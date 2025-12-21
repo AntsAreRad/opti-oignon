@@ -1,0 +1,22 @@
+# Core dependencies
+gradio>=4.0.0
+ollama>=0.2.0
+pyyaml>=6.0
+requests>=2.28.0
+
+# RAG dependencies
+chromadb>=0.4.0
+numpy>=1.24.0
+tqdm>=4.65.0
+
+# Document processing
+pypdf>=3.0.0
+python-docx>=0.8.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# black>=23.0.0
+# isort>=5.0.0
+# mypy>=1.0.0

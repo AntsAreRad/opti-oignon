@@ -1,0 +1,40 @@
+# =============================================================================
+# USER PROFILE - OPTI-OIGNON 1.0
+# =============================================================================
+# User-specific settings and preferences.
+
+# User information
+user:
+  name: ""
+  language: fr  # Primary language (fr, en)
+  domain: bioinformatics  # Main domain of expertise
+
+# Default preferences
+preferences:
+  # Default priority mode
+  default_priority: balanced  # fast, balanced, quality
+  
+  # Enable question refinement by default
+  auto_refine: true
+  
+  # Show analysis details
+  show_analysis: true
+  
+  # RAG settings
+  rag:
+    enabled: true
+    n_chunks: 3
+  
+  # Multi-agent settings
+  multi_agent:
+    enabled: false
+    show_steps: true
+
+# Favorite presets (shown first in UI)
+favorite_presets:
+  - r_quality
+  - python_quality
+  - deep_analysis
+
+# Custom shortcuts
+custom_shortcuts: {}

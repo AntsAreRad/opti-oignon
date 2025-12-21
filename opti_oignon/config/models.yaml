@@ -1,0 +1,80 @@
+# =============================================================================
+# CONFIGURATION DES MODÈLES - CONTEXTEUR 2.0
+# =============================================================================
+# Basé sur les benchmarks de Léon (2025-12-18)
+# Édite ce fichier pour ajuster les modèles selon tes besoins.
+
+# -----------------------------------------------------------------------------
+# Modèles par type d'usage
+# -----------------------------------------------------------------------------
+models:
+  # Modèles pour le code (R, Python, etc.)
+  code:
+    primary: "qwen3-coder:30b"           # MVP: 32s, score 8.2/10
+    quality: "devstral-small-2:latest"   # 96s, score 8.8/10
+    fast: "qwen2.5-coder:7b"             # 14s, pour prototypage rapide
+  
+  # Modèles pour le raisonnement/planification
+  reasoning:
+    primary: "qwen3-coder:30b"           # 46s, score 7/10 - bon compromis
+    quality: "deepseek-r1:32b"           # 186s - raisonnement profond mais LENT
+    fast: "nemotron-3-nano:30b"          # 69s, score 7/10
+  
+  # Modèles généralistes (rédaction, explications)
+  general:
+    primary: "nemotron-3-nano:30b"       # 71s, score 7.8/10
+    quality: "qwen3:32b"                 # 202s, score 10/10 mais TRÈS LENT
+    fast: "gemma3:27b"                   # 23s sur questions simples
+  
+  # Modèles pour questions simples/rapides
+  quick:
+    primary: "gemma3:27b"                # 23s, score 10/10 sur questions simples
+    quality: "nemotron-3-nano:30b"
+    fast: "qwen2.5-coder:7b"
+
+# -----------------------------------------------------------------------------
+# Modèles de fallback (si le préféré n'est pas disponible)
+# -----------------------------------------------------------------------------
+fallback_order:
+  - "qwen3-coder:30b"
+  - "devstral-small-2:latest"
+  - "gemma3:27b"
+  - "nemotron-3-nano:30b"
+  - "qwen2.5-coder:14b"
+  - "qwen3:32b"
+
+# -----------------------------------------------------------------------------
+# Températures par type de tâche
+# -----------------------------------------------------------------------------
+temperatures:
+  code: 0.3           # Plus déterministe pour le code
+  debug: 0.2          # Encore plus déterministe pour le debugging
+  reasoning: 0.5      # Un peu de créativité pour le raisonnement
+  writing: 0.7        # Plus de créativité pour la rédaction
+  general: 0.6        # Équilibré pour les questions générales
+  refining: 0.3       # Raffinage de prompts = précision
+
+# -----------------------------------------------------------------------------
+# Modèles spéciaux
+# -----------------------------------------------------------------------------
+special:
+  vision: "qwen3-vl:32b"           # Pour analyser des images
+  math: "wizard-math:13b"          # Pour les calculs complexes
+  embeddings: "mxbai-embed-large"  # Pour RAG et recherche sémantique
+
+# -----------------------------------------------------------------------------
+# Timeouts (en secondes)
+# -----------------------------------------------------------------------------
+timeouts:
+  default: 300        # 5 minutes par défaut
+  fast: 60            # 1 minute pour modèles rapides
+  deep: 600           # 10 minutes pour raisonnement profond
+
+# -----------------------------------------------------------------------------
+# Modèles à éviter (basé sur tes tests)
+# -----------------------------------------------------------------------------
+blacklist:
+  - reason: "Refuse les questions non-code"
+    model: "deepseek-coder:33b"
+  - reason: "Mauvais en texte pur (modèle vision)"
+    model: "qwen3-vl:32b"

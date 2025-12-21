@@ -1,0 +1,378 @@
+# =============================================================================
+# PRESETS - OPTI-OIGNON 1.0
+# =============================================================================
+# Predefined combinations (task + model + prompt + parameters)
+# You can add your own presets here.
+#
+# ENHANCED: Added detection_weight field (0.0-1.0) for keyword scoring priority
+
+# -----------------------------------------------------------------------------
+# Presets for Léon's daily work
+# -----------------------------------------------------------------------------
+presets:
+  # ----- DEFAULT (fallback) -----
+  default:
+    name: "Default"
+    description: "Default configuration for general questions"
+    task: "simple_question"
+    model: "qwen3-coder:30b"
+    temperature: 0.5
+    prompt_variant: "standard"
+    icon: "⚙️"
+    tags: ["default", "general"]
+    keywords: []  # No specific keywords - used as fallback
+    detection_weight: 0.1  # Low weight - only used when nothing else matches
+
+  # ----- R CODE (your main usage) -----
+  r_rapide:
+    name: "R Code - Fast"
+    description: "Fast R code generation for prototyping"
+    task: "code_r"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "standard"
+    icon: "🧬"
+    tags: ["code", "r", "fast"]
+    keywords: 
+      - "ggplot"
+      - "dplyr"
+      - "tidyverse"
+      - "vegan"
+      - "mutate"
+      - "filter"
+      - "pipe"
+      - "%>%"
+      - "|>"
+      - "dataframe"
+      - "tibble"
+      - "ecology"
+      - "biodiversity"
+      - "shannon"
+      - "simpson"
+      - "bray-curtis"
+      - "nmds"
+      - "pca"
+      - "adonis"
+      - "permanova"
+    detection_weight: 0.8  # High priority for main workflow
+  
+  r_qualite:
+    name: "R Code - Quality"
+    description: "R code with detailed reasoning"
+    task: "code_r"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "reasoning"
+    icon: "🔬"
+    tags: ["code", "r", "quality"]
+    keywords:
+      - "optimize"
+      - "refactor"
+      - "best practices"
+      - "roxygen"
+      - "documentation"
+      - "performance"
+      - "efficient"
+    detection_weight: 0.7
+  
+  # ----- DEBUG -----
+  debug_r:
+    name: "Debug R"
+    description: "Methodical R code debugging"
+    task: "debug_r"
+    model: "qwen3-coder:30b"
+    temperature: 0.2
+    prompt_variant: "standard"
+    icon: "🛠"
+    tags: ["debug", "r"]
+    keywords:
+      - "error"
+      - "erreur"
+      - "bug"
+      - "traceback"
+      - "warning"
+      - "fix"
+      - "corriger"
+      - "doesn't work"
+      - "ne marche pas"
+      - "failed"
+      - "échoue"
+      - "object not found"
+      - "NULL"
+      - "NA"
+      - "NaN"
+    detection_weight: 0.9  # Very high - debug requests are urgent
+  
+  debug_python:
+    name: "Debug Python"
+    description: "Python script debugging"
+    task: "debug_python"
+    model: "qwen3-coder:30b"
+    temperature: 0.2
+    prompt_variant: "standard"
+    icon: "🐍"
+    tags: ["debug", "python"]
+    keywords:
+      - "exception"
+      - "traceback"
+      - "TypeError"
+      - "ValueError"
+      - "AttributeError"
+      - "ImportError"
+      - "SyntaxError"
+      - "KeyError"
+      - "IndexError"
+      - "NameError"
+      - "ModuleNotFoundError"
+      - "FileNotFoundError"
+    detection_weight: 0.9  # Very high - debug requests are urgent
+  
+  # ----- PYTHON CODE -----
+  python_rapide:
+    name: "Python - Fast"
+    description: "Fast Python script"
+    task: "code_python"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "fast"
+    icon: "🐍"
+    tags: ["code", "python", "fast"]
+    keywords:
+      - "script"
+      - "function"
+      - "class"
+      - "pandas"
+      - "numpy"
+      - "matplotlib"
+      - "biopython"
+      - "argparse"
+      - "json"
+      - "csv"
+      - "import"
+      - "def"
+    detection_weight: 0.7
+  
+  python_qualite:
+    name: "Python - Quality"
+    description: "Python with types and docstrings"
+    task: "code_python"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "standard"
+    icon: "📦"
+    tags: ["code", "python", "quality"]
+    keywords:
+      - "type hints"
+      - "typing"
+      - "docstring"
+      - "pytest"
+      - "unittest"
+      - "pydantic"
+      - "mypy"
+      - "documentation"
+    detection_weight: 0.6
+  
+  # ----- BIOINFORMATICS -----
+  bioinformatics:
+    name: "Bioinformatics"
+    description: "Bioinformatics analysis (metabarcoding, bioacoustics)"
+    task: "code_python"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "reasoning"
+    icon: "🧬"
+    tags: ["bioinformatics", "ecology", "science"]
+    keywords:
+      - "metabarcoding"
+      - "bioacoustic"
+      - "ASV"
+      - "OTU"
+      - "DADA2"
+      - "qiime"
+      - "blast"
+      - "fasta"
+      - "fastq"
+      - "alignment"
+      - "phylogeny"
+      - "taxonomy"
+      - "species"
+      - "abundance"
+      - "alpha diversity"
+      - "beta diversity"
+      - "rarefaction"
+      - "16S"
+      - "18S"
+      - "ITS"
+      - "COI"
+      - "primer"
+      - "amplicon"
+    detection_weight: 0.85  # High priority for main research work
+  
+  # ----- SCIENTIFIC WRITING -----
+  redaction:
+    name: "Scientific Writing"
+    description: "Abstracts, methods, results"
+    task: "scientific_writing"
+    model: "qwen3-coder:30b"
+    temperature: 0.7
+    prompt_variant: "standard"
+    icon: "📝"
+    tags: ["writing", "science"]
+    keywords:
+      - "abstract"
+      - "introduction"
+      - "methods"
+      - "results"
+      - "discussion"
+      - "paper"
+      - "article"
+      - "manuscript"
+      - "thesis"
+      - "report"
+      - "scientific"
+      - "académique"
+      - "academic"
+      - "reviewer"
+      - "publication"
+    detection_weight: 0.7
+  
+  # ----- PLANNING -----
+  plan_rapide:
+    name: "Planning - Fast"
+    description: "Quick brainstorming and organization"
+    task: "planning"
+    model: "qwen3-coder:30b"
+    temperature: 0.5
+    prompt_variant: "standard"
+    icon: "📋"
+    tags: ["planning", "fast"]
+    keywords:
+      - "plan"
+      - "organize"
+      - "steps"
+      - "todo"
+      - "list"
+      - "brainstorm"
+      - "ideas"
+      - "structure"
+      - "workflow"
+      - "timeline"
+    detection_weight: 0.5
+  
+  plan_profond:
+    name: "Deep Reflection"
+    description: "In-depth analysis (SLOW: ~3min)"
+    task: "planning_deep"
+    model: "deepseek-r1:32b"
+    temperature: 0.5
+    prompt_variant: "reasoning"
+    icon: "🧠"
+    tags: ["planning", "reflection", "slow"]
+    keywords:
+      - "analyze"
+      - "think deeply"
+      - "consider"
+      - "evaluate"
+      - "pros cons"
+      - "trade-offs"
+      - "strategy"
+      - "in-depth"
+      - "comprehensive"
+      - "detailed analysis"
+    detection_weight: 0.6
+  
+  # ----- LINUX/BASH -----
+  linux:
+    name: "Linux/Bash"
+    description: "Troubleshooting and bash scripts"
+    task: "linux"
+    model: "qwen3-coder:30b"
+    temperature: 0.3
+    prompt_variant: "standard"
+    icon: "🐧"
+    tags: ["linux", "bash"]
+    keywords:
+      - "bash"
+      - "shell"
+      - "terminal"
+      - "command"
+      - "apt"
+      - "systemctl"
+      - "chmod"
+      - "grep"
+      - "sed"
+      - "awk"
+      - "pipe"
+      - "sudo"
+      - "kubuntu"
+      - "ubuntu"
+      - "ssh"
+      - "docker"
+      - "git"
+    detection_weight: 0.7
+  
+  # ----- QUICK QUESTIONS -----
+  question_rapide:
+    name: "Quick Question"
+    description: "Simple questions, direct answer"
+    task: "simple_question"
+    model: "gemma3:27b"
+    temperature: 0.6
+    prompt_variant: "fast"
+    icon: "❓"
+    tags: ["fast", "simple"]
+    keywords:
+      - "what is"
+      - "c'est quoi"
+      - "explain"
+      - "explique"
+      - "how does"
+      - "comment"
+      - "why"
+      - "pourquoi"
+      - "definition"
+      - "meaning"
+    detection_weight: 0.3  # Low priority - fallback for simple questions
+
+# -----------------------------------------------------------------------------
+# Display order in the interface
+# -----------------------------------------------------------------------------
+display_order:
+  - "r_rapide"
+  - "debug_r"
+  - "python_rapide"
+  - "debug_python"
+  - "bioinformatics"
+  - "redaction"
+  - "plan_rapide"
+  - "linux"
+  - "question_rapide"
+  - "r_qualite"
+  - "python_qualite"
+  - "plan_profond"
+  - "default"
+
+# -----------------------------------------------------------------------------
+# Default preset by detected context
+# -----------------------------------------------------------------------------
+auto_select:
+  code_r: "r_rapide"
+  debug_r: "debug_r"
+  code_python: "python_rapide"
+  debug_python: "debug_python"
+  scientific_writing: "redaction"
+  planning: "plan_rapide"
+  planning_deep: "plan_profond"
+  linux: "linux"
+  simple_question: "question_rapide"
+  bioinformatics: "bioinformatics"
+
+# -----------------------------------------------------------------------------
+# Keyboard shortcuts for favorite presets
+# -----------------------------------------------------------------------------
+shortcuts:
+  "Ctrl+1": "r_rapide"
+  "Ctrl+2": "debug_r"
+  "Ctrl+3": "python_rapide"
+  "Ctrl+4": "plan_rapide"
+  "Ctrl+5": "question_rapide"

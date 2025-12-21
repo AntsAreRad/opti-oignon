@@ -1,0 +1,464 @@
+# =============================================================================
+# MULTI-AGENT SYSTEM CONFIGURATION
+# =============================================================================
+# This file defines agents, pipelines and behaviors for the
+# multi-model orchestration system of Opti-Oignon 1.0.
+#
+# IMPORTANT: Multi-agent can be enabled/disabled via 'enabled'
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# GLOBAL PARAMETERS
+# -----------------------------------------------------------------------------
+global:
+  # MULTI-AGENT ACTIVATION
+  # If false, the system uses simple classic routing
+  enabled: true
+  
+  # Logging mode (debug, info, warning, error)
+  log_level: "info"
+  
+  # Global timeout for a complete pipeline (seconds)
+  pipeline_timeout: 600
+  
+  # Allow user intervention between steps
+  allow_intervention: true
+  
+  # Save execution history
+  save_history: true
+  
+  # Display intermediate reasoning
+  show_intermediate: true
+
+# -----------------------------------------------------------------------------
+# SPECIALIZED AGENTS DEFINITION
+# -----------------------------------------------------------------------------
+agents:
+  # Code generation agent
+  coder:
+    description: "Generates high-quality R, Python or Bash code"
+    models:
+      primary: "qwen3-coder:30b"      # MVP according to benchmarks
+      quality: "deepseek-coder:33b"   # More capacity
+      fast: "qwen2.5-coder:7b"        # Rapid prototyping
+    temperature: 0.3
+    max_tokens: 4096
+    timeout: 180
+    specialties:
+      - "code_r"
+      - "code_python"
+      - "code_bash"
+      - "refactoring"
+  
+  # Verification and review agent
+  reviewer:
+    description: "Verifies code, detects bugs and suggests fixes"
+    models:
+      primary: "deepseek-r1:32b"      # Excellent for reasoning
+      quality: "qwen3:32b"            # Good generalist
+      fast: "nemotron-3-nano:30b"     # Fast and reliable
+    temperature: 0.2
+    max_tokens: 2048
+    timeout: 120
+    specialties:
+      - "code_review"
+      - "bug_detection"
+      - "logic_verification"
+  
+  # Explanation and vulgarization agent
+  explainer:
+    description: "Explains code, concepts and simplifies"
+    models:
+      primary: "qwen3:32b"            # Excellent generalist
+      quality: "dolphin-llama3:70b"   # Very fluent
+      fast: "nemotron-3-nano:30b"
+    temperature: 0.5
+    max_tokens: 2048
+    timeout: 120
+    specialties:
+      - "explanation"
+      - "documentation"
+      - "vulgarization"
+  
+  # Planning and decomposition agent
+  planner:
+    description: "Plans complex tasks, decomposes into sub-problems"
+    models:
+      primary: "deepseek-r1:32b"      # Designed for reasoning
+      quality: "qwen3:32b"
+      fast: "nemotron-3-nano:30b"
+    temperature: 0.4
+    max_tokens: 2048
+    timeout: 150
+    specialties:
+      - "planning"
+      - "decomposition"
+      - "strategy"
+  
+  # Scientific writing agent
+  writer:
+    description: "Writes quality scientific content"
+    models:
+      primary: "qwen3:32b"
+      quality: "dolphin-llama3:70b"
+      fast: "nemotron-3-nano:30b"
+    temperature: 0.6
+    max_tokens: 4096
+    timeout: 180
+    specialties:
+      - "scientific_writing"
+      - "documentation"
+      - "reports"
+
+  # Agent rapide pour les étapes simples
+  fast_planner:
+    description: "faster planner for simple steps"
+    models:
+      primary: "qwen3:32b"  # Modèle rapide
+    temperature: 0.4
+    max_tokens: 1024
+    timeout: 60
+    specialties:
+      - "planning"
+
+  # Agent rapide pour les étapes simples
+  fast_understanding:
+    description: "faster understanding"
+    models:
+      primary: "nemotron-3-nano:30b"  # Modèle rapide
+    temperature: 0.4
+    max_tokens: 1024
+    timeout: 60
+    specialties:
+      - "understanding"
+
+# -----------------------------------------------------------------------------
+# ORCHESTRATION PATTERNS
+# -----------------------------------------------------------------------------
+patterns:
+  # Linear chain: A → B → C
+  chain:
+    description: "Sequential execution"
+    allows_rollback: false
+  
+  # Verification: Generator → Verifier (with iteration)
+  verifier:
+    description: "Generation with verification"
+    max_iterations: 3
+    allows_rollback: true
+  
+  # Decomposition: Break down → Solve each → Synthesize
+  decomposition:
+    description: "Decomposition and synthesis"
+    max_subtasks: 5
+  
+  # Iterative: Improve until quality threshold
+  iterative:
+    description: "Iterative improvement"
+    max_iterations: 3
+    quality_threshold: 0.8
+
+# -----------------------------------------------------------------------------
+# PREDEFINED PIPELINES
+# -----------------------------------------------------------------------------
+pipelines:
+  # Complete data analysis pipeline
+  data_analysis:
+    name: "Data Analysis"
+    description: "Complete pipeline for analyzing data in R"
+    pattern: "decomposition"
+    steps:
+      - name: "Understanding"
+        agent: "fast_understanding"
+        prompt_template: "comprehension"
+        description: "Understand data and context"
+      - name: "Planning"
+        agent: "fast_planner"
+        prompt_template: "analysis_plan"
+        description: "Propose relevant analyses"
+      - name: "Code"
+        agent: "coder"
+        prompt_template: "r_analysis"
+        description: "Write R analysis code"
+      - name: "Review"
+        agent: "fast_understanding"
+        prompt_template: "code_review"
+        description: "Verify code and logic"
+      - name: "Interpretation"
+        agent: "explainer"
+        prompt_template: "results_interpretation"
+        description: "Interpret results"
+    auto_detect:
+      keywords: ["analysis", "data", "dataframe", "correlation", "regression", "anova", "analyse", "données"]
+  
+  # Advanced debug pipeline
+  debug:
+    name: "Complex Debug"
+    description: "Diagnosis and correction of difficult bugs"
+    pattern: "verifier"
+    steps:
+      - name: "Reproduction"
+        agent: "reviewer"
+        prompt_template: "error_analysis"
+        description: "Analyze and understand the error"
+      - name: "Diagnosis"
+        agent: "planner"
+        prompt_template: "bug_diagnosis"
+        description: "Identify possible causes"
+      - name: "Solutions"
+        agent: "coder"
+        prompt_template: "bug_fix"
+        description: "Propose fixes"
+      - name: "Evaluation"
+        agent: "reviewer"
+        prompt_template: "solution_review"
+        description: "Evaluate each solution"
+      - name: "Implementation"
+        agent: "coder"
+        prompt_template: "final_fix"
+        description: "Implement the best solution"
+    auto_detect:
+      keywords: ["error", "bug", "crash", "not working", "traceback", "erreur", "ne fonctionne pas"]
+  
+  # Scientific writing pipeline
+  scientific_writing:
+    name: "Scientific Writing"
+    description: "Structured writing of scientific documents"
+    pattern: "iterative"
+    steps:
+      - name: "Structure"
+        agent: "planner"
+        prompt_template: "document_structure"
+        description: "Define document structure"
+      - name: "Writing"
+        agent: "writer"
+        prompt_template: "section_writing"
+        description: "Write each section"
+      - name: "Coherence"
+        agent: "reviewer"
+        prompt_template: "coherence_check"
+        description: "Check global coherence"
+      - name: "Style"
+        agent: "writer"
+        prompt_template: "style_polish"
+        description: "Improve style and clarity"
+    auto_detect:
+      keywords: ["abstract", "methods", "results", "discussion", "article", "report", "méthodes", "résultats"]
+  
+  # Code generation with tests pipeline
+  code_with_tests:
+    name: "Code + Tests"
+    description: "Generates code with unit tests"
+    pattern: "verifier"
+    steps:
+      - name: "Specification"
+        agent: "planner"
+        prompt_template: "spec_extraction"
+        description: "Extract specifications"
+      - name: "Code"
+        agent: "coder"
+        prompt_template: "code_generation"
+        description: "Generate code"
+      - name: "Tests"
+        agent: "coder"
+        prompt_template: "test_generation"
+        description: "Create unit tests"
+      - name: "Review"
+        agent: "reviewer"
+        prompt_template: "full_review"
+        description: "Verify code and tests"
+    auto_detect:
+      keywords: ["function", "create", "implement", "with tests", "tested", "fonction", "créer", "implémenter"]
+  
+  # Quick pipeline (optimized single-agent)
+  quick:
+    name: "Quick Response"
+    description: "Direct response without multi-agent orchestration"
+    pattern: null  # No pattern, single agent
+    steps:
+      - name: "Response"
+        agent: "auto"  # Agent is automatically selected
+        prompt_template: "direct"
+        description: "Direct response"
+    auto_detect: null  # No auto-detection, chosen manually
+
+# -----------------------------------------------------------------------------
+# PROMPT TEMPLATES FOR STEPS
+# -----------------------------------------------------------------------------
+prompt_templates:
+  # Understanding/planning templates
+  comprehension: |
+    Analyze the data or context provided:
+    
+    {input}
+    
+    Questions to answer:
+    1. What is the data type?
+    2. What are the important variables?
+    3. What patterns or potential issues?
+    4. What analyses would be relevant?
+    
+    Structure your response clearly.
+  
+  analysis_plan: |
+    Based on this understanding:
+    {previous_output}
+    
+    And the initial request:
+    {original_input}
+    
+    Propose a structured analysis plan:
+    1. Exploratory analyses
+    2. Appropriate statistical tests
+    3. Recommended visualizations
+    4. Points of attention
+  
+  r_analysis: |
+    Analysis context:
+    {context}
+    
+    Plan to follow:
+    {previous_output}
+    
+    Write the complete R code for this analysis.
+    Style: tidyverse, comments in user's language, error handling.
+  
+  # Debug templates
+  error_analysis: |
+    Analyze this error in detail:
+    
+    {input}
+    
+    1. What is the exact error type?
+    2. Which line/function is involved?
+    3. What is the probable execution context?
+  
+  bug_diagnosis: |
+    Analyzed error:
+    {previous_output}
+    
+    Original code:
+    {original_input}
+    
+    List possible causes by probability order:
+    1. Most probable cause
+    2. ...
+    
+    For each cause, explain why and how to verify.
+  
+  bug_fix: |
+    Diagnosis:
+    {previous_output}
+    
+    Original code:
+    {original_input}
+    
+    Propose a fix for each identified cause.
+    Provide the complete corrected and commented code.
+  
+  # Review templates
+  code_review: |
+    Review this code:
+    
+    {input}
+    
+    Verify:
+    - [ ] Correct syntax
+    - [ ] Coherent logic
+    - [ ] Edge case handling
+    - [ ] Acceptable performance
+    - [ ] Best practices followed
+    
+    Confidence score (0-100):
+    Points to improve:
+  
+  solution_review: |
+    Proposed solutions:
+    {previous_output}
+    
+    Evaluate each solution:
+    1. Effectiveness (does it solve the problem?)
+    2. Robustness (side effects?)
+    3. Simplicity (easy to maintain?)
+    
+    Recommend THE best solution.
+  
+  # Writing templates
+  document_structure: |
+    Writing objective:
+    {input}
+    
+    Propose a detailed structure:
+    - Main sections
+    - Key points per section
+    - Estimated length
+    - Appropriate tone
+  
+  section_writing: |
+    Defined structure:
+    {previous_output}
+    
+    Now write the complete content.
+    Style: scientific, precise, referenced.
+  
+  # Generic template
+  direct: |
+    {input}
+
+# -----------------------------------------------------------------------------
+# METRICS AND EVALUATION
+# -----------------------------------------------------------------------------
+metrics:
+  # Minimum confidence threshold to accept an output
+  min_confidence: 0.7
+  
+  # Weights for global score
+  weights:
+    correctness: 0.4
+    completeness: 0.3
+    clarity: 0.2
+    efficiency: 0.1
+  
+  # Actions based on score
+  thresholds:
+    excellent: 0.9    # No revision needed
+    good: 0.75        # Optional revision
+    acceptable: 0.6   # Recommended revision
+    poor: 0.0         # Mandatory revision
+
+# -----------------------------------------------------------------------------
+# PIPELINE AUTO-DETECTION
+# -----------------------------------------------------------------------------
+auto_detection:
+  # Enable automatic pipeline detection
+  enabled: true
+  
+  # Default pipeline if no detection
+  default_pipeline: "quick"
+  
+  # Confidence threshold for detection
+  confidence_threshold: 0.6
+  
+  # Pipeline priority (first match = chosen)
+  priority:
+    - "debug"             # High priority for errors
+    - "data_analysis"
+    - "scientific_writing"
+    - "code_with_tests"
+    - "quick"             # Fallback
+
+# -----------------------------------------------------------------------------
+# HISTORY AND LOGS
+# -----------------------------------------------------------------------------
+history:
+  # History directory
+  directory: "data/agent_history"
+  
+  # Maximum number of executions kept
+  max_entries: 100
+  
+  # Save intermediate outputs
+  save_intermediate: true
+  
+  # Save format
+  format: "json"

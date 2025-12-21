@@ -1,0 +1,440 @@
+presets:
+  default:
+    id: default
+    name: Default
+    description: Default configuration for general questions
+    task: simple_question
+    model: qwen3-coder:30b
+    temperature: 0.5
+    prompt_variant: standard
+    icon: ⚙️
+    tags:
+    - default
+    - general
+    keywords: []
+    detection_weight: 0.1
+    custom_prompt: null
+  r_rapide:
+    id: r_rapide
+    name: R Code - Fast
+    description: Fast R code generation for prototyping
+    task: code_r
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: standard
+    icon: 🧬
+    tags:
+    - code
+    - r
+    - fast
+    keywords:
+    - ggplot
+    - dplyr
+    - tidyverse
+    - vegan
+    - mutate
+    - filter
+    - pipe
+    - '%>%'
+    - '|>'
+    - dataframe
+    - tibble
+    - ecology
+    - biodiversity
+    - shannon
+    - simpson
+    - bray-curtis
+    - nmds
+    - pca
+    - adonis
+    - permanova
+    detection_weight: 0.8
+    custom_prompt: null
+  r_qualite:
+    id: r_qualite
+    name: R Code - Quality
+    description: R code with detailed reasoning
+    task: code_r
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: reasoning
+    icon: 🔬
+    tags:
+    - code
+    - r
+    - quality
+    keywords:
+    - optimize
+    - refactor
+    - best practices
+    - roxygen
+    - documentation
+    - performance
+    - efficient
+    detection_weight: 0.7
+    custom_prompt: null
+  debug_r:
+    id: debug_r
+    name: Debug R
+    description: Methodical R code debugging
+    task: debug_r
+    model: qwen3-coder:30b
+    temperature: 0.2
+    prompt_variant: standard
+    icon: 🛠
+    tags:
+    - debug
+    - r
+    keywords:
+    - error
+    - erreur
+    - bug
+    - traceback
+    - warning
+    - fix
+    - corriger
+    - doesn't work
+    - ne marche pas
+    - failed
+    - échoue
+    - object not found
+    - 'NULL'
+    - NA
+    - NaN
+    detection_weight: 0.9
+    custom_prompt: null
+  debug_python:
+    id: debug_python
+    name: Debug Python
+    description: Python script debugging
+    task: debug_python
+    model: qwen3-coder:30b
+    temperature: 0.2
+    prompt_variant: standard
+    icon: 🐍
+    tags:
+    - debug
+    - python
+    keywords:
+    - exception
+    - traceback
+    - TypeError
+    - ValueError
+    - AttributeError
+    - ImportError
+    - SyntaxError
+    - KeyError
+    - IndexError
+    - NameError
+    - ModuleNotFoundError
+    - FileNotFoundError
+    detection_weight: 0.9
+    custom_prompt: null
+  python_rapide:
+    id: python_rapide
+    name: Python - Fast
+    description: Fast Python script
+    task: code_python
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: fast
+    icon: 🐍
+    tags:
+    - code
+    - python
+    - fast
+    keywords:
+    - script
+    - function
+    - class
+    - pandas
+    - numpy
+    - matplotlib
+    - biopython
+    - argparse
+    - json
+    - csv
+    - import
+    - def
+    detection_weight: 0.7
+    custom_prompt: null
+  python_qualite:
+    id: python_qualite
+    name: Python - Quality
+    description: Python with types and docstrings
+    task: code_python
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: standard
+    icon: 📦
+    tags:
+    - code
+    - python
+    - quality
+    keywords:
+    - type hints
+    - typing
+    - docstring
+    - pytest
+    - unittest
+    - pydantic
+    - mypy
+    - documentation
+    detection_weight: 0.6
+    custom_prompt: null
+  bioinformatics:
+    id: bioinformatics
+    name: Bioinformatics
+    description: Bioinformatics analysis (metabarcoding, bioacoustics)
+    task: code_python
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: reasoning
+    icon: 🧬
+    tags:
+    - bioinformatics
+    - ecology
+    - science
+    keywords:
+    - metabarcoding
+    - bioacoustic
+    - ASV
+    - OTU
+    - DADA2
+    - qiime
+    - blast
+    - fasta
+    - fastq
+    - alignment
+    - phylogeny
+    - taxonomy
+    - species
+    - abundance
+    - alpha diversity
+    - beta diversity
+    - rarefaction
+    - 16S
+    - 18S
+    - ITS
+    - COI
+    - primer
+    - amplicon
+    detection_weight: 0.85
+    custom_prompt: null
+  redaction:
+    id: redaction
+    name: Scientific Writing
+    description: Abstracts, methods, results
+    task: scientific_writing
+    model: qwen3-coder:30b
+    temperature: 0.7
+    prompt_variant: standard
+    icon: 📝
+    tags:
+    - writing
+    - science
+    keywords:
+    - abstract
+    - introduction
+    - methods
+    - results
+    - discussion
+    - paper
+    - article
+    - manuscript
+    - thesis
+    - report
+    - scientific
+    - académique
+    - academic
+    - reviewer
+    - publication
+    detection_weight: 0.7
+    custom_prompt: null
+  plan_rapide:
+    id: plan_rapide
+    name: Planning - Fast
+    description: Quick brainstorming and organization
+    task: planning
+    model: qwen3-coder:30b
+    temperature: 0.5
+    prompt_variant: standard
+    icon: 📋
+    tags:
+    - planning
+    - fast
+    keywords:
+    - plan
+    - organize
+    - steps
+    - todo
+    - list
+    - brainstorm
+    - ideas
+    - structure
+    - workflow
+    - timeline
+    detection_weight: 0.5
+    custom_prompt: null
+  plan_profond:
+    id: plan_profond
+    name: Deep Reflection
+    description: 'In-depth analysis (SLOW: ~3min)'
+    task: planning_deep
+    model: deepseek-r1:32b
+    temperature: 0.5
+    prompt_variant: reasoning
+    icon: 🧠
+    tags:
+    - planning
+    - reflection
+    - slow
+    keywords:
+    - analyze
+    - think deeply
+    - consider
+    - evaluate
+    - pros cons
+    - trade-offs
+    - strategy
+    - in-depth
+    - comprehensive
+    - detailed analysis
+    detection_weight: 0.6
+    custom_prompt: null
+  linux:
+    id: linux
+    name: Linux/Bash
+    description: Troubleshooting and bash scripts
+    task: linux
+    model: qwen3-coder:30b
+    temperature: 0.3
+    prompt_variant: standard
+    icon: 🐧
+    tags:
+    - linux
+    - bash
+    keywords:
+    - bash
+    - shell
+    - terminal
+    - command
+    - apt
+    - systemctl
+    - chmod
+    - grep
+    - sed
+    - awk
+    - pipe
+    - sudo
+    - kubuntu
+    - ubuntu
+    - ssh
+    - docker
+    - git
+    detection_weight: 0.7
+    custom_prompt: null
+  question_rapide:
+    id: question_rapide
+    name: Quick Question
+    description: Simple questions, direct answer
+    task: simple_question
+    model: gemma3:27b
+    temperature: 0.6
+    prompt_variant: fast
+    icon: ❓
+    tags:
+    - fast
+    - simple
+    keywords:
+    - what is
+    - c'est quoi
+    - explain
+    - explique
+    - how does
+    - comment
+    - why
+    - pourquoi
+    - definition
+    - meaning
+    detection_weight: 0.3
+    custom_prompt: null
+  r_project:
+    id: r_project
+    name: R Projects
+    description: For big R projects with multiple files
+    task: code_r
+    model: qwen3-coder:30b
+    temperature: 0.5
+    prompt_variant: reasoning
+    icon: ⚙️
+    tags:
+    - code
+    - R
+    - project
+    keywords:
+    - ggplot
+    - dplyr
+    - tidyverse
+    - vegan
+    - mutate
+    - filter
+    - pipe
+    - '%>%'
+    - '|>'
+    - dataframe
+    - tibble
+    - library(
+    - data.frame
+    - matrix
+    - function(
+    - project
+    - R
+    - big
+    detection_weight: 0.5
+    custom_prompt: null
+  biology_question:
+    id: biology_question
+    name: Biology Question
+    description: Questions about biology concepts
+    task: ''
+    model: qwen3:32b
+    temperature: 0.3
+    prompt_variant: reasoning
+    icon: ⚙️
+    tags:
+    - biology
+    - nature
+    - environment
+    keywords:
+    - Insect
+    - bug
+    - bugs
+    - nature
+    - science
+    - environment
+    - environnement
+    - biology
+    - biologie
+    - flowers
+    - tree
+    - fleur
+    - arbre
+    - champignon
+    - plante
+    - animal
+    - animaux
+    - oiseau
+    - bird
+    - identification
+    - pourquoi
+    - why
+    - comment
+    - how
+    - quel
+    - which
+    - seen
+    - vu
+    - ecology
+    detection_weight: 0.8
+    custom_prompt: null
