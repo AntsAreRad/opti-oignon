@@ -132,8 +132,8 @@ setup(
     
     # Project URLs
     project_urls={
-        "Bug Reports": "https://github.com/your-username/opti-oignon/issues",
-        "Source": "https://github.com/your-username/opti-oignon",
-        "Documentation": "https://github.com/your-username/opti-oignon/tree/main/docs",
+        "Bug Reports": "https://github.com/AntsAreRad/opti-oignon/issues",
+        "Source": "https://github.com/AntsAreRad/opti-oignon",
+        "Documentation": "https://github.com/AntsAreRad/opti-oignon/tree/main/docs",
     },
 )
