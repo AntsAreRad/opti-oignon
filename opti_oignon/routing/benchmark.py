@@ -158,20 +158,29 @@ Include comments and a usage example.""",
 # Default models to test
 DEFAULT_MODELS = [
     "qwen3-coder:30b",
-    "qwen3:32b",
-    "deepseek-coder:33b",
     "deepseek-r1:32b",
-    "qwen2.5-coder:14b",
-    "gemma3:27b",
-    "devstral-small-2:latest",
     "nemotron-3-nano:30b",
+    "devstral-small-2:latest",
+    "mistral-small3.2:latest",
+    "qwen2.5-coder:7b",
+    "qwen2.5-coder:32b-instruct-q5_k_m",
+    "qwen2.5-coder:14b",
+    "qwen3:32b",
+    "dolphin-mixtral:8x7b",
+    "goekdenizguelmez/JOSIEFIED-Qwen3:30b"
+    "llama3.3:latest"
 ]
 
 # Quick benchmark models
 QUICK_MODELS = [
     "qwen3-coder:30b",
-    "gemma3:27b",
+    "deepseek-r1:32b",
     "nemotron-3-nano:30b",
+    "devstral-small-2:latest",
+    "mistral-small3.2:latest",
+    "qwen2.5-coder:7b",
+    "goekdenizguelmez/JOSIEFIED-Qwen3:30b"
+
 ]
 
 

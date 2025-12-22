@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-UI - OPTI-OIGNON 1.0 + RAG + MULTI-AGENT
+UI - OPTI-OIGNON 1.0
 ========================================
 
 Unified Gradio interface with all systems integrated.
@@ -41,6 +41,22 @@ from .router import router, RoutingResult
 from .executor import executor
 from .presets import preset_manager, Preset, suggest_keywords
 from .history import history
+
+# Context Manager Import (for context limit handling)
+try:
+    from .context_manager import (
+        check_context,
+        estimate_tokens,
+        get_model_limits,
+        format_context_indicator,
+        get_quick_context_status,
+        ContextCheck,
+    )
+    CONTEXT_MANAGER_AVAILABLE = True
+except ImportError:
+    CONTEXT_MANAGER_AVAILABLE = False
+    check_context = None
+    estimate_tokens = None
 
 # RAG Import (optional - graceful fallback if not installed)
 try:
@@ -202,6 +218,52 @@ footer { display: none !important; }
     border-color: #4ade80;
     background: #1e3a2e;
 }
+
+/* Context Indicator */
+.context-indicator {
+    background: #1e2030;
+    border: 1px solid #3b4261;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+    font-size: 0.9em;
+}
+
+.context-indicator.warning {
+    border-color: #fbbf24;
+    background: #2a2520;
+}
+
+.context-indicator.danger {
+    border-color: #f87171;
+    background: #2a2020;
+}
+
+.context-bar {
+    height: 8px;
+    background: #3b4261;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+}
+
+.context-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.context-bar-fill.safe {
+    background: linear-gradient(90deg, #4ade80, #22c55e);
+}
+
+.context-bar-fill.warning {
+    background: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+
+.context-bar-fill.danger {
+    background: linear-gradient(90deg, #f87171, #ef4444);
+}
 """
 
 # =============================================================================
@@ -307,12 +369,12 @@ def format_analysis(analysis: AnalysisResult) -> str:
     lines = [
         f"[>] **Detected task:** {analysis.task_type.value}",
         f"Confidence: {analysis.confidence:.0%}",
-        f"💻 **Language:** {analysis.language.value}",
+        f"**Language:** {analysis.language.value}",
         f"Complexity: {analysis.complexity.value}",
     ]
     
     if analysis.keywords:
-        lines.append(f"🔑 **Keywords:** {', '.join(analysis.keywords)}")
+        lines.append(f"**Keywords:** {', '.join(analysis.keywords)}")
     
     return "\n".join(lines)
 
@@ -380,6 +442,236 @@ def format_agent_steps(steps: List[Dict], elapsed_time: float = 0) -> str:
             lines.append(f"[{status_display}] {name}")
     
     return "\n".join(lines)
+
+
+# =============================================================================
+# CONTEXT MANAGEMENT FUNCTIONS
+# =============================================================================
+
+def get_context_indicator_html(model: str, question: str = "", document: str = "", system_prompt: str = "") -> str:
+    """
+    Generate context indicator display for UI.
+    
+    Args:
+        model: Model name
+        question: User's question
+        document: Document content
+        system_prompt: System prompt
+        
+    Returns:
+        Markdown formatted context indicator
+    """
+    if not CONTEXT_MANAGER_AVAILABLE or not model:
+        return ""
+    
+    try:
+        check = check_context(
+            prompt=question,
+            document=document,
+            system_prompt=system_prompt,
+            model=model
+        )
+        
+        # Create progress bar
+        bar_length = 20
+        filled = int(bar_length * min(check.usage_percent, 100) / 100)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        
+        # Build display
+        lines = [
+            f"**{check.status_emoji} Context Usage** • `{model}`",
+            "",
+            f"Input: ~{check.total_tokens:,} / {check.available_for_input:,} tokens",
+            f"`[{bar}]` {check.usage_percent:.0f}%",
+        ]
+        
+        if check.document_tokens > 100:
+            lines.extend([
+                "",
+                f"*Prompt: ~{check.prompt_tokens:,} • "
+                f"Doc: ~{check.document_tokens:,} • "
+                f"System: ~{check.system_tokens:,}*"
+            ])
+        
+        if check.warning_message:
+            lines.extend(["", f"⚠️ {check.warning_message}"])
+        
+        return "\n".join(lines)
+        
+    except Exception as e:
+        logger.debug(f"Context indicator error: {e}")
+        return ""
+
+
+def format_context_check(check) -> str:
+    """
+    Format a ContextCheck for display.
+    
+    Args:
+        check: ContextCheck object
+        
+    Returns:
+        Formatted string
+    """
+    if check is None:
+        return ""
+    
+    lines = [
+        f"{check.status_emoji} **Context:** {check.usage_percent:.0f}% used",
+        f"• Total: ~{check.total_tokens:,} tokens",
+        f"• Limit: {check.available_for_input:,} tokens",
+    ]
+    
+    if check.warning_message:
+        lines.append(f"• ⚠️ {check.warning_message}")
+    
+    return "\n".join(lines)
+
+
+def update_context_indicator(model: str, question: str, document: str) -> str:
+    """
+    Update context indicator when inputs change.
+    
+    Args:
+        model: Selected model
+        question: Current question
+        document: Current document
+        
+    Returns:
+        Updated indicator markdown
+    """
+    if not model:
+        return "*Select a model to see context usage*"
+    
+    return get_context_indicator_html(model, question, document, "")
+
+
+def get_effective_model(
+    question: str,
+    force_model: str,
+    use_presets: bool,
+    selected_preset: str,
+    priority: str = "balanced"
+) -> Tuple[str, str]:
+    """
+    Determine the effective model based on settings.
+    
+    Priority:
+    1. force_model if set
+    2. selected_preset.model if use_presets and preset selected
+    3. Auto-detected preset via keywords
+    4. Router auto-selection based on question analysis
+    
+    Args:
+        question: User's question
+        force_model: Manually forced model
+        use_presets: Whether presets mode is enabled
+        selected_preset: Selected preset ID
+        priority: Routing priority
+        
+    Returns:
+        Tuple of (model_name, source) where source is one of:
+        "forced", "preset", "auto_preset", "auto_router"
+    """
+    # 1. Force model takes priority
+    if force_model:
+        return force_model, "forced"
+    
+    # 2. Manual preset selection
+    if use_presets and selected_preset:
+        preset = preset_manager.get(selected_preset)
+        if preset and preset.model:
+            return preset.model, "preset"
+    
+    # 3. Auto-detect preset via keywords
+    if question.strip():
+        detected_preset = preset_manager.find_by_keywords(question)
+        if detected_preset and detected_preset.model:
+            return detected_preset.model, "auto_preset"
+    
+    # 4. Auto-routing based on question analysis
+    if question.strip():
+        try:
+            analysis = analyzer.analyze(question)
+            routing = router.route(analysis, priority=priority)
+            return routing.model, "auto_router"
+        except Exception as e:
+            logger.debug(f"Auto-routing failed: {e}")
+    
+    # Fallback: no model determined
+    return "", "none"
+
+
+def update_context_full(
+    question: str,
+    document: str,
+    file_upload,
+    force_model: str,
+    use_presets: bool,
+    selected_preset: str,
+    priority: str = "balanced"
+) -> str:
+    """
+    Update context indicator with full context awareness.
+    
+    Takes into account:
+    - Question text
+    - Document text area
+    - Uploaded file content
+    - Forced model OR preset model OR auto-detected model
+    
+    Args:
+        question: User's question
+        document: Document text area content
+        file_upload: Uploaded file object
+        force_model: Manually selected model
+        use_presets: Whether preset mode is enabled
+        selected_preset: Selected preset ID
+        priority: Routing priority
+        
+    Returns:
+        Formatted context indicator markdown
+    """
+    # Determine effective model
+    model, source = get_effective_model(
+        question, force_model, use_presets, selected_preset, priority
+    )
+    
+    if not model:
+        return "*Enter a question to auto-detect model and see context usage*"
+    
+    # Combine document with file content
+    combined_document = document or ""
+    
+    if file_upload is not None:
+        try:
+            content, error = safe_read_file(file_upload.name)
+            if not error and content:
+                if combined_document:
+                    combined_document = f"{combined_document}\n\n--- Uploaded File ---\n{content}"
+                else:
+                    combined_document = content
+        except Exception as e:
+            logger.debug(f"Error reading file for context indicator: {e}")
+    
+    # Generate context indicator
+    indicator = get_context_indicator_html(model, question, combined_document, "")
+    
+    # Add model source info
+    source_labels = {
+        "forced": "Manual selection",
+        "preset": f"Preset: {selected_preset}",
+        "auto_preset": "Auto-detected preset",
+        "auto_router": "Auto-routed",
+    }
+    source_label = source_labels.get(source, "")
+    
+    if indicator and source_label:
+        indicator = f"*Model: `{model}` ({source_label})*\n\n{indicator}"
+    elif not indicator and model:
+        indicator = f"*Model: `{model}` ({source_label})*"
+    
+    return indicator
 
 
 # =============================================================================
@@ -541,6 +833,51 @@ def process_with_multi_agent(
         else:
             status = f"[!] Pipeline finished with status: {result.status.value}"
         
+        # Save to history (FIX: multi-agent history was not being saved!)
+        try:
+            # Determine model used (use the last step's model or first available)
+            model_used = "multi-agent"
+            if result.steps:
+                # Try to get model from the last step's metadata
+                for step in reversed(result.steps):
+                    if hasattr(step, 'model') and step.model:
+                        model_used = step.model
+                        break
+                    elif hasattr(step, 'agent') and step.agent:
+                        model_used = f"multi-agent:{step.agent}"
+                        break
+            
+            # Build metadata with pipeline info
+            pipeline_metadata = {
+                "pipeline_id": pipeline_id,
+                "steps_count": len(result.steps),
+                "multi_agent": True,
+            }
+            
+            # Add step summaries to metadata
+            if result.steps:
+                pipeline_metadata["steps"] = [
+                    {
+                        "name": sr.step_name,
+                        "status": sr.status.value if hasattr(sr.status, 'value') else str(sr.status),
+                    }
+                    for sr in result.steps
+                ]
+            
+            history.add(
+                question=question,
+                refined_question=f"[Multi-Agent Pipeline: {pipeline_id}] {question}",
+                response=result.final_output or "No result",
+                model=model_used,
+                task_type=f"multi_agent_{pipeline_id}",
+                duration_seconds=elapsed,
+                document=document if document else None,
+                metadata=pipeline_metadata,
+            )
+            logger.debug(f"Multi-agent history saved: {pipeline_id}")
+        except Exception as e:
+            logger.error(f"Failed to save multi-agent history: {e}")
+        
         yield status, steps_md, result.final_output or "No result"
         
     except Exception as e:
@@ -658,6 +995,24 @@ def process_with_streaming(
     routing_md = format_routing(routing)
     
     yield "[>] Generating...", analysis_md, routing_md, rag_sources_md, ""
+    
+    # Context validation (if available)
+    context_warning = ""
+    if CONTEXT_MANAGER_AVAILABLE:
+        try:
+            ctx_check = check_context(
+                prompt=question,
+                document=combined_doc,
+                system_prompt="",  # Will be set by executor
+                model=routing.model
+            )
+            if ctx_check.exceeds_limit:
+                context_warning = f"⚠️ Context exceeds limit ({ctx_check.usage_percent:.0f}%). Response may be truncated."
+                yield f"[!] {context_warning}", analysis_md, routing_md, rag_sources_md, ""
+            elif ctx_check.exceeds_recommended:
+                context_warning = f"Context is large ({ctx_check.usage_percent:.0f}%). Quality may vary."
+        except Exception as e:
+            logger.debug(f"Context check error: {e}")
     
     # Generation
     response_parts = []
@@ -1268,7 +1623,7 @@ def create_app() -> gr.Blocks:
                             )
                             use_multi_agent = gr.Checkbox(
                                 label="Enable Multi-Agent (multi-model orchestration)",
-                                value=MULTI_AGENT_AVAILABLE and is_multi_agent_enabled(),
+                                value=False,  # Off by default
                                 interactive=MULTI_AGENT_AVAILABLE,
                             )
                             multi_agent_pipeline = gr.Dropdown(
@@ -1298,7 +1653,7 @@ def create_app() -> gr.Blocks:
                             )
                             use_rag = gr.Checkbox(
                                 label="Enable RAG (enrich with my documents)",
-                                value=RAG_AVAILABLE,
+                                value=False,  # Off by default
                                 interactive=RAG_AVAILABLE,
                             )
                             rag_n_chunks = gr.Slider(
@@ -1378,6 +1733,16 @@ def create_app() -> gr.Blocks:
                             with gr.Row():
                                 analysis_output = gr.Markdown(label="Analysis")
                                 routing_output = gr.Markdown(label="Routing")
+                            
+                            # Context indicator (if available)
+                            if CONTEXT_MANAGER_AVAILABLE:
+                                context_indicator = gr.Markdown(
+                                    label="Context Usage",
+                                    value="*Enter a question and select a model to see context usage*",
+                                    elem_classes=["context-indicator"],
+                                )
+                            else:
+                                context_indicator = None
                         
                         # Multi-Agent steps (visible if multi-agent used)
                         agent_steps_output = gr.Markdown(
@@ -1439,6 +1804,63 @@ def create_app() -> gr.Blocks:
                     inputs=[question_input, document_input],
                     outputs=[analysis_output, routing_output],
                 )
+                
+                # Context indicator updates (if available)
+                if CONTEXT_MANAGER_AVAILABLE:
+                    # Common inputs for all context updates
+                    context_inputs = [
+                        question_input, document_input, file_input,
+                        force_model, use_presets, preset_dropdown, priority
+                    ]
+                    
+                    # Update on question change
+                    question_input.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on document change  
+                    document_input.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on file upload
+                    file_input.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on model change
+                    force_model.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on preset selection change
+                    preset_dropdown.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on use_presets toggle
+                    use_presets.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
+                    
+                    # Update on priority change
+                    priority.change(
+                        fn=update_context_full,
+                        inputs=context_inputs,
+                        outputs=[context_indicator],
+                    )
             
             # =================================================================
             # TAB 2: MULTI-AGENT
@@ -1926,7 +2348,7 @@ def create_app() -> gr.Blocks:
                             label="Search",
                             placeholder="Keyword...",
                         )
-                        history_search_btn = gr.Button("🔍 Search")
+                        history_search_btn = gr.Button("Search")
                         export_btn = gr.Button("📤 Export to Markdown")
                         export_path = gr.Textbox(
                             label="Export path",
@@ -2025,7 +2447,7 @@ def create_app() -> gr.Blocks:
                 - RAG: {'[OK] Active' if RAG_AVAILABLE else '[x] Not installed'}
                 - Multi-Agent: {'[OK] Active' if MULTI_AGENT_AVAILABLE else '[x] Not installed'}
                 
-                **Author:** Léon
+                **Author:** Léon Brouillé
                 
                 ---
                 

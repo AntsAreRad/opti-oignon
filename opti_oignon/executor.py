@@ -12,6 +12,7 @@ This module handles:
 - Streaming query execution
 - Error and timeout handling
 - Request cancellation
+- Context validation (NEW: Phase A4)
 
 MULTILINGUAL LOGIC:
 - The code and interface are in English
@@ -31,6 +32,19 @@ import ollama
 
 from .config import config
 from .router import RoutingResult
+
+# Context management import
+try:
+    from .context_manager import (
+        get_context_manager,
+        ContextCheck,
+        check_context as cm_check_context,
+        smart_truncate as cm_smart_truncate
+    )
+    CONTEXT_MANAGER_AVAILABLE = True
+except ImportError:
+    CONTEXT_MANAGER_AVAILABLE = False
+    ContextCheck = None
 
 logger = logging.getLogger(__name__)
 
@@ -134,24 +148,24 @@ Question:""",
         "standard": """You are an R debugging expert. Your approach is METHODICAL.
 
 ## DEBUG PROCESS
-1. 🔍 **READ** the error carefully
-2. 🎯 **IDENTIFY** the probable cause
-3. ✅ **FIX** with working code
-4. 💡 **EXPLAIN** to avoid in the future
+1. **READ** the error carefully
+2. **IDENTIFY** the probable cause
+3. **FIX** with working code
+4. **EXPLAIN** to avoid in the future
 
 ## RESPONSE FORMAT
-### 🔍 Error Analysis
+### Error Analysis
 [Error explanation]
 
-### 🎯 Probable Cause
+### Probable Cause
 [What causes the problem]
 
-### ✅ Fixed Code
+### Fixed Code
 ```r
 # Corrected code with comments
 ```
 
-### 💡 Tip
+### Tip
 [How to avoid this problem]
 
 ## LANGUAGE: Respond in the user's language.
@@ -181,24 +195,24 @@ Error:""",
         "standard": """You are a Python debugging expert. Your approach is METHODICAL.
 
 ## DEBUG PROCESS
-1. 🔍 **READ** the traceback carefully
-2. 🎯 **IDENTIFY** the probable cause
-3. ✅ **FIX** with working code
-4. 💡 **EXPLAIN** to avoid in the future
+1. **READ** the traceback carefully
+2. **IDENTIFY** the probable cause
+3. **FIX** with working code
+4. **EXPLAIN** to avoid in the future
 
 ## RESPONSE FORMAT
-### 🔍 Error Analysis
+### Error Analysis
 [Traceback explanation]
 
-### 🎯 Probable Cause
+### Probable Cause
 [What causes the problem]
 
-### ✅ Fixed Code
+### Fixed Code
 ```python
 # Corrected code with comments
 ```
 
-### 💡 Tip
+### Tip
 [How to avoid this problem]
 
 ## LANGUAGE: Respond in the user's language.
@@ -273,121 +287,100 @@ Then write the requested text.""",
 
 ## LANGUAGE: Respond in the user's language.
 
-Help the user with their planning.""",
+Plan the user's task.""",
 
-        "reasoning": """Planning expert. Think deeply. User's language.
+        "reasoning": """Planning expert. Reason through the approach.
+Respond in user's language.""",
 
-<thinking>
-1. What's the real objective?
-2. What are the constraints?
-3. What are the options?
-4. What approach is optimal?
-</thinking>
-
-Then provide a structured plan.""",
-
-        "fast": """Quick planning. Objective, key steps, next action. User's language.""",
+        "fast": """Planner. Concise action steps. User's language.""",
     },
     
-    "planning_deep": {
-        "standard": """You are a strategic advisor expert in deep analysis.
-Respond in the user's language.
+    # ----- GENERAL -----
+    "general": {
+        "standard": """You are a helpful assistant.
 
-## YOUR METHOD
-1. **Analyze** all aspects of the problem
-2. **Evaluate** options with pros/cons
-3. **Reason** step by step
-4. **Recommend** with clear justification
-
-Provide comprehensive analysis and recommendations.""",
-        
-        "reasoning": """Strategic advisor. Deep analysis. User's language.""",
-        "fast": """Strategic advisor. Quick analysis. User's language.""",
-    },
-    
-    # ----- SIMPLE QUESTION -----
-    "simple_question": {
-        "standard": """You are a helpful assistant. Answer clearly and concisely.
-Respond in the user's language (French if asked in French, English if asked in English).
-
-Question:""",
-        "reasoning": """Helpful assistant. Think before answering. User's language.""",
-        "fast": """Helpful assistant. Quick answer. User's language.""",
-    },
-    
-    # ----- LINUX -----
-    "linux": {
-        "standard": """You are a Linux/Bash expert.
-
-## YOUR RULES
-1. Explain commands clearly
-2. Include safety warnings when relevant
-3. Provide working examples
-4. Mention alternatives when useful
+## YOUR APPROACH
+1. Understand the question completely
+2. Provide accurate, relevant information
+3. Be concise but thorough
+4. Use examples when helpful
 
 ## LANGUAGE: Respond in the user's language.
 
-Answer the request.""",
-        "reasoning": """Linux expert. Explain step by step. User's language.""",
-        "fast": """Linux expert. Direct commands. User's language.""",
+Answer the question.""",
+
+        "reasoning": """Thoughtful assistant. Reason through your answer.
+Respond in user's language.""",
+
+        "fast": """Concise assistant. Direct answers. User's language.""",
     },
 }
 
-# Default prompts for unknown task types
-DEFAULT_PROMPTS = {
-    "standard": """You are a helpful AI assistant.
-Respond in the user's language (match their language).
-Answer clearly and helpfully.""",
-    "reasoning": """Think step by step. User's language.""",
-    "fast": """Quick answer. User's language.""",
-}
-
-# Refinement prompt
-REFINE_PROMPT = """Improve this question to get a better answer from an AI.
-Keep the same language as the original question.
-Make it clearer and more specific without changing the intent.
-
-Context:
-{context}
-
-Original question:
-{question}
-
-Improved question (same language):"""
+# Default prompt if task type not found
+DEFAULT_PROMPT = PROMPTS["general"]["standard"]
 
 
 # =============================================================================
-# MAIN CLASS
+# REFINEMENT PROMPT
+# =============================================================================
+
+REFINE_PROMPT = """You are a prompt engineering expert. Your task is to improve user questions.
+
+## CONTEXT
+{context}
+
+## ORIGINAL QUESTION
+{question}
+
+## YOUR MISSION
+Rewrite this question to be:
+1. More specific and detailed
+2. Clear about expected output format
+3. Including relevant technical context
+4. Well-structured if complex
+
+## RULES
+- Keep the same language as the original (French→French, English→English)
+- Don't change the intent
+- Don't add unnecessary complexity
+- If the question is already good, make minimal changes
+
+## OUTPUT
+Return ONLY the improved question, nothing else."""
+
+
+# =============================================================================
+# EXECUTOR CLASS
 # =============================================================================
 
 class Executor:
     """
-    Query executor for Ollama models.
+    Execute LLM queries with refinement and streaming.
     
-    Handles system prompt loading, question refinement,
-    streaming execution, and cancellation.
+    Handles:
+    - System prompt selection
+    - Question refinement
+    - Streaming execution
+    - Context validation (NEW: Phase A4)
+    - Cancellation
     """
     
     def __init__(self):
         """Initialize the executor."""
         self._cancel_event = threading.Event()
         self._current_task: Optional[str] = None
-        # FIX: Store the last refined question for retrieval after streaming
         self._last_refined_question: Optional[str] = None
+        self._last_context_check: Optional['ContextCheck'] = None
     
     @property
     def last_refined_question(self) -> Optional[str]:
-        """
-        Get the last refined question from the most recent execute() call.
-        
-        This property allows retrieval of the refined question after
-        streaming iteration completes, since Python generators don't
-        expose their return value through normal for-loop iteration.
-        
-        Returns:
-            The refined question, or None if no execution has occurred.
-        """
+        """Get the last refined question."""
         return self._last_refined_question
+    
+    @property
+    def last_context_check(self) -> Optional['ContextCheck']:
+        """Get the last context check result."""
+        return self._last_context_check
     
     # -------------------------------------------------------------------------
     # System Prompts
@@ -395,26 +388,17 @@ class Executor:
     
     def get_system_prompt(self, task_type: str, variant: str = "standard") -> str:
         """
-        Get the system prompt for a task type and variant.
+        Get the system prompt for a task type.
         
         Args:
             task_type: Task type (code_r, debug_python, etc.)
-            variant: Variant (standard, reasoning, fast)
+            variant: Prompt variant (standard, reasoning, fast)
             
         Returns:
             System prompt string
         """
-        task_prompts = PROMPTS.get(task_type, DEFAULT_PROMPTS)
-        prompt = task_prompts.get(variant, task_prompts.get("standard", DEFAULT_PROMPTS["standard"]))
-        return prompt
-    
-    def get_available_tasks(self) -> list:
-        """Return list of available task types."""
-        return list(PROMPTS.keys())
-    
-    def get_available_variants(self) -> list:
-        """Return list of available prompt variants."""
-        return ["standard", "reasoning", "fast"]
+        task_prompts = PROMPTS.get(task_type, PROMPTS.get("general", {}))
+        return task_prompts.get(variant, task_prompts.get("standard", DEFAULT_PROMPT))
     
     # -------------------------------------------------------------------------
     # Refinement
@@ -428,7 +412,7 @@ class Executor:
         temperature: float = 0.3,
     ) -> Tuple[str, Optional[str]]:
         """
-        Refine a question for better results.
+        Refine a question using an LLM.
         
         Args:
             question: Original question
@@ -476,6 +460,61 @@ class Executor:
             return question, str(e)
     
     # -------------------------------------------------------------------------
+    # Context Validation (NEW: Phase A4)
+    # -------------------------------------------------------------------------
+    
+    def validate_context(
+        self,
+        question: str,
+        document: str,
+        system_prompt: str,
+        model: str,
+        auto_truncate: bool = False
+    ) -> Tuple[str, Optional['ContextCheck'], Optional[str]]:
+        """
+        Validate and optionally adjust context for model limits.
+        
+        Args:
+            question: User's question
+            document: Document/code content
+            system_prompt: System prompt being used
+            model: Target model
+            auto_truncate: If True, automatically truncate if needed
+            
+        Returns:
+            Tuple of (adjusted_document, context_check, warning_message)
+        """
+        if not CONTEXT_MANAGER_AVAILABLE:
+            return document, None, None
+        
+        # Perform context check
+        context_check = cm_check_context(
+            prompt=question,
+            document=document,
+            system_prompt=system_prompt,
+            model=model
+        )
+        
+        self._last_context_check = context_check
+        warning = context_check.warning_message
+        
+        # Handle truncation if needed
+        if context_check.truncation_needed and auto_truncate:
+            manager = get_context_manager()
+            truncated_doc, tokens_removed = manager.smart_truncate(
+                text=document,
+                max_tokens=context_check.available_for_input - context_check.prompt_tokens - context_check.system_tokens - 1000,
+                model=model
+            )
+            
+            warning = f"Document truncated: removed ~{tokens_removed:,} tokens to fit context window"
+            logger.info(f"Auto-truncated document: {tokens_removed} tokens removed")
+            
+            return truncated_doc, context_check, warning
+        
+        return document, context_check, warning
+    
+    # -------------------------------------------------------------------------
     # Execution
     # -------------------------------------------------------------------------
     
@@ -486,6 +525,8 @@ class Executor:
         document: Optional[str] = None,
         refine: bool = True,
         on_status: Optional[Callable[[str], None]] = None,
+        auto_truncate: bool = False,
+        validate_context: bool = True,
     ) -> Generator[str, None, Tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -496,6 +537,8 @@ class Executor:
             document: Optional document/code for context
             refine: If True, refine question before execution
             on_status: Callback for status updates
+            auto_truncate: If True, auto-truncate document if context exceeded
+            validate_context: If True, validate context against model limits
             
         Yields:
             Response chunks in streaming
@@ -509,25 +552,53 @@ class Executor:
         """
         self._cancel_event.clear()
         self._current_task = routing.task_type
+        self._last_context_check = None
         
         def status(msg: str):
             if on_status:
                 on_status(msg)
             logger.info(msg)
         
+        # Step 0: Context validation (NEW: Phase A4)
+        adjusted_document = document or ""
+        if validate_context and document and CONTEXT_MANAGER_AVAILABLE:
+            system_prompt = self.get_system_prompt(routing.task_type, routing.prompt_variant)
+            
+            adjusted_document, context_check, context_warning = self.validate_context(
+                question=question,
+                document=document,
+                system_prompt=system_prompt,
+                model=routing.model,
+                auto_truncate=auto_truncate
+            )
+            
+            if context_check:
+                if context_check.exceeds_limit and not auto_truncate:
+                    yield f"[ERR] Context exceeds model limit: {context_warning}"
+                    yield f"\n\nEstimated tokens: ~{context_check.total_tokens:,}"
+                    yield f"\nAvailable: {context_check.available_for_input:,}"
+                    yield f"\n\nOptions:"
+                    yield f"\n- Enable auto-truncation"
+                    yield f"\n- Summarize the document first"
+                    yield f"\n- Use a model with larger context (e.g., nemotron-3-nano:30b)"
+                    return question, f"[Context exceeded: {context_check.total_tokens} > {context_check.available_for_input}]"
+                
+                if context_warning:
+                    status(f"[!] {context_warning}")
+        
         # Step 1: Refinement (optional)
         refined_question = question
         if refine:
             status(f"[>] Refining question with {routing.model}...")
             refined_question, error = self.refine_question(
-                question, document, routing.model, config.get_temperature("refining")
+                question, adjusted_document, routing.model, config.get_temperature("refining")
             )
             if error:
                 status(f"[!] Refinement failed: {error}")
             else:
                 status("[OK] Question refined")
         
-        # FIX: Store refined question in instance for later retrieval
+        # Store refined question in instance for later retrieval
         self._last_refined_question = refined_question
         
         if self._cancel_event.is_set():
@@ -543,9 +614,9 @@ class Executor:
             {"role": "user", "content": refined_question}
         ]
         
-        # Add document if present
-        if document and not refine:
-            messages[-1]["content"] += f"\n\n---\nDocument provided:\n{document}"
+        # Add document if present (always, regardless of refinement)
+        if adjusted_document:
+            messages[-1]["content"] += f"\n\n---\nDocument provided:\n{adjusted_document}"
         
         # Step 4: Execute with streaming
         status(f"[>] Generating with {routing.model} (temp={routing.temperature})...")
@@ -641,7 +712,8 @@ class Executor:
         """Reset executor state."""
         self._cancel_event.clear()
         self._current_task = None
-        self._last_refined_question = None  # Also reset refined question
+        self._last_refined_question = None
+        self._last_context_check = None
 
 
 # =============================================================================

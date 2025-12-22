@@ -1,40 +1,269 @@
 # =============================================================================
-# CONFIGURATION DES MODÈLES - CONTEXTEUR 2.0
+# MODEL CONFIGURATION - OPTI-OIGNON 1.0
 # =============================================================================
-# Basé sur les benchmarks de Léon (2025-12-18)
-# Édite ce fichier pour ajuster les modèles selon tes besoins.
+# Configuration with verified context limits per model.
+#
+# SOURCES (verified December 2025):
+# - Qwen3-Coder-30B: HuggingFace Qwen/Qwen3-Coder-30B-A3B-Instruct, Ollama library
+# - DeepSeek-R1-32B: DeepSeek-AI GitHub, HuggingFace deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+# - Gemma 3 27B: Google AI docs, HuggingFace google/gemma-3-27b-it
+# - Nemotron 3 Nano: NVIDIA research page, HuggingFace nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+# - Llama 3.3: Meta official documentation
+# - Mistral Small 3.2: Mistral AI documentation
+# - Devstral: Mistral AI documentation
+#
+# NOTE: The context_manager.py module fetches actual limits from Ollama dynamically.
+# These values serve as fallbacks when Ollama info is unavailable.
+# =============================================================================
 
-# -----------------------------------------------------------------------------
-# Modèles par type d'usage
-# -----------------------------------------------------------------------------
+# =============================================================================
+# MODEL CONTEXT LIMITS
+# =============================================================================
+# Each model entry includes:
+# - context_window: Total context capacity (input + output)
+# - max_output: Maximum tokens the model can generate
+# - recommended_input: Safe input size leaving room for output
+# - chars_per_token: Approximation for token estimation
+
 models:
-  # Modèles pour le code (R, Python, etc.)
-  code:
-    primary: "qwen3-coder:30b"           # MVP: 32s, score 8.2/10
-    quality: "devstral-small-2:latest"   # 96s, score 8.8/10
-    fast: "qwen2.5-coder:7b"             # 14s, pour prototypage rapide
+  # ---------------------------------------------------------------------------
+  # QWEN FAMILY - Large context, excellent for coding
+  # ---------------------------------------------------------------------------
   
-  # Modèles pour le raisonnement/planification
+  "qwen3-coder:30b":
+    display_name: "Qwen3 Coder 30B"
+    context_window: 262144       # 256K native - Source: QwenLM/Ollama
+    max_output: 65536            # 64K max output - Source: HuggingFace
+    recommended_input: 200000    # Leave room for generous output
+    chars_per_token: 3.8
+    notes: "MoE model (3.3B active/30.5B total), excellent for agentic coding"
+  
+  "qwen3:32b":
+    display_name: "Qwen3 32B"
+    context_window: 131072       # 128K with YaRN - Source: QwenLM
+    max_output: 8192
+    recommended_input: 120000
+    chars_per_token: 3.5
+    notes: "Dense model, good general reasoning"
+  
+  "qwen2.5-coder:7b":
+    display_name: "Qwen2.5 Coder 7B"
+    context_window: 131072       # 128K - Source: llm-stats.com
+    max_output: 8192
+    recommended_input: 120000
+    chars_per_token: 4.0
+    notes: "Smaller but capable, fast inference"
+  
+  "qwen2.5-coder:14b":
+    display_name: "Qwen2.5 Coder 14B"
+    context_window: 32768        # 32K base + YaRN - Source: HuggingFace
+    max_output: 8192
+    recommended_input: 24000
+    chars_per_token: 3.8
+    notes: "Good balance of speed and quality"
+  
+  "qwen2.5-coder:32b-instruct-q5_k_m":
+    display_name: "Qwen2.5 Coder 32B Q5_K_M"
+    context_window: 131072       # 128K - Source: llm-stats.com
+    max_output: 8192
+    recommended_input: 120000
+    chars_per_token: 3.5
+    notes: "Quantized version, good quality retention"
+  
+  "qwen3-vl:32b":
+    display_name: "Qwen3 VL 32B"
+    context_window: 1048576      # 1M tokens - Source: QwenLM GitHub
+    max_output: 32768
+    recommended_input: 1000000
+    chars_per_token: 3.2
+    notes: "Vision-language model, massive context"
+  
+  # ---------------------------------------------------------------------------
+  # DEEPSEEK FAMILY - Strong reasoning
+  # ---------------------------------------------------------------------------
+  
+  "deepseek-r1:32b":
+    display_name: "DeepSeek R1 32B"
+    context_window: 131072       # 128K - Source: DeepSeek GitHub
+    max_output: 32768            # Official max - Source: HuggingFace
+    recommended_input: 96000
+    chars_per_token: 3.5
+    notes: "Distilled from R1, excellent reasoning with chain-of-thought"
+  
+  # ---------------------------------------------------------------------------
+  # GOOGLE GEMMA FAMILY
+  # ---------------------------------------------------------------------------
+  
+  "gemma3:27b":
+    display_name: "Gemma 3 27B"
+    context_window: 131072       # 128K - Source: Google AI docs
+    max_output: 8192             # Source: LM Studio
+    recommended_input: 120000
+    chars_per_token: 4.0
+    notes: "Multimodal, 140+ languages, good for explanations"
+  
+  # ---------------------------------------------------------------------------
+  # META LLAMA FAMILY
+  # ---------------------------------------------------------------------------
+  
+  "llama3.3:latest":
+    display_name: "Llama 3.3 70B"
+    context_window: 131072       # 128K - Source: Meta official
+    max_output: 16384
+    recommended_input: 110000
+    chars_per_token: 3.8
+    notes: "Largest Llama, strong general performance"
+  
+  # ---------------------------------------------------------------------------
+  # MISTRAL FAMILY
+  # ---------------------------------------------------------------------------
+  
+  "mistral-small3.2:latest":
+    display_name: "Mistral Small 3.2 24B"
+    context_window: 131072       # 128K - Source: Mistral AI
+    max_output: 16384
+    recommended_input: 110000
+    chars_per_token: 3.5
+    notes: "Fast and efficient, good for general tasks"
+  
+  "devstral-small-2:latest":
+    display_name: "Devstral Small 2 24B"
+    context_window: 262144       # 256K - Source: Mistral AI
+    max_output: 16384
+    recommended_input: 240000
+    chars_per_token: 3.5
+    notes: "Developer-focused, large context"
+  
+  # ---------------------------------------------------------------------------
+  # NVIDIA NEMOTRON FAMILY - Massive context
+  # ---------------------------------------------------------------------------
+  
+  "nemotron-3-nano:30b":
+    display_name: "Nemotron 3 Nano 30B"
+    context_window: 1048576      # 1M tokens! - Source: NVIDIA research
+    max_output: 16384
+    recommended_input: 1000000
+    chars_per_token: 3.2
+    notes: "Hybrid Mamba-Transformer MoE, excellent for massive documents"
+  
+  # ---------------------------------------------------------------------------
+  # OTHER MODELS
+  # ---------------------------------------------------------------------------
+  
+  "goekdenizguelmez/JOSIEFIED-Qwen3:30b":
+    display_name: "JOSIEFIED Qwen3 30B"
+    context_window: 32768        # Base Qwen3 - Source: HuggingFace
+    max_output: 8192
+    recommended_input: 24000
+    chars_per_token: 4.0
+    notes: "Community fine-tune"
+  
+  "dolphin-mixtral:8x7b":
+    display_name: "Dolphin Mixtral 8x7B"
+    context_window: 16384        # 16K finetuned - Source: HuggingFace
+    max_output: 8192
+    recommended_input: 12000
+    chars_per_token: 4.0
+    notes: "Uncensored, good for creative tasks"
+  
+  "wizard-math:13b":
+    display_name: "Wizard Math 13B"
+    context_window: 32768        # 32K - Source: Ollama
+    max_output: 4096
+    recommended_input: 28000
+    chars_per_token: 4.0
+    notes: "Specialized for mathematical reasoning"
+  
+  # ---------------------------------------------------------------------------
+  # DEFAULT FALLBACK
+  # ---------------------------------------------------------------------------
+  # Used when model is not in this list and Ollama info unavailable
+  
+  "_default":
+    display_name: "Unknown Model"
+    context_window: 8192         # Conservative default
+    max_output: 4096
+    recommended_input: 4000
+    chars_per_token: 4.0
+    notes: "Fallback for unrecognized models"
+
+# =============================================================================
+# TASK ROUTING CONFIGURATION
+# =============================================================================
+# Maps task types to preferred models
+
+routing:
+  code_r:
+    primary: "qwen3-coder:30b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen2.5-coder:14b"
+  
+  code_python:
+    primary: "qwen3-coder:30b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen2.5-coder:7b"
+  
+  debug_r:
+    primary: "qwen3-coder:30b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen2.5-coder:14b"
+  
+  debug_python:
+    primary: "qwen3-coder:30b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen2.5-coder:7b"
+  
   reasoning:
-    primary: "qwen3-coder:30b"           # 46s, score 7/10 - bon compromis
-    quality: "deepseek-r1:32b"           # 186s - raisonnement profond mais LENT
-    fast: "nemotron-3-nano:30b"          # 69s, score 7/10
+    primary: "deepseek-r1:32b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen3:32b"
   
-  # Modèles généralistes (rédaction, explications)
+  scientific_writing:
+    primary: "qwen3:32b"
+    quality: "deepseek-r1:32b"
+    fast: "gemma3:27b"
+  
+  planning:
+    primary: "deepseek-r1:32b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen3:32b"
+  
   general:
-    primary: "nemotron-3-nano:30b"       # 71s, score 7.8/10
-    quality: "qwen3:32b"                 # 202s, score 10/10 mais TRÈS LENT
-    fast: "gemma3:27b"                   # 23s sur questions simples
+    primary: "qwen3:32b"
+    quality: "deepseek-r1:32b"
+    fast: "nemotron-3-nano:30b"
   
-  # Modèles pour questions simples/rapides
   quick:
-    primary: "gemma3:27b"                # 23s, score 10/10 sur questions simples
-    quality: "nemotron-3-nano:30b"
+    primary: "nemotron-3-nano:30b"
+    quality: "qwen3-coder:30b"
     fast: "qwen2.5-coder:7b"
 
-# -----------------------------------------------------------------------------
-# Modèles de fallback (si le préféré n'est pas disponible)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# TEMPERATURE DEFAULTS
+# =============================================================================
+
+temperatures:
+  code: 0.3          # Lower for deterministic code
+  debug: 0.2         # Very low for precise debugging
+  reasoning: 0.5     # Balanced for reasoning
+  writing: 0.7       # Higher for creative writing
+  general: 0.6       # Balanced general use
+  refining: 0.3      # Low for prompt refinement
+
+# =============================================================================
+# TIMEOUT CONFIGURATION
+# =============================================================================
+
+timeouts:
+  default: 300       # 5 minutes
+  fast: 60           # 1 minute for quick tasks
+  deep: 600          # 10 minutes for complex reasoning
+
+# =============================================================================
+# FALLBACK ORDER
+# =============================================================================
+# If primary model fails, try these in order
+
 fallback_order:
   - "qwen3-coder:30b"
   - "devstral-small-2:latest"
@@ -43,38 +272,34 @@ fallback_order:
   - "qwen2.5-coder:14b"
   - "qwen3:32b"
 
-# -----------------------------------------------------------------------------
-# Températures par type de tâche
-# -----------------------------------------------------------------------------
-temperatures:
-  code: 0.3           # Plus déterministe pour le code
-  debug: 0.2          # Encore plus déterministe pour le debugging
-  reasoning: 0.5      # Un peu de créativité pour le raisonnement
-  writing: 0.7        # Plus de créativité pour la rédaction
-  general: 0.6        # Équilibré pour les questions générales
-  refining: 0.3       # Raffinage de prompts = précision
+# =============================================================================
+# BLACKLIST
+# =============================================================================
+# Models to avoid for certain tasks
 
-# -----------------------------------------------------------------------------
-# Modèles spéciaux
-# -----------------------------------------------------------------------------
-special:
-  vision: "qwen3-vl:32b"           # Pour analyser des images
-  math: "wizard-math:13b"          # Pour les calculs complexes
-  embeddings: "mxbai-embed-large"  # Pour RAG et recherche sémantique
-
-# -----------------------------------------------------------------------------
-# Timeouts (en secondes)
-# -----------------------------------------------------------------------------
-timeouts:
-  default: 300        # 5 minutes par défaut
-  fast: 60            # 1 minute pour modèles rapides
-  deep: 600           # 10 minutes pour raisonnement profond
-
-# -----------------------------------------------------------------------------
-# Modèles à éviter (basé sur tes tests)
-# -----------------------------------------------------------------------------
 blacklist:
-  - reason: "Refuse les questions non-code"
-    model: "deepseek-coder:33b"
-  - reason: "Mauvais en texte pur (modèle vision)"
-    model: "qwen3-vl:32b"
+  - model: "deepseek-coder:33b"
+    reason: "Refuses non-code prompts"
+  - model: "qwen3-vl:32b"
+    reason: "Vision model, poor text-only performance"
+
+# =============================================================================
+# SPECIAL PURPOSE MODELS
+# =============================================================================
+
+special:
+  vision: "qwen3-vl:32b"
+  math: "wizard-math:13b"
+  embeddings: "mxbai-embed-large"
+  long_context: "nemotron-3-nano:30b"
+
+# =============================================================================
+# CONTEXT WARNINGS
+# =============================================================================
+# Thresholds for context usage warnings
+
+context_warnings:
+  yellow_threshold: 75    # Percentage - show warning
+  orange_threshold: 90    # Percentage - show strong warning
+  auto_truncate: false    # Auto-truncate if exceeds limit
+  prefer_summarize: true  # Suggest summarization over truncation

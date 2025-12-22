@@ -1,0 +1,39 @@
+task_routing:
+  simple_question:
+    primary: mistral-small3.2:latest
+    fallback:
+    - qwen3:32b
+    - qwen3-coder:30b
+    fast: nemotron-3-nano:30b
+  debug_r:
+    primary: qwen3-coder:30b
+    fallback:
+    - devstral-small-2:latest
+    - nemotron-3-nano:30b
+    fast: qwen3-coder:30b
+  code_python:
+    primary: qwen3-coder:30b
+    fallback:
+    - devstral-small-2:latest
+    - nemotron-3-nano:30b
+    fast: qwen2.5-coder:7b
+  explanation:
+    primary: nemotron-3-nano:30b
+    fallback:
+    - qwen3:32b
+    - qwen3-coder:30b
+    fast: qwen3-coder:30b
+  reasoning:
+    primary: deepseek-r1:32b
+    fallback:
+    - mistral-small3.2:latest
+    - qwen3:32b
+    fast: qwen3-coder:30b
+  code_r:
+    primary: qwen3-coder:30b
+    fallback:
+    - devstral-small-2:latest
+    - nemotron-3-nano:30b
+    fast: qwen3-coder:30b
+last_benchmark: 2025-12-22 13:00
+benchmark_mode: automatic
