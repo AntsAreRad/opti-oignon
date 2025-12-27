@@ -660,15 +660,15 @@ if __name__ == "__main__":
     
     # List configured agents
     agents = config.get("agents", {})
-    print(f"\n📦 Configured agents: {len(agents)}")
+    print(f"\nConfigured agents: {len(agents)}")
     for name, cfg in agents.items():
         print(f"   • {name}: {cfg.get('description', 'N/A')}")
         print(f"     Primary model: {cfg.get('models', {}).get('primary', '?')}")
     
     # List pipelines
     pipelines = config.get("pipelines", {})
-    print(f"\n🔄 Configured pipelines: {len(pipelines)}")
+    print(f"\nConfigured pipelines: {len(pipelines)}")
     for name, cfg in pipelines.items():
         print(f"   • {name}: {cfg.get('name', name)}")
     
-    print("\n✅ Base module functional")
+    print("\n[OK] Base module functional")

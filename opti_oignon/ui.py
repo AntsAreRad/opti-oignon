@@ -42,6 +42,18 @@ from .executor import executor
 from .presets import preset_manager, Preset, suggest_keywords
 from .history import history
 
+# Pipeline Manager Import (for custom pipeline management)
+try:
+    from .pipeline_manager import (
+        get_pipeline_manager,
+        Pipeline,
+        PipelineStep,
+    )
+    PIPELINE_MANAGER_AVAILABLE = True
+except ImportError:
+    PIPELINE_MANAGER_AVAILABLE = False
+    get_pipeline_manager = None
+
 # Context Manager Import (for context limit handling)
 try:
     from .context_manager import (
@@ -86,6 +98,20 @@ except ImportError:
     MULTI_AGENT_AVAILABLE = False
     is_multi_agent_enabled = lambda: False
     set_multi_agent_enabled = lambda x: False
+
+# Dynamic Pipeline UI (UPDATED)
+try:
+    from .dynamic_pipeline_ui import (
+        create_dynamic_pipeline_section,
+        create_dynamic_options_compact,
+        process_with_dynamic_pipeline,
+        should_use_dynamic_pipeline,  # Now accepts document parameter
+        format_dynamic_plan_markdown,
+        DYNAMIC_PIPELINE_CSS,
+    )
+    DYNAMIC_UI_AVAILABLE = True
+except ImportError:
+    DYNAMIC_UI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +292,11 @@ footer { display: none !important; }
 }
 """
 
+# Ajouter le CSS du Dynamic Pipeline si disponible
+if DYNAMIC_UI_AVAILABLE:
+    CUSTOM_CSS = CUSTOM_CSS + DYNAMIC_PIPELINE_CSS
+
+
 # =============================================================================
 # RAG INITIALIZATION
 # =============================================================================
@@ -328,12 +359,20 @@ def get_multi_agent_status() -> str:
 
 
 def get_pipeline_choices() -> List[Tuple[str, str]]:
-    """Return pipeline choices for dropdown."""
-    choices = [("Auto-detection", "auto")]
+    """Return pipeline choices for dropdown, including Dynamic Pipeline."""
+    choices = [
+        ("Disabled (single model)", "disabled"),
+        ("Auto-detection", "auto"),
+    ]
+    
+    # Add Dynamic Pipeline option if available
+    if DYNAMIC_UI_AVAILABLE:
+        choices.append(("Dynamic Pipeline (LLM planning)", "dynamic"))
     
     if not MULTI_AGENT_AVAILABLE:
         return choices
     
+    # Add regular pipelines
     try:
         orch = get_orchestrator()
         for p in orch.list_pipelines():
@@ -344,6 +383,31 @@ def get_pipeline_choices() -> List[Tuple[str, str]]:
         pass
     
     return choices
+
+
+def get_pipeline_dropdown_update():
+    """Return a Gradio update for the pipeline dropdown with fresh choices."""
+    return gr.update(choices=get_pipeline_choices())
+
+
+def get_preset_choices() -> List[Tuple[str, str]]:
+    """Return preset choices for dropdown."""
+    try:
+        presets = preset_manager.get_ordered()
+        choices = []
+        for p in presets:
+            choices.append((f"{p.icon} {p.name}", p.id))
+        if not choices:
+            choices = [("⚙️ Default", "default")]
+        return choices
+    except Exception as e:
+        logger.error(f"Error loading presets: {e}")
+        return [("⚙️ Default", "default")]
+
+
+def get_preset_dropdown_update():
+    """Return a Gradio update for the preset dropdown with fresh choices."""
+    return gr.update(choices=get_preset_choices())
 
 
 # =============================================================================
@@ -926,9 +990,17 @@ def process_with_streaming(
     use_multi_agent: bool,
     multi_agent_pipeline: str,
     show_agent_steps: bool,
+    use_dynamic: bool = False,
+    auto_execute_dynamic: bool = True,
 ) -> Generator[Tuple[str, str, str, str, str], None, None]:
     """
-    Process a question with all options.
+    Process a question with all options including dynamic pipeline support.
+    
+    Pipeline selection logic:
+    - "disabled": Single model mode (standard)
+    - "dynamic": Dynamic Pipeline (LLM-planned multi-step)
+    - "auto": Auto-detect best pipeline
+    - Other: Specific multi-agent pipeline
     
     Yields:
         (status, analysis, routing, agent_steps/rag_sources, response)
@@ -936,8 +1008,10 @@ def process_with_streaming(
     if not question.strip():
         yield "Enter a question...", "", "", "", ""
         return
-    
-    # Handle file upload
+
+    # =========================================================================
+    # FIX: Handle file upload FIRST (before any pipeline decisions)
+    # =========================================================================
     if file_upload is not None:
         try:
             content, error = safe_read_file(file_upload.name)
@@ -945,12 +1019,62 @@ def process_with_streaming(
                 yield f"[ERR] File error: {error}", "", "", "", ""
                 return
             document = content
+            logger.info(f"File loaded: {len(document)} chars")
         except Exception as e:
             yield f"[ERR] File error: {str(e)}", "", "", "", ""
             return
+
+    # =========================================================================
+    # Dynamic Pipeline Mode (explicit selection from dropdown)
+    # =========================================================================
+    if multi_agent_pipeline == "dynamic" and DYNAMIC_UI_AVAILABLE:
+        logger.info(f"Dynamic pipeline selected explicitly")
+        logger.info(f"Document length: {len(document) if document else 0}")
+        
+        yield "[>] Dynamic pipeline mode...", "", "", "", ""
+        
+        for status, plan_md, response in process_with_dynamic_pipeline(
+            question=question,
+            document=document,
+            enable_dynamic=True,
+            auto_execute=auto_execute_dynamic,
+        ):
+            logger.debug(f"Dynamic status: {status}")
+            yield status, "", "", plan_md, response
+        return
     
-    # Multi-agent mode
-    if use_multi_agent and MULTI_AGENT_AVAILABLE and is_multi_agent_enabled():
+    # =========================================================================
+    # Legacy Dynamic Pipeline (checkbox - kept for backward compatibility)
+    # =========================================================================
+    if use_dynamic and DYNAMIC_UI_AVAILABLE and multi_agent_pipeline not in ["disabled", "dynamic"]:
+        logger.info(f"Dynamic pipeline check via checkbox: use_dynamic={use_dynamic}")
+        
+        if should_use_dynamic_pipeline(question, use_dynamic, document):
+            yield "[>] Dynamic pipeline mode...", "", "", "", ""
+            
+            for status, plan_md, response in process_with_dynamic_pipeline(
+                question=question,
+                document=document,
+                enable_dynamic=True,
+                auto_execute=auto_execute_dynamic,
+            ):
+                yield status, "", "", plan_md, response
+            return
+        else:
+            logger.info("Dynamic pipeline: should_use returned False, using standard mode")
+    
+    # =========================================================================
+    # Disabled mode (single model) - skip multi-agent entirely
+    # =========================================================================
+    if multi_agent_pipeline == "disabled":
+        logger.info("Multi-agent disabled, using single model mode")
+        # Fall through to standard mode below
+        use_multi_agent = False
+    
+    # =========================================================================
+    # Multi-agent mode (auto or specific pipeline)
+    # =========================================================================
+    if use_multi_agent and MULTI_AGENT_AVAILABLE and is_multi_agent_enabled() and multi_agent_pipeline != "disabled":
         for status, steps_md, response in process_with_multi_agent(
             question, document, multi_agent_pipeline, show_agent_steps
         ):
@@ -1129,9 +1253,9 @@ def toggle_multi_agent(enabled: bool) -> str:
         return f"[ERR] {str(e)}"
 
 
-def refresh_multi_agent_stats() -> str:
-    """Refresh multi-agent stats."""
-    return get_multi_agent_status()
+def refresh_multi_agent_stats() -> Tuple[str, Any]:
+    """Refresh multi-agent stats and pipeline dropdown. Returns (status, dropdown_update)."""
+    return get_multi_agent_status(), get_pipeline_dropdown_update()
 
 
 # =============================================================================
@@ -1290,20 +1414,20 @@ def create_new_preset(
     tags_str: str,
     keywords_str: str,
     detection_weight: float = 0.5,
-) -> Tuple[str, List[List[str]]]:
-    """Create a new preset (with detection_weight)."""
+) -> Tuple[str, List[List[str]], Any]:
+    """Create a new preset. Returns (status, table_data, dropdown_update)."""
     # Validate
     if not preset_id or not preset_id.strip():
-        return "[ERR] Preset ID is required", get_preset_table_data()
+        return "[ERR] Preset ID is required", get_preset_table_data(), get_preset_dropdown_update()
     
     if not preset_manager.validate_preset_id(preset_id):
-        return "[ERR] Invalid ID (use letters, numbers, _ or -)", get_preset_table_data()
+        return "[ERR] Invalid ID (use letters, numbers, _ or -)", get_preset_table_data(), get_preset_dropdown_update()
     
     if preset_manager.get(preset_id):
-        return f"[ERR] Preset '{preset_id}' already exists", get_preset_table_data()
+        return f"[ERR] Preset '{preset_id}' already exists", get_preset_table_data(), get_preset_dropdown_update()
     
     if not name or not name.strip():
-        return "[ERR] Name is required", get_preset_table_data()
+        return "[ERR] Name is required", get_preset_table_data(), get_preset_dropdown_update()
     
     # Parse tags and keywords
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
@@ -1322,9 +1446,9 @@ def create_new_preset(
             keywords=keywords,
             detection_weight=detection_weight,
         )
-        return f"[OK] Preset '{preset_id}' created ({len(keywords)} keywords, weight={detection_weight})", get_preset_table_data()
+        return f"[OK] Preset '{preset_id}' created ({len(keywords)} keywords, weight={detection_weight})", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Creation failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Creation failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
 
 
 def update_existing_preset(
@@ -1338,13 +1462,13 @@ def update_existing_preset(
     tags_str: str,
     keywords_str: str,
     detection_weight: float = 0.5,
-) -> Tuple[str, List[List[str]]]:
-    """Update an existing preset (with detection_weight)."""
+) -> Tuple[str, List[List[str]], Any]:
+    """Update an existing preset. Returns (status, table_data, dropdown_update)."""
     if not preset_id:
-        return "[ERR] No preset selected", get_preset_table_data()
+        return "[ERR] No preset selected", get_preset_table_data(), get_preset_dropdown_update()
     
     if not preset_manager.get(preset_id):
-        return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data()
+        return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data(), get_preset_dropdown_update()
     
     # Parse tags and keywords
     tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
@@ -1363,51 +1487,51 @@ def update_existing_preset(
             keywords=keywords,
             detection_weight=detection_weight,
         )
-        return f"[OK] Preset '{preset_id}' updated", get_preset_table_data()
+        return f"[OK] Preset '{preset_id}' updated", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Update failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Update failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
 
 
-def delete_preset(preset_id: str) -> Tuple[str, List[List[str]]]:
-    """Delete a preset."""
+def delete_preset(preset_id: str) -> Tuple[str, List[List[str]], Any]:
+    """Delete a preset. Returns (status, table_data, dropdown_update)."""
     if not preset_id:
-        return "[ERR] No preset selected", get_preset_table_data()
+        return "[ERR] No preset selected", get_preset_table_data(), get_preset_dropdown_update()
     
     if preset_id == "default":
-        return "[ERR] Cannot delete the default preset", get_preset_table_data()
+        return "[ERR] Cannot delete the default preset", get_preset_table_data(), get_preset_dropdown_update()
     
     try:
         if preset_manager.delete(preset_id):
-            return f"[OK] Preset '{preset_id}' deleted", get_preset_table_data()
+            return f"[OK] Preset '{preset_id}' deleted", get_preset_table_data(), get_preset_dropdown_update()
         else:
-            return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data()
+            return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Delete failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Delete failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
 
 
-def duplicate_preset(preset_id: str, new_id: str) -> Tuple[str, List[List[str]]]:
-    """Duplicate a preset."""
+def duplicate_preset(preset_id: str, new_id: str) -> Tuple[str, List[List[str]], Any]:
+    """Duplicate a preset. Returns (status, table_data, dropdown_update)."""
     if not preset_id:
-        return "[ERR] No preset selected", get_preset_table_data()
+        return "[ERR] No preset selected", get_preset_table_data(), get_preset_dropdown_update()
     
     if not new_id or not new_id.strip():
-        return "[ERR] New ID is required", get_preset_table_data()
+        return "[ERR] New ID is required", get_preset_table_data(), get_preset_dropdown_update()
     
     if not preset_manager.validate_preset_id(new_id):
-        return "[ERR] Invalid new ID", get_preset_table_data()
+        return "[ERR] Invalid new ID", get_preset_table_data(), get_preset_dropdown_update()
     
     try:
         source = preset_manager.get(preset_id)
         if not source:
-            return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data()
+            return f"[ERR] Preset '{preset_id}' not found", get_preset_table_data(), get_preset_dropdown_update()
         
         new_preset = preset_manager.duplicate(preset_id, new_id.strip(), f"Copy of {source.name}")
         if new_preset:
-            return f"[OK] Preset duplicated as '{new_id}'", get_preset_table_data()
+            return f"[OK] Preset duplicated as '{new_id}'", get_preset_table_data(), get_preset_dropdown_update()
         else:
-            return "[ERR] Duplication failed", get_preset_table_data()
+            return "[ERR] Duplication failed", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Duplication failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Duplication failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
 
 
 def test_keyword_matching(test_text: str) -> str:
@@ -1436,15 +1560,15 @@ def test_keyword_matching(test_text: str) -> str:
         return f"Error: {str(e)}"
 
 
-def reload_presets() -> Tuple[str, List[List[str]]]:
-    """Reload presets from config files."""
+def reload_presets() -> Tuple[str, List[List[str]], Any]:
+    """Reload presets from config files. Returns (status, table_data, dropdown_update)."""
     try:
         preset_manager.reload()
         stats = preset_manager.get_stats()
         avg_weight = stats.get('avg_detection_weight', 0.5)
-        return f"[OK] Reloaded {stats['total']} presets ({stats['total_keywords']} keywords, avg weight={avg_weight:.2f})", get_preset_table_data()
+        return f"[OK] Reloaded {stats['total']} presets ({stats['total_keywords']} keywords, avg weight={avg_weight:.2f})", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Reload failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Reload failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
 
 
 def suggest_keywords_for_preset(
@@ -1486,20 +1610,711 @@ def export_all_presets() -> str:
         return f"[ERR] Export failed: {str(e)}"
 
 
-def import_presets_from_file(file) -> Tuple[str, List[List[str]]]:
-    """Import presets from an uploaded YAML file."""
+def import_presets_from_file(file) -> Tuple[str, List[List[str]], Any]:
+    """Import presets from an uploaded YAML file. Returns (status, table_data, dropdown_update)."""
     if file is None:
-        return "[ERR] No file selected", get_preset_table_data()
+        return "[ERR] No file selected", get_preset_table_data(), get_preset_dropdown_update()
     
     try:
         filepath = Path(file.name) if hasattr(file, 'name') else Path(file)
         imported = preset_manager.import_preset(filepath)
         if imported:
-            return f"[OK] Imported {len(imported)} presets: {', '.join(imported)}", get_preset_table_data()
+            return f"[OK] Imported {len(imported)} presets: {', '.join(imported)}", get_preset_table_data(), get_preset_dropdown_update()
         else:
-            return "[ERR] No valid presets found in file", get_preset_table_data()
+            return "[ERR] No valid presets found in file", get_preset_table_data(), get_preset_dropdown_update()
     except Exception as e:
-        return f"[ERR] Import failed: {str(e)}", get_preset_table_data()
+        return f"[ERR] Import failed: {str(e)}", get_preset_table_data(), get_preset_dropdown_update()
+
+
+# =============================================================================
+# PIPELINE MANAGER HELPERS
+# =============================================================================
+
+def get_pipeline_table_data() -> List[List[str]]:
+    """Get pipeline data for display in table."""
+    data = []
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return data
+    
+    try:
+        pm = get_pipeline_manager()
+        for p in pm.list_all():
+            status = "📌" if p.is_builtin else "🧅"
+            keywords_str = ", ".join(p.keywords[:3]) if p.keywords else "-"
+            if p.keywords and len(p.keywords) > 3:
+                keywords_str += f" (+{len(p.keywords)-3})"
+            
+            data.append([
+                status,
+                p.id,
+                p.name,
+                str(p.step_count),
+                p.pattern or "chain",
+                f"{p.detection_weight:.1f}",
+                keywords_str,
+            ])
+    except Exception as e:
+        logger.error(f"Error getting pipeline table data: {e}")
+    return data
+
+
+def refresh_pipeline_table():
+    """Refresh the pipeline table display."""
+    return get_pipeline_table_data()
+
+
+def get_pipeline_details(pipeline_id: str) -> Tuple:
+    """Get all details of a pipeline for editing."""
+    default = ("", "", "", "chain", "🔧", "", "", 0.5, "")
+    
+    if not PIPELINE_MANAGER_AVAILABLE or not pipeline_id:
+        return default
+    
+    try:
+        pm = get_pipeline_manager()
+        pipeline = pm.get(pipeline_id)
+        if pipeline:
+            # Format steps for display
+            steps_text = ""
+            for i, step in enumerate(pipeline.steps):
+                prompt_type = "template" if step.prompt_template else "custom"
+                prompt_val = step.prompt_template or step.system_prompt or ""
+                steps_text += f"Step {i+1}: {step.name}\n"
+                steps_text += f"  Agent: {step.agent}\n"
+                steps_text += f"  Prompt ({prompt_type}): {prompt_val[:50]}...\n"
+                steps_text += f"  Description: {step.description}\n\n"
+            
+            return (
+                pipeline.id,
+                pipeline.name,
+                pipeline.description,
+                pipeline.pattern,
+                pipeline.emoji,
+                ", ".join(pipeline.keywords) if pipeline.keywords else "",
+                steps_text.strip(),
+                pipeline.detection_weight,
+                "builtin" if pipeline.is_builtin else "custom",
+            )
+    except Exception as e:
+        logger.error(f"Error getting pipeline details: {e}")
+    
+    return default
+
+
+def get_pipeline_steps_json(pipeline_id: str) -> str:
+    """Get pipeline steps as JSON for editing."""
+    if not PIPELINE_MANAGER_AVAILABLE or not pipeline_id:
+        return "[]"
+    
+    try:
+        pm = get_pipeline_manager()
+        pipeline = pm.get(pipeline_id)
+        if pipeline:
+            import json
+            steps = []
+            for step in pipeline.steps:
+                steps.append({
+                    "name": step.name,
+                    "agent": step.agent,
+                    "prompt_template": step.prompt_template,
+                    "system_prompt": step.system_prompt,
+                    "description": step.description,
+                })
+            return json.dumps(steps, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error getting pipeline steps: {e}")
+    
+    return "[]"
+
+
+def create_new_pipeline(
+    pipeline_id: str,
+    name: str,
+    description: str,
+    pattern: str,
+    emoji: str,
+    keywords_str: str,
+    steps_json: str,
+    detection_weight: float = 0.5,
+) -> Tuple[str, List[List[str]], Any]:
+    """Create a new custom pipeline. Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    # Validate
+    if not pipeline_id or not pipeline_id.strip():
+        return "[ERR] Pipeline ID is required", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    pm = get_pipeline_manager()
+    
+    if not pm.validate_pipeline_id(pipeline_id):
+        return "[ERR] Invalid ID (use letters, numbers, _ or -)", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if pm.get(pipeline_id):
+        return f"[ERR] Pipeline '{pipeline_id}' already exists", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if not name or not name.strip():
+        return "[ERR] Name is required", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    # Parse keywords
+    keywords = [k.strip() for k in keywords_str.split(",") if k.strip()] if keywords_str else []
+    
+    # Parse steps from JSON
+    try:
+        import json
+        steps_data = json.loads(steps_json) if steps_json else []
+        if not steps_data:
+            return "[ERR] At least one step is required", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        
+        steps = []
+        for s in steps_data:
+            steps.append(PipelineStep(
+                name=s.get("name", "Step"),
+                agent=s.get("agent", "coder"),
+                prompt_template=s.get("prompt_template"),
+                system_prompt=s.get("system_prompt"),
+                description=s.get("description", ""),
+                model=s.get("model"),  # Include model override
+            ))
+    except json.JSONDecodeError as e:
+        return f"[ERR] Invalid steps JSON: {e}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        pipeline = Pipeline(
+            id=pipeline_id.strip(),
+            name=name.strip(),
+            description=description.strip() if description else "",
+            pattern=pattern or "chain",
+            emoji=emoji or "🔧",
+            steps=steps,
+            keywords=keywords,
+            detection_weight=detection_weight,
+        )
+        
+        if pm.create(pipeline):
+            return f"[OK] Pipeline '{pipeline_id}' created ({len(steps)} steps)", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        else:
+            return f"[ERR] Creation failed", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Creation failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+def update_existing_pipeline(
+    pipeline_id: str,
+    name: str,
+    description: str,
+    pattern: str,
+    emoji: str,
+    keywords_str: str,
+    steps_json: str,
+    detection_weight: float = 0.5,
+) -> Tuple[str, List[List[str]], Any]:
+    """Update an existing custom pipeline. Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if not pipeline_id:
+        return "[ERR] No pipeline selected", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    pm = get_pipeline_manager()
+    existing = pm.get(pipeline_id)
+    
+    if not existing:
+        return f"[ERR] Pipeline '{pipeline_id}' not found", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if existing.is_builtin:
+        return "[ERR] Cannot modify builtin pipelines. Duplicate it first.", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    # Parse keywords
+    keywords = [k.strip() for k in keywords_str.split(",") if k.strip()] if keywords_str else []
+    
+    # Parse steps from JSON
+    try:
+        import json
+        steps_data = json.loads(steps_json) if steps_json else []
+        if not steps_data:
+            return "[ERR] At least one step is required", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        
+        steps = []
+        for s in steps_data:
+            steps.append(PipelineStep(
+                name=s.get("name", "Step"),
+                agent=s.get("agent", "coder"),
+                prompt_template=s.get("prompt_template"),
+                system_prompt=s.get("system_prompt"),
+                description=s.get("description", ""),
+                model=s.get("model"),  # Include model override
+            ))
+    except json.JSONDecodeError as e:
+        return f"[ERR] Invalid steps JSON: {e}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        pipeline = Pipeline(
+            id=pipeline_id,
+            name=name.strip() if name else existing.name,
+            description=description.strip() if description else "",
+            pattern=pattern or existing.pattern,
+            emoji=emoji or existing.emoji,
+            steps=steps,
+            keywords=keywords,
+            detection_weight=detection_weight,
+        )
+        
+        if pm.update(pipeline_id, pipeline):
+            return f"[OK] Pipeline '{pipeline_id}' updated", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        else:
+            return f"[ERR] Update failed", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Update failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+def delete_pipeline(pipeline_id: str) -> Tuple[str, List[List[str]], Any]:
+    """Delete a custom pipeline. Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if not pipeline_id:
+        return "[ERR] No pipeline selected", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    pm = get_pipeline_manager()
+    existing = pm.get(pipeline_id)
+    
+    if not existing:
+        return f"[ERR] Pipeline '{pipeline_id}' not found", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if existing.is_builtin:
+        return "[ERR] Cannot delete builtin pipelines", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        if pm.delete(pipeline_id):
+            return f"[OK] Pipeline '{pipeline_id}' deleted", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        else:
+            return f"[ERR] Deletion failed", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Deletion failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+def duplicate_pipeline(pipeline_id: str, new_id: str) -> Tuple[str, List[List[str]], Any]:
+    """Duplicate a pipeline (builtin or custom). Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if not pipeline_id:
+        return "[ERR] No pipeline selected", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if not new_id or not new_id.strip():
+        return "[ERR] New ID is required", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    pm = get_pipeline_manager()
+    
+    if not pm.validate_pipeline_id(new_id):
+        return "[ERR] Invalid new ID", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        new_pipeline = pm.duplicate(pipeline_id, new_id.strip())
+        if new_pipeline:
+            return f"[OK] Pipeline duplicated as '{new_id}'", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        else:
+            return "[ERR] Duplication failed", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Duplication failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+def reload_pipelines() -> Tuple[str, List[List[str]], Any]:
+    """Reload pipelines from files. Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        pm = get_pipeline_manager()
+        pm.reload()
+        stats = pm.get_stats()
+        return f"[OK] Reloaded {stats['total']} pipelines ({stats['builtin']} builtin, {stats['custom']} custom)", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Reload failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+def export_all_pipelines() -> str:
+    """Export all pipelines to YAML file."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available"
+    
+    try:
+        pm = get_pipeline_manager()
+        filepath = DATA_DIR / "exports" / f"pipelines_export_{time.strftime('%Y%m%d_%H%M%S')}.yaml"
+        if pm.export_to_file(filepath):
+            return f"[OK] Exported to {filepath}"
+        else:
+            return "[ERR] Export failed"
+    except Exception as e:
+        return f"[ERR] Export failed: {str(e)}"
+
+
+def import_pipelines_from_file(file) -> Tuple[str, List[List[str]], Any]:
+    """Import pipelines from an uploaded YAML file. Returns (status, table_data, dropdown_update)."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return "[ERR] Pipeline Manager not available", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    if file is None:
+        return "[ERR] No file selected", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    
+    try:
+        filepath = Path(file.name) if hasattr(file, 'name') else Path(file)
+        pm = get_pipeline_manager()
+        imported = pm.import_from_file(filepath)
+        if imported:
+            return f"[OK] Imported {len(imported)} pipelines: {', '.join(imported)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+        else:
+            return "[ERR] No valid pipelines found in file", get_pipeline_table_data(), get_pipeline_dropdown_update()
+    except Exception as e:
+        return f"[ERR] Import failed: {str(e)}", get_pipeline_table_data(), get_pipeline_dropdown_update()
+
+
+# =============================================================================
+# VISUAL STEPS UI HELPERS (supports up to 10 steps)
+# =============================================================================
+
+MAX_PIPELINE_STEPS = 10
+STEP_FIELDS = 8  # enabled, name, agent, model, ptype, template, prompt, desc
+
+
+def steps_ui_to_json(*step_values) -> str:
+    """
+    Convert the visual step blocks to JSON for storage.
+    Accepts 8 values per step (enabled, name, agent, model, ptype, template, prompt, desc).
+    """
+    import json
+    steps = []
+    
+    # Process steps in groups of 8 fields
+    num_steps = len(step_values) // STEP_FIELDS
+    
+    for i in range(num_steps):
+        base = i * STEP_FIELDS
+        enabled = step_values[base]
+        name = step_values[base + 1]
+        agent = step_values[base + 2]
+        model = step_values[base + 3]  # Model override
+        ptype = step_values[base + 4]
+        template = step_values[base + 5]
+        prompt = step_values[base + 6]
+        desc = step_values[base + 7]
+        
+        if enabled and name:
+            step = {
+                "name": name,
+                "agent": agent or "coder",
+                "description": desc or "",
+            }
+            # Include model override if specified
+            if model and model.strip():
+                step["model"] = model.strip()
+            if ptype == "template" and template:
+                step["prompt_template"] = template
+            elif prompt:
+                step["system_prompt"] = prompt
+            steps.append(step)
+    
+    return json.dumps(steps, indent=2)
+
+
+def json_to_steps_ui(steps_json: str, num_steps: int = MAX_PIPELINE_STEPS) -> Tuple:
+    """
+    Convert JSON steps to values for the visual step blocks.
+    Returns a tuple of (8 * num_steps) values.
+    Also returns visibility states for accordions.
+    """
+    import json
+    
+    # Default values for empty step (enabled, name, agent, model, ptype, template, prompt, desc)
+    empty_step = (False, "", "coder", "", "custom", "", "", "")
+    
+    try:
+        steps = json.loads(steps_json) if steps_json else []
+    except:
+        steps = []
+    
+    result = []
+    for i in range(num_steps):
+        if i < len(steps):
+            step = steps[i]
+            enabled = True
+            name = step.get("name", "")
+            agent = step.get("agent", "coder")
+            model = step.get("model", "")  # Model override
+            
+            # Determine prompt type
+            if step.get("prompt_template"):
+                ptype = "template"
+                template = step.get("prompt_template", "")
+                prompt = ""
+            else:
+                ptype = "custom"
+                template = ""
+                prompt = step.get("system_prompt", "")
+            
+            desc = step.get("description", "")
+            result.extend([enabled, name, agent, model, ptype, template, prompt, desc])
+        else:
+            result.extend(empty_step)
+    
+    return tuple(result)
+
+
+def json_to_steps_ui_with_visibility(steps_json: str, num_steps: int = MAX_PIPELINE_STEPS) -> Tuple:
+    """
+    Convert JSON steps to values AND accordion visibility states.
+    Returns: (*step_values, *accordion_visible_states, visible_count)
+    """
+    import json
+    
+    try:
+        steps = json.loads(steps_json) if steps_json else []
+    except:
+        steps = []
+    
+    # Get step values
+    step_values = json_to_steps_ui(steps_json, num_steps)
+    
+    # Calculate how many accordions should be visible
+    # Show at least 2, or the number of steps + 1 (for adding), up to MAX
+    visible_count = max(2, min(len(steps) + 1, num_steps))
+    
+    # Generate visibility states (gr.update objects for accordions)
+    visibility_states = []
+    for i in range(num_steps):
+        visibility_states.append(gr.update(visible=(i < visible_count)))
+    
+    return step_values + tuple(visibility_states) + (visible_count,)
+
+
+def load_pipeline_to_visual_steps(pipeline_id: str) -> Tuple:
+    """
+    Load a pipeline and convert its steps to the visual step UI values.
+    Returns: (id, name, desc, pattern, keywords, weight, type, 
+              *steps_values, *accordion_visibilities, visible_count)
+    """
+    empty_base = ("", "", "", "chain", "", 0.5, "🧅 custom")
+    empty_steps = json_to_steps_ui_with_visibility("[]")
+    
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return empty_base + empty_steps
+    
+    try:
+        pm = get_pipeline_manager()
+        pipeline = pm.get(pipeline_id)
+        if not pipeline:
+            return empty_base + empty_steps
+        
+        # Get basic info
+        keywords_str = ", ".join(pipeline.keywords) if pipeline.keywords else ""
+        pipe_type = "📌 builtin" if pipeline.is_builtin else "🧅 custom"
+        
+        # Convert steps to JSON then to UI values with visibility
+        import json
+        steps_list = [s.to_dict() for s in pipeline.steps]
+        steps_json = json.dumps(steps_list)
+        steps_values = json_to_steps_ui_with_visibility(steps_json)
+        
+        return (
+            pipeline.id,
+            pipeline.name,
+            pipeline.description,
+            pipeline.pattern,
+            keywords_str,
+            pipeline.detection_weight,
+            pipe_type,
+        ) + steps_values
+        
+    except Exception as e:
+        logger.error(f"Error loading pipeline: {e}")
+        return empty_base + empty_steps
+
+
+def create_pipeline_from_visual_steps(
+    pipeline_id: str,
+    name: str,
+    description: str,
+    pattern: str,
+    keywords: str,
+    weight: float,
+    *step_values,  # All step fields as *args
+) -> Tuple[str, List, Any]:
+    """Create a new pipeline from the visual step UI. Returns (status, table, dropdown_update)."""
+    steps_json = steps_ui_to_json(*step_values)
+    return create_new_pipeline(
+        pipeline_id, name, description, pattern, "🔧", keywords, steps_json, weight
+    )
+
+
+def update_pipeline_from_visual_steps(
+    pipeline_id: str,
+    name: str,
+    description: str,
+    pattern: str,
+    keywords: str,
+    weight: float,
+    *step_values,  # All step fields as *args
+) -> Tuple[str, List, Any]:
+    """Update an existing pipeline from the visual step UI. Returns (status, table, dropdown_update)."""
+    steps_json = steps_ui_to_json(*step_values)
+    # Pass empty emoji to keep existing one
+    return update_existing_pipeline(
+        pipeline_id, name, description, pattern, "", keywords, steps_json, weight
+    )
+
+
+def get_template_content(template_id: str) -> str:
+    """
+    Get the content of a prompt template by its ID.
+    Returns the template content or empty string if not found.
+    """
+    if not PIPELINE_MANAGER_AVAILABLE or not template_id:
+        return ""
+    
+    try:
+        # Templates are stored in agents/config.yaml under prompt_templates
+        # They are direct strings, not dicts
+        from .agents import get_orchestrator
+        orch = get_orchestrator()
+        if orch and hasattr(orch, 'config'):
+            prompt_templates = orch.config.get('prompt_templates', {})
+            if template_id in prompt_templates:
+                template_content = prompt_templates[template_id]
+                # Templates are strings directly, not dicts
+                if isinstance(template_content, str):
+                    return template_content
+                elif isinstance(template_content, dict):
+                    # Fallback if it's a dict with system_prompt key
+                    return template_content.get('system_prompt', str(template_content))
+        
+        return ""
+    except Exception as e:
+        logger.warning(f"Could not load template {template_id}: {e}")
+        return ""
+
+
+def on_template_select(template_id: str, current_ptype: str):
+    """
+    When a template is selected, load its content into the prompt field.
+    Only loads if ptype is 'template'.
+    """
+    if current_ptype == "template" and template_id:
+        content = get_template_content(template_id)
+        return content
+    return gr.update()  # No change
+
+
+def on_prompt_edit(new_prompt: str, current_ptype: str, original_prompt: str):
+    """
+    When the prompt is edited, switch to 'custom' mode if it was 'template'.
+    Returns (new_ptype,) - only switches if content actually changed.
+    """
+    # If we're in template mode and the prompt was modified, switch to custom
+    if current_ptype == "template" and new_prompt != original_prompt:
+        return "custom"
+    return gr.update()
+
+
+def swap_steps(
+    # Step A values
+    a_enabled, a_name, a_agent, a_ptype, a_template, a_prompt, a_desc,
+    # Step B values  
+    b_enabled, b_name, b_agent, b_ptype, b_template, b_prompt, b_desc,
+):
+    """
+    Swap the content of two steps.
+    Returns all values for both steps, swapped.
+    """
+    return (
+        # New values for step A (from B)
+        b_enabled, b_name, b_agent, b_ptype, b_template, b_prompt, b_desc,
+        # New values for step B (from A)
+        a_enabled, a_name, a_agent, a_ptype, a_template, a_prompt, a_desc,
+    )
+
+
+def generate_step_prompt_llm(
+    step_name: str,
+    step_description: str,
+    pipeline_context: str,
+    agent_type: str,
+):
+    """
+    Generate a system prompt for a step using LLM with keepalive.
+    
+    This is a generator function that yields progress updates to prevent
+    Gradio timeout during long LLM calls.
+    """
+    if not PIPELINE_MANAGER_AVAILABLE:
+        yield "[ERR] Pipeline Manager not available"
+        return
+    
+    if not step_description:
+        yield "[ERR] Step description is required"
+        return
+    
+    try:
+        pm = get_pipeline_manager()
+        # Use the new keepalive generator
+        for update in pm.generate_step_prompt_with_keepalive(
+            step_name=step_name or "Step",
+            step_description=step_description,
+            pipeline_context=pipeline_context or "General pipeline",
+            agent_type=agent_type or "coder",
+        ):
+            yield update
+    except Exception as e:
+        yield f"[ERR] Generation failed: {str(e)}"
+
+
+def get_available_agents_list() -> List[str]:
+    """Get list of available agent IDs."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return ["coder", "reviewer", "explainer", "planner", "writer"]
+    
+    try:
+        pm = get_pipeline_manager()
+        return pm.get_available_agents()
+    except:
+        return ["coder", "reviewer", "explainer", "planner", "writer"]
+
+
+def get_available_templates_list() -> List[str]:
+    """Get list of available prompt template IDs."""
+    if not PIPELINE_MANAGER_AVAILABLE:
+        return []
+    
+    try:
+        pm = get_pipeline_manager()
+        return pm.get_available_templates()
+    except:
+        return []
+
+
+def get_available_models_list() -> List[Tuple[str, str]]:
+    """Get list of available Ollama models for step model override dropdown."""
+    models = [("(Use agent default)", "")]  # Empty = use agent's default model
+    
+    try:
+        import ollama
+        response = ollama.list()
+        if hasattr(response, 'models'):
+            for m in response.models:
+                name = getattr(m, 'model', None) or getattr(m, 'name', None)
+                if name:
+                    models.append((name, name))
+        elif isinstance(response, dict):
+            for m in response.get("models", []):
+                name = m.get("model") or m.get("name", "")
+                if name:
+                    models.append((name, name))
+    except Exception:
+        # Fallback models
+        for m in ["qwen3-coder:30b", "deepseek-r1:32b", "qwen3:32b", "nemotron-3-nano:30b"]:
+            models.append((m, m))
+    
+    return models
 
 
 # =============================================================================
@@ -1613,24 +2428,25 @@ def create_app() -> gr.Blocks:
                                 file_types=[".r", ".R", ".py", ".sh", ".md", ".txt", ".json", ".yaml"],
                             )
                         
-                        # === MULTI-AGENT SECTION ===
-                        with gr.Accordion("Multi-Agent", open=True):
+                        # === MULTI-AGENT / PIPELINE SECTION ===
+                        with gr.Accordion("Pipeline Mode", open=True):
                             multi_agent_status_display = gr.Textbox(
                                 label="Status",
                                 value=get_multi_agent_status(),
                                 interactive=False,
                                 lines=1,
                             )
-                            use_multi_agent = gr.Checkbox(
-                                label="Enable Multi-Agent (multi-model orchestration)",
-                                value=False,  # Off by default
-                                interactive=MULTI_AGENT_AVAILABLE,
-                            )
                             multi_agent_pipeline = gr.Dropdown(
-                                label="Pipeline",
+                                label="Select Mode",
                                 choices=pipeline_choices,
-                                value="auto",
-                                visible=MULTI_AGENT_AVAILABLE,
+                                value="disabled",  # Single model by default
+                                info="disabled=single model, dynamic=LLM planning, auto=auto-detect",
+                            )
+                            # Hidden but kept for backward compatibility
+                            use_multi_agent = gr.Checkbox(
+                                label="Enable Multi-Agent",
+                                value=True,  # Always true, dropdown controls mode
+                                visible=False,
                             )
                             show_agent_steps = gr.Checkbox(
                                 label="Show reasoning steps",
@@ -1641,6 +2457,16 @@ def create_app() -> gr.Blocks:
                                 "🔄 Refresh", 
                                 size="sm", 
                                 visible=MULTI_AGENT_AVAILABLE
+                            )
+
+                            # Hidden checkboxes for backward compatibility
+                            use_dynamic_pipeline = gr.Checkbox(
+                                value=False,
+                                visible=False,
+                            )
+                            dynamic_auto_execute = gr.Checkbox(
+                                value=True,
+                                visible=False,
                             )
                         
                         # === RAG SECTION ===
@@ -1774,6 +2600,8 @@ def create_app() -> gr.Blocks:
                         do_refine, priority,
                         use_rag, rag_n_chunks,
                         use_multi_agent, multi_agent_pipeline, show_agent_steps,
+                        use_dynamic_pipeline,
+                        dynamic_auto_execute,
                     ],
                     outputs=[status_output, analysis_output, routing_output, agent_steps_output, response_output],
                 )
@@ -1795,7 +2623,7 @@ def create_app() -> gr.Blocks:
                 
                 multi_agent_refresh.click(
                     fn=refresh_multi_agent_stats,
-                    outputs=[multi_agent_status_display],
+                    outputs=[multi_agent_status_display, multi_agent_pipeline],
                 )
                 
                 # Live analysis
@@ -1863,135 +2691,7 @@ def create_app() -> gr.Blocks:
                     )
             
             # =================================================================
-            # TAB 2: MULTI-AGENT
-            # =================================================================
-            with gr.Tab("Multi-Agent", id="multi_agent"):
-                gr.Markdown("""
-                ### Multi-Agent Orchestration
-                
-                Use multiple specialized models in sequence for complex tasks.
-                """)
-                
-                with gr.Row():
-                    # Left column: Configuration
-                    with gr.Column():
-                        gr.Markdown("#### Configuration")
-                        ma_toggle = gr.Checkbox(
-                            label="Enable Multi-Agent",
-                            value=MULTI_AGENT_AVAILABLE and is_multi_agent_enabled(),
-                            interactive=MULTI_AGENT_AVAILABLE,
-                        )
-                        ma_status = gr.Textbox(
-                            label="Status",
-                            value=get_multi_agent_status(),
-                            interactive=False,
-                        )
-                        ma_refresh = gr.Button("🔄 Refresh")
-                        
-                        gr.Markdown("#### Available Pipelines")
-                        
-                        if MULTI_AGENT_AVAILABLE:
-                            try:
-                                status = multi_agent_status()
-                                pipelines_data = []
-                                for p in status.get("available_pipelines", []):
-                                    pipelines_data.append([
-                                        p.get("emoji", ""),
-                                        p.get("id", ""),
-                                        p.get("name", ""),
-                                        p.get("description", "")[:50],
-                                    ])
-                            except:
-                                pipelines_data = []
-                        else:
-                            pipelines_data = []
-                        
-                        pipelines_table = gr.Dataframe(
-                            headers=["", "ID", "Name", "Description"],
-                            value=pipelines_data,
-                            interactive=False,
-                        )
-                    
-                    # Right column: Agents
-                    with gr.Column():
-                        gr.Markdown("#### Available Agents")
-                        
-                        if MULTI_AGENT_AVAILABLE:
-                            try:
-                                status = multi_agent_status()
-                                agents_data = []
-                                for agent_id in status.get("available_agents", []):
-                                    agents_data.append([agent_id])
-                            except:
-                                agents_data = []
-                        else:
-                            agents_data = []
-                        
-                        agents_table = gr.Dataframe(
-                            headers=["Agent"],
-                            value=agents_data,
-                            interactive=False,
-                        )
-                        
-                        gr.Markdown("""
-                        #### How it works
-                        
-                        The system orchestrates multiple specialized models in sequence:
-                        
-                        ---
-                        
-                        **Pipeline: Data Analysis** (`data_analysis`)
-                        1. `deepseek-r1:32b` - Understands data and plans analysis
-                        2. `qwen3-coder:30b` - Writes R/Python analysis code
-                        3. `deepseek-r1:32b` - Verifies code and logic
-                        4. `qwen3:32b` - Interprets results
-                        
-                        ---
-                        
-                        **Pipeline: Complex Debug** (`debug`)
-                        1. `deepseek-r1:32b` - Analyzes error in detail
-                        2. `deepseek-r1:32b` - Diagnoses possible causes  
-                        3. `qwen3-coder:30b` - Proposes fixes
-                        4. `deepseek-r1:32b` - Evaluates each solution
-                        5. `qwen3-coder:30b` - Implements best solution
-                        
-                        ---
-                        
-                        **Pipeline: Scientific Writing** (`scientific_writing`)
-                        1. `deepseek-r1:32b` - Defines document structure
-                        2. `qwen3:32b` - Writes each section
-                        3. `deepseek-r1:32b` - Verifies coherence
-                        4. `qwen3:32b` - Improves style
-                        
-                        ---
-                        
-                        **Pipeline: Code + Tests** (`code_with_tests`)
-                        1. `deepseek-r1:32b` - Extracts specifications
-                        2. `qwen3-coder:30b` - Generates code
-                        3. `qwen3-coder:30b` - Creates unit tests
-                        4. `deepseek-r1:32b` - Verifies code and tests
-                        
-                        ---
-                        
-                        **Pipeline: Quick Response** (`quick`)
-                        - Single auto-selected agent
-                        - No multi-model orchestration
-                        """)
-                
-                # Events
-                ma_toggle.change(
-                    fn=toggle_multi_agent,
-                    inputs=[ma_toggle],
-                    outputs=[ma_status],
-                )
-                
-                ma_refresh.click(
-                    fn=refresh_multi_agent_stats,
-                    outputs=[ma_status],
-                )
-            
-            # =================================================================
-            # TAB: PRESETS MANAGEMENT (ENHANCED)
+            # TAB 2: PRESETS MANAGEMENT (ENHANCED)
             # =================================================================
             with gr.Tab("Presets", id="presets"):
                 gr.Markdown("""
@@ -2174,7 +2874,7 @@ def create_app() -> gr.Blocks:
                 
                 preset_reload_btn.click(
                     fn=reload_presets,
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
                 
                 preset_create_btn.click(
@@ -2191,7 +2891,7 @@ def create_app() -> gr.Blocks:
                         preset_edit_keywords,
                         preset_edit_weight,
                     ],
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
                 
                 preset_update_btn.click(
@@ -2208,19 +2908,19 @@ def create_app() -> gr.Blocks:
                         preset_edit_keywords,
                         preset_edit_weight,
                     ],
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
                 
                 preset_delete_btn.click(
                     fn=delete_preset,
                     inputs=[preset_edit_id],
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
                 
                 preset_dup_btn.click(
                     fn=duplicate_preset,
                     inputs=[preset_edit_id, preset_dup_id],
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
                 
                 keyword_test_btn.click(
@@ -2248,8 +2948,812 @@ def create_app() -> gr.Blocks:
                 import_btn.click(
                     fn=import_presets_from_file,
                     inputs=[import_file],
-                    outputs=[preset_status, preset_table],
+                    outputs=[preset_status, preset_table, preset_dropdown],
                 )
+            
+            # =================================================================
+            # TAB: PIPELINES (Multi-Agent)
+            # =================================================================
+            with gr.Tab("Pipelines", id="pipelines"):
+                gr.Markdown("""
+                ### Pipeline Manager (Multi-Agent)
+                
+                Create and manage multi-agent pipelines for complex tasks.
+                **📌 Builtin** pipelines are read-only. **🧅 Custom** pipelines can be edited.
+                """)
+                
+                with gr.Row():
+                    # Left column: Pipeline list (more space)
+                    with gr.Column(scale=2):
+                        gr.Markdown("#### Available Pipelines")
+                        
+                        pipeline_table = gr.Dataframe(
+                            headers=["Type", "ID", "Name", "Steps", "Pattern", "Weight", "Keywords"],
+                            value=get_pipeline_table_data(),
+                            interactive=False,
+                            wrap=True,
+                        )
+                        
+                        with gr.Row():
+                            pipeline_refresh_btn = gr.Button("🔄 Refresh", size="sm")
+                            pipeline_reload_btn = gr.Button("Reload Config", size="sm")
+                        
+                        pipeline_status = gr.Textbox(
+                            label="Pipeline Status",
+                            interactive=False,
+                            lines=1,
+                        )
+                        
+                        # Export/Import section
+                        with gr.Accordion("Export / Import", open=False):
+                            with gr.Row():
+                                pipeline_export_btn = gr.Button("Export All", size="sm")
+                                pipeline_export_result = gr.Textbox(
+                                    label="Export Result",
+                                    interactive=False,
+                                    lines=1,
+                                )
+                            with gr.Row():
+                                pipeline_import_file = gr.File(
+                                    label="Import YAML file",
+                                    file_types=[".yaml", ".yml"],
+                                )
+                                pipeline_import_btn = gr.Button("Import", size="sm")
+                    
+                    # Right column: Edit/Create form (slightly narrower)
+                    with gr.Column(scale=3):
+                        gr.Markdown("#### Create / Edit Pipeline")
+                        
+                        # Basic info
+                        with gr.Row():
+                            pipeline_edit_id = gr.Textbox(
+                                label="Pipeline ID (unique, no spaces)",
+                                placeholder="my_pipeline",
+                            )
+                        
+                        pipeline_edit_name = gr.Textbox(
+                            label="Display Name",
+                            placeholder="My Custom Pipeline",
+                        )
+                        pipeline_edit_desc = gr.Textbox(
+                            label="Description",
+                            placeholder="What this pipeline does...",
+                            lines=2,
+                        )
+                        
+                        with gr.Row():
+                            pipeline_edit_pattern = gr.Dropdown(
+                                label="Pattern",
+                                choices=[
+                                    ("Chain (sequential)", "chain"),
+                                    ("Verifier (with validation)", "verifier"),
+                                    ("Decomposition (sub-tasks)", "decomposition"),
+                                    ("Iterative (refinement)", "iterative"),
+                                ],
+                                value="chain",
+                            )
+                            pipeline_edit_type = gr.Textbox(
+                                label="Type",
+                                value="🧅 custom",
+                                interactive=False,
+                            )
+                        
+                        # =========================================
+                        # VISUAL STEPS EDITOR (10 blocks max, with move up/down)
+                        # =========================================
+                        gr.Markdown("#### Pipeline Steps")
+                        
+                        # Get available agents and templates for dropdowns
+                        agents_list = get_available_agents_list()
+                        templates_list = get_available_templates_list()
+                        models_list = get_available_models_list()  # For model override dropdown
+                        
+                        # State to track number of visible steps
+                        visible_steps_count = gr.State(value=2)
+                        
+                        # Add step button at the top
+                        with gr.Row():
+                            gr.Markdown("*Use ↑↓ to reorder steps. Template prompts are editable (editing switches to Custom).*")
+                            add_step_btn = gr.Button("➕ Add Step", size="sm", scale=0)
+                        
+                        # Step 1
+                        with gr.Accordion("Step 1", open=True, visible=True) as step1_accordion:
+                            with gr.Row():
+                                step1_enabled = gr.Checkbox(label="✓ Enable", value=True, scale=1)
+                                step1_name = gr.Textbox(label="Name", placeholder="Analysis", scale=2)
+                                step1_agent = gr.Dropdown(label="Agent", choices=agents_list, value="reviewer", scale=2)
+                                step1_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step1_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step1_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step1_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step1_prompt = gr.Textbox(label="System Prompt", placeholder="You are an expert...", lines=2)
+                            with gr.Row():
+                                step1_desc = gr.Textbox(label="Description", placeholder="What this step does", scale=3)
+                                step1_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 2
+                        with gr.Accordion("Step 2", open=True, visible=True) as step2_accordion:
+                            with gr.Row():
+                                step2_enabled = gr.Checkbox(label="✓ Enable", value=True, scale=1)
+                                step2_name = gr.Textbox(label="Name", placeholder="Solution", scale=2)
+                                step2_agent = gr.Dropdown(label="Agent", choices=agents_list, value="coder", scale=2)
+                                step2_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step2_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step2_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step2_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step2_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step2_prompt = gr.Textbox(label="System Prompt", placeholder="You are an expert...", lines=2)
+                            with gr.Row():
+                                step2_desc = gr.Textbox(label="Description", placeholder="What this step does", scale=3)
+                                step2_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 3
+                        with gr.Accordion("Step 3", open=False, visible=False) as step3_accordion:
+                            with gr.Row():
+                                step3_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step3_name = gr.Textbox(label="Name", placeholder="Verification", scale=2)
+                                step3_agent = gr.Dropdown(label="Agent", choices=agents_list, value="reviewer", scale=2)
+                                step3_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step3_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step3_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step3_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step3_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step3_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step3_desc = gr.Textbox(label="Description", scale=3)
+                                step3_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 4
+                        with gr.Accordion("Step 4", open=False, visible=False) as step4_accordion:
+                            with gr.Row():
+                                step4_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step4_name = gr.Textbox(label="Name", placeholder="Refinement", scale=2)
+                                step4_agent = gr.Dropdown(label="Agent", choices=agents_list, value="coder", scale=2)
+                                step4_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step4_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step4_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step4_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step4_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step4_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step4_desc = gr.Textbox(label="Description", scale=3)
+                                step4_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 5
+                        with gr.Accordion("Step 5", open=False, visible=False) as step5_accordion:
+                            with gr.Row():
+                                step5_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step5_name = gr.Textbox(label="Name", placeholder="Review", scale=2)
+                                step5_agent = gr.Dropdown(label="Agent", choices=agents_list, value="reviewer", scale=2)
+                                step5_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step5_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step5_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step5_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step5_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step5_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step5_desc = gr.Textbox(label="Description", scale=3)
+                                step5_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 6
+                        with gr.Accordion("Step 6", open=False, visible=False) as step6_accordion:
+                            with gr.Row():
+                                step6_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step6_name = gr.Textbox(label="Name", scale=2)
+                                step6_agent = gr.Dropdown(label="Agent", choices=agents_list, value="coder", scale=2)
+                                step6_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step6_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step6_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step6_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step6_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step6_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step6_desc = gr.Textbox(label="Description", scale=3)
+                                step6_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 7
+                        with gr.Accordion("Step 7", open=False, visible=False) as step7_accordion:
+                            with gr.Row():
+                                step7_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step7_name = gr.Textbox(label="Name", scale=2)
+                                step7_agent = gr.Dropdown(label="Agent", choices=agents_list, value="reviewer", scale=2)
+                                step7_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step7_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step7_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step7_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step7_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step7_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step7_desc = gr.Textbox(label="Description", scale=3)
+                                step7_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 8
+                        with gr.Accordion("Step 8", open=False, visible=False) as step8_accordion:
+                            with gr.Row():
+                                step8_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step8_name = gr.Textbox(label="Name", scale=2)
+                                step8_agent = gr.Dropdown(label="Agent", choices=agents_list, value="coder", scale=2)
+                                step8_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step8_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step8_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step8_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step8_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step8_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step8_desc = gr.Textbox(label="Description", scale=3)
+                                step8_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 9
+                        with gr.Accordion("Step 9", open=False, visible=False) as step9_accordion:
+                            with gr.Row():
+                                step9_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step9_name = gr.Textbox(label="Name", scale=2)
+                                step9_agent = gr.Dropdown(label="Agent", choices=agents_list, value="reviewer", scale=2)
+                                step9_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step9_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                                step9_down = gr.Button("↓", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step9_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step9_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step9_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step9_desc = gr.Textbox(label="Description", scale=3)
+                                step9_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Step 10
+                        with gr.Accordion("Step 10", open=False, visible=False) as step10_accordion:
+                            with gr.Row():
+                                step10_enabled = gr.Checkbox(label="✓ Enable", value=False, scale=1)
+                                step10_name = gr.Textbox(label="Name", scale=2)
+                                step10_agent = gr.Dropdown(label="Agent", choices=agents_list, value="coder", scale=2)
+                                step10_model = gr.Dropdown(label="Model", choices=models_list, value="", scale=2, info="Override agent's default")
+                                step10_up = gr.Button("↑", size="sm", scale=0, min_width=40)
+                            with gr.Row():
+                                step10_ptype = gr.Radio(
+                                    choices=[("Template", "template"), ("Custom", "custom")],
+                                    value="custom", label="Prompt Type", scale=1,
+                                )
+                                step10_template = gr.Dropdown(
+                                    label="Template", choices=templates_list, allow_custom_value=True,
+                                    value=templates_list[0] if templates_list else None,
+                                    scale=2,
+                                )
+                            step10_prompt = gr.Textbox(label="System Prompt", lines=2)
+                            with gr.Row():
+                                step10_desc = gr.Textbox(label="Description", scale=3)
+                                step10_gen_btn = gr.Button("Generate", size="sm", scale=1)
+                        
+                        # Collect all accordion references for visibility control
+                        all_step_accordions = [
+                            step1_accordion, step2_accordion, step3_accordion, step4_accordion, step5_accordion,
+                            step6_accordion, step7_accordion, step8_accordion, step9_accordion, step10_accordion,
+                        ]
+                        
+
+                        
+                        # Keywords and weight
+                        gr.Markdown("#### Auto-Detection")
+                        pipeline_edit_keywords = gr.Textbox(
+                            label="Detection Keywords (comma-separated)",
+                            placeholder="debug, error, fix, code",
+                            lines=1,
+                        )
+                        
+                        pipeline_edit_weight = gr.Slider(
+                            label="Detection Weight",
+                            minimum=0.0,
+                            maximum=1.0,
+                            step=0.1,
+                            value=0.5,
+                            info="Higher = higher priority when multiple pipelines match",
+                        )
+                        
+                        # Action buttons
+                        with gr.Row():
+                            pipeline_create_btn = gr.Button("Create New ✨", variant="primary")
+                            pipeline_update_btn = gr.Button("Update Selected")
+                            pipeline_delete_btn = gr.Button("Delete", variant="stop")
+                        
+                        with gr.Row():
+                            pipeline_dup_id = gr.Textbox(
+                                label="New ID for duplicate",
+                                placeholder="my_pipeline_copy",
+                                scale=2,
+                            )
+                            pipeline_dup_btn = gr.Button("Duplicate", scale=1)
+                
+                # =========================================
+                # EVENTS
+                # =========================================
+                
+                # Add Step button handler
+                def add_step(current_count):
+                    """Show the next hidden step accordion."""
+                    new_count = min(current_count + 1, MAX_PIPELINE_STEPS)
+                    visibility_updates = []
+                    for i in range(MAX_PIPELINE_STEPS):
+                        visibility_updates.append(gr.update(visible=(i < new_count)))
+                    return visibility_updates + [new_count]
+                
+                add_step_btn.click(
+                    fn=add_step,
+                    inputs=[visible_steps_count],
+                    outputs=all_step_accordions + [visible_steps_count],
+                )
+                
+                # =============================================
+                # TEMPLATE SELECTION - Load content into prompt
+                # =============================================
+                # When template is selected and ptype is "template", load the template content
+                step1_template.change(fn=on_template_select, inputs=[step1_template, step1_ptype], outputs=[step1_prompt])
+                step2_template.change(fn=on_template_select, inputs=[step2_template, step2_ptype], outputs=[step2_prompt])
+                step3_template.change(fn=on_template_select, inputs=[step3_template, step3_ptype], outputs=[step3_prompt])
+                step4_template.change(fn=on_template_select, inputs=[step4_template, step4_ptype], outputs=[step4_prompt])
+                step5_template.change(fn=on_template_select, inputs=[step5_template, step5_ptype], outputs=[step5_prompt])
+                step6_template.change(fn=on_template_select, inputs=[step6_template, step6_ptype], outputs=[step6_prompt])
+                step7_template.change(fn=on_template_select, inputs=[step7_template, step7_ptype], outputs=[step7_prompt])
+                step8_template.change(fn=on_template_select, inputs=[step8_template, step8_ptype], outputs=[step8_prompt])
+                step9_template.change(fn=on_template_select, inputs=[step9_template, step9_ptype], outputs=[step9_prompt])
+                step10_template.change(fn=on_template_select, inputs=[step10_template, step10_ptype], outputs=[step10_prompt])
+                
+                # When ptype changes to "template", load the current template content
+                def on_ptype_change(ptype, template_id):
+                    """When switching to template mode, load the template content."""
+                    if ptype == "template" and template_id:
+                        return get_template_content(template_id)
+                    return gr.update()
+                
+                step1_ptype.change(fn=on_ptype_change, inputs=[step1_ptype, step1_template], outputs=[step1_prompt])
+                step2_ptype.change(fn=on_ptype_change, inputs=[step2_ptype, step2_template], outputs=[step2_prompt])
+                step3_ptype.change(fn=on_ptype_change, inputs=[step3_ptype, step3_template], outputs=[step3_prompt])
+                step4_ptype.change(fn=on_ptype_change, inputs=[step4_ptype, step4_template], outputs=[step4_prompt])
+                step5_ptype.change(fn=on_ptype_change, inputs=[step5_ptype, step5_template], outputs=[step5_prompt])
+                step6_ptype.change(fn=on_ptype_change, inputs=[step6_ptype, step6_template], outputs=[step6_prompt])
+                step7_ptype.change(fn=on_ptype_change, inputs=[step7_ptype, step7_template], outputs=[step7_prompt])
+                step8_ptype.change(fn=on_ptype_change, inputs=[step8_ptype, step8_template], outputs=[step8_prompt])
+                step9_ptype.change(fn=on_ptype_change, inputs=[step9_ptype, step9_template], outputs=[step9_prompt])
+                step10_ptype.change(fn=on_ptype_change, inputs=[step10_ptype, step10_template], outputs=[step10_prompt])
+                
+                # =============================================
+                # MOVE UP/DOWN - Swap step contents
+                # =============================================
+                # Step 1 can only go down
+                step1_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step1_enabled, step1_name, step1_agent, step1_ptype, step1_template, step1_prompt, step1_desc,
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    ],
+                    outputs=[
+                        step1_enabled, step1_name, step1_agent, step1_ptype, step1_template, step1_prompt, step1_desc,
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    ],
+                )
+                
+                # Step 2
+                step2_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step1_enabled, step1_name, step1_agent, step1_ptype, step1_template, step1_prompt, step1_desc,
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    ],
+                    outputs=[
+                        step1_enabled, step1_name, step1_agent, step1_ptype, step1_template, step1_prompt, step1_desc,
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    ],
+                )
+                step2_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    ],
+                    outputs=[
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    ],
+                )
+                
+                # Step 3
+                step3_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    ],
+                    outputs=[
+                        step2_enabled, step2_name, step2_agent, step2_ptype, step2_template, step2_prompt, step2_desc,
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    ],
+                )
+                step3_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    ],
+                    outputs=[
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    ],
+                )
+                
+                # Step 4
+                step4_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    ],
+                    outputs=[
+                        step3_enabled, step3_name, step3_agent, step3_ptype, step3_template, step3_prompt, step3_desc,
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    ],
+                )
+                step4_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    ],
+                    outputs=[
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    ],
+                )
+                
+                # Step 5
+                step5_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    ],
+                    outputs=[
+                        step4_enabled, step4_name, step4_agent, step4_ptype, step4_template, step4_prompt, step4_desc,
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    ],
+                )
+                step5_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    ],
+                    outputs=[
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    ],
+                )
+                
+                # Step 6
+                step6_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    ],
+                    outputs=[
+                        step5_enabled, step5_name, step5_agent, step5_ptype, step5_template, step5_prompt, step5_desc,
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    ],
+                )
+                step6_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    ],
+                    outputs=[
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    ],
+                )
+                
+                # Step 7
+                step7_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    ],
+                    outputs=[
+                        step6_enabled, step6_name, step6_agent, step6_ptype, step6_template, step6_prompt, step6_desc,
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    ],
+                )
+                step7_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    ],
+                    outputs=[
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    ],
+                )
+                
+                # Step 8
+                step8_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    ],
+                    outputs=[
+                        step7_enabled, step7_name, step7_agent, step7_ptype, step7_template, step7_prompt, step7_desc,
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    ],
+                )
+                step8_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    ],
+                    outputs=[
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    ],
+                )
+                
+                # Step 9
+                step9_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    ],
+                    outputs=[
+                        step8_enabled, step8_name, step8_agent, step8_ptype, step8_template, step8_prompt, step8_desc,
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    ],
+                )
+                step9_down.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                        step10_enabled, step10_name, step10_agent, step10_ptype, step10_template, step10_prompt, step10_desc,
+                    ],
+                    outputs=[
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                        step10_enabled, step10_name, step10_agent, step10_ptype, step10_template, step10_prompt, step10_desc,
+                    ],
+                )
+                
+                # Step 10 can only go up
+                step10_up.click(
+                    fn=swap_steps,
+                    inputs=[
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                        step10_enabled, step10_name, step10_agent, step10_ptype, step10_template, step10_prompt, step10_desc,
+                    ],
+                    outputs=[
+                        step9_enabled, step9_name, step9_agent, step9_ptype, step9_template, step9_prompt, step9_desc,
+                        step10_enabled, step10_name, step10_agent, step10_ptype, step10_template, step10_prompt, step10_desc,
+                    ],
+                )
+                
+                # =============================================
+                # AUTO-SWITCH TO CUSTOM ON PROMPT EDIT
+                # =============================================
+                # When user edits the prompt while in template mode, switch to custom
+                def switch_to_custom_on_edit(ptype):
+                    """Switch to custom mode when prompt is edited in template mode."""
+                    if ptype == "template":
+                        return "custom"
+                    return gr.update()
+                
+                # Use .input() to detect user keyboard input (not programmatic changes)
+                step1_prompt.input(fn=switch_to_custom_on_edit, inputs=[step1_ptype], outputs=[step1_ptype])
+                step2_prompt.input(fn=switch_to_custom_on_edit, inputs=[step2_ptype], outputs=[step2_ptype])
+                step3_prompt.input(fn=switch_to_custom_on_edit, inputs=[step3_ptype], outputs=[step3_ptype])
+                step4_prompt.input(fn=switch_to_custom_on_edit, inputs=[step4_ptype], outputs=[step4_ptype])
+                step5_prompt.input(fn=switch_to_custom_on_edit, inputs=[step5_ptype], outputs=[step5_ptype])
+                step6_prompt.input(fn=switch_to_custom_on_edit, inputs=[step6_ptype], outputs=[step6_ptype])
+                step7_prompt.input(fn=switch_to_custom_on_edit, inputs=[step7_ptype], outputs=[step7_ptype])
+                step8_prompt.input(fn=switch_to_custom_on_edit, inputs=[step8_ptype], outputs=[step8_ptype])
+                step9_prompt.input(fn=switch_to_custom_on_edit, inputs=[step9_ptype], outputs=[step9_ptype])
+                step10_prompt.input(fn=switch_to_custom_on_edit, inputs=[step10_ptype], outputs=[step10_ptype])
+                
+                # =============================================
+                # PIPELINE TABLE SELECTION
+                # =============================================
+                # All step components for outputs (10 steps x 7 fields = 70 values)
+                all_step_outputs = [
+                    step1_enabled, step1_name, step1_agent, step1_model, step1_ptype, step1_template, step1_prompt, step1_desc,
+                    step2_enabled, step2_name, step2_agent, step2_model, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    step3_enabled, step3_name, step3_agent, step3_model, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    step4_enabled, step4_name, step4_agent, step4_model, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    step5_enabled, step5_name, step5_agent, step5_model, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    step6_enabled, step6_name, step6_agent, step6_model, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    step7_enabled, step7_name, step7_agent, step7_model, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    step8_enabled, step8_name, step8_agent, step8_model, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    step9_enabled, step9_name, step9_agent, step9_model, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    step10_enabled, step10_name, step10_agent, step10_model, step10_ptype, step10_template, step10_prompt, step10_desc,
+                ]
+                
+                def on_pipeline_row_select(evt: gr.SelectData, table_data):
+                    """When a row is clicked, load its details into the visual editor."""
+                    if evt.index and len(evt.index) > 0:
+                        row_idx = evt.index[0]
+                        if row_idx < len(table_data):
+                            pipeline_id = table_data.iloc[row_idx, 1]  # ID is in column 1
+                            return load_pipeline_to_visual_steps(pipeline_id)
+                    # Return empty defaults
+                    return load_pipeline_to_visual_steps("")
+                
+                pipeline_table.select(
+                    fn=on_pipeline_row_select,
+                    inputs=[pipeline_table],
+                    outputs=[
+                        pipeline_edit_id,
+                        pipeline_edit_name,
+                        pipeline_edit_desc,
+                        pipeline_edit_pattern,
+                        pipeline_edit_keywords,
+                        pipeline_edit_weight,
+                        pipeline_edit_type,
+                    ] + all_step_outputs + all_step_accordions + [visible_steps_count],
+                )
+                
+                pipeline_refresh_btn.click(
+                    fn=refresh_pipeline_table,
+                    outputs=[pipeline_table],
+                )
+                
+                pipeline_reload_btn.click(
+                    fn=reload_pipelines,
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                # All step inputs for create/update (10 steps) - 8 fields per step
+                all_step_inputs = [
+                    step1_enabled, step1_name, step1_agent, step1_model, step1_ptype, step1_template, step1_prompt, step1_desc,
+                    step2_enabled, step2_name, step2_agent, step2_model, step2_ptype, step2_template, step2_prompt, step2_desc,
+                    step3_enabled, step3_name, step3_agent, step3_model, step3_ptype, step3_template, step3_prompt, step3_desc,
+                    step4_enabled, step4_name, step4_agent, step4_model, step4_ptype, step4_template, step4_prompt, step4_desc,
+                    step5_enabled, step5_name, step5_agent, step5_model, step5_ptype, step5_template, step5_prompt, step5_desc,
+                    step6_enabled, step6_name, step6_agent, step6_model, step6_ptype, step6_template, step6_prompt, step6_desc,
+                    step7_enabled, step7_name, step7_agent, step7_model, step7_ptype, step7_template, step7_prompt, step7_desc,
+                    step8_enabled, step8_name, step8_agent, step8_model, step8_ptype, step8_template, step8_prompt, step8_desc,
+                    step9_enabled, step9_name, step9_agent, step9_model, step9_ptype, step9_template, step9_prompt, step9_desc,
+                    step10_enabled, step10_name, step10_agent, step10_model, step10_ptype, step10_template, step10_prompt, step10_desc,
+                ]
+                
+                pipeline_create_btn.click(
+                    fn=create_pipeline_from_visual_steps,
+                    inputs=[
+                        pipeline_edit_id,
+                        pipeline_edit_name,
+                        pipeline_edit_desc,
+                        pipeline_edit_pattern,
+                        pipeline_edit_keywords,
+                        pipeline_edit_weight,
+                    ] + all_step_inputs,
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                pipeline_update_btn.click(
+                    fn=update_pipeline_from_visual_steps,
+                    inputs=[
+                        pipeline_edit_id,
+                        pipeline_edit_name,
+                        pipeline_edit_desc,
+                        pipeline_edit_pattern,
+                        pipeline_edit_keywords,
+                        pipeline_edit_weight,
+                    ] + all_step_inputs,
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                pipeline_delete_btn.click(
+                    fn=delete_pipeline,
+                    inputs=[pipeline_edit_id],
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                pipeline_dup_btn.click(
+                    fn=duplicate_pipeline,
+                    inputs=[pipeline_edit_id, pipeline_dup_id],
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                pipeline_export_btn.click(
+                    fn=export_all_pipelines,
+                    outputs=[pipeline_export_result],
+                )
+                
+                pipeline_import_btn.click(
+                    fn=import_pipelines_from_file,
+                    inputs=[pipeline_import_file],
+                    outputs=[pipeline_status, pipeline_table, multi_agent_pipeline],
+                )
+                
+                # Generate prompt buttons (with keepalive) for all 10 steps
+                step1_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step1_name, step1_desc, pipeline_edit_desc, step1_agent], outputs=[step1_prompt])
+                step2_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step2_name, step2_desc, pipeline_edit_desc, step2_agent], outputs=[step2_prompt])
+                step3_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step3_name, step3_desc, pipeline_edit_desc, step3_agent], outputs=[step3_prompt])
+                step4_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step4_name, step4_desc, pipeline_edit_desc, step4_agent], outputs=[step4_prompt])
+                step5_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step5_name, step5_desc, pipeline_edit_desc, step5_agent], outputs=[step5_prompt])
+                step6_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step6_name, step6_desc, pipeline_edit_desc, step6_agent], outputs=[step6_prompt])
+                step7_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step7_name, step7_desc, pipeline_edit_desc, step7_agent], outputs=[step7_prompt])
+                step8_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step8_name, step8_desc, pipeline_edit_desc, step8_agent], outputs=[step8_prompt])
+                step9_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step9_name, step9_desc, pipeline_edit_desc, step9_agent], outputs=[step9_prompt])
+                step10_gen_btn.click(fn=generate_step_prompt_llm, inputs=[step10_name, step10_desc, pipeline_edit_desc, step10_agent], outputs=[step10_prompt])
+            
             
             # =================================================================
             # TAB 3: RAG
@@ -2427,7 +3931,7 @@ def create_app() -> gr.Blocks:
             # =================================================================
             # TAB 5: INFO
             # =================================================================
-            with gr.Tab("ℹ️ Info", id="info"):
+            with gr.Tab("[i] Info", id="info"):
                 gr.Markdown(f"""
                 ### 🧅 Opti-Oignon - Local LLM Optimization
                 

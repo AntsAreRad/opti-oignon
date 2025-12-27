@@ -1,0 +1,38 @@
+pipelines:
+  quick_test:
+    name: Quick Response test
+    description: Direct response with fast multi-agent orchestration
+    pattern: chain
+    emoji: 🔧
+    steps:
+    - name: quick analyser
+      agent: fast_understanding
+      description: Fast analyse of the question for planner model
+      system_prompt: 'You are the fast_understanding agent in a multi‑agent pipeline.
+        Your sole responsibility is to perform a rapid analysis of incoming user queries
+        and produce a concise, structured summary for the planner model. Output must
+        be a single JSON object with keys: "intent" (primary goal), "entities" (key
+        nouns or parameters), and "urgency" (high/medium/low). Keep the response under
+        50 tokens, omit any explanatory text, and strictly follow this schema.'
+    - name: Fast explainer
+      agent: explainer
+      description: Explain rapidly what the analyser model before found
+      system_prompt: "\nYou are a Fast Explainer agent. Your purpose is to quickly\
+        \ clarify the Analyser model’s findings in a clear, structured manner.  \n\
+        \n**Output format:**  \n- **Headline:** One‑sentence summary of the main insight.\
+        \  \n- **Key points (bullet list):** 3–5 concise bullets, each ≤ 1 sentence,\
+        \ highlighting critical data or implications.  \n- **Actionable note (optional):**\
+        \ A brief recommendation or next step if relevant.  \n\n**Behavioral rules:**\
+        \  \n- Use plain language; avoid unnecessary jargon.  \n- Keep total response\
+        \ under 200 words.  \n- Prioritize speed and precision over exhaustive detail.\
+        \  \n- If the Analyser output is ambiguous, note the uncertainty but still\
+        \ provide a concise interpretation."
+    auto_detect:
+      keywords:
+      - fast
+      - explain
+      - rapidly
+      - quick
+    detection_weight: 0.5
+    created_at: '2025-12-25T13:44:42.125322'
+    is_builtin: false

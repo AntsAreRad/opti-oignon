@@ -193,6 +193,17 @@ models:
 # Maps task types to preferred models
 
 routing:
+  # ---------------------------------------------------------------------------
+  # GENERIC TYPES (used by analyzer)
+  # ---------------------------------------------------------------------------
+  code:
+    primary: "qwen3-coder:30b"
+    quality: "deepseek-r1:32b"
+    fast: "qwen2.5-coder:14b"
+  
+  # ---------------------------------------------------------------------------
+  # SPECIFIC TYPES
+  # ---------------------------------------------------------------------------
   code_r:
     primary: "qwen3-coder:30b"
     quality: "deepseek-r1:32b"

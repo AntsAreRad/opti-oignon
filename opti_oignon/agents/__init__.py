@@ -89,6 +89,23 @@ from .orchestrator import (
     run_auto,
 )
 
+# Dynamic Pipeline
+try:
+    from .dynamic_pipeline import (
+        DynamicPipelinePlanner,
+        DynamicPipelineExecutor,
+        DynamicPipelinePlan,
+        PipelineStep,
+        PlanComplexity,
+        plan_pipeline,
+        execute_dynamic_pipeline,
+        get_planner,
+        get_executor,
+    )
+    DYNAMIC_PIPELINE_AVAILABLE = True
+except ImportError:
+    DYNAMIC_PIPELINE_AVAILABLE = False
+
 # Version
 __version__ = "2.0.0"
 

@@ -147,19 +147,23 @@ class OptiOignonConfig:
     # Model Access
     # -------------------------------------------------------------------------
     
+    # Cache pour éviter le spam de warnings
+    _warned_types: set = set()
+    
     def get_model(self, model_type: str, priority: str = "primary") -> str:
         """
         Get a model by type and priority.
         
         Args:
-            model_type: Model type (code, reasoning, general, quick)
+            model_type: Model type (code_r, code_python, reasoning, general, quick, etc.)
             priority: Priority (primary, quality, fast)
             
         Returns:
             Ollama model name
         """
-        models = self._models_config.get("models", {})
-        type_models = models.get(model_type, {})
+        # Utiliser la section 'routing' pour le mapping type → modèle
+        routing = self._models_config.get("routing", {})
+        type_models = routing.get(model_type, {})
         
         model = type_models.get(priority)
         if model:
@@ -171,10 +175,12 @@ class OptiOignonConfig:
             logger.debug(f"Fallback to primary for {model_type}/{priority}")
             return model
         
-        # Last resort: first available fallback
+        # Last resort: first available fallback (avec cache pour le warning)
         fallbacks = self._models_config.get("fallback_order", [])
         if fallbacks:
-            logger.warning(f"Type {model_type} not found, using fallback {fallbacks[0]}")
+            if model_type not in self._warned_types:
+                logger.warning(f"Type {model_type} not found in routing, using fallback {fallbacks[0]}")
+                self._warned_types.add(model_type)
             return fallbacks[0]
         
         # Absolute default value

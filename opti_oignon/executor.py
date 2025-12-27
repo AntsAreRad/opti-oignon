@@ -26,6 +26,7 @@ Author: Léon
 from typing import Dict, Generator, Optional, Tuple, Callable, Any
 from pathlib import Path
 import threading
+import queue
 import time
 import logging
 import ollama
@@ -618,45 +619,93 @@ class Executor:
         if adjusted_document:
             messages[-1]["content"] += f"\n\n---\nDocument provided:\n{adjusted_document}"
         
-        # Step 4: Execute with streaming
+        # Step 4: Execute with streaming (with keepalive for Gradio)
         status(f"[>] Generating with {routing.model} (temp={routing.temperature})...")
         
         full_response = ""
         start_time = time.time()
         
-        try:
-            stream = ollama.chat(
-                model=routing.model,
-                messages=messages,
-                options={"temperature": routing.temperature},
-                stream=True,
-            )
-            
-            for chunk in stream:
-                if self._cancel_event.is_set():
+        # Use queue and thread for keepalive (prevents Gradio timeout during model loading)
+        chunk_queue = queue.Queue()
+        thread_result = {"error": None, "done": False}
+        
+        def stream_thread():
+            """Run ollama.chat in separate thread, push chunks to queue."""
+            try:
+                stream = ollama.chat(
+                    model=routing.model,
+                    messages=messages,
+                    options={"temperature": routing.temperature},
+                    stream=True,
+                )
+                
+                for chunk in stream:
+                    if self._cancel_event.is_set():
+                        chunk_queue.put(("cancel", None))
+                        break
+                    
+                    if "message" in chunk and "content" in chunk["message"]:
+                        content = chunk["message"]["content"]
+                        chunk_queue.put(("chunk", content))
+                    
+                    # Check timeout
+                    if time.time() - start_time > routing.timeout:
+                        chunk_queue.put(("timeout", None))
+                        break
+                        
+            except Exception as e:
+                thread_result["error"] = str(e)
+            finally:
+                thread_result["done"] = True
+                chunk_queue.put(("done", None))
+        
+        # Start streaming thread
+        stream_thread_obj = threading.Thread(target=stream_thread, daemon=True)
+        stream_thread_obj.start()
+        
+        # Process chunks with keepalive
+        last_yield_time = time.time()
+        while True:
+            try:
+                # Wait for chunk with timeout (keeps Gradio connection alive)
+                event_type, content = chunk_queue.get(timeout=2.0)
+                
+                if event_type == "done":
+                    break
+                elif event_type == "chunk":
+                    full_response += content
+                    yield content
+                    last_yield_time = time.time()
+                elif event_type == "cancel":
                     full_response += "\n\n[Generation cancelled]"
                     yield "\n\n[Generation cancelled]"
                     break
-                
-                if "message" in chunk and "content" in chunk["message"]:
-                    content = chunk["message"]["content"]
-                    full_response += content
-                    yield content
-                
-                # Check timeout
-                if time.time() - start_time > routing.timeout:
+                elif event_type == "timeout":
                     full_response += "\n\n[Timeout reached]"
                     yield "\n\n[Timeout reached]"
                     break
-            
-            elapsed = time.time() - start_time
-            status(f"[OK] Completed in {elapsed:.1f}s")
-            
-        except Exception as e:
-            error_msg = f"\n\n[ERR] Error: {str(e)}"
+                    
+            except queue.Empty:
+                # No chunk received, yield keepalive to prevent Gradio timeout
+                elapsed = time.time() - start_time
+                # Yield empty string to keep connection alive (invisible to user)
+                # But log progress for debugging
+                logger.debug(f"Keepalive: waiting for model response... ({elapsed:.0f}s)")
+                # Don't yield visible text, just keep the generator active
+                yield ""
+        
+        # Wait for thread to finish
+        stream_thread_obj.join(timeout=5.0)
+        
+        # Check for thread errors
+        if thread_result["error"]:
+            error_msg = f"\n\n[ERR] Error: {thread_result['error']}"
             full_response += error_msg
             yield error_msg
-            status(f"[ERR] Error: {e}")
+            status(f"[ERR] Error: {thread_result['error']}")
+        else:
+            elapsed = time.time() - start_time
+            status(f"[OK] Completed in {elapsed:.1f}s")
         
         self._current_task = None
         return refined_question, full_response

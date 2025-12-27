@@ -31,6 +31,142 @@ global:
   show_intermediate: true
 
 # -----------------------------------------------------------------------------
+# DYNAMIC PIPELINE SETTINGS
+# -----------------------------------------------------------------------------
+dynamic_pipeline:
+  # Enable/disable dynamic pipeline feature
+  enabled: true
+  
+  # Model used for planning (reasoning model recommended)
+  planning_model: "deepseek-r1:32b"
+  
+  # Fast planning model (for quick pre-analysis)
+  fast_planning_model: "qwen3:32b"
+  
+  # Temperature for planning (lower = more consistent)
+  planning_temperature: 0.3
+  
+  # Timeout for planning phase (seconds)
+  planning_timeout: 180
+  
+  # Number of retries if planning fails
+  planning_retries: 2
+  
+  # Default behavior
+  defaults:
+    # Auto-execute without confirmation
+    auto_execute: true
+    # Show plan preview before execution
+    show_plan: true
+    # Use fast mode by default (less accurate but faster)
+    fast_mode: false
+  
+  # Agent model assignments (can be overridden per-agent)
+  agent_models:
+    planner: "deepseek-r1:32b"      # Best for reasoning/planning
+    coder: "qwen3-coder:30b"        # Best for code generation
+    reviewer: "qwen3-coder:30b"     # Code review
+    explainer: "qwen3:32b"          # Explanations
+    writer: "qwen3:32b"             # Scientific writing
+  
+  # Complexity thresholds for auto-detection
+  complexity_detection:
+    # Minimum words to consider for dynamic pipeline
+    min_words: 10
+    # Keywords that indicate complex tasks
+    complex_indicators:
+      - "implement"
+      - "create"
+      - "build"
+      - "develop"
+      - "with tests"
+      - "including"
+      - "step by step"
+      - "detailed"
+      - "complete"
+      - "full"
+    # Keywords that indicate simple tasks
+    simple_indicators:
+      - "what is"
+      - "how to"
+      - "explain"
+      - "show me"
+      - "quick"
+      - "simple"
+  
+  # Pipeline patterns
+  patterns:
+    # Pattern for code generation tasks
+    code_generation:
+      - agent: "planner"
+        optional: true
+        condition: "complexity >= medium"
+      - agent: "coder"
+        required: true
+      - agent: "reviewer"
+        optional: true
+        condition: "with_tests or complexity >= medium"
+    
+    # Pattern for debugging tasks
+    debugging:
+      - agent: "reviewer"
+        required: true
+        role: "analyze_error"
+      - agent: "coder"
+        required: true
+        role: "fix_code"
+      - agent: "reviewer"
+        optional: true
+        role: "verify_fix"
+    
+    # Pattern for explanations
+    explanation:
+      - agent: "explainer"
+        required: true
+    
+    # Pattern for scientific writing
+    scientific_writing:
+      - agent: "planner"
+        required: true
+        role: "structure"
+      - agent: "writer"
+        required: true
+        role: "content"
+      - agent: "reviewer"
+        optional: true
+        role: "coherence"
+  
+  # Performance optimization
+  performance:
+    # Maximum steps in a pipeline
+    max_steps: 5
+    # Step timeout (seconds)
+    step_timeout: 180
+    # Total pipeline timeout (seconds)
+    pipeline_timeout: 600
+    # Enable parallel execution where possible
+    parallel_enabled: false
+    # Cache planning results for similar queries
+    cache_plans: true
+    cache_ttl: 3600  # seconds
+  
+  # UI settings
+  ui:
+    # Show step-by-step progress
+    show_progress: true
+    # Show intermediate outputs
+    show_intermediate: true
+    # Collapse completed steps
+    collapse_completed: true
+    # Theme colors
+    colors:
+      planner: "#a78bfa"  # Purple
+      coder: "#60a5fa"    # Blue
+      reviewer: "#4ade80" # Green
+      explainer: "#fbbf24" # Yellow
+      writer: "#f472b6"   # Pink
+
+# -----------------------------------------------------------------------------
 # SPECIALIZED AGENTS DEFINITION
 # -----------------------------------------------------------------------------
 agents:
@@ -110,27 +246,40 @@ agents:
       - "documentation"
       - "reports"
 
-  # Agent rapide pour les étapes simples
+  # Faster agent for simple planning
   fast_planner:
     description: "faster planner for simple steps"
     models:
-      primary: "qwen3:32b"  # Modèle rapide
+      primary: "qwen3:32b"  
     temperature: 0.4
     max_tokens: 1024
     timeout: 60
     specialties:
       - "planning"
 
-  # Agent rapide pour les étapes simples
+  # Faster agent for simple understanding tasks
   fast_understanding:
     description: "faster understanding"
     models:
-      primary: "nemotron-3-nano:30b"  # Modèle rapide
+      primary: "nemotron-3-nano:30b"  
     temperature: 0.4
     max_tokens: 1024
     timeout: 60
     specialties:
       - "understanding"
+
+  dynamic_planner:
+    description: "Plans dynamic pipelines by analyzing task complexity"
+    models:
+      primary: "deepseek-r1:32b"
+      fast: "qwen3:32b"
+    temperature: 0.3
+    max_tokens: 2048
+    timeout: 180
+    specialties:
+      - "planning"
+      - "task_analysis"
+      - "orchestration"
 
 # -----------------------------------------------------------------------------
 # ORCHESTRATION PATTERNS

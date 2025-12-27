@@ -26,7 +26,7 @@ readme_path = Path(__file__).parent / "README.md"
 long_description = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
 
 # Version
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 
 setup(
     name="opti-oignon",
@@ -36,7 +36,7 @@ setup(
     description="Local LLM optimization suite with intelligent routing, RAG, and multi-agent orchestration",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/your-username/opti-oignon",
+    url="https://github.com/AntsAreRad/opti-oignon",
     license="MIT",
     
     # Package discovery
