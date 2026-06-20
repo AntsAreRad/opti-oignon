@@ -1,0 +1,161 @@
+# =============================================================================
+# OPTI-OIGNON v1.5.9 -- PROJECTS CONFIG (S57)
+# =============================================================================
+# Configuration for the Project system: file storage, limits, and defaults.
+#
+# Projects group conversations and files together, enabling
+# RAG-based context injection in S58.
+# =============================================================================
+
+projects:
+  # Master switch for the projects feature
+  enabled: true
+
+  # Storage base path (relative to opti_oignon/data/)
+  storage_path: "projects"
+
+  # Maximum number of projects allowed
+  max_projects: 50
+
+  # Maximum files per project
+  max_files_per_project: 100
+
+  # Maximum file size in megabytes (per file)
+  max_file_size_mb: 50
+
+  # Allowed file extensions (empty list = allow all)
+  # Common categories: text, code, data, documents, images
+  allowed_extensions:
+    # Text
+    - ".txt"
+    - ".md"
+    - ".rst"
+    - ".log"
+    # Code
+    - ".py"
+    - ".r"
+    - ".js"
+    - ".ts"
+    - ".svelte"
+    - ".html"
+    - ".css"
+    - ".sh"
+    - ".yaml"
+    - ".yml"
+    - ".json"
+    - ".toml"
+    - ".xml"
+    - ".sql"
+    # Data
+    - ".csv"
+    - ".tsv"
+    - ".xlsx"
+    - ".xls"
+    # Documents
+    - ".pdf"
+    - ".docx"
+    - ".tex"
+    # Images
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".svg"
+    # Archives (for S57 upload+extract)
+    - ".zip"
+    - ".tar.gz"
+    - ".tgz"
+
+  # Default project settings (applied when creating a new project)
+  default_settings:
+    # Default model for project conversations (empty = use global default)
+    default_model: ""
+    # Default pipeline for project conversations
+    default_pipeline: "direct"
+    # Context budget in tokens for RAG injection (S58)
+    context_budget_tokens: 4096
+    # Auto-index uploaded files for RAG (S58)
+    auto_index: true
+
+  # File type detection mapping (extension -> category)
+  file_type_categories:
+    text:
+      - ".txt"
+      - ".md"
+      - ".rst"
+      - ".log"
+    code:
+      - ".py"
+      - ".r"
+      - ".js"
+      - ".ts"
+      - ".svelte"
+      - ".html"
+      - ".css"
+      - ".sh"
+      - ".yaml"
+      - ".yml"
+      - ".json"
+      - ".toml"
+      - ".xml"
+      - ".sql"
+    data:
+      - ".csv"
+      - ".tsv"
+      - ".xlsx"
+      - ".xls"
+    document:
+      - ".pdf"
+      - ".docx"
+      - ".tex"
+    image:
+      - ".png"
+      - ".jpg"
+      - ".jpeg"
+      - ".gif"
+      - ".svg"
+    archive:
+      - ".zip"
+      - ".tar.gz"
+      - ".tgz"
+
+  # ==========================================================================
+  # S58: Trigger detection configuration
+  # ==========================================================================
+  triggers:
+    # Enable/disable each detection level independently
+    level1_enabled: true
+    level2_enabled: true
+    level3_enabled: true
+
+    # Level 2: minimum number of matching terms to trigger
+    level2_min_matches: 2
+    # Level 2: minimum score (matched_terms / query_tokens ratio)
+    level2_min_score: 0.15
+
+    # Level 3: LLM model for classification (empty = use project default)
+    level3_model: ""
+    # Level 3: timeout in milliseconds (hard limit)
+    level3_timeout_ms: 500
+    # Level 3: Ollama API URL
+    level3_ollama_url: "http://localhost:11434"
+
+  # ==========================================================================
+  # S58: Project context / RAG configuration
+  # ==========================================================================
+  context:
+    # Base path for per-project ChromaDB collections (relative to data/)
+    chroma_base_path: "project_chroma"
+
+    # Summary: max approximate tokens for extractive summary
+    summary_max_tokens: 200
+    # Key terms: max number of terms extracted per file
+    key_terms_max: 20
+
+    # Context injection markers
+    context_header: "--- Project Context ---"
+    context_footer: "--- End Project Context ---"
+
+    # RAG retrieval limits
+    max_chunks_per_query: 10
+    min_relevance_score: 0.25

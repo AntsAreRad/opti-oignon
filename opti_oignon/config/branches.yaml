@@ -1,0 +1,41 @@
+# Conversation branching configuration (S97)
+# Controls branch creation, naming, colors, and merge behavior.
+
+branches:
+  # Maximum number of branches per conversation (0 = unlimited).
+  max_per_conversation: 50
+
+  # Default branch name template. {n} is replaced with the branch number.
+  default_name_template: "Branch {n}"
+
+  # Color palette for automatic branch color assignment (hex values).
+  # Colors are assigned round-robin as branches are created.
+  color_palette:
+    - "#B59E7D"   # Tobacco (primary accent)
+    - "#7A857C"   # Pine Smoke / sage
+    - "#8A7E72"   # Warm taupe
+    - "#6B7F8E"   # Steel blue muted
+    - "#9E8A76"   # Sable
+    - "#7C8B7A"   # Muted olive
+    - "#8E7D6D"   # Dark sand
+    - "#6E7B86"   # Slate grey
+
+merge:
+  # When merging, preserve original timestamps from the source branch.
+  preserve_timestamps: true
+
+  # Add a metadata marker to merged messages indicating their origin.
+  tag_merged_messages: true
+
+  # Maximum number of messages that can be merged in a single operation.
+  max_messages_per_merge: 200
+
+display:
+  # Show branch tree in sidebar (true) or inline above messages (false).
+  sidebar_mode: true
+
+  # Highlight divergence point when comparing branches.
+  highlight_divergence: true
+
+  # Maximum depth for tree visualization (0 = unlimited).
+  max_tree_depth: 0

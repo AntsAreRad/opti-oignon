@@ -1,0 +1,20 @@
+# Pipeline: Research Assistant
+# Sequence optimisee pour la recherche et l'analyse.
+# WEB_SEARCH -> REASONING -> SELF_CORRECT
+id: research-assistant
+name: Research Assistant
+description: >
+  Pipeline de recherche approfondie. Commence par une recherche web
+  pour collecter des informations, applique un raisonnement structure
+  pour analyser les resultats, puis verifie la coherence.
+steps:
+  - step_type: web_search
+    label: Information Gathering
+    parameters: {}
+  - step_type: reasoning
+    label: Structured Analysis
+    parameters:
+      strategy: decompose
+  - step_type: self_correct
+    label: Fact Check
+    parameters: {}

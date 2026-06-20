@@ -1,0 +1,97 @@
+# Opti-Oignon system presets -- infrastructure-level configurations
+# tied to detected hardware (VRAM, RAM) and Ollama model inventory.
+#
+# At first start the SystemPresetsManager detects available Ollama models,
+# matches them against these presets, and recommends one based on the
+# user's hardware. Users can apply a preset to bulk-configure the platform.
+#
+# To add a custom preset, copy an entry below and adjust the fields:
+#   - recommended_vram_gb / recommended_ram_gb : minimum hardware
+#   - config_overrides : key-value overrides applied to user_config.yaml
+#   - model_strategy   : smallest | medium | largest (selection within tier)
+#   - pipelines        : list of pipeline IDs activated by this preset
+
+system_presets:
+
+  laptop_lite:
+    name: "Laptop Lite"
+    description: >
+      Compact setup for laptops with 8 GB VRAM or less. Uses the
+      smallest available Ollama models, direct pipeline only, minimal
+      RAG and no parallel inference.
+    icon: "laptop"
+    recommended_vram_gb: 4
+    recommended_ram_gb: 8
+    model_strategy: "smallest"
+    pipelines:
+      - "direct"
+    config_overrides:
+      smart_routing.enabled: false
+      consensus.enabled: false
+      rag.parallel_workers: 1
+      compression.enabled: true
+
+  workstation_balanced:
+    name: "Workstation Balanced"
+    description: >
+      Balanced setup for workstations with 12-24 GB VRAM. Uses medium
+      models with smart routing, direct and consensus pipelines, and
+      parallel RAG. Good default for most users.
+    icon: "desktop"
+    recommended_vram_gb: 12
+    recommended_ram_gb: 16
+    model_strategy: "medium"
+    pipelines:
+      - "direct"
+      - "consensus"
+      - "reasoning"
+    config_overrides:
+      smart_routing.enabled: true
+      consensus.enabled: true
+      rag.parallel_workers: 4
+      compression.enabled: true
+
+  workstation_max:
+    name: "Workstation Max"
+    description: >
+      Maximum capability for workstations with 24+ GB VRAM. Largest
+      models, all pipelines, full RAG parallelism, cascading inference,
+      and speculative decoding enabled.
+    icon: "server"
+    recommended_vram_gb: 24
+    recommended_ram_gb: 32
+    model_strategy: "largest"
+    pipelines:
+      - "direct"
+      - "consensus"
+      - "reasoning"
+      - "cascading"
+      - "speculative"
+    config_overrides:
+      smart_routing.enabled: true
+      consensus.enabled: true
+      cascading.enabled: true
+      speculative.enabled: true
+      rag.parallel_workers: 8
+      compression.enabled: false
+
+  bulbe_minimal:
+    name: "Bulbe Minimal"
+    description: >
+      Hardened minimal-surface configuration for Bulbe mode. Disables
+      consensus, speculative inference, and external plugins to reduce
+      attack surface. Uses smallest models for fastest inference.
+    icon: "shield"
+    recommended_vram_gb: 8
+    recommended_ram_gb: 12
+    model_strategy: "smallest"
+    pipelines:
+      - "direct"
+    config_overrides:
+      smart_routing.enabled: false
+      consensus.enabled: false
+      speculative.enabled: false
+      cascading.enabled: false
+      plugins.enabled: false
+      rag.parallel_workers: 1
+      web_search.enabled: false

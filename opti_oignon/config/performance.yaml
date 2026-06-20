@@ -1,0 +1,43 @@
+# Performance Monitor configuration (S72)
+# Real-time metrics collection and drift detection
+
+enabled: true
+
+# How long to keep raw metrics (days)
+retention_days: 7
+
+# Rolling window for throughput/latency calculations (seconds)
+default_window_seconds: 300
+
+# Drift detection settings
+drift:
+  # Window for "recent" metrics comparison (seconds)
+  window_seconds: 3600
+  # Baseline window (seconds) - longer period for comparison
+  baseline_window_seconds: 86400
+  # Threshold for flagging drift (0.3 = 30% change)
+  threshold: 0.3
+
+# Recommendation rules
+# Each rule: metric, condition, threshold, message
+recommendation_rules:
+  - metric: latency_p95
+    condition: gt
+    threshold: 5000
+    message: "Model {model} p95 latency exceeds 5s — consider switching to a faster model"
+  - metric: latency_drift
+    condition: gt
+    threshold: 0.4
+    message: "Model {model} latency increased by {value:.0%} — check model health or load"
+  - metric: quality_drift
+    condition: lt
+    threshold: -0.2
+    message: "Model {model} quality dropped by {value:.0%} — review recent outputs"
+  - metric: utilization
+    condition: gt
+    threshold: 0.7
+    message: "Model {model} handles {value:.0%} of requests — consider load balancing"
+  - metric: error_rate
+    condition: gt
+    threshold: 0.1
+    message: "Model {model} error rate at {value:.0%} — check model availability"

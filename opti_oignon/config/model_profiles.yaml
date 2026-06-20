@@ -1,0 +1,385 @@
+# =============================================================================
+# OPTI-OIGNON v1.5.8 -- MODEL PROFILES (S54)
+# =============================================================================
+# Capability profiles for each Ollama model.
+# Used by the Smart Router for automatic per-step model selection.
+#
+# Fields:
+#   display_name       -- Human-readable name for the UI
+#   capabilities       -- General capabilities [code, reasoning, general, ...]
+#   strengths          -- Specific strong points
+#   weaknesses         -- Known weak points
+#   context_window     -- Context window size (tokens)
+#   speed_tier         -- fast | medium | slow
+#   quality_tier       -- high | medium | low
+#   recommended_for    -- Recommended task types
+#   not_recommended_for-- Task types to avoid
+#   task_scores        -- Numeric score per task type (0.0-1.0) for smart routing
+# =============================================================================
+
+profiles:
+
+  # ---------------------------------------------------------------------------
+  # QWEN3 CODER -- Primary code model
+  # ---------------------------------------------------------------------------
+  qwen3-coder:30b:
+    display_name: "Qwen3 Coder 30B"
+    capabilities: [code, reasoning, tool_use]
+    strengths: [python, r, javascript, debugging, code_review, refactoring, linux_commands]
+    weaknesses: [creative_writing, translation]
+    context_window: 262144
+    speed_tier: medium
+    quality_tier: high
+    recommended_for: [code_python, code_r, code_javascript, debug, debug_python, debug_r, refactor, linux, tool_use]
+    not_recommended_for: [creative_writing, translation, poetry]
+    task_scores:
+      code_python: 0.95
+      code_r: 0.90
+      code_javascript: 0.88
+      debug: 0.92
+      debug_python: 0.93
+      debug_r: 0.88
+      refactor: 0.90
+      code_verify: 0.92
+      tool_use: 0.85
+      linux: 0.85
+      general: 0.55
+      reasoning: 0.65
+      analysis: 0.60
+
+  # ---------------------------------------------------------------------------
+  # QWEN3 CODER NEXT -- Experimental variant
+  # ---------------------------------------------------------------------------
+  qwen3-coder-next:latest:
+    display_name: "Qwen3 Coder Next"
+    capabilities: [code, reasoning]
+    strengths: [python, complex_algorithms, architecture]
+    weaknesses: [speed, stability]
+    context_window: 262144
+    speed_tier: slow
+    quality_tier: high
+    recommended_for: [code_python, architecture, complex_code]
+    not_recommended_for: [quick_answer, chat]
+    task_scores:
+      code_python: 0.93
+      architecture: 0.90
+      complex_code: 0.92
+      code_verify: 0.90
+      debug: 0.85
+      refactor: 0.88
+      reasoning: 0.70
+      general: 0.45
+
+  # ---------------------------------------------------------------------------
+  # QWEN3 -- Primary general purpose
+  # ---------------------------------------------------------------------------
+  qwen3:32b:
+    display_name: "Qwen3 32B"
+    capabilities: [general, reasoning, multilingual, creative]
+    strengths: [instruction_following, explanation, analysis, scientific_writing, french, english]
+    weaknesses: []
+    context_window: 262144
+    speed_tier: medium
+    quality_tier: high
+    recommended_for: [explanation, analysis, general, scientific_writing, planning, simple_question, summary, unknown]
+    not_recommended_for: []
+    task_scores:
+      general: 0.90
+      explanation: 0.92
+      analysis: 0.88
+      scientific_writing: 0.90
+      planning: 0.85
+      planning_deep: 0.75
+      simple_question: 0.85
+      summary: 0.88
+      quick_answer: 0.80
+      reasoning: 0.75
+      code_python: 0.60
+      tool_use: 0.70
+      creative_writing: 0.75
+
+  # ---------------------------------------------------------------------------
+  # QWEN3.5 -- Premium general purpose
+  # ---------------------------------------------------------------------------
+  qwen3.5:35b:
+    display_name: "Qwen3.5 35B"
+    capabilities: [general, reasoning, multilingual, creative, long_context]
+    strengths: [complex_reasoning, nuanced_analysis, long_form_writing, instruction_following]
+    weaknesses: [speed]
+    context_window: 262144
+    speed_tier: slow
+    quality_tier: high
+    recommended_for: [planning_deep, complex_analysis, scientific_writing, creative_writing, reasoning]
+    not_recommended_for: [quick_answer]
+    task_scores:
+      planning_deep: 0.92
+      complex_analysis: 0.93
+      scientific_writing: 0.92
+      creative_writing: 0.88
+      reasoning: 0.90
+      analysis: 0.90
+      explanation: 0.88
+      general: 0.82
+      summary: 0.85
+      code_python: 0.55
+      quick_answer: 0.40
+
+  # ---------------------------------------------------------------------------
+  # DEEPSEEK-R1 -- Advanced reasoning
+  # ---------------------------------------------------------------------------
+  deepseek-r1:32b:
+    display_name: "DeepSeek R1 32B"
+    capabilities: [reasoning, code]
+    strengths: [chain_of_thought, mathematical_reasoning, complex_problems, step_by_step]
+    weaknesses: [speed, instruction_following, hallucination_prone]
+    context_window: 131072
+    speed_tier: slow
+    quality_tier: high
+    recommended_for: [planning_deep, mathematical, proof, complex_analysis, reasoning]
+    not_recommended_for: [quick_answer, chat, simple_question, translation]
+    task_scores:
+      reasoning: 0.95
+      mathematical: 0.95
+      planning_deep: 0.90
+      complex_analysis: 0.88
+      proof: 0.92
+      code_python: 0.65
+      debug: 0.60
+      general: 0.40
+      quick_answer: 0.15
+
+  # ---------------------------------------------------------------------------
+  # NEMOTRON 3 NANO -- Fast model
+  # ---------------------------------------------------------------------------
+  nemotron-3-nano:30b:
+    display_name: "Nemotron 3 Nano 30B"
+    capabilities: [general, fast]
+    strengths: [speed, general_knowledge, short_answers, chat]
+    weaknesses: [complex_reasoning, long_form, code_quality]
+    context_window: 1048576
+    speed_tier: fast
+    quality_tier: medium
+    recommended_for: [quick_answer, chat, translation, simple_question, summary]
+    not_recommended_for: [complex_code, planning_deep, scientific_writing]
+    task_scores:
+      quick_answer: 0.90
+      chat: 0.85
+      simple_question: 0.88
+      translation: 0.75
+      summary: 0.72
+      general: 0.70
+      code_python: 0.35
+      reasoning: 0.30
+      planning_deep: 0.20
+
+  # ---------------------------------------------------------------------------
+  # QWEN3 VL -- Vision + Language
+  # ---------------------------------------------------------------------------
+  qwen3-vl:32b:
+    display_name: "Qwen3 VL 32B"
+    capabilities: [general, vision, multilingual]
+    strengths: [image_analysis, visual_qa, ocr, diagram_understanding]
+    weaknesses: [speed, code]
+    context_window: 32768
+    speed_tier: slow
+    quality_tier: high
+    recommended_for: [vision, image_analysis, visual_qa, ocr]
+    not_recommended_for: [code_python, code_r, debug]
+    task_scores:
+      vision: 0.95
+      image_analysis: 0.95
+      visual_qa: 0.92
+      ocr: 0.90
+      general: 0.55
+      explanation: 0.55
+      code_python: 0.25
+
+  # ---------------------------------------------------------------------------
+  # LLAVA -- Vision + Language (lightweight)
+  # ---------------------------------------------------------------------------
+  llava:13b:
+    display_name: "LLaVA 13B"
+    capabilities: [vision, general]
+    strengths: [image_description, visual_qa, image_captioning]
+    weaknesses: [code, complex_reasoning, multilingual]
+    context_window: 4096
+    speed_tier: medium
+    quality_tier: medium
+    recommended_for: [vision, image_analysis, visual_qa]
+    not_recommended_for: [code_python, code_r, debug, scientific_writing]
+    task_scores:
+      vision: 0.80
+      image_analysis: 0.78
+      visual_qa: 0.75
+      general: 0.40
+      code_python: 0.15
+
+  # ---------------------------------------------------------------------------
+  # LLAMA 3.1 -- General purpose Meta
+  # ---------------------------------------------------------------------------
+  llama3.1:8b:
+    display_name: "Llama 3.1 8B"
+    capabilities: [general, fast]
+    strengths: [speed, instruction_following, chat]
+    weaknesses: [complex_reasoning, long_form, limited_knowledge]
+    context_window: 131072
+    speed_tier: fast
+    quality_tier: low
+    recommended_for: [quick_answer, chat, simple_question]
+    not_recommended_for: [code_python, scientific_writing, planning_deep]
+    task_scores:
+      quick_answer: 0.82
+      chat: 0.78
+      simple_question: 0.80
+      general: 0.55
+      translation: 0.50
+      code_python: 0.25
+      reasoning: 0.20
+
+  # ---------------------------------------------------------------------------
+  # MISTRAL -- Versatile
+  # ---------------------------------------------------------------------------
+  mistral:7b:
+    display_name: "Mistral 7B"
+    capabilities: [general, fast, multilingual]
+    strengths: [speed, french, european_languages, chat]
+    weaknesses: [complex_reasoning, code_quality]
+    context_window: 32768
+    speed_tier: fast
+    quality_tier: low
+    recommended_for: [quick_answer, chat, translation, simple_question]
+    not_recommended_for: [code_python, planning_deep, complex_analysis]
+    task_scores:
+      quick_answer: 0.80
+      chat: 0.78
+      translation: 0.82
+      simple_question: 0.78
+      general: 0.55
+      code_python: 0.20
+      reasoning: 0.20
+
+  # ---------------------------------------------------------------------------
+  # GEMMA2 -- Google
+  # ---------------------------------------------------------------------------
+  gemma2:27b:
+    display_name: "Gemma 2 27B"
+    capabilities: [general, reasoning, code]
+    strengths: [instruction_following, analysis, balanced]
+    weaknesses: [creative_writing, french]
+    context_window: 8192
+    speed_tier: medium
+    quality_tier: medium
+    recommended_for: [analysis, explanation, general, code_python]
+    not_recommended_for: [creative_writing, long_context_tasks]
+    task_scores:
+      analysis: 0.75
+      explanation: 0.72
+      general: 0.70
+      code_python: 0.65
+      reasoning: 0.60
+      quick_answer: 0.65
+      debug: 0.55
+
+  # ---------------------------------------------------------------------------
+  # PHI-3 -- Microsoft
+  # ---------------------------------------------------------------------------
+  phi3:14b:
+    display_name: "Phi-3 14B"
+    capabilities: [general, reasoning, code]
+    strengths: [efficiency, reasoning, mathematics]
+    weaknesses: [creative_writing, multilingual]
+    context_window: 131072
+    speed_tier: fast
+    quality_tier: medium
+    recommended_for: [quick_answer, code_python, mathematical, reasoning]
+    not_recommended_for: [creative_writing, translation, french]
+    task_scores:
+      quick_answer: 0.78
+      code_python: 0.72
+      mathematical: 0.80
+      reasoning: 0.72
+      general: 0.62
+      debug: 0.60
+      analysis: 0.58
+
+  # ---------------------------------------------------------------------------
+  # CODESTRAL -- Mistral Code
+  # ---------------------------------------------------------------------------
+  codestral:22b:
+    display_name: "Codestral 22B"
+    capabilities: [code]
+    strengths: [code_completion, code_generation, python, javascript]
+    weaknesses: [general_knowledge, chat, explanation]
+    context_window: 32768
+    speed_tier: medium
+    quality_tier: medium
+    recommended_for: [code_python, code_javascript, code_completion, refactor]
+    not_recommended_for: [chat, explanation, scientific_writing]
+    task_scores:
+      code_python: 0.82
+      code_javascript: 0.80
+      code_completion: 0.85
+      refactor: 0.78
+      code_verify: 0.78
+      debug: 0.70
+      general: 0.30
+      reasoning: 0.35
+
+  # ---------------------------------------------------------------------------
+  # STARCODER2 -- Specialized code
+  # ---------------------------------------------------------------------------
+  starcoder2:15b:
+    display_name: "StarCoder2 15B"
+    capabilities: [code, fast]
+    strengths: [code_completion, python, multiple_languages]
+    weaknesses: [general_knowledge, chat, reasoning]
+    context_window: 16384
+    speed_tier: fast
+    quality_tier: medium
+    recommended_for: [code_completion, code_python, code_r]
+    not_recommended_for: [chat, explanation, reasoning, scientific_writing]
+    task_scores:
+      code_completion: 0.82
+      code_python: 0.75
+      code_r: 0.70
+      code_verify: 0.72
+      debug: 0.55
+      general: 0.25
+      reasoning: 0.15
+
+  # ---------------------------------------------------------------------------
+  # NOMIC EMBED -- Embeddings (special)
+  # ---------------------------------------------------------------------------
+  mxbai-embed-large:
+    display_name: "MxBAI Embed Large"
+    capabilities: [embeddings]
+    strengths: [semantic_similarity, retrieval, clustering]
+    weaknesses: [generation, chat, code]
+    context_window: 8192
+    speed_tier: fast
+    quality_tier: high
+    recommended_for: [embeddings, semantic_search, rag]
+    not_recommended_for: [code_python, chat, explanation, generation]
+
+  # ---------------------------------------------------------------------------
+  # COMMAND-R -- Cohere RAG-optimized
+  # ---------------------------------------------------------------------------
+  command-r:35b:
+    display_name: "Command-R 35B"
+    capabilities: [general, reasoning, tool_use, long_context]
+    strengths: [rag, tool_use, grounded_generation, citations]
+    weaknesses: [code, speed]
+    context_window: 131072
+    speed_tier: slow
+    quality_tier: high
+    recommended_for: [rag, tool_use, grounded_qa, long_context_tasks]
+    not_recommended_for: [code_python, quick_answer]
+    task_scores:
+      tool_use: 0.90
+      rag: 0.92
+      grounded_qa: 0.88
+      general: 0.65
+      analysis: 0.70
+      reasoning: 0.65
+      code_python: 0.30
+      quick_answer: 0.30

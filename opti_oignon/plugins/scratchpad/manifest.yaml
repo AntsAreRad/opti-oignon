@@ -1,0 +1,31 @@
+name: scratchpad
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Persistent note-taking scratchpad. Save, list, search, and delete
+  notes via slash commands. Notes are stored in a local SQLite database
+  and displayed in a dedicated UI panel.
+entry_point: entry_point.py
+hooks:
+  - tool_call
+  - ui_panel
+dependencies: []
+permissions:
+  - conversation_read
+  - tool_register
+  - ui_panel_register
+  - filesystem_plugin_dir
+min_opti_version: "1.10.0"
+config_schema:
+  max_note_length:
+    type: integer
+    default: 2000
+    description: Maximum character length for a single note
+  max_notes:
+    type: integer
+    default: 500
+    description: Maximum number of stored notes
+  auto_tag:
+    type: boolean
+    default: true
+    description: Automatically extract keyword tags from note content

@@ -1,0 +1,35 @@
+# =============================================================================
+# OPTI-OIGNON v1.9.2 — BENCHMARK AUTO-TRIGGER CONFIG (S90)
+# =============================================================================
+# Automatic benchmark triggering when new models are pulled or updated.
+# STRICTLY OPT-IN: disabled by default. User must explicitly enable via
+# the UI toggle or API. Never runs benchmarks without user consent.
+# =============================================================================
+
+# Master switch — must be explicitly set to true by the user
+enabled: false
+
+# Polling interval in seconds for checking Ollama model list changes
+poll_interval_seconds: 120
+
+# Cooldown period in seconds — prevents re-triggering too soon
+cooldown_seconds: 1800
+
+# Profile to use for auto-triggered benchmark runs
+trigger_profile: "all_round"
+
+# Which models to auto-benchmark on detection:
+#   "all_new" — any newly detected or updated model
+#   or a list of specific model name patterns (e.g. ["qwen3:*", "deepseek-*"])
+trigger_models: "all_new"
+
+# Optional: refuse to trigger if system load average exceeds threshold
+# Set to 0 to disable the resource guard
+resource_guard_load_max: 0.0
+
+# Whether to run LLM-as-Judge evaluation on auto-triggered runs
+use_judge: false
+judge_model: ""
+
+# Maximum concurrent auto-triggered runs (always 1 for safety)
+max_concurrent_auto_runs: 1

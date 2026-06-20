@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 HISTORY - OPTI-OIGNON 1.0
 =========================
@@ -15,15 +14,15 @@ Features:
 Author: Léon
 """
 
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict, field
+import hashlib
+import json
+import logging
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-import json
-import hashlib
-import logging
+from typing import Any
 
-from .config import DATA_DIR, save_yaml, load_yaml
+from .config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +41,19 @@ class HistoryEntry:
     task_type: str
     model: str
     temperature: float
-    preset_used: Optional[str] = None
-    document: Optional[str] = None
+    preset_used: str | None = None
+    document: str | None = None
     duration_seconds: float = 0.0
-    rating: Optional[int] = None  # User rating 1-5
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict:
+    rating: int | None = None  # User rating 1-5
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, data: Dict) -> 'HistoryEntry':
+    def from_dict(cls, data: dict) -> 'HistoryEntry':
         """Create an entry from a dictionary."""
         return cls(
             id=data.get("id", ""),
@@ -72,7 +71,7 @@ class HistoryEntry:
             tags=data.get("tags", []),
             metadata=data.get("metadata", {}),
         )
-    
+
     def to_markdown(self) -> str:
         """Export entry to Markdown."""
         md = []
@@ -86,18 +85,18 @@ class HistoryEntry:
         if self.rating:
             md.append(f"**Rating:** {'⭐' * self.rating}")
         md.append("")
-        
+
         md.append("### Original Question")
         md.append("")
         md.append(self.question)
         md.append("")
-        
+
         if self.refined_question and self.refined_question != self.question:
             md.append("### Refined Question")
             md.append("")
             md.append(self.refined_question)
             md.append("")
-        
+
         if self.document:
             md.append("### Document Provided")
             md.append("")
@@ -107,19 +106,19 @@ class HistoryEntry:
                 md.append("... (truncated)")
             md.append("```")
             md.append("")
-        
+
         md.append("### Response")
         md.append("")
         md.append(self.response)
         md.append("")
-        
+
         if self.tags:
             md.append(f"**Tags:** {', '.join(self.tags)}")
             md.append("")
-        
+
         md.append("---")
         md.append("")
-        
+
         return "\n".join(md)
 
 
@@ -130,35 +129,35 @@ class HistoryEntry:
 class HistoryManager:
     """
     Conversation history manager.
-    
+
     Stores conversations in daily JSON files for
     easy navigation and export.
-    
+
     Usage:
         history = HistoryManager()
         entry_id = history.add(question="...", response="...", ...)
         entries = history.get_recent(10)
         history.export_markdown(entries, "export.md")
     """
-    
+
     def __init__(self):
         """Initialize the manager."""
         self._history_dir = DATA_DIR / "history"
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._index_file = self._history_dir / "index.json"
-        self._index: Dict[str, str] = {}  # id -> filename
+        self._index: dict[str, str] = {}  # id -> filename
         self._load_index()
-    
+
     def _load_index(self) -> None:
         """Load the entry index."""
         if self._index_file.exists():
             try:
-                with open(self._index_file, 'r', encoding='utf-8') as f:
+                with open(self._index_file, encoding='utf-8') as f:
                     self._index = json.load(f)
             except Exception as e:
                 logger.error(f"Error loading index: {e}")
                 self._index = {}
-    
+
     def _save_index(self) -> None:
         """Save the index."""
         try:
@@ -166,23 +165,23 @@ class HistoryManager:
                 json.dump(self._index, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving index: {e}")
-    
+
     def _get_daily_file(self, date: datetime = None) -> Path:
         """Return the file for a given date."""
         date = date or datetime.now()
         filename = f"history_{date.strftime('%Y-%m-%d')}.json"
         return self._history_dir / filename
-    
+
     def _generate_id(self, question: str) -> str:
         """Generate a unique ID for an entry."""
         timestamp = datetime.now().isoformat()
         content = f"{timestamp}:{question}"
         return hashlib.sha256(content.encode()).hexdigest()[:12]
-    
+
     # -------------------------------------------------------------------------
     # Adding entries
     # -------------------------------------------------------------------------
-    
+
     def add(
         self,
         question: str,
@@ -191,15 +190,15 @@ class HistoryManager:
         task_type: str,
         model: str,
         temperature: float = 0.5,
-        preset_used: Optional[str] = None,
-        document: Optional[str] = None,
+        preset_used: str | None = None,
+        document: str | None = None,
         duration_seconds: float = 0.0,
-        tags: List[str] = None,
-        metadata: Dict[str, Any] = None,
+        tags: list[str] = None,
+        metadata: dict[str, Any] = None,
     ) -> str:
         """
         Add an entry to history.
-        
+
         Args:
             question: Original question
             refined_question: Question after refinement
@@ -212,13 +211,13 @@ class HistoryManager:
             duration_seconds: Generation duration
             tags: Tags for search
             metadata: Additional metadata
-            
+
         Returns:
             ID of the created entry
         """
         entry_id = self._generate_id(question)
         timestamp = datetime.now().isoformat()
-        
+
         entry = HistoryEntry(
             id=entry_id,
             timestamp=timestamp,
@@ -234,87 +233,87 @@ class HistoryManager:
             tags=tags or [],
             metadata=metadata or {},
         )
-        
+
         # Save to daily file
         daily_file = self._get_daily_file()
         entries = []
-        
+
         if daily_file.exists():
             try:
-                with open(daily_file, 'r', encoding='utf-8') as f:
+                with open(daily_file, encoding='utf-8') as f:
                     entries = json.load(f)
             except:
                 entries = []
-        
+
         entries.append(entry.to_dict())
-        
+
         with open(daily_file, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=2, ensure_ascii=False)
-        
+
         # Update index
         self._index[entry_id] = daily_file.name
         self._save_index()
-        
+
         logger.debug(f"Entry added: {entry_id}")
         return entry_id
-    
+
     # -------------------------------------------------------------------------
     # Retrieving entries
     # -------------------------------------------------------------------------
-    
-    def get(self, entry_id: str) -> Optional[HistoryEntry]:
+
+    def get(self, entry_id: str) -> HistoryEntry | None:
         """
         Get an entry by its ID.
-        
+
         Args:
             entry_id: Entry ID
-            
+
         Returns:
             The entry or None if not found
         """
         filename = self._index.get(entry_id)
         if not filename:
             return None
-        
+
         filepath = self._history_dir / filename
         if not filepath.exists():
             return None
-        
+
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 entries = json.load(f)
-            
+
             for entry_data in entries:
                 if entry_data.get("id") == entry_id:
                     return HistoryEntry.from_dict(entry_data)
         except Exception as e:
             logger.error(f"Error reading entry {entry_id}: {e}")
-        
+
         return None
-    
-    def get_recent(self, n: int = 10) -> List[HistoryEntry]:
+
+    def get_recent(self, n: int = 10) -> list[HistoryEntry]:
         """
         Get the n most recent entries.
-        
+
         Args:
             n: Number of entries to retrieve
-            
+
         Returns:
             List of entries ordered from most recent to oldest
         """
         all_entries = []
-        
+
         # List files by date (most recent first)
         files = sorted(self._history_dir.glob("history_*.json"), reverse=True)
-        
+
         for filepath in files:
             if len(all_entries) >= n:
                 break
-            
+
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding='utf-8') as f:
                     entries = json.load(f)
-                
+
                 # Add entries in reverse order (most recent first)
                 for entry_data in reversed(entries):
                     all_entries.append(HistoryEntry.from_dict(entry_data))
@@ -322,49 +321,49 @@ class HistoryManager:
                         break
             except Exception as e:
                 logger.error(f"Error reading {filepath}: {e}")
-        
+
         return all_entries
-    
-    def get_by_date(self, date: datetime) -> List[HistoryEntry]:
+
+    def get_by_date(self, date: datetime) -> list[HistoryEntry]:
         """
         Get all entries for a given date.
-        
+
         Args:
             date: Date to search
-            
+
         Returns:
             List of entries for that date
         """
         filepath = self._get_daily_file(date)
         if not filepath.exists():
             return []
-        
+
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 entries = json.load(f)
             return [HistoryEntry.from_dict(e) for e in entries]
         except Exception as e:
             logger.error(f"Error reading {filepath}: {e}")
             return []
-    
-    def get_by_task(self, task_type: str, limit: int = 50) -> List[HistoryEntry]:
+
+    def get_by_task(self, task_type: str, limit: int = 50) -> list[HistoryEntry]:
         """
         Get entries for a task type.
-        
+
         Args:
             task_type: Task type to filter
             limit: Maximum number of entries
-            
+
         Returns:
             List of matching entries
         """
         results = []
-        
+
         for filepath in sorted(self._history_dir.glob("history_*.json"), reverse=True):
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding='utf-8') as f:
                     entries = json.load(f)
-                
+
                 for entry_data in reversed(entries):
                     if entry_data.get("task_type") == task_type:
                         results.append(HistoryEntry.from_dict(entry_data))
@@ -372,28 +371,28 @@ class HistoryManager:
                             return results
             except:
                 continue
-        
+
         return results
-    
-    def search(self, query: str, limit: int = 20) -> List[HistoryEntry]:
+
+    def search(self, query: str, limit: int = 20) -> list[HistoryEntry]:
         """
         Search in history.
-        
+
         Args:
             query: Search term
             limit: Maximum number of results
-            
+
         Returns:
             List of matching entries
         """
         query = query.lower()
         results = []
-        
+
         for filepath in sorted(self._history_dir.glob("history_*.json"), reverse=True):
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding='utf-8') as f:
                     entries = json.load(f)
-                
+
                 for entry_data in reversed(entries):
                     # Search in question, response and tags
                     searchable = " ".join([
@@ -401,73 +400,73 @@ class HistoryManager:
                         entry_data.get("response", ""),
                         " ".join(entry_data.get("tags", [])),
                     ]).lower()
-                    
+
                     if query in searchable:
                         results.append(HistoryEntry.from_dict(entry_data))
                         if len(results) >= limit:
                             return results
             except:
                 continue
-        
+
         return results
-    
+
     # -------------------------------------------------------------------------
     # Modifying entries
     # -------------------------------------------------------------------------
-    
+
     def rate(self, entry_id: str, rating: int) -> bool:
         """
         Rate an entry (1-5 stars).
-        
+
         Args:
             entry_id: Entry ID
             rating: Rating from 1 to 5
-            
+
         Returns:
             True if successful
         """
         if rating < 1 or rating > 5:
             return False
-        
+
         filename = self._index.get(entry_id)
         if not filename:
             return False
-        
+
         filepath = self._history_dir / filename
         if not filepath.exists():
             return False
-        
+
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 entries = json.load(f)
-            
+
             for entry in entries:
                 if entry.get("id") == entry_id:
                     entry["rating"] = rating
                     break
-            
+
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, indent=2, ensure_ascii=False)
-            
+
             return True
         except Exception as e:
             logger.error(f"Rating error: {e}")
             return False
-    
+
     def add_tag(self, entry_id: str, tag: str) -> bool:
         """Add a tag to an entry."""
         filename = self._index.get(entry_id)
         if not filename:
             return False
-        
+
         filepath = self._history_dir / filename
         if not filepath.exists():
             return False
-        
+
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 entries = json.load(f)
-            
+
             for entry in entries:
                 if entry.get("id") == entry_id:
                     tags = entry.get("tags", [])
@@ -475,60 +474,60 @@ class HistoryManager:
                         tags.append(tag)
                         entry["tags"] = tags
                     break
-            
+
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, indent=2, ensure_ascii=False)
-            
+
             return True
         except Exception as e:
             logger.error(f"Error adding tag: {e}")
             return False
-    
+
     def delete(self, entry_id: str) -> bool:
         """Delete an entry."""
         filename = self._index.get(entry_id)
         if not filename:
             return False
-        
+
         filepath = self._history_dir / filename
         if not filepath.exists():
             return False
-        
+
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 entries = json.load(f)
-            
+
             entries = [e for e in entries if e.get("id") != entry_id]
-            
+
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, indent=2, ensure_ascii=False)
-            
+
             del self._index[entry_id]
             self._save_index()
-            
+
             return True
         except Exception as e:
             logger.error(f"Deletion error: {e}")
             return False
-    
+
     # -------------------------------------------------------------------------
     # Export
     # -------------------------------------------------------------------------
-    
+
     def export_markdown(
-        self, 
-        entries: List[HistoryEntry], 
+        self,
+        entries: list[HistoryEntry],
         filepath: Path,
         title: str = "Opti-Oignon History Export"
     ) -> bool:
         """
         Export entries to Markdown.
-        
+
         Args:
             entries: List of entries to export
             filepath: Destination path
             title: Document title
-            
+
         Returns:
             True if successful
         """
@@ -542,40 +541,40 @@ class HistoryManager:
             md.append("")
             md.append("---")
             md.append("")
-            
+
             for entry in entries:
                 md.append(entry.to_markdown())
-            
+
             filepath.parent.mkdir(parents=True, exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write("\n".join(md))
-            
+
             logger.info(f"Markdown export: {filepath}")
             return True
         except Exception as e:
             logger.error(f"Export error: {e}")
             return False
-    
-    def export_json(self, entries: List[HistoryEntry], filepath: Path) -> bool:
+
+    def export_json(self, entries: list[HistoryEntry], filepath: Path) -> bool:
         """Export entries to JSON."""
         try:
             data = [entry.to_dict() for entry in entries]
-            
+
             filepath.parent.mkdir(parents=True, exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            
+
             logger.info(f"JSON export: {filepath}")
             return True
         except Exception as e:
             logger.error(f"Export error: {e}")
             return False
-    
+
     # -------------------------------------------------------------------------
     # Statistics
     # -------------------------------------------------------------------------
-    
-    def get_stats(self) -> Dict[str, Any]:
+
+    def get_stats(self) -> dict[str, Any]:
         """Return statistics about history."""
         total = 0
         by_task = {}
@@ -583,31 +582,31 @@ class HistoryManager:
         by_day = {}
         rated_sum = 0
         rated_count = 0
-        
+
         for filepath in self._history_dir.glob("history_*.json"):
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding='utf-8') as f:
                     entries = json.load(f)
-                
+
                 day = filepath.stem.replace("history_", "")
                 by_day[day] = len(entries)
-                
+
                 for entry in entries:
                     total += 1
-                    
+
                     task = entry.get("task_type", "unknown")
                     by_task[task] = by_task.get(task, 0) + 1
-                    
+
                     model = entry.get("model", "unknown")
                     by_model[model] = by_model.get(model, 0) + 1
-                    
+
                     rating = entry.get("rating")
                     if rating:
                         rated_sum += rating
                         rated_count += 1
             except:
                 continue
-        
+
         return {
             "total_entries": total,
             "by_task": by_task,
@@ -616,41 +615,41 @@ class HistoryManager:
             "average_rating": rated_sum / rated_count if rated_count else None,
             "rated_count": rated_count,
         }
-    
+
     def clear_old(self, days: int = 30) -> int:
         """
         Delete entries older than n days.
-        
+
         Args:
             days: Number of days to keep
-            
+
         Returns:
             Number of deleted entries
         """
         cutoff = datetime.now().timestamp() - (days * 86400)
         deleted = 0
-        
+
         for filepath in self._history_dir.glob("history_*.json"):
             # Extract date from filename
             try:
                 date_str = filepath.stem.replace("history_", "")
                 file_date = datetime.strptime(date_str, "%Y-%m-%d")
-                
+
                 if file_date.timestamp() < cutoff:
                     # Count entries before deletion
-                    with open(filepath, 'r', encoding='utf-8') as f:
+                    with open(filepath, encoding='utf-8') as f:
                         entries = json.load(f)
                     deleted += len(entries)
-                    
+
                     # Delete file
                     filepath.unlink()
                     logger.info(f"File deleted: {filepath.name}")
             except:
                 continue
-        
+
         # Clean index
         self._load_index()
-        
+
         return deleted
 
 
@@ -666,12 +665,12 @@ def add_entry(**kwargs) -> str:
     return history.add(**kwargs)
 
 
-def get_recent(n: int = 10) -> List[HistoryEntry]:
+def get_recent(n: int = 10) -> list[HistoryEntry]:
     """Convenience function to get recent entries."""
     return history.get_recent(n)
 
 
-def search_history(query: str) -> List[HistoryEntry]:
+def search_history(query: str) -> list[HistoryEntry]:
     """Convenience function to search history."""
     return history.search(query)
 
@@ -682,9 +681,9 @@ def search_history(query: str) -> List[HistoryEntry]:
 
 if __name__ == "__main__":
     print("=== History Test ===\n")
-    
+
     manager = HistoryManager()
-    
+
     # Add a test entry
     entry_id = manager.add(
         question="How to calculate the mean in R?",
@@ -697,15 +696,15 @@ if __name__ == "__main__":
         tags=["r", "statistics"],
     )
     print(f"Entry added: {entry_id}")
-    
+
     # Get recent entries
     recent = manager.get_recent(5)
     print(f"\n{len(recent)} recent entries:")
     for entry in recent:
         print(f"  [{entry.timestamp[:10]}] {entry.question[:50]}...")
-    
+
     # Stats
     stats = manager.get_stats()
-    print(f"\nStatistics:")
+    print("\nStatistics:")
     print(f"  Total: {stats['total_entries']} entries")
     print(f"  By task: {stats['by_task']}")

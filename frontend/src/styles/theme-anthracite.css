@@ -1,0 +1,48 @@
+/*
+ * theme-anthracite.css -- Anthracite preset (dark).
+ * Generated for S166 from the design-token contract (spec 7.3).
+ * Declares the full 38-token foundation schema.
+ */
+
+:root,
+html.dark,
+:root[data-oo-theme="anthracite"] {
+	--oo-bg-base: #1F1F22;
+	--oo-bg-surface: #27272A;
+	--oo-bg-elevated: #303034;
+	--oo-bg-overlay: #3A3A3E;
+	--oo-bg-subtle: #1A1A1D;
+	--oo-bg-hover: #34343A;
+	--oo-bg-active: #3E3E45;
+	--oo-fg-primary: #ECE9E3;
+	--oo-fg-secondary: #B5B1A9;
+	--oo-fg-tertiary: #928D85;
+	--oo-fg-muted: #8C8881;
+	--oo-fg-decorative: #4A4A4C;
+	--oo-fg-on-accent: #1F1F22;
+	--oo-bd-subtle: #2A2A2D;
+	--oo-bd-default: #2E2E32;
+	--oo-bd-strong: #48484C;
+	--oo-acc-50: #FDF6EE;
+	--oo-acc-100: #F8E8D4;
+	--oo-acc-200: #E8C9A0;
+	--oo-acc-300: #D4AC78;
+	--oo-acc-400: #C48838;
+	--oo-acc-500: #C48838;
+	--oo-acc-600: #A87030;
+	--oo-acc-700: #7D5636;
+	--oo-acc-800: #614328;
+	--oo-acc-900: #4A321E;
+	--oo-success: #86A189;
+	--oo-success-bg: rgba(134, 161, 137, 0.16);
+	--oo-success-bd: rgba(134, 161, 137, 0.24);
+	--oo-warning: #D2C0A0;
+	--oo-warning-bg: rgba(210, 192, 160, 0.16);
+	--oo-warning-bd: rgba(210, 192, 160, 0.24);
+	--oo-error: #D88679;
+	--oo-error-bg: rgba(216, 134, 121, 0.16);
+	--oo-error-bd: rgba(216, 134, 121, 0.24);
+	--oo-info: #8AABBF;
+	--oo-info-bg: rgba(138, 171, 191, 0.16);
+	--oo-info-bd: rgba(138, 171, 191, 0.24);
+}

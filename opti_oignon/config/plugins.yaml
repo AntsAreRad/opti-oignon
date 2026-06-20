@@ -1,0 +1,110 @@
+# Plugin system configuration (S101)
+# Controls plugin discovery, loading, sandbox, and lifecycle.
+
+# Enable/disable the entire plugin system
+enabled: true
+
+# Directory where plugins are stored (relative to DATA_DIR)
+plugins_dir: "plugins"
+
+# Auto-discover and load plugins on startup
+auto_discover: true
+
+# Auto-enable newly discovered built-in plugins
+auto_enable_builtin: true
+
+# Sandbox settings
+sandbox:
+  # Enable sandboxed execution (import + filesystem restrictions)
+  enabled: true
+
+  # Modules always blocked from plugin imports
+  blocked_imports:
+    - subprocess
+    - shutil
+    - ctypes
+    - multiprocessing
+    - signal
+    - resource
+    - pty
+    - fcntl
+    - termios
+
+  # Network modules blocked unless plugin has network_outbound permission
+  network_modules:
+    - socket
+    - http
+    - urllib
+    - requests
+    - httpx
+    - aiohttp
+
+# Hook execution settings
+hooks:
+  # Maximum execution time per hook in milliseconds (0 = no limit)
+  timeout_ms: 5000
+
+  # Continue executing remaining hooks if one fails
+  continue_on_error: true
+
+  # Log hook execution timings at debug level
+  log_timings: true
+
+# Built-in plugins (shipped with Opti-Oignon)
+builtin_plugins:
+  - calculator
+  - code_formatter
+  - citation_gen
+  - fact-checker
+  - chain-of-thought-enforcer
+  - scratchpad
+  - task-extractor
+  - auto-tldr
+  - code-guardian
+  - tone-shifter
+  - response-stats
+  - markdown-beautifier
+  - session-summarizer
+  - diff-tracker
+  - github-connector
+
+# Plugin limits
+limits:
+  # Maximum number of installed plugins
+  max_plugins: 50
+
+  # Maximum total hooks across all plugins
+  max_hooks: 200
+
+  # Maximum plugin directory size in MB
+  max_plugin_size_mb: 50
+
+# S143: Subprocess isolation settings
+subprocess:
+  # Execution mode: "auto" (try subprocess, fallback in-process),
+  # "subprocess" (force subprocess only), "inprocess" (legacy)
+  mode: "auto"
+
+  # Startup timeout: how long to wait for subprocess to become ready (seconds)
+  startup_timeout: 15.0
+
+  # Default hook call timeout (seconds)
+  hook_timeout: 10.0
+
+  # Watchdog interval: how often to check subprocess health (seconds)
+  watchdog_interval: 5.0
+
+  # Default resource limits (can be overridden per-plugin in manifest)
+  default_resource_limits:
+    cpu_time_seconds: 30
+    memory_bytes: 268435456   # 256 MB
+    max_file_descriptors: 64
+
+  # Plugin log capture
+  log:
+    # Directory for per-plugin log files (relative to DATA_DIR)
+    dir: "plugin_logs"
+    # Maximum log file size before rotation (bytes)
+    max_bytes: 5242880        # 5 MB
+    # Number of rotated backup files to keep
+    backup_count: 3

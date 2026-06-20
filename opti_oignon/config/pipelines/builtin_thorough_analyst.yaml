@@ -1,0 +1,21 @@
+# Pipeline: Thorough Analyst
+# Sequence pour l analyse approfondie avec validation croisee.
+# REASONING -> CONSENSUS -> SELF_CORRECT
+id: thorough-analyst
+name: Thorough Analyst
+description: >
+  Pipeline d analyse exhaustive. Raisonnement structure suivi
+  d un consensus multi-modele pour valider les conclusions,
+  puis auto-correction finale.
+steps:
+  - step_type: reasoning
+    label: Deep Analysis
+    parameters:
+      strategy: tree_of_thought
+  - step_type: consensus
+    label: Cross-Validation
+    parameters:
+      strategy: weighted_vote
+  - step_type: self_correct
+    label: Final Review
+    parameters: {}

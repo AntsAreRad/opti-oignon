@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 ANALYZER - OPTI-OIGNON 1.0
 ==========================
@@ -20,17 +19,17 @@ ENHANCED: Integration with preset keywords for automatic routing.
 Author: Léon
 """
 
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
-import logging
+from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
 # Avoid circular imports
 if TYPE_CHECKING:
-    from .presets import PresetManager, Preset
+    from .presets import PresetManager
 
 # =============================================================================
 # TASK TYPES
@@ -79,15 +78,15 @@ class AnalysisResult:
     confidence: float           # 0.0 to 1.0
     language: Language
     complexity: Complexity
-    keywords: List[str]         # Detected keywords
+    keywords: list[str]         # Detected keywords
     is_debug: bool              # Is this about debugging?
     is_code: bool               # Is this about code?
     suggested_model_type: str   # "code", "reasoning", "general", "quick"
     explanation: str            # Detection explanation (for debug)
-    suggested_preset_id: Optional[str] = None  # NEW: Suggested preset based on keywords
+    suggested_preset_id: str | None = None  # NEW: Suggested preset based on keywords
     preset_score: float = 0.0   # NEW: Score from preset matching
-    
-    def to_dict(self) -> Dict:
+
+    def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
             "task_type": self.task_type.value,
@@ -220,39 +219,39 @@ LINUX_PATTERNS = {
 class TaskAnalyzer:
     """
     Intelligent task analyzer.
-    
+
     Analyzes user text to determine task type, programming language,
     complexity, etc. Now with integration for preset keyword matching.
-    
+
     Usage:
         analyzer = TaskAnalyzer()
         result = analyzer.analyze("Why do I have an error with rowSums?")
         print(result.task_type)  # TaskType.DEBUG_R
         print(result.suggested_preset_id)  # "debug_r" (if matching preset found)
     """
-    
+
     def __init__(self):
         """Initialize the analyzer."""
         self._compile_patterns()
         self._preset_manager = None
-    
+
     def _compile_patterns(self):
         """Compile regex for better performance."""
         self._patterns = {
-            "r": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "r": {k: [re.compile(p, re.IGNORECASE) for p in v]
                   for k, v in R_PATTERNS.items()},
-            "python": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "python": {k: [re.compile(p, re.IGNORECASE) for p in v]
                        for k, v in PYTHON_PATTERNS.items()},
-            "debug": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "debug": {k: [re.compile(p, re.IGNORECASE) for p in v]
                       for k, v in DEBUG_PATTERNS.items()},
-            "writing": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "writing": {k: [re.compile(p, re.IGNORECASE) for p in v]
                         for k, v in WRITING_PATTERNS.items()},
-            "planning": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "planning": {k: [re.compile(p, re.IGNORECASE) for p in v]
                          for k, v in PLANNING_PATTERNS.items()},
-            "linux": {k: [re.compile(p, re.IGNORECASE) for p in v] 
+            "linux": {k: [re.compile(p, re.IGNORECASE) for p in v]
                       for k, v in LINUX_PATTERNS.items()},
         }
-    
+
     def _get_preset_manager(self) -> Optional['PresetManager']:
         """Get the preset manager (lazy loading to avoid circular imports)."""
         if self._preset_manager is None:
@@ -263,19 +262,19 @@ class TaskAnalyzer:
                 logger.warning("Could not import preset_manager")
                 return None
         return self._preset_manager
-    
-    def _score_patterns(self, text: str, patterns: Dict[str, List]) -> Tuple[float, List[str]]:
+
+    def _score_patterns(self, text: str, patterns: dict[str, list]) -> tuple[float, list[str]]:
         """
         Calculate score based on matched patterns.
-        
+
         Returns:
             (score, keywords_found)
         """
         score = 0.0
         keywords = []
-        
+
         weights = {"high": 3.0, "medium": 1.5, "low": 0.5, "complex": 2.0}
-        
+
         for level, pattern_list in patterns.items():
             weight = weights.get(level, 1.0)
             for pattern in pattern_list:
@@ -283,23 +282,23 @@ class TaskAnalyzer:
                 if matches:
                     score += weight * len(matches)
                     keywords.extend([m if isinstance(m, str) else m[0] for m in matches[:2]])
-        
+
         return score, list(set(keywords))[:5]  # Max 5 keywords
-    
-    def _score_with_presets(self, text: str) -> Tuple[Optional[str], float, int]:
+
+    def _score_with_presets(self, text: str) -> tuple[str | None, float, int]:
         """
         Score text against preset keywords.
-        
+
         Args:
             text: Text to analyze
-            
+
         Returns:
             (best_preset_id, weighted_score, match_count) or (None, 0, 0)
         """
         pm = self._get_preset_manager()
         if pm is None:
             return None, 0.0, 0
-        
+
         try:
             results = pm.find_by_keywords_with_scores(text, min_matches=1)
             if results:
@@ -307,25 +306,25 @@ class TaskAnalyzer:
                 return best_preset.id, score, matches
         except Exception as e:
             logger.warning(f"Error scoring with presets: {e}")
-        
+
         return None, 0.0, 0
-    
-    def _detect_language(self, text: str, document: Optional[str] = None) -> Language:
+
+    def _detect_language(self, text: str, document: str | None = None) -> Language:
         """Detect programming language."""
         # Score for each language
         r_score, _ = self._score_patterns(text + (document or ""), self._patterns["r"])
         py_score, _ = self._score_patterns(text + (document or ""), self._patterns["python"])
         linux_score, _ = self._score_patterns(text + (document or ""), self._patterns["linux"])
-        
+
         # Highest score wins
         scores = {"R": r_score, "Python": py_score, "Bash": linux_score}
         best = max(scores, key=scores.get)
-        
+
         if scores[best] < 1.0:  # Minimum threshold
             return Language.NONE
-        
+
         return Language[best.upper()] if best != "Bash" else Language.BASH
-    
+
     def _detect_complexity(self, text: str) -> Complexity:
         """Detect question complexity."""
         # Complexity indicators
@@ -336,55 +335,55 @@ class TaskAnalyzer:
             r"\bexplain\s+in\s+detail\b", r"\bétape\s+par\s+étape\b",
             r"\bstep\s+by\s+step\b", r"\bpour\s+et\s+contre\b", r"\bpros\s+and\s+cons\b",
         ]
-        
+
         simple_indicators = [
             r"\brapide\b", r"\bquick\b", r"\bcourt\b", r"\bshort\b",
             r"\bsimple\b", r"\bjuste\b", r"\bjust\b",
             r"^(qu'?est[- ]ce|c'?est quoi|comment|pourquoi|what|how|why)\b",
         ]
-        
+
         # Count indicators
         complex_count = sum(1 for p in complex_indicators if re.search(p, text, re.IGNORECASE))
         simple_count = sum(1 for p in simple_indicators if re.search(p, text, re.IGNORECASE))
-        
+
         # Text length as factor
         text_length = len(text.split())
-        
+
         if complex_count >= 2 or text_length > 100:
             return Complexity.COMPLEX
         elif simple_count >= 1 or text_length < 20:
             return Complexity.SIMPLE
         else:
             return Complexity.MEDIUM
-    
+
     def analyze(
-        self, 
-        text: str, 
-        document: Optional[str] = None,
-        force_task: Optional[str] = None,
+        self,
+        text: str,
+        document: str | None = None,
+        force_task: str | None = None,
         use_preset_keywords: bool = True,
     ) -> AnalysisResult:
         """
         Analyze a question/request to determine task type.
-        
+
         Args:
             text: User question
             document: Optional document/code content
             force_task: If specified, force this task type
             use_preset_keywords: Whether to check preset keywords (default: True)
-            
+
         Returns:
             AnalysisResult with all detected information
         """
         full_text = text + "\n" + (document or "")
-        
+
         # Check preset keywords first (if enabled)
         suggested_preset_id = None
         preset_score = 0.0
-        
+
         if use_preset_keywords and not force_task:
             suggested_preset_id, preset_score, _ = self._score_with_presets(full_text)
-        
+
         # If task forced
         if force_task:
             try:
@@ -404,76 +403,76 @@ class TaskAnalyzer:
                 )
             except ValueError:
                 logger.warning(f"Invalid forced task: {force_task}")
-        
+
         # Scores for each category
         scores = {}
         all_keywords = []
-        
+
         # R score
         r_score, r_kw = self._score_patterns(full_text, self._patterns["r"])
         scores["r"] = r_score
         all_keywords.extend(r_kw)
-        
+
         # Python score
         py_score, py_kw = self._score_patterns(full_text, self._patterns["python"])
         scores["python"] = py_score
         all_keywords.extend(py_kw)
-        
+
         # Debug score
         debug_score, debug_kw = self._score_patterns(full_text, self._patterns["debug"])
         scores["debug"] = debug_score
         all_keywords.extend(debug_kw)
-        
+
         # Writing score
         writing_score, writing_kw = self._score_patterns(full_text, self._patterns["writing"])
         scores["writing"] = writing_score
         all_keywords.extend(writing_kw)
-        
+
         # Planning score
         planning_score, planning_kw = self._score_patterns(full_text, self._patterns["planning"])
         scores["planning"] = planning_score
         all_keywords.extend(planning_kw)
-        
+
         # Linux score
         linux_score, linux_kw = self._score_patterns(full_text, self._patterns["linux"])
         scores["linux"] = linux_score
         all_keywords.extend(linux_kw)
-        
+
         # Determine if debug
         is_debug = debug_score >= 2.0
-        
+
         # Determine task type
         task_type, confidence, explanation = self._determine_task(scores, is_debug)
-        
+
         # Determine language
         language = self._detect_language(text, document)
-        
+
         # Adjust task_type if debug + language detected
         if is_debug:
             if language == Language.R:
                 task_type = TaskType.DEBUG_R
             elif language == Language.PYTHON:
                 task_type = TaskType.DEBUG_PYTHON
-        
+
         # Determine complexity
         complexity = self._detect_complexity(text)
-        
+
         # If high complexity and planning, use planning_deep
         if task_type == TaskType.PLANNING and complexity == Complexity.COMPLEX:
             task_type = TaskType.PLANNING_DEEP
             explanation += " + high complexity -> planning_deep"
-        
+
         # Determine if code
-        is_code = task_type in [TaskType.CODE_R, TaskType.CODE_PYTHON, 
+        is_code = task_type in [TaskType.CODE_R, TaskType.CODE_PYTHON,
                                 TaskType.DEBUG_R, TaskType.DEBUG_PYTHON]
-        
+
         # Deduplicate keywords
         unique_keywords = list(dict.fromkeys(all_keywords))[:5]
-        
+
         # Add preset info to explanation if found
         if suggested_preset_id and preset_score > 0:
             explanation += f" | Preset match: {suggested_preset_id} (score={preset_score:.1f})"
-        
+
         return AnalysisResult(
             task_type=task_type,
             confidence=min(confidence, 1.0),
@@ -487,12 +486,12 @@ class TaskAnalyzer:
             suggested_preset_id=suggested_preset_id,
             preset_score=preset_score,
         )
-    
+
     def _determine_task(
-        self, 
-        scores: Dict[str, float], 
+        self,
+        scores: dict[str, float],
         is_debug: bool
-    ) -> Tuple[TaskType, float, str]:
+    ) -> tuple[TaskType, float, str]:
         """Determine task type from scores."""
         # Find max score (excluding debug which is cross-cutting)
         max_category = max(
@@ -500,11 +499,11 @@ class TaskAnalyzer:
             key=lambda x: x[1],
             default=("unknown", 0)
         )
-        
+
         category, score = max_category
         total_score = sum(scores.values())
         confidence = score / max(total_score, 1) if total_score > 0 else 0
-        
+
         # Category -> TaskType mapping
         task_map = {
             "r": TaskType.CODE_R,
@@ -513,16 +512,16 @@ class TaskAnalyzer:
             "planning": TaskType.PLANNING,
             "linux": TaskType.LINUX,
         }
-        
+
         # Minimum threshold
         if score < 1.0:
             return TaskType.SIMPLE_QUESTION, 0.5, f"Score too low ({score:.1f}), simple question"
-        
+
         task_type = task_map.get(category, TaskType.SIMPLE_QUESTION)
         explanation = f"{category}={score:.1f}, conf={confidence:.2f}"
-        
+
         return task_type, confidence, explanation
-    
+
     def _get_model_type(self, task_type: TaskType) -> str:
         """Return recommended model type for a task."""
         model_type_map = {
@@ -547,7 +546,7 @@ class TaskAnalyzer:
 analyzer = TaskAnalyzer()
 
 
-def analyze(text: str, document: Optional[str] = None, force_task: Optional[str] = None) -> AnalysisResult:
+def analyze(text: str, document: str | None = None, force_task: str | None = None) -> AnalysisResult:
     """Convenience function to analyze a question."""
     return analyzer.analyze(text, document, force_task)
 
@@ -555,7 +554,7 @@ def analyze(text: str, document: Optional[str] = None, force_task: Optional[str]
 def detect_task(text: str) -> str:
     """
     Simply detect task type (backwards compatible).
-    
+
     Returns:
         Task type string (e.g., "code_r", "debug_python")
     """
@@ -563,10 +562,10 @@ def detect_task(text: str) -> str:
     return result.task_type.value
 
 
-def detect_with_preset(text: str, document: Optional[str] = None) -> Tuple[str, Optional[str], float]:
+def detect_with_preset(text: str, document: str | None = None) -> tuple[str, str | None, float]:
     """
     Detect task type with preset suggestion.
-    
+
     Returns:
         (task_type, suggested_preset_id, preset_score)
     """
@@ -605,7 +604,7 @@ def resolve_alias(task: str) -> str:
 
 if __name__ == "__main__":
     import sys
-    
+
     test_cases = [
         "How to calculate Shannon index in R?",
         "Error in rowSums(df): 'x' must be numeric",
@@ -618,13 +617,13 @@ if __name__ == "__main__":
         "Compare pros and cons of ggplot vs base R, detailed analysis",
         "Can you help with ggplot2 and dplyr for ecology analysis?",
     ]
-    
+
     if len(sys.argv) > 1:
         # Analyze the passed argument
         test_cases = [" ".join(sys.argv[1:])]
-    
+
     print("=== Analyzer Test (with Preset Integration) ===\n")
-    
+
     for test in test_cases:
         result = analyze(test)
         print(f"Question: {test[:60]}...")

@@ -1,0 +1,33 @@
+# Configuration du module de consensus multi-modele (S50)
+# Parametres pour les strategies de consensus entre modeles.
+
+consensus:
+  # Modeles par defaut pour le consensus (3 modeles diversifies)
+  default_models:
+    - "qwen3:32b"
+    - "deepseek-r1:32b"
+    - "nemotron-3-nano:30b"
+
+  # Strategie par defaut: best_of_n, weighted_vote, llm_merge
+  strategy: "best_of_n"
+
+  # Modele juge pour la strategie llm_merge
+  judge_model: "qwen3:32b"
+
+  # Nombre maximum de modeles en parallele
+  max_models: 3
+
+  # Timeout par modele en secondes
+  timeout_per_model: 60
+
+  # Seuil minimum d'accord (Jaccard) pour valider le consensus
+  min_agreement_threshold: 0.3
+
+  # Temperature utilisee pour les queries de consensus
+  temperature: 0.3
+
+  # Poids par tier de qualite (pour weighted_vote)
+  quality_weights:
+    high: 1.0
+    medium: 0.7
+    low: 0.4

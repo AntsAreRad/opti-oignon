@@ -1,0 +1,68 @@
+/*
+ * density.css -- per-density type/spacing overrides (S166).
+ * html.oo-density-{compact|comfortable|spacious}.
+ * Default (no class) = comfortable values in tokens.css.
+ */
+
+html.oo-density-compact {
+	--oo-text-2xs: calc(11px * var(--oo-type-scale, 1));
+	--oo-text-xs: calc(12px * var(--oo-type-scale, 1));
+	--oo-text-sm: calc(13px * var(--oo-type-scale, 1));
+	--oo-text-base: calc(14px * var(--oo-type-scale, 1));
+	--oo-text-lg: calc(16px * var(--oo-type-scale, 1));
+	--oo-text-xl: calc(18px * var(--oo-type-scale, 1));
+	--oo-text-2xl: calc(22px * var(--oo-type-scale, 1));
+	--oo-text-3xl: calc(26px * var(--oo-type-scale, 1));
+	--oo-space-0: 0;
+	--oo-space-1: 2px;
+	--oo-space-2: 4px;
+	--oo-space-3: 6px;
+	--oo-space-4: 8px;
+	--oo-space-5: 12px;
+	--oo-space-6: 16px;
+	--oo-space-7: 20px;
+	--oo-space-8: 24px;
+	--oo-space-9: 32px;
+}
+
+html.oo-density-comfortable {
+	--oo-text-2xs: calc(12px * var(--oo-type-scale, 1));
+	--oo-text-xs: calc(13px * var(--oo-type-scale, 1));
+	--oo-text-sm: calc(14px * var(--oo-type-scale, 1));
+	--oo-text-base: calc(15px * var(--oo-type-scale, 1));
+	--oo-text-lg: calc(17px * var(--oo-type-scale, 1));
+	--oo-text-xl: calc(20px * var(--oo-type-scale, 1));
+	--oo-text-2xl: calc(24px * var(--oo-type-scale, 1));
+	--oo-text-3xl: calc(30px * var(--oo-type-scale, 1));
+	--oo-space-0: 0;
+	--oo-space-1: 3px;
+	--oo-space-2: 6px;
+	--oo-space-3: 8px;
+	--oo-space-4: 12px;
+	--oo-space-5: 16px;
+	--oo-space-6: 20px;
+	--oo-space-7: 24px;
+	--oo-space-8: 32px;
+	--oo-space-9: 40px;
+}
+
+html.oo-density-spacious {
+	--oo-text-2xs: calc(12px * var(--oo-type-scale, 1));
+	--oo-text-xs: calc(13px * var(--oo-type-scale, 1));
+	--oo-text-sm: calc(15px * var(--oo-type-scale, 1));
+	--oo-text-base: calc(16px * var(--oo-type-scale, 1));
+	--oo-text-lg: calc(18px * var(--oo-type-scale, 1));
+	--oo-text-xl: calc(22px * var(--oo-type-scale, 1));
+	--oo-text-2xl: calc(28px * var(--oo-type-scale, 1));
+	--oo-text-3xl: calc(34px * var(--oo-type-scale, 1));
+	--oo-space-0: 0;
+	--oo-space-1: 4px;
+	--oo-space-2: 8px;
+	--oo-space-3: 12px;
+	--oo-space-4: 16px;
+	--oo-space-5: 20px;
+	--oo-space-6: 24px;
+	--oo-space-7: 32px;
+	--oo-space-8: 40px;
+	--oo-space-9: 48px;
+}

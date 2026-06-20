@@ -1,0 +1,89 @@
+# =============================================================================
+# Red Team Audit Configuration — Opti-Oignon S147
+# =============================================================================
+# LLM-powered adversarial testing of defense layers.
+# All generation is 100% local via Ollama.
+
+enabled: true
+
+# --- LLM Model Settings ---
+model: "llama3.2"
+ollama_url: "http://127.0.0.1:11434"
+
+# --- Attack Generation ---
+categories:
+  - prompt_injection
+  - jailbreak
+  - rag_poisoning
+  - data_exfiltration
+  - tool_hijack
+  - delimiter_escape
+  - off_topic
+  - encoding_bypass
+
+attacks_per_category: 10
+min_attack_length: 10
+max_attack_length: 2000
+batch_size: 5
+
+# Seed fallback: use curated seeds when Ollama is unavailable
+seed_fallback: true
+seed_file: "data/redteam_seeds.json"
+
+# --- Obfuscation Strategies ---
+strategies:
+  - none
+  - base64_encode
+  - rot13
+  - leetspeak
+  - roleplay
+  - few_shot
+  - payload_splitting
+  - char_swap
+  # - multilingual  # Requires Ollama; enable if model supports it
+
+# Strategy chains: apply multiple transforms in sequence
+strategy_chains:
+  - [base64_encode, roleplay]
+  - [rot13, few_shot]
+  - [leetspeak, payload_splitting]
+
+# --- Target Modules ---
+targets:
+  - rag_sanitizer
+  - rag_augmenter
+  - search_sanitizer
+  - pii_sanitizer
+  - sandbox
+  # - chat  # End-to-end testing (full in S148)
+
+# --- Scoring Thresholds ---
+bypass_threshold: 0.7   # Attack considered successful above this
+flag_threshold: 0.3     # Attack flagged as suspicious above this
+
+# --- Output ---
+output_dir: "data/redteam_results"
+save_attacks: true
+save_results: true
+
+# --- Per-Category Toggles ---
+# Override to disable specific categories without removing them
+category_toggles:
+  prompt_injection: true
+  jailbreak: true
+  rag_poisoning: true
+  data_exfiltration: true
+  tool_hijack: true
+  delimiter_escape: true
+  off_topic: true
+  encoding_bypass: true
+
+# --- S158: Automated Security Scheduling ---
+scheduler:
+  enabled: true
+  interval: weekly          # daily | weekly | on-deploy
+  quiet_hours_start: "00:00"
+  quiet_hours_end: "06:00"
+  auto_accept_suggestions: false
+  dep_audit_interval: weekly  # daily | weekly | on-deploy
+  dep_severity_threshold: high  # low | medium | high | critical

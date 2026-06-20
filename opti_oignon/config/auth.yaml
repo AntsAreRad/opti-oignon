@@ -1,0 +1,22 @@
+db_path: data/auth.db
+jwt:
+  access_token_expiry_minutes: 60
+  algorithm: HS512
+  refresh_token_expiry_days: 30
+  secret_key: ''
+password:
+  bcrypt_rounds: 12
+  hash_algorithm: bcrypt
+  min_length: 8
+  require_digit: false
+  require_special: false
+  require_uppercase: false
+session:
+  invalidate_on_password_change: true
+  max_sessions: 5
+single_user_mode: true
+users:
+  allow_registration: true
+  default_role: user
+  max_users: 0
+  require_email: false

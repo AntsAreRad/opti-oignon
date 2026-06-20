@@ -1,0 +1,46 @@
+/*
+ * theme-high-contrast.css -- High Contrast preset (dark).
+ * Generated for S166 from the design-token contract (spec 7.3).
+ * Declares the full 38-token foundation schema.
+ */
+
+:root[data-oo-theme="high-contrast"] {
+	--oo-bg-base: #000000;
+	--oo-bg-surface: #0A0A0A;
+	--oo-bg-elevated: #141414;
+	--oo-bg-overlay: #1E1E1E;
+	--oo-bg-subtle: #000000;
+	--oo-bg-hover: #1A1A1A;
+	--oo-bg-active: #242424;
+	--oo-fg-primary: #FFFFFF;
+	--oo-fg-secondary: #D6D6D6;
+	--oo-fg-tertiary: #B8B8B8;
+	--oo-fg-muted: #A8A8A8;
+	--oo-fg-decorative: #6A6A6A;
+	--oo-fg-on-accent: #000000;
+	--oo-bd-subtle: #2A2A2A;
+	--oo-bd-default: #3A3A3A;
+	--oo-bd-strong: #6A6A6A;
+	--oo-acc-50: #FFF4E5;
+	--oo-acc-100: #FFEACB;
+	--oo-acc-200: #FFDDAC;
+	--oo-acc-300: #FFCE87;
+	--oo-acc-400: #FFBE63;
+	--oo-acc-500: #FFB347;
+	--oo-acc-600: #D6963C;
+	--oo-acc-700: #AD7A30;
+	--oo-acc-800: #855D25;
+	--oo-acc-900: #61441B;
+	--oo-success: #7CE07C;
+	--oo-success-bg: rgba(124, 224, 124, 0.16);
+	--oo-success-bd: rgba(124, 224, 124, 0.24);
+	--oo-warning: #FFD27A;
+	--oo-warning-bg: rgba(255, 210, 122, 0.16);
+	--oo-warning-bd: rgba(255, 210, 122, 0.24);
+	--oo-error: #FF8A7A;
+	--oo-error-bg: rgba(255, 138, 122, 0.16);
+	--oo-error-bd: rgba(255, 138, 122, 0.24);
+	--oo-info: #8FD0FF;
+	--oo-info-bg: rgba(143, 208, 255, 0.16);
+	--oo-info-bd: rgba(143, 208, 255, 0.24);
+}

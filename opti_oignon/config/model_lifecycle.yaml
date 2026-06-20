@@ -1,0 +1,34 @@
+# Model Lifecycle Management — Opti-Oignon S112
+# Pull, delete, update models via Ollama API with progress tracking.
+
+enabled: true
+
+# Ollama API base URL (used for pull/delete/show operations).
+ollama_base_url: "http://localhost:11434"
+
+# Pull settings.
+pull:
+  # Maximum concurrent pull jobs.
+  max_concurrent_pulls: 2
+  # Timeout for pull progress polling (seconds). 0 = no timeout.
+  progress_poll_interval_s: 1.0
+  # Auto-cleanup: remove partial downloads on failure.
+  cleanup_on_failure: true
+
+# Update check settings.
+update_check:
+  # How often to auto-check for newer model versions (seconds). 0 = disabled.
+  auto_check_interval_s: 0
+  # Include model digest comparison for staleness detection.
+  compare_digests: true
+
+# Model aliases — user-friendly names mapped to full model identifiers.
+# Example:
+#   aliases:
+#     fast: "qwen2.5:0.5b"
+#     default: "llama3.1:8b"
+#     big: "deepseek-v3:latest"
+aliases: {}
+
+# Stale model threshold: models not used in this many days are flagged.
+stale_threshold_days: 30

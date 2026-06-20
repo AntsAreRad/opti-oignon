@@ -1,0 +1,27 @@
+# Configuration du moteur de raisonnement (S49)
+# Parametres pour les strategies CoT, Tree-of-Thought, et Self-Consistency.
+
+reasoning:
+  # Decompose-and-Solve
+  max_sub_steps: 5             # Nombre max de sous-etapes
+
+  # Tree-of-Thought
+  tree_branches: 3             # Nombre de branches a explorer
+
+  # Self-Consistency
+  self_consistency_runs: 3     # Nombre d'executions paralleles
+  temperature_variance: 0.1    # Ecart de temperature entre les runs
+
+  # General
+  base_temperature: 0.3        # Temperature de base pour le raisonnement
+  min_complexity_for_reasoning: "complex"  # Seuil de complexite: "simple", "moderate", "complex"
+  timeout_per_step: 60         # Timeout par etape en secondes
+
+  # Strategy used by the live reasoning pipeline when the caller does not
+  # force one: "decompose", "tree_of_thought" or "self_consistency"
+  # (RSN-04, S192)
+  default_strategy: "decompose"
+
+  # Modeles specifiques (null = utiliser le modele du routeur)
+  decompose_model: null        # Ex: "qwen3:32b"
+  evaluate_model: null         # Ex: "nemotron-3-nano:30b"

@@ -1,0 +1,44 @@
+# Token Budget Configuration — Opti-Oignon S65
+# ==============================================
+# Controls how the context window is divided for prompt assembly.
+# Each ratio is a fraction of the total context window.
+
+# Budget allocation ratios (must sum to 1.0)
+# When fingerprint is active, its budget is carved from history.
+allocation:
+  system_ratio: 0.10       # System prompt (task template + instructions)
+  project_ratio: 0.25      # RAG-injected project context
+  history_ratio: 0.40      # Conversation history
+  user_ratio: 0.10         # Current user message + document
+  reserve_ratio: 0.15      # Generation headroom
+  fingerprint_ratio: 0.025 # Session fingerprint (S75, ~200 tokens on 8K)
+
+# Context window cache settings
+cache:
+  ttl_seconds: 3600        # 1 hour TTL for ollama.show() results
+  max_entries: 50           # Max cached model entries
+
+# Fallback context windows when ollama.show() is unavailable
+fallback_context_windows:
+  "qwen3:32b": 32768
+  "qwen3-coder:30b": 32768
+  "deepseek-r1:32b": 32768
+  "nemotron-3-nano:30b": 32768
+  "qwen3:8b": 8192
+  "qwen3:4b": 8192
+  "llama3:8b": 8192
+  "phi3:mini": 4096
+  "gemma2:9b": 8192
+  "codellama:13b": 16384
+  "starcoder2:15b": 16384
+
+# Ultimate fallback when model is completely unknown
+default_context_window: 8192
+
+# Minimum budget floors (tokens) — prevents any section from being zero
+minimum_budgets:
+  system: 256
+  project: 0               # 0 when no project active
+  history: 512
+  user: 256
+  reserve: 512

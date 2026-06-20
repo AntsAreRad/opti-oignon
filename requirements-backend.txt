@@ -1,0 +1,38 @@
+# Opti-Oignon backend dependencies
+# S163 -- Docker build requirements
+#
+# Core framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+starlette>=0.27.0
+
+# Multipart form parsing (FastAPI file upload / form endpoints)
+python-multipart>=0.0.6
+
+# HTTP clients
+httpx>=0.25.0
+requests>=2.31.0
+
+# LLM inference
+ollama>=0.1.0
+
+# Vector store (RAG)
+chromadb>=0.4.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Configuration and CLI
+PyYAML>=6.0
+click>=8.1.0
+
+# Progress display
+tqdm>=4.65.0
+
+# Security
+bcrypt>=4.0.0
+argon2-cffi>=23.1.0
+cryptography>=41.0.0

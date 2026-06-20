@@ -1,0 +1,30 @@
+name: citation-gen
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Generates formatted citations from RAG retrieval results. Supports
+  APA, MLA, and Chicago citation styles. Runs as a post_inference hook
+  to append source references, and as a tool_call for on-demand citation
+  formatting.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+  - tool_call
+dependencies: []
+permissions:
+  - conversation_read
+  - tool_register
+min_opti_version: "1.10.0"
+config_schema:
+  default_style:
+    type: string
+    default: apa
+    description: "Default citation style: apa, mla, or chicago"
+  auto_cite:
+    type: boolean
+    default: true
+    description: Automatically append citations to RAG-augmented responses
+  max_citations:
+    type: integer
+    default: 10
+    description: Maximum number of citations per response

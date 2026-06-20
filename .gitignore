@@ -1,0 +1,106 @@
+# Opti-Oignon .gitignore
+# Runtime state, user data, and key material must never be committed.
+# See SHAKEDOWN_S183_FINDINGS.md (P-01, K-01).
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+
+# --- Node / frontend ---
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+
+# --- Databases and SQLite sidecars (runtime; may hold personal data) ---
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+opti_oignon/data/*.db
+opti_oignon/data/*.db-wal
+opti_oignon/data/*.db-shm
+opti_oignon/data/*.db-journal
+
+# --- Audit chain anchor (per-install integrity tip; not a shared artifact) ---
+.audit_chain_anchor
+data/.audit_chain_anchor
+
+# --- Plugin execution logs ---
+data/plugin_logs/
+
+# --- Master key material (keyfile mode, K-01): never commit or back up ---
+data/.keyfile
+
+# --- ChromaDB vector persistence (may hold ingested personal documents) ---
+opti_oignon/data/project_chroma/
+
+# --- Per-machine accumulated runtime state ---
+data/speculative_stats.json
+data/plugin_allowlist.json
+# Runtime JSON written into the data dirs (tuner_results.json, learned-router
+# stats, etc.). The data dirs ship only seed YAMLs, so globbing JSON here keeps
+# per-machine state out of the repo without hiding any tracked seed.
+data/*.json
+opti_oignon/data/*.json
+# Pickled / joblib model artifacts (e.g. learned_router.pkl). These are pickle
+# under the hood: never commit them, both to keep per-machine state out of the
+# repo and to avoid shipping a deserialization sink (see AUDIT LR-01).
+*.pkl
+*.joblib
+# Keyed-MAC sidecars for persisted models (LR-01): per-machine runtime state.
+*.mac
+fingerprint.db
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+
+# --- Development bookkeeping (local only) ---
+/PROMPT_S*.md
+/SESSION_TRACKING_*.md
+/BASELINE_S*
+/ROADMAP_*.md
+/*_E2E_S*.md
+/SHAKEDOWN_*.md
+/HOST_SHAKEDOWN_*.md
+/AUDIT_FINDINGS_*.md
+/AUDIT_FUNCTIONAL_FINDINGS.md
+/FIX_REPORT_*.md
+/DEBT_LOT_*.md
+/BLOC*_LIVE_WALK.md
+/SANDBOX_CYCLE_LIVE_WALK.md
+docs/ROADMAP_SIDE_QUESTS.md
+/SANDBOX_CYCLE_LIVE_WALK.md
+docs/ROADMAP_SIDE_QUESTS.md
+
+# Keep the repo root limited to standard docs: ignore any other root-level .md
+# (internal specs, inventories, session/roadmap/audit notes remain local only)
+/*.md
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/CODE_OF_CONDUCT.md
+
+# docs/ design and audit artifacts
+docs/COLOR_INSPIRATION_*.md
+docs/SECURITY_AUDIT_*.md
+docs/*_audit_report.json
+docs/s93-palette-preview-*.html

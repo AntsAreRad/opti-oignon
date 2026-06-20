@@ -1,0 +1,26 @@
+# Speculative Generation Configuration -- S70
+# Draft-verify pattern: fast model generates a draft, larger model verifies.
+# Mutually exclusive with cascading inference (S69).
+
+enabled: false
+
+# Draft model: fast, smaller model for initial generation.
+draft_model: "qwen3:8b"
+
+# Verify model: larger, more capable model for verification.
+verify_model: "qwen3:32b"
+
+# Maximum draft-verify iterations before accepting best result.
+max_iterations: 2
+
+# Similarity above which the draft is accepted without verify regeneration.
+# Uses heuristic similarity (word overlap + structure matching).
+convergence_threshold: 0.85
+
+# Token limits per phase.
+draft_max_tokens: 2048
+verify_max_tokens: 4096
+
+# Temperature per phase.
+draft_temperature: 0.5
+verify_temperature: 0.3

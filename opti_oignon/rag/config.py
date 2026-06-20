@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 RAG CONFIGURATION - Opti-Oignon RAG System
 ==========================================
@@ -10,10 +9,9 @@ Adapted from the original Contexteur RAG.
 Author: Léon
 """
 
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 import os
+from dataclasses import dataclass, field
+from pathlib import Path
 
 # =============================================================================
 # DEFAULT PATHS
@@ -32,38 +30,38 @@ LOGS_DIR = RAG_HOME / "logs"
 @dataclass
 class ChunkingConfig:
     """Configuration for document chunking."""
-    
+
     # Maximum chunk size (in approximate tokens)
     max_chunk_size: int = 500
-    
+
     # Overlap between chunks (in tokens)
     chunk_overlap: int = 50
-    
+
     # Separators by file type
-    code_separators: List[str] = field(default_factory=lambda: [
+    code_separators: list[str] = field(default_factory=lambda: [
         "\n\n\n",      # Triple line break (section separation)
         "\ndef ",      # Python function definition
         "\nclass ",    # Python class definition
         "\n# ===",     # Section separator (comment)
         "\n# ---",     # Sub-section separator
     ])
-    
-    r_separators: List[str] = field(default_factory=lambda: [
+
+    r_separators: list[str] = field(default_factory=lambda: [
         "\n\n\n",           # Triple line break
         "\n# ===",          # Section separator
         "\n# ---",          # Sub-section separator
         "\n\n# ",           # New comment block
     ])
-    
-    markdown_separators: List[str] = field(default_factory=lambda: [
+
+    markdown_separators: list[str] = field(default_factory=lambda: [
         "\n## ",       # Header level 2
         "\n### ",      # Header level 3
         "\n#### ",     # Header level 4
         "\n---\n",     # Horizontal separator
         "\n\n\n",      # Triple line break
     ])
-    
-    text_separators: List[str] = field(default_factory=lambda: [
+
+    text_separators: list[str] = field(default_factory=lambda: [
         "\n\n\n",      # Triple line break
         "\n\n",        # Double line break (paragraph)
         ". ",          # End of sentence
@@ -73,24 +71,24 @@ class ChunkingConfig:
 @dataclass
 class EmbeddingConfig:
     """Configuration for embeddings."""
-    
+
     # Ollama embedding model
     model: str = "mxbai-embed-large"
-    
+
     # Alternative model (faster)
     fast_model: str = "nomic-embed-text"
-    
+
     # Ollama URL
     ollama_url: str = "http://localhost:11434"
-    
+
     # Embedding dimension (depends on model)
     # mxbai-embed-large: 1024
     # nomic-embed-text: 768
     dimension: int = 1024
-    
+
     # Batch size for embedding
     batch_size: int = 32
-    
+
     # Timeout in seconds
     timeout: int = 120
 
@@ -98,15 +96,15 @@ class EmbeddingConfig:
 @dataclass
 class RetrieverConfig:
     """Configuration for search."""
-    
+
     # Default number of results
     n_results: int = 5
-    
+
     # Minimum similarity score (0-1)
     min_score: float = 0.3
-    
+
     # Default file types to include
-    default_file_types: List[str] = field(default_factory=lambda: [
+    default_file_types: list[str] = field(default_factory=lambda: [
         "py", "r", "R", "md", "txt", "csv", "json", "yaml", "yml", "sh", "bash"
     ])
 
@@ -114,37 +112,37 @@ class RetrieverConfig:
 @dataclass
 class RAGConfig:
     """Main RAG system configuration."""
-    
+
     # Sub-module configurations
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
-    
+
     # Paths
     rag_home: Path = RAG_HOME
     chroma_dir: Path = CHROMA_DIR
     cache_dir: Path = CACHE_DIR
     logs_dir: Path = LOGS_DIR
-    
+
     # Supported extensions with their type
-    file_type_mapping: Dict[str, str] = field(default_factory=lambda: {
+    file_type_mapping: dict[str, str] = field(default_factory=lambda: {
         # Python code
         ".py": "python",
         ".pyw": "python",
         ".pyi": "python",
-        
+
         # R code
         ".r": "r",
         ".R": "r",
         ".Rmd": "rmarkdown",
         ".rmd": "rmarkdown",
-        
+
         # Markdown and text
         ".md": "markdown",
         ".markdown": "markdown",
         ".txt": "text",
         ".text": "text",
-        
+
         # Configuration
         ".yaml": "yaml",
         ".yml": "yaml",
@@ -152,35 +150,35 @@ class RAGConfig:
         ".toml": "toml",
         ".ini": "ini",
         ".cfg": "ini",
-        
+
         # Shell
         ".sh": "shell",
         ".bash": "shell",
         ".zsh": "shell",
-        
+
         # Data - Tabular
         ".csv": "csv",
         ".tsv": "csv",
         ".xlsx": "excel",
         ".xls": "excel",
-        
+
         # Documents
         ".pdf": "pdf",
         ".docx": "docx",
         ".doc": "docx",
-        
+
         # SQL
         ".sql": "sql",
-        
+
         # Other languages
         ".js": "javascript",
         ".ts": "typescript",
         ".html": "html",
         ".css": "css",
     })
-    
+
     # Files/folders to ignore
-    ignore_patterns: List[str] = field(default_factory=lambda: [
+    ignore_patterns: list[str] = field(default_factory=lambda: [
         "__pycache__",
         ".git",
         ".svn",
@@ -197,10 +195,10 @@ class RAGConfig:
         ".mypy_cache",
         ".ruff_cache",
     ])
-    
+
     # Maximum file size to index (in MB)
     max_file_size_mb: float = 10.0
-    
+
     def __post_init__(self):
         """Create necessary directories."""
         self.rag_home.mkdir(parents=True, exist_ok=True)
@@ -214,7 +212,7 @@ class RAGConfig:
 # =============================================================================
 
 # Default configuration (singleton)
-_config: Optional[RAGConfig] = None
+_config: RAGConfig | None = None
 
 
 def get_config() -> RAGConfig:

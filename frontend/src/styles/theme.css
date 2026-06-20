@@ -1,0 +1,378 @@
+/*
+ * theme.css -- Opti-Oignon design-system orchestrator (S166).
+ *
+ * Imports the split token files, then declares the default-mode
+ * foundation (Anthracite for dark, Parchment for light) inline together
+ * with the retained legacy component tokens and the backward-compat alias
+ * layer. The five preset palettes live in theme-<name>.css; the alias
+ * layer (spec 4.2) is transitional and removed in S171 once consumers
+ * migrate off the legacy names.
+ *
+ * Convention: --oo-{category}-{variant}  (bg / fg / bd / acc).
+ */
+
+@import './tokens.css';
+@import './theme-anthracite.css';
+@import './theme-parchment.css';
+@import './theme-slate.css';
+@import './theme-linen.css';
+@import './theme-high-contrast.css';
+@import './density.css';
+
+:root,
+html.dark {
+	/* -- Anthracite foundation (default dark) -- */
+	--oo-bg-base: #1F1F22;
+	--oo-bg-surface: #27272A;
+	--oo-bg-elevated: #303034;
+	--oo-bg-overlay: #3A3A3E;
+	--oo-bg-subtle: #1A1A1D;
+	--oo-bg-hover: #34343A;
+	--oo-bg-active: #3E3E45;
+	--oo-fg-primary: #ECE9E3;
+	--oo-fg-secondary: #B5B1A9;
+	--oo-fg-tertiary: #928D85;
+	/* A2 (spec 4.5): --oo-fg-muted passes AA-large only on some surfaces.
+	   Reserve it for tertiary information at >=14px; never use for body
+	   text below 14px or on --oo-bg-elevated. */
+	--oo-fg-muted: #8C8881;
+	/* A1 (spec 4.5): --oo-fg-decorative is intentionally low-contrast and
+	   DECORATIVE ONLY (dividers, faint glyphs, placeholder ornaments). It
+	   fails AA and must never carry essential text. The legacy
+	   --oo-fg-faint name aliases it (see below) and inherits this rule. */
+	--oo-fg-decorative: #4A4A4C;
+	--oo-fg-on-accent: #1F1F22;
+	--oo-bd-subtle: #2A2A2D;
+	--oo-bd-default: #2E2E32;
+	--oo-bd-strong: #48484C;
+	--oo-acc-50: #FDF6EE;
+	--oo-acc-100: #F8E8D4;
+	--oo-acc-200: #E8C9A0;
+	--oo-acc-300: #D4AC78;
+	--oo-acc-400: #C48838;
+	--oo-acc-500: #C48838;
+	--oo-acc-600: #A87030;
+	--oo-acc-700: #7D5636;
+	--oo-acc-800: #614328;
+	--oo-acc-900: #4A321E;
+	--oo-success: #86A189;
+	--oo-success-bg: rgba(134, 161, 137, 0.16);
+	--oo-success-bd: rgba(134, 161, 137, 0.24);
+	--oo-warning: #D2C0A0;
+	--oo-warning-bg: rgba(210, 192, 160, 0.16);
+	--oo-warning-bd: rgba(210, 192, 160, 0.24);
+	--oo-error: #D88679;
+	--oo-error-bg: rgba(216, 134, 121, 0.16);
+	--oo-error-bd: rgba(216, 134, 121, 0.24);
+	--oo-info: #8AABBF;
+	--oo-info-bg: rgba(138, 171, 191, 0.16);
+	--oo-info-bd: rgba(138, 171, 191, 0.24);
+
+	/* -- Legacy background aliases (component back-compat) -- */
+	--oo-bg-primary: var(--oo-bg-base);
+	--oo-bg-secondary: var(--oo-bg-surface);
+	--oo-bg-tertiary: var(--oo-bg-elevated);
+	--oo-bg-surface-raised: var(--oo-bg-elevated);
+	--oo-bg-input: var(--oo-bg-elevated);
+	--oo-fg-faint: var(--oo-fg-decorative);
+	--oo-fg-on-semantic: #ECE9E3;
+	--oo-accent-primary: var(--oo-acc-500);
+
+	/* -- Dual accent: sage (content) / tobacco -- */
+	--oo-sage: #86A189;
+	--oo-sage-bg: rgba(134, 161, 137, 0.12);
+	--oo-sage-bd: rgba(134, 161, 137, 0.18);
+	--oo-pine: #7A857C;
+	--oo-tobacco: #C48838;
+	--oo-tobacco-bg: rgba(196, 136, 56, 0.10);
+	--oo-tobacco-bd: rgba(196, 136, 56, 0.15);
+
+	/* -- Semantic aliases -- */
+	--oo-status-success: var(--oo-success);
+	--oo-status-warning: var(--oo-warning);
+	--oo-status-error: var(--oo-error);
+	--oo-err-fg: var(--oo-error);
+	--oo-err-bg: var(--oo-error-bg);
+	--oo-err-bd: var(--oo-error-bd);
+
+	/* -- Component-specific -- */
+	--oo-sidebar-bg: #1C1C1E;
+	--oo-header-bg: #1F1F22;
+	--oo-panel-bg: #1C1C1E;
+	--oo-input-bg: #27272A;
+	--oo-input-bd: #2E2E32;
+	--oo-input-focus: rgba(196, 136, 56, 0.35);
+	--oo-toggle-knob: #ECE9E3;
+	--oo-surface-600: var(--oo-bg-subtle);
+	--oo-surface-700: var(--oo-bg-overlay);
+	--oo-surface-800: var(--oo-bg-elevated);
+
+	/* -- Message bubbles -- */
+	--oo-msg-user-bg: rgba(196, 136, 56, 0.06);
+	--oo-msg-user-bd: rgba(196, 136, 56, 0.06);
+	--oo-msg-user-fg: #ECE9E3;
+	--oo-msg-bot-bg: #27272A;
+	--oo-msg-bot-bd: transparent;
+	--oo-msg-bot-fg: #B5B1A9;
+
+	/* -- Buttons -- */
+	--oo-btn-primary-bg: #C48838;
+	--oo-btn-primary-fg: #1F1F22;
+	--oo-btn-primary-hover: #A87030;
+	--oo-btn-secondary-bg: #2E2E32;
+	--oo-btn-secondary-fg: #ECE9E3;
+	--oo-btn-secondary-hover: #3A3A3C;
+	--oo-btn-ghost-fg: #928D85;
+	--oo-btn-ghost-bg: transparent;
+	--oo-btn-ghost-hover: #2E2E32;
+
+	/* -- Pipeline badges -- */
+	--oo-pipe-direct: #8AABBF;
+	--oo-pipe-tools: #A890B8;
+	--oo-pipe-think: #C48838;
+	--oo-pipe-search: #86A189;
+	--oo-pipe-code: #D2C0A0;
+	--oo-pipe-reason: #C4889A;
+	--oo-pipe-consensus: #9098C0;
+	--oo-pipe-correct: #80B8A8;
+
+	/* -- Category colors -- */
+	--oo-cat-blue: #8AABBF;
+	--oo-cat-blue-bg: rgba(138, 171, 191, 0.12);
+	--oo-cat-blue-bd: rgba(138, 171, 191, 0.20);
+	--oo-cat-purple: #A890B8;
+	--oo-cat-purple-bg: rgba(168, 144, 184, 0.12);
+	--oo-cat-purple-bd: rgba(168, 144, 184, 0.20);
+	--oo-cat-emerald: #86A189;
+	--oo-cat-emerald-bg: rgba(134, 161, 137, 0.12);
+	--oo-cat-emerald-bd: rgba(134, 161, 137, 0.18);
+	--oo-cat-orange: #C48838;
+	--oo-cat-orange-bg: rgba(196, 136, 56, 0.10);
+	--oo-cat-orange-bd: rgba(196, 136, 56, 0.18);
+	--oo-cat-pink: #C4889A;
+	--oo-cat-pink-bg: rgba(196, 136, 154, 0.12);
+	--oo-cat-pink-bd: rgba(196, 136, 154, 0.20);
+	--oo-cat-yellow: #D2C0A0;
+	--oo-cat-yellow-bg: rgba(210, 192, 160, 0.12);
+	--oo-cat-gray: #928D85;
+	--oo-cat-gray-bg: rgba(146, 141, 133, 0.12);
+
+	/* -- Radar chart -- */
+	--oo-radar-blue: #8AABBF;
+	--oo-radar-sand: #C48838;
+	--oo-radar-green: #86A189;
+
+	/* -- Scrollbar -- */
+	--oo-scrollbar-thumb: #3A3A3E;
+	--oo-scrollbar-hover: #48484C;
+
+	/* -- Shadows (dark, spec 7.6) -- */
+	--oo-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+	--oo-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.40);
+	--oo-shadow-md: 0 4px 8px rgba(0, 0, 0, 0.45);
+	--oo-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.50);
+	--oo-shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.30);
+
+	/* -- Transition aliases (resolve to motion tokens) -- */
+	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
+	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
+	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
+}
+
+html:not(.dark) {
+	/* -- Parchment foundation (default light) -- */
+	--oo-bg-base: #E5DECE;
+	--oo-bg-surface: #DDD5C3;
+	--oo-bg-elevated: #ECE5D6;
+	--oo-bg-overlay: #D2CAB8;
+	--oo-bg-subtle: #D8D0BE;
+	--oo-bg-hover: #D6CEBC;
+	--oo-bg-active: #CFC6B3;
+	--oo-fg-primary: #2D2C2A;
+	--oo-fg-secondary: #4D4842;
+	--oo-fg-tertiary: #555049;
+	--oo-fg-muted: #6E675E;
+	--oo-fg-decorative: #B8B1A4;
+	--oo-fg-on-accent: #F0EBE4;
+	--oo-bd-subtle: #CFC8BC;
+	--oo-bd-default: #BEB7AB;
+	--oo-bd-strong: #A8A298;
+	--oo-acc-50: #F5EDE4;
+	--oo-acc-100: #EAD8C4;
+	--oo-acc-200: #D4B48A;
+	--oo-acc-300: #B8925E;
+	--oo-acc-400: #7A4E1E;
+	--oo-acc-500: #7A4E1E;
+	--oo-acc-600: #5E3C15;
+	--oo-acc-700: #4E3012;
+	--oo-acc-800: #3D250E;
+	--oo-acc-900: #2E1B0A;
+	--oo-success: #3D5240;
+	--oo-success-bg: rgba(61, 82, 64, 0.12);
+	--oo-success-bd: rgba(61, 82, 64, 0.20);
+	--oo-warning: #5E5030;
+	--oo-warning-bg: rgba(94, 80, 48, 0.12);
+	--oo-warning-bd: rgba(94, 80, 48, 0.20);
+	--oo-error: #7A3E34;
+	--oo-error-bg: rgba(122, 62, 52, 0.12);
+	--oo-error-bd: rgba(122, 62, 52, 0.20);
+	--oo-info: #2E5A6E;
+	--oo-info-bg: rgba(46, 90, 110, 0.12);
+	--oo-info-bd: rgba(46, 90, 110, 0.20);
+
+	/* -- Legacy background aliases -- */
+	--oo-bg-primary: var(--oo-bg-base);
+	--oo-bg-secondary: var(--oo-bg-surface);
+	--oo-bg-tertiary: var(--oo-bg-elevated);
+	--oo-bg-surface-raised: var(--oo-bg-overlay);
+	--oo-bg-input: var(--oo-bg-elevated);
+	--oo-fg-faint: var(--oo-fg-decorative);
+	--oo-fg-on-semantic: #F0EBE4;
+	--oo-accent-primary: var(--oo-acc-500);
+
+	--oo-sage: #3D5240;
+	--oo-sage-bg: rgba(61, 82, 64, 0.12);
+	--oo-sage-bd: rgba(61, 82, 64, 0.20);
+	--oo-pine: #334836;
+	--oo-tobacco: #7A4E1E;
+	--oo-tobacco-bg: rgba(122, 78, 30, 0.12);
+	--oo-tobacco-bd: rgba(122, 78, 30, 0.18);
+
+	--oo-status-success: var(--oo-success);
+	--oo-status-warning: var(--oo-warning);
+	--oo-status-error: var(--oo-error);
+	--oo-err-fg: var(--oo-error);
+	--oo-err-bg: var(--oo-error-bg);
+	--oo-err-bd: var(--oo-error-bd);
+
+	--oo-sidebar-bg: #CAC3B7;
+	--oo-header-bg: #B5AFA5;
+	--oo-panel-bg: #CAC3B7;
+	--oo-input-bg: #ECE5D6;
+	--oo-input-bd: #BEB7AB;
+	--oo-input-focus: rgba(122, 78, 30, 0.35);
+	--oo-toggle-knob: #ECE5D6;
+	--oo-surface-600: var(--oo-bg-subtle);
+	--oo-surface-700: var(--oo-bg-overlay);
+	--oo-surface-800: var(--oo-bg-elevated);
+
+	--oo-msg-user-bg: rgba(61, 82, 64, 0.14);
+	--oo-msg-user-bd: rgba(61, 82, 64, 0.18);
+	--oo-msg-user-fg: #2D2C2A;
+	--oo-msg-bot-bg: #ECE5D6;
+	--oo-msg-bot-bd: #CFC8BC;
+	--oo-msg-bot-fg: #2D2C2A;
+
+	--oo-btn-primary-bg: #3D5240;
+	--oo-btn-primary-fg: #F0EBE4;
+	--oo-btn-primary-hover: #334836;
+	--oo-btn-secondary-bg: #C8C0B4;
+	--oo-btn-secondary-fg: #2D2C2A;
+	--oo-btn-secondary-hover: #BEB7AB;
+	--oo-btn-ghost-fg: #4D4842;
+	--oo-btn-ghost-bg: transparent;
+	--oo-btn-ghost-hover: #D2CAB8;
+
+	--oo-pipe-direct: #2E5A6E;
+	--oo-pipe-tools: #5E4570;
+	--oo-pipe-think: #7A4E1E;
+	--oo-pipe-search: #3D5240;
+	--oo-pipe-code: #5E5030;
+	--oo-pipe-reason: #703848;
+	--oo-pipe-consensus: #404870;
+	--oo-pipe-correct: #2E6858;
+
+	--oo-cat-blue: #2E5A6E;
+	--oo-cat-blue-bg: rgba(46, 90, 110, 0.10);
+	--oo-cat-blue-bd: rgba(46, 90, 110, 0.18);
+	--oo-cat-purple: #5E4570;
+	--oo-cat-purple-bg: rgba(94, 69, 112, 0.10);
+	--oo-cat-purple-bd: rgba(94, 69, 112, 0.18);
+	--oo-cat-emerald: #3D5240;
+	--oo-cat-emerald-bg: rgba(61, 82, 64, 0.10);
+	--oo-cat-emerald-bd: rgba(61, 82, 64, 0.18);
+	--oo-cat-orange: #7A4E1E;
+	--oo-cat-orange-bg: rgba(122, 78, 30, 0.10);
+	--oo-cat-orange-bd: rgba(122, 78, 30, 0.18);
+	--oo-cat-pink: #703848;
+	--oo-cat-pink-bg: rgba(112, 56, 72, 0.10);
+	--oo-cat-pink-bd: rgba(112, 56, 72, 0.18);
+	--oo-cat-yellow: #5E5030;
+	--oo-cat-yellow-bg: rgba(94, 80, 48, 0.10);
+	--oo-cat-gray: #4D4842;
+	--oo-cat-gray-bg: rgba(77, 72, 66, 0.10);
+
+	--oo-radar-blue: #2E5A6E;
+	--oo-radar-sand: #7A4E1E;
+	--oo-radar-green: #3D5240;
+
+	--oo-scrollbar-thumb: #BEB7AB;
+	--oo-scrollbar-hover: #B5AFA5;
+
+	/* -- Shadows (light, spec 7.6) -- */
+	--oo-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
+	--oo-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.08);
+	--oo-shadow-md: 0 4px 8px rgba(0, 0, 0, 0.10);
+	--oo-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.14);
+	--oo-shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+
+	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
+	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
+	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
+}
+
+/* ------------------------------------------------------------------ */
+/*  LOGO -- dark-mode adaptive filter                                  */
+/* ------------------------------------------------------------------ */
+html.dark .oo-logo-adaptive,
+:root .oo-logo-adaptive {
+	filter: invert(1) sepia(0.4) saturate(1.8) hue-rotate(5deg) brightness(0.85);
+}
+html:not(.dark) .oo-logo-adaptive {
+	filter: none;
+}
+
+/* ------------------------------------------------------------------ */
+/*  LEGACY ALIAS LAYER (S166) -- resolves the 30 undeclared-but-used   */
+/*  variables from spec 4.2. Transitional; removed in S171.            */
+/* ------------------------------------------------------------------ */
+:root {
+	/* Radius re-declared for orchestrator self-sufficiency; canonical
+	   source is tokens.css (spec 7.5). Values kept identical. */
+	--oo-radius-none: 0;
+	--oo-radius-sm: 4px;
+	--oo-radius-md: 8px;
+	--oo-radius-lg: 12px;
+	--oo-radius-xl: 16px;
+	--oo-radius-full: 9999px;
+
+	--oo-text-primary: var(--oo-fg-primary);
+	--oo-text-secondary: var(--oo-fg-secondary);
+	--oo-text-tertiary: var(--oo-fg-tertiary);
+	--oo-text-on-accent: var(--oo-fg-on-accent);
+	--oo-fg-error: var(--oo-error);
+	--oo-fg-warning: var(--oo-warning);
+	--oo-fg-success: var(--oo-success);
+	--oo-border: var(--oo-bd-default);
+	--oo-border-default: var(--oo-bd-default);
+	--oo-border-subtle: var(--oo-bd-subtle);
+	--oo-border-hover: var(--oo-bd-strong);
+	--oo-bd-soft: var(--oo-bd-subtle);
+	--oo-surface: var(--oo-bg-surface);
+	--oo-surface-hover: var(--oo-bg-hover);
+	--oo-card-bg: var(--oo-bg-surface);
+	--oo-overlay-bg: var(--oo-bg-overlay);
+	--oo-bg: var(--oo-bg-base);
+	--oo-bg-default: var(--oo-bg-base);
+	--oo-bg-sunken: var(--oo-bg-subtle);
+	--oo-bg-error: var(--oo-error-bg);
+	--oo-bg-warning: var(--oo-warning-bg);
+	--oo-bg-success: var(--oo-success-bg);
+	--oo-danger: var(--oo-error);
+	--oo-danger-bg: var(--oo-error-bg);
+	--oo-danger-bd: var(--oo-error-bd);
+	--oo-accent: var(--oo-acc-500);
+	--oo-accent-secondary: var(--oo-acc-400);
+	--oo-accent-bg: var(--oo-acc-100);
+	--oo-qr-bg: #FFFFFF;
+}

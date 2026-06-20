@@ -1,0 +1,38 @@
+name: session-summarizer
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Generates a running summary of the conversation session. Every N
+  messages (configurable), a background thread produces a summary
+  using the smallest available model or extractive fallback. Use
+  the /summary command to view the current session summary.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+  - tool_call
+dependencies: []
+permissions:
+  - conversation_read
+  - model_config_read
+min_opti_version: "1.10.0"
+config_schema:
+  interval:
+    type: integer
+    default: 5
+    description: Generate summary every N messages
+  model_override:
+    type: string
+    default: ""
+    description: >
+      Force a specific model for summary generation. Leave empty
+      to auto-select the smallest available model.
+  max_summary_length:
+    type: integer
+    default: 300
+    description: Maximum word count for the summary
+  use_extractive_fallback:
+    type: boolean
+    default: true
+    description: >
+      Use extractive summarization when no model is available
+      for generative summary.

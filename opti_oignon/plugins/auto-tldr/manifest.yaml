@@ -1,0 +1,27 @@
+name: auto-tldr
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Automatically generates a TL;DR summary for long LLM responses.
+  Uses extractive summarization (sentence scoring by position, keyword
+  density, and length) to produce a concise summary prepended to the
+  response.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions: []
+min_opti_version: "1.10.0"
+config_schema:
+  word_threshold:
+    type: integer
+    default: 300
+    description: Minimum word count to trigger summarization
+  max_summary_sentences:
+    type: integer
+    default: 2
+    description: Maximum number of sentences in the TL;DR
+  separator:
+    type: string
+    default: "---"
+    description: Separator between TL;DR and full response

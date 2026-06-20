@@ -1,136 +1,49 @@
 # Changelog
 
-All notable changes to Opti-Oignon will be documented in this file.
+All notable changes to Opti-Oignon are documented in this file.
+Security-relevant changes are marked with [SECURITY].
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## 2.0.0 -- 2026-06-20
 
-## [1.2.0] - 2025-12-25
+A complete rewrite and public re-release. Opti-Oignon began as a Gradio-based
+local-LLM optimization framework (the 1.x line); 2.0.0 replaces that entirely
+with a new local-first AI inference platform built on SvelteKit and FastAPI,
+running against Ollama on your own hardware.
 
-### Added
+### Working in this release
 
-- **Pipeline Manager** - New UI tab for managing multi-agent pipelines
-  - View all pipelines (builtin + custom) in a searchable table
-  - Create custom pipelines with visual step-by-step editor (up to 10 steps)
-  - Modify and delete custom pipelines (builtin are read-only)
-  - Duplicate any pipeline for customization
-  - Import/Export pipelines in YAML format
-  - LLM-powered prompt generation for pipeline steps
-  - Keywords for automatic pipeline detection with weighted scoring
-  - Move Up/Down buttons (↑↓) to reorder pipeline steps
+- Private, streamed chat from local Ollama models over WebSocket.
+- Accounts with registration, login, and optional 2FA (TOTP and WebAuthn). [SECURITY]
+- Two security modes. Daily is the normal mode; Bulbe binds the backend to
+  `127.0.0.1` at the socket layer and accepts cookie-only authentication, with a
+  guarded, human-confirmed downgrade ceremony and fail-secure behavior when the
+  mode cannot be determined. [SECURITY]
+- Encryption at rest via SQLCipher. [SECURITY]
+- Projects with RAG context backed by ChromaDB.
 
-- **Model Override per Step** - Pipeline steps can now use a specific model
-  - Added "Model" dropdown in each pipeline step
-  - Allows overriding the agent's default model
-  - Model override is saved in `pipelines_custom.yaml`
+### Also included, still maturing
 
-- **Keepalive Mechanism** - Prevents Gradio timeouts during long operations
-  - Threading + queue-based communication for responsive UI
-  - Applied to both single queries and multi-agent pipelines
-  - Progress indicators during model loading
+A broad backend surface is implemented and covered by the test suite but not yet
+verified end to end on a fresh install: smart model routing, multi-model
+consensus and cascading inference, a semantic cache, a sandboxed agent loop,
+benchmark and performance dashboards, a resource governor, an LLM-powered red
+team engine, RBAC and multi-user isolation, and an encrypted Notes tab. See the
+Status section of the README for details.
 
-- **Dynamic Step Addition** - Cleaner pipeline creation UX
-  - Start with only 2 visible steps
-  - "➕ Add Step" button reveals additional steps (up to 10)
-  - All steps use collapsible Accordion layout
+### Not yet wired end to end
 
-- **Template Loading** - Templates load their content into the prompt field
-  - Selecting a template fills the System Prompt with template content
-  - Auto-switch to Custom mode when editing a template prompt
+Veilid device-to-device sync is incomplete on the producer side, so nothing
+moves between paired devices yet. Everything that depends on it -- remote
+inference, collaborative Notes sync, and the mobile client -- is experimental.
 
-### Fixed
+### Security posture
 
-- **Custom Pipelines Not Visible in Chat** - Critical persistence bug fixed
-  - Custom pipelines now properly appear in the "Select Mode" dropdown
-  - Dropdown automatically refreshes after creating/updating/deleting pipelines
-  - Pipeline changes in Pipelines tab sync to Chat tab immediately
-
-- **Custom Presets Not Visible in Chat** - Same fix applied to presets
-  - Custom presets now properly appear in the "Preset" dropdown
-  - Preset changes sync between tabs immediately
-
-- **Chat Timeout During Model Loading** - Gradio timeout fix
-  - Added keepalive mechanism using threading
-  - Prevents connection timeout when model is loading into memory
-
-- **Template Loading Errors** - Fixed `'str' object has no attribute 'get'`
-  - Templates in config.yaml are now properly handled as strings
-
-- **Empty Template Dropdown Error** - Fixed "Value not in list of choices"
-  - Added `allow_custom_value=True` to template dropdowns
-  - Templates used in pipelines are auto-added to dropdown choices
-
-- **Ollama Connection** - Fixed model name resolution
-  - Now returns full model name with tag (e.g., `qwen3:32b`)
-  - Better error messages for connection issues
-
-### Changed
-
-- **Pipeline Manager UI** - Major UX improvements
-  - Replaced JSON step editor with visual "Add Step" interface
-  - 5→10 step blocks with Name, Agent, Model, Prompt Type, Prompt, Description
-  - Each step has a "Generate" button for LLM-powered prompt generation
-  - Collapsible accordions (Step 1-2 open by default)
-
-- **Multi-Agent Tab Removed** - Consolidated into Pipelines tab
-  - Enable/Disable toggle moved to top of Pipelines tab
-  - Less UI clutter, more intuitive navigation
-
-- **Layout Balance** - Better column proportions in Pipelines tab
-  - Available Pipelines: 40% width
-  - Create/Edit Pipeline: 60% width
-
-### Technical
-
-- **New modules:**
-  - `pipeline_manager.py`: Pipeline and PipelineStep dataclasses, PipelineManager with CRUD
-  - `dynamic_pipeline_ui.py`: UI integration for dynamic pipeline planning
-
-- **New data structures:**
-  - `PipelineStep.model`: Optional model override field
-  - `STEP_FIELDS`: Increased from 7 to 8 fields per step
-
-- **New functions:**
-  - `get_pipeline_dropdown_update()`: Returns `gr.update(choices=...)`
-  - `get_preset_choices()` / `get_preset_dropdown_update()`: Preset dropdown refresh
-  - `get_available_models_list()`: Populates model dropdowns
-  - `swap_steps()`: Exchanges content between adjacent steps
-  - `get_template_content()`: Loads template from orchestrator config
-
-- **Modified functions:**
-  - `executor.execute()`: Rewritten with threading + queue for keepalive
-  - `refresh_multi_agent_stats()`: Now returns both status and dropdown update
-  - Pipeline/Preset CRUD functions: Return 3 values (status, table, dropdown_update)
-
-- **Storage:**
-  - Custom pipelines: `opti_oignon/data/pipelines_custom.yaml`
-  - Orchestrator loads both builtin and custom pipelines
+Deny-by-default authentication, per-user data isolation, Argon2/bcrypt password
+hashing, a disposable bubblewrap sandbox for any LLM-driven filesystem, shell,
+or code tool, ML-DSA-65 post-quantum signatures on records intended for sync,
+and a hash-chained audit log. Security follows Kerckhoffs's principle: it rests
+on keys and correct implementation, not on secrecy of the code. [SECURITY]
 
 ---
 
-## [1.1.0] - 2025-12-22
-
-### Added
-- **Context Manager** - Context max length is now extracted from "ollama show" for each model and context can now accurately be monitored.
-- **Multi-agent history metadata** - Pipeline ID, step count, and step summaries are now saved in history.
-
-### Fixed
-- **Document upload** - Files uploaded via the Gradio interface are now properly sent to the model.
-- **Multi-agent history** - Conversations using multi-agent pipelines are now saved to history.
-- **Context indicator** - Now correctly includes uploaded files, works with presets and auto-routing.
-
-### Changed
-- **Default UI settings** - Multi-Agent and RAG are now disabled by default.
-
----
-
-## [1.0.0] - 2025-12-21
-
-### Added
-- Initial release
-- Automatic task detection and model routing
-- RAG document enrichment
-- Multi-agent orchestration with pipelines
-- Preset system with keyword-based auto-detection
-- Conversation history with search and export
-- Gradio web interface with dark mode
+Earlier history (the 1.x Gradio line) remains available in the git tags.

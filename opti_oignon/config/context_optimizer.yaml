@@ -1,0 +1,51 @@
+# Context Optimizer Configuration — Opti-Oignon S123
+# ===================================================
+# Controls the unified context window orchestrator.
+# When enabled, replaces the manual 5-step pipeline in executor.py.
+
+# Master toggle — opt-in (default: false)
+enabled: false
+
+# Priority presets — predefined zone weight profiles
+# Each preset overrides allocation ratios from token_budget.yaml
+priority_presets:
+  balanced:
+    system_ratio: 0.10
+    project_ratio: 0.25
+    history_ratio: 0.40
+    user_ratio: 0.10
+    reserve_ratio: 0.15
+  rag_heavy:
+    system_ratio: 0.10
+    project_ratio: 0.35
+    history_ratio: 0.30
+    user_ratio: 0.10
+    reserve_ratio: 0.15
+  history_heavy:
+    system_ratio: 0.10
+    project_ratio: 0.15
+    history_ratio: 0.50
+    user_ratio: 0.10
+    reserve_ratio: 0.15
+
+# Active preset (one of the keys above, or "custom")
+active_preset: "balanced"
+
+# Emergency truncation settings
+emergency:
+  # If total exceeds window after all strategies, truncate from middle
+  enabled: true
+  # Keep at least this many recent messages no matter what
+  min_recent_messages: 2
+  # Maximum chars for emergency-truncated text blocks
+  max_block_chars: 2000
+
+# Compression settings (delegates to ConversationCompressor S66)
+compression:
+  # Strategy override ("auto" = use compressor default)
+  strategy: "auto"
+
+# Report retention
+report:
+  # Keep last N reports in memory for API access
+  max_retained: 10

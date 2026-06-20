@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 CENTRALIZED CONFIGURATION - OPTI-OIGNON 1.0
 ==========================================
@@ -12,10 +11,11 @@ All other modules import their config from here.
 Author: Léon
 """
 
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-import yaml
 import logging
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
 
 # Logger configuration
 logger = logging.getLogger(__name__)
@@ -41,16 +41,16 @@ PRESETS_CONFIG_FILE = CONFIG_DIR / "presets.yaml"
 # CONFIGURATION LOADING
 # =============================================================================
 
-def load_yaml(filepath: Path) -> Dict[str, Any]:
+def load_yaml(filepath: Path) -> dict[str, Any]:
     """
     Safely load a YAML file.
-    
+
     Args:
         filepath: Path to YAML file
-        
+
     Returns:
         Dictionary with file contents
-        
+
     Raises:
         FileNotFoundError: If file doesn't exist
         yaml.YAMLError: If file is malformed
@@ -58,9 +58,9 @@ def load_yaml(filepath: Path) -> Dict[str, Any]:
     if not filepath.exists():
         logger.warning(f"Config file not found: {filepath}")
         return {}
-    
+
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding='utf-8') as f:
             data = yaml.safe_load(f) or {}
             logger.debug(f"Config loaded from {filepath}")
             return data
@@ -72,14 +72,14 @@ def load_yaml(filepath: Path) -> Dict[str, Any]:
         return {}
 
 
-def save_yaml(filepath: Path, data: Dict[str, Any]) -> bool:
+def save_yaml(filepath: Path, data: dict[str, Any]) -> bool:
     """
     Save a dictionary to a YAML file.
-    
+
     Args:
         filepath: Destination path
         data: Data to save
-        
+
     Returns:
         True if success, False otherwise
     """
@@ -101,80 +101,80 @@ def save_yaml(filepath: Path, data: Dict[str, Any]) -> bool:
 class OptiOignonConfig:
     """
     Centralized Opti-Oignon configuration.
-    
+
     Singleton that loads and exposes all configuration.
-    
+
     Usage:
         config = OptiOignonConfig()
         model = config.get_model("code", "primary")
         temp = config.get_temperature("code")
     """
-    
+
     _instance: Optional['OptiOignonConfig'] = None
-    
+
     def __new__(cls):
         """Singleton pattern - only one instance."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         """Initialize configuration (only once)."""
         if self._initialized:
             return
-            
-        self._models_config: Dict = {}
-        self._presets_config: Dict = {}
-        self._user_config: Dict = {}
-        
+
+        self._models_config: dict = {}
+        self._presets_config: dict = {}
+        self._user_config: dict = {}
+
         self.reload()
         self._initialized = True
-    
+
     def reload(self) -> None:
         """Reload configuration from files."""
         self._models_config = load_yaml(MODELS_CONFIG_FILE)
         self._presets_config = load_yaml(PRESETS_CONFIG_FILE)
-        
+
         # Load user config if it exists
         user_config_file = DATA_DIR / "user_config.yaml"
         if user_config_file.exists():
             self._user_config = load_yaml(user_config_file)
-        
+
         logger.info("Configuration reloaded")
-    
+
     # -------------------------------------------------------------------------
     # Model Access
     # -------------------------------------------------------------------------
-    
-    # Cache pour éviter le spam de warnings
+
+    # Cache to avoid warning spam
     _warned_types: set = set()
-    
+
     def get_model(self, model_type: str, priority: str = "primary") -> str:
         """
         Get a model by type and priority.
-        
+
         Args:
             model_type: Model type (code_r, code_python, reasoning, general, quick, etc.)
             priority: Priority (primary, quality, fast)
-            
+
         Returns:
             Ollama model name
         """
-        # Utiliser la section 'routing' pour le mapping type → modèle
+        # Use the 'routing' section for task type → model mapping
         routing = self._models_config.get("routing", {})
         type_models = routing.get(model_type, {})
-        
+
         model = type_models.get(priority)
         if model:
             return model
-        
+
         # Fallback to primary if priority not found
         model = type_models.get("primary")
         if model:
             logger.debug(f"Fallback to primary for {model_type}/{priority}")
             return model
-        
+
         # Last resort: first available fallback (avec cache pour le warning)
         fallbacks = self._models_config.get("fallback_order", [])
         if fallbacks:
@@ -182,139 +182,139 @@ class OptiOignonConfig:
                 logger.warning(f"Type {model_type} not found in routing, using fallback {fallbacks[0]}")
                 self._warned_types.add(model_type)
             return fallbacks[0]
-        
+
         # Absolute default value
         return "qwen3-coder:30b"
-    
-    def get_fallback_models(self) -> List[str]:
+
+    def get_fallback_models(self) -> list[str]:
         """Return the list of fallback models in order."""
         return self._models_config.get("fallback_order", [])
-    
-    def get_special_model(self, purpose: str) -> Optional[str]:
+
+    def get_special_model(self, purpose: str) -> str | None:
         """Get a special model (vision, math, embeddings)."""
         special = self._models_config.get("special", {})
         return special.get(purpose)
-    
-    def get_blacklisted_models(self) -> List[Dict[str, str]]:
+
+    def get_blacklisted_models(self) -> list[dict[str, str]]:
         """Return the list of models to avoid with their reasons."""
         return self._models_config.get("blacklist", [])
-    
+
     def is_blacklisted(self, model: str) -> bool:
         """Check if a model is blacklisted."""
         blacklist = self.get_blacklisted_models()
         return any(item.get("model") == model for item in blacklist)
-    
+
     # -------------------------------------------------------------------------
     # Temperature Access
     # -------------------------------------------------------------------------
-    
+
     def get_temperature(self, task_type: str) -> float:
         """
         Get the optimal temperature for a task type.
-        
+
         Args:
             task_type: Task type (code, debug, reasoning, writing, general)
-            
+
         Returns:
             Temperature (float between 0 and 1)
         """
         temps = self._models_config.get("temperatures", {})
         return temps.get(task_type, 0.5)  # 0.5 default
-    
+
     # -------------------------------------------------------------------------
     # Timeout Access
     # -------------------------------------------------------------------------
-    
+
     def get_timeout(self, timeout_type: str = "default") -> int:
         """
         Get a timeout in seconds.
-        
+
         Args:
             timeout_type: Timeout type (default, fast, deep)
-            
+
         Returns:
             Timeout in seconds
         """
         timeouts = self._models_config.get("timeouts", {})
         return timeouts.get(timeout_type, 300)
-    
+
     # -------------------------------------------------------------------------
     # Preset Access
     # -------------------------------------------------------------------------
-    
-    def get_preset(self, preset_id: str) -> Optional[Dict[str, Any]]:
+
+    def get_preset(self, preset_id: str) -> dict[str, Any] | None:
         """
         Get a preset by ID.
-        
+
         Args:
             preset_id: Preset identifier (e.g., "r_fast")
-            
+
         Returns:
             Dictionary with preset config, or None if not found
         """
         presets = self._presets_config.get("presets", {})
         return presets.get(preset_id)
-    
-    def get_all_presets(self) -> Dict[str, Dict[str, Any]]:
+
+    def get_all_presets(self) -> dict[str, dict[str, Any]]:
         """Return all available presets."""
         return self._presets_config.get("presets", {})
-    
-    def get_preset_display_order(self) -> List[str]:
+
+    def get_preset_display_order(self) -> list[str]:
         """Return the display order of presets."""
         return self._presets_config.get("display_order", list(self.get_all_presets().keys()))
-    
-    def get_auto_select_preset(self, task: str) -> Optional[str]:
+
+    def get_auto_select_preset(self, task: str) -> str | None:
         """
         Get the preset to auto-select for a task.
-        
+
         Args:
             task: Detected task type
-            
+
         Returns:
             Preset ID, or None
         """
         auto_select = self._presets_config.get("auto_select", {})
         return auto_select.get(task)
-    
-    def get_shortcuts(self) -> Dict[str, str]:
+
+    def get_shortcuts(self) -> dict[str, str]:
         """Return keyboard shortcuts to presets."""
         return self._presets_config.get("shortcuts", {})
-    
+
     # -------------------------------------------------------------------------
     # User Configuration
     # -------------------------------------------------------------------------
-    
+
     def get_user_preference(self, key: str, default: Any = None) -> Any:
         """Get a user preference."""
         return self._user_config.get(key, default)
-    
+
     def set_user_preference(self, key: str, value: Any) -> bool:
         """
         Set a user preference and save it.
-        
+
         Args:
             key: Preference key
             value: Value to store
-            
+
         Returns:
             True if success
         """
         self._user_config[key] = value
         user_config_file = DATA_DIR / "user_config.yaml"
         return save_yaml(user_config_file, self._user_config)
-    
+
     # -------------------------------------------------------------------------
     # Utility Methods
     # -------------------------------------------------------------------------
-    
-    def as_dict(self) -> Dict[str, Any]:
+
+    def as_dict(self) -> dict[str, Any]:
         """Return all configuration as a dictionary."""
         return {
             "models": self._models_config,
             "presets": self._presets_config,
             "user": self._user_config,
         }
-    
+
     def __repr__(self) -> str:
         model_count = len(self._models_config.get("models", {}))
         preset_count = len(self.get_all_presets())
@@ -343,7 +343,7 @@ def get_temperature(task_type: str) -> float:
     return config.get_temperature(task_type)
 
 
-def get_preset(preset_id: str) -> Optional[Dict[str, Any]]:
+def get_preset(preset_id: str) -> dict[str, Any] | None:
     """Shortcut to config.get_preset()."""
     return config.get_preset(preset_id)
 
@@ -367,31 +367,30 @@ ensure_config_dirs()
 # =============================================================================
 
 if __name__ == "__main__":
-    import sys
-    
+
     print("=== Opti-Oignon 1.0 Configuration ===\n")
-    
+
     cfg = OptiOignonConfig()
-    
+
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Config dir: {CONFIG_DIR}")
     print(f"Data dir: {DATA_DIR}\n")
-    
+
     print("--- Models by type ---")
     for mtype in ["code", "reasoning", "general", "quick"]:
         primary = cfg.get_model(mtype, "primary")
         fast = cfg.get_model(mtype, "fast")
         print(f"  {mtype}: primary={primary}, fast={fast}")
-    
+
     print("\n--- Temperatures ---")
     for ttype in ["code", "debug", "reasoning", "writing", "general"]:
         print(f"  {ttype}: {cfg.get_temperature(ttype)}")
-    
+
     print("\n--- Presets ---")
     for pid in cfg.get_preset_display_order()[:5]:
         preset = cfg.get_preset(pid)
         if preset:
             print(f"  {preset.get('icon', '•')} {pid}: {preset.get('name', 'N/A')}")
     print(f"  ... ({len(cfg.get_all_presets())} presets total)")
-    
+
     print(f"\n{cfg}")

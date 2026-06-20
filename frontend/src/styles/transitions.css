@@ -1,0 +1,151 @@
+/*
+ * transitions.css — Opti-Oignon reusable micro-interaction classes (S135).
+ *
+ * Utility classes for fade, slide, scale, and collapse transitions.
+ * All animations are automatically disabled when the user has
+ * prefers-reduced-motion: reduce enabled (handled by the global
+ * rule in app.css).
+ *
+ * Convention: .oo-{effect} for the base class.
+ * Usage: Add class to element; toggle visibility/state in Svelte.
+ */
+
+/* ------------------------------------------------------------------ */
+/*  FADE                                                               */
+/* ------------------------------------------------------------------ */
+
+@keyframes oo-fade-in-kf {
+	from { opacity: 0; }
+	to   { opacity: 1; }
+}
+
+.oo-fade-in {
+	animation: oo-fade-in-kf var(--oo-motion-normal) var(--oo-ease-default) forwards;
+}
+
+.oo-fade-out {
+	opacity: 0;
+	transition: opacity var(--oo-motion-normal) var(--oo-ease-default);
+}
+
+/* ------------------------------------------------------------------ */
+/*  SLIDE UP (for panels, dropdowns entering from below)               */
+/* ------------------------------------------------------------------ */
+
+@keyframes oo-slide-up-kf {
+	from {
+		opacity: 0;
+		transform: translateY(0.5rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.oo-slide-up {
+	animation: oo-slide-up-kf var(--oo-motion-normal) var(--oo-ease-default) forwards;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SLIDE DOWN (for panels entering from above)                        */
+/* ------------------------------------------------------------------ */
+
+@keyframes oo-slide-down-kf {
+	from {
+		opacity: 0;
+		transform: translateY(-0.5rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.oo-slide-down {
+	animation: oo-slide-down-kf var(--oo-motion-normal) var(--oo-ease-default) forwards;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SCALE PRESS (button click feedback)                                */
+/* ------------------------------------------------------------------ */
+
+.oo-scale-press {
+	transition: transform var(--oo-motion-fast) var(--oo-ease-default);
+}
+
+.oo-scale-press:active {
+	transform: scale(0.97);
+}
+
+/* ------------------------------------------------------------------ */
+/*  COLLAPSE (smooth height transition for collapsible sections)       */
+/* ------------------------------------------------------------------ */
+
+.oo-collapse {
+	overflow: hidden;
+	transition: max-height var(--oo-motion-slow) var(--oo-ease-default), opacity var(--oo-motion-normal) var(--oo-ease-default);
+	max-height: 0;
+	opacity: 0;
+}
+
+.oo-collapse.oo-collapse-open {
+	max-height: 1000px;
+	opacity: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  TOGGLE SWITCH KNOB (smooth left/right slide)                       */
+/* ------------------------------------------------------------------ */
+
+.oo-toggle-knob {
+	transition: left var(--oo-motion-fast) var(--oo-ease-default), background-color var(--oo-motion-fast) var(--oo-ease-default);
+}
+
+/* ------------------------------------------------------------------ */
+/*  TAB PANEL FADE (smooth content swap between tabs)                  */
+/* ------------------------------------------------------------------ */
+
+@keyframes oo-tab-enter-kf {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.oo-tab-enter {
+	animation: oo-tab-enter-kf var(--oo-motion-fast) var(--oo-ease-default) forwards;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SPINNER (consistent sizing utility)                                */
+/* ------------------------------------------------------------------ */
+
+.oo-spinner {
+	width: 1.25rem;
+	height: 1.25rem;
+	border-width: 2px;
+	border-style: solid;
+	border-radius: 9999px;
+	border-color: var(--oo-bd-default);
+	border-top-color: var(--oo-acc-400);
+	animation: spin 600ms linear infinite;
+}
+
+.oo-spinner-sm {
+	width: 1rem;
+	height: 1rem;
+}
+
+.oo-spinner-lg {
+	width: 1.5rem;
+	height: 1.5rem;
+}
+
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}

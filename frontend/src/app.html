@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<title>Opti-Oignon</title>
+		<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+		<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
+		<script>
+			// Apply theme immediately to prevent flash of wrong theme
+			(function() {
+				var stored = localStorage.getItem('oo-theme');
+				var isDark = stored === 'light' ? false
+					: stored === 'dark' ? true
+					: !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+				if (isDark) document.documentElement.classList.add('dark');
+			})();
+		</script>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<a href="#main-content" class="skip-to-content">Skip to content</a>
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

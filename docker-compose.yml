@@ -1,0 +1,121 @@
+# Opti-Oignon Docker Compose
+# S163 -- Release Automation + Docker
+#
+# SECURITY NOTICE
+# ---------------
+# Native deployment (without Docker) is RECOMMENDED for maximum
+# security. The native setup provides Bulbe mode (socket-level
+# 127.0.0.1 binding), bwrap sandbox isolation, and no root daemon.
+#
+# This Docker Compose file is provided as an OPTIONAL convenience.
+# If you choose to use it, be aware of the following:
+#
+#   1. All ports are bound to 127.0.0.1 by default. Do NOT change
+#      this to 0.0.0.0 unless you understand the implications and
+#      have configured a reverse proxy with TLS.
+#
+#   2. The Docker daemon itself runs as root on the host. This is
+#      an inherent trade-off of Docker that cannot be mitigated
+#      here. Consider Podman (rootless) as an alternative.
+#
+#   3. Volume mounts expose host directories to the container.
+#      The default data volume uses a named volume (Docker-managed)
+#      to limit host filesystem exposure.
+#
+#   4. The Ollama service downloads and stores model weights.
+#      These can be large (several GB per model). The ollama_data
+#      volume persists them across restarts.
+#
+#   5. bwrap (bubblewrap) sandboxing inside Docker containers may
+#      require additional security options. If plugin sandboxing
+#      fails, the container is still isolated from the host, but
+#      plugin-to-plugin isolation is reduced.
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose logs -f        # follow logs
+#   docker compose down           # stop all services
+#   docker compose down -v        # stop and remove volumes (data loss)
+
+services:
+
+  # -- Backend API server --
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: opti-oignon-backend
+    # Bind to localhost ONLY -- see security notice above
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OO_DATA_DIR=/app/db
+      - OO_LOG_DIR=/app/logs
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - backend_data:/app/db
+      - backend_logs:/app/logs
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # -- Frontend (SvelteKit) --
+  # DISABLED (S197 PKG-02): Dockerfile.frontend was never written, so this
+  # service cannot build. The native-first posture runs the frontend outside
+  # Docker -- build the static bundle (`vite build` in frontend/) and serve it,
+  # or run the dev server (`scripts/dev_frontend.sh`) against the backend
+  # container's 127.0.0.1:8001. Re-enable by adding frontend/Dockerfile.frontend
+  # and uncommenting the block below.
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile.frontend
+  #   container_name: opti-oignon-frontend
+  #   # Bind to localhost ONLY
+  #   ports:
+  #     - "127.0.0.1:5173:5173"
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-q", "--spider", "http://localhost:5173/"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 5s
+  #   restart: unless-stopped
+
+  # -- Ollama LLM inference server --
+  ollama:
+    image: ollama/ollama:latest
+    container_name: opti-oignon-ollama
+    # No port exposed to host by default -- only reachable from
+    # the backend container via Docker network. Uncomment the
+    # following line ONLY if you need direct host access to Ollama:
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+    name: opti-oignon-backend-data
+  backend_logs:
+    name: opti-oignon-backend-logs
+  ollama_data:
+    name: opti-oignon-ollama-data

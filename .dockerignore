@@ -1,0 +1,55 @@
+# Opti-Oignon -- Docker build context exclusions (S163, restored S197)
+#
+# The backend image (Dockerfile.backend) copies only opti_oignon/, scripts/
+# and assets/. Everything below is excluded from the build context to keep the
+# image small and to keep host artefacts, runtime state and secrets out of it.
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests and documentation are not needed in the runtime image
+tests/
+docs/
+
+# Frontend sources and node tooling (the backend image is API-only)
+frontend/
+node_modules/
+
+# Version control and CI metadata
+.git/
+.github/
+.gitignore
+
+# Runtime databases and encrypted stores (never bake into an image)
+*.db
+*.db-wal
+*.db-shm
+data/
+.audit_chain_anchor
+fingerprint.db
+
+# Secrets and key material
+*.key
+*.pem
+
+# Session-tracking and prompt continuity files (development artefacts)
+SESSION_TRACKING_*.md
+PROMPT_S*.md
+
+# Archives and build outputs
+*.zip
+*.tar
+*.tar.gz
+build/
+dist/
+*.egg-info/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store

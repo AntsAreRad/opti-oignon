@@ -1,0 +1,47 @@
+# Web Search configuration -- S82
+# Proxy support, PII sanitization, and retry settings.
+
+# Proxy configuration
+# null = direct connection (no proxy)
+# "socks5h://localhost:9050" = Tor (default SOCKS5 port)
+# "socks5h://host:port" = custom SOCKS5 proxy
+# The 'h' in socks5h means DNS resolution is done by the proxy (important for Tor)
+proxy: null
+
+# Timeout in seconds (increase for Tor, which is slower)
+timeout: 10
+proxy_timeout: 15
+
+# Retry settings for rate-limited or unreliable proxies
+# DDG rate-limits Tor exit nodes aggressively
+max_retries: 3
+retry_backoff: [2, 5, 10]
+
+# Cache settings
+cache_ttl: 300
+
+# Rate limiting (minimum seconds between requests)
+rate_limit_interval: 1.0
+
+# Default search parameters
+default_max_results: 5
+default_token_budget: 1500
+
+# DuckDuckGo settings
+region: null
+safesearch: "moderate"
+
+# PII sanitization before sending search queries
+# When enabled, strips personally identifiable information from queries
+pii_sanitization:
+  enabled: true
+  # Strip email addresses (user@example.com -> [EMAIL])
+  strip_emails: true
+  # Strip IPv4 and IPv6 addresses (192.168.1.1 -> [IP])
+  strip_ip_addresses: true
+  # Strip local file paths (/home/user/file.py -> [PATH])
+  strip_file_paths: true
+  # Strip hostnames that look like internal machines (myhost.local -> [HOST])
+  strip_hostnames: true
+  # Custom patterns: list of {pattern: "regex", replacement: "text"} entries
+  custom_patterns: []

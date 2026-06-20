@@ -1,316 +1,121 @@
 # =============================================================================
-# MODEL CONFIGURATION - OPTI-OIGNON 1.0
+# OPTI-OIGNON v1.4.0 — MODELS CONFIGURATION
 # =============================================================================
-# Configuration with verified context limits per model.
+# Ce fichier definit le mapping entre types de taches et modeles Ollama.
+# Modifier selon les modeles installes sur votre machine.
 #
-# SOURCES (verified December 2025):
-# - Qwen3-Coder-30B: HuggingFace Qwen/Qwen3-Coder-30B-A3B-Instruct, Ollama library
-# - DeepSeek-R1-32B: DeepSeek-AI GitHub, HuggingFace deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-# - Gemma 3 27B: Google AI docs, HuggingFace google/gemma-3-27b-it
-# - Nemotron 3 Nano: NVIDIA research page, HuggingFace nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
-# - Llama 3.3: Meta official documentation
-# - Mistral Small 3.2: Mistral AI documentation
-# - Devstral: Mistral AI documentation
-#
-# NOTE: The context_manager.py module fetches actual limits from Ollama dynamically.
-# These values serve as fallbacks when Ollama info is unavailable.
+# Pour voir les modeles disponibles: ollama list
 # =============================================================================
 
-# =============================================================================
-# MODEL CONTEXT LIMITS
-# =============================================================================
-# Each model entry includes:
-# - context_window: Total context capacity (input + output)
-# - max_output: Maximum tokens the model can generate
-# - recommended_input: Safe input size leaving room for output
-# - chars_per_token: Approximation for token estimation
-
-models:
-  # ---------------------------------------------------------------------------
-  # QWEN FAMILY - Large context, excellent for coding
-  # ---------------------------------------------------------------------------
-  
-  "qwen3-coder:30b":
-    display_name: "Qwen3 Coder 30B"
-    context_window: 262144       # 256K native - Source: QwenLM/Ollama
-    max_output: 65536            # 64K max output - Source: HuggingFace
-    recommended_input: 200000    # Leave room for generous output
-    chars_per_token: 3.8
-    notes: "MoE model (3.3B active/30.5B total), excellent for agentic coding"
-  
-  "qwen3:32b":
-    display_name: "Qwen3 32B"
-    context_window: 131072       # 128K with YaRN - Source: QwenLM
-    max_output: 8192
-    recommended_input: 120000
-    chars_per_token: 3.5
-    notes: "Dense model, good general reasoning"
-  
-  "qwen2.5-coder:7b":
-    display_name: "Qwen2.5 Coder 7B"
-    context_window: 131072       # 128K - Source: llm-stats.com
-    max_output: 8192
-    recommended_input: 120000
-    chars_per_token: 4.0
-    notes: "Smaller but capable, fast inference"
-  
-  "qwen2.5-coder:14b":
-    display_name: "Qwen2.5 Coder 14B"
-    context_window: 32768        # 32K base + YaRN - Source: HuggingFace
-    max_output: 8192
-    recommended_input: 24000
-    chars_per_token: 3.8
-    notes: "Good balance of speed and quality"
-  
-  "qwen2.5-coder:32b-instruct-q5_k_m":
-    display_name: "Qwen2.5 Coder 32B Q5_K_M"
-    context_window: 131072       # 128K - Source: llm-stats.com
-    max_output: 8192
-    recommended_input: 120000
-    chars_per_token: 3.5
-    notes: "Quantized version, good quality retention"
-  
-  "qwen3-vl:32b":
-    display_name: "Qwen3 VL 32B"
-    context_window: 1048576      # 1M tokens - Source: QwenLM GitHub
-    max_output: 32768
-    recommended_input: 1000000
-    chars_per_token: 3.2
-    notes: "Vision-language model, massive context"
-  
-  # ---------------------------------------------------------------------------
-  # DEEPSEEK FAMILY - Strong reasoning
-  # ---------------------------------------------------------------------------
-  
-  "deepseek-r1:32b":
-    display_name: "DeepSeek R1 32B"
-    context_window: 131072       # 128K - Source: DeepSeek GitHub
-    max_output: 32768            # Official max - Source: HuggingFace
-    recommended_input: 96000
-    chars_per_token: 3.5
-    notes: "Distilled from R1, excellent reasoning with chain-of-thought"
-  
-  # ---------------------------------------------------------------------------
-  # GOOGLE GEMMA FAMILY
-  # ---------------------------------------------------------------------------
-  
-  "gemma3:27b":
-    display_name: "Gemma 3 27B"
-    context_window: 131072       # 128K - Source: Google AI docs
-    max_output: 8192             # Source: LM Studio
-    recommended_input: 120000
-    chars_per_token: 4.0
-    notes: "Multimodal, 140+ languages, good for explanations"
-  
-  # ---------------------------------------------------------------------------
-  # META LLAMA FAMILY
-  # ---------------------------------------------------------------------------
-  
-  "llama3.3:latest":
-    display_name: "Llama 3.3 70B"
-    context_window: 131072       # 128K - Source: Meta official
-    max_output: 16384
-    recommended_input: 110000
-    chars_per_token: 3.8
-    notes: "Largest Llama, strong general performance"
-  
-  # ---------------------------------------------------------------------------
-  # MISTRAL FAMILY
-  # ---------------------------------------------------------------------------
-  
-  "mistral-small3.2:latest":
-    display_name: "Mistral Small 3.2 24B"
-    context_window: 131072       # 128K - Source: Mistral AI
-    max_output: 16384
-    recommended_input: 110000
-    chars_per_token: 3.5
-    notes: "Fast and efficient, good for general tasks"
-  
-  "devstral-small-2:latest":
-    display_name: "Devstral Small 2 24B"
-    context_window: 262144       # 256K - Source: Mistral AI
-    max_output: 16384
-    recommended_input: 240000
-    chars_per_token: 3.5
-    notes: "Developer-focused, large context"
-  
-  # ---------------------------------------------------------------------------
-  # NVIDIA NEMOTRON FAMILY - Massive context
-  # ---------------------------------------------------------------------------
-  
-  "nemotron-3-nano:30b":
-    display_name: "Nemotron 3 Nano 30B"
-    context_window: 1048576      # 1M tokens! - Source: NVIDIA research
-    max_output: 16384
-    recommended_input: 1000000
-    chars_per_token: 3.2
-    notes: "Hybrid Mamba-Transformer MoE, excellent for massive documents"
-  
-  # ---------------------------------------------------------------------------
-  # OTHER MODELS
-  # ---------------------------------------------------------------------------
-  
-  "goekdenizguelmez/JOSIEFIED-Qwen3:30b":
-    display_name: "JOSIEFIED Qwen3 30B"
-    context_window: 32768        # Base Qwen3 - Source: HuggingFace
-    max_output: 8192
-    recommended_input: 24000
-    chars_per_token: 4.0
-    notes: "Community fine-tune"
-  
-  "dolphin-mixtral:8x7b":
-    display_name: "Dolphin Mixtral 8x7B"
-    context_window: 16384        # 16K finetuned - Source: HuggingFace
-    max_output: 8192
-    recommended_input: 12000
-    chars_per_token: 4.0
-    notes: "Uncensored, good for creative tasks"
-  
-  "wizard-math:13b":
-    display_name: "Wizard Math 13B"
-    context_window: 32768        # 32K - Source: Ollama
-    max_output: 4096
-    recommended_input: 28000
-    chars_per_token: 4.0
-    notes: "Specialized for mathematical reasoning"
-  
-  # ---------------------------------------------------------------------------
-  # DEFAULT FALLBACK
-  # ---------------------------------------------------------------------------
-  # Used when model is not in this list and Ollama info unavailable
-  
-  "_default":
-    display_name: "Unknown Model"
-    context_window: 8192         # Conservative default
-    max_output: 4096
-    recommended_input: 4000
-    chars_per_token: 4.0
-    notes: "Fallback for unrecognized models"
-
-# =============================================================================
-# TASK ROUTING CONFIGURATION
-# =============================================================================
-# Maps task types to preferred models
-
+# -----------------------------------------------------------------------------
+# ROUTING: type de tache → modele Ollama
+# -----------------------------------------------------------------------------
+# Chaque type peut avoir:
+#   primary  — modele principal (meilleur qualite)
+#   fast     — modele rapide (reponses courtes)
+#   quality  — modele premium (taches critiques)
+# -----------------------------------------------------------------------------
 routing:
-  # ---------------------------------------------------------------------------
-  # GENERIC TYPES (used by analyzer)
-  # ---------------------------------------------------------------------------
-  code:
-    primary: "qwen3-coder:30b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen2.5-coder:14b"
-  
-  # ---------------------------------------------------------------------------
-  # SPECIFIC TYPES
-  # ---------------------------------------------------------------------------
   code_r:
     primary: "qwen3-coder:30b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen2.5-coder:14b"
-  
+    fast: "qwen3-coder:30b"
+    quality: "qwen3-coder-next:latest"
   code_python:
     primary: "qwen3-coder:30b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen2.5-coder:7b"
-  
+    fast: "qwen3-coder:30b"
+    quality: "qwen3-coder-next:latest"
   debug_r:
     primary: "qwen3-coder:30b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen2.5-coder:14b"
-  
   debug_python:
     primary: "qwen3-coder:30b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen2.5-coder:7b"
-  
-  reasoning:
-    primary: "deepseek-r1:32b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen3:32b"
-  
   scientific_writing:
     primary: "qwen3:32b"
     quality: "deepseek-r1:32b"
-    fast: "gemma3:27b"
-  
   planning:
+    primary: "qwen3:32b"
+  planning_deep:
     primary: "deepseek-r1:32b"
-    quality: "deepseek-r1:32b"
-    fast: "qwen3:32b"
-  
+  linux:
+    primary: "qwen3-coder:30b"
+  simple_question:
+    primary: "qwen3:32b"
+    fast: "nemotron-3-nano:30b"
+  unknown:
+    primary: "qwen3:32b"
+    fast: "nemotron-3-nano:30b"
+
+  # Types generiques utilises par le router
   general:
     primary: "qwen3:32b"
-    quality: "deepseek-r1:32b"
     fast: "nemotron-3-nano:30b"
-  
-  quick:
-    primary: "nemotron-3-nano:30b"
-    quality: "qwen3-coder:30b"
-    fast: "qwen2.5-coder:7b"
+    quality: "qwen3.5:35b"
+  code:
+    primary: "qwen3-coder:30b"
+    quality: "qwen3-coder-next:latest"
+  reasoning:
+    primary: "deepseek-r1:32b"
+    quality: "qwen3.5:35b"
+  creative:
+    primary: "qwen3:32b"
+    quality: "qwen3.5:35b"
+  vision:
+    primary: "qwen3-vl:32b"
 
-# =============================================================================
-# TEMPERATURE DEFAULTS
-# =============================================================================
-
-temperatures:
-  code: 0.3          # Lower for deterministic code
-  debug: 0.2         # Very low for precise debugging
-  reasoning: 0.5     # Balanced for reasoning
-  writing: 0.7       # Higher for creative writing
-  general: 0.6       # Balanced general use
-  refining: 0.3      # Low for prompt refinement
-
-# =============================================================================
-# TIMEOUT CONFIGURATION
-# =============================================================================
-
-timeouts:
-  default: 300       # 5 minutes
-  fast: 60           # 1 minute for quick tasks
-  deep: 600          # 10 minutes for complex reasoning
-
-# =============================================================================
-# FALLBACK ORDER
-# =============================================================================
-# If primary model fails, try these in order
-
+# -----------------------------------------------------------------------------
+# FALLBACK: ordre de preference si le modele principal n'est pas disponible
+# -----------------------------------------------------------------------------
 fallback_order:
   - "qwen3-coder:30b"
-  - "devstral-small-2:latest"
-  - "gemma3:27b"
-  - "nemotron-3-nano:30b"
-  - "qwen2.5-coder:14b"
   - "qwen3:32b"
+  - "qwen3.5:35b"
+  - "deepseek-r1:32b"
+  - "nemotron-3-nano:30b"
+  - "qwen3-coder-next:latest"
 
-# =============================================================================
-# BLACKLIST
-# =============================================================================
-# Models to avoid for certain tasks
-
-blacklist:
-  - model: "deepseek-coder:33b"
-    reason: "Refuses non-code prompts"
-  - model: "qwen3-vl:32b"
-    reason: "Vision model, poor text-only performance"
-
-# =============================================================================
-# SPECIAL PURPOSE MODELS
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# MODELES SPECIAUX
+# -----------------------------------------------------------------------------
 special:
-  vision: "qwen3-vl:32b"
-  math: "wizard-math:13b"
   embeddings: "mxbai-embed-large"
-  long_context: "nemotron-3-nano:30b"
+  summary: "nemotron-3-nano:30b"
+  vision: "qwen3-vl:32b"
 
-# =============================================================================
-# CONTEXT WARNINGS
-# =============================================================================
-# Thresholds for context usage warnings
+# -----------------------------------------------------------------------------
+# BLACKLIST: modeles a eviter (performances insuffisantes)
+# -----------------------------------------------------------------------------
+blacklist: []
+  # - model: "mistral:7b"
+  #   reason: "Trop petit pour les taches complexes"
 
-context_warnings:
-  yellow_threshold: 75    # Percentage - show warning
-  orange_threshold: 90    # Percentage - show strong warning
-  auto_truncate: false    # Auto-truncate if exceeds limit
-  prefer_summarize: true  # Suggest summarization over truncation
+# -----------------------------------------------------------------------------
+# TEMPERATURES par type de tache
+# -----------------------------------------------------------------------------
+temperatures:
+  code: 0.2
+  debug: 0.1
+  analysis: 0.3
+  creative: 0.7
+  general: 0.5
+  scientific_writing: 0.3
+  planning: 0.4
+
+# -----------------------------------------------------------------------------
+# TIMEOUTS (secondes)
+# -----------------------------------------------------------------------------
+timeouts:
+  default: 300
+  quick: 60
+  long: 600
+
+# -----------------------------------------------------------------------------
+# CONTEXT WINDOWS — tailles verifiees (tokens)
+# -----------------------------------------------------------------------------
+# Utilise par context_manager.py pour le budget allocation
+# Si un modele n'est pas liste, Ollama est interroge dynamiquement
+# -----------------------------------------------------------------------------
+context_windows:
+  "qwen3-coder:30b": 262144
+  "qwen3:32b": 262144
+  "deepseek-r1:32b": 131072
+  "nemotron-3-nano:30b": 1048576
+  "mxbai-embed-large": 8192

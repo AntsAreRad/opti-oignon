@@ -1,0 +1,28 @@
+name: code-formatter
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Formats code blocks in LLM responses. Supports Python (via basic
+  indentation normalization) and JSON (via json.dumps). Runs as a
+  post_inference hook to clean up code output.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+  - tool_call
+dependencies: []
+permissions:
+  - tool_register
+min_opti_version: "1.10.0"
+config_schema:
+  python_indent:
+    type: integer
+    default: 4
+    description: Number of spaces for Python indentation
+  json_indent:
+    type: integer
+    default: 2
+    description: Number of spaces for JSON indentation
+  max_code_length:
+    type: integer
+    default: 50000
+    description: Maximum code block size to format (characters)

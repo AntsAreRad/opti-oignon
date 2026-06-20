@@ -1,0 +1,24 @@
+name: calculator
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Safe math expression evaluator. Registers a tool_call hook that
+  intercepts arithmetic expressions and returns computed results.
+  Supports basic arithmetic, exponents, roots, trig, and constants.
+entry_point: entry_point.py
+hooks:
+  - tool_call
+  - post_inference
+dependencies: []
+permissions:
+  - tool_register
+min_opti_version: "1.10.0"
+config_schema:
+  max_expression_length:
+    type: integer
+    default: 500
+    description: Maximum allowed expression length in characters
+  precision:
+    type: integer
+    default: 10
+    description: Decimal precision for results

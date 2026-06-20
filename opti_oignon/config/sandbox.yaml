@@ -1,0 +1,271 @@
+# Sandbox configuration for filesystem & shell tools (S73)
+# All LLM filesystem operations execute inside isolated sandboxes.
+#
+# ISOLATION BACKENDS:
+#   - bwrap (bubblewrap): Full kernel namespace isolation. RECOMMENDED.
+#     Install: sudo apt install bubblewrap
+#   - tempdir: Temporary directory only. NO real isolation.
+#     The process runs with full host privileges.
+#     ONLY for development/testing with explicit confirmation.
+#
+# "auto" tries bwrap first, falls back to tempdir with mandatory warning.
+
+enabled: true
+
+# Isolation backend: "auto", "bwrap", or "tempdir"
+# "auto" = prefer bwrap, fallback to tempdir with confirmation required
+# "bwrap" = require bwrap, refuse to start without it
+# "tempdir" = use tempdir only (UNSAFE - development only)
+isolation_backend: auto
+
+# When bwrap is unavailable and backend falls back to tempdir,
+# require explicit human confirmation before allowing any command.
+# Setting this to false is DANGEROUS and defeats the security model.
+require_degraded_confirmation: true
+
+# Web search during sandbox mode:
+# web_search remains enabled by default because the LLM may need to
+# search documentation while coding. However, it presents a minor
+# data exfiltration risk: the LLM could embed conversation data
+# in search queries. Since read_file/write_file are disabled
+# in sandbox mode, the LLM cannot access NEW host data.
+# Set to true to also disable web_search during sandbox sessions.
+disable_web_search_in_sandbox: false
+
+# Base directory for sandbox workspaces
+workspace_base: /tmp/opti-oignon-sandboxes
+
+# Command execution limits
+command_timeout: 30          # seconds
+max_output_bytes: 65536      # 64 KB stdout cap
+max_stderr_bytes: 16384      # 16 KB stderr cap
+max_concurrent_sessions: 5
+
+# Audit log (separate SQLite DB per feature domain)
+audit_db_path: sandbox_audit.db
+
+# ---- Resource caps (S209, Bloc 0) ----
+# Per-sandbox limits applied to the bwrap process tree. Out-of-range values
+# are clamped into the documented ranges, never disabled.
+#   limits_enabled    gate the caps on/off (off = no caps applied)
+#   resource_backend  "rlimit" (default, dependency-free RLIMIT_* via a
+#                     preexec hook) or "cgroup" (a transient systemd --user
+#                     scope when systemd-run is available, rlimit otherwise)
+#   limit_memory_bytes  RLIMIT_AS, per process.  Range 64 MiB .. 16 GiB
+#   limit_nproc         RLIMIT_NPROC, per real uid.  Range 16 .. 8192
+#   limit_fsize_bytes   RLIMIT_FSIZE, per file.  Range 1 MiB .. 16 GiB
+#   limit_cpu_seconds   RLIMIT_CPU, CPU-seconds.  Range 5 .. 86400
+#   tmpfs_size_bytes    --size cap on the /tmp tmpfs.  Range 1 MiB .. 8 GiB
+limits_enabled: true
+resource_backend: rlimit
+limit_memory_bytes: 2147483648
+limit_nproc: 4096
+limit_fsize_bytes: 1073741824
+limit_cpu_seconds: 300
+tmpfs_size_bytes: 268435456
+
+# ---- Seccomp denylist (S209, Bloc 0) ----
+# A moderate seccomp BPF denylist (x86_64) is built and passed on every bwrap
+# launch. It reduces kernel syscall surface but is NOT the boundary -- the
+# namespaces are. seccomp_required makes a build or fd failure REFUSE the
+# launch (fail-secure) rather than run unfiltered; flip it off only knowingly.
+seccomp_enabled: true
+seccomp_required: true
+
+# ---- Workspace lifecycle (S210, Bloc 1) ----
+# Workspaces default ephemeral under workspace_base (volatile under /tmp:
+# they do NOT survive a reboot). reconcile_on_start reaps orphaned
+# sandbox-* directories left by a previous process at startup (directories
+# only; the audit database file in workspace_base is never touched).
+# workspace_persistent=true skips that reap so files under a configured
+# persistent workspace_base survive restarts -- the trade-off is a WIDENED
+# DISPOSABLE WINDOW (data persists on disk between runs); write-back to the
+# host stays approval-gated regardless (Bloc 3). idle_ttl_seconds lazily
+# destroys idle workspaces that are not bound to a conversation (a binding
+# is explicit user intent and exempts it); 0 disables; clamped 0..2592000.
+# disk_soft_limit_bytes is the per-workspace copy-in soft quota: a copy-in
+# that would exceed it is refused (HTTP 413); the workspace is never killed;
+# clamped 1 MiB..16 GiB. The tmpfs --size from Bloc 0 caps /tmp inside the
+# sandbox; this quota covers the workspace bind on the host side.
+workspace_persistent: false
+reconcile_on_start: true
+idle_ttl_seconds: 3600
+disk_soft_limit_bytes: 536870912
+
+# ---- Copy-in (S211, Bloc 2) ----
+# All copy-in is EXPLICIT and user-initiated through the manager UI; the
+# model can trigger neither an upload nor a browse nor a clone (S73/S74).
+# host_share_roots confines the host explorer and the clone source: each
+# entry is expanduser'd and realpath'd at load, the filesystem root "/" is
+# refused, and entries that are not existing directories are dropped. An
+# empty list defaults to the user's home. Requests outside the roots answer
+# 403 BEFORE any existence check (no existence leak).
+# upload_max_files caps one multipart request (clamped 1..1024);
+# upload_max_file_bytes caps one uploaded file (clamped 1 MiB..16 GiB).
+# clone_max_bytes / clone_max_files cap ONE clone (clamped 1 MiB..16 GiB /
+# 1..1000000), enforced by an exact pre-walk that REFUSES (413) before any
+# copy -- hitting the walk's depth bound also refuses, never undercounts.
+# The request/clone TOTAL is additionally bounded by disk_soft_limit_bytes
+# above: the caps bound a single action, the quota bounds the workspace as
+# a whole -- both apply, neither subsumes the other. The clone never
+# follows symlinks (skipped and counted; targets never exposed) and skips
+# device/special files; it records the section 6.1 baseline manifest
+# (in-memory, outside the sandboxed code's reach) that Bloc 3's diff and
+# write-back consume.
+host_share_roots: []
+upload_max_files: 64
+upload_max_file_bytes: 134217728
+clone_max_bytes: 536870912
+clone_max_files: 20000
+
+# ---- Diff-gated write-back (S212, Bloc 3) ----
+# The review and the apply are EXPLICIT and user-initiated through the
+# manager UI; the model can trigger neither (S73/S74). The diff classifies
+# the live workspace against the in-memory 6.1 baseline (hash-driven:
+# added/modified/deleted; symlinks and specials skipped and counted, never
+# followed). diff_max_entries bounds the review (clamped 1..1000000):
+# exceeding it REFUSES (413) rather than truncating or paginating -- a
+# review gate must present the whole change set or nothing. Apply writes
+# ONLY approved changes under the write-once cloned root (re-validated
+# against host_share_roots above) or an explicit allowlisted target;
+# per-file symlink-component validation, temp-file-plus-rename, deletions
+# only from their own separately-confirmed set; everything audited per
+# file. No knob disables the approval gate: checkpoint-before-apply is
+# hardcoded, not configuration.
+diff_max_entries: 50000
+
+# ---- Optional Daily network: provision phase (S213, Bloc 4) ----
+# There is deliberately NO key here that turns the sandbox network on:
+# the network flag is per workspace, default off, and set only by an
+# explicit user action through the manager (spec 8.3 -- never a config
+# default, never model-triggerable; refused under Bulbe at the
+# binding-layer gate, an unset or unknown mode treated as Bulbe). The one
+# key below is a TIMEOUT for the single network-on step the cycle ships:
+# the provision run (a hash-pinned requirements set installed with
+# --require-hashes --only-binary=:all: into a workspace venv; arbitrary
+# task code never touches the network -- every task run keeps
+# --unshare-net unconditionally). Clamped 30..3600 seconds.
+provision_timeout_seconds: 600
+
+# ---- Bubblewrap (bwrap) configuration ----
+
+# Read-only system paths to expose inside the sandbox.
+# Only paths that exist on the host are bound.
+bwrap_ro_binds:
+  - /usr
+  - /bin
+  - /lib
+  - /lib64
+  - /etc/ld.so.cache
+  - /etc/alternatives
+  - /etc/python3
+  - /etc/localtime
+  - /etc/ssl/certs
+
+# Paths that are explicitly NEVER bound, even if listed above.
+# Defense-in-depth: these are blocked regardless of config edits.
+bwrap_never_bind:
+  - /home
+  - /root
+  - /var
+  - /etc/shadow
+  - /etc/passwd
+  - /etc/sudoers
+  - /etc/ssh
+  - /mnt
+  - /media
+  - /opt
+  - /srv
+  - /boot
+  - /run
+
+# ---- Command blocklist (defense-in-depth, applies to ALL backends) ----
+
+# Blocked commands - exact prefix matches (case-insensitive)
+blocked_commands:
+  - "sudo"
+  - "su "
+  - "curl"
+  - "wget"
+  - "nc "
+  - "ncat"
+  - "netcat"
+  - "chmod 777"
+  - "chmod +s"
+  - "chown"
+  - "chgrp"
+  - "mount"
+  - "umount"
+  - "mkfs"
+  - "dd "
+  - "dd if="
+  - "shutdown"
+  - "reboot"
+  - "halt"
+  - "poweroff"
+  - "init "
+  - "systemctl"
+  - "service "
+  - "iptables"
+  - "ip6tables"
+  - "nft "
+  - "modprobe"
+  - "insmod"
+  - "rmmod"
+  - "mknod"
+  - "kill -9 1"
+  - "killall"
+  - "pkill"
+
+# Blocked patterns - regex (case-insensitive), checked on ALL backends
+blocked_patterns:
+  # Pipe or redirect to network tools
+  - "\\|\\s*(curl|wget|nc|ncat|netcat)"
+  - "\\|\\s*bash"
+  - "\\|\\s*sh\\b"
+  - "\\|\\s*zsh"
+  # Backtick injection
+  - "`[^`]*`"
+  # $() with dangerous commands
+  - "\\$\\(\\s*(curl|wget|sudo|rm|dd|nc|ncat|chmod|chown)"
+  # rm -rf with root or parent traversal
+  - "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?/"
+  - "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?\\.\\."
+  # Path traversal in commands
+  - "\\.\\./\\.\\."
+  # Fork bomb patterns
+  - ":\\(\\)\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"
+  - "\\bfork\\b.*\\bwhile\\b.*\\btrue\\b"
+  # /dev/ access (except /dev/null, /dev/stdin, /dev/stdout, /dev/stderr)
+  - "/dev/(?!null|stdin|stdout|stderr)[a-zA-Z]"
+  # /proc/ and /sys/ access (only enforced in tempdir mode,
+  # bwrap has its own isolated /proc)
+  - "/proc/"
+  - "/sys/"
+  # Python/perl/ruby with dangerous modules
+  - "python[23]?\\s+-c\\s+.*\\b(os\\.|subprocess|socket|shutil\\.rmtree|urllib|http\\.|requests\\.|httpx|aiohttp)"
+  - "perl\\s+-e\\s+.*\\b(system|exec|socket)"
+  - "ruby\\s+-e\\s+.*\\b(system|exec|socket)"
+  # Base64 decode piped to shell (encoding bypass)
+  - "base64\\s+(-d|--decode).*\\|\\s*(bash|sh|zsh|python)"
+  # Hex/octal printf bypass
+  - "printf\\s+.*\\\\x[0-9a-fA-F].*\\|\\s*(bash|sh|zsh)"
+  # Environment variable manipulation for escalation
+  - "export\\s+(PATH|LD_PRELOAD|LD_LIBRARY_PATH)="
+  # Symlink escape attempts
+  - "ln\\s+-s.*\\.\\./"
+  - "ln\\s+-sf?\\s+/"
+  # find with -exec on root (can bypass other restrictions)
+  - "find\\s+/\\s.*-exec"
+
+# ---- Quick Sandbox (S117) ----
+# Chat-integrated sandboxed code execution.
+# When enabled, execute_code/write_file/read_file tool calls in regular
+# chat are transparently redirected to an isolated sandbox session.
+# The user must approve and download files explicitly.
+# This is opt-in: default is disabled.
+
+quick_sandbox:
+  enabled: false
+  auto_destroy_minutes: 30
+  max_concurrent_quick_sessions: 3

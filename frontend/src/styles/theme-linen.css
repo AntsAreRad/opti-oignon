@@ -1,0 +1,46 @@
+/*
+ * theme-linen.css -- Linen preset (light).
+ * Generated for S166 from the design-token contract (spec 7.3).
+ * Declares the full 38-token foundation schema.
+ */
+
+:root[data-oo-theme="linen"] {
+	--oo-bg-base: #EAEBE7;
+	--oo-bg-surface: #E3E4E0;
+	--oo-bg-elevated: #F0F1EE;
+	--oo-bg-overlay: #D9DAD5;
+	--oo-bg-subtle: #DEDFDA;
+	--oo-bg-hover: #DCDDD8;
+	--oo-bg-active: #D3D4CE;
+	--oo-fg-primary: #22272D;
+	--oo-fg-secondary: #454C54;
+	--oo-fg-tertiary: #4C5157;
+	--oo-fg-muted: #666D75;
+	--oo-fg-decorative: #B0B4AD;
+	--oo-fg-on-accent: #F0F1EE;
+	--oo-bd-subtle: #D2D3CD;
+	--oo-bd-default: #C2C3BD;
+	--oo-bd-strong: #A8A9A2;
+	--oo-acc-50: #E2E8EB;
+	--oo-acc-100: #C4D1D6;
+	--oo-acc-200: #A1B5BE;
+	--oo-acc-300: #7794A1;
+	--oo-acc-400: #4D7384;
+	--oo-acc-500: #2E5A6E;
+	--oo-acc-600: #274C5C;
+	--oo-acc-700: #1F3D4B;
+	--oo-acc-800: #182F39;
+	--oo-acc-900: #11222A;
+	--oo-success: #2E6858;
+	--oo-success-bg: rgba(46, 104, 88, 0.12);
+	--oo-success-bd: rgba(46, 104, 88, 0.20);
+	--oo-warning: #5E5030;
+	--oo-warning-bg: rgba(94, 80, 48, 0.12);
+	--oo-warning-bd: rgba(94, 80, 48, 0.20);
+	--oo-error: #7A3E34;
+	--oo-error-bg: rgba(122, 62, 52, 0.12);
+	--oo-error-bd: rgba(122, 62, 52, 0.20);
+	--oo-info: #2E5A6E;
+	--oo-info-bg: rgba(46, 90, 110, 0.12);
+	--oo-info-bd: rgba(46, 90, 110, 0.20);
+}

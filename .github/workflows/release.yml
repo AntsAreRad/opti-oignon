@@ -1,0 +1,191 @@
+# Opti-Oignon Release Pipeline
+# S163 -- Release Automation
+#
+# Triggered on tag push matching v* (e.g., v3.2.11).
+# Jobs:
+#   validate  - run CI checks before releasing
+#   build     - create release archive, checksums, changelog
+#   release   - create GitHub Release with assets
+#
+# GPG signing is optional: runs only if GPG_PRIVATE_KEY secret
+# is configured in the repository. Without it, the release is
+# created with checksums but no detached signature.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  PYTHON_DEFAULT: "3.12"
+  NODE_VERSION: "20"
+
+permissions:
+  contents: write
+
+jobs:
+
+  # -------------------------------------------------------------------
+  # Validate -- quick sanity checks before building release
+  # -------------------------------------------------------------------
+  validate:
+    name: Validate Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      tag: ${{ steps.extract.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: extract
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+          echo "Version: $VERSION"
+
+      - name: Verify tag matches __version__.py
+        run: |
+          FILE_VERSION=$(python3 -c "
+          with open('opti_oignon/__version__.py') as f:
+              for line in f:
+                  if '__version__' in line:
+                      print(line.split('=')[1].strip().strip('\"'))
+                      break
+          ")
+          TAG_VERSION="${{ steps.extract.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match __version__.py ($FILE_VERSION)"
+            exit 1
+          fi
+          echo "Version match confirmed: $FILE_VERSION"
+
+      - name: Run lint check
+        run: |
+          pip install ruff
+          ruff check opti_oignon/ tests/ --output-format=github
+
+  # -------------------------------------------------------------------
+  # Build -- create archive, checksums, changelog
+  # -------------------------------------------------------------------
+  build:
+    name: Build Release
+    runs-on: ubuntu-latest
+    needs: [validate]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Generate changelog
+        run: |
+          python3 scripts/generate_changelog.py > RELEASE_CHANGELOG.md
+          echo "--- Generated changelog ---"
+          cat RELEASE_CHANGELOG.md
+
+      - name: Create release archive
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          ARCHIVE="opti-oignon-v${VERSION}.zip"
+          zip -r "$ARCHIVE" \
+            opti_oignon/ \
+            frontend/ \
+            tests/ \
+            docs/ \
+            scripts/ \
+            assets/ \
+            data/ \
+            CHANGELOG.md \
+            README.md \
+            LICENSE \
+            mkdocs.yml \
+            docker-compose.yml \
+            Dockerfile.backend \
+            .dockerignore \
+            -x "**/__pycache__/*" \
+            -x "**/*.pyc" \
+            -x "**/node_modules/*" \
+            -x "**/.svelte-kit/*" \
+            -x "**/build/*" \
+            -x "**/*.db" \
+            -x "**/*.db-wal" \
+            -x "**/*.db-shm"
+          echo "archive=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Generate checksums
+        run: |
+          sha256sum "${{ env.archive }}" > "${{ env.archive }}.sha256"
+          echo "Checksum:"
+          cat "${{ env.archive }}.sha256"
+
+      - name: GPG sign release
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --keyid-format=long 2>/dev/null \
+            | grep '^sec' | head -1 \
+            | sed -E 's/.*\/([A-F0-9]+).*/\1/')
+          echo "Signing with key: $KEY_ID"
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$KEY_ID" \
+            --armor --detach-sign \
+            --output "${{ env.archive }}.sig" \
+            "${{ env.archive }}"
+          echo "gpg_signed=true" >> "$GITHUB_ENV"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            ${{ env.archive }}
+            ${{ env.archive }}.sha256
+            ${{ env.archive }}.sig
+            RELEASE_CHANGELOG.md
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # Release -- create GitHub Release with assets
+  # -------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+
+      - name: List release assets
+        run: ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: "Opti-Oignon ${{ needs.validate.outputs.tag }}"
+          body_path: RELEASE_CHANGELOG.md
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.tag, 'rc') || contains(needs.validate.outputs.tag, 'beta') || contains(needs.validate.outputs.tag, 'alpha') }}
+          files: |
+            opti-oignon-v${{ needs.validate.outputs.version }}.zip
+            opti-oignon-v${{ needs.validate.outputs.version }}.zip.sha256
+            opti-oignon-v${{ needs.validate.outputs.version }}.zip.sig
+          fail_on_unmatched_files: false

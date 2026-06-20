@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 MULTI-AGENT SYSTEM - OPTI-OIGNON 1.0
 ====================================
@@ -28,14 +27,14 @@ Architecture:
 
 Basic usage:
     from opti_oignon.agents import run_auto, is_multi_agent_enabled
-    
+
     if is_multi_agent_enabled():
         result = run_auto("Analyze this dataset")
         print(result.final_output)
 
 Advanced usage:
     from opti_oignon.agents import Orchestrator
-    
+
     orch = Orchestrator()
     orch.set_callbacks(
         on_step_start=lambda name, i: print(f"Step {i}: {name}"),
@@ -51,56 +50,54 @@ Version: 2.0
 from .base import (
     # Data classes
     AgentOutput,
-    StepResult,
-    StepStatus,
-    PipelineResult,
-    PipelineStatus,
     AgentRole,
     BaseAgent,
-    
+    PipelineResult,
+    PipelineStatus,
+    StepResult,
+    StepStatus,
     # Configuration
     get_agent_config,
-    load_agent_config,
-    
     # Multi-agent control (IMPORTANT!)
     is_multi_agent_enabled,
+    load_agent_config,
     set_multi_agent_enabled,
-)
-
-# Specialized agents
-from .specialists import (
-    CoderAgent,
-    ReviewerAgent,
-    ExplainerAgent,
-    PlannerAgent,
-    create_coder_agent,
-    create_reviewer_agent,
-    create_explainer_agent,
-    create_planner_agent,
-    create_agent,
-    list_agents,
 )
 
 # Orchestrator
 from .orchestrator import (
     Orchestrator,
     get_orchestrator,
-    run_pipeline,
     run_auto,
+    run_pipeline,
+)
+
+# Specialized agents
+from .specialists import (
+    CoderAgent,
+    ExplainerAgent,
+    PlannerAgent,
+    ReviewerAgent,
+    create_agent,
+    create_coder_agent,
+    create_explainer_agent,
+    create_planner_agent,
+    create_reviewer_agent,
+    list_agents,
 )
 
 # Dynamic Pipeline
 try:
     from .dynamic_pipeline import (
-        DynamicPipelinePlanner,
         DynamicPipelineExecutor,
         DynamicPipelinePlan,
+        DynamicPipelinePlanner,
         PipelineStep,
         PlanComplexity,
-        plan_pipeline,
         execute_dynamic_pipeline,
-        get_planner,
         get_executor,
+        get_planner,
+        plan_pipeline,
     )
     DYNAMIC_PIPELINE_AVAILABLE = True
 except ImportError:
@@ -113,26 +110,26 @@ __version__ = "2.0.0"
 __all__ = [
     # Version
     "__version__",
-    
+
     # System control (MOST IMPORTANT!)
     "is_multi_agent_enabled",
     "set_multi_agent_enabled",
-    
+
     # Main functions
     "run_auto",
     "run_pipeline",
     "get_orchestrator",
-    
+
     # Main classes
     "Orchestrator",
     "BaseAgent",
-    
+
     # Specialized agents
     "CoderAgent",
     "ReviewerAgent",
     "ExplainerAgent",
     "PlannerAgent",
-    
+
     # Agent factories
     "create_coder_agent",
     "create_reviewer_agent",
@@ -140,7 +137,7 @@ __all__ = [
     "create_planner_agent",
     "create_agent",
     "list_agents",
-    
+
     # Dataclasses
     "AgentOutput",
     "StepResult",
@@ -148,7 +145,7 @@ __all__ = [
     "PipelineResult",
     "PipelineStatus",
     "AgentRole",
-    
+
     # Configuration
     "get_agent_config",
     "load_agent_config",
@@ -162,16 +159,16 @@ __all__ = [
 def quick_run(query: str, stream: bool = False) -> str:
     """
     Quickly execute a query and return the response.
-    
+
     This is the simplest way to use the multi-agent system.
-    
+
     Args:
         query: Your question or problem
         stream: Enable streaming (not implemented here)
-        
+
     Returns:
         The final response as a string
-        
+
     Example:
         >>> from opti_oignon.agents import quick_run
         >>> answer = quick_run("How to debug this R code?")
@@ -186,7 +183,7 @@ def quick_run(query: str, stream: bool = False) -> str:
             context={"original_input": query},
         )
         return output.content
-    
+
     result = run_auto(query, stream=stream)
     return result.final_output
 
@@ -204,7 +201,7 @@ def disable_multi_agent() -> bool:
 def status() -> dict:
     """
     Return the current system status.
-    
+
     Returns:
         Dict with status information
     """
@@ -226,10 +223,10 @@ def _print_status():
     """Display status on load (optional)."""
     import logging
     logger = logging.getLogger("MultiAgent")
-    
+
     enabled = is_multi_agent_enabled()
     status_emoji = "✅" if enabled else "❌"
-    
+
     logger.debug(f"Multi-Agent System v{__version__} {status_emoji}")
 
 

@@ -1,0 +1,46 @@
+/*
+ * theme-slate.css -- Slate preset (dark).
+ * Generated for S166 from the design-token contract (spec 7.3).
+ * Declares the full 38-token foundation schema.
+ */
+
+:root[data-oo-theme="slate"] {
+	--oo-bg-base: #1A1E24;
+	--oo-bg-surface: #22272F;
+	--oo-bg-elevated: #2B313A;
+	--oo-bg-overlay: #353C46;
+	--oo-bg-subtle: #15181D;
+	--oo-bg-hover: #2F3640;
+	--oo-bg-active: #39414C;
+	--oo-fg-primary: #E4E8EC;
+	--oo-fg-secondary: #B0B8C1;
+	--oo-fg-tertiary: #8A929C;
+	--oo-fg-muted: #828B95;
+	--oo-fg-decorative: #444A52;
+	--oo-fg-on-accent: #10141A;
+	--oo-bd-subtle: #242A32;
+	--oo-bd-default: #2A313A;
+	--oo-bd-strong: #444C56;
+	--oo-acc-50: #ECF3F7;
+	--oo-acc-100: #DAE6F0;
+	--oo-acc-200: #C3D7E6;
+	--oo-acc-300: #A9C6DB;
+	--oo-acc-400: #8EB4D0;
+	--oo-acc-500: #7AA7C8;
+	--oo-acc-600: #668CA8;
+	--oo-acc-700: #537288;
+	--oo-acc-800: #3F5768;
+	--oo-acc-900: #2E3F4C;
+	--oo-success: #7AB69A;
+	--oo-success-bg: rgba(122, 182, 154, 0.16);
+	--oo-success-bd: rgba(122, 182, 154, 0.24);
+	--oo-warning: #D4B98F;
+	--oo-warning-bg: rgba(212, 185, 143, 0.16);
+	--oo-warning-bd: rgba(212, 185, 143, 0.24);
+	--oo-error: #D88679;
+	--oo-error-bg: rgba(216, 134, 121, 0.16);
+	--oo-error-bd: rgba(216, 134, 121, 0.24);
+	--oo-info: #8AB6D0;
+	--oo-info-bg: rgba(138, 182, 208, 0.16);
+	--oo-info-bd: rgba(138, 182, 208, 0.24);
+}

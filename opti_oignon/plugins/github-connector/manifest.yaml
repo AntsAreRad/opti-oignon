@@ -1,0 +1,41 @@
+name: github-connector
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  GitHub integration plugin. Provides slash commands to interact with
+  the GitHub API: list issues, pull requests, repo info, search repos,
+  and create gists. Auto-detects GitHub references in LLM responses
+  (owner/repo#123, full URLs) and enriches with metadata footnotes.
+  Requires a Personal Access Token stored locally in SQLite.
+entry_point: entry_point.py
+hooks:
+  - tool_call
+  - post_inference
+dependencies: []
+permissions:
+  - network_outbound
+  - conversation_read
+  - tool_register
+  - filesystem_plugin_dir
+min_opti_version: "1.10.0"
+config_schema:
+  default_repo:
+    type: string
+    default: ""
+    description: >
+      Default repository in owner/repo format. Used when commands
+      omit the repository argument.
+  max_results:
+    type: integer
+    default: 10
+    description: Maximum results per query
+  auto_link:
+    type: boolean
+    default: true
+    description: >
+      Enable auto-detection and enrichment of GitHub references
+      in LLM responses (post_inference hook).
+  show_rate_limit:
+    type: boolean
+    default: false
+    description: Show GitHub API rate limit info in responses

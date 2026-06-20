@@ -1,0 +1,29 @@
+# Configuration du moteur d'auto-correction (S51)
+# Parametres pour la verification et correction des sorties non-code.
+
+self_correction:
+  # Activer l'auto-correction automatique pour toutes les reponses
+  # (false = uniquement quand explicitement demande ou via pipeline)
+  enable_auto: false
+
+  # Nombre maximum d'iterations de correction
+  max_iterations: 2
+
+  # Seuil de conformite aux instructions (0.0-1.0)
+  # En dessous de ce seuil, une correction est tentee
+  compliance_threshold: 0.7
+
+  # Seuil de qualite globale (0.0-1.0)
+  # En dessous de ce seuil, une correction est tentee
+  quality_threshold: 0.6
+
+  # Axes de verification actives
+  check_instructions: true   # Conformite aux instructions
+  check_facts: true          # Verification factuelle
+  check_quality: true        # Evaluation de qualite
+
+  # Modele pour la correction (null = meme modele que la generation)
+  correction_model: null
+
+  # Temperature pour la generation de corrections
+  temperature: 0.2

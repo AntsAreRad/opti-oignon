@@ -1,0 +1,483 @@
+/* Opti-Oignon -- Global styles S93: Palette v4e + theme transitions */
+
+@import './styles/theme.css';
+@import './styles/responsive.css';
+@import './styles/transitions.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/*  FONT IMPORTS                                                       */
+/* ------------------------------------------------------------------ */
+
+/* JetBrains Mono loaded locally or via system.
+   No @import Google Fonts to stay offline-friendly. */
+
+/* ------------------------------------------------------------------ */
+/*  BASE RESETS                                                        */
+/* ------------------------------------------------------------------ */
+
+html, body {
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+body {
+	font-family: var(--oo-font-sans);
+	font-size: var(--oo-text-base);
+	line-height: var(--oo-leading-normal);
+	letter-spacing: var(--oo-tracking-normal);
+	background-color: var(--oo-bg-base);
+	color: var(--oo-fg-primary);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* ------------------------------------------------------------------ */
+/*  HEADING SCALE (S166, spec 7.1)                                     */
+/*  Semantic h1-h6 mapped to the type tokens. Declared after          */
+/*  @tailwind base so it overrides Preflight's heading reset.          */
+/* ------------------------------------------------------------------ */
+h1 {
+	font-size: var(--oo-text-3xl);
+	font-weight: 600;
+	line-height: var(--oo-leading-tight);
+	letter-spacing: var(--oo-tracking-tight);
+}
+h2 {
+	font-size: var(--oo-text-2xl);
+	font-weight: 600;
+	line-height: var(--oo-leading-snug);
+	letter-spacing: var(--oo-tracking-tight);
+}
+h3 {
+	font-size: var(--oo-text-xl);
+	font-weight: 600;
+	line-height: var(--oo-leading-snug);
+}
+h4 {
+	font-size: var(--oo-text-lg);
+	font-weight: 500;
+	line-height: var(--oo-leading-snug);
+}
+h5 {
+	font-size: var(--oo-text-base);
+	font-weight: 600;
+	line-height: var(--oo-leading-normal);
+}
+h6 {
+	font-size: var(--oo-text-sm);
+	font-weight: 600;
+	line-height: var(--oo-leading-normal);
+}
+
+/* ------------------------------------------------------------------ */
+/*  THEME TRANSITION (smooth toggle between dark/light)                */
+/* ------------------------------------------------------------------ */
+
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+	transition:
+		background-color var(--oo-motion-slow) var(--oo-ease-default),
+		color var(--oo-motion-normal) var(--oo-ease-default),
+		border-color var(--oo-motion-slow) var(--oo-ease-default),
+		box-shadow var(--oo-motion-slow) var(--oo-ease-default) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/*  REDUCED MOTION                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Forced reduce (Appearance > Motion = "Reduce motion"), OS-independent. */
+html.oo-reduce-motion *,
+html.oo-reduce-motion *::before,
+html.oo-reduce-motion *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}
+
+/*
+ * OS-level reduced motion. Scoped to html:not(.oo-motion-full) so the
+ * Appearance > Motion = "Full motion" override can opt back in even when the
+ * operating system requests reduced motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+	html:not(.oo-motion-full) *,
+	html:not(.oo-motion-full) *::before,
+	html:not(.oo-motion-full) *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+
+	html:not(.oo-motion-full).theme-transitioning,
+	html:not(.oo-motion-full).theme-transitioning *,
+	html:not(.oo-motion-full).theme-transitioning *::before,
+	html:not(.oo-motion-full).theme-transitioning *::after {
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/*  LIGHT MODE SURFACE OVERRIDES (Tailwind class compatibility)        */
+/*  Maps Tailwind surface-* and accent-* classes to theme variables    */
+/*  so existing dark-mode Tailwind classes work in light mode.         */
+/*  All values reference CSS variables — no hardcoded hex.             */
+/* ------------------------------------------------------------------ */
+
+html:not(.dark) .bg-surface-950 { background-color: var(--oo-sidebar-bg); }
+html:not(.dark) .bg-surface-900 { background-color: var(--oo-bg-base); }
+html:not(.dark) .bg-surface-800 { background-color: var(--oo-bg-elevated); }
+html:not(.dark) .bg-surface-700 { background-color: var(--oo-bg-overlay); }
+html:not(.dark) .bg-surface-800\/50 { background-color: color-mix(in srgb, var(--oo-bg-elevated) 50%, transparent); }
+html:not(.dark) .bg-surface-800\/60 { background-color: color-mix(in srgb, var(--oo-bg-elevated) 60%, transparent); }
+html:not(.dark) .bg-surface-900\/50 { background-color: color-mix(in srgb, var(--oo-bg-base) 50%, transparent); }
+
+html:not(.dark) .text-surface-100 { color: var(--oo-fg-primary); }
+html:not(.dark) .text-surface-200 { color: var(--oo-fg-primary); }
+html:not(.dark) .text-surface-300 { color: var(--oo-fg-secondary); }
+html:not(.dark) .text-surface-400 { color: var(--oo-fg-tertiary); }
+html:not(.dark) .text-surface-500 { color: var(--oo-fg-muted); }
+html:not(.dark) .text-surface-600 { color: var(--oo-fg-faint); }
+html:not(.dark) .text-white { color: var(--oo-fg-primary); }
+
+html:not(.dark) .border-surface-600 { border-color: var(--oo-bd-default); }
+html:not(.dark) .border-surface-700 { border-color: var(--oo-bd-default); }
+html:not(.dark) .border-surface-800 { border-color: var(--oo-bd-subtle); }
+html:not(.dark) .border-surface-700\/50 { border-color: color-mix(in srgb, var(--oo-bd-default) 50%, transparent); }
+html:not(.dark) .border-surface-700\/30 { border-color: color-mix(in srgb, var(--oo-bd-default) 30%, transparent); }
+html:not(.dark) .border-surface-800\/50 { border-color: color-mix(in srgb, var(--oo-bd-subtle) 50%, transparent); }
+
+/* Hover states in light mode */
+html:not(.dark) .hover\:bg-surface-800:hover { background-color: var(--oo-bg-overlay); }
+html:not(.dark) .hover\:bg-surface-700:hover { background-color: var(--oo-bg-subtle); }
+html:not(.dark) .hover\:bg-surface-600:hover { background-color: var(--oo-bg-subtle); }
+html:not(.dark) .hover\:bg-surface-800\/50:hover { background-color: color-mix(in srgb, var(--oo-bg-overlay) 50%, transparent); }
+html:not(.dark) .hover\:text-surface-200:hover { color: var(--oo-fg-primary); }
+html:not(.dark) .hover\:text-surface-300:hover { color: var(--oo-fg-secondary); }
+html:not(.dark) .hover\:text-surface-400:hover { color: var(--oo-fg-tertiary); }
+
+/* Accent overrides light mode */
+html:not(.dark) .text-accent-300 { color: var(--oo-acc-500); }
+html:not(.dark) .text-accent-400 { color: var(--oo-acc-400); }
+html:not(.dark) .text-accent-500 { color: var(--oo-acc-500); }
+html:not(.dark) .bg-accent-500\/15 { background-color: var(--oo-msg-user-bg); }
+html:not(.dark) .bg-accent-600 { background-color: var(--oo-acc-400); }
+html:not(.dark) .bg-accent-600\/20 { background-color: var(--oo-error-bg); }
+html:not(.dark) .bg-accent-600\/30 { background-color: var(--oo-success-bg); }
+html:not(.dark) .hover\:bg-accent-500:hover { background-color: var(--oo-acc-500); }
+html:not(.dark) .hover\:bg-accent-600\/30:hover { background-color: var(--oo-msg-user-bg); }
+html:not(.dark) .border-accent-500 { border-color: var(--oo-acc-400); }
+html:not(.dark) .border-accent-500\/40 { border-color: var(--oo-input-focus); }
+html:not(.dark) .border-accent-600\/50 { border-color: var(--oo-input-focus); }
+html:not(.dark) .focus\:border-accent-600\/50:focus { border-color: var(--oo-input-focus); }
+html:not(.dark) .focus\:ring-accent-600\/20:focus { --tw-ring-color: var(--oo-input-focus); }
+html:not(.dark) .focus\:border-accent-500:focus { border-color: var(--oo-acc-400); }
+html:not(.dark) .focus\:border-surface-500:focus { border-color: var(--oo-fg-muted); }
+html:not(.dark) .hover\:text-accent-400:hover { color: var(--oo-acc-400); }
+html:not(.dark) .hover\:text-accent-300:hover { color: var(--oo-acc-500); }
+
+/* Verification + correction badges */
+html:not(.dark) .bg-green-900\/30 { background-color: var(--oo-success-bg); }
+html:not(.dark) .text-green-400 { color: var(--oo-success); }
+html:not(.dark) .border-green-800\/40 { border-color: var(--oo-success-bd); }
+html:not(.dark) .bg-amber-900\/30 { background-color: var(--oo-warning-bg); }
+html:not(.dark) .text-amber-400 { color: var(--oo-warning); }
+html:not(.dark) .border-amber-800\/40 { border-color: var(--oo-warning-bd); }
+html:not(.dark) .bg-red-900\/30 { background-color: var(--oo-error-bg); }
+html:not(.dark) .text-red-400 { color: var(--oo-error); }
+html:not(.dark) .border-red-800 { border-color: var(--oo-error-bd); }
+html:not(.dark) .text-red-300 { color: var(--oo-error); }
+html:not(.dark) .bg-red-600\/20 { background-color: var(--oo-error-bg); }
+html:not(.dark) .hover\:bg-red-600\/30:hover { background-color: var(--oo-error-bg); }
+html:not(.dark) .hover\:text-red-400:hover { color: var(--oo-error); }
+
+/* Additional Tailwind color class overrides for light mode */
+html:not(.dark) .bg-green-500 { background-color: var(--oo-success); }
+html:not(.dark) .bg-green-900 { background-color: var(--oo-success-bg); }
+html:not(.dark) .border-green-500 { border-color: var(--oo-success-bd); }
+html:not(.dark) .border-green-700 { border-color: var(--oo-success-bd); }
+html:not(.dark) .border-green-800 { border-color: var(--oo-success-bd); }
+html:not(.dark) .text-green-300 { color: var(--oo-success); }
+html:not(.dark) .text-emerald-300 { color: var(--oo-success); }
+html:not(.dark) .text-emerald-400 { color: var(--oo-success); }
+html:not(.dark) .bg-emerald-500 { background-color: var(--oo-success); }
+html:not(.dark) .bg-emerald-950 { background-color: var(--oo-success-bg); }
+html:not(.dark) .border-emerald-800 { border-color: var(--oo-success-bd); }
+html:not(.dark) .bg-emerald-400 { background-color: var(--oo-success); }
+
+html:not(.dark) .bg-red-500 { background-color: var(--oo-error); }
+html:not(.dark) .bg-red-600 { background-color: var(--oo-error); }
+html:not(.dark) .bg-red-700 { background-color: var(--oo-error); }
+html:not(.dark) .bg-red-800 { background-color: var(--oo-error-bg); }
+html:not(.dark) .bg-red-900 { background-color: var(--oo-error-bg); }
+html:not(.dark) .bg-red-950 { background-color: var(--oo-error-bg); }
+html:not(.dark) .bg-red-400 { background-color: var(--oo-error); }
+html:not(.dark) .text-red-100 { color: var(--oo-error); }
+html:not(.dark) .border-red-700 { border-color: var(--oo-error-bd); }
+html:not(.dark) .border-red-800 { border-color: var(--oo-error-bd); }
+
+html:not(.dark) .bg-amber-400 { background-color: var(--oo-warning); }
+html:not(.dark) .bg-amber-500 { background-color: var(--oo-warning); }
+html:not(.dark) .text-amber-300 { color: var(--oo-warning); }
+html:not(.dark) .border-amber-500 { border-color: var(--oo-warning-bd); }
+
+html:not(.dark) .bg-yellow-500 { background-color: var(--oo-warning); }
+html:not(.dark) .bg-yellow-900 { background-color: var(--oo-warning-bg); }
+html:not(.dark) .text-yellow-300 { color: var(--oo-warning); }
+html:not(.dark) .text-yellow-400 { color: var(--oo-warning); }
+html:not(.dark) .border-yellow-700 { border-color: var(--oo-warning-bd); }
+
+html:not(.dark) .bg-blue-400 { background-color: var(--oo-info); }
+html:not(.dark) .bg-blue-500 { background-color: var(--oo-info); }
+html:not(.dark) .text-blue-300 { color: var(--oo-info); }
+html:not(.dark) .text-blue-400 { color: var(--oo-info); }
+
+html:not(.dark) .bg-purple-500 { background-color: var(--oo-cat-purple); }
+html:not(.dark) .text-purple-400 { color: var(--oo-cat-purple); }
+
+html:not(.dark) .bg-orange-500 { background-color: var(--oo-cat-orange); }
+html:not(.dark) .text-orange-400 { color: var(--oo-cat-orange); }
+
+html:not(.dark) .bg-pink-500 { background-color: var(--oo-cat-pink); }
+html:not(.dark) .text-pink-400 { color: var(--oo-cat-pink); }
+
+html:not(.dark) .bg-gray-500 { background-color: var(--oo-fg-muted); }
+html:not(.dark) .text-gray-400 { color: var(--oo-fg-tertiary); }
+
+/* Active conversation in light mode */
+html:not(.dark) .bg-surface-700.text-white {
+	background-color: var(--oo-msg-user-bg);
+	color: var(--oo-fg-primary);
+}
+
+/* Code blocks in light mode */
+html:not(.dark) pre code {
+	background-color: transparent;
+}
+html:not(.dark) .bg-surface-900.rounded-lg {
+	background-color: var(--oo-bg-elevated);
+	border-color: var(--oo-bd-subtle);
+}
+
+/* Overlay in light mode */
+html:not(.dark) .bg-black\/50 { background-color: rgba(0, 0, 0, 0.3); }
+html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
+
+/* ------------------------------------------------------------------ */
+/*  SCROLLBAR                                                          */
+/* ------------------------------------------------------------------ */
+
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--oo-scrollbar-thumb);
+	border-radius: var(--oo-radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--oo-scrollbar-hover);
+}
+
+/* Firefox */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--oo-scrollbar-thumb) transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/*  TRANSITIONS                                                        */
+/* ------------------------------------------------------------------ */
+
+.sidebar-transition {
+	transition: width var(--oo-transition-normal), transform var(--oo-transition-normal);
+}
+
+.panel-transition {
+	transition: width var(--oo-transition-normal);
+}
+
+/* ------------------------------------------------------------------ */
+/*  ANIMATIONS S38+                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Fade + slide-up for new messages */
+@keyframes message-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+.animate-message-in {
+	animation: message-in 220ms ease-out both;
+}
+
+/* Panel slide-in from right */
+@keyframes panel-slide {
+	from {
+		opacity: 0;
+		transform: translateX(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+.animate-panel-slide {
+	animation: panel-slide 180ms ease-out both;
+}
+
+/* Generic fade-in */
+@keyframes fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+.animate-fade-in {
+	animation: fade-in 180ms ease-out both;
+}
+
+/* Sidebar slide-in from left (mobile) */
+@keyframes sidebar-slide {
+	from {
+		opacity: 0;
+		transform: translateX(-12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+.animate-sidebar-slide {
+	animation: sidebar-slide 180ms ease-out both;
+}
+
+/* Skeleton pulse */
+@keyframes skeleton-pulse {
+	0%, 100% { opacity: 0.4; }
+	50% { opacity: 0.12; }
+}
+.animate-skeleton {
+	animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Streaming cursor blink */
+@keyframes cursor-blink {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.3; }
+}
+.animate-cursor-blink {
+	animation: cursor-blink 1s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/*  ACCESSIBILITY                                                      */
+/* ------------------------------------------------------------------ */
+
+/* Skip-to-content link */
+.skip-to-content {
+	position: absolute;
+	left: -9999px;
+	top: 0;
+	z-index: 9999;
+	padding: 0.5rem 1rem;
+	background: var(--oo-acc-500);
+	color: var(--oo-fg-on-accent);
+	font-size: var(--oo-text-sm);
+	border-radius: 0 0 var(--oo-radius-md) 0;
+	text-decoration: none;
+}
+.skip-to-content:focus {
+	left: 0;
+}
+
+/* Spec 7.9 -- single shared focus ring (resolves A4). Driven by the
+   --oo-focus-ring-* tokens so width/offset stay consistent app-wide.
+   Components that define their own focus style (e.g. inputs) override
+   this but reuse the same tokens. */
+:focus-visible {
+	outline: var(--oo-focus-ring-width, 2px) solid var(--oo-acc-500);
+	outline-offset: var(--oo-focus-ring-offset, 2px);
+	border-radius: var(--oo-radius-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/*  UTILITIES                                                          */
+/* ------------------------------------------------------------------ */
+
+.no-select {
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.overflow-y-auto, .overflow-x-auto {
+	-webkit-overflow-scrolling: touch;
+}
+
+/* ------------------------------------------------------------------ */
+/*  RESPONSIVE                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 639px) {
+	button, [role="button"] {
+		min-height: 40px;
+	}
+}
+
+@media (max-width: 320px) {
+	body {
+		min-width: 320px;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/*  S166: Global accessibility utilities                               */
+/* ------------------------------------------------------------------ */
+
+/* Visually-hidden but screen-reader-available (resolves A8; used by
+   Input hideLabel and other primitives). */
+.oo-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Spec 8.9 -- skip-to-content link (resolves A6). Hidden until focused;
+   the link itself is added to the layout in S167. */
+.oo-skip-link {
+	position: absolute;
+	top: -100px;
+	left: var(--oo-space-3);
+	z-index: var(--oo-z-toast);
+	padding: var(--oo-space-2) var(--oo-space-4);
+	background-color: var(--oo-acc-500);
+	color: var(--oo-fg-on-accent);
+	border-radius: var(--oo-radius-md);
+	font-size: var(--oo-text-sm);
+	text-decoration: none;
+	transition: top var(--oo-motion-fast) var(--oo-ease-default);
+}
+.oo-skip-link:focus {
+	top: var(--oo-space-3);
+}

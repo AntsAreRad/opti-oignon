@@ -1,0 +1,49 @@
+# Fine-tuning data export and variant tracking configuration (S96)
+# Controls export formats, quality scoring, and A/B comparison settings.
+
+export:
+  # Default export format: sharegpt, alpaca, or jsonl
+  default_format: "sharegpt"
+
+  # Minimum quality score (0.0 - 1.0) to include a conversation in export.
+  # Set to 0.0 to include all conversations regardless of quality.
+  min_quality_score: 0.0
+
+  # Maximum number of conversations per export batch.
+  # Set to 0 for unlimited.
+  max_conversations: 0
+
+  # Include system messages in exported data.
+  include_system_messages: true
+
+  # Minimum number of turns (user+assistant pairs) to include a conversation.
+  min_turns: 1
+
+  # Strip leading/trailing whitespace from messages.
+  strip_whitespace: true
+
+quality:
+  # Weight for feedback-based scoring (thumbs up/down ratio).
+  feedback_weight: 0.6
+
+  # Weight for benchmark-based scoring (normalized benchmark scores).
+  benchmark_weight: 0.4
+
+  # Default quality score when no feedback or benchmarks exist.
+  default_score: 0.5
+
+  # Minimum feedback entries before trusting the feedback score.
+  min_feedback_count: 1
+
+tracking:
+  # Enable variant tracking and A/B comparison.
+  enabled: true
+
+  # Default number of prompts for A/B comparison.
+  default_comparison_prompts: 5
+
+  # Maximum concurrent A/B comparisons.
+  max_concurrent_comparisons: 3
+
+  # Timeout in seconds for each model response during comparison.
+  comparison_timeout: 120

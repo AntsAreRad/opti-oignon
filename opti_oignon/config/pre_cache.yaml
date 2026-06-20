@@ -1,0 +1,47 @@
+# Pre-Cache Configuration -- S71 Offline-First Intelligence
+#
+# Defines common queries to pre-generate and cache proactively
+# so they are available during offline mode.
+
+# Master toggle
+enabled: true
+
+# Default model for pre-cache generation (empty = use router default)
+default_model: ""
+
+# Generation parameters
+max_tokens: 256
+temperature: 0.3
+
+# Queries to pre-cache
+queries:
+  - query: "Hello"
+    task_type: "general"
+    model: ""
+  - query: "Hi, how can you help me?"
+    task_type: "general"
+    model: ""
+  - query: "What can you do?"
+    task_type: "general"
+    model: ""
+  - query: "Summarize this text"
+    task_type: "general"
+    model: ""
+  - query: "Explain this code"
+    task_type: "code_python"
+    model: ""
+  - query: "Fix this bug"
+    task_type: "code_python"
+    model: ""
+  - query: "Write a Python function"
+    task_type: "code_python"
+    model: ""
+  - query: "Write an R script"
+    task_type: "code_r"
+    model: ""
+  - query: "Analyze this data"
+    task_type: "data_analysis"
+    model: ""
+  - query: "Help me plan"
+    task_type: "planning"
+    model: ""

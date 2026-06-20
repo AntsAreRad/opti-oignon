@@ -1,0 +1,36 @@
+name: diff-tracker
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Detects code blocks in LLM responses that are iterations of
+  previously seen code in the conversation. Computes and displays
+  a colored diff (additions/deletions) using difflib. Matches
+  code blocks by function/class names or structural similarity.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions:
+  - conversation_read
+min_opti_version: "1.10.0"
+config_schema:
+  similarity_threshold:
+    type: number
+    default: 0.4
+    description: >
+      Minimum similarity ratio (0.0-1.0) to consider two code blocks
+      as iterations of each other.
+  diff_format:
+    type: string
+    default: "inline"
+    description: >
+      Diff display format. 'inline' shows unified diff below the code
+      block. 'unified' is an alias for inline.
+  show_stats:
+    type: boolean
+    default: true
+    description: Show addition/deletion counts in the diff header
+  max_history:
+    type: integer
+    default: 50
+    description: Maximum number of code blocks to keep in history

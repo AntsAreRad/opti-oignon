@@ -1,0 +1,92 @@
+# =============================================================================
+# OPTI-OIGNON v2.0 — BACKENDS CONFIGURATION (S105)
+# =============================================================================
+# Configure inference backends: Ollama, llama.cpp, or both.
+#
+# Opti-Oignon supports multiple inference backends simultaneously.
+# You can switch between them at runtime via the API or Settings UI.
+#
+# At least one backend must be available for inference to work.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# DEFAULT BACKEND
+# -----------------------------------------------------------------------------
+# Which backend to use by default: "ollama" or "llama_cpp"
+# If the selected backend is unavailable, Opti-Oignon falls back
+# to the first healthy backend it finds.
+# -----------------------------------------------------------------------------
+default_backend: "ollama"
+
+# -----------------------------------------------------------------------------
+# OLLAMA BACKEND
+# -----------------------------------------------------------------------------
+# Wraps the Ollama server API. Requires Ollama to be installed
+# and running (ollama serve).
+#
+# Install: https://ollama.com
+# Python lib: pip install ollama
+# -----------------------------------------------------------------------------
+ollama:
+  # Ollama server address
+  host: "http://localhost:11434"
+
+  # Connection timeout in seconds
+  timeout: 30
+
+  # Keep models loaded in memory (Ollama keep_alive parameter)
+  # Examples: "5m", "30m", "1h", "0" (unload immediately)
+  keep_alive: "30m"
+
+# -----------------------------------------------------------------------------
+# LLAMA.CPP BACKEND
+# -----------------------------------------------------------------------------
+# Loads GGUF models directly via llama-cpp-python, without
+# requiring an Ollama server.
+#
+# Install: pip install llama-cpp-python
+# GPU support: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+#
+# Note: llama-cpp-python is an OPTIONAL dependency. If not installed,
+# the llama.cpp backend is simply unavailable (no error).
+# -----------------------------------------------------------------------------
+llama_cpp:
+  # Directories to scan for .gguf model files
+  # Add your local model directories here
+  model_dirs:
+    - "~/models/gguf"
+    # - "/data/models"
+    # - "/opt/gguf-models"
+
+  # Default directory for downloaded models
+  default_download_dir: "~/models/gguf"
+
+  # Default context window size (tokens)
+  # Override per-model via per_model_overrides below
+  n_ctx: 4096
+
+  # Number of GPU layers to offload (-1 = all layers)
+  # Set to 0 for CPU-only inference
+  n_gpu_layers: -1
+
+  # Number of CPU threads (null = auto-detect)
+  n_threads: null
+
+  # Batch size for prompt processing
+  n_batch: 512
+
+# -----------------------------------------------------------------------------
+# PER-MODEL BACKEND OVERRIDES
+# -----------------------------------------------------------------------------
+# Force specific models to use a specific backend, regardless of
+# the default_backend setting. Useful when you have some models
+# in Ollama and others as standalone GGUF files.
+#
+# Format:
+#   "model_name_or_pattern": "backend_name"
+# -----------------------------------------------------------------------------
+per_model_overrides: {}
+  # Examples:
+  # "llama-3.1-8b-Q4_K_M.gguf": "llama_cpp"
+  # "qwen3:32b": "ollama"
+  # "my-finetuned-model.gguf": "llama_cpp"

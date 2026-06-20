@@ -1,0 +1,40 @@
+# =============================================================================
+# OPTI-OIGNON v1.5.8 -- SMART ROUTING CONFIG (S54)
+# =============================================================================
+# Configuration for the Smart Router that selects the optimal
+# model per pipeline step type based on model capability profiles.
+#
+# Set enabled: false to disable smart routing and use the default
+# model for all steps (backward-compatible behavior).
+# =============================================================================
+
+smart_routing:
+  # Master switch for smart routing
+  enabled: true
+
+  # Default model when no profile matches or routing is disabled
+  default_model: "qwen3:32b"
+
+  # Speed preference: 'fast', 'balanced', or 'quality'
+  # - fast: prefer faster models (boosts fast tier, penalizes slow)
+  # - balanced: no speed preference (default)
+  # - quality: prefer higher quality models (boosts slow tier)
+  speed_preference: "balanced"
+
+  # Speed tier multipliers (applied to base speed weights)
+  speed_weights:
+    fast: 1.2
+    medium: 1.0
+    slow: 0.8
+
+  # Minimum context window requirements per step type (tokens)
+  context_requirements:
+    direct: 4096
+    tools: 8192
+    code_verify: 8192
+    think: 16384
+    web_search: 8192
+    think_tools: 16384
+    reasoning: 32768
+    consensus: 8192
+    self_correct: 16384

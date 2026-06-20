@@ -1,0 +1,109 @@
+# Resource Governor configuration (RESOURCE_GOVERNOR_SPEC.md Section 10).
+#
+# Bloc 0 (S223) consumes the measurement subset: enabled, total_vram_gb,
+# safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
+# decisions_ring_size. The remaining keys are carried here so the file is
+# written once; the later blocs (admission, backpressure, limits) only
+# consume them.
+
+# Gates the FUTURE admission behaviour (Bloc 1); measurement itself stays
+# available regardless of this flag.
+enabled: true
+
+# Total VRAM capacity in GB. null means UNKNOWN: the VRAM half of
+# measurement reports disabled_capacity_unknown and any future admission
+# stays fail-open with a logged warning (spec Section 3.1). Set this to
+# the real card capacity on the host.
+total_vram_gb: null
+
+# Subtracted by the Bloc 1 fit math (spec Section 4.2); also the
+# fast-down margin of the ceiling learning (spec Section 3.2). The
+# speculative_decoding precedent value.
+safety_margin_gb: 1.5
+
+# Snapshot cache TTL in seconds (spec Section 3). The ps view is a socket
+# round trip and must not run synchronously on every admission.
+snapshot_ttl_s: 2.0
+
+# KV-cache estimate: GiB of KV per 1024 tokens of the requested num_ctx
+# (read-gate decision DI-4: layers folded into one conservative,
+# deliberately high-side coefficient; refined by measure-and-adapt).
+kv_coefficient: 0.5
+
+# S259 per-model KV-cache overrides consumed by the admission cost math.
+# Resolution order: exact model name > longest matching family substring
+# > the global kv_coefficient above, which stays the fail-secure answer
+# for any model neither table names. Matching is case-insensitive.
+# Example -- a GQA MoE whose real KV at 256K tokens is a few GiB:
+#   models:
+#     "qwen3.6-35b-a3b:latest": 0.03
+#   families:
+#     "qwen3.6": 0.03
+kv_overrides:
+  models: {}
+  families: {}
+
+# S261 per-model weights-residency overrides in GiB. The MoE gap: a
+# Mixture-of-Experts model's resident weights can differ from its file
+# size (active-params vs total-params). Resolution: exact model name
+# > longest matching family substring > the estimator chain unchanged,
+# which stays the fail-secure answer for any model neither table names
+# (an unknown model prices exactly as today). Matching is
+# case-insensitive. Calibrate against a live observation (the walk is
+# in DEBT_LOT_S261.md); example:
+#   models:
+#     "qwen3.6-35b-a3b:latest": 4.5
+#   families:
+#     "qwen3.6": 4.5
+weights_overrides:
+  models: {}
+  families: {}
+
+# The learned capacity ceiling never drops below this floor in GB
+# (spec Section 3.2, the fast-down bound).
+ceiling_floor_gb: 4.0
+
+# Bounded ring of recent admission decisions, pruned by count
+# (spec Section 3.2; written by the Bloc 1 admission path).
+decisions_ring_size: 200
+
+# --- Later-bloc keys (carried; not consumed by Bloc 0) ---
+
+# Bloc 1: the downsize ladder and the per-caller context floors
+# (benchmark/AGT have no floor entry: they never downsize, D3).
+ctx_ladder: [32768, 16384, 8192, 4096]
+ctx_floor:
+  chat: 4096
+  pipeline: 4096
+
+# Bloc 2: backpressure.
+idle_evict_threshold_s: 600
+pressure:
+  soft_threshold: 0.85
+  hard_threshold: 0.95
+  # Soft-or-worse pressure must persist this long before the governor
+  # writes the warmup keep_alive (restored at the first clear).
+  sustain_s: 60.0
+  # The bounded window the refusal-rate signal reads.
+  refusal_window_s: 60.0
+pressure_keep_alive: "5m"
+queue:
+  enabled_per_caller: {}
+  depth: 2
+  wait_s: 30
+
+# Bloc 3: optional in-process rlimits (off by default) and Ollama limit
+# management (spawn-path env application; advisory for external servers).
+# Caveat (why rlimits ships off): setrlimit is process-wide -- it caps the
+# ENTIRE Opti-Oignon process, not the llama.cpp backend alone. Admission
+# accounting (R-01) remains the primary control.
+rlimits:
+  enabled: false
+  as_gb: null
+  data_gb: null
+ollama_limits:
+  max_loaded_models: null
+  num_parallel: null
+  max_queue: null
+  spawn_applies: true
+  external_advisory: true

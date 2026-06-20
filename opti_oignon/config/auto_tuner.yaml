@@ -1,0 +1,21 @@
+# Auto-Tuner Configuration -- S110
+# Automatically finds optimal inference parameters for the user's hardware.
+# Runs on demand only (never automatically). Persists best config per model.
+# Inspired by llama-optimus.
+
+auto_tuner:
+  enabled: true             # Feature available (runs only on user request)
+  warmup_runs: 3            # Throwaway runs before measuring
+  benchmark_tokens: 128     # Tokens to generate per benchmark run
+  benchmark_prompt_tokens: 128  # Prompt tokens for processing speed test
+  trials_per_param: 3       # Average over N runs for stability
+  auto_apply: false         # If true, apply best config automatically after tuning
+
+# Parameter search space.
+# Each parameter lists candidate values to try.
+parameter_space:
+  batch_size: [512, 1024, 2048, 4096]
+  ubatch_size: [256, 512, 1024]
+  threads: [2, 4, 6, 8]        # 'auto' resolved at runtime to os.cpu_count()
+  flash_attention: [true, false]
+  # gpu_layers is auto-detected from model size, not searched.

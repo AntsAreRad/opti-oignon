@@ -1,0 +1,28 @@
+# Inference Telemetry Pipeline — Opti-Oignon S112
+# Central event bus for inference events, feeding live_metrics,
+# performance_monitor, and speculative_decoding from a single point.
+
+enabled: true
+
+# Event buffering: batch events before dispatching to consumers.
+buffer:
+  # Maximum events held before forced flush.
+  max_size: 64
+  # Flush interval in milliseconds (0 = immediate dispatch).
+  flush_interval_ms: 250
+
+# Consumer toggles: which downstream systems receive telemetry.
+consumers:
+  live_metrics: true
+  performance_monitor: true
+  speculative_decoding: true
+
+# Token-level tracking granularity.
+token_tracking:
+  # Track individual token timestamps for tok/s calculation.
+  enabled: true
+  # Maximum tokens tracked per request before dropping oldest.
+  max_tokens_per_request: 8192
+
+# Logging: emit DEBUG log lines for each event (noisy, off by default).
+debug_logging: false

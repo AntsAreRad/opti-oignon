@@ -1,0 +1,36 @@
+# Semantic Cache Configuration — S68
+# Persistent dual-threshold cache: exact hash + embedding similarity
+
+# Master toggle (off by default — enable when ready)
+enabled: false
+
+# Tier 1: Exact hash match (SHA-256 of query text)
+exact_match_enabled: true
+
+# Tier 2: Embedding similarity match (cosine similarity)
+semantic_match_enabled: true
+
+# Cosine similarity threshold for semantic hit (0.5 - 0.99)
+similarity_threshold: 0.92
+
+# Time-to-live in seconds (entries older than this are stale)
+ttl_seconds: 3600
+
+# Maximum number of cached entries (LRU eviction when exceeded)
+max_entries: 1000
+
+# Ollama embedding model for semantic matching
+embedding_model: "mxbai-embed-large"
+
+# Scope: "global" (all conversations) or "conversation" (per-conversation).
+# Default is "conversation" (TC-01): a fuzzy semantic hit is confined to its
+# originating conversation, so one conversation's cached response (which may
+# embed its private RAG/project context) is not served to a similar query in
+# another. Bulbe mode forces conversation scope regardless of this setting.
+scope: "conversation"
+
+# Maximum candidates to compare per semantic search
+max_candidates: 50
+
+# Estimated average tokens per cached response (for savings calculation)
+avg_response_tokens: 250

@@ -1,0 +1,219 @@
+# =============================================================================
+# OPTI-OIGNON v1.6.0 — BENCHMARK CONFIGURATION
+# =============================================================================
+# Defines benchmark suites, tasks, scoring methods, and runner defaults.
+# Each suite groups tasks by category for organized model evaluation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# RUNNER DEFAULTS
+# -----------------------------------------------------------------------------
+runner:
+  timeout: 300
+  temperature: 0.7
+  max_tokens: 1000
+  max_concurrent_runs: 1
+
+# -----------------------------------------------------------------------------
+# SCORING CONFIGURATION
+# -----------------------------------------------------------------------------
+scoring:
+  # Weight for user score vs auto score when both present
+  user_weight: 0.6
+  auto_weight: 0.4
+  # Regression threshold (score drop in points)
+  regression_threshold: 1.5
+  # Time penalty: if elapsed > max_expected_time * factor, penalize
+  time_penalty_factor: 2.0
+  time_penalty_points: 2
+
+# -----------------------------------------------------------------------------
+# BENCHMARK SUITES
+# -----------------------------------------------------------------------------
+suites:
+  full:
+    name: "Full Benchmark"
+    description: "Complete model evaluation across all task categories"
+    tasks:
+      - simple_question
+      - debug_r
+      - code_python
+      - code_r
+      - explanation
+      - reasoning
+
+  code_generation:
+    name: "Code Generation"
+    description: "Code writing and debugging tasks"
+    tasks:
+      - debug_r
+      - code_python
+      - code_r
+
+  general_knowledge:
+    name: "General Knowledge"
+    description: "Factual questions and concept explanations"
+    tasks:
+      - simple_question
+      - explanation
+
+  reasoning:
+    name: "Reasoning"
+    description: "Multi-step reasoning and analytical tasks"
+    tasks:
+      - reasoning
+
+  quick:
+    name: "Quick Check"
+    description: "Fast evaluation with minimal tasks"
+    tasks:
+      - simple_question
+      - code_python
+
+# -----------------------------------------------------------------------------
+# TASK DEFINITIONS
+# -----------------------------------------------------------------------------
+# Each task has: name, description, prompt, category, expected_keywords,
+# max_expected_time (seconds), scoring_method (keywords|length|llm_judge)
+# -----------------------------------------------------------------------------
+tasks:
+  simple_question:
+    name: "Simple Question"
+    description: "Basic factual question"
+    category: "general"
+    prompt: "What is biodiversity? Answer in 3 sentences maximum."
+    expected_keywords:
+      - variety
+      - species
+      - living
+      - ecosystem
+      - diversity
+      - life
+    max_expected_time: 60
+    scoring_method: "keywords"
+
+  debug_r:
+    name: "R Code Debug"
+    description: "R code debugging (main use case)"
+    category: "code"
+    prompt: |
+      I have this R error, help me fix it:
+
+      ```r
+      library(dplyr)
+      df <- data.frame(a = c(1, 2, NA), b = c(4, NA, 6))
+      result <- df %>%
+        mutate(total = rowSums(.))
+      ```
+
+      Error: "Error in rowSums(.) : 'x' must be numeric"
+
+      Explain the error and provide the fix.
+    expected_keywords:
+      - select
+      - numeric
+      - na.rm
+      - across
+      - where
+      - is.numeric
+    max_expected_time: 90
+    scoring_method: "keywords"
+
+  code_python:
+    name: "Python Code Generation"
+    description: "Functional Python code creation"
+    category: "code"
+    prompt: |
+      Write a Python function that calculates the Shannon diversity index.
+
+      The function should:
+      1. Take a list of species counts
+      2. Calculate proportions
+      3. Apply the formula H' = -sum(pi * ln(pi))
+      4. Return the result
+
+      Include a usage example with documented code.
+    expected_keywords:
+      - def
+      - shannon
+      - log
+      - math
+      - sum
+      - proportion
+    max_expected_time: 90
+    scoring_method: "keywords"
+
+  code_r:
+    name: "R Code Generation"
+    description: "R code generation with tidyverse"
+    category: "code"
+    prompt: |
+      Write an R function using tidyverse to calculate alpha diversity metrics.
+
+      Requirements:
+      1. Input: dataframe with species (rows) and samples (columns)
+      2. Calculate: Shannon, Simpson, and Richness for each sample
+      3. Return: tidy dataframe with results
+
+      Include comments and a usage example.
+    expected_keywords:
+      - function
+      - tidyverse
+      - shannon
+      - simpson
+      - mutate
+      - summarise
+    max_expected_time: 120
+    scoring_method: "keywords"
+
+  explanation:
+    name: "Concept Explanation"
+    description: "Pedagogical concept explanation"
+    category: "general"
+    prompt: |
+      Explain the concept of rarefaction in ecology pedagogically.
+
+      Include:
+      1. Simple definition
+      2. Why it is useful
+      3. A concrete example
+      4. Method limitations
+
+      Provide a clear and structured answer.
+    expected_keywords:
+      - sampling
+      - species
+      - richness
+      - comparison
+      - curve
+      - individuals
+    max_expected_time: 180
+    scoring_method: "keywords"
+
+  reasoning:
+    name: "Multi-Step Reasoning"
+    description: "Problem requiring multiple reasoning steps"
+    category: "reasoning"
+    prompt: |
+      Here is biodiversity data from 3 sites:
+
+      | Site | Individuals | Species | Shannon |
+      |------|-------------|---------|---------|
+      | A    | 150         | 25      | 2.8     |
+      | B    | 500         | 20      | 1.9     |
+      | C    | 200         | 30      | 3.1     |
+
+      Analyze this data and answer:
+      1. Which site has the highest species richness?
+      2. Why does Site B have lower Shannon despite many individuals?
+      3. If I do rarefaction to 100 individuals, what will happen?
+
+      Reason step by step.
+    expected_keywords:
+      - Site C
+      - dominance
+      - evenness
+      - species
+      - rarefaction
+    max_expected_time: 180
+    scoring_method: "keywords"

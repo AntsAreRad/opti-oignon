@@ -1,0 +1,47 @@
+# Session Fingerprint Configuration — Opti-Oignon S75
+# ====================================================
+# Controls how the 10-dimension session fingerprint is computed
+# and serialized for context injection.
+
+# Master enable/disable
+enabled: true
+
+# Per-dimension weights (0.0 = excluded, 1.0 = full weight)
+# Dimensions with weight 0 are omitted from serialized output.
+dimension_weights:
+  task_type: 1.0          # D1: task classification
+  stack: 1.0              # D2: technology stack detection
+  hot_files: 1.0          # D3: file touch frequency
+  recent_bugs: 1.0        # D4: bug category tracking
+  test_health: 1.0        # D5: rolling test pass rate
+  momentum: 1.0           # D6: session progress/velocity
+  domain_terms: 0.8       # D7: TF-IDF domain vocabulary
+  dep_clusters: 0.6       # D8: import graph communities
+  user_preferences: 0.9   # D9: checkpoint decision patterns
+  context_anchors: 1.0    # D10: explicit invariants
+
+# D7: TF-IDF refresh interval (recompute every N steps)
+tfidf_refresh_interval: 5
+
+# D3: Maximum files tracked in hot_files top list
+max_hot_files: 5
+
+# D7: Maximum domain terms in serialized output
+max_domain_terms: 10
+
+# D8: Maximum dependency clusters to track
+max_dep_clusters: 5
+
+# D10: Maximum context anchors (FIFO eviction)
+max_anchors: 5
+
+# D4: Maximum bug history entries kept in memory
+max_bug_history: 20
+
+# D9: SQLite database path for persistent user preferences
+# Relative to data directory. Stores cumulative approve/modify/abort ratios.
+sqlite_path: "fingerprint.db"
+
+# Serialization format for compact output: "yaml" or "json"
+# YAML is slightly more token-efficient for LLM context injection.
+serialization_format: "yaml"

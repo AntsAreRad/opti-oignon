@@ -1,0 +1,47 @@
+# Speculative Decoding Configuration -- S110
+# Pairs a small draft model with the main model for 2-5x token generation
+# speedup via llama.cpp speculative decoding. Zero quality loss.
+# Only available when using the llama.cpp backend (not Ollama).
+# Entirely opt-in: disabled by default, user explicitly enables.
+
+speculative_decoding:
+  enabled: false          # Opt-in only
+  draft_model: ""         # Auto-detected or user-selected GGUF path/name
+  draft_max: 16           # Max tokens to draft before verification
+  draft_min: 5            # Min tokens to draft per step
+  draft_gpu_layers: 99    # GPU layers for draft model (-1 = all)
+  auto_select_draft: true # Auto-pick best draft from installed models
+
+# Family compatibility map for auto-selection.
+# Keys are model family prefixes; values are lists of preferred draft
+# families with max parameter sizes (in billions).
+family_compatibility:
+  llama3:
+    - family: "llama3"
+      max_params_b: 3
+  llama:
+    - family: "llama"
+      max_params_b: 3
+  qwen:
+    - family: "qwen"
+      max_params_b: 3
+  qwen2:
+    - family: "qwen2"
+      max_params_b: 3
+  deepseek:
+    - family: "deepseek"
+      max_params_b: 3
+  gemma:
+    - family: "gemma"
+      max_params_b: 2
+  phi:
+    - family: "phi"
+      max_params_b: 3
+  mistral:
+    - family: "mistral"
+      max_params_b: 3
+
+# VRAM budget estimation defaults (in GB).
+vram_budget:
+  default_total_gb: 24   # Assumed total VRAM if detection fails
+  safety_margin_gb: 1.5  # Reserve for OS/other processes

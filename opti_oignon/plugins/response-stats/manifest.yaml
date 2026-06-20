@@ -1,0 +1,37 @@
+name: response-stats
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Appends a statistics footer to LLM responses: estimated token count,
+  reading time, Flesch-Kincaid readability score (adapted for technical
+  content), word/sentence/paragraph counts, and a complexity label.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions: []
+min_opti_version: "1.10.0"
+config_schema:
+  enabled_stats:
+    type: array
+    default:
+      - words
+      - sentences
+      - paragraphs
+      - tokens
+      - reading_time
+      - readability
+      - complexity
+    description: Which statistics to include in the footer
+  position:
+    type: string
+    default: "footer"
+    description: Where to place stats ('footer' or 'header')
+  style:
+    type: string
+    default: "compact"
+    description: Display style ('compact' = single line, 'detailed' = multi-line)
+  min_words:
+    type: integer
+    default: 20
+    description: Minimum word count to trigger stats display

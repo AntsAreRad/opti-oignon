@@ -1,0 +1,45 @@
+# =============================================================================
+# OPTI-OIGNON v1.5.9 -- FEEDBACK & ANALYTICS CONFIG (S55)
+# =============================================================================
+# Configuration for the Feedback Store and Analytics Engine.
+#
+# Set enabled: false to disable feedback collection entirely.
+# Set auto_adjust_routing: true to let feedback scores influence
+# the SmartRouter's task_scores over time.
+# =============================================================================
+
+feedback:
+  # Master switch for feedback collection
+  enabled: true
+
+  # Maximum length for free-text feedback
+  max_text_length: 2000
+
+  # Auto-adjust SmartRouter task_scores based on feedback
+  # When enabled, consistently low-rated model/task combos
+  # will have their scores reduced automatically.
+  auto_adjust_routing: false
+
+  # Minimum feedback count before adjustments kick in
+  min_samples_for_adjustment: 10
+
+  # Score adjustment factor (multiplied by deviation from average)
+  adjustment_factor: 0.05
+
+analytics:
+  # Master switch for performance tracking
+  enabled: true
+
+  # How long to retain detailed performance records (seconds)
+  # Default: 30 days
+  retention_seconds: 2592000
+
+  # Time windows for trend computation
+  trend_windows:
+    - "1h"
+    - "24h"
+    - "7d"
+    - "30d"
+
+  # Maximum records to keep in memory before flushing to DB
+  memory_buffer_size: 500

@@ -1,0 +1,79 @@
+/*
+ * tokens.css -- mode/theme/density invariant design tokens (S166).
+ * Typography family + default (comfortable) size scale, leading, tracking,
+ * spacing scale, radius, motion, z-index, focus-ring metrics.
+ * Per-density overrides of the size/spacing scales live in density.css.
+ */
+
+:root {
+	--oo-font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--oo-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
+
+	/* Global typography scale multiplier (S168). Overridden at runtime on
+	   <html> by the preferences store; the text tokens below multiply by it. */
+	--oo-type-scale: 1;
+
+	--oo-text-2xs: calc(12px * var(--oo-type-scale, 1));
+	--oo-text-xs: calc(13px * var(--oo-type-scale, 1));
+	--oo-text-sm: calc(14px * var(--oo-type-scale, 1));
+	--oo-text-base: calc(15px * var(--oo-type-scale, 1));
+	--oo-text-lg: calc(17px * var(--oo-type-scale, 1));
+	--oo-text-xl: calc(20px * var(--oo-type-scale, 1));
+	--oo-text-2xl: calc(24px * var(--oo-type-scale, 1));
+	--oo-text-3xl: calc(30px * var(--oo-type-scale, 1));
+
+	--oo-leading-tight: 1.25;
+	--oo-leading-snug: 1.4;
+	--oo-leading-normal: 1.55;
+	--oo-leading-relaxed: 1.7;
+
+	--oo-tracking-tight: -0.01em;
+	--oo-tracking-normal: 0;
+	--oo-tracking-wide: 0.02em;
+
+	--oo-space-0: 0;
+	--oo-space-1: 3px;
+	--oo-space-2: 6px;
+	--oo-space-3: 8px;
+	--oo-space-4: 12px;
+	--oo-space-5: 16px;
+	--oo-space-6: 20px;
+	--oo-space-7: 24px;
+	--oo-space-8: 32px;
+	--oo-space-9: 40px;
+
+	--oo-radius-none: 0;
+	--oo-radius-sm: 4px;
+	--oo-radius-md: 8px;
+	--oo-radius-lg: 12px;
+	--oo-radius-xl: 16px;
+	--oo-radius-full: 9999px;
+
+	--oo-motion-instant: 1ms;
+	--oo-motion-fast: 120ms;
+	--oo-motion-normal: 200ms;
+	--oo-motion-slow: 300ms;
+	--oo-motion-slower: 500ms;
+	--oo-ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+	--oo-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+
+	--oo-z-base: 0;
+	--oo-z-elevated: 10;
+	--oo-z-overlay: 100;
+	--oo-z-modal-backdrop: 200;
+	--oo-z-modal: 210;
+	--oo-z-toast: 300;
+	--oo-z-tooltip: 400;
+
+	--oo-focus-ring-width: 2px;
+	--oo-focus-ring-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--oo-motion-fast: var(--oo-motion-instant);
+		--oo-motion-normal: var(--oo-motion-instant);
+		--oo-motion-slow: var(--oo-motion-instant);
+		--oo-motion-slower: var(--oo-motion-instant);
+	}
+}

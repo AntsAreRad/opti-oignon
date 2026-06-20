@@ -1,0 +1,127 @@
+# Agent configuration (S176, Theme 3 / Odysseus Core).
+#
+# Maximum-security, local-first. The top-level values are the defaults the
+# agent runs with; they match the S175 reference values (round cap 20, verifier
+# cap 2). Presets under "presets" represent named variants; the laptop-lite
+# preset is the compact profile for small local hardware. The loader
+# (config_loader.py) is guarded: when this file or PyYAML is unavailable, the
+# same defaults are used, so security and behaviour never depend on the file
+# being present.
+
+loop:
+  # Multi-turn round cap (loop.MAX_AGENT_ROUNDS). Clamped to [1, 1000].
+  round_cap: 20
+  # Bounded verifier subagent cap (loop._VERIFIER_MAX_ROUNDS). Clamped to [1, 2].
+  verifier_cap: 2
+  # Run the bounded verifier after a successful run.
+  verify: false
+
+teacher:
+  # Student-to-teacher escalation (teacher.EscalationPolicy).
+  enabled: true
+  # Escalate after this many consecutive failed or refused tool results.
+  failure_threshold: 2
+  on_verifier_fail: true
+  on_max_rounds: true
+  on_model_error: true
+  # A stronger teacher model and the small local student (laptop-lite spirit).
+  teacher_model: "qwen3:32b"
+  student_model: "qwen3:4b"
+  # Advisory wait for the teacher call, in seconds.
+  timeout: 120.0
+
+tools:
+  # Per-mode tool exposure. Daily exposes everything; Bulbe exposes the
+  # sandboxed subset plus the session-state todo and the bounded task (S228).
+  # This mirrors the allowlists, which remain the enforced gate; this list
+  # documents intent (ATL-01: non-enforcing, the frozensets are the floor).
+  daily:
+    - bash
+    - view
+    - create_file
+    - str_replace
+    - grep
+    - glob
+    - ls
+    - web_search
+    - manage_memory
+    - manage_skills
+    - manage_notes
+    - todo
+    - task
+  bulbe:
+    - bash
+    - view
+    - create_file
+    - str_replace
+    - grep
+    - glob
+    - ls
+    - todo
+    - task
+
+diagnostics:
+  # Diagnostics-after-write (S228, AGT_SPEC 5.2). After create_file or
+  # str_replace succeeds on a matching file, a linter runs on the sandbox
+  # copy INSIDE the disposable bwrap sandbox (never the host) and findings
+  # are appended to the tool output. A clean write returns byte-identical
+  # output; degraded backends and failures skip silently. Disabled means no
+  # probe and no run.
+  enabled: true
+  # The Python ladder, first available wins (probed once per session inside
+  # the sandbox). Svelte files use the host-side tag-balance read instead.
+  tools:
+    - ruff
+    - pyflakes
+    - py_compile
+  # Per-execution timeout in seconds for probes and runs.
+  timeout_s: 10
+  # Output caps for the appended block.
+  max_block_bytes: 4096
+  max_findings: 25
+
+hardening:
+  # Loop hardening (S229, AGT_SPEC Section 6). Per-observation transcript
+  # caps (6.1), applied before untrusted wrapping; the hard floors of 4096
+  # bytes / 64 lines are enforced at load time and cannot be configured
+  # below. Full pre-truncation text spills to .agent/spill/ inside the
+  # workspace when a session is active (an ordinary workspace write; the
+  # copy-out diff excludes the .agent/ prefix by the manifest rule).
+  obs_max_bytes: 16384
+  obs_max_lines: 256
+  # Per-round observation budget: later observations in an over-budget
+  # round truncate harder, never drop.
+  round_obs_budget: 49152
+  # Deterministic prune stage (6.2): chars-based transcript estimate;
+  # observation messages outside the protect window become one-line stubs,
+  # oldest first, until the estimate falls under the target. The system
+  # prompt, the original task, the memory block and skill messages are
+  # never pruned; the last prune_protect_rounds rounds stay verbatim.
+  prune_trigger_chars: 98304
+  prune_target_chars: 65536
+  prune_protect_rounds: 3
+  # Stage two (summarization of the pruned span) is OFF by default; turning
+  # it on is a host-assured decision the Lot 3 harness measures first.
+  summarize_compaction: false
+  # Doom-loop window (6.3): identical consecutive (tool, canonical args)
+  # executed calls trip at this threshold (floor 2).
+  doom_loop_threshold: 3
+  # Governor feed (6.6): with an admitted ticket, budget_chars =
+  # admitted_num_ctx * 4 * obs_fraction raises the round budget and the
+  # prune thresholds, never below the static floors above.
+  obs_fraction: 0.35
+
+presets:
+  # Compact profile for laptops with limited VRAM: a shorter loop, a single
+  # verifier pass, and a lighter teacher than the global default.
+  laptop_lite:
+    loop:
+      round_cap: 12
+      verifier_cap: 1
+      verify: false
+    teacher:
+      enabled: true
+      failure_threshold: 2
+      teacher_model: "qwen3:14b"
+      student_model: "qwen3:4b"
+      timeout: 90.0

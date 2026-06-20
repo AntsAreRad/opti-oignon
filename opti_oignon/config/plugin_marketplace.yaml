@@ -1,0 +1,54 @@
+# Plugin marketplace configuration (S102)
+# Controls the plugin index, remote install, reviews, and template generation.
+
+# Enable/disable the marketplace feature
+enabled: true
+
+# Remote plugin index
+index:
+  # URL to a remote index.json file (GitHub raw URL or similar)
+  # Leave empty to disable remote index
+  url: ""
+
+  # Cache TTL in seconds before refreshing the remote index
+  cache_ttl_seconds: 3600
+
+  # Auto-refresh index on marketplace page load
+  auto_refresh: true
+
+# Remote installation settings
+install:
+  # Allow installing plugins from remote URLs
+  allow_remote_install: true
+
+  # Maximum download size in MB
+  max_download_size_mb: 50
+
+  # Auto-enable plugins after remote install
+  auto_enable: false
+
+  # Require SHA-256 hash verification for remote installs
+  require_hash: false
+
+# Reviews settings
+reviews:
+  # Enable the review/rating system
+  enabled: true
+
+  # Maximum review text length in characters
+  max_review_length: 2000
+
+  # Default author name for anonymous reviews
+  default_author: "anonymous"
+
+# Template generator settings
+template:
+  # Default hooks for new plugin scaffolds
+  default_hooks:
+    - post_inference
+
+  # Default permissions for new plugin scaffolds
+  default_permissions: []
+
+  # Default author for new plugin scaffolds
+  default_author: "Your Name"

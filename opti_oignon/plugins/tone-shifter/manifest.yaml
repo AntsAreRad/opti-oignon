@@ -1,0 +1,27 @@
+name: tone-shifter
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Transforms LLM response tone via rule-based text processing.
+  Supports multiple modes: academic, casual, eli5, formal, concise,
+  and verbose. Each mode applies a set of regex and string replacement
+  rules sequentially. No re-inference needed — pure post-processing.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions: []
+min_opti_version: "1.10.0"
+config_schema:
+  active_mode:
+    type: string
+    default: "none"
+    description: >
+      Active tone mode. One of: none, academic, casual, eli5, formal,
+      concise, verbose. Set to 'none' to disable.
+  custom_rules:
+    type: object
+    default: {}
+    description: >
+      Custom replacement rules as key-value pairs. Keys are regex
+      patterns, values are replacement strings.

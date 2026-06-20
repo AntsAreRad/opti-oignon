@@ -1,0 +1,31 @@
+name: chain-of-thought-enforcer
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Detects complex questions and injects chain-of-thought instructions
+  into the prompt. Post-inference, parses the response to separate
+  reasoning from the final answer and formats them distinctly.
+entry_point: entry_point.py
+hooks:
+  - pre_inference
+  - post_inference
+dependencies: []
+permissions: []
+min_opti_version: "1.10.0"
+config_schema:
+  complexity_keywords:
+    type: string
+    default: "why,how,compare,contrast,explain,analyze,evaluate,prove,derive,calculate"
+    description: Comma-separated keywords that trigger CoT injection
+  injection_template:
+    type: string
+    default: "Think step by step, show your reasoning, then give your final answer."
+    description: Instruction injected into the system message
+  format_style:
+    type: string
+    default: separator
+    description: "How to format output: separator (--- divider), collapsible, plain"
+  min_question_words:
+    type: integer
+    default: 5
+    description: Minimum word count in prompt to consider it complex

@@ -1,0 +1,16 @@
+# Coding History configuration -- S76
+# SQLite-backed task history and checkpoint/resume for the coding agent.
+
+enabled: true
+
+# Maximum number of tasks to retain (oldest pruned first)
+max_tasks: 200
+
+# Retention period in days (tasks older than this are pruned)
+retention_days: 30
+
+# Maximum length of stored output fields (truncated beyond this)
+max_output_length: 10000
+
+# Maximum plan JSON size in bytes
+max_plan_size: 50000

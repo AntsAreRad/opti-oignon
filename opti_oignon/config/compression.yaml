@@ -1,0 +1,66 @@
+# ============================================================================
+# CONVERSATION COMPRESSOR — OPTI-OIGNON S66
+# ============================================================================
+# Configuration for conversation history compression and archive retrieval.
+# The compressor reduces prompt history to fit the S65 token budget while
+# keeping the full conversation archive always searchable in SQLite.
+
+# -- Core compression settings --
+
+# Default strategy: "rule", "llm", or "hybrid"
+# - rule:   Fast heuristic compression, no LLM call required
+# - llm:    Higher-quality LLM-based summarization (costs one inference)
+# - hybrid: Rule-based first pass, then LLM refinement if budget allows
+strategy: "hybrid"
+
+# Number of most recent messages to always keep verbatim (never compressed)
+recent_messages_keep: 6
+
+# Only compress when history token count exceeds this fraction of history_tokens budget
+# 1.0 = compress only when strictly over budget
+# 0.9 = compress when at 90% of budget (proactive)
+compression_threshold_ratio: 1.0
+
+# Enable or disable the compressor entirely
+enabled: true
+
+# -- LLM-based summarization settings --
+
+# Model to use for LLM summarization; null = use the current chat model
+llm_summary_model: null
+
+# Maximum tokens for the generated summary
+llm_summary_max_tokens: 300
+
+# Temperature for the summarization call (low = deterministic)
+llm_summary_temperature: 0.2
+
+# Timeout (seconds) for the LLM summarization call
+llm_summary_timeout: 30
+
+# -- Rule-based strategy settings --
+
+# Number of key facts to extract per message in rule-based mode
+rule_max_facts_per_message: 2
+
+# Minimum message character length to consider for fact extraction
+rule_min_message_length: 50
+
+# -- Archive retrieval settings --
+
+# Default number of top results to return from archive search
+archive_retrieval_top_k: 3
+
+# Minimum relevance score (0.0–1.0) to include a result
+archive_retrieval_min_score: 0.05
+
+# Maximum snippet length (characters) per retrieved message
+archive_retrieval_snippet_length: 300
+
+# -- Retrieval trigger detection --
+
+# Enable automatic archive retrieval when user references past context
+retrieval_trigger_enabled: true
+
+# Minimum confidence score to auto-inject retrieved context
+retrieval_trigger_min_confidence: 0.6

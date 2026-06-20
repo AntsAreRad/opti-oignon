@@ -1,0 +1,148 @@
+/* ------------------------------------------------------------------ */
+/*  RESPONSIVE FOUNDATION — S132 Mobile Responsive                     */
+/*  Breakpoints, touch targets, safe-area insets, viewport height fix  */
+/* ------------------------------------------------------------------ */
+
+/* -- Breakpoint custom properties ---------------------------------- */
+:root {
+  --oo-bp-sm: 640px;   /* Small phones */
+  --oo-bp-md: 768px;   /* Tablets, large phones landscape */
+  --oo-bp-lg: 1024px;  /* Desktop */
+}
+
+/* -- Touch target utility ------------------------------------------ */
+/* Ensures minimum 44x44px interactive area per WCAG 2.5.5 */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* -- Safe area insets (notched phones) ----------------------------- */
+/* Apply padding for devices with notches, rounded corners, etc. */
+.safe-area-pad {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-pad-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* -- Viewport height fix ------------------------------------------- */
+/* dvh (dynamic viewport height) accounts for mobile browser chrome   */
+/* that appears/disappears on scroll. Falls back to vh.               */
+.h-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.min-h-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* -- Mobile text size prevention ----------------------------------- */
+/* Prevent iOS Safari from inflating font sizes in landscape */
+@media screen and (max-width: 768px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}
+
+/* -- Scrollbar hiding on mobile ------------------------------------ */
+/* Hide scrollbars on mobile for cleaner appearance */
+@media screen and (max-width: 768px) {
+  .mobile-hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .mobile-hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* -- Touch-friendly scrolling -------------------------------------- */
+/* Momentum scrolling for touch devices */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+.touch-scroll-x {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+}
+
+/* -- Sidebar overlay transition ------------------------------------ */
+.sidebar-mobile-enter {
+  transition: transform 200ms ease;
+}
+
+.sidebar-mobile-backdrop {
+  transition: opacity 200ms ease;
+}
+
+/* -- Scroll-to-bottom FAB ----------------------------------------- */
+.scroll-fab {
+  position: fixed;
+  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--oo-tobacco, #a0785a);
+  color: var(--oo-fg-on-semantic, #fff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  border: none;
+  z-index: 30;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.scroll-fab:hover {
+  transform: scale(1.05);
+}
+
+.scroll-fab.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+}
+
+/* -- Mobile-specific spacing overrides ----------------------------- */
+@media screen and (max-width: 640px) {
+  /* Tighter padding on small screens */
+  .mobile-px-tight {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  /* Full-width inputs on mobile */
+  .mobile-full-width {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+/* -- Code blocks horizontal scroll on mobile ----------------------- */
+@media screen and (max-width: 768px) {
+  pre, code {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

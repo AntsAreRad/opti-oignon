@@ -1,0 +1,37 @@
+# Learned Router Configuration (S67)
+# ====================================
+# ML-based routing classifier trained on actual query history.
+# Falls back to YAML heuristic router when below confidence threshold.
+
+# Master enable switch (disabled until first training completes)
+enabled: false
+
+# Classifier type: "logistic" or "random_forest"
+model_type: "logistic"
+
+# Confidence threshold below which the YAML fallback router is used
+confidence_threshold: 0.70
+
+# Minimum labeled samples required before training is allowed
+min_training_samples: 50
+
+# Auto-retrain every N new samples logged since last training run
+auto_retrain_interval: 100
+
+# TF-IDF feature extraction parameters
+feature_max_features: 5000       # Maximum vocabulary size
+feature_ngram_range: [1, 2]      # Unigrams + bigrams
+
+# Logistic regression parameters (used when model_type = "logistic")
+logistic_max_iter: 1000
+logistic_C: 1.0
+
+# Random forest parameters (used when model_type = "random_forest")
+random_forest_n_estimators: 100
+random_forest_max_depth: null    # null = unlimited
+
+# Training sample storage
+max_stored_samples: 10000        # Cap on persisted samples (oldest pruned)
+
+# Cross-validation folds for accuracy reporting during training
+cv_folds: 5

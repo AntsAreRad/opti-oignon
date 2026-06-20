@@ -1,0 +1,27 @@
+name: code-guardian
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Validates code blocks in LLM responses. Parses Python via ast, JSON
+  via json.loads, and R via basic heuristics. Appends a syntax badge
+  ([Syntax OK] or [Syntax Error: detail]) after each code block.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions:
+  - conversation_read
+min_opti_version: "1.10.0"
+config_schema:
+  languages:
+    type: string
+    default: "python,json,r"
+    description: "Comma-separated languages to validate: python, json, r"
+  badge_format:
+    type: string
+    default: bracket
+    description: "Badge style: bracket ([Syntax OK]), emoji, or hidden"
+  min_lines:
+    type: integer
+    default: 2
+    description: Minimum lines in a code block to trigger validation

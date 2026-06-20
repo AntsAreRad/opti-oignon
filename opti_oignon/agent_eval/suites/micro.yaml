@@ -1,0 +1,242 @@
+# Opti-Oignon agent eval -- micro suite v1 (S230, AGT_SPEC 7.1).
+#
+# 12 tasks across the capability axes the AGT lots target:
+#   file-creation (2), targeted single-edit (2), search-then-edit
+#   exercising grep/glob (3), multi-file change (2), fix-failing-test
+#   where the checks are literally pytest on the fixture (2),
+#   long-output handling exercising the spill path (1).
+#
+# Tasks are micro by construction: one to ten rounds for a competent run.
+# Scoring is auto: every check command must exit 0 inside the same sandbox
+# after the agent run. Fixtures and checks are deterministic and
+# blocklist-clean: fixture file contents avoid every pattern the sandbox
+# CommandValidator inspects on write-then-execute, and checks avoid
+# backticks, command substitution and pipes to shells (pipes to grep are
+# permitted by the validator and used deliberately).
+
+suite: micro
+
+tasks:
+  - id: t01-create-file
+    title: Create a single exact file
+    prompt: |
+      Create a file named greeting.txt in the workspace root containing
+      exactly one line: Hello from the eval harness
+    checks:
+      - "test -f greeting.txt"
+      - "grep -qx 'Hello from the eval harness' greeting.txt"
+
+  - id: t02-create-nested
+    title: Create a file in a new subdirectory
+    prompt: |
+      Create a file at notes/summary.md (the notes directory does not
+      exist yet). It must contain a first line "# Summary" and, somewhere
+      below, a line reading exactly "status: ready".
+    checks:
+      - "test -f notes/summary.md"
+      - "grep -q '^# Summary' notes/summary.md"
+      - "grep -qx 'status: ready' notes/summary.md"
+
+  - id: t03-edit-config
+    title: Targeted single edit in a config file
+    prompt: |
+      In config.ini, change the retries value from 2 to 5. Do not change
+      anything else in the file.
+    fixture:
+      config.ini: |
+        [service]
+        timeout = 30
+        retries = 2
+        verbose = false
+    checks:
+      - "grep -qx 'retries = 5' config.ini"
+      - "grep -qx 'timeout = 30' config.ini"
+      - "grep -qx 'verbose = false' config.ini"
+      - "! grep -q 'retries = 2' config.ini"
+
+  - id: t04-bump-version
+    title: Bump a version constant
+    prompt: |
+      In app/version.py, bump VERSION from "1.0.0" to "1.1.0". Leave the
+      comment and everything else untouched.
+    fixture:
+      app/version.py: |
+        # Application version constant. Bump on release.
+        VERSION = "1.0.0"
+    checks:
+      - "grep -q '\"1.1.0\"' app/version.py"
+      - "! grep -q '\"1.0.0\"' app/version.py"
+      - "grep -q '^# Application version constant' app/version.py"
+
+  - id: t05-grep-constant
+    title: Find the defining file with grep, then edit it
+    prompt: |
+      One file under src/ defines DEFAULT_LIMIT. Find which file it is
+      and change the value from 10 to 25.
+    fixture:
+      src/alpha.py: |
+        def load_alpha():
+            return "alpha module"
+      src/beta.py: |
+        DEFAULT_LIMIT = 10
+
+        def load_beta():
+            return "beta module"
+      src/gamma.py: |
+        def load_gamma():
+            return "gamma module"
+    checks:
+      - "grep -qx 'DEFAULT_LIMIT = 25' src/beta.py"
+      - "! grep -rq 'DEFAULT_LIMIT = 10' src"
+
+  - id: t06-glob-draft
+    title: Find the draft among text files, then finalize it
+    prompt: |
+      Among the .txt files in docs/, exactly one is marked with the line
+      "STATUS: draft". Find it and change that line to "STATUS: final".
+      Leave the other files untouched.
+    fixture:
+      docs/alpha.txt: |
+        Release notes for alpha.
+        STATUS: published
+      docs/beta.txt: |
+        Release notes for beta.
+        STATUS: draft
+      docs/gamma.txt: |
+        Release notes for gamma.
+        STATUS: published
+    checks:
+      - "grep -qx 'STATUS: final' docs/beta.txt"
+      - "! grep -rq 'STATUS: draft' docs"
+      - "grep -qx 'STATUS: published' docs/alpha.txt"
+      - "grep -qx 'STATUS: published' docs/gamma.txt"
+
+  - id: t07-grep-distractor
+    title: Edit the real assignment, not the comment mentioning it
+    prompt: |
+      Somewhere under lib/ the constant SEPARATOR is assigned the value
+      "semicolon". Change the assignment so it reads "comma". One other
+      file only mentions SEPARATOR in a comment; leave that file alone.
+    fixture:
+      lib/parser.py: |
+        SEPARATOR = "semicolon"
+
+        def split_record(record):
+            return record.split(SEPARATOR)
+      lib/util.py: |
+        # This helper module mentions SEPARATOR in prose only; the real
+        # assignment lives elsewhere in the lib tree.
+
+        def trim(value):
+            return value.strip()
+    checks:
+      - "grep -qx 'SEPARATOR = \"comma\"' lib/parser.py"
+      - "! grep -q 'SEPARATOR = \"semicolon\"' lib/parser.py"
+      - "grep -q 'mentions SEPARATOR in prose only' lib/util.py"
+
+  - id: t08-rename-function
+    title: Rename a function across definition and call site
+    prompt: |
+      Rename the function add to add_numbers everywhere it appears under
+      mathx/: both the definition in mathx/ops.py and the call in
+      mathx/main.py. The program must still run.
+    fixture:
+      mathx/ops.py: |
+        def add(a, b):
+            return a + b
+      mathx/main.py: |
+        from ops import add
+
+        print(add(2, 3))
+    checks:
+      - "grep -q 'def add_numbers' mathx/ops.py"
+      - "grep -q 'add_numbers(2, 3)' mathx/main.py"
+      - "! grep -rq 'def add(' mathx"
+      - "python3 mathx/main.py"
+
+  - id: t09-add-function
+    title: Add a function in one module and use it from another
+    prompt: |
+      Add a function shout(name) to pkg/greet.py that returns the greet()
+      output for that name converted to uppercase. Then change pkg/cli.py
+      so it prints shout("world") instead of greet("world").
+    fixture:
+      pkg/greet.py: |
+        def greet(name):
+            return "Hi " + name
+      pkg/cli.py: |
+        from greet import greet
+
+        print(greet("world"))
+    checks:
+      - "grep -q 'def shout' pkg/greet.py"
+      - "grep -q 'shout(\"world\")' pkg/cli.py"
+      - "python3 pkg/cli.py | grep -q 'HI WORLD'"
+
+  - id: t10-fix-multiply
+    title: Fix the implementation a pytest suite catches
+    prompt: |
+      Run the test suite with: python3 -m pytest -q
+      One test fails because of a bug in calc.py. Fix the bug in the
+      implementation; do not modify the tests.
+    fixture:
+      calc.py: |
+        def multiply(a, b):
+            return a + b
+      test_calc.py: |
+        from calc import multiply
+
+        def test_multiply():
+            assert multiply(3, 4) == 12
+
+        def test_multiply_zero():
+            assert multiply(5, 0) == 0
+    checks:
+      - "python3 -m pytest -q"
+      - "grep -q 'multiply(3, 4) == 12' test_calc.py"
+
+  - id: t11-fix-count-words
+    title: Fix an off-by-one a pytest suite catches
+    prompt: |
+      Run the test suite with: python3 -m pytest -q
+      The word counter in textutil.py is wrong. Fix the implementation so
+      the tests pass; do not modify the tests.
+    fixture:
+      textutil.py: |
+        def count_words(text):
+            return len(text.split()) + 1
+      test_textutil.py: |
+        from textutil import count_words
+
+        def test_three_words():
+            assert count_words("one two three") == 3
+
+        def test_empty_string():
+            assert count_words("") == 0
+    checks:
+      - "python3 -m pytest -q"
+      - "grep -q 'count_words(\"one two three\") == 3' test_textutil.py"
+
+  - id: t12-long-output
+    title: Recover a token from output far larger than the observation cap
+    prompt: |
+      First run exactly this command, with no filters: python3 gen.py
+      Its output is several thousand lines and will be truncated in your
+      view; the truncation notice names a spill file holding the full
+      output. Somewhere in the full output there is a single line
+      containing MAGIC-TOKEN followed by a colon and the token value.
+      Find the token value and create answer.txt containing exactly that
+      value on a single line.
+    fixture:
+      gen.py: |
+        def main():
+            for i in range(1, 3001):
+                if i == 1500:
+                    print("line", i, "MAGIC-TOKEN: K7Q2")
+                else:
+                    print("line", i, "padding-padding-padding-padding")
+
+        main()
+    checks:
+      - "test -f answer.txt"
+      - "grep -q 'K7Q2' answer.txt"

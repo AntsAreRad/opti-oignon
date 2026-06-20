@@ -1,0 +1,32 @@
+name: fact-checker
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Cross-references factual claims in LLM responses against web search
+  results. Annotates inline with [verified], [unverified], or
+  [conflict: source says X]. Uses DuckDuckGo via the web_search module.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions:
+  - network_outbound
+  - conversation_read
+min_opti_version: "1.10.0"
+config_schema:
+  aggressiveness:
+    type: string
+    default: moderate
+    description: "Checking level: low (dates/numbers only), moderate (+ proper nouns), high (all claims)"
+  max_checks:
+    type: integer
+    default: 5
+    description: Maximum number of claims to verify per response
+  skip_code_blocks:
+    type: boolean
+    default: true
+    description: Skip claims found inside code blocks
+  trusted_domains:
+    type: string
+    default: ""
+    description: Comma-separated list of domains to auto-trust

@@ -1,0 +1,17 @@
+# Pipeline: Creative Writer
+# Sequence pour la generation creative.
+# THINK -> DIRECT (haute temperature)
+id: creative-writer
+name: Creative Writer
+description: >
+  Pipeline creatif. Une phase de reflexion pour structurer les
+  idees, suivie d'une generation directe avec parametres
+  favorisant la creativite.
+steps:
+  - step_type: think
+    label: Brainstorm & Outline
+    parameters: {}
+  - step_type: direct
+    label: Creative Generation
+    parameters:
+      temperature: 0.9

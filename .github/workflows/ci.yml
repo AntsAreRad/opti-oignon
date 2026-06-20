@@ -1,0 +1,375 @@
+# Opti-Oignon CI Pipeline
+# S162 -- GitHub Actions CI
+#
+# Jobs:
+#   lint       - ruff check on Python codebase
+#   typecheck  - mypy on key modules (baseline gate)
+#   test       - pytest with coverage gate
+#   frontend   - svelte-check (TypeScript) + eslint (S171)
+#   e2e        - Playwright E2E tests (frontend)
+#   install    - build + install the distribution in a fresh venv, CLI smoke (S171)
+#   security   - bandit, pip-audit, npm audit
+#   badge      - coverage badge generation
+#
+# Fail-fast: lint and typecheck block test/e2e.
+# Security scan runs independently (informational).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_DEFAULT: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+
+  # -------------------------------------------------------------------
+  # Lint -- ruff check on Python sources
+  # -------------------------------------------------------------------
+  lint:
+    name: Lint (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check opti_oignon/ tests/ --output-format=github
+
+  # -------------------------------------------------------------------
+  # Typecheck -- mypy with baseline gate
+  # -------------------------------------------------------------------
+  typecheck:
+    name: Typecheck (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install mypy
+          pip install -r requirements.txt 2>/dev/null || true
+
+      - name: Run mypy
+        run: |
+          bash scripts/run_typecheck.sh --ci
+
+  # -------------------------------------------------------------------
+  # Test -- pytest with coverage gate
+  # -------------------------------------------------------------------
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov
+          pip install -r requirements.txt 2>/dev/null || true
+
+      - name: Run tests with coverage
+        run: |
+          bash scripts/run_tests.sh --ci --coverage
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.json
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Frontend -- svelte-check (TypeScript) + eslint (S171)
+  # -------------------------------------------------------------------
+  frontend:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript check (svelte-check)
+        working-directory: frontend
+        run: npm run check
+
+      - name: Lint (eslint)
+        working-directory: frontend
+        run: npm run lint
+
+  # -------------------------------------------------------------------
+  # Install smoke -- build the distribution, install it in a fresh
+  # virtualenv, and verify the CLI entry point responds (S171).
+  # -------------------------------------------------------------------
+  install:
+    name: Install Smoke Test
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Build distribution (sdist + wheel)
+        run: |
+          pip install build
+          python -m build
+
+      - name: Install built wheel in a fresh virtualenv
+        run: |
+          python -m venv /tmp/smoke-venv
+          . /tmp/smoke-venv/bin/activate
+          pip install --upgrade pip
+          pip install dist/*.whl
+
+      - name: Smoke test (CLI entry point + metadata)
+        run: |
+          . /tmp/smoke-venv/bin/activate
+          oo --version
+          python -c "from importlib.metadata import version; print('installed opti-oignon', version('opti-oignon'))"
+
+      - name: Upload distribution artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  # -------------------------------------------------------------------
+  # E2E -- Playwright frontend tests
+  # -------------------------------------------------------------------
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        working-directory: frontend
+        env:
+          CI: "1"
+        run: npx playwright test
+
+      - name: Upload E2E report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 14
+
+  # -------------------------------------------------------------------
+  # Security -- bandit, pip-audit, npm audit (informational)
+  # -------------------------------------------------------------------
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install security tools
+        run: |
+          pip install bandit pip-audit
+          pip install -r requirements.txt 2>/dev/null || true
+
+      - name: Run bandit
+        run: |
+          bandit -r opti_oignon/ \
+            -f json \
+            -o bandit-report.json \
+            --severity-level medium \
+            --confidence-level medium \
+            || true
+
+      - name: Bandit summary
+        if: always()
+        run: |
+          if [ -f bandit-report.json ]; then
+            python3 -c "
+          import json
+          with open('bandit-report.json') as f:
+              data = json.load(f)
+          results = data.get('results', [])
+          by_severity = {}
+          for r in results:
+              sev = r['issue_severity']
+              by_severity[sev] = by_severity.get(sev, 0) + 1
+          print('Bandit findings:')
+          for sev in ('HIGH', 'MEDIUM', 'LOW'):
+              count = by_severity.get(sev, 0)
+              print(f'  {sev}: {count}')
+          print(f'  Total: {len(results)}')
+          "
+          fi
+
+      - name: Run pip-audit
+        run: |
+          pip-audit --format=json --output=pip-audit-report.json || true
+
+      - name: pip-audit summary
+        if: always()
+        run: |
+          if [ -f pip-audit-report.json ]; then
+            python3 -c "
+          import json
+          with open('pip-audit-report.json') as f:
+              data = json.load(f)
+          vulns = [d for d in data if d.get('vulns')]
+          print(f'pip-audit: {len(vulns)} packages with known vulnerabilities')
+          for pkg in vulns:
+              name = pkg.get('name', '?')
+              ver = pkg.get('version', '?')
+              count = len(pkg.get('vulns', []))
+              print(f'  {name}=={ver}: {count} vulnerability(ies)')
+          "
+          fi
+
+      - name: Run npm audit
+        working-directory: frontend
+        run: |
+          npm install --package-lock-only 2>/dev/null || true
+          npm audit --json > ../npm-audit-report.json 2>/dev/null || true
+
+      - name: npm audit summary
+        if: always()
+        run: |
+          if [ -f npm-audit-report.json ]; then
+            python3 -c "
+          import json
+          with open('npm-audit-report.json') as f:
+              data = json.load(f)
+          meta = data.get('metadata', {}).get('vulnerabilities', {})
+          if meta:
+              print('npm audit:')
+              for sev in ('critical', 'high', 'moderate', 'low', 'info'):
+                  count = meta.get(sev, 0)
+                  if count:
+                      print(f'  {sev}: {count}')
+              total = sum(meta.values())
+              print(f'  Total: {total}')
+          else:
+              print('npm audit: no vulnerabilities found (or no metadata)')
+          "
+          fi
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            pip-audit-report.json
+            npm-audit-report.json
+          retention-days: 30
+
+  # -------------------------------------------------------------------
+  # Badge -- coverage badge generation (runs after test)
+  # -------------------------------------------------------------------
+  badge:
+    name: Coverage Badge
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Generate badge
+        run: |
+          python3 scripts/generate_coverage_badge.py coverage.json
+
+      - name: Commit badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/coverage-badge.svg
+          git diff --cached --quiet || \
+            git commit -m "ci: update coverage badge [skip ci]"
+          git push || true

@@ -1,0 +1,71 @@
+# Coding Agent configuration -- S74/S79/S80
+# Multi-step autonomous coding loop with sandbox isolation.
+
+enabled: true
+
+# Maximum execution loop iterations (plan steps + retries)
+max_iterations: 10
+
+# Maximum LLM fix attempts per test failure
+max_fix_retries: 3
+
+# Maximum plan generation retries on JSON parse failure (S80)
+# After exhausting retries, falls back to numbered list parsing
+max_plan_retries: 3
+
+# Auto-retry on transient sandbox errors (S79)
+# Transient errors: timeout, bwrap startup failure, sandbox I/O errors
+max_auto_retries: 2
+retry_backoff_seconds: [1, 2]
+
+# Automatically run tests after implementation steps
+auto_test: true
+auto_test_command: "python3 -m pytest -x --tb=short"
+
+# Model selection (null = use router default)
+default_model: null
+planning_model: null  # optional: use stronger model for planning phase
+
+# Human checkpoints
+checkpoint_after_plan: true
+# SECURITY: checkpoint_before_apply is ALWAYS True.
+# This value is hardcoded in coding_agent.py and cannot be overridden.
+# The apply phase is the ONLY exit from the sandbox.
+checkpoint_before_apply: true
+
+# Token budget reserve for tool responses within context window
+context_window_reserve: 2048
+
+# Cascading model escalation in fix loop (S81)
+# When enabled, after escalate_after_failures consecutive fix failures
+# on the current model, auto-escalate to the next cascade tier (S69).
+enable_cascading: true
+escalate_after_failures: 2
+
+# Per-step routing (S81, experimental, opt-in)
+# When enabled, simple steps (bash, view) are routed to fast tier,
+# complex steps (create_file with logic, fix) to standard/power tier.
+# Requires SmartRouter with learned confidence (S67).
+per_step_routing: false
+
+# ---- Chat Coding Agent (S118) ----
+# Conversational coding agent that lives in the chat.
+# Combines multi-step coding intelligence with natural conversation flow.
+# Provides persistent sandbox across turns, adaptive pipeline,
+# full conversation memory (compression, retrieval, context management).
+# This is opt-in: default is disabled.
+
+chat_coding:
+  enabled: false
+  session_timeout_minutes: 60
+  max_concurrent_sessions: 3
+  # Fix loop config (inherits top-level defaults if not set)
+  max_fix_retries: 3
+  max_plan_retries: 2
+  auto_test: true
+  auto_test_command: "python3 -m pytest -x --tb=short"
+  # Model selection (null = use router default)
+  default_model: null
+  planning_model: null
+  # Shell command timeout in seconds
+  command_timeout: 30

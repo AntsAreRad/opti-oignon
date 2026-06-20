@@ -1,0 +1,47 @@
+/*
+ * theme-parchment.css -- Parchment preset (light).
+ * Generated for S166 from the design-token contract (spec 7.3).
+ * Declares the full 38-token foundation schema.
+ */
+
+html:not(.dark),
+:root[data-oo-theme="parchment"] {
+	--oo-bg-base: #E5DECE;
+	--oo-bg-surface: #DDD5C3;
+	--oo-bg-elevated: #ECE5D6;
+	--oo-bg-overlay: #D2CAB8;
+	--oo-bg-subtle: #D8D0BE;
+	--oo-bg-hover: #D6CEBC;
+	--oo-bg-active: #CFC6B3;
+	--oo-fg-primary: #2D2C2A;
+	--oo-fg-secondary: #4D4842;
+	--oo-fg-tertiary: #555049;
+	--oo-fg-muted: #6E675E;
+	--oo-fg-decorative: #B8B1A4;
+	--oo-fg-on-accent: #F0EBE4;
+	--oo-bd-subtle: #CFC8BC;
+	--oo-bd-default: #BEB7AB;
+	--oo-bd-strong: #A8A298;
+	--oo-acc-50: #F5EDE4;
+	--oo-acc-100: #EAD8C4;
+	--oo-acc-200: #D4B48A;
+	--oo-acc-300: #B8925E;
+	--oo-acc-400: #7A4E1E;
+	--oo-acc-500: #7A4E1E;
+	--oo-acc-600: #5E3C15;
+	--oo-acc-700: #4E3012;
+	--oo-acc-800: #3D250E;
+	--oo-acc-900: #2E1B0A;
+	--oo-success: #3D5240;
+	--oo-success-bg: rgba(61, 82, 64, 0.12);
+	--oo-success-bd: rgba(61, 82, 64, 0.20);
+	--oo-warning: #5E5030;
+	--oo-warning-bg: rgba(94, 80, 48, 0.12);
+	--oo-warning-bd: rgba(94, 80, 48, 0.20);
+	--oo-error: #7A3E34;
+	--oo-error-bg: rgba(122, 62, 52, 0.12);
+	--oo-error-bd: rgba(122, 62, 52, 0.20);
+	--oo-info: #2E5A6E;
+	--oo-info-bg: rgba(46, 90, 110, 0.12);
+	--oo-info-bd: rgba(46, 90, 110, 0.20);
+}

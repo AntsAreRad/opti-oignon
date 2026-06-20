@@ -1,0 +1,101 @@
+# Opti-Oignon Backend -- Multi-stage Dockerfile
+# S163 -- Docker Optimization
+#
+# SECURITY NOTICE
+# ---------------
+# Running natively (without Docker) is the recommended deployment
+# for maximum security. The native setup provides:
+#   - Bulbe mode socket-level 127.0.0.1 binding
+#   - bwrap sandbox isolation for plugins and LLM tools
+#   - No root daemon on the host
+#
+# Docker is provided as an OPTIONAL convenience for users who
+# prefer containerized deployment. Be aware that:
+#   - The Docker daemon runs as root (increased attack surface)
+#   - Network isolation differs from native Bulbe mode
+#   - Volume mounts require careful permission management
+#   - bwrap inside Docker may need --privileged or --security-opt
+#
+# If you use Docker, review docker-compose.yml security notes.
+#
+# Stage 1 (builder): install Python dependencies in an isolated layer
+# Stage 2 (runtime): minimal image with only runtime dependencies
+#
+# Build:
+#   docker build -f Dockerfile.backend -t opti-oignon-backend .
+#
+# Run (localhost only):
+#   docker run -p 127.0.0.1:8001:8001 opti-oignon-backend
+#
+# The backend expects Ollama to be reachable at OLLAMA_HOST
+# (default: http://localhost:11434). In Docker, use docker-compose
+# or --network host, or point OLLAMA_HOST to the Ollama container.
+
+# ---------------------------------------------------------------------------
+# Stage 1 -- builder
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies (gcc needed for some Python packages)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy dependency file first for layer caching.
+# requirements-backend.txt is kept in sync with pyproject.toml [project.dependencies]
+# manually; if you change one, update the other.
+COPY requirements-backend.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements-backend.txt
+
+# ---------------------------------------------------------------------------
+# Stage 2 -- runtime
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+# Install minimal runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        gnupg \
+        bubblewrap \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd --gid 1000 opti && \
+    useradd --uid 1000 --gid opti --shell /bin/bash --create-home opti
+
+# Copy installed Python packages from builder
+COPY --from=builder /install /usr/local
+
+# Copy application code
+WORKDIR /app
+COPY opti_oignon/ ./opti_oignon/
+COPY scripts/ ./scripts/
+COPY assets/ ./assets/
+
+# Create directories for runtime data (owned by non-root user)
+RUN mkdir -p /app/db /app/logs /app/uploads /app/plugins && \
+    chown -R opti:opti /app
+
+# Switch to non-root user
+USER opti
+
+# Environment configuration
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OLLAMA_HOST=http://ollama:11434 \
+    OO_DATA_DIR=/app/db \
+    OO_LOG_DIR=/app/logs
+
+EXPOSE 8001
+
+# Health check against the /api/health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \
+    CMD curl -f http://localhost:8001/api/health || exit 1
+
+# Launch the API server
+# Using uvicorn directly for production (avoids full __init__.py chain)
+CMD ["python", "-m", "uvicorn", "opti_oignon.api.app:app", \
+     "--host", "0.0.0.0", "--port", "8001"]

@@ -1,0 +1,22 @@
+# Live Performance Metrics -- S111
+# Real-time inference metrics sampling configuration.
+
+live_metrics:
+  # Enable/disable the live metrics collector.
+  enabled: true
+
+  # Sampling interval in milliseconds.
+  # Lower values give smoother updates but use more CPU.
+  sample_interval_ms: 500
+
+  # Rolling history window in seconds.
+  # Controls how much history is kept in memory.
+  window_seconds: 60
+
+  # Rolling speed calculation window in seconds.
+  # tokens/sec is averaged over this window for smoothing.
+  rolling_speed_window_s: 5.0
+
+  # Enable GPU monitoring via nvidia-smi.
+  # Gracefully degrades if no NVIDIA GPU or nvidia-smi is unavailable.
+  gpu_monitoring: true

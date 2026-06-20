@@ -1,0 +1,54 @@
+# Benchmark Judge Configuration — S89
+# LLM-as-Judge evaluation layer for autonomous benchmarks.
+
+# Weight balance between autonomous metrics (S88) and judge scores.
+# Both must sum to 1.0.
+autonomous_weight: 0.5
+judge_weight: 0.5
+
+# Judge rubric dimensions (each scored 1-10).
+rubric:
+  accuracy:
+    description: "Factual correctness of the response"
+    weight: 0.25
+  relevance:
+    description: "How well the response answers the actual question"
+    weight: 0.25
+  completeness:
+    description: "Whether all aspects of the question are covered"
+    weight: 0.20
+  conciseness:
+    description: "Absence of unnecessary verbosity"
+    weight: 0.15
+  reasoning:
+    description: "Quality of logical chain of thought"
+    weight: 0.15
+
+# Maximum tokens for judge evaluation prompt.
+max_judge_tokens: 1024
+
+# Timeout for judge model query in seconds.
+judge_timeout: 60
+
+# System prompt template for the judge.
+judge_system_prompt: |
+  You are an expert evaluator assessing the quality of an AI model's response.
+  You must evaluate the response against the original question using the following rubric.
+  Each dimension is scored from 1 (worst) to 10 (best).
+
+  Rubric:
+  - Accuracy (1-10): Factual correctness of the response
+  - Relevance (1-10): How well the response answers the actual question
+  - Completeness (1-10): Whether all aspects of the question are covered
+  - Conciseness (1-10): Absence of unnecessary verbosity
+  - Reasoning (1-10): Quality of logical chain of thought
+
+  You MUST respond with valid JSON only, no other text. Format:
+  {
+    "accuracy": <int>,
+    "relevance": <int>,
+    "completeness": <int>,
+    "conciseness": <int>,
+    "reasoning": <int>,
+    "justification": "<brief explanation>"
+  }

@@ -1,0 +1,112 @@
+site_name: Opti-Oignon Documentation
+site_description: Local-first AI inference platform with defense-in-depth security
+site_url: https://opti-oignon.readthedocs.io
+repo_url: https://github.com/AntsAreRad/opti-oignon
+repo_name: AntsAreRad/opti-oignon
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/opti-oignon.svg
+  favicon: assets/opti-oignon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - First Run: getting-started/first-run.md
+      - Ollama Setup: getting-started/ollama-setup.md
+      - Post-install Checklist: getting-started/post-install-checklist.md
+  - User Guide:
+      - Chat: user-guide/chat.md
+      - RAG: user-guide/rag.md
+      - Plugins: user-guide/plugins.md
+      - Keyboard Shortcuts: user-guide/keyboard-shortcuts.md
+  - Agent (Odysseus):
+      - Sandboxed Agent: agent/sandboxed-agent.md
+      - Sandbox Workspaces: agent/sandbox-workspaces.md
+      - Evolving Memory: agent/evolving-memory.md
+      - Evolving Skills: agent/evolving-skills.md
+      - Agent Performance: agent/agent-performance.md
+  - Sync (Veilid):
+      - Veilid Sync: sync/veilid-sync.md
+      - Remote Inference: sync/remote-inference.md
+  - Security Guide:
+      - Overview: security/overview.md
+      - Bulbe Mode: security/bulbe-mode.md
+      - Encryption: security/encryption.md
+      - Audit Chain: security/audit-chain.md
+      - Authentication: security/authentication.md
+      - Design Note, Fail-Secure Tool Gate: security/DESIGN_NOTE_EX01_FAIL_SECURE_TOOL_GATE.md
+      - Security Audit S155: SECURITY_AUDIT_S155.md
+  - Red Team Guide:
+      - Running Audits: redteam/running-audits.md
+      - Interpreting Reports: redteam/interpreting-reports.md
+  - API Reference: api-reference.md
+  - API Reference, v3.2.0 Additions: API_REFERENCE.md
+  - Plugin Development: plugin-development.md
+  - Plugin Development Guide (extended): PLUGIN_DEVELOPMENT_GUIDE.md
+  - CLI Reference: cli-reference.md
+  - Architecture:
+      - Module Map: architecture/module-map.md
+      - Data Flow: architecture/data-flow.md
+      - Security Layers: architecture/security-layers.md
+  - Project Notes:
+      - Demo Scenarios: demo_scenarios.md
+      - Branch Protection: BRANCH_PROTECTION.md
+      - Roadmap Side Quests: ROADMAP_SIDE_QUESTS.md
+      - Color Inspiration (S93): COLOR_INSPIRATION_S93.md
+  - Contributing: contributing.md

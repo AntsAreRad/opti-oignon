@@ -1,0 +1,57 @@
+/* Opti-Oignon MkDocs branding -- S161 */
+/* Maps project --oo-* palette to Material theme variables */
+
+:root {
+  --oo-acc-500: #C48838;
+  --oo-acc-600: #A8712D;
+  --oo-bg-surface: #FAFAF8;
+  --oo-text-primary: #1A1A18;
+}
+
+[data-md-color-scheme="slate"] {
+  --oo-acc-500: #D4993F;
+  --oo-acc-600: #B8802E;
+  --oo-bg-surface: #1E1E1C;
+  --oo-text-primary: #E8E8E4;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--oo-acc-600);
+  --md-primary-bg-color: var(--oo-bg-surface);
+  --md-accent-fg-color: var(--oo-acc-500);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--oo-acc-500);
+  --md-accent-fg-color: var(--oo-acc-500);
+}
+
+.md-header {
+  background-color: var(--oo-acc-600);
+}
+
+.md-tabs {
+  background-color: var(--oo-acc-600);
+}
+
+.md-nav__link--active,
+.md-nav__link:hover {
+  color: var(--oo-acc-500);
+}
+
+.md-typeset a {
+  color: var(--oo-acc-500);
+}
+
+.md-typeset a:hover {
+  color: var(--oo-acc-600);
+}
+
+.md-footer {
+  background-color: var(--oo-text-primary);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: var(--oo-acc-500);
+}

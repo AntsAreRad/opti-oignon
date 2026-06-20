@@ -1,0 +1,92 @@
+# Humanizer configuration -- S86
+# Post-processing to reduce "statistically perfect" LLM output.
+
+# Master toggle (opt-in)
+enabled: false
+
+# Mode: "rewrite" (LLM rewrite pass), "logprobs" (token-level), "hybrid" (both)
+mode: "rewrite"
+
+# Rewrite intensity: "light", "moderate", "heavy"
+intensity: "moderate"
+
+# Formality level: "casual", "neutral", "formal"
+formality: "neutral"
+
+# Model used for rewrite pass (null = current conversation model)
+rewrite_model: null
+
+# Maximum input length (chars) for rewrite pass (skip if longer)
+max_input_length: 8000
+
+# Phrases commonly overused by LLMs, stripped or replaced
+banned_phrases:
+  - "It's worth noting"
+  - "It's important to mention"
+  - "In conclusion"
+  - "To summarize"
+  - "As an AI"
+  - "I'd be happy to"
+  - "Great question"
+  - "That's a great question"
+  - "Let me break this down"
+  - "Here's the thing"
+
+# Overused LLM words mapped to natural alternatives
+vocabulary_replacements:
+  crucial: "important"
+  delve: "explore"
+  leverage: "use"
+  utilize: "use"
+  comprehensive: "thorough"
+  facilitate: "help"
+  endeavor: "effort"
+  paramount: "key"
+  streamline: "simplify"
+  robust: "strong"
+  seamless: "smooth"
+  innovative: "new"
+  cutting-edge: "modern"
+  furthermore: "also"
+  subsequently: "then"
+  aforementioned: "previous"
+  commenced: "started"
+  terminated: "ended"
+  methodology: "method"
+  paradigm: "approach"
+
+# Contraction rules (applied when formality is casual or neutral)
+contractions:
+  "it is": "it's"
+  "do not": "don't"
+  "does not": "doesn't"
+  "cannot": "can't"
+  "will not": "won't"
+  "would not": "wouldn't"
+  "should not": "shouldn't"
+  "could not": "couldn't"
+  "is not": "isn't"
+  "are not": "aren't"
+  "have not": "haven't"
+  "has not": "hasn't"
+  "did not": "didn't"
+  "that is": "that's"
+  "there is": "there's"
+  "they are": "they're"
+  "we are": "we're"
+  "you are": "you're"
+  "I am": "I'm"
+  "I have": "I've"
+  "I will": "I'll"
+  "I would": "I'd"
+
+# Hedging phrases to reduce when output is over-hedged
+hedging_excess:
+  - "I think that perhaps"
+  - "It could potentially be argued that"
+  - "It might be worth considering that"
+  - "One could argue that"
+  - "It is possible that"
+
+# Feedback database path (relative to data dir)
+feedback_db: "humanizer_feedback.db"

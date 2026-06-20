@@ -1,0 +1,31 @@
+# =============================================================================
+# OPTI-OIGNON v1.6.2 -- MODEL HEALTH MONITOR CONFIG (S63)
+# =============================================================================
+# Configuration for the Model Health Monitor that tracks Ollama model
+# availability and performance in real-time with automatic failover.
+#
+# Health degradation thresholds determine when a model is considered
+# degraded or unavailable based on consecutive check failures.
+# =============================================================================
+
+model_health:
+  # Master switch for health monitoring
+  enabled: true
+
+  # Interval between health checks in seconds
+  check_interval_seconds: 60
+
+  # Consecutive failures before marking a model as degraded
+  degraded_threshold: 3
+
+  # Consecutive failures before marking a model as unavailable
+  unavailable_threshold: 5
+
+  # Latency warning threshold in milliseconds
+  latency_warning_ms: 5000
+
+  # Enable automatic failover in SmartRouter when models are degraded
+  auto_failover: true
+
+  # Maximum number of health records to keep in memory
+  max_records: 100

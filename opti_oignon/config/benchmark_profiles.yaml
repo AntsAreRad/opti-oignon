@@ -1,0 +1,122 @@
+# =============================================================================
+# OPTI-OIGNON v1.9.0 — BENCHMARK PROFILES (S88)
+# =============================================================================
+# Defines benchmark profiles that combine question categories with scoring
+# weights. Each profile selects which question categories to include and
+# how to weight the composite score dimensions.
+#
+# Composite score formula:
+#   score = w_accuracy * accuracy + w_code * code + w_structure * structure + w_speed * speed
+#
+# Weight profiles can be referenced by name or overridden per-run.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# WEIGHT PRESETS
+# -----------------------------------------------------------------------------
+weight_presets:
+  balanced:
+    accuracy: 0.35
+    code: 0.25
+    structure: 0.25
+    speed: 0.15
+
+  accuracy_first:
+    accuracy: 0.55
+    code: 0.20
+    structure: 0.15
+    speed: 0.10
+
+  speed_first:
+    accuracy: 0.20
+    code: 0.15
+    structure: 0.15
+    speed: 0.50
+
+  code_focused:
+    accuracy: 0.15
+    code: 0.50
+    structure: 0.20
+    speed: 0.15
+
+  writing_focused:
+    accuracy: 0.20
+    code: 0.05
+    structure: 0.55
+    speed: 0.20
+
+# -----------------------------------------------------------------------------
+# BENCHMARK PROFILES
+# -----------------------------------------------------------------------------
+profiles:
+  fast_answer:
+    name: "Fast Answer"
+    description: "Factual questions with speed emphasis. Tests how quickly and accurately the model answers short factual queries."
+    categories:
+      - general_knowledge
+      - math
+      - date_fact
+    weight_preset: speed_first
+    timeout: 15
+    max_response_tokens: 200
+    expected_length_range: [5, 150]
+
+  code_quality:
+    name: "Code Quality"
+    description: "Programming tasks with sandbox execution. Tests whether the model generates correct, runnable code."
+    categories:
+      - code_output
+      - code_generation
+    weight_preset: code_focused
+    timeout: 60
+    max_response_tokens: 1000
+    expected_length_range: [50, 800]
+
+  writing_quality:
+    name: "Writing Quality"
+    description: "Knowledge questions assessed for structural quality, lexical diversity, and formatting. Tests explanation and writing ability."
+    categories:
+      - science
+      - general_knowledge
+    weight_preset: writing_focused
+    timeout: 60
+    max_response_tokens: 500
+    expected_length_range: [100, 500]
+    format_check: markdown
+
+  all_round:
+    name: "All-Round"
+    description: "Comprehensive evaluation across all categories with balanced weights. Best for overall model comparison."
+    categories:
+      - general_knowledge
+      - math
+      - science
+      - date_fact
+      - code_output
+      - code_generation
+    weight_preset: balanced
+    timeout: 45
+    max_response_tokens: 800
+    expected_length_range: [10, 600]
+
+  science_focus:
+    name: "Science Focus"
+    description: "Science and reasoning questions for research-oriented evaluation."
+    categories:
+      - science
+      - math
+    weight_preset: accuracy_first
+    timeout: 30
+    max_response_tokens: 400
+    expected_length_range: [20, 400]
+
+# -----------------------------------------------------------------------------
+# RUNNER DEFAULTS
+# -----------------------------------------------------------------------------
+runner:
+  default_profile: all_round
+  parallel_execution: false
+  max_concurrent: 2
+  progress_interval_seconds: 2
+  results_db: "benchmark_results.db"
+  results_retention_days: 90

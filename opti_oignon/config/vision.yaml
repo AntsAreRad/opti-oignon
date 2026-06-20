@@ -1,0 +1,46 @@
+# Vision model configuration (S94)
+# Selects which model handles image analysis tasks.
+
+# Selected vision model. "auto" means auto-detect from available models.
+vision_model: "auto"
+
+# Detection strategy: "capabilities" checks ollama.show() for vision support,
+# "patterns" matches model names, "both" tries capabilities first then patterns.
+detection_strategy: "both"
+
+# Patterns used to detect vision-capable models by name (fallback).
+auto_detect_patterns:
+  - "vl"
+  - "vision"
+  - "llava"
+  - "bakllava"
+  - "moondream"
+
+# Capability families that indicate vision support (from ollama.show details).
+vision_families:
+  - "clip"
+  - "mllama"
+
+# Manually declared vision-capable models (always treated as vision regardless
+# of name or detected capabilities). Use full model names with tags.
+known_vision_models: []
+# Example:
+#   - "qwen3.5:32b"
+#   - "my-custom-model:latest"
+
+# Default prompt template for image description (used by S95 vision pipeline).
+describe_prompt: "Describe this image in detail, focusing on its content, structure, and any relevant text or data visible."
+
+# --- S95: Vision delegation pipeline settings ---
+
+# Enable transparent delegation: when user sends an image to a non-vision model,
+# automatically call the vision model for a description and inject it back.
+delegation_enabled: true
+
+# Format template for injecting image description into the user message.
+# Available placeholders: {description}, {message}
+inject_format: "[Image analysis: {description}]\nUser question: {message}"
+
+# Maximum tokens for the vision model description response.
+# Higher values produce more detailed descriptions but take longer.
+max_description_tokens: 500

@@ -1,0 +1,26 @@
+# Tool configuration for Opti-Oignon (S73)
+# Defines available tool categories and their settings.
+
+# Sandbox tools (S73): filesystem and shell tools running in isolation
+sandbox_tools:
+  enabled: true
+  # Register simplified (session-bound) tools in tool_registry
+  # when a sandbox session is active. Tool names: bash, view,
+  # create_file, str_replace.
+  register_simplified: true
+  # Also register raw (session_id-explicit) tools with sandbox_ prefix.
+  # Useful for API-level access and multi-session scenarios.
+  register_raw: true
+
+# Built-in tools (S44): always registered
+builtin_tools:
+  web_search:
+    enabled: true
+  execute_code:
+    enabled: true
+  read_file:
+    enabled: true
+  write_file:
+    enabled: true
+  list_files:
+    enabled: true

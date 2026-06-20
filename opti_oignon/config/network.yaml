@@ -1,0 +1,23 @@
+# Network Manager Configuration -- S71 Offline-First Intelligence
+#
+# Controls connectivity detection, health polling, and offline behavior.
+
+# Master toggle for network monitoring
+enabled: true
+
+# Interval between Ollama health checks (seconds)
+poll_interval_seconds: 15
+
+# Timeout for individual health check requests (seconds)
+timeout_seconds: 5
+
+# Number of consecutive failures before declaring offline
+max_consecutive_failures: 3
+
+# Embedding model availability check
+check_embedding: true
+embedding_model: "mxbai-embed-large"
+
+# Latency tracking
+track_latency: true
+latency_warning_ms: 3000

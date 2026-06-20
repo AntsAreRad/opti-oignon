@@ -1,0 +1,20 @@
+# Pipeline: Code Expert
+# Sequence optimisee pour la generation de code fiable.
+# THINK -> CODE_VERIFY -> SELF_CORRECT
+id: code-expert
+name: Code Expert
+description: >
+  Pipeline specialise pour la generation de code. Commence par une
+  phase de reflexion pour planifier la solution, puis genere et
+  verifie le code, et enfin applique une auto-correction.
+steps:
+  - step_type: think
+    label: Planning
+    parameters: {}
+  - step_type: code_verify
+    label: Code Generation & Verification
+    parameters: {}
+  - step_type: self_correct
+    label: Quality Check
+    condition: if_code_detected
+    parameters: {}

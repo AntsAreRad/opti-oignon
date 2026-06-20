@@ -1,0 +1,32 @@
+name: markdown-beautifier
+version: "1.0.0"
+author: Opti-Oignon
+description: >
+  Normalizes and beautifies markdown in LLM responses. Fixes common
+  formatting issues: inconsistent header spacing, broken list indentation,
+  misaligned tables, missing blank lines around code blocks, and unclosed
+  code fences.
+entry_point: entry_point.py
+hooks:
+  - post_inference
+dependencies: []
+permissions: []
+min_opti_version: "1.10.0"
+config_schema:
+  rules:
+    type: array
+    default:
+      - header_spacing
+      - list_formatting
+      - table_alignment
+      - code_block_spacing
+      - fence_repair
+    description: >
+      Which beautification rules to apply. Available: header_spacing,
+      list_formatting, table_alignment, code_block_spacing, fence_repair.
+  strictness:
+    type: string
+    default: "normal"
+    description: >
+      Strictness level. 'normal' applies safe fixes only. 'strict'
+      applies all fixes including opinionated formatting.
