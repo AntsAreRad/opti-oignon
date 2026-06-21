@@ -26,7 +26,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Path helpers

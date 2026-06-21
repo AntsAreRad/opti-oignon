@@ -161,7 +161,7 @@ def _zero_bytes(b: bytes) -> bool:
     if not _is_exclusively_owned(b):
         return False
     try:
-        buf_addr = id(b) + sys.getsizeof(bytes()) - 1
+        buf_addr = id(b) + sys.getsizeof(b"") - 1
         _libc.memset(buf_addr, 0, len(b))
         return True
     except Exception:
@@ -262,7 +262,7 @@ class ConversationWipeManager:
                 os.path.dirname(__file__), "config", "security.yaml"
             )
             if os.path.isfile(config_path):
-                with open(config_path, "r", encoding="utf-8") as fh:
+                with open(config_path, encoding="utf-8") as fh:
                     data = yaml.safe_load(fh) or {}
                 return data.get("hardening", {})
         except Exception as exc:

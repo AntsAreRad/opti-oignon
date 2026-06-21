@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 from opti_oignon.api.app import app
 from opti_oignon.conversation_compressor import ArchiveSearchResult
 
-
 client = TestClient(app)
 
 

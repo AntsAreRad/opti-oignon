@@ -20,14 +20,13 @@ code obscurity. This entire file will be on GitHub.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import socket
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -215,7 +214,7 @@ def _is_remote_enabled_in_config() -> bool:
     """Check if remote_access.enabled is True in security.yaml."""
     try:
         if _SECURITY_YAML.exists():
-            with open(_SECURITY_YAML, "r", encoding="utf-8") as fh:
+            with open(_SECURITY_YAML, encoding="utf-8") as fh:
                 cfg = yaml.safe_load(fh) or {}
             ra = cfg.get("remote_access", {})
             if isinstance(ra, dict):
@@ -248,7 +247,7 @@ def _probe_bound_address(port: int) -> str | None:
     # Method 1: Parse /proc/net/tcp (Linux-specific, no subprocess)
     try:
         hex_port = f"{port:04X}"
-        with open("/proc/net/tcp", "r", encoding="utf-8") as f:
+        with open("/proc/net/tcp", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 2:
@@ -461,7 +460,7 @@ def _check_ollama_proc_net_tcp(port: int) -> str | None:
     """
     try:
         hex_port = f"{port:04X}"
-        with open("/proc/net/tcp", "r", encoding="utf-8") as f:
+        with open("/proc/net/tcp", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 4:

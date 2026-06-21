@@ -63,7 +63,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, NoReturn, Optional
+from typing import Any, Callable, Iterator, NoReturn
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ except Exception:
     DEFAULT_LOCAL_USER = "local"
 
     def effective_user_id(  # type: ignore[misc]
-        user_id: Optional[str], single_user_mode: bool = True
+        user_id: str | None, single_user_mode: bool = True
     ) -> str:
         if single_user_mode or user_id is None:
             return DEFAULT_LOCAL_USER
@@ -161,7 +161,7 @@ def _sync_publish_note_update(
     note_id: str,
     seq: int,
     update_blob: bytes,
-    author_device: Optional[str],
+    author_device: str | None,
 ) -> None:
     """Journal an appended update for Veilid sync, best-effort (S264).
 
@@ -213,7 +213,7 @@ def _sync_publish_note_update(
             from opti_oignon.veilid.sync_engine import get_sync_engine
 
             engine = get_sync_engine()
-            record_key = "{0}:{1}".format(note_id, int(seq))
+            record_key = f"{note_id}:{int(seq)}"
             clock = (
                 engine.current_clock(RecordKind.NOTE_UPDATE, record_key) + 1
             )
@@ -254,7 +254,7 @@ class NoteUpdateRecord:
     note_id: str
     seq: int
     update_blob: bytes
-    author_device: Optional[str]
+    author_device: str | None
     created_at: str
 
 
@@ -276,10 +276,10 @@ class NoteUpdatesStore:
 
     def __init__(
         self,
-        root: Optional[Path | str] = None,
+        root: Path | str | None = None,
         *,
         single_user_mode: bool = True,
-        parent_lookup: Optional[Callable[[str, str], bool]] = None,
+        parent_lookup: Callable[[str, str], bool] | None = None,
     ) -> None:
         base = Path(root) if root is not None else _default_root()
         base.mkdir(parents=True, exist_ok=True)
@@ -339,7 +339,7 @@ class NoteUpdatesStore:
     def db_path(self) -> Path:
         return self._db_path
 
-    def resolve_user(self, user_id: Optional[str] = None) -> str:
+    def resolve_user(self, user_id: str | None = None) -> str:
         return effective_user_id(user_id, self._single_user_mode)
 
     def close(self) -> None:
@@ -382,11 +382,11 @@ class NoteUpdatesStore:
     def append_update(
         self,
         note_id: str,
-        update_blob: Optional[bytes],
+        update_blob: bytes | None,
         *,
-        author_device: Optional[str] = None,
-        seq: Optional[int] = None,
-        user_id: Optional[str] = None,
+        author_device: str | None = None,
+        seq: int | None = None,
+        user_id: str | None = None,
         sync_publish: bool = True,
     ) -> NoteUpdateRecord:
         """Append one opaque update for ``note_id``; refuse fail-secure.
@@ -460,9 +460,9 @@ class NoteUpdatesStore:
         self,
         note_id: str,
         *,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         after_seq: int = 0,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> list[NoteUpdateRecord]:
         uid = effective_user_id(user_id, self._single_user_mode)
         sql = (
@@ -478,7 +478,7 @@ class NoteUpdatesStore:
         return [_row_to_update(r) for r in rows]
 
     def count_updates(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> int:
         uid = effective_user_id(user_id, self._single_user_mode)
         with self._lock, self._conn() as conn:
@@ -490,7 +490,7 @@ class NoteUpdatesStore:
         return int(row["n"])
 
     def latest_seq(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> int:
         uid = effective_user_id(user_id, self._single_user_mode)
         with self._lock, self._conn() as conn:
@@ -504,7 +504,7 @@ class NoteUpdatesStore:
     # The checkpoint watermark (section 4)
 
     def get_checkpoint_watermark(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> int:
         """The highest seq folded into the PATCHed body; 0 when unset."""
         uid = effective_user_id(user_id, self._single_user_mode)
@@ -517,7 +517,7 @@ class NoteUpdatesStore:
         return int(row["watermark"]) if row is not None else 0
 
     def set_checkpoint_watermark(
-        self, note_id: str, seq: int, *, user_id: Optional[str] = None
+        self, note_id: str, seq: int, *, user_id: str | None = None
     ) -> bool:
         """Record the checkpoint watermark; monotonic non-decreasing.
 
@@ -557,7 +557,7 @@ class NoteUpdatesStore:
     # Pruning (section 4: local, lazy, never over-prune)
 
     def prune_below_watermark(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> int:
         """Delete rows at-or-below the recorded watermark; 0 without one.
 
@@ -578,7 +578,7 @@ class NoteUpdatesStore:
             return int(cur.rowcount)
 
     def prune_for_tombstone(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> int:
         """Delete the FULL update tail of a dead note; refuse on a live one.
 
@@ -622,7 +622,7 @@ class NoteUpdatesStore:
 
 # Module-level singleton with a reset for test isolation (the S171 lesson:
 # never leak shared state across pytest invocations).
-_store: Optional[NoteUpdatesStore] = None
+_store: NoteUpdatesStore | None = None
 
 
 def get_note_updates_store() -> NoteUpdatesStore:

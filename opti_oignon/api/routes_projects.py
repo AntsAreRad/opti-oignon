@@ -38,8 +38,8 @@ except ImportError:
 # S58: Project context (indexation + retrieval)
 try:
     from opti_oignon.project_context import (
-        ProjectContextBuilder,
-        ProjectIndexer,
+        ProjectContextBuilder,  # noqa: F401
+        ProjectIndexer,  # noqa: F401
         project_context_builder,
         project_indexer,
     )
@@ -52,7 +52,7 @@ except ImportError:
 # S58: Project trigger detection
 try:
     from opti_oignon.project_triggers import (
-        ProjectTriggerDetector,
+        ProjectTriggerDetector,  # noqa: F401
         trigger_detector,
     )
     PROJECT_TRIGGERS_AVAILABLE = True

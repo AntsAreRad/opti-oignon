@@ -70,7 +70,7 @@ def _get_python_files(root: Path, skip_dirs: set = SKIP_DIRS) -> list[Path]:
 def _parse_file(path: Path) -> ast.Module | None:
     """Parse a Python file, return AST or None on error."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return ast.parse(fh.read(), filename=str(path))
     except SyntaxError:
         return None
@@ -157,7 +157,7 @@ class TestStaticSecurityAudit:
                             f"{path.name}:{node.lineno}: {func.id}()"
                         )
         assert not violations, (
-            f"eval()/exec() found outside sandbox:\n"
+            "eval()/exec() found outside sandbox:\n"
             + "\n".join(violations)
         )
 
@@ -214,7 +214,7 @@ class TestStaticSecurityAudit:
                             func.value.id == "pickle"):
                         violations.append(f"{path.name}:{node.lineno}")
         assert not violations, (
-            f"pickle.loads() found (code execution risk):\n"
+            "pickle.loads() found (code execution risk):\n"
             + "\n".join(violations)
         )
 
@@ -246,7 +246,7 @@ class TestStaticSecurityAudit:
                                     f"{path.name}:{node.lineno}: {func_name}(shell=True)"
                                 )
         assert not violations, (
-            f"subprocess with shell=True found:\n"
+            "subprocess with shell=True found:\n"
             + "\n".join(violations)
         )
 
@@ -280,7 +280,7 @@ class TestStaticSecurityAudit:
                             continue
                         violations.append(f"{path.name}:{i}: {stripped[:80]}")
         assert not violations, (
-            f"Weak crypto found:\n" + "\n".join(violations)
+            "Weak crypto found:\n" + "\n".join(violations)
         )
 
     def test_md5_not_used_for_security(self):
@@ -310,7 +310,7 @@ class TestStaticSecurityAudit:
         for u in md5_uses:
             print(f"    {u}")
         assert not security_md5, (
-            f"MD5 used for security:\n" + "\n".join(security_md5)
+            "MD5 used for security:\n" + "\n".join(security_md5)
         )
 
     # -- No http:// URLs in production code --
@@ -349,12 +349,12 @@ class TestStaticSecurityAudit:
         failures = []
         for path in self._all_py_files():
             try:
-                with open(path, "r", encoding="utf-8") as fh:
+                with open(path, encoding="utf-8") as fh:
                     ast.parse(fh.read())
             except SyntaxError as e:
                 failures.append(f"{path.name}: {e}")
         assert not failures, (
-            f"Files with syntax errors:\n" + "\n".join(failures)
+            "Files with syntax errors:\n" + "\n".join(failures)
         )
 
     # -- SQLite direct connect count (informational) --
@@ -817,7 +817,7 @@ class TestJWTPQC:
     def test_new_tokens_use_hs512(self):
         mod = self._get_jwt()
         token = mod.jwt_encode({"sub": "user", "exp": 9999999999}, "secret")
-        import json, base64
+        import base64
         hdr = token.split(".")[0]
         pad = 4 - len(hdr) % 4
         if pad != 4:

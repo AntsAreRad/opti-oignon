@@ -15,23 +15,23 @@ from fastapi.responses import PlainTextResponse
 from .deps import (
     TELEMETRY_AVAILABLE,
     TELEMETRY_HISTORY_AVAILABLE,
-    get_telemetry,
     get_history_store,
+    get_telemetry,
 )
 from .schemas import (
+    HistoryEventSchema,
+    ModelBreakdownSchema,
     TelemetryConsumerInfoSchema,
     TelemetryConsumersResponse,
     TelemetryFlushResponse,
-    TelemetryStatsResponse,
-    TelemetryHistoryResponse,
-    TelemetryTrendsResponse,
     TelemetryHistoryPurgeResponse,
-    TelemetryHistoryStatsResponse,
+    TelemetryHistoryResponse,
     TelemetryHistorySettingsRequest,
     TelemetryHistorySettingsResponse,
-    HistoryEventSchema,
+    TelemetryHistoryStatsResponse,
+    TelemetryStatsResponse,
+    TelemetryTrendsResponse,
     TrendBucketSchema,
-    ModelBreakdownSchema,
 )
 
 logger = logging.getLogger(__name__)

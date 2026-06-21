@@ -8,13 +8,12 @@ rejection, symlink escape prevention, workspace boundary enforcement,
 and integration with sandbox_manager.
 """
 
+# Direct imports to avoid needing full opti_oignon package resolution
+import importlib.util
 import os
 import tempfile
 
 import pytest
-
-# Direct imports to avoid needing full opti_oignon package resolution
-import importlib.util
 
 _sm_path = os.path.join(
     os.path.dirname(__file__), os.pardir,
@@ -36,6 +35,7 @@ _ft_mod = importlib.util.module_from_spec(_ft_spec)
 
 # Patch module references before exec so imports resolve
 import sys
+
 sys.modules["opti_oignon"] = type(sys)("opti_oignon")
 sys.modules["opti_oignon.sandbox_manager"] = _sm_mod
 # We need tool_registry types - load them too

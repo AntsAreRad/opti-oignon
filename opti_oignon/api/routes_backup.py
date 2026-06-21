@@ -13,7 +13,6 @@ Endpoints:
 
 import base64
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -74,7 +73,7 @@ def list_backup_sections() -> dict:
 
 @router.get("/export")
 def export_backup(
-    sections: Optional[str] = Query(
+    sections: str | None = Query(
         None,
         description="Comma-separated section names to export. Omit for all.",
     ),

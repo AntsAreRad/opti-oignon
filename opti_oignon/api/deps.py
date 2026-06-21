@@ -9,7 +9,7 @@ via conditional imports with availability flags.
 import importlib.util
 import logging
 
-from opti_oignon.lazy_loader import lazy_import as _lazy, LazyAttr as _LazyAttr
+from opti_oignon.lazy_loader import LazyAttr as _LazyAttr
 
 logger = logging.getLogger(__name__)
 
@@ -265,9 +265,9 @@ except ImportError:
 # -- Learned Router (S67) --
 try:
     from opti_oignon.learned_router import (
-        learned_router,
         LEARNED_ROUTER_AVAILABLE,
         LearnedRouterMetrics,
+        learned_router,
     )
     LEARNED_ROUTER_AVAILABLE = LEARNED_ROUTER_AVAILABLE  # re-export
 except ImportError:
@@ -326,8 +326,8 @@ except ImportError:
 # -- Sandbox Manager (S73) --
 try:
     from opti_oignon.sandbox_manager import (
-        sandbox_manager,
         SANDBOX_AVAILABLE,
+        sandbox_manager,
     )
     SANDBOX_AVAILABLE = SANDBOX_AVAILABLE  # re-export
 except ImportError:
@@ -358,9 +358,11 @@ coding_agent_instance = None
 if CODING_AGENT_AVAILABLE:
     try:
         from opti_oignon.coding_agent import (
-            CodingAgent,
             CODING_AGENT_AVAILABLE as _ca_avail,
-            coding_agent_config,
+        )
+        from opti_oignon.coding_agent import (
+            CodingAgent,
+            coding_agent_config,  # noqa: F401
         )
         CODING_AGENT_AVAILABLE = _ca_avail
         coding_agent_instance = CodingAgent() if CODING_AGENT_AVAILABLE else None
@@ -370,8 +372,8 @@ if CODING_AGENT_AVAILABLE:
 # -- Session Fingerprint (S75) --
 try:
     from opti_oignon.session_fingerprint import (
-        FingerprintManager,
         FINGERPRINT_AVAILABLE,
+        FingerprintManager,
         fingerprint_config,
     )
     FINGERPRINT_AVAILABLE = FINGERPRINT_AVAILABLE  # re-export
@@ -388,8 +390,10 @@ coding_history_store = _LazyAttr("opti_oignon.coding_history", "coding_history_s
 # -- Web Search (S82) --
 try:
     from opti_oignon.web_search import (
-        web_searcher,
         DDGS_AVAILABLE as _DDGS_AVAIL,
+    )
+    from opti_oignon.web_search import (
+        web_searcher,
     )
     WEB_SEARCH_AVAILABLE = _DDGS_AVAIL
 except ImportError:
@@ -407,8 +411,8 @@ except ImportError:
 # -- System Presets (S84) --
 try:
     from opti_oignon.system_presets import (
-        system_presets_manager,
         SYSTEM_PRESETS_AVAILABLE,
+        system_presets_manager,
     )
     SYSTEM_PRESETS_AVAILABLE = SYSTEM_PRESETS_AVAILABLE  # re-export
 except ImportError:
@@ -417,7 +421,7 @@ except ImportError:
 
 # -- Humanizer (S86) --
 try:
-    from opti_oignon.humanizer import humanizer_engine, HUMANIZER_AVAILABLE
+    from opti_oignon.humanizer import HUMANIZER_AVAILABLE, humanizer_engine
     HUMANIZER_AVAILABLE = HUMANIZER_AVAILABLE  # re-export
 except ImportError:
     HUMANIZER_AVAILABLE = False
@@ -450,7 +454,7 @@ custom_profile_store = _LazyAttr("opti_oignon.benchmark_custom_profiles", "custo
 
 # -- Vision Config (S94) --
 try:
-    from opti_oignon.vision_config import vision_config, VISION_CONFIG_AVAILABLE
+    from opti_oignon.vision_config import VISION_CONFIG_AVAILABLE, vision_config
     VISION_CONFIG_AVAILABLE = VISION_CONFIG_AVAILABLE  # re-export
 except ImportError:
     VISION_CONFIG_AVAILABLE = False
@@ -467,8 +471,8 @@ fine_tune_tracker = _LazyAttr("opti_oignon.fine_tune_tracker", "fine_tune_tracke
 # -- Conversation Branches (S97) --
 try:
     from opti_oignon.conversation_branches import (
-        branch_manager,
         BRANCHES_AVAILABLE,
+        branch_manager,
     )
 except ImportError:
     BRANCHES_AVAILABLE = False
@@ -477,8 +481,8 @@ except ImportError:
 # -- Auth Manager (S98) --
 try:
     from opti_oignon.auth import (
-        auth_manager,
         AUTH_AVAILABLE,
+        auth_manager,
     )
 except ImportError:
     AUTH_AVAILABLE = False
@@ -487,8 +491,8 @@ except ImportError:
 # -- User Settings Store (S98) --
 try:
     from opti_oignon.user_isolation import (
-        user_settings_store,
         USER_SETTINGS_AVAILABLE,
+        user_settings_store,
     )
 except ImportError:
     USER_SETTINGS_AVAILABLE = False
@@ -518,8 +522,10 @@ get_auto_refresh = _LazyAttr("opti_oignon.rag_dashboard", "get_auto_refresh") if
 # -- Plugin Registry (S101) --
 try:
     from opti_oignon.plugin_manifest import (
-        plugin_registry as plugin_registry_instance,
         PLUGIN_MANIFEST_AVAILABLE as PLUGIN_REGISTRY_AVAILABLE,
+    )
+    from opti_oignon.plugin_manifest import (
+        plugin_registry as plugin_registry_instance,
     )
 except ImportError:
     PLUGIN_REGISTRY_AVAILABLE = False
@@ -528,8 +534,10 @@ except ImportError:
 # -- Plugin Loader (S101) --
 try:
     from opti_oignon.plugin_loader import (
-        plugin_loader as plugin_loader_instance,
         PLUGIN_LOADER_AVAILABLE,
+    )
+    from opti_oignon.plugin_loader import (
+        plugin_loader as plugin_loader_instance,
     )
 except ImportError:
     PLUGIN_LOADER_AVAILABLE = False
@@ -538,8 +546,8 @@ except ImportError:
 # -- Plugin Hooks (S101) --
 try:
     from opti_oignon.plugin_hooks import (
-        hook_manager,
         PLUGIN_HOOKS_AVAILABLE,
+        hook_manager,
     )
 except ImportError:
     PLUGIN_HOOKS_AVAILABLE = False
@@ -564,10 +572,12 @@ plugin_template_instance = _LazyAttr("opti_oignon.plugin_template", "plugin_temp
 # -- Inference Backend (S105) --
 try:
     from opti_oignon.inference_backend import (
+        LLAMA_CPP_AVAILABLE,
         get_backend_registry,
         init_backends_from_config,
+    )
+    from opti_oignon.inference_backend import (
         OLLAMA_AVAILABLE as OLLAMA_LIB_AVAILABLE,
-        LLAMA_CPP_AVAILABLE,
     )
     INFERENCE_BACKEND_AVAILABLE = True
 except ImportError:
@@ -627,6 +637,8 @@ reset_history_store = _LazyAttr("opti_oignon.telemetry_history", "reset_history_
 try:
     from opti_oignon.model_lifecycle import (
         get_lifecycle_manager,
+    )
+    from opti_oignon.model_lifecycle import (
         reset_manager as reset_lifecycle_manager,
     )
     MODEL_LIFECYCLE_AVAILABLE = True
@@ -638,8 +650,8 @@ except ImportError:
 # -- Backup Manager (S121) --
 try:
     from opti_oignon.backup_manager import (
-        backup_manager,
         BACKUP_AVAILABLE,
+        backup_manager,
     )
     BACKUP_AVAILABLE = BACKUP_AVAILABLE  # re-export
 except ImportError:
@@ -650,9 +662,13 @@ except ImportError:
 # -- Context Optimizer (S123) --
 try:
     from opti_oignon.context_optimizer import (
-        get_optimizer as get_context_optimizer,
-        init_optimizer as init_context_optimizer,
         ContextOptimizer,
+    )
+    from opti_oignon.context_optimizer import (
+        get_optimizer as get_context_optimizer,
+    )
+    from opti_oignon.context_optimizer import (
+        init_optimizer as init_context_optimizer,
     )
     CONTEXT_OPTIMIZER_AVAILABLE = True
 except ImportError:
@@ -718,7 +734,7 @@ except ImportError:
 
 # -- DB Encryption / SQLCipher (S126) --
 try:
-    from opti_oignon.db_encryption import get_encrypted_connection, SQLCIPHER_AVAILABLE
+    from opti_oignon.db_encryption import SQLCIPHER_AVAILABLE, get_encrypted_connection
     DB_ENCRYPTION_AVAILABLE = True
 except ImportError:
     DB_ENCRYPTION_AVAILABLE = False
@@ -746,7 +762,8 @@ except ImportError:
 
 # -- Secure Bytes / Key Memory Protection (S126) --
 try:
-    from opti_oignon.secure_bytes import SecureBytes, get_platform_info as secure_bytes_info
+    from opti_oignon.secure_bytes import SecureBytes
+    from opti_oignon.secure_bytes import get_platform_info as secure_bytes_info
     SECURE_BYTES_AVAILABLE = True
 except ImportError:
     SECURE_BYTES_AVAILABLE = False
@@ -757,8 +774,8 @@ except ImportError:
 # -- Per-User Key Manager (S142) --
 try:
     from opti_oignon.user_key_manager import (
-        get_user_key_manager,
         UserKeyManager,
+        get_user_key_manager,
     )
     USER_KEY_MANAGER_AVAILABLE = True
 except ImportError:
@@ -777,8 +794,8 @@ except ImportError:
 # -- Admin Audit (S142) --
 try:
     from opti_oignon.admin_audit import (
-        get_admin_audit_store,
         ADMIN_AUDIT_AVAILABLE,
+        get_admin_audit_store,
     )
 except ImportError:
     ADMIN_AUDIT_AVAILABLE = False
@@ -788,9 +805,9 @@ except ImportError:
 # -- User Data Manager (S142) --
 try:
     from opti_oignon.user_data_manager import (
-        get_user_data_exporter,
-        get_user_data_deleter,
         USER_DATA_MANAGER_AVAILABLE,
+        get_user_data_deleter,
+        get_user_data_exporter,
     )
 except ImportError:
     USER_DATA_MANAGER_AVAILABLE = False
@@ -801,8 +818,8 @@ except ImportError:
 # -- Plugin User Config (S142) --
 try:
     from opti_oignon.plugin_user_config import (
-        get_plugin_user_config_store,
         PLUGIN_USER_CONFIG_AVAILABLE,
+        get_plugin_user_config_store,
     )
 except ImportError:
     PLUGIN_USER_CONFIG_AVAILABLE = False

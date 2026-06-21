@@ -115,7 +115,7 @@ class CodeChunker(BaseChunker):
     def chunk(self, content: str, source_file: str, file_type: str) -> list[Chunk]:
         """Split Python code by function/class/section."""
         chunks = []
-        lines = content.split('\n')
+        lines = content.split('\n')  # noqa: F841
 
         # Identifier les positions des fonctions, classes et sections
         boundaries = self._find_boundaries(content)

@@ -316,7 +316,7 @@ class TestConfirmationCodeDerivation:
             dklen=32,
         )
         value = int.from_bytes(digest[:8], "big") % (10**8)
-        expected = "{:04d} {:04d}".format(value // 10000, value % 10000)
+        expected = f"{value // 10000:04d} {value % 10000:04d}"
         assert confirmation_code(a, b) == expected
 
 

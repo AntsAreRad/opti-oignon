@@ -199,7 +199,7 @@ class FineTuneTracker:
         """Load tracking configuration from YAML."""
         try:
             if YAML_AVAILABLE and self._config_path.exists():
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     self._config = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning("Failed to load fine-tune tracker config: %s", exc)
@@ -395,7 +395,7 @@ class FineTuneTracker:
             conn = self._get_conn()
             try:
                 rows = conn.execute(
-                    "SELECT * FROM variants {} ORDER BY created_at DESC LIMIT ?".format(where),
+                    f"SELECT * FROM variants {where} ORDER BY created_at DESC LIMIT ?",
                     params,
                 ).fetchall()
                 return [self._row_to_variant(r) for r in rows]
@@ -430,14 +430,14 @@ class FineTuneTracker:
 
         filtered["updated_at"] = datetime.utcnow().isoformat() + "Z"
 
-        set_clause = ", ".join("{} = ?".format(k) for k in filtered)
+        set_clause = ", ".join(f"{k} = ?" for k in filtered)
         params = list(filtered.values()) + [variant_id]
 
         with self._lock:
             conn = self._get_conn()
             try:
                 cursor = conn.execute(
-                    "UPDATE variants SET {} WHERE variant_id = ?".format(set_clause),
+                    f"UPDATE variants SET {set_clause} WHERE variant_id = ?",
                     params,
                 )
                 conn.commit()
@@ -653,7 +653,7 @@ class FineTuneTracker:
             conn = self._get_conn()
             try:
                 rows = conn.execute(
-                    "SELECT * FROM comparisons {} ORDER BY created_at DESC LIMIT ?".format(where),
+                    f"SELECT * FROM comparisons {where} ORDER BY created_at DESC LIMIT ?",
                     params,
                 ).fetchall()
                 return [self._row_to_comparison(r) for r in rows]

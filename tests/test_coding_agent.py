@@ -6,10 +6,10 @@ Covers: CodingAgent lifecycle, planning, execution, testing, fixing,
 diffing, applying, abort, checkpoints, configuration, security.
 """
 
+import importlib.util
 import json
 import os
 import sys
-import importlib.util
 import tempfile
 import threading
 import time

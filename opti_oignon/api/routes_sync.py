@@ -43,7 +43,7 @@ imports are guarded too, so a partial build cannot block app startup.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +165,7 @@ def peer_status_payload(
     return out
 
 
-def _outcome_to_dict(outcome: Any) -> Optional[dict[str, Any]]:
+def _outcome_to_dict(outcome: Any) -> dict[str, Any] | None:
     """Shape a RoundOutcome into a JSON-safe payload, or None when there is none."""
     if outcome is None:
         return None
@@ -357,8 +357,8 @@ def _audit_pairing(action: str, **details: Any) -> None:
 def self_pairing_payload(
     peer_id: str,
     routing_key: str,
-    signing_pub: Optional[str] = None,
-    device_class: Optional[str] = None,
+    signing_pub: str | None = None,
+    device_class: str | None = None,
 ) -> dict[str, Any]:
     """Build this device's pairing payload plus the JSON text for a QR / transcription.
 
@@ -388,7 +388,7 @@ def self_pairing_payload(
     }
 
 
-def pairing_confirmation_code_for(store: Any, rec: Any) -> Optional[str]:
+def pairing_confirmation_code_for(store: Any, rec: Any) -> str | None:
     """The PAIR-02 confirmation code for a pending peer, or ``None``.
 
     Recomputed from local disk: the peer's stored public material (its
@@ -482,7 +482,7 @@ def relabel_peer_payload(store: Any, engine: Any, peer_id: str, label: str) -> d
     return _peer_to_dict(updated)
 
 
-def _normalise_device_class(value: Any) -> Optional[str]:
+def _normalise_device_class(value: Any) -> str | None:
     """Normalise a control-surface device-class value to the allowlist.
 
     The strict pure half of the S260 setter leg: ``None`` and a blank
@@ -632,7 +632,7 @@ def reset_self_routing_resolver() -> None:
     _SELF_ROUTING_RESOLVER = None
 
 
-def resolve_self_routing_key_for_route(engine: Any) -> Optional[str]:
+def resolve_self_routing_key_for_route(engine: Any) -> str | None:
     """This device's routing key, or ``None`` when the transport cannot supply one.
 
     Uses an injected resolver when set, else the live transport. Defensive: a
@@ -681,8 +681,8 @@ def set_remote_chat_grant_payload(
     store: Any,
     peer_id: str,
     *,
-    enabled: Optional[bool] = None,
-    rag: Optional[bool] = None,
+    enabled: bool | None = None,
+    rag: bool | None = None,
 ) -> dict[str, Any]:
     """Enable/disable remote chat and/or set the RAG sub-grant for a device.
 
@@ -929,7 +929,7 @@ try:
                 status_code=503,
                 detail="Routing key not available (node not attached)",
             )
-        signing_pub: Optional[str] = None
+        signing_pub: str | None = None
         pub_getter = getattr(engine, "self_signing_pub", None)
         if callable(pub_getter):
             try:

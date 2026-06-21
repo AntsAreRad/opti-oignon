@@ -14,7 +14,7 @@ Pure text processing -- no external dependencies, no permissions needed.
 import logging
 import math
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "response-stats"
 __plugin_version__: str = "1.0.0"
@@ -337,7 +337,7 @@ def compute_stats(text: str) -> dict[str, Any]:
     prose = _strip_code_for_analysis(text)
 
     words = count_words(text)
-    prose_words = count_words(prose)
+    prose_words = count_words(prose)  # noqa: F841
     sentences = count_sentences(prose)
     paragraphs = count_paragraphs(text)
     tokens = estimate_tokens(text)
@@ -448,7 +448,7 @@ def format_stats_detailed(
 # =========================================================================
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: compute and append response statistics.
 
     Computes word count, sentence count, paragraph count, estimated

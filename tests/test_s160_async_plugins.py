@@ -20,7 +20,7 @@ import tempfile
 import threading
 import time
 import types
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # -- Isolation stubs (standard pattern) --
 for mod_name in [
@@ -145,9 +145,9 @@ def _load_embeddings():
     if "requests" not in sys.modules:
         req_stub = types.ModuleType("requests")
         class _ReqExc:
-            class ConnectionError(Exception): pass
-            class Timeout(Exception): pass
-            class RequestException(Exception): pass
+            class ConnectionError(Exception): pass  # noqa: E701
+            class Timeout(Exception): pass  # noqa: E701
+            class RequestException(Exception): pass  # noqa: E701
         req_stub.exceptions = _ReqExc()
         req_stub.get = MagicMock()
         req_stub.post = MagicMock()
@@ -709,7 +709,7 @@ class TestParallelIngestWorker:
         w = mod.ParallelIngestWorker(max_workers=1)
         chunks = [{"chunk_id": "c1", "text": "data"}]
         def bad_store(*a):
-            raise IOError("disk full")
+            raise OSError("disk full")
         result = w.ingest_chunks(chunks, lambda t: [0.1], bad_store)
         assert result.failed == 1
         assert "disk full" in result.chunk_results[0].error_message

@@ -20,7 +20,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import yaml
 
@@ -51,7 +51,7 @@ def _load_module(name, path):
 
 def _read(path):
     """Read file contents as string."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -372,7 +372,7 @@ class TestVisionYamlConfig(unittest.TestCase):
 
     def setUp(self):
         self.config_path = os.path.join(CONFIG_DIR, "vision.yaml")
-        with open(self.config_path, "r", encoding="utf-8") as f:
+        with open(self.config_path, encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
 
     def test_delegation_enabled_field_exists(self):

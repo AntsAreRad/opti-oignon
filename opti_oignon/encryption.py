@@ -34,7 +34,6 @@ import os
 import secrets
 import stat
 import struct
-import time
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +75,7 @@ except ImportError:
         def __exit__(self, *exc):
             self.wipe()
 
-    def secure_key_from_bytes(data) -> "SecureBytes":
+    def secure_key_from_bytes(data) -> SecureBytes:
         return SecureBytes(data)
 
 # ---------------------------------------------------------------------------
@@ -126,7 +125,7 @@ def _load_encryption_config() -> dict[str, Any]:
     cfg_path = Path(__file__).parent / "config" / "security.yaml"
     try:
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("encryption", {})
     except Exception:
@@ -141,11 +140,11 @@ def _load_encryption_config() -> dict[str, Any]:
 _CRYPTO_BACKEND: str | None = None
 
 try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
     _CRYPTO_BACKEND = "cryptography"
 except ImportError:
     try:
-        from Crypto.Cipher import AES as _PyCryptoAES
+        from Crypto.Cipher import AES as _PyCryptoAES  # noqa: F401
         _CRYPTO_BACKEND = "pycryptodome"
     except ImportError:
         _CRYPTO_BACKEND = None
@@ -345,7 +344,8 @@ def _decrypt_v1(key: bytes, token_b64: bytes) -> bytes:
 # Check Argon2 availability
 _ARGON2_AVAILABLE = False
 try:
-    from argon2.low_level import hash_secret_raw, Type as Argon2Type
+    from argon2.low_level import Type as Argon2Type
+    from argon2.low_level import hash_secret_raw
     _ARGON2_AVAILABLE = True
 except ImportError:
     pass

@@ -86,7 +86,7 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
     }
     if target.exists():
         try:
-            with open(target, "r", encoding="utf-8") as fh:
+            with open(target, encoding="utf-8") as fh:
                 loaded = yaml.safe_load(fh) or {}
             # Shallow merge — top-level keys
             for key, val in loaded.items():
@@ -922,7 +922,7 @@ class ContextOptimizer:
         if not history:
             return history, 0
 
-        current_tokens = self._estimate_messages_tokens(history, model)
+        current_tokens = self._estimate_messages_tokens(history, model)  # noqa: F841
         tokens_removed = 0
 
         truncated = list(history)

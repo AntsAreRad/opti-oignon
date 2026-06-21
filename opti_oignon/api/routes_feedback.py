@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 # Conditional imports
 try:
     from opti_oignon.feedback import (
-        RATING_TYPE_STARS,
-        RATING_TYPE_THUMBS,
+        RATING_TYPE_STARS,  # noqa: F401
+        RATING_TYPE_THUMBS,  # noqa: F401
         FeedbackEntry,
-        FeedbackStats,
+        FeedbackStats,  # noqa: F401
         feedback_store,
     )
     FEEDBACK_AVAILABLE = True

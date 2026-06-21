@@ -24,7 +24,7 @@ except ImportError:
     _safe_connect = lambda p, **kw: sqlite3.connect(str(p), **kw)
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "scratchpad"
 __plugin_version__: str = "1.0.0"
@@ -107,7 +107,7 @@ class ScratchpadDB:
     def __init__(self, db_path: str | Path, max_notes: int = _MAX_NOTES) -> None:
         self.db_path = str(db_path)
         self.max_notes = max_notes
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -135,7 +135,7 @@ class ScratchpadDB:
     def add_note(
         self,
         text: str,
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Add a new note.
 
@@ -283,7 +283,7 @@ class ScratchpadDB:
 # Module-level DB instance (lazy init)
 # =========================================================================
 
-_db: Optional[ScratchpadDB] = None
+_db: ScratchpadDB | None = None
 
 
 def _get_db(ctx: Any) -> ScratchpadDB:
@@ -343,14 +343,14 @@ def _format_note_list(notes: list[dict[str, Any]], title: str = "Notes") -> str:
 # Hook implementations
 # =========================================================================
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Tool call hook: handle scratchpad slash commands.
 
     Detects /note, /notes, /note delete, /note search, /note export
     commands and executes the corresponding action.
     """
     # Get the user input text
-    tool_name = ctx.data.get("tool_name", "")
+    tool_name = ctx.data.get("tool_name", "")  # noqa: F841
     user_input = ctx.data.get("user_input", "") or ctx.data.get("prompt", "")
 
     if not user_input:
@@ -438,7 +438,7 @@ def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
     return None
 
 
-def hook_ui_panel(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_ui_panel(ctx: Any) -> dict[str, Any] | None:
     """UI panel hook: render scratchpad panel content.
 
     Returns HTML for displaying notes in a side panel.

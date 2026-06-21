@@ -12,18 +12,18 @@ from fastapi import APIRouter, HTTPException
 
 from .deps import (
     NETWORK_MANAGER_AVAILABLE,
-    SYNC_QUEUE_AVAILABLE,
     PRE_CACHE_AVAILABLE,
+    SYNC_QUEUE_AVAILABLE,
     network_manager,
-    sync_queue,
     pre_cache,
+    sync_queue,
 )
 from .schemas import (
     NetworkStatusResponse,
+    PreCacheResponse,
     QueueEntrySchema,
     QueueListResponse,
     QueueProcessResponse,
-    PreCacheResponse,
 )
 
 logger = logging.getLogger(__name__)

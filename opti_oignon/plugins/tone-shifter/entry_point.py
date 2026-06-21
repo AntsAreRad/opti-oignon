@@ -18,7 +18,7 @@ Pure text processing -- no external dependencies, no permissions needed.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "tone-shifter"
 __plugin_version__: str = "1.0.0"
@@ -343,7 +343,7 @@ def apply_custom_rules(text: str, custom: dict[str, str]) -> str:
 def transform_tone(
     text: str,
     mode: str,
-    custom_rules: Optional[dict[str, str]] = None,
+    custom_rules: dict[str, str] | None = None,
 ) -> str:
     """Transform text tone according to mode and optional custom rules.
 
@@ -386,7 +386,7 @@ def transform_tone(
 # =========================================================================
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: transform response tone.
 
     Reads the active mode from config and applies the corresponding

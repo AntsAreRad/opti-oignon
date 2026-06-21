@@ -66,7 +66,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Sequence, Tuple
+from typing import Any, Callable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +85,8 @@ try:
     from opti_oignon.agent.claim_aggregation import make_answer_verifier
     from opti_oignon.agent.claim_verification import (
         VERDICT_SUPPORTED,
-        VERDICT_UNSUPPORTED,
         VERDICT_UNCERTAIN,
+        VERDICT_UNSUPPORTED,
     )
 
     FEATURE_AVAILABLE = True
@@ -116,7 +116,7 @@ class CitationGateResult:
     ok: bool
     reason: str = ""
     results: list = field(default_factory=list)
-    pairs: List[Tuple[str, str]] = field(default_factory=list)
+    pairs: list[tuple[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {

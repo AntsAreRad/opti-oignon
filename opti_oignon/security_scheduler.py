@@ -23,7 +23,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +86,14 @@ class SecurityScheduler:
         )
 
         # Timers
-        self._redteam_timer: Optional[threading.Timer] = None
-        self._dep_audit_timer: Optional[threading.Timer] = None
+        self._redteam_timer: threading.Timer | None = None
+        self._dep_audit_timer: threading.Timer | None = None
 
         # State
         self._running = False
-        self._last_redteam_run: Optional[str] = None
-        self._last_redteam_result: Optional[dict[str, Any]] = None
-        self._next_redteam_run: Optional[str] = None
+        self._last_redteam_run: str | None = None
+        self._last_redteam_result: dict[str, Any] | None = None
+        self._next_redteam_run: str | None = None
         self._alerts: list[SchedulerAlert] = []
         self._run_count: int = 0
 
@@ -493,7 +493,7 @@ class SecurityScheduler:
 
 # -- Module-level singleton ----------------------------------------------------
 
-_scheduler: Optional[SecurityScheduler] = None
+_scheduler: SecurityScheduler | None = None
 _scheduler_lock = threading.Lock()
 
 

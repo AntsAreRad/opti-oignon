@@ -16,7 +16,6 @@ import json
 import re
 from typing import Any
 
-
 # -- HSL / Hex conversion utilities --
 
 def hsl_to_hex(h: float, s: float, l: float) -> str:
@@ -25,9 +24,7 @@ def hsl_to_hex(h: float, s: float, l: float) -> str:
     s_norm = max(0.0, min(100.0, s)) / 100.0
     l_norm = max(0.0, min(100.0, l)) / 100.0
     r, g, b = colorsys.hls_to_rgb(h_norm, l_norm, s_norm)
-    return "#{:02X}{:02X}{:02X}".format(
-        round(r * 255), round(g * 255), round(b * 255)
-    )
+    return f"#{round(r * 255):02X}{round(g * 255):02X}{round(b * 255):02X}"
 
 
 def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:

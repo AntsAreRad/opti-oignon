@@ -47,7 +47,7 @@ STYLES_DIR = os.path.join(FRONTEND_SRC, "styles")
 
 
 def _read(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

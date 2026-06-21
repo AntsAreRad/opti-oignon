@@ -32,7 +32,7 @@ never overridable.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -44,12 +44,12 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 
 try:
+    from opti_oignon.notes.blob_store import get_notes_blob_store
     from opti_oignon.notes.caption import (
         build_live_captioner,
         caption_attachment,
     )
     from opti_oignon.notes.notes_store import get_notes_store
-    from opti_oignon.notes.blob_store import get_notes_blob_store
 
     FEATURE_AVAILABLE = True
 except Exception:  # pragma: no cover - constrained environments
@@ -124,7 +124,7 @@ def _captioner_dep():
 )
 def caption(
     attachment_id: str,
-    request: Optional[CaptionRequest] = None,
+    request: CaptionRequest | None = None,
     store: Any = Depends(_notes_store_dep),
     blobs: Any = Depends(_blob_store_dep),
     sandbox: Any = Depends(_sandbox_dep),

@@ -10,7 +10,7 @@ plugin failure never crashes others or the main pipeline.
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ class HookContext:
 
     hook_name: str
     plugin_name: str
-    conversation_id: Optional[str] = None
-    model: Optional[str] = None
+    conversation_id: str | None = None
+    model: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -58,8 +58,8 @@ class HookResult:
     hook_name: str
     success: bool
     duration_ms: float = 0.0
-    error: Optional[str] = None
-    modified_data: Optional[dict[str, Any]] = None
+    error: str | None = None
+    modified_data: dict[str, Any] | None = None
 
 
 @dataclass
@@ -81,7 +81,7 @@ class _HookRegistration:
 
     plugin_name: str
     hook_name: str
-    callback: Callable[[HookContext], Optional[dict[str, Any]]]
+    callback: Callable[[HookContext], dict[str, Any] | None]
     priority: int = DEFAULT_PRIORITY
     enabled: bool = True
 
@@ -110,7 +110,7 @@ class HookManager:
         self,
         hook_name: str,
         plugin_name: str,
-        callback: Callable[[HookContext], Optional[dict[str, Any]]],
+        callback: Callable[[HookContext], dict[str, Any] | None],
         *,
         priority: int = DEFAULT_PRIORITY,
     ) -> bool:
@@ -208,11 +208,11 @@ class HookManager:
         self,
         hook_name: str,
         *,
-        conversation_id: Optional[str] = None,
-        model: Optional[str] = None,
-        data: Optional[dict[str, Any]] = None,
-        config: Optional[dict[str, Any]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        conversation_id: str | None = None,
+        model: str | None = None,
+        data: dict[str, Any] | None = None,
+        config: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         redact_sensitive: bool = False,
     ) -> HookExecutionReport:
         """Execute all registered hooks for a hook point.
@@ -354,7 +354,7 @@ class HookManager:
         """Check if any hooks are registered for a hook point."""
         return bool(self._hooks.get(hook_name))
 
-    def get_hook_count(self, hook_name: Optional[str] = None) -> int:
+    def get_hook_count(self, hook_name: str | None = None) -> int:
         """Get the number of registered hooks.
 
         If hook_name is provided, count for that hook only.
@@ -367,8 +367,8 @@ class HookManager:
     def list_hooks(
         self,
         *,
-        hook_name: Optional[str] = None,
-        plugin_name: Optional[str] = None,
+        hook_name: str | None = None,
+        plugin_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """List registered hooks with optional filtering.
 

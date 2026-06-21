@@ -30,7 +30,7 @@ POST   /api/security/scheduler/trigger   -- Manually trigger scheduled task (S15
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -71,7 +71,7 @@ def _load_security_yaml() -> dict[str, Any]:
     """Load the full security.yaml config."""
     try:
         if os.path.isfile(_SECURITY_YAML_PATH):
-            with open(_SECURITY_YAML_PATH, "r", encoding="utf-8") as fh:
+            with open(_SECURITY_YAML_PATH, encoding="utf-8") as fh:
                 return yaml.safe_load(fh) or {}
     except Exception as exc:
         logger.warning("Failed to load security.yaml: %s", exc)
@@ -101,7 +101,7 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
 
     # 1. CORS not wildcard: +15
     try:
-        from opti_oignon.api.app import _cors_origins, _cors_credentials
+        from opti_oignon.api.app import _cors_origins
         is_wildcard = "*" in _cors_origins
         passed = not is_wildcard
         checks.append({
@@ -252,7 +252,7 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
 
     # 8. Plugin data redaction: +10
     try:
-        from opti_oignon.plugin_hooks import redact_hook_data, REDACTED_PLACEHOLDER
+        from opti_oignon.plugin_hooks import REDACTED_PLACEHOLDER, redact_hook_data
         # Verify redaction works
         test = redact_hook_data(
             {"message": "x", "model": "y"}, "__test__", force_redact=True,
@@ -665,8 +665,9 @@ def get_security_audit(
     # 3. Rate limiter state (current lockouts)
     if event_type is None or event_type == "rate_limit":
         try:
-            from opti_oignon.auth import login_rate_limiter
             import time as _time
+
+            from opti_oignon.auth import login_rate_limiter
             now = _time.time()
             if login_rate_limiter and login_rate_limiter.enabled:
                 # Report currently locked IPs
@@ -756,10 +757,10 @@ def get_security_audit(
 
 try:
     from opti_oignon.security_mode import (
-        security_mode_manager,
+        MODE_BULBE,  # noqa: F401
         MODE_DAILY,
-        MODE_BULBE,
         VALID_MODES,
+        security_mode_manager,
     )
     SECURITY_MODE_AVAILABLE = True
 except ImportError:
@@ -1127,11 +1128,13 @@ async def verify_plugin_allowlist(plugin_id: str) -> dict[str, Any]:
 
 try:
     from opti_oignon.db_encryption import (
+        SQLCIPHER_AVAILABLE as _SQLCIPHER_OK,
+    )
+    from opti_oignon.db_encryption import (
         encryption_status_summary,
+        get_db_status,  # noqa: F401
         migrate_all_databases,
         migrate_db_to_encrypted,
-        get_db_status,
-        SQLCIPHER_AVAILABLE as _SQLCIPHER_OK,
     )
     DB_ENCRYPTION_AVAILABLE = True
 except ImportError:
@@ -1353,7 +1356,7 @@ class EmergencyStopRequest(BaseModel):
 
 class EmergencyResumeRequest(BaseModel):
     """Resume from the emergency stop. No ceremony; auth still required."""
-    warmup_model: Optional[str] = Field(
+    warmup_model: str | None = Field(
         None,
         description="Optional model name to warm after the client reconnect.",
     )
@@ -1413,9 +1416,13 @@ async def resume_from_emergency_stop(
 
 try:
     from opti_oignon.auth_2fa import (
-        two_factor_manager,
-        WEBAUTHN_AVAILABLE as _WEBAUTHN_OK,
         TOTP_AVAILABLE as _TOTP_OK,
+    )
+    from opti_oignon.auth_2fa import (
+        WEBAUTHN_AVAILABLE as _WEBAUTHN_OK,
+    )
+    from opti_oignon.auth_2fa import (
+        two_factor_manager,
     )
     TWO_FA_AVAILABLE = True
 except ImportError:
@@ -1726,11 +1733,13 @@ async def get_tool_approval_audit(limit: int = 50) -> dict[str, Any]:
 try:
     from opti_oignon.pqc_signatures import (
         PQC_AVAILABLE as PQC_SIG_AVAILABLE,
-        get_pqc_status,
-        generate_pqc_keypair,
-        save_pqc_keypair,
-        pqc_keypair_exists,
+    )
+    from opti_oignon.pqc_signatures import (
         delete_pqc_keypair,
+        generate_pqc_keypair,
+        get_pqc_status,
+        pqc_keypair_exists,
+        save_pqc_keypair,
     )
 except ImportError:
     PQC_SIG_AVAILABLE = False
@@ -1792,6 +1801,8 @@ async def remove_pqc_keys() -> dict[str, Any]:
 try:
     from opti_oignon.signed_audit_log import (
         SIGNED_AUDIT_AVAILABLE as _CHAIN_AVAIL,
+    )
+    from opti_oignon.signed_audit_log import (
         signed_audit_log as _chain,
     )
 except ImportError:
@@ -1884,7 +1895,7 @@ class VerifyAnchorRequest(BaseModel):
     timestamp: float = Field(default=0, description="Anchor creation timestamp")
     version: str = Field(default="", description="App version at anchor time")
     anchor_version: int = Field(default=1, description="Anchor format version")
-    hmac_sha256: Optional[str] = Field(
+    hmac_sha256: str | None = Field(
         default=None, description="HMAC signature (if signed anchor)",
     )
 
@@ -1918,8 +1929,9 @@ async def audit_export_anchor() -> Any:
     """
     chain = _require_chain()
     try:
-        from opti_oignon.audit_anchor_export import generate_anchor_json_bytes
         from fastapi.responses import Response
+
+        from opti_oignon.audit_anchor_export import generate_anchor_json_bytes
         json_bytes = generate_anchor_json_bytes(chain, _get_app_version())
         return Response(
             content=json_bytes,
@@ -2215,7 +2227,7 @@ async def remote_access_enable(
 
     # Setup TLS if needed
     try:
-        from opti_oignon.tls_manager import setup_tls, get_tls_status
+        from opti_oignon.tls_manager import get_tls_status, setup_tls
         status = get_tls_status()
         if not status.get("enabled"):
             result = setup_tls(body.passphrase)
@@ -2403,16 +2415,16 @@ _redteam_report_counter: int = 0
 class RedTeamRunRequest(BaseModel):
     """Request body for launching a red team campaign."""
 
-    categories: Optional[list[str]] = Field(
+    categories: list[str] | None = Field(
         None, description="Attack categories to test (None = all enabled)"
     )
-    strategies: Optional[list[str]] = Field(
+    strategies: list[str] | None = Field(
         None, description="Strategies to apply (None = all enabled)"
     )
-    targets: Optional[list[str]] = Field(
+    targets: list[str] | None = Field(
         None, description="Targets to evaluate (None = all enabled)"
     )
-    attacks_per_category: Optional[int] = Field(
+    attacks_per_category: int | None = Field(
         None, ge=1, le=100, description="Number of attacks per category"
     )
 
@@ -2440,9 +2452,9 @@ async def redteam_run_campaign(
 
     try:
         from opti_oignon.redteam.config import load_redteam_config
+        from opti_oignon.redteam.reports import save_report
         from opti_oignon.redteam.runner import RedTeamRunner
         from opti_oignon.redteam.scoring import aggregate_scores, score_result
-        from opti_oignon.redteam.reports import save_report
     except ImportError as exc:
         raise HTTPException(
             status_code=503,
@@ -2537,7 +2549,6 @@ async def redteam_run_campaign(
             try:
                 from opti_oignon.redteam.feedback import (
                     extract_suggestions as _extract_suggestions,
-                    suggestion_store as _suggestion_store,
                 )
                 suggestions = _extract_suggestions(scores)
                 if suggestions:
@@ -2654,13 +2665,16 @@ async def redteam_report(
 
     # For text/markdown, we need to reconstruct the report
     try:
-        from opti_oignon.redteam.scoring import (
-            CampaignScore, AttackScore,
-            CategoryBreakdown, TargetBreakdown, StrategyBreakdown,
-        )
         from opti_oignon.redteam.reports import (
-            generate_text_report,
             generate_markdown_report,
+            generate_text_report,
+        )
+        from opti_oignon.redteam.scoring import (
+            AttackScore,  # noqa: F401
+            CampaignScore,
+            CategoryBreakdown,
+            StrategyBreakdown,
+            TargetBreakdown,
         )
 
         # Rebuild a minimal CampaignScore from stored dict for report gen
@@ -2976,8 +2990,10 @@ async def redteam_accept_suggestion(
     """
     try:
         from opti_oignon.redteam.feedback import (
-            suggestion_store as _store,
             apply_suggestion_to_config,
+        )
+        from opti_oignon.redteam.feedback import (
+            suggestion_store as _store,
         )
     except ImportError:
         raise HTTPException(

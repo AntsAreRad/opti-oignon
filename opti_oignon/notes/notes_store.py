@@ -48,7 +48,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ except Exception:
     DEFAULT_LOCAL_USER = "local"
 
     def effective_user_id(  # type: ignore[misc]
-        user_id: Optional[str], single_user_mode: bool = True
+        user_id: str | None, single_user_mode: bool = True
     ) -> str:
         if single_user_mode or user_id is None:
             return DEFAULT_LOCAL_USER
@@ -150,7 +150,7 @@ def _default_root() -> Path:
 _SYNC_LOCK = threading.Lock()
 
 
-def _note_sync_payload(record: "NoteRecord") -> dict[str, Any]:
+def _note_sync_payload(record: NoteRecord) -> dict[str, Any]:
     """The full-state, JSON-safe payload a note journals (opaque downstream).
 
     The opaque CRDT body rides base64-encoded; the tags OR-Set rides as the
@@ -224,7 +224,7 @@ def _sync_publish_note(
                 return
             if not veilid_available():
                 return
-            payload: Optional[dict[str, Any]] = None
+            payload: dict[str, Any] | None = None
             if not deleted:
                 payload = payload_fn() if payload_fn is not None else None
                 if payload is None:
@@ -291,9 +291,9 @@ class AttachmentRecord:
     byte_size: int
     nonce: str
     created_at: str
-    transcript_text: Optional[str] = None
-    caption_text: Optional[str] = None
-    ocr_text: Optional[str] = None
+    transcript_text: str | None = None
+    caption_text: str | None = None
+    ocr_text: str | None = None
 
 
 def _row_to_note(row: sqlite3.Row) -> NoteRecord:
@@ -343,7 +343,7 @@ class NotesStore:
 
     def __init__(
         self,
-        root: Optional[Path | str] = None,
+        root: Path | str | None = None,
         *,
         single_user_mode: bool = True,
     ) -> None:
@@ -437,7 +437,7 @@ class NotesStore:
             row = conn.execute("PRAGMA journal_mode").fetchone()
         return str(row[0]).lower()
 
-    def resolve_user(self, user_id: Optional[str] = None) -> str:
+    def resolve_user(self, user_id: str | None = None) -> str:
         return effective_user_id(user_id, self._single_user_mode)
 
     def close(self) -> None:
@@ -452,10 +452,10 @@ class NotesStore:
         title: str,
         *,
         body_crdt: bytes = b"",
-        tags: Optional[str] = None,
+        tags: str | None = None,
         pinned: bool = False,
-        user_id: Optional[str] = None,
-        note_id: Optional[str] = None,
+        user_id: str | None = None,
+        note_id: str | None = None,
     ) -> NoteRecord:
         """Insert a note and return its record."""
         uid = effective_user_id(user_id, self._single_user_mode)
@@ -493,8 +493,8 @@ class NotesStore:
     # Notes -- read
 
     def get_note(
-        self, note_id: str, *, user_id: Optional[str] = None
-    ) -> Optional[NoteRecord]:
+        self, note_id: str, *, user_id: str | None = None
+    ) -> NoteRecord | None:
         uid = effective_user_id(user_id, self._single_user_mode)
         with self._lock, self._conn() as conn:
             row = conn.execute(
@@ -506,12 +506,12 @@ class NotesStore:
     def list_notes(
         self,
         *,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         include_deleted: bool = False,
         pinned_only: bool = False,
         order_by: str = "updated_at",
         descending: bool = True,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> list[NoteRecord]:
         if order_by not in _ORDERABLE_COLUMNS:
             order_by = "updated_at"
@@ -528,9 +528,7 @@ class NotesStore:
             clauses.append("pinned = 1")
         where = " AND ".join(clauses)
         direction = "DESC" if descending else "ASC"
-        sql = "SELECT * FROM note WHERE {} ORDER BY {} {}".format(
-            where, order_by, direction
-        )
+        sql = f"SELECT * FROM note WHERE {where} ORDER BY {order_by} {direction}"
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
@@ -539,7 +537,7 @@ class NotesStore:
         return [_row_to_note(r) for r in rows]
 
     def count_notes(
-        self, *, user_id: Optional[str] = None, include_deleted: bool = False
+        self, *, user_id: str | None = None, include_deleted: bool = False
     ) -> int:
         uid = effective_user_id(user_id, self._single_user_mode)
         sql = "SELECT COUNT(*) AS n FROM note WHERE user_id = ?"
@@ -555,9 +553,9 @@ class NotesStore:
         self,
         note_id: str,
         *,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         **fields: Any,
-    ) -> Optional[NoteRecord]:
+    ) -> NoteRecord | None:
         """Update one or more allowlisted columns; refreshes updated_at."""
         uid = effective_user_id(user_id, self._single_user_mode)
         columns: list[str] = []
@@ -565,7 +563,7 @@ class NotesStore:
         for key, value in fields.items():
             if key not in self._UPDATABLE_COLUMNS:
                 raise ValueError("Not an updatable column: " + repr(key))
-            columns.append("{} = ?".format(key))
+            columns.append(f"{key} = ?")
             if key == "pinned":
                 value = int(bool(value))
             params.append(value)
@@ -591,7 +589,7 @@ class NotesStore:
             )
         return record
 
-    def delete_note(self, note_id: str, *, user_id: Optional[str] = None) -> bool:
+    def delete_note(self, note_id: str, *, user_id: str | None = None) -> bool:
         """Tombstone delete: set deleted=1 so the deletion syncs (CRDT-safe)."""
         uid = effective_user_id(user_id, self._single_user_mode)
         ts = _now()
@@ -611,7 +609,7 @@ class NotesStore:
     # Notes -- the per-item mobile-allowed flag (N.9, S256)
 
     def set_mobile_allowed(
-        self, note_id: str, allowed: bool, *, user_id: Optional[str] = None
+        self, note_id: str, allowed: bool, *, user_id: str | None = None
     ) -> bool:
         """Set the per-item phone-sync opt-in (MOBILE_THREAT_MODEL.md s.3).
 
@@ -645,7 +643,7 @@ class NotesStore:
         return changed > 0
 
     def is_mobile_allowed(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> bool:
         """Fail-secure read of the phone-sync opt-in (decision N9-D2).
 
@@ -681,11 +679,11 @@ class NotesStore:
         mime: str = "",
         byte_size: int = 0,
         nonce: str = "",
-        user_id: Optional[str] = None,
-        attachment_id: Optional[str] = None,
-        transcript_text: Optional[str] = None,
-        caption_text: Optional[str] = None,
-        ocr_text: Optional[str] = None,
+        user_id: str | None = None,
+        attachment_id: str | None = None,
+        transcript_text: str | None = None,
+        caption_text: str | None = None,
+        ocr_text: str | None = None,
     ) -> AttachmentRecord:
         """Insert an attachment manifest row. ``kind`` is allowlisted."""
         if kind not in ATTACHMENT_KINDS:
@@ -731,8 +729,8 @@ class NotesStore:
         return record
 
     def get_attachment(
-        self, attachment_id: str, *, user_id: Optional[str] = None
-    ) -> Optional[AttachmentRecord]:
+        self, attachment_id: str, *, user_id: str | None = None
+    ) -> AttachmentRecord | None:
         uid = effective_user_id(user_id, self._single_user_mode)
         with self._lock, self._conn() as conn:
             row = conn.execute(
@@ -742,7 +740,7 @@ class NotesStore:
         return _row_to_attachment(row) if row is not None else None
 
     def list_attachments(
-        self, note_id: str, *, user_id: Optional[str] = None
+        self, note_id: str, *, user_id: str | None = None
     ) -> list[AttachmentRecord]:
         uid = effective_user_id(user_id, self._single_user_mode)
         with self._lock, self._conn() as conn:
@@ -754,7 +752,7 @@ class NotesStore:
         return [_row_to_attachment(r) for r in rows]
 
     def delete_attachment(
-        self, attachment_id: str, *, user_id: Optional[str] = None
+        self, attachment_id: str, *, user_id: str | None = None
     ) -> bool:
         """Hard-delete one attachment's manifest row; return whether a row went.
 
@@ -778,7 +776,7 @@ class NotesStore:
         transcript_text: Any = _UNSET,
         caption_text: Any = _UNSET,
         ocr_text: Any = _UNSET,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> bool:
         """Write derived post-processing text back onto an existing manifest row.
 
@@ -825,7 +823,7 @@ class NotesStore:
 
 # Module-level singleton with a reset for test isolation (the S171 lesson: never
 # leak shared state across pytest invocations).
-_store: Optional[NotesStore] = None
+_store: NotesStore | None = None
 
 
 def get_notes_store() -> NotesStore:

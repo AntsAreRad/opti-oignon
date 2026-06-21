@@ -73,11 +73,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 import stat
 import threading
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from opti_oignon.veilid.records import SyncRecord, canonical_record_bytes
 
@@ -152,7 +151,7 @@ def _b64decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text.encode("ascii"))
 
 
-def _wrap_subkey() -> Optional[bytes]:
+def _wrap_subkey() -> bytes | None:
     """The at-rest key-wrapping subkey, or ``None`` when no master key exists.
 
     HMAC-SHA256(master_key, label): domain-separated from the SQLCipher and
@@ -200,8 +199,8 @@ class PqcRecordSigner:
     tests run against a temporary directory.
     """
 
-    def __init__(self, path: Optional[Path | str] = None) -> None:
-        self._path: Optional[Path] = Path(path) if path is not None else None
+    def __init__(self, path: Path | str | None = None) -> None:
+        self._path: Path | None = Path(path) if path is not None else None
         self._lock = threading.Lock()
 
     def _key_path(self) -> Path:
@@ -396,7 +395,7 @@ def encode_public_key(raw: bytes) -> str:
     return _b64encode(bytes(raw))
 
 
-def decode_public_key(text: Any) -> Optional[bytes]:
+def decode_public_key(text: Any) -> bytes | None:
     """Decode a base64url public key defensively, or ``None``.
 
     The registry stores the public key as text (the pairing payload's
@@ -414,7 +413,7 @@ def decode_public_key(text: Any) -> Optional[bytes]:
 # Module-level singleton with a reset hook (one signer per process, testable);
 # the SYN-04 guarded-singleton idiom.
 
-_signer: Optional[RecordSigner] = None
+_signer: RecordSigner | None = None
 _signer_lock = threading.Lock()
 
 
@@ -427,7 +426,7 @@ def get_record_signer() -> RecordSigner:
         return _signer
 
 
-def set_record_signer(signer: Optional[RecordSigner]) -> None:
+def set_record_signer(signer: RecordSigner | None) -> None:
     """Install a specific signer as the process singleton (used by tests)."""
     global _signer
     with _signer_lock:

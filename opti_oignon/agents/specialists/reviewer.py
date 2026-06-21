@@ -99,7 +99,7 @@ Review the code and provide:
                 match = re.search(r'score[:\s]*(\d+)', content.lower())
                 if match:
                     score = float(match.group(1))
-            except:
+            except:  # noqa: E722
                 pass
 
         is_valid = "VALID" in content.upper() and "INVALID" not in content.upper()

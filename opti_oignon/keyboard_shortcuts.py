@@ -12,8 +12,7 @@ Provides a centralized registry of keyboard shortcuts with:
 from __future__ import annotations
 
 import logging
-import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)

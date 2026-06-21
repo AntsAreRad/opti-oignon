@@ -34,7 +34,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 import stat
 from pathlib import Path
 from typing import Any
@@ -78,7 +77,7 @@ def _load_pqc_config() -> dict[str, Any]:
         import yaml
         cfg_path = Path(__file__).parent / "config" / "security.yaml"
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("pqc", {})
     except Exception:

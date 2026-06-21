@@ -105,7 +105,7 @@ class TestOllamaBenchmarkFn:
         """Verify that the benchmark sets num_predict in options."""
         captured = {}
 
-        def mock_post(url, json=None, timeout=None):
+        def mock_post(url, json=None, timeout=None):  # noqa: F811
             captured["payload"] = json
             resp = MagicMock()
             resp.status_code = 200
@@ -130,7 +130,7 @@ class TestOllamaBenchmarkFn:
         assert "num_predict" in opts
 
     def test_handles_http_error(self):
-        def mock_post(url, json=None, timeout=None):
+        def mock_post(url, json=None, timeout=None):  # noqa: F811
             resp = MagicMock()
             resp.status_code = 500
             resp.text = "Internal Server Error"
@@ -144,7 +144,7 @@ class TestOllamaBenchmarkFn:
     def test_custom_benchmark_tokens(self):
         captured = {}
 
-        def mock_post(url, json=None, timeout=None):
+        def mock_post(url, json=None, timeout=None):  # noqa: F811
             captured["payload"] = json
             resp = MagicMock()
             resp.status_code = 200

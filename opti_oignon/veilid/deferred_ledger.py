@@ -66,10 +66,10 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from opti_oignon.veilid.records import SyncRecord, decode_record, encode_record
 from opti_oignon.veilid.reconcile import choose_winner
+from opti_oignon.veilid.records import SyncRecord, decode_record, encode_record
 
 # S242 (RS-01 / CHF-04): encrypted DB connections, the same pattern as the
 # veilid change feed (S136) and sync_queue. The deferred ledger quarantines
@@ -105,7 +105,7 @@ _TABLES: frozenset[str] = frozenset({TABLE_NAME})
 def _safe_table(name: str) -> str:
     """Return the table name only if it is in the allowlist, else raise."""
     if name not in _TABLES:
-        raise ValueError("table identifier not in allowlist: {!r}".format(name))
+        raise ValueError(f"table identifier not in allowlist: {name!r}")
     return name
 
 
@@ -117,7 +117,7 @@ OFFER_DUPLICATE = "duplicate"
 OFFER_STALE = "stale"
 
 _CREATE_TABLE = (
-    "CREATE TABLE IF NOT EXISTS {table} ("
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(TABLE_NAME)} ("
     "kind TEXT NOT NULL, "
     "record_id TEXT NOT NULL, "
     "origin_device TEXT NOT NULL, "
@@ -129,51 +129,47 @@ _CREATE_TABLE = (
     "last_offered_at TEXT NOT NULL, "
     "PRIMARY KEY (kind, record_id)"
     ")"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _INSERT = (
-    "INSERT INTO {table} (kind, record_id, origin_device, peer_id, clock, "
+    f"INSERT INTO {_safe_table(TABLE_NAME)} (kind, record_id, origin_device, peer_id, clock, "
     "content_hash, envelope, deferred_at, last_offered_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _REPLACE = (
-    "UPDATE {table} SET origin_device = ?, peer_id = ?, clock = ?, "
+    f"UPDATE {_safe_table(TABLE_NAME)} SET origin_device = ?, peer_id = ?, clock = ?, "
     "content_hash = ?, envelope = ?, deferred_at = ?, last_offered_at = ? "
     "WHERE kind = ? AND record_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _TOUCH = (
-    "UPDATE {table} SET last_offered_at = ? WHERE kind = ? AND record_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET last_offered_at = ? WHERE kind = ? AND record_id = ?"
+)
 
 _SELECT_ONE = (
     "SELECT kind, record_id, origin_device, peer_id, clock, content_hash, "
-    "envelope, deferred_at, last_offered_at FROM {table} "
+    f"envelope, deferred_at, last_offered_at FROM {_safe_table(TABLE_NAME)} "
     "WHERE kind = ? AND record_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _SELECT_ALL = (
     "SELECT kind, record_id, origin_device, peer_id, clock, content_hash, "
-    "envelope, deferred_at, last_offered_at FROM {table} "
+    f"envelope, deferred_at, last_offered_at FROM {_safe_table(TABLE_NAME)} "
     "ORDER BY deferred_at ASC, kind ASC, record_id ASC"
-).format(table=_safe_table(TABLE_NAME))
-
-_SELECT_COUNT = "SELECT COUNT(*) FROM {table}".format(table=_safe_table(TABLE_NAME))
-
-_DELETE_ONE = "DELETE FROM {table} WHERE kind = ? AND record_id = ?".format(
-    table=_safe_table(TABLE_NAME)
 )
 
-_DELETE_FOR_PEER = "DELETE FROM {table} WHERE peer_id = ?".format(
-    table=_safe_table(TABLE_NAME)
-)
+_SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
+
+_DELETE_ONE = f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ?"
+
+_DELETE_FOR_PEER = f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
 
 _DELETE_BELOW = (
-    "DELETE FROM {table} WHERE kind = ? AND record_id = ? AND clock < ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ? AND clock < ?"
+)
 
-_DELETE_ALL = "DELETE FROM {table}".format(table=_safe_table(TABLE_NAME))
+_DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
 
 def _now_iso() -> str:
@@ -246,10 +242,10 @@ class DeferredLedger:
     engine's job.
     """
 
-    def __init__(self, root: Optional[Path | str] = None) -> None:
-        self._root: Optional[Path] = Path(root) if root is not None else None
-        self._db_path: Optional[Path] = None
-        self._connection: Optional[sqlite3.Connection] = None
+    def __init__(self, root: Path | str | None = None) -> None:
+        self._root: Path | None = Path(root) if root is not None else None
+        self._db_path: Path | None = None
+        self._connection: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
     def _resolve_db_path(self) -> Path:
@@ -276,7 +272,7 @@ class DeferredLedger:
         return self._connection
 
     @property
-    def db_path(self) -> Optional[Path]:
+    def db_path(self) -> Path | None:
         return self._db_path
 
     def journal_mode(self) -> str:
@@ -411,7 +407,7 @@ class DeferredLedger:
 
     # Reads (local-disk; never gated)
 
-    def get(self, kind: str, record_id: str) -> Optional[DeferredEntry]:
+    def get(self, kind: str, record_id: str) -> DeferredEntry | None:
         """The entry for a key, or None."""
         if not isinstance(kind, str) or not isinstance(record_id, str):
             return None
@@ -452,11 +448,11 @@ class DeferredLedger:
 # SYN-04: creation is guarded by a lock, the same idiom as the change feed, the
 # peer store, the status store, and the engine singletons.
 
-_ledger: Optional[DeferredLedger] = None
+_ledger: DeferredLedger | None = None
 _ledger_lock = threading.Lock()
 
 
-def get_deferred_ledger(root: Optional[Path | str] = None) -> DeferredLedger:
+def get_deferred_ledger(root: Path | str | None = None) -> DeferredLedger:
     """Return the process deferred ledger, creating it once (with ``root`` if given)."""
     global _ledger
     with _ledger_lock:
@@ -465,7 +461,7 @@ def get_deferred_ledger(root: Optional[Path | str] = None) -> DeferredLedger:
         return _ledger
 
 
-def set_deferred_ledger(ledger: Optional[DeferredLedger]) -> None:
+def set_deferred_ledger(ledger: DeferredLedger | None) -> None:
     """Install a specific ledger as the process singleton (used by tests)."""
     global _ledger
     with _ledger_lock:

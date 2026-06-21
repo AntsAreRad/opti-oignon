@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from opti_oignon.self_correction import compute_heuristic_quality, QualityResult
+    from opti_oignon.self_correction import QualityResult, compute_heuristic_quality
     QUALITY_EVAL_AVAILABLE = True
 except ImportError:
     QUALITY_EVAL_AVAILABLE = False
@@ -127,7 +127,7 @@ class CascadingInference:
         """Load configuration from YAML file."""
         if self._config_path.exists():
             try:
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     raw = yaml.safe_load(f) or {}
                 self._raw_config = raw
                 self._enabled = raw.get("enabled", False)

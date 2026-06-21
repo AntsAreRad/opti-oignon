@@ -29,9 +29,7 @@ __all__ = [
     "load_injection_defense_config",
 ]
 
-import html as html_module
 import logging
-import os
 import re
 import sqlite3
 import time

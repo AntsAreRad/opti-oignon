@@ -30,9 +30,9 @@ import os
 import secrets
 import stat
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -123,7 +123,7 @@ class ModePolicy:
     remote_access_allowed: bool = False
 
     @classmethod
-    def for_mode(cls, mode: str) -> "ModePolicy":
+    def for_mode(cls, mode: str) -> ModePolicy:
         """Build the policy for a given mode."""
         if mode == MODE_BULBE:
             return cls(
@@ -168,7 +168,7 @@ class ModePolicy:
         """Read remote_access.enabled from security.yaml for Daily mode."""
         try:
             if _SECURITY_YAML.exists():
-                with open(_SECURITY_YAML, "r", encoding="utf-8") as fh:
+                with open(_SECURITY_YAML, encoding="utf-8") as fh:
                     cfg = yaml.safe_load(fh) or {}
                 ra = cfg.get("remote_access", {})
                 if isinstance(ra, dict):
@@ -228,7 +228,7 @@ def _compute_lockfile_hmac(
     S129: Accepts SecureBytes or raw bytes.
     """
     raw_key = _extract_key_bytes(key)
-    message = f"{mode}||{timestamp}||{user_id}".encode("utf-8")
+    message = f"{mode}||{timestamp}||{user_id}".encode()
     return _hmac.new(raw_key, message, hashlib.sha512).hexdigest()
 
 
@@ -314,7 +314,7 @@ def _read_yaml_mode() -> str:
     """Read security_mode from security.yaml.  Default is 'daily'."""
     try:
         if _SECURITY_YAML.exists():
-            with open(_SECURITY_YAML, "r", encoding="utf-8") as fh:
+            with open(_SECURITY_YAML, encoding="utf-8") as fh:
                 cfg = yaml.safe_load(fh) or {}
             return cfg.get("security_mode", MODE_DAILY)
     except Exception as exc:
@@ -327,7 +327,7 @@ def _write_yaml_mode(mode: str) -> None:
     try:
         cfg: dict[str, Any] = {}
         if _SECURITY_YAML.exists():
-            with open(_SECURITY_YAML, "r", encoding="utf-8") as fh:
+            with open(_SECURITY_YAML, encoding="utf-8") as fh:
                 cfg = yaml.safe_load(fh) or {}
         cfg["security_mode"] = mode
         with open(_SECURITY_YAML, "w", encoding="utf-8") as fh:

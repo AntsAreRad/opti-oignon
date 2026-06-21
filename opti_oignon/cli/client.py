@@ -15,9 +15,8 @@ Design decisions
 
 import asyncio
 import json
-import sys
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generator, Iterator, Optional
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import httpx
 
@@ -27,7 +26,7 @@ from .config import CLIConfig
 class CLIClientError(Exception):
     """Raised when a backend request fails."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
 
@@ -83,7 +82,7 @@ class OOClient:
                 raise CLIClientError("Request timed out") from exc
             return self._handle_response(resp)
 
-    def post(self, path: str, json_body: Optional[dict] = None, **kwargs: Any) -> Any:
+    def post(self, path: str, json_body: dict | None = None, **kwargs: Any) -> Any:
         """Perform a POST request with a JSON body."""
         with self._http() as client:
             try:
@@ -110,7 +109,7 @@ class OOClient:
             return self._handle_response(resp)
 
     def post_file(self, path: str, filepath: str,
-                  extra_fields: Optional[Dict[str, str]] = None) -> Any:
+                  extra_fields: dict[str, str] | None = None) -> Any:
         """Upload a file via multipart/form-data POST."""
         import os
         fname = os.path.basename(filepath)
@@ -133,10 +132,10 @@ class OOClient:
     def stream_chat(
         self,
         message: str,
-        model: Optional[str] = None,
-        on_token: Optional[Callable[[str], None]] = None,
-        on_thinking: Optional[Callable[[str], None]] = None,
-        on_metadata: Optional[Callable[[dict], None]] = None,
+        model: str | None = None,
+        on_token: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
+        on_metadata: Callable[[dict], None] | None = None,
     ) -> str:
         """Send a chat message and stream tokens back.
 
@@ -169,10 +168,10 @@ class OOClient:
     async def _ws_stream(
         self,
         message: str,
-        model: Optional[str],
-        on_token: Optional[Callable[[str], None]],
-        on_thinking: Optional[Callable[[str], None]],
-        on_metadata: Optional[Callable[[dict], None]],
+        model: str | None,
+        on_token: Callable[[str], None] | None,
+        on_thinking: Callable[[str], None] | None,
+        on_metadata: Callable[[dict], None] | None,
     ) -> str:
         try:
             import websockets

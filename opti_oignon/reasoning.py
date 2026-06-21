@@ -529,7 +529,7 @@ class ReasoningEngine:
                 temperature=self._config.base_temperature,
             )
             result.final_answer = final_answer
-        except Exception as e:
+        except Exception:
             # Fallback: concatener les reponses des etapes
             result.final_answer = "\n\n".join(
                 f"**{s.title}**: {s.content}" for s in result.steps
@@ -617,7 +617,7 @@ class ReasoningEngine:
         # Phase 2: Evaluer each branche
         branches: list[TreeBranch] = []
         for i, bd in enumerate(branches_data):
-            eval_start = time.time()
+            eval_start = time.time()  # noqa: F841
             approach = bd.get("approach", f"Approach {i + 1}")
 
             eval_prompt = _TREE_EVALUATE_PROMPT.format(

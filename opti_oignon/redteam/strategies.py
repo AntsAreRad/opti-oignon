@@ -203,8 +203,8 @@ def strategy_multilingual(
     str
         Translated payload (or prefixed fallback).
     """
-    import urllib.request
     import json
+    import urllib.request
 
     prompt = (
         "Translate the following text to French. "

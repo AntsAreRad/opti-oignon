@@ -14,9 +14,8 @@ Supported keys
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -35,7 +34,7 @@ class CLIConfig:
     """Runtime configuration for the ``oo`` CLI."""
 
     api_url: str = DEFAULT_API_URL
-    default_model: Optional[str] = None
+    default_model: str | None = None
     output_format: str = "text"
     color: bool = True
     timeout: int = DEFAULT_TIMEOUT
@@ -72,7 +71,7 @@ class CLIConfig:
             data["default_model"] = self.default_model
         return data
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         """Write current configuration to *path* (default CONFIG_FILE)."""
         dest = path or CONFIG_FILE
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -81,13 +80,13 @@ class CLIConfig:
         return dest
 
 
-def load_config(path: Optional[Path] = None) -> CLIConfig:
+def load_config(path: Path | None = None) -> CLIConfig:
     """Load CLI configuration, falling back to defaults if the file is absent."""
     src = path or CONFIG_FILE
     if not src.exists():
         return CLIConfig()
     try:
-        with open(src, "r", encoding="utf-8") as fh:
+        with open(src, encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
         if not isinstance(raw, dict):
             return CLIConfig()

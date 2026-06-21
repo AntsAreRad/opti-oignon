@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "github-connector"
 __plugin_version__: str = "1.0.0"
@@ -57,8 +57,8 @@ def _github_api(
     method: str,
     path: str,
     token: str,
-    body: Optional[dict] = None,
-    params: Optional[dict[str, str]] = None,
+    body: dict | None = None,
+    params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Make a GitHub API request.
 
@@ -184,7 +184,7 @@ class TokenStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -216,13 +216,13 @@ class TokenStore:
         )
         conn.commit()
 
-    def get_token(self) -> Optional[str]:
+    def get_token(self) -> str | None:
         """Retrieve the stored token, or None."""
         conn = self._get_conn()
         row = conn.execute("SELECT token FROM auth WHERE id = 1").fetchone()
         return row[0] if row else None
 
-    def get_auth_info(self) -> Optional[dict[str, Any]]:
+    def get_auth_info(self) -> dict[str, Any] | None:
         """Retrieve auth info (username, scopes, created_at)."""
         conn = self._get_conn()
         row = conn.execute(
@@ -253,7 +253,7 @@ class TokenStore:
 # Module-level state
 # =========================================================================
 
-_token_store: Optional[TokenStore] = None
+_token_store: TokenStore | None = None
 
 
 def _get_store(ctx: Any) -> TokenStore:
@@ -276,7 +276,7 @@ def _get_store(ctx: Any) -> TokenStore:
     return _token_store
 
 
-def _require_token(ctx: Any) -> tuple[Optional[str], Optional[dict]]:
+def _require_token(ctx: Any) -> tuple[str | None, dict | None]:
     """Get token or return error response."""
     store = _get_store(ctx)
     token = store.get_token()
@@ -296,7 +296,7 @@ def _require_token(ctx: Any) -> tuple[Optional[str], Optional[dict]]:
 # =========================================================================
 
 
-def _parse_owner_repo(arg: str, config: dict) -> Optional[str]:
+def _parse_owner_repo(arg: str, config: dict) -> str | None:
     """Parse owner/repo from argument or fall back to config default."""
     arg = arg.strip()
     if arg and "/" in arg:
@@ -619,7 +619,7 @@ _CMD_RE = re.compile(
 )
 
 
-def route_command(user_input: str, ctx: Any) -> Optional[dict[str, Any]]:
+def route_command(user_input: str, ctx: Any) -> dict[str, Any] | None:
     """Route /gh commands to the appropriate handler.
 
     Parameters
@@ -853,7 +853,7 @@ def format_footnotes(enriched: list[dict[str, Any]]) -> str:
 # =========================================================================
 
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Tool call hook: handle /gh commands."""
     user_input = ctx.data.get("user_input", "") or ctx.data.get("prompt", "")
     if not user_input:
@@ -866,7 +866,7 @@ def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
     return route_command(user_input, ctx)
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: auto-detect GitHub references and enrich.
 
     Scans the LLM response for GitHub references (owner/repo#123,

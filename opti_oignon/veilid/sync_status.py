@@ -29,7 +29,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +94,9 @@ class SyncStatusStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._by_peer: dict[str, RoundOutcome] = {}
-        self._last: Optional[RoundOutcome] = None
+        self._last: RoundOutcome | None = None
 
-    def record_round(self, summary: Any, *, at: Optional[str] = None) -> RoundOutcome:
+    def record_round(self, summary: Any, *, at: str | None = None) -> RoundOutcome:
         """Record a completed round from its summary (a RoundResult or a dict).
 
         Returns the stored outcome. The summary is read by attribute or key, so the
@@ -125,7 +125,7 @@ class SyncStatusStore:
         return outcome
 
     def record_failure(
-        self, peer_id: str, error: str, *, at: Optional[str] = None
+        self, peer_id: str, error: str, *, at: str | None = None
     ) -> RoundOutcome:
         """Record a failed attempt (a timeout, an unavailable transport, a refusal).
 
@@ -144,14 +144,14 @@ class SyncStatusStore:
             self._last = outcome
         return outcome
 
-    def last_for(self, peer_id: str) -> Optional[RoundOutcome]:
+    def last_for(self, peer_id: str) -> RoundOutcome | None:
         """The most recent outcome for a peer, or None when it has none yet."""
         if not isinstance(peer_id, str) or not peer_id:
             return None
         with self._lock:
             return self._by_peer.get(peer_id)
 
-    def last_round(self) -> Optional[RoundOutcome]:
+    def last_round(self) -> RoundOutcome | None:
         """The single most recent outcome across all peers, or None."""
         with self._lock:
             return self._last
@@ -170,7 +170,7 @@ class SyncStatusStore:
 
 # Module-level singleton with a reset hook (one status store per process, testable).
 
-_status: Optional[SyncStatusStore] = None
+_status: SyncStatusStore | None = None
 _status_lock = threading.Lock()
 
 
@@ -183,7 +183,7 @@ def get_sync_status_store() -> SyncStatusStore:
         return _status
 
 
-def set_sync_status_store(store: Optional[SyncStatusStore]) -> None:
+def set_sync_status_store(store: SyncStatusStore | None) -> None:
     """Install a specific status store as the process singleton (used by tests)."""
     global _status
     with _status_lock:

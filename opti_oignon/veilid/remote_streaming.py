@@ -41,7 +41,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +68,14 @@ RATE_LIMIT_WINDOW_SECONDS = 60.0
 # session count without deadlocking).
 _LOCK = threading.RLock()
 # key: (peer_id, request_id) -> list[str] of response chunks.
-_SESSIONS: "OrderedDict[tuple, list]" = OrderedDict()
+_SESSIONS: OrderedDict[tuple, list] = OrderedDict()
 # peer_id -> [window_start_epoch, count_in_window]
 _RATE: dict = {}
 # peer_id -> {"count": int, "last": float}
 _ALERTS: dict = {}
 
 
-def _key(peer_id: Any, request_id: Any) -> Optional[tuple]:
+def _key(peer_id: Any, request_id: Any) -> tuple | None:
     if not isinstance(peer_id, str) or not peer_id:
         return None
     if not isinstance(request_id, str) or not request_id:
@@ -117,7 +117,7 @@ def open_session(peer_id: str, request_id: str, chunks: Any) -> None:
             _SESSIONS.popitem(last=False)  # evict the oldest
 
 
-def pull(peer_id: str, request_id: str, cursor: Any) -> Optional[dict]:
+def pull(peer_id: str, request_id: str, cursor: Any) -> dict | None:
     """Return the chunk at ``cursor`` for a session, or ``None`` on a mismatch.
 
     The lookup is a literal ``(peer_id, request_id)`` match -- the binding. A
@@ -199,9 +199,9 @@ def _record_alert(peer_id: str, now: float) -> None:
 def check_rate(
     peer_id: str,
     *,
-    now: Optional[float] = None,
-    limit: Optional[int] = None,
-    window: Optional[float] = None,
+    now: float | None = None,
+    limit: int | None = None,
+    window: float | None = None,
 ) -> bool:
     """Per-device fixed-window rate gate. ``True`` allows, ``False`` is a breach.
 
@@ -229,7 +229,7 @@ def check_rate(
         return True
 
 
-def telemetry(peer_id: Optional[str] = None) -> dict:
+def telemetry(peer_id: str | None = None) -> dict:
     """The channel rate/telemetry state for the desktop control surface.
 
     For a single device, its window counter, the window start, and its alert

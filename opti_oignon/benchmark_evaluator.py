@@ -15,10 +15,8 @@ Scoring dimensions:
 
 import json
 import logging
-import math
 import os
 import re
-import time
 import uuid
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -32,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Optional dependency: sandbox_manager for code execution
 # ---------------------------------------------------------------------------
 try:
-    from opti_oignon.sandbox_manager import sandbox_manager, CommandResult
+    from opti_oignon.sandbox_manager import CommandResult, sandbox_manager
     SANDBOX_AVAILABLE = True
 except ImportError:
     SANDBOX_AVAILABLE = False
@@ -57,7 +55,7 @@ def _load_yaml(path: Path) -> dict:
     if not path.exists():
         logger.warning("Config file not found: %s", path)
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
 
@@ -968,8 +966,10 @@ class BenchmarkEvaluator:
             return self._custom_store
         try:
             from opti_oignon.benchmark_custom_profiles import (
-                custom_profile_store as _store,
                 CUSTOM_PROFILES_AVAILABLE,
+            )
+            from opti_oignon.benchmark_custom_profiles import (
+                custom_profile_store as _store,
             )
             if CUSTOM_PROFILES_AVAILABLE and _store is not None:
                 return _store

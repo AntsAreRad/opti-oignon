@@ -35,40 +35,38 @@ from fastapi.responses import StreamingResponse
 
 from .deps import (
     CODING_AGENT_AVAILABLE,
-    coding_agent_instance,
-    SANDBOX_AVAILABLE,
-    sandbox_manager,
     CODING_HISTORY_AVAILABLE,
+    coding_agent_instance,
     coding_history_store,
 )
 from .schemas import (
-    CodingTaskRequest,
-    CodingPlanResponse,
-    CodingPlanStepResponse,
-    CodingCheckpointRequest,
-    CodingStepResponse,
-    CodingTestResultResponse,
-    CodingDiffEntry,
-    CodingDiffResponse,
+    CodingAnalyticsResponse,
     CodingApplyRequest,
     CodingApplyResponse,
-    CodingStatusResponse,
-    CodingHistoryEntryResponse,
-    CodingTaskSummaryResponse,
-    CodingTaskDetailResponse,
-    CodingHistoryListResponse,
-    CodingHistoryStatsResponse,
-    CodingResumeRequest,
-    CodingAnalyticsResponse,
-    CodingModelSuccessRate,
-    CodingModelAvgSteps,
     CodingAvgStepsOverall,
-    CodingFailureReason,
-    CodingTimeTrend,
-    CodingTestPassRate,
-    CodingStepsDistribution,
     CodingBatchDeleteRequest,
     CodingBatchDeleteResponse,
+    CodingCheckpointRequest,
+    CodingDiffEntry,
+    CodingDiffResponse,
+    CodingFailureReason,
+    CodingHistoryEntryResponse,
+    CodingHistoryListResponse,
+    CodingHistoryStatsResponse,
+    CodingModelAvgSteps,
+    CodingModelSuccessRate,
+    CodingPlanResponse,
+    CodingPlanStepResponse,
+    CodingResumeRequest,
+    CodingStatusResponse,
+    CodingStepResponse,
+    CodingStepsDistribution,
+    CodingTaskDetailResponse,
+    CodingTaskRequest,
+    CodingTaskSummaryResponse,
+    CodingTestPassRate,
+    CodingTestResultResponse,
+    CodingTimeTrend,
 )
 
 # S215: emergency-stop admission guard (a stopped system refuses honestly)
@@ -284,7 +282,7 @@ def start_coding_task(request: CodingTaskRequest) -> dict:
     agent = _ensure_agent_with_callback()
 
     try:
-        task_id = agent.start_task(
+        task_id = agent.start_task(  # noqa: F841
             task=request.task,
             project_path=request.project_path,
             allow_degraded=request.allow_degraded,
@@ -325,7 +323,9 @@ def generate_or_approve_plan(request: CodingCheckpointRequest | None = None) -> 
     if decision == "modify" and request.modified_plan:
         # Rebuild plan from modified data
         from opti_oignon.coding_agent import (
-            CodingPlan, PlanStep, PlanStepType,
+            CodingPlan,
+            PlanStep,
+            PlanStepType,
         )
         raw = request.modified_plan
         steps = []

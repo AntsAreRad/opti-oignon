@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import threading
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from opti_oignon.veilid.guard import (
     VeilidError,
@@ -91,7 +91,7 @@ def _audit(action: str, **details: Any) -> None:
         logger.debug("veilid audit log unavailable", exc_info=True)
 
 
-def _default_connector() -> Optional[Any]:
+def _default_connector() -> Any | None:
     """Build the production connector (the Goal 3 async client), lazily and guarded.
 
     Returns None when the veilid framework or the client wrapper is unavailable,
@@ -124,7 +124,7 @@ class VeilidNode:
         self,
         *,
         connector: Any = None,
-        connector_factory: Optional[Callable[[], Any]] = None,
+        connector_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._state = NodeState.STOPPED
@@ -287,7 +287,7 @@ class VeilidNode:
                 raise VeilidStateError("cannot stop from stopping")
             connector = self._connector
             self._state = NodeState.STOPPING
-        error: Optional[BaseException] = None
+        error: BaseException | None = None
         if connector is not None:
             try:
                 connector.shutdown()
@@ -310,7 +310,7 @@ class VeilidNode:
 # peer-store, and status singletons -- two racing first calls must not build
 # two node state machines (and potentially two connectors).
 
-_NODE: Optional[VeilidNode] = None
+_NODE: VeilidNode | None = None
 _NODE_LOCK = threading.Lock()
 
 
@@ -322,7 +322,7 @@ def get_node() -> VeilidNode:
         return _NODE
 
 
-def set_node(node: Optional[VeilidNode]) -> None:
+def set_node(node: VeilidNode | None) -> None:
     global _NODE
     with _NODE_LOCK:
         _NODE = node

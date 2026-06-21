@@ -30,8 +30,7 @@ import json
 import logging
 import sqlite3
 import time
-import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -140,19 +139,17 @@ def migrate_table(db_path: str | Path, table: str) -> bool:
             return False  # Already migrated
 
         # S138: validate table name against allowlist
-        assert table in _ALLOWED_TABLES, "Invalid table: {}".format(table)
+        assert table in _ALLOWED_TABLES, f"Invalid table: {table}"
 
         # Add column with default value
         conn.execute(
-            "ALTER TABLE {} ADD COLUMN user_id TEXT DEFAULT '{}'".format(
-                table, DEFAULT_LOCAL_USER
-            )
+            f"ALTER TABLE {table} ADD COLUMN user_id TEXT DEFAULT '{DEFAULT_LOCAL_USER}'"
         )
 
         # Create index for efficient per-user queries
-        index_name = "idx_{}_user_id".format(table)
+        index_name = f"idx_{table}_user_id"
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS {} ON {}(user_id)".format(index_name, table)
+            f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}(user_id)"
         )
 
         conn.commit()
@@ -300,7 +297,7 @@ class UserSettingsStore:
                 val = kwargs[key]
                 if key == "sidebar_open":
                     val = int(bool(val))
-                updates.append("{} = ?".format(key))
+                updates.append(f"{key} = ?")
                 params.append(val)
 
         if "preferences" in kwargs and isinstance(kwargs["preferences"], dict):

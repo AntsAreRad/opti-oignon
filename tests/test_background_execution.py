@@ -6,10 +6,10 @@ Covers: _RunState lifecycle, execute_all_steps with should_stop callback,
 background thread start/stop, execute-all/status/stop endpoint logic.
 """
 
+import importlib.util
 import json
 import os
 import sys
-import importlib.util
 import threading
 import time
 
@@ -81,7 +81,7 @@ import textwrap as _textwrap
 _rc_path = os.path.join(_base, "api", "routes_coding.py")
 try:
     # Parse the source and extract _RunState class definition
-    with open(_rc_path, "r", encoding="utf-8") as _f:
+    with open(_rc_path, encoding="utf-8") as _f:
         _rc_source = _f.read()
 
     # Build a minimal module with just _RunState

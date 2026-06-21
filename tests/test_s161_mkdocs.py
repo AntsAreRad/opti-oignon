@@ -53,7 +53,7 @@ def _make_mkdocs_loader():
 @pytest.fixture(scope="module")
 def mkdocs_config():
     """Load and parse mkdocs.yml."""
-    with open(MKDOCS_YML, "r", encoding="utf-8") as f:
+    with open(MKDOCS_YML, encoding="utf-8") as f:
         return yaml.load(f, Loader=_make_mkdocs_loader())
 
 
@@ -94,7 +94,7 @@ class TestMkdocsYml:
         assert MKDOCS_YML.is_file(), "mkdocs.yml must exist at project root"
 
     def test_mkdocs_yml_valid_yaml(self):
-        with open(MKDOCS_YML, "r", encoding="utf-8") as f:
+        with open(MKDOCS_YML, encoding="utf-8") as f:
             config = yaml.load(f, Loader=_make_mkdocs_loader())
         assert isinstance(config, dict), "mkdocs.yml must parse as a dict"
 
@@ -219,7 +219,7 @@ class TestBuildScript:
         assert mode & stat.S_IXUSR, "build_docs.sh must be executable"
 
     def test_build_script_has_shebang(self):
-        with open(BUILD_SCRIPT, "r", encoding="utf-8") as f:
+        with open(BUILD_SCRIPT, encoding="utf-8") as f:
             first_line = f.readline().strip()
         assert first_line.startswith("#!/"), "must have a shebang line"
         assert "bash" in first_line
@@ -268,7 +268,7 @@ class TestInternalLinks:
                 resolved = (mdfile.parent / target).resolve()
                 if not resolved.is_file():
                     broken.append(f"{mdfile.relative_to(PROJECT_ROOT)} -> {target}")
-        assert not broken, f"Broken links:\n" + "\n".join(broken)
+        assert not broken, "Broken links:\n" + "\n".join(broken)
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@ class TestCustomCSS:
             # Check for hex color values in property assignments
             if re.search(r':\s*#[0-9a-fA-F]{3,8}\s*;', stripped):
                 violations.append(f"Line {i}: {stripped}")
-        assert not violations, f"Hardcoded hex in CSS properties:\n" + "\n".join(violations)
+        assert not violations, "Hardcoded hex in CSS properties:\n" + "\n".join(violations)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ class TestContentQuality:
             for marker in french_markers:
                 if marker in content:
                     violations.append(f"{relpath}: contains '{marker}'")
-        assert not violations, f"French text found:\n" + "\n".join(violations)
+        assert not violations, "French text found:\n" + "\n".join(violations)
 
     def test_no_emojis_in_docs(self, all_doc_files):
         """No emojis in documentation markdown."""

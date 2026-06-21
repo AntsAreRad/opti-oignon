@@ -9,7 +9,6 @@ S68 adds: status, config update, clear by conversation, toggle.
 import logging
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from .deps import (
     RESPONSE_CACHE_AVAILABLE,

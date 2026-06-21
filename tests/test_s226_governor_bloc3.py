@@ -94,7 +94,7 @@ rg = _load_module(
 sc = _load_module("opti_oignon.startup_checks", "opti_oignon/startup_checks.py")
 
 
-def _cfg(**kw) -> "rg.GovernorConfig":
+def _cfg(**kw) -> rg.GovernorConfig:
     return rg.GovernorConfig(**kw)
 
 

@@ -311,7 +311,7 @@ def apply_suggestion_to_config(
     path = Path(config_path) if config_path else _RAG_CONFIG_PATH
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except Exception as exc:
         logger.error("Failed to read rag.yaml: %s", exc)

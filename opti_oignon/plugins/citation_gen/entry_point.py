@@ -5,8 +5,7 @@ Generates formatted citations from RAG retrieval results. Supports
 APA, MLA, and Chicago citation styles.
 """
 
-import time
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "citation-gen"
 __plugin_version__: str = "1.0.0"
@@ -156,7 +155,7 @@ def extract_sources_from_rag(data: dict[str, Any]) -> list[dict[str, Any]]:
 # Hook implementations
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Auto-append citations to RAG-augmented responses.
 
     Checks ctx.data for RAG sources and appends a references section
@@ -186,7 +185,7 @@ def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
     }
 
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Handle direct citation formatting requests.
 
     Expects ctx.data:

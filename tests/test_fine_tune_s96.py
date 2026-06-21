@@ -52,7 +52,7 @@ def _load_module(name, path):
 
 def _read(path):
     """Read file contents as string."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -728,7 +728,7 @@ class TestConfig(unittest.TestCase):
     """Test fine_tune.yaml configuration."""
 
     def setUp(self):
-        with open(os.path.join(CONFIG_DIR, "fine_tune.yaml"), "r") as f:
+        with open(os.path.join(CONFIG_DIR, "fine_tune.yaml")) as f:
             self.config = yaml.safe_load(f)
 
     def test_export_section(self):

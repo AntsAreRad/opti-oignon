@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, List, Sequence, Tuple
+from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ _MARKER_WITH_LEAD_WS = re.compile(r"\s*\[\d+\]")
 _WS_RUN = re.compile(r"\s+")
 
 
-def split_sentences(text: Any) -> List[str]:
+def split_sentences(text: Any) -> list[str]:
     """Segment ``text`` into sentences, deterministically and fail-soft.
 
     Splits on a terminal ``.`` / ``!`` / ``?`` followed by whitespace; the
@@ -110,7 +110,7 @@ def split_sentences(text: Any) -> List[str]:
     return [p for p in (part.strip() for part in parts) if p]
 
 
-def find_citation_indices(text: Any) -> List[int]:
+def find_citation_indices(text: Any) -> list[int]:
     """Return the citation indices in ``text``, in order and de-duplicated.
 
     A pure scanner over the ``[n]`` markers: it returns every well-formed
@@ -120,7 +120,7 @@ def find_citation_indices(text: Any) -> List[int]:
     """
     if text is None:
         return []
-    out: List[int] = []
+    out: list[int] = []
     seen: set[int] = set()
     for match in CITATION_PATTERN.finditer(str(text)):
         n = int(match.group(1))
@@ -145,7 +145,7 @@ def strip_citation_markers(text: Any) -> str:
 
 def extract_pairs(
     answer: Any, sources: Sequence[Any]
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Parse ``answer`` and its ``sources`` into (claim, source) pairs.
 
     The answer carries inline numeric citation markers ``[n]`` (1-based) that
@@ -164,15 +164,15 @@ def extract_pairs(
         return []
 
     try:
-        srcs: List[Any] = [] if sources is None else list(sources)
+        srcs: list[Any] = [] if sources is None else list(sources)
     except TypeError:
         # A non-iterable sources argument cannot index any marker.
         return []
     if not srcs:
         return []
 
-    out: List[Tuple[str, str]] = []
-    seen: set[Tuple[str, int]] = set()
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, int]] = set()
     for sentence in split_sentences(text):
         indices = find_citation_indices(sentence)
         if not indices:

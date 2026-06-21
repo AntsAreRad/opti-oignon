@@ -21,7 +21,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
@@ -40,21 +40,21 @@ except ImportError:
 # ---------------------------------------------------------------------------
 try:
     from opti_oignon.benchmark_evaluator import (
+        BENCHMARK_EVALUATOR_AVAILABLE,
+        AccuracyResult,
         BenchmarkEvaluator,
+        CodeResult,
+        PerformanceResult,
         Question,
         QuestionResult,
-        AccuracyResult,
-        CodeResult,
         StructuralResult,
-        PerformanceResult,
         WeightPreset,
         benchmark_evaluator,
+        compute_composite_score,
         evaluate_accuracy,
         evaluate_code,
-        evaluate_structure,
         evaluate_performance,
-        compute_composite_score,
-        BENCHMARK_EVALUATOR_AVAILABLE,
+        evaluate_structure,
     )
 except ImportError:
     try:
@@ -96,9 +96,11 @@ except ImportError:
 
 try:
     from opti_oignon.benchmark_judge import (
-        BenchmarkJudge,
-        benchmark_judge as _default_judge,
         BENCHMARK_JUDGE_AVAILABLE,
+        BenchmarkJudge,
+    )
+    from opti_oignon.benchmark_judge import (
+        benchmark_judge as _default_judge,
     )
 except ImportError:
     try:
@@ -563,15 +565,15 @@ class ResultsStore:
                 ids = [r[0] for r in old_ids]
                 placeholders = ",".join("?" * len(ids))
                 conn.execute(
-                    "DELETE FROM benchmark_question_results WHERE run_id IN ({})".format(placeholders),
+                    f"DELETE FROM benchmark_question_results WHERE run_id IN ({placeholders})",
                     ids,
                 )
                 conn.execute(
-                    "DELETE FROM benchmark_model_scores WHERE run_id IN ({})".format(placeholders),
+                    f"DELETE FROM benchmark_model_scores WHERE run_id IN ({placeholders})",
                     ids,
                 )
                 conn.execute(
-                    "DELETE FROM benchmark_runs WHERE run_id IN ({})".format(placeholders),
+                    f"DELETE FROM benchmark_runs WHERE run_id IN ({placeholders})",
                     ids,
                 )
                 conn.commit()

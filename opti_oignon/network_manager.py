@@ -18,7 +18,7 @@ Author: Leon
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -141,7 +141,7 @@ class NetworkManager:
         }
         try:
             if self._config_path.exists():
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     loaded = yaml.safe_load(f) or {}
                 defaults.update(loaded)
         except Exception as e:

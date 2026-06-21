@@ -5,7 +5,7 @@ Pydantic v2 schemas for the Opti-Oignon REST API.
 Defines request/response models for all API endpoints.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -3172,8 +3172,8 @@ class BackupDiffItemResponse(BaseModel):
     section: str = ""
     key: str = ""
     action: str = ""
-    current_value: Optional[Any] = None
-    incoming_value: Optional[Any] = None
+    current_value: Any | None = None
+    incoming_value: Any | None = None
 
 
 class BackupPreviewResponse(BaseModel):

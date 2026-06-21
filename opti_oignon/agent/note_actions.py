@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .untrusted_context import untrusted_message
 
@@ -193,7 +193,7 @@ def _default_mode() -> str:
         return MODE_BULBE
 
 
-def _resolve_mode(mode_provider: Optional[Callable[[], str]]) -> str:
+def _resolve_mode(mode_provider: Callable[[], str] | None) -> str:
     if mode_provider is None:
         return _default_mode()
     try:
@@ -245,7 +245,7 @@ def _invoke_once(model_client: Any, messages: list[dict[str, str]]) -> str:
 def make_note_action_runner(
     model_client: Any = None,
     *,
-    mode_provider: Optional[Callable[[], str]] = None,
+    mode_provider: Callable[[], str] | None = None,
 ) -> Callable[[str, str], NoteActionResult]:
     """Build a selection-action runner, injecting the inference seam and mode.
 

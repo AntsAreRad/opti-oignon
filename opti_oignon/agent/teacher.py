@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from opti_oignon.agent import allowlists, untrusted_context
@@ -87,7 +87,7 @@ class EscalationPolicy:
     timeout: float = DEFAULT_TEACHER_TIMEOUT
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "EscalationPolicy":
+    def from_dict(cls, data: dict[str, Any] | None) -> EscalationPolicy:
         """Build a policy from a mapping, ignoring unknown keys, clamped sane."""
         data = dict(data or {})
         policy = cls()

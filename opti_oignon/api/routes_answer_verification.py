@@ -56,7 +56,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -107,8 +107,8 @@ class AnswerVerificationRequest(BaseModel):
     False), not an error.
     """
 
-    pairs: List[ClaimSourcePair]
-    model: Optional[str] = None
+    pairs: list[ClaimSourcePair]
+    model: str | None = None
 
 
 class ClaimVerificationResultSchema(BaseModel):
@@ -137,7 +137,7 @@ class AnswerVerificationResultSchema(BaseModel):
     verdict: str
     ok: bool
     reason: str = ""
-    results: List[ClaimVerificationResultSchema] = []
+    results: list[ClaimVerificationResultSchema] = []
 
 
 answer_verification_router = APIRouter(
@@ -161,7 +161,7 @@ class _OneShotOllamaClient:
     failure surfaces as the runner's clean fail-secure failure.
     """
 
-    def __init__(self, model: str, *, host: Optional[str] = None) -> None:
+    def __init__(self, model: str, *, host: str | None = None) -> None:
         self._model = model
         self._host = host
 
@@ -177,7 +177,7 @@ class _OneShotOllamaClient:
             return str(getattr(msg, "content", "") if msg is not None else "")
 
 
-def _resolve_one_shot_client(model: Optional[str]) -> Any:
+def _resolve_one_shot_client(model: str | None) -> Any:
     """Build a one-shot model client from the selected model, or None.
 
     None when no model is selected (so the runner reports a clean fail-secure
@@ -192,7 +192,7 @@ def _resolve_one_shot_client(model: Optional[str]) -> Any:
         return None
 
 
-def _client_builder_dep() -> Callable[[Optional[str]], Any]:
+def _client_builder_dep() -> Callable[[str | None], Any]:
     """The one-shot client builder seam (a model -> client callable).
 
     A FastAPI dependency so tests inject a fake builder through
@@ -207,7 +207,7 @@ def _client_builder_dep() -> Callable[[Optional[str]], Any]:
 )
 def run_answer_verification(
     request: AnswerVerificationRequest,
-    build_client: Callable[[Optional[str]], Any] = Depends(_client_builder_dep),
+    build_client: Callable[[str | None], Any] = Depends(_client_builder_dep),
     current_user: dict = Depends(_get_current_user),
 ) -> AnswerVerificationResultSchema:
     """Verify every (claim, source) pair in one answer and aggregate fail-secure.

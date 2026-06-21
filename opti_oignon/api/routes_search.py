@@ -15,12 +15,12 @@ from fastapi import APIRouter, HTTPException
 
 from .deps import WEB_SEARCH_AVAILABLE
 from .schemas import (
-    ProxyStatusResponse,
-    ProxyConfigRequest,
-    ProxyConfigResponse,
+    PIISanitizePreviewItem,
     PIISanitizePreviewRequest,
     PIISanitizePreviewResponse,
-    PIISanitizePreviewItem,
+    ProxyConfigRequest,
+    ProxyConfigResponse,
+    ProxyStatusResponse,
     SearchConfigResponse,
 )
 

@@ -110,7 +110,7 @@ def extract_json_substring(text: str) -> str | None:
         open_char, close_char = "{", "}"
     else:
         start = arr_start
-        open_char, close_char = "[", "]"
+        open_char, close_char = "[", "]"  # noqa: F841
 
     # Bracket-counting with string awareness
     depth = 0

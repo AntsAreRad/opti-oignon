@@ -28,7 +28,7 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 # ---------------------------------------------------------------------------
 # Isolated module loading (avoids __init__ import chain)
@@ -529,7 +529,7 @@ class TestAPIEndpointSchemas(unittest.TestCase):
     def _get_routes(self):
         """Extract route info from routes_security module."""
         mod_path = _PROJECT_ROOT / "opti_oignon" / "api" / "routes_security.py"
-        with open(mod_path, "r", encoding="utf-8") as f:
+        with open(mod_path, encoding="utf-8") as f:
             content = f.read()
         return content
 

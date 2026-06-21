@@ -7,11 +7,11 @@ refactored _snapshot_originals, refactored generate_diffs with batch reads.
 """
 
 import base64
+import importlib.util
 import io
 import json
 import os
 import sys
-import importlib.util
 import tarfile
 import tempfile
 import time

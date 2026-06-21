@@ -12,9 +12,9 @@ Validates:
 - All comments in modified files are in English
 """
 
+import glob
 import os
 import re
-import glob
 import unittest
 
 FRONTEND_SRC = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src')
@@ -28,7 +28,7 @@ APP_PY = os.path.join(os.path.dirname(__file__), '..', 'opti_oignon', 'api', 'ap
 
 
 def _read(path):
-    with open(os.path.abspath(path), 'r', encoding='utf-8') as f:
+    with open(os.path.abspath(path), encoding='utf-8') as f:
         return f.read()
 
 
@@ -264,7 +264,7 @@ class TestNoLegacyColorVariables(unittest.TestCase):
                     fname = os.path.basename(fpath)
                     violations.append(f'{fname}:{i}: {line.strip()[:100]}')
         self.assertEqual(violations, [],
-                         f'Found legacy var(--color-*):\n' +
+                         'Found legacy var(--color-*):\n' +
                          '\n'.join(violations[:20]))
 
     def test_no_acc2_references(self):
@@ -295,7 +295,7 @@ class TestNoFallbackPatterns(unittest.TestCase):
             if pattern.search(line):
                 violations.append(f'app.css:{i}: {line.strip()[:100]}')
         self.assertEqual(violations, [],
-                         f'Found var(--oo-*, #fallback):\n' +
+                         'Found var(--oo-*, #fallback):\n' +
                          '\n'.join(violations[:20]))
 
 
@@ -323,7 +323,7 @@ class TestNoRgbOldPalette(unittest.TestCase):
                 if re.search(pat, content):
                     violations.append(f'{os.path.basename(fpath)}: {pat}')
         self.assertEqual(violations, [],
-                         f'Old palette rgb() found:\n' + '\n'.join(violations[:20]))
+                         'Old palette rgb() found:\n' + '\n'.join(violations[:20]))
 
 
 class TestThemeTogglePersistence(unittest.TestCase):

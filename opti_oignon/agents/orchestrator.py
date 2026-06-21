@@ -50,10 +50,10 @@ try:
         DynamicPipelineExecutor,
         DynamicPipelinePlan,
         DynamicPipelinePlanner,
-        PipelineStep,
-        get_executor,
-        get_planner,
-        plan_pipeline,
+        PipelineStep,  # noqa: F401
+        get_executor,  # noqa: F401
+        get_planner,  # noqa: F401
+        plan_pipeline,  # noqa: F401
     )
     DYNAMIC_PIPELINE_AVAILABLE = True
 except ImportError:
@@ -62,7 +62,7 @@ except ImportError:
 
 # Custom pipeline support
 try:
-    from ..pipeline_manager import Pipeline as CustomPipeline
+    from ..pipeline_manager import Pipeline as CustomPipeline  # noqa: F401
     from ..pipeline_manager import get_pipeline_manager
     PIPELINE_MANAGER_AVAILABLE = True
 except ImportError:

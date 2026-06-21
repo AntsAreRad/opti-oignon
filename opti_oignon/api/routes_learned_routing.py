@@ -124,7 +124,7 @@ class ABMetricsResponse(BaseModel):
 def _get_learned_router():
     """Return the LearnedRouter singleton or raise 503."""
     try:
-        from opti_oignon.learned_router import learned_router, LEARNED_ROUTER_AVAILABLE
+        from opti_oignon.learned_router import LEARNED_ROUTER_AVAILABLE, learned_router
         if not LEARNED_ROUTER_AVAILABLE or learned_router is None:
             raise HTTPException(
                 status_code=503,

@@ -13,14 +13,13 @@ import pytest
 
 from opti_oignon.prompt_optimization import (
     PromptTemplate,
+    PromptTemplateEngine,
     PromptTokenBudget,
     PromptTokenBudgetManager,
-    PromptTemplateEngine,
     _load_yaml_config,
     prompt_budget_manager,
     prompt_template_engine,
 )
-
 
 # ============================================================================
 # PromptTokenBudget dataclass tests
@@ -781,6 +780,7 @@ class TestTemplateEngineSingleton:
 
 try:
     from fastapi.testclient import TestClient
+
     from opti_oignon.api.app import app
     _API_AVAILABLE = True
 except ImportError:

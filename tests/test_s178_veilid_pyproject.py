@@ -15,10 +15,10 @@ Covers pyproject.toml:
 Pure file/TOML parsing, so the suite collects without the backend.
 """
 
-import tomllib
 from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"

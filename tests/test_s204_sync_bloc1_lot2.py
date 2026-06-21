@@ -257,7 +257,7 @@ class TestCompactionMetaIsolation:
         assert feed.feed_epoch() == epoch
         side = sqlite3.connect(str(feed.db_path))
         rows = side.execute(
-            "SELECT COUNT(*) FROM {t}".format(t=change_feed.META_TABLE_NAME)
+            f"SELECT COUNT(*) FROM {change_feed.META_TABLE_NAME}"
         ).fetchone()
         side.close()
         assert rows == (1,)

@@ -11,7 +11,7 @@ POST   /api/plugins/marketplace/template  -- Generate a plugin scaffold
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -86,7 +86,7 @@ class RemoteInstallResponse(BaseModel):
     name: str = ""
     version: str = ""
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ReviewResponse(BaseModel):
@@ -119,9 +119,9 @@ class AddReviewRequest(BaseModel):
 
 class AddReviewResponse(BaseModel):
     success: bool
-    review: Optional[ReviewResponse] = None
+    review: ReviewResponse | None = None
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class TemplateRequest(BaseModel):
@@ -138,7 +138,7 @@ class TemplateResponse(BaseModel):
     path: str = ""
     files: list[str] = []
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # =========================================================================

@@ -21,7 +21,6 @@ Storage: SQLite WAL mode in data/admin_audit.db
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
@@ -178,9 +177,7 @@ class AdminAuditStore:
         if clauses:
             where = " WHERE " + " AND ".join(clauses)
 
-        sql = "SELECT * FROM admin_audit_log{} ORDER BY timestamp DESC LIMIT ? OFFSET ?".format(
-            where
-        )
+        sql = f"SELECT * FROM admin_audit_log{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         conn = self._get_conn()
@@ -213,7 +210,7 @@ class AdminAuditStore:
         conn = self._get_conn()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) FROM admin_audit_log{}".format(where),
+                f"SELECT COUNT(*) FROM admin_audit_log{where}",
                 params,
             ).fetchone()
             return row[0] if row else 0

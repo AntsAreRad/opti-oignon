@@ -526,7 +526,7 @@ class HybridSearchEngine:
             norm_scores = self._bm25.normalize_scores(raw_scores)
 
             # Build a lookup for normalized scores
-            score_map = dict(norm_scores)
+            score_map = dict(norm_scores)  # noqa: F841
 
             # Build a chunk lookup
             chunk_lookup = {c["chunk_id"]: c for c in chunks}

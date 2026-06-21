@@ -18,13 +18,12 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import secrets
 import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -299,7 +298,7 @@ class AuthManager:
         path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
         try:
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     cfg = yaml.safe_load(f) or {}
                 return cfg
         except Exception as e:
@@ -1225,7 +1224,7 @@ class LoginRateLimiter:
         try:
             sec_path = Path(__file__).parent / "config" / "security.yaml"
             if sec_path.is_file():
-                with open(sec_path, "r", encoding="utf-8") as fh:
+                with open(sec_path, encoding="utf-8") as fh:
                     raw = yaml.safe_load(fh) or {}
                 return raw.get("rate_limiting", {})
         except Exception:

@@ -15,73 +15,73 @@ S116: Copy-out + human approval workflow endpoints:
 - approval info and audit trail
 """
 
-import os
 import logging
+import os
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from .deps import (
+    FILE_TOOLS_AVAILABLE,
     SANDBOX_AVAILABLE,
     sandbox_manager,
-    FILE_TOOLS_AVAILABLE,
 )
 from .schemas import (
-    SandboxCreateRequest,
-    SandboxCreateResponse,
-    SandboxInjectRequest,
-    SandboxInjectResponse,
-    SandboxFileEntry,
-    SandboxFilesResponse,
-    SandboxExecuteRequest,
-    SandboxExecuteResponse,
-    SandboxStatusResponse,
-    SandboxSessionInfo,
-    SandboxAuditEntry,
-    SandboxAuditResponse,
-    SandboxDestroyResponse,
-    SandboxConfirmDegradedResponse,
-    # S116
-    SandboxPreviewResponse,
-    SandboxApproveRequest,
-    SandboxApproveResponse,
-    SandboxCopyOutEntry,
-    SandboxCopyOutResponse,
-    SandboxRejectResponse,
-    SandboxApprovalInfoResponse,
-    SandboxApprovalAuditEntry,
-    SandboxApprovalAuditResponse,
+    HostBrowseEntry,
+    HostBrowseResponse,
+    QuickSandboxSessionInfo,
     # S117
     QuickSandboxStatusResponse,
     QuickSandboxToggleRequest,
-    QuickSandboxSessionInfo,
-    # S210 (Bloc 1)
-    SandboxStopResponse,
-    SandboxBindRequest,
+    SandboxApplyEntry,
+    SandboxApplyRefusedEntry,
+    SandboxApplyRequest,
+    SandboxApplyResponse,
+    SandboxApprovalAuditEntry,
+    SandboxApprovalAuditResponse,
+    SandboxApprovalInfoResponse,
+    SandboxApproveRequest,
+    SandboxApproveResponse,
+    SandboxAuditEntry,
+    SandboxAuditResponse,
     SandboxBindingResponse,
-    # S211 (Bloc 2)
-    SandboxUploadRefused,
-    SandboxUploadResponse,
-    HostBrowseEntry,
-    HostBrowseResponse,
+    SandboxBindRequest,
     SandboxCloneRequest,
     SandboxCloneResponse,
+    SandboxConfirmDegradedResponse,
+    SandboxConfirmDeletionsRefused,
+    SandboxConfirmDeletionsRequest,
+    SandboxConfirmDeletionsResponse,
+    SandboxCopyOutEntry,
+    SandboxCopyOutResponse,
+    SandboxCreateRequest,
+    SandboxCreateResponse,
+    SandboxDestroyResponse,
     # S212 (Bloc 3)
     SandboxDiffEntry,
     SandboxDiffResponse,
-    SandboxConfirmDeletionsRequest,
-    SandboxConfirmDeletionsRefused,
-    SandboxConfirmDeletionsResponse,
-    SandboxApplyRequest,
-    SandboxApplyEntry,
-    SandboxApplyRefusedEntry,
-    SandboxApplyResponse,
+    SandboxExecuteRequest,
+    SandboxExecuteResponse,
+    SandboxFileEntry,
+    SandboxFilesResponse,
+    SandboxInjectRequest,
+    SandboxInjectResponse,
     # S213 (Bloc 4)
     SandboxNetworkToggleRequest,
     SandboxNetworkToggleResponse,
-    SandboxProvisionRequest,
+    # S116
+    SandboxPreviewResponse,
     SandboxProvisionRefusedLine,
+    SandboxProvisionRequest,
     SandboxProvisionResponse,
+    SandboxRejectResponse,
+    SandboxSessionInfo,
+    SandboxStatusResponse,
+    # S210 (Bloc 1)
+    SandboxStopResponse,
+    # S211 (Bloc 2)
+    SandboxUploadRefused,
+    SandboxUploadResponse,
 )
 
 # S210 (Bloc 1): the conversation <-> workspace binding store; guarded so the
@@ -130,8 +130,10 @@ except ImportError:
 # S117: Quick sandbox imports
 try:
     from opti_oignon.quick_sandbox import (
-        quick_sandbox_manager as _qs_manager,
         QUICK_SANDBOX_AVAILABLE,
+    )
+    from opti_oignon.quick_sandbox import (
+        quick_sandbox_manager as _qs_manager,
     )
 except ImportError:
     _qs_manager = None
@@ -324,9 +326,9 @@ def execute_sandbox_tool(request: SandboxExecuteRequest) -> dict:
 
     from opti_oignon.file_tools import (
         _handle_sandbox_bash,
-        _handle_sandbox_view,
         _handle_sandbox_create_file,
         _handle_sandbox_str_replace,
+        _handle_sandbox_view,
     )
 
     tool_map = {

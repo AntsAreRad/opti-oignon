@@ -609,7 +609,7 @@ class TestBranchExplorerIntegration:
 
     @pytest.fixture(scope="class")
     def explorer_content(self):
-        with open(BRANCH_EXPLORER_PATH, "r") as f:
+        with open(BRANCH_EXPLORER_PATH) as f:
             return f.read()
 
     def test_imports_branch_tree_node_item(self, explorer_content):
@@ -638,7 +638,7 @@ class TestBranchTreeNodeItemContent:
 
     @pytest.fixture(scope="class")
     def node_content(self):
-        with open(BRANCH_TREE_NODE_PATH, "r") as f:
+        with open(BRANCH_TREE_NODE_PATH) as f:
             return f.read()
 
     def test_has_svelte_self(self, node_content):
@@ -675,7 +675,7 @@ class TestBranchDiffContent:
 
     @pytest.fixture(scope="class")
     def diff_content(self):
-        with open(BRANCH_DIFF_PATH, "r") as f:
+        with open(BRANCH_DIFF_PATH) as f:
             return f.read()
 
     def test_has_side_by_side_mode(self, diff_content):
@@ -708,7 +708,7 @@ class TestChatMessageS154:
 
     @pytest.fixture(scope="class")
     def msg_content(self):
-        with open(CHAT_MESSAGE_PATH, "r") as f:
+        with open(CHAT_MESSAGE_PATH) as f:
             return f.read()
 
     def test_has_fork_event(self, msg_content):
@@ -750,7 +750,7 @@ class TestFileUploadS154:
 
     @pytest.fixture(scope="class")
     def upload_content(self):
-        with open(FILE_UPLOAD_PATH, "r") as f:
+        with open(FILE_UPLOAD_PATH) as f:
             return f.read()
 
     def test_has_full_window_overlay(self, upload_content):
@@ -802,7 +802,7 @@ class TestScrollToBottomContent:
 
     @pytest.fixture(scope="class")
     def stb_content(self):
-        with open(SCROLL_TO_BOTTOM_PATH, "r") as f:
+        with open(SCROLL_TO_BOTTOM_PATH) as f:
             return f.read()
 
     def test_has_scroll_container_prop(self, stb_content):
@@ -852,7 +852,7 @@ class TestVersionBump:
     """Verify version is bumped to 3.2.3."""
 
     def test_version_is_3_2_3(self):
-        with open(VERSION_PATH, "r") as f:
+        with open(VERSION_PATH) as f:
             content = f.read()
         assert '"3.2.3"' in content or "'3.2.3'" in content, \
             f"Version not bumped to 3.2.3. Content: {content.strip()}"

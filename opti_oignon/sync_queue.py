@@ -17,7 +17,7 @@ import logging
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -124,7 +124,7 @@ class SyncQueue:
         }
         try:
             if self._config_path.exists():
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     loaded = yaml.safe_load(f) or {}
                 # Queue settings might be nested under 'queue' key or at top level
                 if "queue" in loaded and isinstance(loaded["queue"], dict):

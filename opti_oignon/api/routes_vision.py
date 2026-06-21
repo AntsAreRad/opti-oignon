@@ -70,7 +70,7 @@ def _get_available_model_names() -> list[str]:
 def _get_vision_config():
     """Get the vision config singleton, raising 503 if unavailable."""
     try:
-        from opti_oignon.api.deps import vision_config, VISION_CONFIG_AVAILABLE
+        from opti_oignon.api.deps import VISION_CONFIG_AVAILABLE, vision_config
         if not VISION_CONFIG_AVAILABLE or vision_config is None:
             raise HTTPException(status_code=503, detail="Vision config not available")
         return vision_config

@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import secrets
-import signal
 import socket
 import struct
 import subprocess
@@ -25,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +205,7 @@ def recv_message(sock: socket.socket, key: bytes, timeout: float = 10.0) -> dict
         if not _verify_hmac(key, raw, mac):
             raise PluginHMACError("HMAC verification failed")
         return json.loads(raw.decode("utf-8"))
-    except socket.timeout:
+    except TimeoutError:
         raise PluginSubprocessTimeout("Timed out reading from plugin socket")
     except (ConnectionResetError, BrokenPipeError) as exc:
         raise PluginIPCError(f"Connection lost: {exc}") from exc
@@ -315,8 +314,8 @@ def setup_plugin_logger(
 
 def make_rpc_request(
     method: str,
-    params: Optional[dict[str, Any]] = None,
-    request_id: Optional[str] = None,
+    params: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-RPC 2.0 request dict."""
     return {
@@ -330,7 +329,7 @@ def make_rpc_request(
 def make_rpc_response(
     request_id: str,
     result: Any = None,
-    error: Optional[dict[str, Any]] = None,
+    error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-RPC 2.0 response dict."""
     resp: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
@@ -342,7 +341,7 @@ def make_rpc_response(
 
 
 def make_rpc_error(
-    request_id: Optional[str],
+    request_id: str | None,
     code: int,
     message: str,
     data: Any = None,
@@ -370,8 +369,8 @@ class PluginProcess:
     process: subprocess.Popen  # type: ignore[type-arg]
     socket_path: str
     hmac_key: bytes
-    conn: Optional[socket.socket] = None
-    plugin_logger: Optional[logging.Logger] = None
+    conn: socket.socket | None = None
+    plugin_logger: logging.Logger | None = None
     started_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -434,9 +433,9 @@ class PluginSubprocessManager:
     def __init__(
         self,
         *,
-        socket_dir: Optional[Path | str] = None,
-        log_dir: Optional[Path | str] = None,
-        worker_script: Optional[Path | str] = None,
+        socket_dir: Path | str | None = None,
+        log_dir: Path | str | None = None,
+        worker_script: Path | str | None = None,
         watchdog_interval: float = DEFAULT_WATCHDOG_INTERVAL_S,
         default_hook_timeout: float = DEFAULT_HOOK_TIMEOUT_S,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_S,
@@ -465,7 +464,7 @@ class PluginSubprocessManager:
 
         self._processes: dict[str, PluginProcess] = {}
         self._lock = threading.Lock()
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
         self._watchdog_stop = threading.Event()
 
     # ------------------------------------------------------------------
@@ -498,8 +497,8 @@ class PluginSubprocessManager:
         plugin_dir: str | Path,
         entry_point: str,
         *,
-        resource_limits: Optional[PluginResourceLimits] = None,
-        env_extra: Optional[dict[str, str]] = None,
+        resource_limits: PluginResourceLimits | None = None,
+        env_extra: dict[str, str] | None = None,
     ) -> PluginProcess:
         """Launch a plugin in a new subprocess.
 
@@ -688,7 +687,7 @@ class PluginSubprocessManager:
             pp = self._processes.get(plugin_name)
         return pp is not None and pp.is_alive()
 
-    def get_process(self, plugin_name: str) -> Optional[PluginProcess]:
+    def get_process(self, plugin_name: str) -> PluginProcess | None:
         """Get the PluginProcess handle for a plugin, or None."""
         with self._lock:
             return self._processes.get(plugin_name)
@@ -703,7 +702,7 @@ class PluginSubprocessManager:
         hook_name: str,
         context_data: dict[str, Any],
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Call a hook on a plugin via RPC.
 

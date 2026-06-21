@@ -11,9 +11,9 @@ Covers:
 - routes_plugin_marketplace: endpoint schemas
 """
 
+import hashlib
 import importlib.util
 import json
-import hashlib
 import os
 import shutil
 import sqlite3

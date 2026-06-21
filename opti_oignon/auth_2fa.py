@@ -31,15 +31,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac as _hmac
-import json
 import logging
-import os
 import secrets
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from opti_oignon.db_utils import safe_connect
 
@@ -53,10 +51,10 @@ WEBAUTHN_AVAILABLE = False
 try:
     from fido2.server import Fido2Server  # type: ignore[import]
     from fido2.webauthn import (  # type: ignore[import]
+        AttestedCredentialData,
+        AuthenticatorData,  # noqa: F401
         PublicKeyCredentialRpEntity,
         PublicKeyCredentialUserEntity,
-        AttestedCredentialData,
-        AuthenticatorData,
     )
     WEBAUTHN_AVAILABLE = True
 except ImportError:
@@ -71,8 +69,9 @@ except ImportError:
 
 QRCODE_AVAILABLE = False
 try:
-    import qrcode  # type: ignore[import]
     import io as _io
+
+    import qrcode  # type: ignore[import]
     QRCODE_AVAILABLE = True
 except ImportError:
     pass
@@ -286,7 +285,7 @@ _CODE_HMAC_INFO = b"oo-2fa-code-hmac-v2"
 _V2_PREFIX = "v2:"
 
 
-def _derive_2fa_code_key() -> Optional[bytes]:
+def _derive_2fa_code_key() -> bytes | None:
     """Derive the 2FA code-hashing subkey off the master key (HMAC-SHA256).
 
     Domain-separated from the SQLCipher subkey, the learned-router MAC and the
@@ -392,7 +391,7 @@ def _get_hash_server_key() -> str:
     return ""
 
 
-def _totp_matched_step(totp: Any, code: str, now: float) -> Optional[int]:
+def _totp_matched_step(totp: Any, code: str, now: float) -> int | None:
     """Return the time-step a TOTP code matches within the +/-1 window, or None.
 
     Used for replay protection (AU-06): the caller records the last consumed

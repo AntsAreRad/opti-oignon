@@ -15,7 +15,6 @@ Author: Leon
 
 import json
 import logging
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -259,7 +258,7 @@ class FineTuneExporter:
         """Load configuration from YAML file."""
         try:
             if YAML_AVAILABLE and self._config_path.exists():
-                with open(self._config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, encoding="utf-8") as f:
                     self._config = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning("Failed to load fine-tune config: %s", exc)

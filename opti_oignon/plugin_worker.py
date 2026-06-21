@@ -32,7 +32,7 @@ import sys
 import time
 import types
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Logging (to stderr, captured by host)
@@ -225,12 +225,12 @@ def execute_hook(
 # JSON-RPC response builders
 # ---------------------------------------------------------------------------
 
-def make_response(request_id: Optional[str], result: Any) -> dict[str, Any]:
+def make_response(request_id: str | None, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
 def make_error(
-    request_id: Optional[str],
+    request_id: str | None,
     code: int,
     message: str,
     data: Any = None,
@@ -261,9 +261,9 @@ class PluginWorkerServer:
         self.entry_point = entry_point
         self.socket_path = socket_path
         self.hmac_key = hmac_key
-        self.module: Optional[types.ModuleType] = None
+        self.module: types.ModuleType | None = None
         self._running = False
-        self._server_sock: Optional[socket.socket] = None
+        self._server_sock: socket.socket | None = None
 
     def start(self) -> None:
         """Create the listening socket, accept a connection, and serve."""
@@ -284,7 +284,7 @@ class PluginWorkerServer:
 
         try:
             conn, _ = self._server_sock.accept()
-        except socket.timeout:
+        except TimeoutError:
             logger.error("No connection received within timeout")
             return
 
@@ -304,7 +304,7 @@ class PluginWorkerServer:
         while self._running:
             try:
                 msg = recv_message(conn, self.hmac_key, timeout=60.0)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except (ConnectionError, ValueError) as exc:
                 logger.error("Receive error: %s", exc)
@@ -333,7 +333,7 @@ class PluginWorkerServer:
         self,
         method: str,
         params: dict[str, Any],
-        request_id: Optional[str],
+        request_id: str | None,
     ) -> dict[str, Any]:
         """Route a JSON-RPC method to the appropriate handler."""
         if method == "initialize":
@@ -351,7 +351,7 @@ class PluginWorkerServer:
             )
 
     def _handle_initialize(
-        self, params: dict[str, Any], request_id: Optional[str],
+        self, params: dict[str, Any], request_id: str | None,
     ) -> dict[str, Any]:
         """Load the plugin module and call init() if present."""
         try:
@@ -376,7 +376,7 @@ class PluginWorkerServer:
             )
 
     def _handle_execute_hook(
-        self, params: dict[str, Any], request_id: Optional[str],
+        self, params: dict[str, Any], request_id: str | None,
     ) -> dict[str, Any]:
         """Execute a hook on the loaded plugin."""
         if self.module is None:
@@ -400,7 +400,7 @@ class PluginWorkerServer:
                 f"Hook execution failed: {exc}",
             )
 
-    def _handle_ping(self, request_id: Optional[str]) -> dict[str, Any]:
+    def _handle_ping(self, request_id: str | None) -> dict[str, Any]:
         """Respond to a health check."""
         return make_response(request_id, {
             "status": "pong",
@@ -408,7 +408,7 @@ class PluginWorkerServer:
             "uptime": time.time(),
         })
 
-    def _handle_shutdown(self, request_id: Optional[str]) -> dict[str, Any]:
+    def _handle_shutdown(self, request_id: str | None) -> dict[str, Any]:
         """Gracefully shut down the worker."""
         logger.info("Shutdown requested for '%s'", self.plugin_name)
         self._running = False

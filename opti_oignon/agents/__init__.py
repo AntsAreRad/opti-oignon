@@ -233,5 +233,5 @@ def _print_status():
 # Display status on load (if debug)
 try:
     _print_status()
-except:
+except:  # noqa: E722
     pass

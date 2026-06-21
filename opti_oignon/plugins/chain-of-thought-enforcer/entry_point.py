@@ -11,7 +11,7 @@ final answer and formats them with a clear visual separator.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "chain-of-thought-enforcer"
 __plugin_version__: str = "1.0.0"
@@ -83,7 +83,7 @@ _REASONING_MARKER_RE = re.compile(
 def is_complex_question(
     prompt: str,
     *,
-    keywords: Optional[list[str]] = None,
+    keywords: list[str] | None = None,
     min_words: int = 5,
 ) -> bool:
     """Determine if a prompt contains a complex question.
@@ -236,7 +236,7 @@ def format_response(
 # Hook implementations
 # =========================================================================
 
-def hook_pre_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_pre_inference(ctx: Any) -> dict[str, Any] | None:
     """Pre-inference hook: inject CoT instruction for complex questions.
 
     Reads ctx.data["prompt"] (or ctx.data["messages"]) and injects
@@ -291,7 +291,7 @@ def hook_pre_inference(ctx: Any) -> Optional[dict[str, Any]]:
     return result
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: format reasoning vs answer in response.
 
     Only activates if CoT was injected (checks _cot_injected flag)

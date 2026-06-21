@@ -30,7 +30,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -172,7 +172,7 @@ class ModelUpdateInfo:
 # ---------------------------------------------------------------------------
 
 
-def _load_config(path: Optional[Path] = None) -> LifecycleConfig:
+def _load_config(path: Path | None = None) -> LifecycleConfig:
     """Load lifecycle config from YAML, with defaults for missing keys."""
     p = path or _DEFAULT_CONFIG_PATH
     cfg = LifecycleConfig()
@@ -210,7 +210,7 @@ def _load_config(path: Optional[Path] = None) -> LifecycleConfig:
 # ---------------------------------------------------------------------------
 
 
-def _load_aliases(path: Optional[Path] = None) -> dict[str, str]:
+def _load_aliases(path: Path | None = None) -> dict[str, str]:
     """Load model aliases from JSON file."""
     p = path or _ALIASES_PATH
     if not p.is_file():
@@ -225,7 +225,7 @@ def _load_aliases(path: Optional[Path] = None) -> dict[str, str]:
     return {}
 
 
-def _save_aliases(aliases: dict[str, str], path: Optional[Path] = None) -> bool:
+def _save_aliases(aliases: dict[str, str], path: Path | None = None) -> bool:
     """Persist model aliases to JSON file."""
     p = path or _ALIASES_PATH
     try:
@@ -270,9 +270,9 @@ class ModelLifecycleManager:
 
     def __init__(
         self,
-        config: Optional[LifecycleConfig] = None,
-        config_path: Optional[Path] = None,
-        aliases_path: Optional[Path] = None,
+        config: LifecycleConfig | None = None,
+        config_path: Path | None = None,
+        aliases_path: Path | None = None,
         ollama_module: Any = None,
     ) -> None:
         self._config = config or _load_config(config_path)
@@ -337,7 +337,7 @@ class ModelLifecycleManager:
             logger.warning("Failed to list Ollama models: %s", exc)
             return []
 
-    def get_model_info(self, model_name: str) -> Optional[dict[str, Any]]:
+    def get_model_info(self, model_name: str) -> dict[str, Any] | None:
         """Get detailed info for a single model via ollama.show()."""
         resolved = self.resolve_alias(model_name)
         if not self._ollama:
@@ -389,7 +389,7 @@ class ModelLifecycleManager:
         logger.info("Started pull job %s for model %s", job.job_id, model_name)
         return job
 
-    def get_pull_job(self, job_id: str) -> Optional[PullJob]:
+    def get_pull_job(self, job_id: str) -> PullJob | None:
         """Get the current state of a pull job."""
         with self._lock:
             return self._jobs.get(job_id)
@@ -667,7 +667,7 @@ class ModelLifecycleManager:
     # ----- Internal helpers -----
 
     @staticmethod
-    def _parse_model_entry(m: Any) -> Optional[dict[str, Any]]:
+    def _parse_model_entry(m: Any) -> dict[str, Any] | None:
         """Parse an Ollama model list entry into a dict."""
         if isinstance(m, dict):
             name = m.get("name", m.get("model", ""))
@@ -691,7 +691,7 @@ class ModelLifecycleManager:
             modified_epoch = float(modified)
         elif isinstance(modified, str) and modified:
             try:
-                from datetime import datetime, timezone
+                from datetime import datetime
 
                 # Ollama returns ISO format timestamps.
                 dt = datetime.fromisoformat(modified.replace("Z", "+00:00"))
@@ -723,12 +723,12 @@ class ModelLifecycleManager:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_manager: Optional[ModelLifecycleManager] = None
+_manager: ModelLifecycleManager | None = None
 _manager_lock = threading.Lock()
 
 
 def get_lifecycle_manager(
-    config_path: Optional[Path] = None,
+    config_path: Path | None = None,
 ) -> ModelLifecycleManager:
     """Get or create the singleton ModelLifecycleManager."""
     global _manager

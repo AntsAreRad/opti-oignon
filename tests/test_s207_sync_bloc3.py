@@ -341,7 +341,7 @@ class TestLedgerStore:
         led.offer(skill("s1", 5), peer_id="dev-p")
         with led._lock:
             led._conn().execute(
-                "UPDATE {t} SET envelope = ?".format(t=_ledger_mod.TABLE_NAME),
+                f"UPDATE {_ledger_mod.TABLE_NAME} SET envelope = ?",
                 ("{not json",),
             )
             led._conn().commit()
@@ -562,7 +562,7 @@ class TestApprovalPath:
         eng, feed, store, ledger = self._defer_signed_skill(tmp_path)
         with ledger._lock:
             ledger._conn().execute(
-                "UPDATE {t} SET envelope = ?".format(t=_ledger_mod.TABLE_NAME),
+                f"UPDATE {_ledger_mod.TABLE_NAME} SET envelope = ?",
                 ("][", ),
             )
             ledger._conn().commit()

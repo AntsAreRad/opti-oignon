@@ -49,7 +49,7 @@ def _load_config(path: Path | None = None) -> dict:
     if not target.exists():
         logger.debug("Auto-trigger config not found: %s", target)
         return {}
-    with open(target, "r", encoding="utf-8") as fh:
+    with open(target, encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
 

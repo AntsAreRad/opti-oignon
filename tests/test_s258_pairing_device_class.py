@@ -198,7 +198,7 @@ def _guard_param(fn, name: str) -> None:
 
 def _guard_attr(mod, name: str):
     obj = getattr(mod, name, None)
-    assert obj is not None, "S258 surface absent: {!r}".format(name)
+    assert obj is not None, f"S258 surface absent: {name!r}"
     return obj
 
 

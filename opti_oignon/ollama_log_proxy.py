@@ -31,7 +31,6 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ def _detect_ollama_env() -> dict[str, str]:
                 environ_path = f"/proc/{pid}/environ"
                 if os.path.isfile(environ_path):
                     try:
-                        with open(environ_path, "r", encoding="utf-8",
+                        with open(environ_path, encoding="utf-8",
                                   errors="replace") as fh:
                             raw = fh.read()
                         for entry in raw.split("\x00"):
@@ -116,7 +115,7 @@ def check_ollama_log_config() -> OllamaLogConfig:
             os.path.dirname(__file__), "config", "security.yaml"
         )
         if os.path.isfile(yaml_path):
-            with open(yaml_path, "r", encoding="utf-8") as fh:
+            with open(yaml_path, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
             ollama_cfg = data.get("ollama", {})
             config.sanitization_enabled = ollama_cfg.get(

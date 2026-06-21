@@ -21,8 +21,8 @@ router = APIRouter(prefix="/api/execution-pipelines", tags=["execution-pipelines
 # Conditional import of pipelines module (S53)
 try:
     from opti_oignon.pipelines import (
-        STEP_TYPE_DESCRIPTIONS,
-        VALID_STEP_TYPES,
+        STEP_TYPE_DESCRIPTIONS,  # noqa: F401
+        VALID_STEP_TYPES,  # noqa: F401
         ExecutionPipeline,
         ExecutionStep,
         get_pipeline_store,

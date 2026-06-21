@@ -9,13 +9,12 @@ __all__ = ["RedTeamConfig", "SchedulerConfig", "load_redteam_config"]
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +233,7 @@ def load_redteam_config(
     raw: dict[str, Any] = {}
     if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
             logger.info("Loaded red team config from %s", path)
         except Exception as exc:

@@ -435,9 +435,7 @@ class CanonicalMemoryStore:
             params.append(category)
         where = " AND ".join(clauses)
         direction = "DESC" if descending else "ASC"
-        sql = "SELECT * FROM memory_facts WHERE {} ORDER BY {} {}".format(
-            where, order_by, direction
-        )
+        sql = f"SELECT * FROM memory_facts WHERE {where} ORDER BY {order_by} {direction}"
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))
@@ -483,9 +481,9 @@ class CanonicalMemoryStore:
 
         # columns are drawn from _UPDATABLE_COLUMNS only; the assembled clause
         # therefore contains allowlisted identifiers plus "?" placeholders.
-        set_clause = ", ".join("{} = ?".format(col) for col in columns)
+        set_clause = ", ".join(f"{col} = ?" for col in columns)
         uid = effective_user_id(user_id, self._single_user_mode)
-        sql = "UPDATE memory_facts SET {} WHERE id = ? AND user_id = ?".format(set_clause)
+        sql = f"UPDATE memory_facts SET {set_clause} WHERE id = ? AND user_id = ?"
         values.extend([fact_id, uid])
         with self._lock:
             with self._conn() as conn:

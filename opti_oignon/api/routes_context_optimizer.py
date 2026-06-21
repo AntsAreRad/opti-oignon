@@ -225,7 +225,7 @@ def calculate_budget_with_preset(body: BudgetPresetRequest) -> dict[str, Any]:
 
     # Import here to avoid circular dependency at module load
     try:
-        from opti_oignon.prompt_optimization import PromptTokenBudgetManager
+        from opti_oignon.prompt_optimization import PromptTokenBudgetManager  # noqa: F401
     except ImportError:
         raise HTTPException(
             status_code=503,

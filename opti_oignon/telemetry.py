@@ -26,14 +26,13 @@ Thread-safe: RLock protects all mutable state.
 Author: Leon
 """
 
-import collections
 import logging
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import yaml
 
@@ -119,7 +118,7 @@ class ActiveRequest:
 # ---------------------------------------------------------------------------
 
 
-def _load_config(path: Optional[Path] = None) -> TelemetryConfig:
+def _load_config(path: Path | None = None) -> TelemetryConfig:
     """Load telemetry config from YAML, with defaults for missing keys."""
     p = path or _DEFAULT_CONFIG_PATH
     cfg = TelemetryConfig()
@@ -189,8 +188,8 @@ class TelemetryCollector:
 
     def __init__(
         self,
-        config: Optional[TelemetryConfig] = None,
-        config_path: Optional[Path] = None,
+        config: TelemetryConfig | None = None,
+        config_path: Path | None = None,
     ) -> None:
         self._config = config or _load_config(config_path)
         self._lock = threading.RLock()
@@ -211,7 +210,7 @@ class TelemetryCollector:
         self._total_tokens: int = 0
 
         # Flush thread (if interval > 0).
-        self._flush_thread: Optional[threading.Thread] = None
+        self._flush_thread: threading.Thread | None = None
         self._running = False
 
         # Auto-register built-in consumers.
@@ -231,8 +230,8 @@ class TelemetryCollector:
     def on_inference_start(
         self,
         model: str,
-        messages: Optional[list[dict]] = None,
-        request_id: Optional[str] = None,
+        messages: list[dict] | None = None,
+        request_id: str | None = None,
     ) -> str:
         """Called when an inference request begins.
 
@@ -319,7 +318,7 @@ class TelemetryCollector:
         latency_ms: float = 0.0,
         quality_score: float = 0.0,
         task_type: str = "chat",
-        speculative_data: Optional[dict] = None,
+        speculative_data: dict | None = None,
     ) -> None:
         """Called when an inference request completes.
 
@@ -503,7 +502,7 @@ class TelemetryCollector:
 # ---------------------------------------------------------------------------
 
 
-def _create_live_metrics_consumer() -> Optional[TelemetryConsumer]:
+def _create_live_metrics_consumer() -> TelemetryConsumer | None:
     """Create a consumer that feeds LiveMetricsCollector."""
     try:
         from opti_oignon.live_metrics import get_live_metrics
@@ -531,7 +530,7 @@ def _create_live_metrics_consumer() -> Optional[TelemetryConsumer]:
     return consumer
 
 
-def _create_performance_monitor_consumer() -> Optional[TelemetryConsumer]:
+def _create_performance_monitor_consumer() -> TelemetryConsumer | None:
     """Create a consumer that feeds PerformanceMonitor."""
     try:
         from opti_oignon.performance_monitor import performance_monitor
@@ -558,7 +557,7 @@ def _create_performance_monitor_consumer() -> Optional[TelemetryConsumer]:
     return consumer
 
 
-def _create_speculative_decoding_consumer() -> Optional[TelemetryConsumer]:
+def _create_speculative_decoding_consumer() -> TelemetryConsumer | None:
     """Create a consumer that feeds SpeculativeDecodingManager."""
     try:
         from opti_oignon.speculative_decoding import get_speculative_decoding_manager
@@ -594,12 +593,12 @@ def _create_speculative_decoding_consumer() -> Optional[TelemetryConsumer]:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_collector: Optional[TelemetryCollector] = None
+_collector: TelemetryCollector | None = None
 _collector_lock = threading.Lock()
 
 
 def get_telemetry(
-    config_path: Optional[Path] = None,
+    config_path: Path | None = None,
 ) -> TelemetryCollector:
     """Get or create the singleton TelemetryCollector."""
     global _collector

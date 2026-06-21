@@ -20,14 +20,12 @@ Thread-safe: all public methods use RLock for safe concurrent access.
 
 import collections
 import logging
-import os
 import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
 
 import yaml
 
@@ -236,7 +234,7 @@ class LiveMetricsCollector:
     Thread-safe via RLock.
     """
 
-    def __init__(self, config: Optional[LiveMetricsConfig] = None):
+    def __init__(self, config: LiveMetricsConfig | None = None):
         self._config = config or LiveMetricsConfig()
         self._lock = threading.RLock()
 
@@ -274,7 +272,7 @@ class LiveMetricsCollector:
 
         # Background sampler thread.
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def config(self) -> LiveMetricsConfig:
@@ -369,7 +367,7 @@ class LiveMetricsCollector:
                 return self._history[-1]
             return self._take_sample()
 
-    def get_history(self, seconds: Optional[int] = None) -> list[dict]:
+    def get_history(self, seconds: int | None = None) -> list[dict]:
         """Get metrics history as a list of dicts.
 
         Args:
@@ -492,12 +490,12 @@ class LiveMetricsCollector:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_collector: Optional[LiveMetricsCollector] = None
+_collector: LiveMetricsCollector | None = None
 _init_lock = threading.Lock()
 
 
 def get_live_metrics(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
     auto_start: bool = True,
 ) -> LiveMetricsCollector:
     """Get or create the module-level singleton collector.
@@ -534,7 +532,7 @@ def reset_live_metrics() -> None:
         _collector = None
 
 
-def _load_config(config_path: Optional[str] = None) -> LiveMetricsConfig:
+def _load_config(config_path: str | None = None) -> LiveMetricsConfig:
     """Load live metrics configuration from YAML."""
     p = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
     if not p.is_file():
@@ -542,7 +540,7 @@ def _load_config(config_path: Optional[str] = None) -> LiveMetricsConfig:
         return LiveMetricsConfig()
 
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
     except Exception as exc:
         logger.warning("Failed to load live_metrics.yaml: %s", exc)

@@ -13,7 +13,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 # S136 audit fix: use encrypted DB connections
@@ -237,7 +237,7 @@ class PluginIndex:
         finally:
             conn.close()
 
-    def get(self, name: str) -> Optional[IndexEntry]:
+    def get(self, name: str) -> IndexEntry | None:
         """Get a single plugin entry by name, or None."""
         conn = self._get_conn()
         try:
@@ -279,7 +279,7 @@ class PluginIndex:
         conn = self._get_conn()
         try:
             rows = conn.execute(
-                "SELECT * FROM plugin_index ORDER BY {} {} LIMIT ? OFFSET ?".format(col, order),
+                f"SELECT * FROM plugin_index ORDER BY {col} {order} LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
             return [self._row_to_entry(r) for r in rows]
@@ -344,8 +344,8 @@ class PluginIndex:
         conn = self._get_conn()
         try:
             rows = conn.execute(
-                "SELECT * FROM plugin_index WHERE {} "
-                "ORDER BY {} {} LIMIT ?".format(where, col, order),
+                f"SELECT * FROM plugin_index WHERE {where} "
+                f"ORDER BY {col} {order} LIMIT ?",
                 (*params, limit),
             ).fetchall()
             return [self._row_to_entry(r) for r in rows]
@@ -399,8 +399,8 @@ class PluginIndex:
             return 0
 
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             req = urllib.request.Request(
                 self._index_url,
@@ -501,7 +501,7 @@ try:
 
         _mp_cfg_path = Path(__file__).parent / "config" / "plugin_marketplace.yaml"
         if _mp_cfg_path.exists():
-            with open(_mp_cfg_path, "r", encoding="utf-8") as _fh:
+            with open(_mp_cfg_path, encoding="utf-8") as _fh:
                 _mp_cfg = _yaml.safe_load(_fh) or {}
             _idx_url = _mp_cfg.get("index", {}).get("url", DEFAULT_INDEX_URL)
             _idx_ttl = _mp_cfg.get("index", {}).get(

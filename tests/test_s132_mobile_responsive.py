@@ -24,7 +24,7 @@ FRONTEND_SRC = os.path.join(PROJECT_ROOT, "frontend", "src")
 def read_file(relpath: str) -> str:
     """Read a file relative to project root."""
     fullpath = os.path.join(PROJECT_ROOT, relpath)
-    with open(fullpath, "r", encoding="utf-8") as f:
+    with open(fullpath, encoding="utf-8") as f:
         return f.read()
 
 

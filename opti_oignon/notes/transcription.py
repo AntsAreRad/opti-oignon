@@ -48,7 +48,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class TranscriptionResult:
 
     ok: bool
     attachment_id: str
-    transcript_text: Optional[str] = None
+    transcript_text: str | None = None
     written_back: bool = False
     refused: bool = False
     reason: str = ""
@@ -132,11 +132,11 @@ def _refused(attachment_id: str, reason: str) -> TranscriptionResult:
 def transcribe_attachment(
     attachment_id: str,
     *,
-    user_id: Optional[str],
+    user_id: str | None,
     store: Any,
     blobs: Any,
     sandbox: Any,
-    transcriber: Optional[Transcriber],
+    transcriber: Transcriber | None,
     approve: bool = False,
     input_filename: str = DEFAULT_INPUT_NAME,
 ) -> TranscriptionResult:
@@ -232,8 +232,8 @@ def transcribe_attachment(
 def build_live_transcriber(
     *,
     binary: str = "whisper-cli",
-    extra_args: Optional[list[str]] = None,
-) -> Optional[Transcriber]:
+    extra_args: list[str] | None = None,
+) -> Transcriber | None:
     """Build the live whisper.cpp transcriber, or None when the opt-in dep is off.
 
     HOST-ASSURED. whisper.cpp is absent in-container, so this returns None here;

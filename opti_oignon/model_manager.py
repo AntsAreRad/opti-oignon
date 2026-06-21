@@ -23,14 +23,12 @@ Author: Leon
 import hashlib
 import http.client
 import logging
-import os
 import socket
 import struct
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -117,19 +115,19 @@ class GGUFMetadata:
         self.metadata: dict[str, Any] = {}
 
         # Convenience fields extracted from metadata
-        self.architecture: Optional[str] = None
-        self.model_name: Optional[str] = None
-        self.author: Optional[str] = None
-        self.description: Optional[str] = None
-        self.context_length: Optional[int] = None
-        self.embedding_length: Optional[int] = None
-        self.block_count: Optional[int] = None
-        self.head_count: Optional[int] = None
-        self.head_count_kv: Optional[int] = None
-        self.vocab_size: Optional[int] = None
-        self.file_type: Optional[int] = None
-        self.quantization_name: Optional[str] = None
-        self.parameter_count: Optional[int] = None
+        self.architecture: str | None = None
+        self.model_name: str | None = None
+        self.author: str | None = None
+        self.description: str | None = None
+        self.context_length: int | None = None
+        self.embedding_length: int | None = None
+        self.block_count: int | None = None
+        self.head_count: int | None = None
+        self.head_count_kv: int | None = None
+        self.vocab_size: int | None = None
+        self.file_type: int | None = None
+        self.quantization_name: str | None = None
+        self.parameter_count: int | None = None
 
     def to_dict(self) -> dict:
         """Serialize to dictionary."""
@@ -332,9 +330,9 @@ def _extract_convenience_fields(meta: GGUFMetadata) -> None:
 def _estimate_parameter_count(
     embedding_length: int,
     block_count: int,
-    head_count: Optional[int] = None,
-    head_count_kv: Optional[int] = None,
-    vocab_size: Optional[int] = None,
+    head_count: int | None = None,
+    head_count_kv: int | None = None,
+    vocab_size: int | None = None,
 ) -> int:
     """Estimate total parameter count from model architecture.
 
@@ -551,7 +549,7 @@ def _close_raw(raw) -> None:
 def urlopen_ssrf_safe(
     url: str,
     *,
-    headers: Optional[dict] = None,
+    headers: dict | None = None,
     timeout: int = 30,
     max_redirects: int = _MAX_REDIRECTS,
     resolver=None,
@@ -605,8 +603,8 @@ class ModelManager:
 
     def __init__(
         self,
-        model_dirs: Optional[list[str]] = None,
-        default_dir: Optional[str] = None,
+        model_dirs: list[str] | None = None,
+        default_dir: str | None = None,
     ):
         self._model_dirs = [Path(d) for d in (model_dirs or [])]
         self._default_dir = Path(default_dir) if default_dir else None
@@ -620,7 +618,7 @@ class ModelManager:
         return list(self._model_dirs)
 
     @property
-    def default_dir(self) -> Optional[Path]:
+    def default_dir(self) -> Path | None:
         """Return the default directory for downloaded models."""
         return self._default_dir
 
@@ -659,7 +657,7 @@ class ModelManager:
 
     def get_model_info(
         self, filepath: str, force_refresh: bool = False
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Get metadata for a specific GGUF model file.
 
         Results are cached by file path + mtime for efficiency.
@@ -785,9 +783,9 @@ class ModelManager:
     def download_model(
         self,
         url: str,
-        filename: Optional[str] = None,
-        target_dir: Optional[str] = None,
-        progress_callback: Optional[Callable[[dict], None]] = None,
+        filename: str | None = None,
+        target_dir: str | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
     ) -> dict:
         """Download a GGUF model from a URL.
 
@@ -990,7 +988,7 @@ class ModelManager:
 
     # -- internal helpers --
 
-    def _resolve_path(self, name: str) -> Optional[Path]:
+    def _resolve_path(self, name: str) -> Path | None:
         """Resolve a model name to a full path."""
         for d in self._model_dirs:
             candidate = d / name
@@ -1007,7 +1005,7 @@ class ModelManager:
 # Module singleton
 # ---------------------------------------------------------------------------
 
-_model_manager_instance: Optional[ModelManager] = None
+_model_manager_instance: ModelManager | None = None
 _manager_lock = threading.Lock()
 
 
@@ -1028,7 +1026,7 @@ def get_model_manager() -> ModelManager:
         return _model_manager_instance
 
 
-def init_model_manager(config_path: Optional[str] = None) -> ModelManager:
+def init_model_manager(config_path: str | None = None) -> ModelManager:
     """Initialize the model manager from backends.yaml configuration.
 
     Reads the llama_cpp.model_dirs setting and configures scanning
@@ -1054,7 +1052,7 @@ def init_model_manager(config_path: Optional[str] = None) -> ModelManager:
     return manager
 
 
-def _load_model_config(config_path: Optional[str] = None) -> dict:
+def _load_model_config(config_path: str | None = None) -> dict:
     """Load backends.yaml for model directory configuration."""
     if config_path:
         p = Path(config_path)
@@ -1076,7 +1074,7 @@ def _load_model_config(config_path: Optional[str] = None) -> dict:
 # Utility functions
 # ---------------------------------------------------------------------------
 
-def _format_size(size_bytes: Optional[int]) -> str:
+def _format_size(size_bytes: int | None) -> str:
     """Format a byte count into human-readable string."""
     if not size_bytes:
         return "0B"
@@ -1089,7 +1087,7 @@ def _format_size(size_bytes: Optional[int]) -> str:
     return f"{size_bytes}B"
 
 
-def _format_params(count: Optional[int]) -> Optional[str]:
+def _format_params(count: int | None) -> str | None:
     """Format a parameter count (e.g. 7_000_000_000 -> '7.0B')."""
     if count is None:
         return None

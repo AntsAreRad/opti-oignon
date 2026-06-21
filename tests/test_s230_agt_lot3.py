@@ -67,6 +67,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import opti_oignon.resource_governor as real_governor  # noqa: E402
 from opti_oignon import sandbox_manager as sm  # noqa: E402
 from opti_oignon.agent_eval import (  # noqa: E402
     DEFAULT_MAX_ROUNDS,
@@ -86,8 +87,6 @@ from opti_oignon.agent_eval import __main__ as eval_cli  # noqa: E402
 from opti_oignon.agent_eval import runner as runner_mod  # noqa: E402
 from opti_oignon.agent_eval import store as store_mod  # noqa: E402
 from opti_oignon.agent_eval import tasks as tasks_mod  # noqa: E402
-
-import opti_oignon.resource_governor as real_governor  # noqa: E402
 
 NEW_PY_FILES = [
     ROOT / "opti_oignon" / "agent_eval" / "__init__.py",

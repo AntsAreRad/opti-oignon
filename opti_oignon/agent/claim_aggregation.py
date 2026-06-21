@@ -62,11 +62,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Sequence
 
 from .claim_verification import (
+    VERDICT_SUPPORTED,
+    VERDICT_UNCERTAIN,
+    VERDICT_UNSUPPORTED,
     ClaimVerificationResult,
     make_claim_verifier,
-    VERDICT_SUPPORTED,
-    VERDICT_UNSUPPORTED,
-    VERDICT_UNCERTAIN,
 )
 
 logger = logging.getLogger(__name__)

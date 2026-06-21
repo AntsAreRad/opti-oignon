@@ -18,7 +18,7 @@ missing or unreadable, secure defaults are used.
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -59,7 +59,7 @@ def _load_header_config() -> dict[str, Any]:
             os.path.dirname(__file__), "..", "config", "security.yaml"
         )
         if os.path.isfile(sec_path):
-            with open(sec_path, "r", encoding="utf-8") as fh:
+            with open(sec_path, encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh) or {}
             headers_cfg = raw.get("headers", {})
             if isinstance(headers_cfg, dict):
@@ -83,7 +83,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     so that CORS headers are not overwritten.
     """
 
-    def __init__(self, app: Any, config: Optional[dict[str, Any]] = None) -> None:
+    def __init__(self, app: Any, config: dict[str, Any] | None = None) -> None:
         super().__init__(app)
         self._config = config or _load_header_config()
         self._enabled = not self._config.get("_disabled", False)
@@ -168,8 +168,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         """
         try:
             from opti_oignon.remote_session_guard import (
-                is_remote_request,
                 get_remote_security_headers,
+                is_remote_request,
             )
             client_host = request.client.host if request.client else None
             if is_remote_request(client_host):

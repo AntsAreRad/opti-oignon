@@ -9,7 +9,7 @@ import ast
 import json
 import re
 import textwrap
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "code-formatter"
 __plugin_version__: str = "1.0.0"
@@ -128,7 +128,7 @@ def format_response_blocks(text: str) -> tuple[str, int]:
 # Hook implementations
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Format code blocks in LLM response text."""
     response = ctx.data.get("response", "")
     if not response or "```" not in response:
@@ -143,7 +143,7 @@ def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
     return None
 
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Handle direct format requests via tool_call.
 
     Expects ctx.data:

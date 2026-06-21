@@ -10,7 +10,8 @@ the lifecycle module is unavailable.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path as PathParam
+from fastapi import APIRouter, HTTPException
+from fastapi import Path as PathParam
 
 from .deps import (
     MODEL_LIFECYCLE_AVAILABLE,

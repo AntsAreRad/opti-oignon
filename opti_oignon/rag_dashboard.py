@@ -24,12 +24,9 @@ Usage::
     refresher.check_and_refresh()
 """
 
-import hashlib
 import logging
-import os
 import sqlite3
 import time
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

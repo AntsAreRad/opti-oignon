@@ -31,7 +31,7 @@ FRONTEND_SRC = os.path.join(PROJECT_ROOT, 'frontend', 'src')
 
 def _read(path):
     """Read file content safely."""
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         return f.read()
 
 

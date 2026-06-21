@@ -56,7 +56,7 @@ def _ensure_base_modules():
 
 _ensure_base_modules()
 
-from opti_oignon.semantic_cache import SemanticCache, CacheStats
+from opti_oignon.semantic_cache import CacheStats, SemanticCache
 
 # ---------------------------------------------------------------------------
 # Now test the routes directly (unit-test style, no FastAPI TestClient)

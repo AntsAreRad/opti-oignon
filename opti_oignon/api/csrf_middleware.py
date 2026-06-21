@@ -91,7 +91,7 @@ def _load_csrf_config() -> dict[str, Any]:
             os.path.dirname(__file__), "..", "config", "security.yaml",
         )
         if os.path.isfile(sec_path):
-            with open(sec_path, "r", encoding="utf-8") as fh:
+            with open(sec_path, encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh) or {}
             jwt_cfg = raw.get("jwt", {})
             return {

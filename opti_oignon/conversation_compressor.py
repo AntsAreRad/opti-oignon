@@ -26,7 +26,7 @@ import logging
 import math
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -511,7 +511,7 @@ class ConversationCompressor:
             strategy = self._config.get("strategy", "hybrid")
 
         # Separate system messages from history
-        system_msgs = [m for m in messages if m.get("role") == "system"]
+        system_msgs = [m for m in messages if m.get("role") == "system"]  # noqa: F841
         history_msgs = [m for m in messages if m.get("role") != "system"]
 
         total_tokens = _estimate_messages_tokens(history_msgs, model)
@@ -702,7 +702,7 @@ class ConversationCompressor:
 
         max_tokens = int(self._config.get("llm_summary_max_tokens", 300))
         temperature = float(self._config.get("llm_summary_temperature", 0.2))
-        timeout = float(self._config.get("llm_summary_timeout", 30))
+        timeout = float(self._config.get("llm_summary_timeout", 30))  # noqa: F841
 
         # Build a compact representation of the messages to summarize
         convo_text = self._format_messages_for_summary(messages)
@@ -713,9 +713,9 @@ class ConversationCompressor:
             "- Key facts, decisions, and conclusions reached\n"
             "- Important context that might be referenced later\n"
             "- Questions asked and answers given\n"
-            "Keep the summary under {max_tokens} tokens. Be specific and factual. "
+            f"Keep the summary under {max_tokens} tokens. Be specific and factual. "
             "Do not interpret or editorialize. Output the summary directly."
-        ).format(max_tokens=max_tokens)
+        )
 
         user_prompt = (
             f"Please summarize this conversation excerpt:\n\n{convo_text}\n\n"

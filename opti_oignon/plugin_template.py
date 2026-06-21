@@ -9,9 +9,8 @@ manifest.yaml, entry_point.py (with hook stubs), and README.md.
 import logging
 import re
 import textwrap
-import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

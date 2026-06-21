@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from opti_oignon.veilid.guard import assert_sync_allowed, veilid_available
 from opti_oignon.veilid.protocol import MSG_REMOTE_INFER, MSG_REMOTE_INFER_CONT
@@ -63,7 +63,7 @@ def _encode_message(obj: Any) -> bytes:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def decode_answer(raw: Any) -> Optional[dict]:
+def decode_answer(raw: Any) -> dict | None:
     """Parse a peer's reply (bytes, str, or an already-decoded dict) defensively.
 
     Returns the decoded dict, or ``None`` on anything malformed -- never raises.
@@ -98,7 +98,7 @@ class RouteMessenger(Protocol):
     """
 
     def call(
-        self, routing_key: str, payload: bytes, *, timeout: Optional[float] = None
+        self, routing_key: str, payload: bytes, *, timeout: float | None = None
     ) -> Any:
         ...
 
@@ -112,14 +112,14 @@ class ClientRouteMessenger:
     underlying error a ``VeilidError``), so this wrapper is a thin adapter.
     """
 
-    def __init__(self, client: Any, *, timeout: Optional[float] = None) -> None:
+    def __init__(self, client: Any, *, timeout: float | None = None) -> None:
         if client is None:
             raise ValueError("client must not be None")
         self._client = client
         self._timeout = timeout
 
     def call(
-        self, routing_key: str, payload: bytes, *, timeout: Optional[float] = None
+        self, routing_key: str, payload: bytes, *, timeout: float | None = None
     ) -> Any:
         budget = timeout if timeout is not None else self._timeout
         return self._client.app_call(routing_key, payload, timeout=budget)
@@ -141,7 +141,7 @@ class VeilidPeer:
         routing_key: str,
         *,
         device: str = "",
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> None:
         if messenger is None:
             raise ValueError("messenger must not be None")
@@ -156,7 +156,7 @@ class VeilidPeer:
     def routing_key(self) -> str:
         return self._routing_key
 
-    def fetch(self, request: dict) -> Optional[dict]:
+    def fetch(self, request: dict) -> dict | None:
         """Send a delta request to the peer over the route and return its batch.
 
         Refuses under Bulbe at the binding-layer gate. A ``VeilidTimeout`` or other
@@ -219,8 +219,8 @@ def resolve_live_peer(
     node: Any = None,
     client: Any = None,
     device: str = "",
-    timeout: Optional[float] = None,
-) -> Optional[VeilidPeer]:
+    timeout: float | None = None,
+) -> VeilidPeer | None:
     """Build a live peer for a paired peer, or ``None`` when the transport is down.
 
     The production resolver the route uses. Returns ``None`` -- which the route maps
@@ -257,7 +257,7 @@ def resolve_live_peer(
     return VeilidPeer(messenger, rec.routing_key, device=device, timeout=timeout)
 
 
-def resolve_self_routing_key(*, node: Any = None, client: Any = None) -> Optional[str]:
+def resolve_self_routing_key(*, node: Any = None, client: Any = None) -> str | None:
     """This device's own public routing key for pairing, or ``None`` when unavailable.
 
     The production source the pairing route uses to mint the routing key it puts in

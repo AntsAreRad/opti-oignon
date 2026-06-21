@@ -49,7 +49,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +60,11 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _stopped: bool = False
-_stopped_since: Optional[float] = None
+_stopped_since: float | None = None
 _stopped_by: str = ""
 _veilid_was_running: bool = False
-_last_stop: Optional[dict[str, Any]] = None
-_last_resume: Optional[dict[str, Any]] = None
+_last_stop: dict[str, Any] | None = None
+_last_resume: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ def _step_drop_to_bulbe(user_id: str) -> dict[str, Any]:
 # Resume steps
 # ---------------------------------------------------------------------------
 
-def _step_reconnect_ollama(warmup_model: Optional[str]) -> dict[str, Any]:
+def _step_reconnect_ollama(warmup_model: str | None) -> dict[str, Any]:
     registry = _resolve_backend_registry()
     if registry is None:
         return {"skipped": "backend registry unavailable"}
@@ -465,7 +465,7 @@ def stop(user_id: str = "", drop_to_bulbe: bool = False) -> dict[str, Any]:
     return result
 
 
-def resume(user_id: str = "", warmup_model: Optional[str] = None) -> dict[str, Any]:
+def resume(user_id: str = "", warmup_model: str | None = None) -> dict[str, Any]:
     """Clear the flag and bring the surfaces back. No ceremony; auth at the route."""
     global _stopped, _stopped_since, _stopped_by, _veilid_was_running, _last_resume
     with _lock:

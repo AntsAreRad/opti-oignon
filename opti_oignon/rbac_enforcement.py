@@ -35,7 +35,6 @@ Usage in routes::
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request

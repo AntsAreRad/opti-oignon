@@ -26,7 +26,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def _resolve_resource_governor() -> Any:
         return None
 
 
-def _governor_admission(model: str, options: Optional[dict]) -> None:
+def _governor_admission(model: str, options: dict | None) -> None:
     """The internal hook at the four generate/stream heads (S224).
 
     Additive and internal: generate/stream signatures DO NOT change. A
@@ -126,14 +126,14 @@ class BackendModelInfo:
         self,
         name: str,
         backend: str,
-        size: Optional[str] = None,
-        family: Optional[str] = None,
-        parameter_size: Optional[str] = None,
-        quantization_level: Optional[str] = None,
-        context_length: Optional[int] = None,
-        modified_at: Optional[str] = None,
-        path: Optional[str] = None,
-        extra: Optional[dict] = None,
+        size: str | None = None,
+        family: str | None = None,
+        parameter_size: str | None = None,
+        quantization_level: str | None = None,
+        context_length: int | None = None,
+        modified_at: str | None = None,
+        path: str | None = None,
+        extra: dict | None = None,
     ):
         self.name = name
         self.backend = backend
@@ -170,11 +170,11 @@ class ChatResponse:
     def __init__(
         self,
         content: str,
-        thinking: Optional[str] = None,
+        thinking: str | None = None,
         model: str = "",
         done: bool = True,
-        total_duration: Optional[int] = None,
-        extra: Optional[dict] = None,
+        total_duration: int | None = None,
+        extra: dict | None = None,
     ):
         self.content = content
         self.thinking = thinking
@@ -260,7 +260,7 @@ class InferenceBackend(ABC):
         ...
 
     @abstractmethod
-    def model_info(self, model_name: str) -> Optional[BackendModelInfo]:
+    def model_info(self, model_name: str) -> BackendModelInfo | None:
         """Return detailed information about a specific model."""
         ...
 
@@ -269,10 +269,10 @@ class InferenceBackend(ABC):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming inference.
 
@@ -295,10 +295,10 @@ class InferenceBackend(ABC):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference.
 
@@ -421,7 +421,7 @@ class OllamaBackend(InferenceBackend):
             logger.debug("Ollama list_models failed: %s", exc)
             return []
 
-    def model_info(self, model_name: str) -> Optional[BackendModelInfo]:
+    def model_info(self, model_name: str) -> BackendModelInfo | None:
         """Get model details via ollama.show()."""
         if not OLLAMA_AVAILABLE:
             return None
@@ -460,10 +460,10 @@ class OllamaBackend(InferenceBackend):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming chat via ollama.chat()."""
         if not OLLAMA_AVAILABLE:
@@ -519,10 +519,10 @@ class OllamaBackend(InferenceBackend):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat via ollama.chat(stream=True)."""
         if not OLLAMA_AVAILABLE:
@@ -667,7 +667,7 @@ def _is_within_dir(base: Path, candidate: Path) -> bool:
         return False
 
 
-def _resolve_ggml_kv_type(name: str) -> Optional[int]:
+def _resolve_ggml_kv_type(name: str) -> int | None:
     """Resolve a KV-cache type name (e.g. "q8_0") to the installed
     llama-cpp-python's GGML_TYPE_* constant (S259).
 
@@ -711,13 +711,13 @@ class LlamaCppBackend(InferenceBackend):
 
     def __init__(
         self,
-        model_dirs: Optional[list[str]] = None,
+        model_dirs: list[str] | None = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = -1,
-        n_threads: Optional[int] = None,
+        n_threads: int | None = None,
         flash_attn: bool = False,
-        type_k: Optional[str] = None,
-        type_v: Optional[str] = None,
+        type_k: str | None = None,
+        type_v: str | None = None,
     ):
         self._model_dirs = [Path(d) for d in (model_dirs or [])]
         self._n_ctx = n_ctx
@@ -771,7 +771,7 @@ class LlamaCppBackend(InferenceBackend):
                 results.append(info)
         return results
 
-    def model_info(self, model_name: str) -> Optional[BackendModelInfo]:
+    def model_info(self, model_name: str) -> BackendModelInfo | None:
         """Return info about a specific GGUF model."""
         gguf_path = self._resolve_model_path(model_name)
         if gguf_path is None:
@@ -784,10 +784,10 @@ class LlamaCppBackend(InferenceBackend):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming inference via llama-cpp-python."""
         # S224: governor admission hook (additive, signature untouched).
@@ -838,10 +838,10 @@ class LlamaCppBackend(InferenceBackend):
         self,
         model: str,
         messages: list[dict],
-        options: Optional[dict] = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference via llama-cpp-python."""
         # S224: governor admission hook (additive, signature untouched).
@@ -919,7 +919,7 @@ class LlamaCppBackend(InferenceBackend):
                     registry[model_name] = lock
         return lock
 
-    def _resolve_model_path(self, model_name: str) -> Optional[Path]:
+    def _resolve_model_path(self, model_name: str) -> Path | None:
         """Find a .gguf file by name across configured directories.
 
         S136 audit fix: NEVER accepts absolute paths or paths outside
@@ -1122,8 +1122,8 @@ class LlamaServerBackend(InferenceBackend):
     def _request(
         self,
         path: str,
-        payload: Optional[dict] = None,
-        timeout_s: Optional[float] = None,
+        payload: dict | None = None,
+        timeout_s: float | None = None,
     ) -> Any:
         """One guarded HTTP round trip; raises RuntimeError when the
         server is unreachable or answers a non-JSON body."""
@@ -1177,7 +1177,7 @@ class LlamaServerBackend(InferenceBackend):
                 )
         return out
 
-    def model_info(self, model_name: str) -> Optional[BackendModelInfo]:
+    def model_info(self, model_name: str) -> BackendModelInfo | None:
         for info in self.list_models():
             if info.name == model_name:
                 return info
@@ -1186,12 +1186,12 @@ class LlamaServerBackend(InferenceBackend):
     def generate(
         self,
         model: str,
-        messages: Optional[list[dict]] = None,
-        options: Optional[dict] = None,
+        messages: list[dict] | None = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
-        prompt: Optional[str] = None,
+        images: list | None = None,
+        prompt: str | None = None,
     ) -> ChatResponse:
         """Non-streaming chat through /v1/chat/completions.
 
@@ -1231,11 +1231,11 @@ class LlamaServerBackend(InferenceBackend):
     def stream(
         self,
         model: str,
-        messages: Optional[list[dict]] = None,
-        options: Optional[dict] = None,
+        messages: list[dict] | None = None,
+        options: dict | None = None,
         keep_alive: str = "30m",
         think: bool = False,
-        images: Optional[list] = None,
+        images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""
         payload: dict[str, Any] = {
@@ -1298,7 +1298,7 @@ class BackendRegistry:
 
     def __init__(self):
         self._backends: dict[str, InferenceBackend] = {}
-        self._active_name: Optional[str] = None
+        self._active_name: str | None = None
         self._lock = threading.Lock()
 
     def register(self, backend: InferenceBackend) -> None:
@@ -1317,7 +1317,7 @@ class BackendRegistry:
                 return True
             return False
 
-    def get(self, name: str) -> Optional[InferenceBackend]:
+    def get(self, name: str) -> InferenceBackend | None:
         """Get a backend by name."""
         return self._backends.get(name)
 
@@ -1331,7 +1331,7 @@ class BackendRegistry:
             return list(self._backends.values())
 
     @property
-    def active(self) -> Optional[InferenceBackend]:
+    def active(self) -> InferenceBackend | None:
         """Return the currently active backend."""
         if self._active_name:
             return self._backends.get(self._active_name)
@@ -1344,7 +1344,7 @@ class BackendRegistry:
         return None
 
     @property
-    def active_name(self) -> Optional[str]:
+    def active_name(self) -> str | None:
         """Return the name of the active backend."""
         return self._active_name
 
@@ -1392,7 +1392,7 @@ class BackendRegistry:
 # Singleton
 # ---------------------------------------------------------------------------
 
-_registry_instance: Optional[BackendRegistry] = None
+_registry_instance: BackendRegistry | None = None
 _registry_lock = threading.Lock()
 
 
@@ -1428,7 +1428,7 @@ def get_backend_registry() -> BackendRegistry:
         return _registry_instance
 
 
-def init_backends_from_config(config_path: Optional[str] = None) -> BackendRegistry:
+def init_backends_from_config(config_path: str | None = None) -> BackendRegistry:
     """Initialize backends from backends.yaml configuration.
 
     Loads configuration and applies settings to the registry.
@@ -1581,7 +1581,7 @@ def _parse_gguf_filename(path: Path) -> BackendModelInfo:
     )
 
 
-def _load_backend_config(config_path: Optional[str] = None) -> dict:
+def _load_backend_config(config_path: str | None = None) -> dict:
     """Load backends.yaml configuration."""
     if config_path:
         p = Path(config_path)

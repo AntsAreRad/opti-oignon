@@ -39,7 +39,7 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 def _read(*parts: str) -> str:
     """Read a repository file as UTF-8 text."""
-    with open(os.path.join(PROJECT_ROOT, *parts), "r", encoding="utf-8") as fh:
+    with open(os.path.join(PROJECT_ROOT, *parts), encoding="utf-8") as fh:
         return fh.read()
 
 

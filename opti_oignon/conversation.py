@@ -31,9 +31,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import DATA_DIR
-
 from opti_oignon.db_utils import safe_connect
+
+from .config import DATA_DIR
 
 # EXP-01 (S194): real app version for export metadata (was hardcoded "1.6.3")
 try:
@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 try:
-    from .encryption import encrypt_field as _encrypt, decrypt_field as _decrypt
+    from .encryption import decrypt_field as _decrypt
+    from .encryption import encrypt_field as _encrypt
     _HAS_ENCRYPTION = True
 except ImportError:
     _HAS_ENCRYPTION = False
@@ -1497,7 +1498,7 @@ class ConversationManager:
                     )
 
                 conn.commit()
-            except Exception as e:
+            except Exception:
                 conn.rollback()
                 raise
             finally:

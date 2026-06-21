@@ -36,7 +36,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from opti_oignon.db_utils import safe_connect
 
@@ -507,8 +507,8 @@ class SignedAuditLog:
             query = (
                 "SELECT id, timestamp, event_type, source, action, "
                 "severity, details_json, prev_hash, entry_hash "
-                "FROM audit_chain{} "
-                "ORDER BY id DESC LIMIT ? OFFSET ?".format(where)
+                f"FROM audit_chain{where} "
+                "ORDER BY id DESC LIMIT ? OFFSET ?"
             )
             params.extend([limit, offset])
 

@@ -26,7 +26,6 @@ GET    /api/rag/injection-defense/config             -- Get defense config (S144
 import logging
 import os
 import tempfile
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # S159: Chunked transfer for large RAG responses
 try:
-    from opti_oignon.chunked_response import chunked_json_generator, DEFAULT_CHUNK_SIZE
+    from opti_oignon.chunked_response import DEFAULT_CHUNK_SIZE, chunked_json_generator
     CHUNKED_RESPONSE_AVAILABLE = True
 except ImportError:
     CHUNKED_RESPONSE_AVAILABLE = False
@@ -230,7 +229,7 @@ class QueryResponseSchema(BaseModel):
 def _get_store():
     """Get the RAGVectorStore singleton, raising 503 if unavailable."""
     try:
-        from opti_oignon.rag_store import RAGVectorStore, RAG_STORE_AVAILABLE
+        from opti_oignon.rag_store import RAG_STORE_AVAILABLE, RAGVectorStore  # noqa: F401
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -481,7 +480,7 @@ async def ingest_batch(
         if not upload.filename:
             continue
 
-        suffix = os.path.splitext(upload.filename)[1] or ".txt"
+        suffix = os.path.splitext(upload.filename)[1] or ".txt"  # noqa: F841
         # Use a unique name to avoid collisions
         safe_name = f"{len(saved_paths):04d}_{upload.filename}"
         tmp_path = os.path.join(tmp_dir, safe_name)

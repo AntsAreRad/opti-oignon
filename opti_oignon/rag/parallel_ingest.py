@@ -31,10 +31,10 @@ Usage::
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,8 @@ class ChunkResult:
     chunk_id: str
     status: ChunkStatus
     elapsed_s: float = 0.0
-    error_message: Optional[str] = None
-    embedding_dim: Optional[int] = None
+    error_message: str | None = None
+    embedding_dim: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,7 +149,7 @@ class ProgressTracker:
     def __init__(
         self,
         total: int,
-        callback: Optional[Callable[[int, int], None]] = None,
+        callback: Callable[[int, int], None] | None = None,
     ) -> None:
         self._total = total
         self._done = 0
@@ -215,10 +215,10 @@ class ParallelIngestWorker:
     def ingest_chunks(
         self,
         chunks: Sequence[Any],
-        embed_fn: Callable[[str], Optional[list[float]]],
+        embed_fn: Callable[[str], list[float] | None],
         store_fn: Callable[[str, list[float], dict[str, Any]], Any],
         *,
-        progress_cb: Optional[Callable[[int, int], None]] = None,
+        progress_cb: Callable[[int, int], None] | None = None,
         skip_empty: bool = True,
     ) -> IngestBatchResult:
         """Process a batch of chunks in parallel.
@@ -311,7 +311,7 @@ class ParallelIngestWorker:
         self,
         index: int,
         chunk: Any,
-        embed_fn: Callable[[str], Optional[list[float]]],
+        embed_fn: Callable[[str], list[float] | None],
         store_fn: Callable[[str, list[float], dict[str, Any]], Any],
         tracker: ProgressTracker,
         skip_empty: bool,
@@ -405,11 +405,11 @@ class ParallelIngestWorker:
 
 def parallel_ingest(
     chunks: Sequence[Any],
-    embed_fn: Callable[[str], Optional[list[float]]],
+    embed_fn: Callable[[str], list[float] | None],
     store_fn: Callable[[str, list[float], dict[str, Any]], Any],
     *,
     max_workers: int = DEFAULT_MAX_WORKERS,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> IngestBatchResult:
     """One-shot convenience wrapper around :class:`ParallelIngestWorker`.
 

@@ -33,7 +33,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import yaml
 
@@ -225,7 +225,7 @@ class TunerJob:
     completed_steps: int = 0
     started_at: float = 0.0
     finished_at: float = 0.0
-    result: Optional[TunerProfile] = None
+    result: TunerProfile | None = None
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -557,8 +557,8 @@ class AutoTuner:
         self,
         config: TunerConfig,
         param_space: ParameterSpace,
-        benchmark_fn: Optional[Callable[[dict], BenchmarkResult]] = None,
-        progress_fn: Optional[Callable[[TunerJob], None]] = None,
+        benchmark_fn: Callable[[dict], BenchmarkResult] | None = None,
+        progress_fn: Callable[[TunerJob], None] | None = None,
     ):
         self._config = config
         self._param_space = param_space
@@ -809,7 +809,7 @@ class AutoTunerManager:
     the API surface used by route handlers.
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self._config = TunerConfig()
         self._param_space = ParameterSpace()
         self._profiles: dict[str, TunerProfile] = {}
@@ -818,7 +818,7 @@ class AutoTunerManager:
         self._lock = threading.RLock()
         self._load_config(config_path)
 
-    def _load_config(self, config_path: Optional[str] = None) -> None:
+    def _load_config(self, config_path: str | None = None) -> None:
         """Load configuration from YAML."""
         p = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
         if not p.is_file():
@@ -826,7 +826,7 @@ class AutoTunerManager:
             return
 
         try:
-            with open(p, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning("Failed to load auto_tuner.yaml: %s", exc)
@@ -853,7 +853,7 @@ class AutoTunerManager:
         if not _RESULTS_PATH.is_file():
             return
         try:
-            with open(_RESULTS_PATH, "r", encoding="utf-8") as f:
+            with open(_RESULTS_PATH, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 for key, val in data.items():
@@ -904,7 +904,7 @@ class AutoTunerManager:
         with self._lock:
             return {k: v.to_dict() for k, v in self._profiles.items()}
 
-    def get_result(self, model_name: str) -> Optional[TunerProfile]:
+    def get_result(self, model_name: str) -> TunerProfile | None:
         """Get best config for a specific model."""
         with self._lock:
             profile = self._profiles.get(model_name)
@@ -925,7 +925,7 @@ class AutoTunerManager:
         self,
         model_name: str,
         benchmark_fn: Callable[[dict], BenchmarkResult],
-        progress_fn: Optional[Callable[[TunerJob], None]] = None,
+        progress_fn: Callable[[TunerJob], None] | None = None,
     ) -> TunerJob:
         """Start a tuning session for a model.
 
@@ -983,7 +983,7 @@ class AutoTunerManager:
             tuner.cancel()
             return True
 
-    def get_job(self, model_name: str) -> Optional[TunerJob]:
+    def get_job(self, model_name: str) -> TunerJob | None:
         """Get the current/last job for a model."""
         with self._lock:
             job = self._active_jobs.get(model_name)
@@ -992,7 +992,7 @@ class AutoTunerManager:
             # Return a snapshot.
             return job
 
-    def apply_result(self, model_name: str) -> Optional[dict]:
+    def apply_result(self, model_name: str) -> dict | None:
         """Get the best params for a model (for manual application).
 
         Returns the best_params dict, or None if no profile exists.
@@ -1029,12 +1029,12 @@ class AutoTunerManager:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_manager: Optional[AutoTunerManager] = None
+_manager: AutoTunerManager | None = None
 _init_lock = threading.Lock()
 
 
 def get_auto_tuner_manager(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
 ) -> AutoTunerManager:
     """Get or create the module-level singleton manager."""
     global _manager

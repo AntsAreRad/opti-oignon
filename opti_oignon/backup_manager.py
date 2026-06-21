@@ -44,14 +44,13 @@ is honest and fail-secure, never a silent partial import.
 """
 
 import base64
-import copy
 import json
 import logging
 import platform
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +61,17 @@ logger = logging.getLogger(__name__)
 try:
     from opti_oignon.pqc_signatures import (
         PQC_AVAILABLE as _PQC_LIB_AVAILABLE,
+    )
+    from opti_oignon.pqc_signatures import (
         is_pqc_enabled,
-        sign_backup as _pqc_sign,
-        verify_backup as _pqc_verify,
         load_pqc_keypair,
         pqc_keypair_exists,
+    )
+    from opti_oignon.pqc_signatures import (
+        sign_backup as _pqc_sign,
+    )
+    from opti_oignon.pqc_signatures import (
+        verify_backup as _pqc_verify,
     )
 except ImportError:
     _PQC_LIB_AVAILABLE = False
@@ -888,7 +893,7 @@ class BackupManager:
             cfg_path = Path(__file__).parent / "config" / "telemetry.yaml"
             if cfg_path.is_file():
                 import yaml
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     result["pipeline"] = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.debug("Cannot export telemetry pipeline config: %s", exc)
@@ -912,7 +917,7 @@ class BackupManager:
             cfg_path = Path(__file__).parent / "config" / "sandbox.yaml"
             if cfg_path.is_file():
                 import yaml
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     return yaml.safe_load(f) or {}
         except Exception as exc:
             logger.debug("Cannot export sandbox config: %s", exc)
@@ -1040,7 +1045,7 @@ class BackupManager:
             cfg_path = Path(__file__).parent / "config" / "fine_tune.yaml"
             if cfg_path.is_file():
                 import yaml
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     result["config"] = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.debug("Cannot export fine-tune config: %s", exc)
@@ -1095,7 +1100,7 @@ class BackupManager:
             cfg_path = Path(__file__).parent / "config" / "projects.yaml"
             if cfg_path.is_file():
                 import yaml
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     return yaml.safe_load(f) or {}
         except Exception as exc:
             logger.debug("Cannot export projects settings: %s", exc)
@@ -1252,7 +1257,7 @@ class BackupManager:
                     with open(cfg_path, "w", encoding="utf-8") as f:
                         yaml.safe_dump(pipeline, f, default_flow_style=False)
                 elif strategy == STRATEGY_MERGE and cfg_path.is_file():
-                    with open(cfg_path, "r", encoding="utf-8") as f:
+                    with open(cfg_path, encoding="utf-8") as f:
                         current = yaml.safe_load(f) or {}
                     merged = dict(current)
                     for k, v in pipeline.items():
@@ -1285,7 +1290,7 @@ class BackupManager:
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     yaml.safe_dump(data, f, default_flow_style=False)
             elif strategy == STRATEGY_MERGE and cfg_path.is_file():
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     current = yaml.safe_load(f) or {}
                 merged = dict(current)
                 for k, v in data.items():
@@ -1359,7 +1364,7 @@ class BackupManager:
                     with open(cfg_path, "w", encoding="utf-8") as f:
                         yaml.safe_dump(backup_yaml, f, default_flow_style=False)
                 elif strategy == STRATEGY_MERGE and cfg_path.is_file():
-                    with open(cfg_path, "r", encoding="utf-8") as f:
+                    with open(cfg_path, encoding="utf-8") as f:
                         current = yaml.safe_load(f) or {}
                     for k, v in backup_yaml.items():
                         if k not in current:
@@ -1451,7 +1456,7 @@ class BackupManager:
                     with open(cfg_path, "w", encoding="utf-8") as f:
                         yaml.safe_dump(cfg, f, default_flow_style=False)
                 elif strategy == STRATEGY_MERGE and cfg_path.is_file():
-                    with open(cfg_path, "r", encoding="utf-8") as f:
+                    with open(cfg_path, encoding="utf-8") as f:
                         current = yaml.safe_load(f) or {}
                     merged = dict(current)
                     for k, v in cfg.items():
@@ -1563,7 +1568,7 @@ class BackupManager:
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     yaml.safe_dump(data, f, default_flow_style=False)
             elif strategy == STRATEGY_MERGE and cfg_path.is_file():
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, encoding="utf-8") as f:
                     current = yaml.safe_load(f) or {}
                 merged = dict(current)
                 for k, v in data.items():
@@ -1608,7 +1613,7 @@ def _load_backup_config() -> dict:
     cfg_path = Path(__file__).parent / "config" / "security.yaml"
     try:
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("backup", {})
     except Exception:
@@ -1637,7 +1642,12 @@ def encrypt_backup(backup_data: dict[str, Any], password: str) -> bytes:
         raise ValueError("Backup encryption password must be at least 8 characters")
 
     try:
-        from .encryption import derive_key_from_passphrase, encrypt_bytes, _KDF_ARGON2ID, _KDF_PBKDF2
+        from .encryption import (
+            _KDF_ARGON2ID,
+            _KDF_PBKDF2,
+            derive_key_from_passphrase,
+            encrypt_bytes,
+        )
     except ImportError:
         raise RuntimeError("Encryption module not available")
 
@@ -1680,7 +1690,7 @@ def decrypt_backup(encrypted_data: bytes, password: str) -> dict[str, Any]:
         raise ValueError("Not an encrypted Opti-Oignon backup (invalid magic bytes)")
 
     try:
-        from .encryption import derive_key_from_passphrase, decrypt_bytes, _KDF_ARGON2ID
+        from .encryption import _KDF_ARGON2ID, decrypt_bytes, derive_key_from_passphrase
     except ImportError:
         raise RuntimeError("Encryption module not available")
 

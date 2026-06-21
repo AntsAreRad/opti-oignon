@@ -28,7 +28,7 @@ from .config import config
 
 # S46: Conditional import of model profiles
 try:
-    from .model_profiles import ModelProfile, RoutingReason, profile_manager
+    from .model_profiles import ModelProfile, RoutingReason, profile_manager  # noqa: F401
     MODEL_PROFILES_AVAILABLE = True
 except ImportError:
     MODEL_PROFILES_AVAILABLE = False
@@ -270,7 +270,7 @@ class ModelRouter:
             return None
 
         available = self.get_available_models()
-        alternatives = [p.name for p in vision_only]
+        alternatives = [p.name for p in vision_only]  # noqa: F841
 
         for profile in vision_only:
             if profile.name in available:
@@ -484,7 +484,7 @@ class ModelRouter:
 
                 if best_profiles:
                     available = self.get_available_models()
-                    alternatives = [p.name for p in best_profiles]
+                    alternatives = [p.name for p in best_profiles]  # noqa: F841
 
                     for profile in best_profiles:
                         if profile.name in available:

@@ -53,7 +53,6 @@ from opti_oignon.smart_router import (
     SmartRoutingResult,
 )
 
-
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -932,9 +931,10 @@ class TestModelHealthAPI(unittest.TestCase):
     def setUpClass(cls):
         """Set up FastAPI test client."""
         try:
-            from fastapi.testclient import TestClient
-            from opti_oignon.api.routes_smart_routing import router
             from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+
+            from opti_oignon.api.routes_smart_routing import router
             app = FastAPI()
             app.include_router(router)
             cls.client = TestClient(app)

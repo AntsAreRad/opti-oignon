@@ -335,8 +335,8 @@ class ToolRegistry:
         """Check if the sandbox manager is available."""
         try:
             from opti_oignon.sandbox_manager import (
-                sandbox_manager,
                 SANDBOX_AVAILABLE,
+                sandbox_manager,
             )
             return SANDBOX_AVAILABLE and sandbox_manager is not None
         except ImportError:
@@ -580,8 +580,8 @@ def _register_sandbox_tools(registry: ToolRegistry) -> None:
     """Register sandboxed file tools (S73) if available."""
     try:
         from opti_oignon.file_tools import (
-            get_all_sandbox_tool_definitions,
             FILE_TOOLS_AVAILABLE,
+            get_all_sandbox_tool_definitions,
         )
         if not FILE_TOOLS_AVAILABLE:
             return

@@ -20,7 +20,7 @@ except ImportError:
     _safe_connect = lambda p, **kw: sqlite3.connect(str(p), **kw)
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "task-extractor"
 __plugin_version__: str = "1.0.0"
@@ -98,7 +98,7 @@ def _build_pattern_regex(patterns: list[str]) -> re.Pattern[str]:
 def extract_tasks(
     text: str,
     *,
-    patterns: Optional[list[str]] = None,
+    patterns: list[str] | None = None,
     max_tasks: int = 10,
 ) -> list[dict[str, str]]:
     """Extract task items from response text.
@@ -175,7 +175,7 @@ class TaskDB:
     def __init__(self, db_path: str | Path, max_tasks: int = _MAX_TASKS) -> None:
         self.db_path = str(db_path)
         self.max_tasks = max_tasks
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -333,7 +333,7 @@ class TaskDB:
 # Module-level DB instance (lazy init)
 # =========================================================================
 
-_db: Optional[TaskDB] = None
+_db: TaskDB | None = None
 
 
 def _get_db(ctx: Any) -> TaskDB:
@@ -396,7 +396,7 @@ def _format_task_list(tasks: list[dict[str, Any]], title: str = "Tasks") -> str:
 # Hook implementations
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: extract tasks from LLM response.
 
     Scans the response for action items and stores them in the
@@ -448,7 +448,7 @@ def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
     }
 
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Tool call hook: handle task management slash commands.
 
     Commands:

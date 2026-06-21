@@ -32,7 +32,6 @@ import os
 import re
 import shlex
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -41,11 +40,13 @@ logger = logging.getLogger(__name__)
 # Conditional imports
 try:
     from opti_oignon.sandbox_manager import (
+        SANDBOX_AVAILABLE,
         SandboxManager,
         SandboxSession,
-        sandbox_manager as _default_sandbox_manager,
-        SANDBOX_AVAILABLE,
         validate_sandbox_path,
+    )
+    from opti_oignon.sandbox_manager import (
+        sandbox_manager as _default_sandbox_manager,
     )
 except ImportError:
     SANDBOX_AVAILABLE = False
@@ -57,9 +58,9 @@ except ImportError:
 try:
     from opti_oignon.file_tools import (
         _handle_sandbox_bash,
-        _handle_sandbox_view,
         _handle_sandbox_create_file,
         _handle_sandbox_str_replace,
+        _handle_sandbox_view,
     )
     FILE_TOOLS_AVAILABLE = True
 except ImportError:

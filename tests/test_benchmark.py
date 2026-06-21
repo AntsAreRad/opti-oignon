@@ -799,8 +799,8 @@ class TestThreadSafety:
             except Exception as e:
                 errors.append(str(e))
         threads = [threading.Thread(target=w, args=(i,)) for i in range(10)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads: t.start()  # noqa: E701
+        for t in threads: t.join()  # noqa: E701
         assert not errors and history.get_run_count() == 10
 
 

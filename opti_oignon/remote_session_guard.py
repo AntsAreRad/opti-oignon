@@ -30,7 +30,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 
 import yaml
 
@@ -268,7 +267,7 @@ class RemoteSessionGuard:
 
         try:
             if _SECURITY_YAML.exists():
-                with open(_SECURITY_YAML, "r", encoding="utf-8") as fh:
+                with open(_SECURITY_YAML, encoding="utf-8") as fh:
                     cfg = yaml.safe_load(fh) or {}
                 ra = cfg.get("remote_access", {})
                 if isinstance(ra, dict):

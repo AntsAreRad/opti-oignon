@@ -14,9 +14,8 @@ import sqlite3
 import statistics
 import threading
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -102,7 +101,7 @@ def _load_config(config_path: Path | None = None) -> dict:
     cfg = dict(_DEFAULT_CONFIG)
     try:
         if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
             # Merge top-level keys
             for key in ("enabled", "retention_days", "default_window_seconds",
@@ -401,19 +400,19 @@ class PerformanceMonitor:
 
             # S138: validate column name against allowlist
             _METRIC_COLS = frozenset({"latency_ms", "quality_score"})
-            assert col in _METRIC_COLS, "Invalid metric column: {}".format(col)
+            assert col in _METRIC_COLS, f"Invalid metric column: {col}"
 
             # Recent average
             row_recent = conn.execute(
-                "SELECT AVG({}) AS val, COUNT(*) AS cnt FROM metrics "
-                "WHERE model = ? AND timestamp >= ?".format(col),
+                f"SELECT AVG({col}) AS val, COUNT(*) AS cnt FROM metrics "
+                "WHERE model = ? AND timestamp >= ?",
                 (model, recent_cutoff),
             ).fetchone()
 
             # Baseline average (older data only)
             row_baseline = conn.execute(
-                "SELECT AVG({}) AS val, COUNT(*) AS cnt FROM metrics "
-                "WHERE model = ? AND timestamp >= ? AND timestamp < ?".format(col),
+                f"SELECT AVG({col}) AS val, COUNT(*) AS cnt FROM metrics "
+                "WHERE model = ? AND timestamp >= ? AND timestamp < ?",
                 (model, baseline_cutoff, recent_cutoff),
             ).fetchone()
         finally:

@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Fixture: isolated router + patched app
 # ---------------------------------------------------------------------------

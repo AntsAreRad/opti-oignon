@@ -34,9 +34,8 @@ import os
 import shutil
 import sqlite3
 import tempfile
-import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,9 @@ Covers: API endpoints, tool registration in tool_registry,
 SandboxToolSession lifecycle and tool generation, frontend file existence.
 """
 
+import importlib.util
 import os
 import sys
-import importlib.util
 
 import pytest
 

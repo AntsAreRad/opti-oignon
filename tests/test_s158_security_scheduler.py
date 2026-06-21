@@ -789,32 +789,32 @@ class TestModuleStructure:
         assert mod.checkpoint_before_apply is True
 
     def test_scheduler_ast_valid(self):
-        with open(SCHEDULER_PATH, "r", encoding="utf-8") as f:
+        with open(SCHEDULER_PATH, encoding="utf-8") as f:
             tree = ast.parse(f.read())
         assert isinstance(tree, ast.Module)
 
     def test_dep_monitor_ast_valid(self):
-        with open(DEP_MONITOR_PATH, "r", encoding="utf-8") as f:
+        with open(DEP_MONITOR_PATH, encoding="utf-8") as f:
             tree = ast.parse(f.read())
         assert isinstance(tree, ast.Module)
 
     def test_config_ast_valid(self):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
             tree = ast.parse(f.read())
         assert isinstance(tree, ast.Module)
 
     def test_routes_security_ast_valid(self):
-        with open(ROUTES_SECURITY_PATH, "r", encoding="utf-8") as f:
+        with open(ROUTES_SECURITY_PATH, encoding="utf-8") as f:
             tree = ast.parse(f.read())
         assert isinstance(tree, ast.Module)
 
     def test_app_ast_valid(self):
-        with open(APP_PATH, "r", encoding="utf-8") as f:
+        with open(APP_PATH, encoding="utf-8") as f:
             tree = ast.parse(f.read())
         assert isinstance(tree, ast.Module)
 
     def test_no_french_in_scheduler(self):
-        with open(SCHEDULER_PATH, "r", encoding="utf-8") as f:
+        with open(SCHEDULER_PATH, encoding="utf-8") as f:
             content = f.read()
         # Check for common French words in code comments
         french_patterns = [
@@ -827,7 +827,7 @@ class TestModuleStructure:
             )
 
     def test_no_french_in_dep_monitor(self):
-        with open(DEP_MONITOR_PATH, "r", encoding="utf-8") as f:
+        with open(DEP_MONITOR_PATH, encoding="utf-8") as f:
             content = f.read()
         french_patterns = [
             r"\bvoir\b", r"\bfonction\b", r"\bretourne\b",
@@ -838,7 +838,7 @@ class TestModuleStructure:
             )
 
     def test_no_emoji_in_scheduler(self):
-        with open(SCHEDULER_PATH, "r", encoding="utf-8") as f:
+        with open(SCHEDULER_PATH, encoding="utf-8") as f:
             content = f.read()
         emoji_pattern = re.compile(
             "[\U0001f600-\U0001f64f\U0001f300-\U0001f5ff"
@@ -847,7 +847,7 @@ class TestModuleStructure:
         assert not emoji_pattern.search(content), "Emoji found in scheduler"
 
     def test_no_emoji_in_dep_monitor(self):
-        with open(DEP_MONITOR_PATH, "r", encoding="utf-8") as f:
+        with open(DEP_MONITOR_PATH, encoding="utf-8") as f:
             content = f.read()
         emoji_pattern = re.compile(
             "[\U0001f600-\U0001f64f\U0001f300-\U0001f5ff"
@@ -869,7 +869,7 @@ class TestRedteamYAMLStructure:
         if "yaml" in sys.modules and not hasattr(sys.modules["yaml"], "__file__"):
             del sys.modules["yaml"]
         import yaml
-        with open(REDTEAM_YAML_PATH, "r", encoding="utf-8") as f:
+        with open(REDTEAM_YAML_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         assert "scheduler" in data
         sched = data["scheduler"]
@@ -885,7 +885,7 @@ class TestRedteamYAMLStructure:
         if "yaml" in sys.modules and not hasattr(sys.modules["yaml"], "__file__"):
             del sys.modules["yaml"]
         import yaml
-        with open(REDTEAM_YAML_PATH, "r", encoding="utf-8") as f:
+        with open(REDTEAM_YAML_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         expected_keys = {
             "enabled", "interval", "quiet_hours_start", "quiet_hours_end",
@@ -904,7 +904,7 @@ class TestRoutesNewEndpoints:
     """Verify new S158 endpoints exist in routes_security.py."""
 
     def setup_method(self):
-        with open(ROUTES_SECURITY_PATH, "r", encoding="utf-8") as f:
+        with open(ROUTES_SECURITY_PATH, encoding="utf-8") as f:
             self.content = f.read()
 
     def test_scheduler_get_endpoint(self):
@@ -930,7 +930,7 @@ class TestAppHealthScheduler:
     """Verify scheduler section in app.py health endpoint."""
 
     def setup_method(self):
-        with open(APP_PATH, "r", encoding="utf-8") as f:
+        with open(APP_PATH, encoding="utf-8") as f:
             self.content = f.read()
 
     def test_scheduler_import_in_health(self):

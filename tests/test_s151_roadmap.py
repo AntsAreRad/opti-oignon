@@ -11,8 +11,8 @@ Verifies:
 
 import importlib.util
 import os
-import sys
 import re
+import sys
 
 # -- Isolation stubs (standard pattern) --
 for mod_name in [
@@ -36,7 +36,7 @@ SESSION_TRACKING = os.path.join(PROJECT_ROOT, "SESSION_TRACKING_S65_S151.md")
 # -- helpers --
 
 def read_file(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

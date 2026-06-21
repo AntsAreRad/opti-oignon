@@ -34,7 +34,7 @@ import base64
 import binascii
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -130,7 +130,7 @@ def _tags_to_list(raw: Any) -> list[str]:
     return []
 
 
-def _tags_to_opaque(tags: Optional[list[str]]) -> Optional[str]:
+def _tags_to_opaque(tags: list[str] | None) -> str | None:
     """Encode a tag list as the opaque JSON-array string the store stores.
 
     Mirrors the ``manage_notes`` tool's ``_notes_tags_value`` so the route and
@@ -143,7 +143,7 @@ def _tags_to_opaque(tags: Optional[list[str]]) -> Optional[str]:
     return json.dumps(items)
 
 
-def _decode_body(b64: Optional[str]) -> bytes:
+def _decode_body(b64: str | None) -> bytes:
     """Decode the base64 opaque body; an invalid value is a 422, not a 500."""
     if not b64:
         return b""

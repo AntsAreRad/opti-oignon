@@ -14,7 +14,6 @@ Falls back to legacy /api/embeddings endpoint for older Ollama versions.
 
 import logging
 import threading
-import time
 
 import numpy as np
 import requests

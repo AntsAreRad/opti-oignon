@@ -561,14 +561,14 @@ class TestFrontendHexCompliance:
     def test_telemetry_dashboard_no_hex(self):
         violations = self._check_file("TelemetryDashboard.svelte")
         assert violations == [], (
-            f"Hardcoded hex in TelemetryDashboard.svelte:\n" +
+            "Hardcoded hex in TelemetryDashboard.svelte:\n" +
             "\n".join(violations)
         )
 
     def test_model_manager_no_hex(self):
         violations = self._check_file("ModelManager.svelte")
         assert violations == [], (
-            f"Hardcoded hex in ModelManager.svelte:\n" +
+            "Hardcoded hex in ModelManager.svelte:\n" +
             "\n".join(violations)
         )
 

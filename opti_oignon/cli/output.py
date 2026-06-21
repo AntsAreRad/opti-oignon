@@ -10,9 +10,7 @@ and error messages.  Respects ``NO_COLOR`` / ``--no-color``.
 import itertools
 import sys
 import threading
-import time
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # -- ANSI colour helpers ---------------------------------------------------
 
@@ -88,7 +86,7 @@ class Spinner:
         self.message = message
         self.enabled = enabled and sys.stderr.isatty()
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     def __enter__(self) -> "Spinner":
         if self.enabled:
@@ -115,7 +113,7 @@ class Spinner:
 
 # -- Formatters ------------------------------------------------------------
 
-def format_models_table(models: List[Dict[str, Any]], *, color: bool = True) -> str:
+def format_models_table(models: list[dict[str, Any]], *, color: bool = True) -> str:
     """Format a list of model dicts as a terminal-friendly table."""
     if not models:
         return "No models available."
@@ -137,7 +135,7 @@ def format_models_table(models: List[Dict[str, Any]], *, color: bool = True) -> 
     return "\n".join(lines)
 
 
-def format_status(data: Dict[str, Any], *, color: bool = True) -> str:
+def format_status(data: dict[str, Any], *, color: bool = True) -> str:
     """Format health dashboard data as a readable status report."""
     lines: list[str] = []
 

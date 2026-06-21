@@ -12,7 +12,7 @@ Pure text processing — no external dependencies, no permissions needed.
 import logging
 import math
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "auto-tldr"
 __plugin_version__: str = "1.0.0"
@@ -314,7 +314,7 @@ def generate_summary(
 # Hook implementation
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: prepend TL;DR to long responses.
 
     Checks if the response exceeds the word threshold, generates

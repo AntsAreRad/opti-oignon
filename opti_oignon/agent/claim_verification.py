@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .untrusted_context import untrusted_message_many
 

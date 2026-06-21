@@ -911,7 +911,6 @@ class TestReconcileTtlQuota:
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-
 _ROUTES_SANDBOX_CACHE = {}
 
 

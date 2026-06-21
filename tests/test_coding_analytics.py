@@ -13,16 +13,15 @@ Covers:
 - Analytics API endpoint schema
 """
 
+# ---------------------------------------------------------------------------
+# Direct module loading to avoid import chain issues in test env
+# ---------------------------------------------------------------------------
+import importlib.util
 import os
 import sqlite3
 import tempfile
 import time
 import unittest
-
-# ---------------------------------------------------------------------------
-# Direct module loading to avoid import chain issues in test env
-# ---------------------------------------------------------------------------
-import importlib.util
 
 _base = os.path.join(
     os.path.dirname(__file__), os.pardir, "opti_oignon"

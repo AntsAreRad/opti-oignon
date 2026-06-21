@@ -20,7 +20,6 @@ Configuration lives in config/vision.yaml (delegation_* keys).
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +74,7 @@ class VisionPipeline:
         self,
         vision_config=None,
         ollama_module=None,
-        config_path: Optional[Path] = None,
+        config_path: Path | None = None,
     ) -> None:
         self._vision_config = vision_config or _default_vision_config
         self._ollama = ollama_module or _ollama_module
@@ -99,7 +98,7 @@ class VisionPipeline:
         if not self._config_path.exists():
             return
         try:
-            with open(self._config_path, "r", encoding="utf-8") as fh:
+            with open(self._config_path, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
 
             delegation = data.get("delegation_enabled")
@@ -166,7 +165,7 @@ class VisionPipeline:
             logger.warning("Failed to list models: %s", exc)
             return []
 
-    def _resolve_vision_model(self) -> Optional[str]:
+    def _resolve_vision_model(self) -> str | None:
         """Resolve the effective vision model using VisionConfig.
 
         Respects the user's preferred selection from Settings > Vision Model.
@@ -228,7 +227,7 @@ class VisionPipeline:
         self,
         image_data: list[str],
         user_prompt: str,
-        vision_model: Optional[str] = None,
+        vision_model: str | None = None,
     ) -> str:
         """Call the vision model to describe the image(s).
 
@@ -355,7 +354,7 @@ class VisionPipeline:
         message: str,
         images: list[str] | None,
         current_model: str,
-        on_status: Optional[callable] = None,
+        on_status: callable | None = None,
     ) -> tuple[str, list[str] | None, dict]:
         """Run the full vision delegation pipeline.
 

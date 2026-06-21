@@ -12,7 +12,7 @@ PUT    /api/plugins/{name}/config — Update plugin config
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -64,7 +64,7 @@ class InstallResponse(BaseModel):
     name: str = ""
     version: str = ""
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class StateChangeResponse(BaseModel):
@@ -72,14 +72,14 @@ class StateChangeResponse(BaseModel):
     name: str
     state: str
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class UninstallResponse(BaseModel):
     success: bool
     name: str
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class PluginConfigResponse(BaseModel):
@@ -97,7 +97,7 @@ class UpdateConfigResponse(BaseModel):
     name: str
     config: dict[str, Any] = {}
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # =========================================================================
@@ -169,7 +169,7 @@ def _record_to_info(record: Any) -> PluginInfo:
 
 @router.get("", response_model=PluginListResponse)
 def list_plugins(
-    state: Optional[str] = Query(None, description="Filter by state: installed, enabled, disabled"),
+    state: str | None = Query(None, description="Filter by state: installed, enabled, disabled"),
 ) -> dict:
     """List all installed plugins with optional state filter."""
     registry = _get_registry()
@@ -194,7 +194,7 @@ def install_plugin(req: InstallRequest) -> dict:
             auto_enable=req.auto_enable,
         )
         # Get the manifest info from the registry
-        registry = _get_registry()
+        registry = _get_registry()  # noqa: F841
 
         # Determine the plugin name from the loaded result or by scanning
         if loaded:
@@ -206,7 +206,7 @@ def install_plugin(req: InstallRequest) -> dict:
             manifest_path = Path(req.source_dir) / "manifest.yaml"
             if manifest_path.exists():
                 import yaml
-                with open(manifest_path, "r", encoding="utf-8") as fh:
+                with open(manifest_path, encoding="utf-8") as fh:
                     data = yaml.safe_load(fh)
                 name = data.get("name", "unknown")
                 version = data.get("version", "0.0.0")

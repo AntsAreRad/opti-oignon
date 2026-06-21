@@ -40,7 +40,7 @@ def _load_module(name, path):
 
 
 def _read(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

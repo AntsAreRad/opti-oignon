@@ -6,10 +6,10 @@ Covers: all REST endpoints, WebSocket, response shapes,
 error handling, and frontend file existence.
 """
 
+import importlib.util
 import json
 import os
 import sys
-import importlib.util
 
 import pytest
 

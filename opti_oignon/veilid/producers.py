@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from opti_oignon.veilid.records import RecordKind, SyncRecord, new_record
 
@@ -82,7 +82,7 @@ def _produce(
 
 def conversation_record(
     conversation_id: str,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,
@@ -103,7 +103,7 @@ def conversation_record(
 
 def note_record(
     note_id: str,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,
@@ -134,7 +134,7 @@ def note_record(
 def note_update_record(
     note_id: str,
     seq: int,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,
@@ -160,7 +160,7 @@ def note_update_record(
         raise ValueError("seq must be a positive integer")
     return _produce(
         RecordKind.NOTE_UPDATE,
-        "{0}:{1}".format(note_id, seq),
+        f"{note_id}:{seq}",
         payload,
         device=device,
         clock=clock,
@@ -171,7 +171,7 @@ def note_update_record(
 
 def memory_canonical_record(
     fact_id: str,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,
@@ -196,7 +196,7 @@ def memory_canonical_record(
 
 def memory_archive_record(
     entry_id: str,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,
@@ -220,7 +220,7 @@ def memory_archive_record(
 
 def skill_record(
     skill_id: str,
-    payload: Optional[Mapping[str, Any]] = None,
+    payload: Mapping[str, Any] | None = None,
     *,
     device: str,
     clock: int,

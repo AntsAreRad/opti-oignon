@@ -20,7 +20,6 @@ Modes:
 
 import logging
 import re
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -76,7 +75,7 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
         logger.warning("Humanizer config not found at %s, using defaults", config_path)
         return {}
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
         logger.error("Failed to load humanizer config: %s", e)

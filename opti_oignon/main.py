@@ -27,7 +27,6 @@ from pathlib import Path
 # Read version from single source of truth
 from .__version__ import __version__
 
-
 # =============================================================================
 # UI COMMAND
 # =============================================================================
@@ -387,7 +386,7 @@ def cmd_config(args):
         try:
             value = config.get(args.key)
             print(f"{args.key} = {value}")
-        except Exception as e:
+        except Exception:
             print(f"[ERR] Key not found: {args.key}")
             sys.exit(1)
 
@@ -809,7 +808,7 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
     )
 
     # rag status
-    rag_status = rag_subparsers.add_parser(
+    rag_status = rag_subparsers.add_parser(  # noqa: F841
         "status",
         help="Show RAG index status"
     )
@@ -836,7 +835,7 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
     config_subparsers = config_parser.add_subparsers(dest="config_action", help="Config actions")
 
     # config show
-    config_show = config_subparsers.add_parser(
+    config_show = config_subparsers.add_parser(  # noqa: F841
         "show",
         help="Show current configuration"
     )

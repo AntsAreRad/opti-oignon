@@ -27,12 +27,11 @@ import hashlib
 import hmac as _hmac
 import json
 import logging
-import os
 import secrets
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ class AllowlistEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AllowlistEntry":
+    def from_dict(cls, data: dict[str, Any]) -> AllowlistEntry:
         return cls(
             plugin_id=data.get("plugin_id", ""),
             code_hash=data.get("code_hash", ""),
@@ -180,7 +179,7 @@ def _sign_entry(entry: AllowlistEntry, key) -> str:
     perms_str = ",".join(sorted(entry.permissions))
     message = (
         f"{entry.plugin_id}||{entry.code_hash}||{perms_str}||{entry.batch_id}"
-    ).encode("utf-8")
+    ).encode()
     return _hmac.new(raw_key, message, hashlib.sha512).hexdigest()
 
 
@@ -198,7 +197,7 @@ def _load_allowlist() -> list[AllowlistEntry]:
     """Load the allowlist from disk."""
     try:
         if _ALLOWLIST_PATH.exists():
-            with open(_ALLOWLIST_PATH, "r", encoding="utf-8") as fh:
+            with open(_ALLOWLIST_PATH, encoding="utf-8") as fh:
                 data = json.load(fh)
             if isinstance(data, list):
                 return [AllowlistEntry.from_dict(d) for d in data]

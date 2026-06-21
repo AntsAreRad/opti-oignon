@@ -53,7 +53,7 @@ def _load_module(name, path):
 
 def _read(path):
     """Read file contents as string."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -673,7 +673,7 @@ class TestBranchesConfig(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         config_path = os.path.join(CONFIG_DIR, "branches.yaml")
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             cls.cfg = yaml.safe_load(f)
 
     def test_file_exists(self):

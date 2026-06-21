@@ -24,13 +24,12 @@ Usage examples::
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
 from .client import CLIClientError, OOClient
 from .config import CLIConfig, load_config
-from .output import format_models_table, format_status, echo_error, echo_success, Spinner
+from .output import Spinner, echo_error, echo_success, format_models_table, format_status
 
 
 def _get_client(ctx: click.Context) -> OOClient:
@@ -54,7 +53,7 @@ def _get_config(ctx: click.Context) -> CLIConfig:
               help="Disable colour output.")
 @click.version_option(package_name="opti-oignon")
 @click.pass_context
-def cli(ctx: click.Context, api_url: Optional[str], no_color: bool) -> None:
+def cli(ctx: click.Context, api_url: str | None, no_color: bool) -> None:
     """oo -- Opti-Oignon CLI companion.
 
     Talk to a running Opti-Oignon backend from your terminal.
@@ -83,8 +82,8 @@ def cli(ctx: click.Context, api_url: Optional[str], no_color: bool) -> None:
 @click.option("--json-out", "json_out", is_flag=True, default=False,
               help="Output full response as JSON.")
 @click.pass_context
-def ask(ctx: click.Context, prompt: Optional[str], model: Optional[str],
-        input_file: Optional[str], pipe: bool, json_out: bool) -> None:
+def ask(ctx: click.Context, prompt: str | None, model: str | None,
+        input_file: str | None, pipe: bool, json_out: bool) -> None:
     """Send a prompt to the LLM and stream the response."""
     client = _get_client(ctx)
     cfg = _get_config(ctx)
@@ -135,7 +134,7 @@ def ask(ctx: click.Context, prompt: Optional[str], model: Optional[str],
         ctx.exit(1)
 
 
-def _resolve_prompt(prompt: Optional[str], input_file: Optional[str], pipe: bool) -> str:
+def _resolve_prompt(prompt: str | None, input_file: str | None, pipe: bool) -> str:
     """Determine the final prompt string from the various input sources."""
     if pipe or (not sys.stdin.isatty() and not prompt and not input_file):
         return sys.stdin.read().strip()
@@ -203,7 +202,7 @@ def backup() -> None:
 @backup.command("export")
 @click.argument("output_path", required=False, default=None)
 @click.pass_context
-def backup_export(ctx: click.Context, output_path: Optional[str]) -> None:
+def backup_export(ctx: click.Context, output_path: str | None) -> None:
     """Export configuration backup to a JSON file."""
     client = _get_client(ctx)
     cfg = _get_config(ctx)
@@ -427,7 +426,7 @@ def redteam_status_cmd(ctx: click.Context) -> None:
               help="Specific report ID.")
 @click.pass_context
 def redteam_report_cmd(ctx: click.Context, fmt: str, use_last: bool,
-                       report_id: Optional[str]) -> None:
+                       report_id: str | None) -> None:
     """Display or download a red team report."""
     client = _get_client(ctx)
     cfg = _get_config(ctx)

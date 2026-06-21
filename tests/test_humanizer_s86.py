@@ -38,7 +38,7 @@ CONFIG_DIR = os.path.join(BACKEND_DIR, 'config')
 
 def _read(path):
     """Read file content safely."""
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         return f.read()
 
 
@@ -86,7 +86,7 @@ class TestHumanizerYAML(unittest.TestCase):
         import yaml
         self.config_path = os.path.join(CONFIG_DIR, 'humanizer.yaml')
         self.assertTrue(os.path.exists(self.config_path), "humanizer.yaml must exist")
-        with open(self.config_path, 'r', encoding='utf-8') as f:
+        with open(self.config_path, encoding='utf-8') as f:
             self.cfg = yaml.safe_load(f)
 
     def test_yaml_has_required_keys(self):

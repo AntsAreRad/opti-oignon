@@ -34,7 +34,7 @@ def test_oo_command_tree_complete():
     assert "@click.group()" in src
     # Top-level commands.
     for cmd in ("ask", "models", "status"):
-        assert f"@cli.command()\n" in src  # at least one bare command
+        assert "@cli.command()\n" in src  # at least one bare command
         assert f"def {cmd}(" in src, f"missing command function {cmd}"
     # Groups and their leaves.
     leaves = {
@@ -43,7 +43,7 @@ def test_oo_command_tree_complete():
         "redteam": ("run", "status", "report", "compare"),
     }
     for group, subs in leaves.items():
-        assert f"@cli.group()" in src
+        assert "@cli.group()" in src
         for sub in subs:
             assert f'@{group}.command("{sub}")' in src, f"missing {group} {sub}"
     # config group with invoke_without_command + its leaves.

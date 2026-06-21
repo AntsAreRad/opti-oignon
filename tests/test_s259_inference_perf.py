@@ -430,7 +430,7 @@ def _spec_cfg(**kw):
     return cfg_cls(**defaults)
 
 
-def _pair(cmd: list, flag: str) -> Optional[str]:
+def _pair(cmd: list, flag: str) -> str | None:
     assert flag in cmd, f"missing flag: {flag}"
     i = cmd.index(flag)
     assert i + 1 < len(cmd), f"flag {flag} has no value"

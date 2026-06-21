@@ -106,13 +106,13 @@ def _get_rbac():
     """Lazy-load RBAC functions."""
     try:
         from opti_oignon.rbac_enforcement import (
-            get_current_user,
-            get_user_id,
-            require_admin,
             enforce_user_ownership,
+            get_current_user,
             get_effective_user_id,
+            get_user_id,
             is_admin,
             log_admin_action,
+            require_admin,
         )
         return {
             "get_current_user": get_current_user,
@@ -131,8 +131,10 @@ def _get_rbac():
 try:
     from opti_oignon.rbac_enforcement import (
         get_current_user,
-        get_user_id as _get_user_id,
         require_admin,
+    )
+    from opti_oignon.rbac_enforcement import (
+        get_user_id as _get_user_id,
     )
 except ImportError:
     # Stubs for when module is loaded standalone

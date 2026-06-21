@@ -17,7 +17,6 @@ remembered to add a Depends().
 """
 
 import logging
-import os
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware

@@ -23,11 +23,11 @@ from .deps import (
     PRESET_AVAILABLE,
     RESPONSE_CACHE_AVAILABLE,
     SEMANTIC_CACHE_AVAILABLE,
-    perf_benchmark_runner,
     conversation_manager,
     executor,
     memory_manager,
     model_warmup,
+    perf_benchmark_runner,
     response_cache,
 )
 from .schemas import (

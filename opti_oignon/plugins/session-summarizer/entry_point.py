@@ -18,8 +18,7 @@ import logging
 import math
 import re
 import threading
-import time
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "session-summarizer"
 __plugin_version__: str = "1.0.0"
@@ -316,7 +315,7 @@ _CMD_SUMMARY_RESET = re.compile(r"^/summary\s+reset\s*$")
 # =========================================================================
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: track messages and trigger summary.
 
     Adds each response to the conversation buffer and triggers
@@ -341,7 +340,7 @@ def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
     return None
 
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Tool call hook: handle /summary commands.
 
     /summary       -- display current session summary

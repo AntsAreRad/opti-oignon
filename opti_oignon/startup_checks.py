@@ -357,7 +357,7 @@ def _check_encrypted_swap() -> CheckItem:
                 score_impact=0,
             )
 
-        with open(swap_path, "r", encoding="utf-8") as f:
+        with open(swap_path, encoding="utf-8") as f:
             lines = f.readlines()
 
         # First line is header

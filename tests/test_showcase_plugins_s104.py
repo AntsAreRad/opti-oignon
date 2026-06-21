@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 

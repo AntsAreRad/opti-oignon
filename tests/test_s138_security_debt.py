@@ -79,7 +79,7 @@ class TestNoRawSqliteConnect(unittest.TestCase):
                     violations.append(f"  {rel}:{i} -> {stripped[:80]}")
         self.assertEqual(
             violations, [],
-            f"Found raw sqlite3.connect() calls:\n" + "\n".join(violations),
+            "Found raw sqlite3.connect() calls:\n" + "\n".join(violations),
         )
 
     def test_conversation_uses_safe_connect(self):
@@ -217,7 +217,7 @@ class TestNoFstringSql(unittest.TestCase):
                     violations.append(f"  {rel}:{i} -> {stripped[:80]}")
         self.assertEqual(
             violations, [],
-            f"Found f-string SQL:\n" + "\n".join(violations),
+            "Found f-string SQL:\n" + "\n".join(violations),
         )
 
     def test_migrated_files_use_format(self):
@@ -295,7 +295,7 @@ class TestNoBareHexColors(unittest.TestCase):
                     violations.append(f"  {rel}:{i} -> {remaining} in: {stripped[:80]}")
         self.assertEqual(
             violations, [],
-            f"Found bare hex colors:\n" + "\n".join(violations),
+            "Found bare hex colors:\n" + "\n".join(violations),
         )
 
     def test_totp_setup_uses_css_var(self):

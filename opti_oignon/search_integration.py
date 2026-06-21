@@ -378,7 +378,7 @@ class SearchInterceptor:
                             f"tag ignore"
                         )
                         self._state = InterceptorState.NORMAL
-                        result = ""  # Supprimer le tag quand meme
+                        result = ""  # Supprimer le tag quand meme  # noqa: F841
                         self._buffer = ""
                         # Absorber le reste de la query + close tag
                         self._state = InterceptorState.COLLECTING

@@ -19,71 +19,71 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from opti_oignon.__version__ import __version__
 
+from .routes_agent import router as agent_router
+from .routes_agent_eval import router as agent_eval_router
+from .routes_answer_verification import answer_verification_router
 from .routes_artifacts import router as artifacts_router
+from .routes_auth import router as auth_router
+from .routes_backends import router as backends_router
+from .routes_backup import router as backup_router
 from .routes_benchmark import router as benchmark_dashboard_router
+from .routes_benchmark_v2 import router as benchmark_v2_router
+from .routes_branches import router as branches_router
 from .routes_cache import router as cache_router
+from .routes_cascading import router as cascading_router
 from .routes_chat import router as chat_router
+from .routes_citation_verification import citation_verification_router
+from .routes_claim_verification import claim_verification_router
 from .routes_code import router as code_router
+from .routes_coding import router as coding_router
+from .routes_compression import router as compression_router
 from .routes_context import router as context_router
+from .routes_context_optimizer import router as context_optimizer_router
 from .routes_conversations import router as conversations_router
 from .routes_exec_pipelines import router as exec_pipelines_router
 from .routes_export import router as export_router
 from .routes_feedback import router as feedback_router
 from .routes_files import router as files_router
-from .routes_health import router as health_router
-from .routes_memory import router as memory_router
-from .routes_memory import memories_router
-from .routes_notes import notes_router
-from .routes_note_actions import note_actions_router
-from .routes_claim_verification import claim_verification_router
-from .routes_answer_verification import answer_verification_router
-from .routes_citation_verification import citation_verification_router
-from .routes_notes_attachments import notes_attachments_router
-from .routes_notes_transcription import notes_transcription_router
-from .routes_notes_caption import notes_caption_router
-from .routes_note_updates import note_updates_router
-from .routes_models import router as models_router
-from .routes_pipelines import router as pipelines_router
-from .routes_presets import router as presets_router
-from .routes_projects import router as projects_router
-from .routes_compression import router as compression_router
-from .routes_learned_routing import router as learned_routing_router
-from .routes_cascading import router as cascading_router
-from .routes_speculative import router as speculative_router
-from .routes_prompt import router as prompt_router
-from .routes_network import router as network_router
-from .routes_performance import router as performance_router
-from .routes_settings import router as settings_router
-from .routes_smart_routing import router as smart_routing_router
-from .routes_sandbox import router as sandbox_router
-from .routes_coding import router as coding_router
-from .routes_search import router as search_router
-from .routes_system_presets import router as system_presets_router
-from .routes_humanizer import router as humanizer_router
-from .routes_benchmark_v2 import router as benchmark_v2_router
-from .routes_vision import router as vision_router
 from .routes_fine_tune import router as fine_tune_router
-from .routes_branches import router as branches_router
-from .routes_auth import router as auth_router
+from .routes_governor import router as governor_router
+from .routes_health import router as health_router
+from .routes_humanizer import router as humanizer_router
+from .routes_learned_routing import router as learned_routing_router
+from .routes_live_metrics import router as live_metrics_router
+from .routes_memory import memories_router
+from .routes_memory import router as memory_router
+from .routes_model_lifecycle import router as model_lifecycle_router
+from .routes_models import router as models_router
+from .routes_network import router as network_router
+from .routes_note_actions import note_actions_router
+from .routes_note_updates import note_updates_router
+from .routes_notes import notes_router
+from .routes_notes_attachments import notes_attachments_router
+from .routes_notes_caption import notes_caption_router
+from .routes_notes_transcription import notes_transcription_router
+from .routes_performance import router as performance_router
+from .routes_pipelines import router as pipelines_router
+from .routes_plugin_marketplace import router as plugin_marketplace_router
+from .routes_plugins import router as plugins_router
+from .routes_presets import router as presets_router
+from .routes_profiler import router as profiler_router
+from .routes_projects import router as projects_router
+from .routes_prompt import router as prompt_router
 from .routes_rag import router as rag_router
 from .routes_rag_dashboard import router as rag_dashboard_router
-from .routes_plugins import router as plugins_router
-from .routes_agent import router as agent_router
-from .routes_sync import router as sync_router
-from .routes_governor import router as governor_router
-from .routes_agent_eval import router as agent_eval_router
-from .routes_plugin_marketplace import router as plugin_marketplace_router
-from .routes_backends import router as backends_router
-from .routes_speculative_decoding import router as speculative_decoding_router
-from .routes_tuner import router as tuner_router
-from .routes_live_metrics import router as live_metrics_router
-from .routes_model_lifecycle import router as model_lifecycle_router
-from .routes_telemetry import router as telemetry_router
-from .routes_profiler import router as profiler_router
-from .routes_backup import router as backup_router
-from .routes_context_optimizer import router as context_optimizer_router
+from .routes_sandbox import router as sandbox_router
+from .routes_search import router as search_router
 from .routes_security import router as security_router
+from .routes_settings import router as settings_router
+from .routes_smart_routing import router as smart_routing_router
+from .routes_speculative import router as speculative_router
+from .routes_speculative_decoding import router as speculative_decoding_router
+from .routes_sync import router as sync_router
+from .routes_system_presets import router as system_presets_router
+from .routes_telemetry import router as telemetry_router
+from .routes_tuner import router as tuner_router
 from .routes_users import router as users_router
+from .routes_vision import router as vision_router
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ def _resolve_cors_origins() -> tuple[list[str], bool]:
             _os.path.dirname(__file__), "..", "config", "security.yaml"
         )
         if _os.path.isfile(_sec_path):
-            with open(_sec_path, "r", encoding="utf-8") as _fh:
+            with open(_sec_path, encoding="utf-8") as _fh:
                 _sec_cfg = _yaml.safe_load(_fh) or {}
             cors_cfg = _sec_cfg.get("cors", {})
             if isinstance(cors_cfg, dict) and "origins" in cors_cfg:
@@ -380,70 +380,70 @@ def health_check():
     from .deps import (
         ANALYTICS_AVAILABLE,
         ARTIFACT_AVAILABLE,
+        AUTH_AVAILABLE,
+        AUTO_TRIGGER_AVAILABLE,
         BENCHMARK_AVAILABLE,
         BENCHMARK_HISTORY_AVAILABLE,
+        BENCHMARK_JUDGE_AVAILABLE,
+        BENCHMARK_RECOMMENDATIONS_AVAILABLE,
+        BENCHMARK_V2_AVAILABLE,
+        BRANCHES_AVAILABLE,
+        CASCADING_AVAILABLE,
         CODE_EXECUTOR_AVAILABLE,
+        CODING_AGENT_AVAILABLE,
         CONFIG_AVAILABLE,
+        CONTEXT_OPTIMIZER_AVAILABLE,
         CONTEXT_WINDOW_AVAILABLE,
         CONVERSATION_AVAILABLE,
+        CONVERSATION_COMPRESSOR_AVAILABLE,
+        CUSTOM_PROFILES_AVAILABLE,
+        EXTERNAL_STORES_AVAILABLE,
         FEEDBACK_AVAILABLE,
+        FILE_TOOLS_AVAILABLE,
+        FINE_TUNE_EXPORT_AVAILABLE,
+        FINE_TUNE_TRACKER_AVAILABLE,
+        FINGERPRINT_AVAILABLE,
+        HUMANIZER_AVAILABLE,
+        HYBRID_SEARCH_AVAILABLE,
+        INFERENCE_BACKEND_AVAILABLE,
+        INFERENCE_PROFILER_AVAILABLE,
         LEARNED_ROUTER_AVAILABLE,
         MEMORY_AVAILABLE,
         MODEL_HEALTH_AVAILABLE,
+        MODEL_MANAGER_AVAILABLE,
         MODEL_WARMUP_AVAILABLE,
+        NETWORK_MANAGER_AVAILABLE,
+        PERFORMANCE_MONITOR_AVAILABLE,
+        PII_SANITIZER_AVAILABLE,
         PIPELINE_AVAILABLE,
+        PLUGIN_HOOKS_AVAILABLE,
+        PLUGIN_INDEX_AVAILABLE,
+        PLUGIN_INSTALLER_AVAILABLE,
+        PLUGIN_LOADER_AVAILABLE,
+        PLUGIN_REGISTRY_AVAILABLE,
+        PLUGIN_REVIEWS_AVAILABLE,
+        PLUGIN_TEMPLATE_AVAILABLE,
+        PRE_CACHE_AVAILABLE,
         PRESET_AVAILABLE,
         PROFILE_AVAILABLE,
         PROJECT_CONTEXT_AVAILABLE,
         PROJECT_TRIGGERS_AVAILABLE,
         PROJECTS_AVAILABLE,
-        CONVERSATION_COMPRESSOR_AVAILABLE,
         PROMPT_OPTIMIZATION_AVAILABLE,
-        CASCADING_AVAILABLE,
-        SPECULATIVE_AVAILABLE,
+        RAG_CHUNKER_AVAILABLE,
+        RAG_DASHBOARD_AVAILABLE,
+        RAG_STORE_AVAILABLE,
         RESPONSE_CACHE_AVAILABLE,
+        SANDBOX_AVAILABLE,
+        SANDBOX_TOOLS_AVAILABLE,
         SEMANTIC_CACHE_AVAILABLE,
         SMART_ROUTER_AVAILABLE,
-        NETWORK_MANAGER_AVAILABLE,
+        SPECULATIVE_AVAILABLE,
         SYNC_QUEUE_AVAILABLE,
-        PRE_CACHE_AVAILABLE,
-        PERFORMANCE_MONITOR_AVAILABLE,
-        SANDBOX_AVAILABLE,
-        FILE_TOOLS_AVAILABLE,
-        SANDBOX_TOOLS_AVAILABLE,
-        CODING_AGENT_AVAILABLE,
-        FINGERPRINT_AVAILABLE,
-        WEB_SEARCH_AVAILABLE,
-        PII_SANITIZER_AVAILABLE,
         SYSTEM_PRESETS_AVAILABLE,
-        HUMANIZER_AVAILABLE,
-        BENCHMARK_V2_AVAILABLE,
-        BENCHMARK_JUDGE_AVAILABLE,
-        BENCHMARK_RECOMMENDATIONS_AVAILABLE,
-        AUTO_TRIGGER_AVAILABLE,
-        CUSTOM_PROFILES_AVAILABLE,
-        FINE_TUNE_EXPORT_AVAILABLE,
-        FINE_TUNE_TRACKER_AVAILABLE,
-        BRANCHES_AVAILABLE,
-        AUTH_AVAILABLE,
-        USER_SETTINGS_AVAILABLE,
-        RAG_STORE_AVAILABLE,
-        RAG_CHUNKER_AVAILABLE,
-        HYBRID_SEARCH_AVAILABLE,
-        EXTERNAL_STORES_AVAILABLE,
-        RAG_DASHBOARD_AVAILABLE,
-        PLUGIN_REGISTRY_AVAILABLE,
-        PLUGIN_LOADER_AVAILABLE,
-        PLUGIN_HOOKS_AVAILABLE,
-        PLUGIN_INDEX_AVAILABLE,
-        PLUGIN_INSTALLER_AVAILABLE,
-        PLUGIN_REVIEWS_AVAILABLE,
-        PLUGIN_TEMPLATE_AVAILABLE,
-        INFERENCE_BACKEND_AVAILABLE,
-        MODEL_MANAGER_AVAILABLE,
         TELEMETRY_AVAILABLE,
-        INFERENCE_PROFILER_AVAILABLE,
-        CONTEXT_OPTIMIZER_AVAILABLE,
+        USER_SETTINGS_AVAILABLE,
+        WEB_SEARCH_AVAILABLE,
     )
 
     return {

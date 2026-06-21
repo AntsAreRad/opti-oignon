@@ -213,9 +213,7 @@ class TestIntegrity:
         # Corrupt one row's payload directly in the DB; the reader must skip it.
         conn = sqlite3.connect(str(feed.db_path))
         conn.execute(
-            "UPDATE {} SET payload = ? WHERE record_id = ?".format(
-                change_feed.TABLE_NAME
-            ),
+            f"UPDATE {change_feed.TABLE_NAME} SET payload = ? WHERE record_id = ?",
             ("{ not json", "a"),
         )
         conn.commit()

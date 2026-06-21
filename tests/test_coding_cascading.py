@@ -16,7 +16,7 @@ import os
 import time
 import unittest
 from dataclasses import dataclass, field
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 # ---------------------------------------------------------------------------
 # Direct module loading (bypass __init__.py chain)

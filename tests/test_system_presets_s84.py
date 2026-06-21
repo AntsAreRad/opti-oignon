@@ -19,11 +19,11 @@ import copy
 import glob
 import os
 import re
-import types
 import sys
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -39,7 +39,7 @@ CONFIG_DIR = os.path.join(BACKEND_DIR, 'config')
 
 def _read(path):
     """Read file content safely."""
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         return f.read()
 
 

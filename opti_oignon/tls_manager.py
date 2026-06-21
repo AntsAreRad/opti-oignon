@@ -29,12 +29,11 @@ import logging
 import os
 import secrets
 import ssl
-import stat
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -703,7 +702,7 @@ def get_tls_status() -> dict[str, Any]:
 
     try:
         from cryptography import x509
-
+        from cryptography.hazmat.primitives import serialization
         # CA fingerprint
         ca_cert = x509.load_pem_x509_certificate(_CA_CERT_PATH.read_bytes())
         status["ca_fingerprint"] = hashlib.sha256(
@@ -838,7 +837,7 @@ def _encrypt_ca_key(ca_key, passphrase: str) -> None:
 
     # Derive encryption key with Argon2id
     try:
-        from argon2.low_level import hash_secret_raw, Type
+        from argon2.low_level import Type, hash_secret_raw
         derived = hash_secret_raw(
             secret=passphrase.encode("utf-8"),
             salt=salt,

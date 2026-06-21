@@ -13,10 +13,9 @@ GET    /api/rag/dashboard/backends    -- Available external backends
 """
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 

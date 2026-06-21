@@ -109,7 +109,7 @@ def _load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
     if YAML_AVAILABLE and path.is_file():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             merged = dict(_DEFAULT_CONFIG)
             merged.update(data)

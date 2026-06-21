@@ -27,7 +27,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-
 # ============================================================================
 # Module loading via importlib (bypasses __init__.py)
 # ============================================================================

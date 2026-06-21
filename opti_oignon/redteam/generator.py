@@ -26,10 +26,9 @@ import json
 import logging
 import re
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +177,7 @@ class AttackGenerator:
             logger.warning("Seed file not found: %s", path)
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             self._seeds = data.get("categories", {})
             total = sum(len(v) for v in self._seeds.values())

@@ -30,7 +30,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class SearchKillSwitch:
                 Path(__file__).resolve().parent / "config" / "security.yaml"
             )
             if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as fh:
+                with open(config_path, encoding="utf-8") as fh:
                     cfg = yaml.safe_load(fh) or {}
                 return cfg.get("search_killswitch", {})
         except Exception:

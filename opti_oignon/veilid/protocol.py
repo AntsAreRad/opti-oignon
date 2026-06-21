@@ -40,16 +40,16 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from opti_oignon.veilid.guard import assert_sync_allowed
+from opti_oignon.veilid.reconcile import reconcile
 from opti_oignon.veilid.records import (
     SyncRecord,
     decode_records,
     encode_records,
     key_of,
 )
-from opti_oignon.veilid.reconcile import reconcile
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class RecordBatch:
     high_water: int
     records: list[SyncRecord] = field(default_factory=list)
     rejected: int = 0
-    epoch: Optional[str] = None
+    epoch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,7 +171,7 @@ def _check_watermark(watermark: Any) -> None:
 # Outbound, gated: these act on records over the wire and refuse under Bulbe.
 
 
-def _feed_epoch_of(feed: Any) -> Optional[str]:
+def _feed_epoch_of(feed: Any) -> str | None:
     """The feed's epoch read defensively (S204, CHF-05), or ``None``.
 
     Duck-typed like ``since_page``: a feed that predates ``feed_epoch`` simply
@@ -303,7 +303,7 @@ def apply_record_batch(
     feed: Any,
     batch: Any,
     *,
-    local_records: Optional[list[SyncRecord]] = None,
+    local_records: list[SyncRecord] | None = None,
 ) -> ApplyResult:
     """Reconcile an incoming batch into the local set and journal what changed.
 
@@ -325,7 +325,7 @@ def apply_local_batch(
     feed: Any,
     batch: Any,
     *,
-    local_records: Optional[list[SyncRecord]] = None,
+    local_records: list[SyncRecord] | None = None,
 ) -> ApplyResult:
     """Apply a batch of ALREADY-LOCALLY-HELD records; ungated by design (S207).
 
@@ -348,11 +348,11 @@ def _apply_batch(
     feed: Any,
     batch: Any,
     *,
-    local_records: Optional[list[SyncRecord]] = None,
+    local_records: list[SyncRecord] | None = None,
 ) -> ApplyResult:
     """The shared merge core: parse defensively, reconcile, journal winners."""
     if isinstance(batch, RecordBatch):
-        parsed: Optional[RecordBatch] = batch
+        parsed: RecordBatch | None = batch
     else:
         parsed = parse_record_batch(batch)
     if parsed is None:
@@ -398,7 +398,7 @@ def sync_with_peer(
 # Inbound, defensive: parsing is reading data, never acting; ungated, never raises.
 
 
-def parse_delta_request(obj: Any) -> Optional[DeltaRequest]:
+def parse_delta_request(obj: Any) -> DeltaRequest | None:
     """Parse an incoming delta request, or return ``None`` on any problem."""
     try:
         if not isinstance(obj, dict):
@@ -426,7 +426,7 @@ def parse_record_batch(
     *,
     max_count: int = RECEIVER_MAX_RECORDS,
     max_bytes: int = RECEIVER_MAX_BYTES,
-) -> Optional[RecordBatch]:
+) -> RecordBatch | None:
     """Parse an incoming batch, or return ``None`` on a malformed envelope.
 
     The envelope is validated strictly; the records inside are decoded defensively

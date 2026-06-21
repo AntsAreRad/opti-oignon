@@ -73,7 +73,7 @@ except ImportError:
         def __repr__(self) -> str:
             return "<SecureBytes [REDACTED]>"
 
-        def __enter__(self) -> "SecureBytes":
+        def __enter__(self) -> SecureBytes:
             return self
 
         def __exit__(self, *exc: Any) -> None:
@@ -89,7 +89,8 @@ except ImportError:
 
 _ARGON2_AVAILABLE = False
 try:
-    from argon2.low_level import hash_secret_raw, Type as Argon2Type
+    from argon2.low_level import Type as Argon2Type
+    from argon2.low_level import hash_secret_raw
     _ARGON2_AVAILABLE = True
 except ImportError:
     pass

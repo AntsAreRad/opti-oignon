@@ -26,7 +26,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class CSPConfig:
             self.directives = dict(_DEFAULT_CSP_CONFIG["directives"])
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CSPConfig":
+    def from_dict(cls, data: dict[str, Any]) -> CSPConfig:
         """Create config from a dictionary (e.g. parsed YAML)."""
         directives = data.get("directives", {})
         if not isinstance(directives, dict):
@@ -99,7 +99,7 @@ class CSPConfig:
         )
 
     @classmethod
-    def default(cls) -> "CSPConfig":
+    def default(cls) -> CSPConfig:
         """Return default configuration."""
         return cls.from_dict(_DEFAULT_CSP_CONFIG)
 
@@ -116,7 +116,7 @@ def load_csp_config() -> CSPConfig:
             os.path.dirname(__file__), "..", "config", "security.yaml"
         )
         if os.path.isfile(config_path):
-            with open(config_path, "r", encoding="utf-8") as fh:
+            with open(config_path, encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh) or {}
             csp_section = raw.get("csp", {})
             if isinstance(csp_section, dict) and csp_section:
@@ -145,7 +145,7 @@ def generate_nonce(length: int = 24) -> str:
 # ---------------------------------------------------------------------------
 
 def build_csp_header(directives: dict[str, str], nonce: str,
-                     report_uri: Optional[str] = None) -> str:
+                     report_uri: str | None = None) -> str:
     """Build a CSP header string from directives, injecting the nonce.
 
     The nonce is added to script-src. If script-src is not present,
@@ -253,7 +253,7 @@ class CSPReportStore:
 
 
 # Module-level singleton
-_report_store: Optional[CSPReportStore] = None
+_report_store: CSPReportStore | None = None
 _store_lock = Lock()
 
 
@@ -292,7 +292,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
     In report-only mode (default), violations are logged but not blocked.
     """
 
-    def __init__(self, app: Any, config: Optional[CSPConfig] = None) -> None:
+    def __init__(self, app: Any, config: CSPConfig | None = None) -> None:
         if not STARLETTE_AVAILABLE:
             raise RuntimeError("starlette is required for CSPMiddleware")
         super().__init__(app)
@@ -347,7 +347,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
 # FastAPI route for violation reports
 # ---------------------------------------------------------------------------
 
-def parse_csp_report(body: bytes) -> Optional[CSPViolationReport]:
+def parse_csp_report(body: bytes) -> CSPViolationReport | None:
     """Parse a CSP violation report from the request body.
 
     Browsers send reports as JSON with a 'csp-report' key.
@@ -374,7 +374,8 @@ def parse_csp_report(body: bytes) -> Optional[CSPViolationReport]:
 
 
 try:
-    from fastapi import APIRouter, Request as FARequest
+    from fastapi import APIRouter
+    from fastapi import Request as FARequest
     from fastapi.responses import JSONResponse
 
     FASTAPI_AVAILABLE = True

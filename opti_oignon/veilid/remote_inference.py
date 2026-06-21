@@ -52,10 +52,10 @@ and named in the spec, never simulated.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from opti_oignon.veilid.guard import VeilidDisabledInBulbe, assert_sync_allowed
 from opti_oignon.veilid import remote_streaming
+from opti_oignon.veilid.guard import VeilidDisabledInBulbe, assert_sync_allowed
 from opti_oignon.veilid.protocol import (
     MSG_REMOTE_INFER,
     MSG_REMOTE_INFER_CONT,
@@ -158,7 +158,7 @@ def _refusal(request_id: str, reason: str, detail: str, *, kind: str = MSG_REMOT
     }
 
 
-def _audit_event(audit: Optional[Callable[..., Any]], action: str, **details: Any) -> None:
+def _audit_event(audit: Callable[..., Any] | None, action: str, **details: Any) -> None:
     """Record an event on the hash-chain audit log, best-effort.
 
     Rides the same trail ``serve_request`` writes to. An injected ``audit`` sink
@@ -188,7 +188,7 @@ def _audit_event(audit: Optional[Callable[..., Any]], action: str, **details: An
 
 def _enforce_bounded_surface(
     request: dict, request_id: str, *, rag_granted: bool = False
-) -> Optional[dict]:
+) -> dict | None:
     """The single tier 1 bounded-surface gate (section 3).
 
     Returns a structured refusal when the request is out of surface, else
@@ -243,7 +243,7 @@ def _resolve_peer_store(peer_store: Any) -> Any:
         return None
 
 
-def _resolve_router(router: Optional[Callable[[str], Any]]) -> Callable[[str], Any]:
+def _resolve_router(router: Callable[[str], Any] | None) -> Callable[[str], Any]:
     """Return the injected router, else a default analyze + route resolver.
 
     The default is resolved lazily and only on the success path, so a refusal
@@ -345,9 +345,9 @@ def serve_remote_inference(
     *,
     peer_id: str = "",
     executor: Any = None,
-    router: Optional[Callable[[str], Any]] = None,
+    router: Callable[[str], Any] | None = None,
     peer_store: Any = None,
-    audit: Optional[Callable[..., Any]] = None,
+    audit: Callable[..., Any] | None = None,
 ) -> dict:
     """Serve a remote chat request from a paired phone over the private route.
 
@@ -544,7 +544,7 @@ def serve_remote_inference_continuation(
     *,
     peer_id: str = "",
     peer_store: Any = None,
-    audit: Optional[Callable[..., Any]] = None,
+    audit: Callable[..., Any] | None = None,
 ) -> dict:
     """Serve a streaming continuation: return the next buffered chunk (Lot 2).
 

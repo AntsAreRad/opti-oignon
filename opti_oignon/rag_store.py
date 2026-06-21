@@ -18,7 +18,6 @@ import hashlib
 import html as html_module
 import json
 import logging
-import os
 import re
 import sqlite3
 import time
@@ -512,8 +511,8 @@ class RAGVectorStore:
         """Lazy-init the Ollama embedder."""
         if self._embedder is None:
             try:
-                from opti_oignon.rag.embeddings import OllamaEmbeddings
                 from opti_oignon.rag.config import EmbeddingConfig
+                from opti_oignon.rag.embeddings import OllamaEmbeddings
                 cfg = EmbeddingConfig(
                     model=self._embedding_model,
                     ollama_url=self._ollama_url,

@@ -502,7 +502,7 @@ try:
         """Forward the live AgentEvent stream over a WebSocket."""
         await websocket.accept()
         loop = asyncio.get_running_loop()
-        queue: "asyncio.Queue[str]" = asyncio.Queue()
+        queue: asyncio.Queue[str] = asyncio.Queue()
 
         def _push(payload: str) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, payload)

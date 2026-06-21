@@ -72,7 +72,7 @@ def _ensure_base_modules():
 
 _ensure_base_modules()
 
-from opti_oignon.cascading import CascadingInference, CascadeResult, CascadeTierResult
+from opti_oignon.cascading import CascadeResult, CascadeTierResult, CascadingInference
 
 # Load schemas
 if "opti_oignon.api" not in sys.modules:

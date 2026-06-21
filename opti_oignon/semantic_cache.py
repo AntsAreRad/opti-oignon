@@ -374,7 +374,7 @@ class SemanticCache:
         }
         try:
             if self._config_path.exists():
-                with open(self._config_path, "r", encoding="utf-8") as fh:
+                with open(self._config_path, encoding="utf-8") as fh:
                     loaded = yaml.safe_load(fh) or {}
                 defaults.update(loaded)
         except Exception as exc:
@@ -1564,7 +1564,7 @@ class SemanticCache:
                 placeholders = ",".join("?" for _ in orphans)
                 conn.execute(
                     "DELETE FROM semantic_embeddings "
-                    "WHERE cache_key IN ({})".format(placeholders),
+                    f"WHERE cache_key IN ({placeholders})",
                     orphans,
                 )
                 conn.commit()

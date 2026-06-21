@@ -45,10 +45,12 @@ logger = logging.getLogger(__name__)
 
 try:
     from opti_oignon.sandbox_manager import (
+        SANDBOX_AVAILABLE,
         SandboxManager,
         SandboxSession,
+    )
+    from opti_oignon.sandbox_manager import (
         sandbox_manager as _default_sandbox_manager,
-        SANDBOX_AVAILABLE,
     )
 except ImportError:
     SANDBOX_AVAILABLE = False
@@ -58,10 +60,10 @@ except ImportError:
 
 try:
     from opti_oignon.file_tools import (
-        _handle_sandbox_bash,
-        _handle_sandbox_view,
-        _handle_sandbox_create_file,
         FILE_TOOLS_AVAILABLE,
+        _handle_sandbox_bash,
+        _handle_sandbox_create_file,
+        _handle_sandbox_view,
     )
 except ImportError:
     FILE_TOOLS_AVAILABLE = False
@@ -80,10 +82,12 @@ except ImportError:
 
 try:
     from opti_oignon.conversation_compressor import (
-        ConversationCompressor,
         CompressedContext,
-        conversation_compressor as _conversation_compressor,
+        ConversationCompressor,  # noqa: F401
         check_retrieval_trigger,
+    )
+    from opti_oignon.conversation_compressor import (
+        conversation_compressor as _conversation_compressor,
     )
     COMPRESSOR_AVAILABLE = True
 except ImportError:
@@ -94,8 +98,10 @@ except ImportError:
 
 try:
     from opti_oignon.context_manager import (
-        get_model_limits as _get_model_limits,
         estimate_tokens as _estimate_tokens_cm,
+    )
+    from opti_oignon.context_manager import (
+        get_model_limits as _get_model_limits,
     )
     CONTEXT_MANAGER_AVAILABLE = True
 except ImportError:
@@ -106,6 +112,8 @@ except ImportError:
 try:
     from opti_oignon.prompt_optimization import (
         prompt_budget_manager as _prompt_budget_manager,
+    )
+    from opti_oignon.prompt_optimization import (
         prompt_template_engine as _prompt_template_engine,
     )
     PROMPT_OPTIMIZATION_AVAILABLE = True
@@ -448,7 +456,7 @@ class ChatCodingSession:
         self._is_rich_llm = False  # detected on first call
 
         # Sandbox state
-        self._sandbox_session: "SandboxSession | None" = None
+        self._sandbox_session: SandboxSession | None = None
         self._sandbox_state = SandboxState()
 
         # Timing
@@ -1417,10 +1425,10 @@ class ChatCodingSession:
                 event = next(impl_gen)
                 yield event
         except StopIteration as e:
-            impl_response = e.value or ""
+            impl_response = e.value or ""  # noqa: F841
 
         # Update files list from sandbox
-        current_files = self._list_sandbox_files()
+        current_files = self._list_sandbox_files()  # noqa: F841
         result["files_written"] = list(self._sandbox_state.files)
         full_response_parts.append(
             f"Files: {', '.join(self._sandbox_state.files)}"

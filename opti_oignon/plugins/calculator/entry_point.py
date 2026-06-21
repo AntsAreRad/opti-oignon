@@ -10,7 +10,7 @@ import ast
 import math
 import operator
 import re
-from typing import Any, Optional
+from typing import Any
 
 # Plugin metadata (injected by loader)
 __plugin_name__: str = "calculator"
@@ -186,7 +186,7 @@ def format_result(value: Any) -> str:
 # Hook implementations
 # =========================================================================
 
-def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Handle tool_call hook: evaluate math expressions.
 
     Expects ctx.data to contain:
@@ -218,7 +218,7 @@ def hook_tool_call(ctx: Any) -> Optional[dict[str, Any]]:
         }
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Handle post_inference hook: detect and evaluate calc() in responses.
 
     Scans the LLM response text for calc(...) or calculate(...) patterns

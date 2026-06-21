@@ -77,7 +77,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 # S242 (RS-01 / PEER-01): encrypted DB connections, the same pattern as the
 # veilid change feed (S136) and sync_queue. RS1-D1: the open-registry rationale
@@ -118,12 +117,12 @@ _TABLES: frozenset[str] = frozenset({TABLE_NAME, META_TABLE_NAME})
 def _safe_table(name: str) -> str:
     """Return the table name only if it is in the allowlist, else raise."""
     if name not in _TABLES:
-        raise ValueError("table identifier not in allowlist: {!r}".format(name))
+        raise ValueError(f"table identifier not in allowlist: {name!r}")
     return name
 
 
 _CREATE_TABLE = (
-    "CREATE TABLE IF NOT EXISTS {table} ("
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(TABLE_NAME)} ("
     "peer_id TEXT PRIMARY KEY, "
     "routing_key TEXT NOT NULL, "
     "label TEXT NOT NULL DEFAULT '', "
@@ -149,7 +148,7 @@ _CREATE_TABLE = (
     # re-pair (a local trust decision, like the watermark and the grants).
     "device_class TEXT"
     ")"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 # N.9 (S256): the device-class allowlist -- the only values the setter ever
 # accepts (NULL clears back to the grandfathered desktop class). The sync
@@ -182,7 +181,7 @@ DEVICE_CLASSES: frozenset[str] = frozenset(
 # refreshed in the same statement. A keyless re-pair (excluded NULL) never
 # demotes: it carries no trust material.
 _UPSERT = (
-    "INSERT INTO {table} (peer_id, routing_key, label, watermark, added_at, "
+    f"INSERT INTO {_safe_table(TABLE_NAME)} (peer_id, routing_key, label, watermark, added_at, "
     "updated_at, signing_pub, pending) "
     "VALUES (?, ?, ?, 0, ?, ?, ?, ?) "
     "ON CONFLICT(peer_id) DO UPDATE SET "
@@ -194,7 +193,7 @@ _UPSERT = (
     "AND (signing_pub IS NULL OR signing_pub != excluded.signing_pub) "
     "THEN 2 ELSE pending END, "
     "signing_pub = COALESCE(excluded.signing_pub, signing_pub)"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _SELECT_COLUMNS = (
     "peer_id, routing_key, label, watermark, added_at, updated_at, last_epoch, "
@@ -202,23 +201,23 @@ _SELECT_COLUMNS = (
 )
 
 _SELECT_ONE = (
-    "SELECT {cols} FROM {table} WHERE peer_id = ?"
-).format(cols=_SELECT_COLUMNS, table=_safe_table(TABLE_NAME))
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
+)
 
 _SELECT_ALL = (
-    "SELECT {cols} FROM {table} ORDER BY added_at ASC, peer_id ASC"
-).format(cols=_SELECT_COLUMNS, table=_safe_table(TABLE_NAME))
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} ORDER BY added_at ASC, peer_id ASC"
+)
 
 _SELECT_WATERMARK = (
-    "SELECT watermark FROM {table} WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"SELECT watermark FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
+)
 
 # Monotonic advance: max() here is the SQLite scalar (two arguments), so the
 # watermark only ever moves forward, atomically, within the statement.
 _ADVANCE = (
-    "UPDATE {table} SET watermark = max(watermark, ?), updated_at = ? "
+    f"UPDATE {_safe_table(TABLE_NAME)} SET watermark = max(watermark, ?), updated_at = ? "
     "WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 # S204 (CHF-05): the per-peer last-seen feed epoch. Read it; store it on first
 # contact (no reset); and the epoch reset -- the watermark back to 0 and the new
@@ -227,29 +226,29 @@ _ADVANCE = (
 # would silently skip the full resync). The reset is the deliberate, epoch-bound
 # exception to the monotonic advance above.
 _SELECT_LAST_EPOCH = (
-    "SELECT last_epoch FROM {table} WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"SELECT last_epoch FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
+)
 
 _SET_LAST_EPOCH = (
-    "UPDATE {table} SET last_epoch = ?, updated_at = ? WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET last_epoch = ?, updated_at = ? WHERE peer_id = ?"
+)
 
 _RESET_FOR_EPOCH = (
-    "UPDATE {table} SET watermark = 0, last_epoch = ?, updated_at = ? "
+    f"UPDATE {_safe_table(TABLE_NAME)} SET watermark = 0, last_epoch = ?, updated_at = ? "
     "WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+)
 
-_DELETE_ONE = "DELETE FROM {table} WHERE peer_id = ?".format(table=_safe_table(TABLE_NAME))
-_SELECT_COUNT = "SELECT COUNT(*) FROM {table}".format(table=_safe_table(TABLE_NAME))
-_DELETE_ALL = "DELETE FROM {table}".format(table=_safe_table(TABLE_NAME))
+_DELETE_ONE = f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
+_SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
+_DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
 # S206 (PAIR-02): activate a pending peer. The ONLY statement that lowers the
 # pending state -- the upsert above can only raise it -- so an entry becomes
 # trusted exclusively through the explicit human confirmation. Idempotent on an
 # already-confirmed peer.
 _CONFIRM = (
-    "UPDATE {table} SET pending = NULL, updated_at = ? WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET pending = NULL, updated_at = ? WHERE peer_id = ?"
+)
 
 # cas 7 Lot 2 (S235): the per-device remote-inference grants. Set the remote-chat
 # enable bit (1 enabled, 0 disabled) or the RAG read-only sub-grant (1 on, 0 off).
@@ -258,36 +257,36 @@ _CONFIRM = (
 # change it. A revoke is ``set_remote_chat_grant(peer_id, False)`` plus the
 # in-memory live-session kill in remote_streaming -- no new revocation primitive.
 _SET_REMOTE_CHAT_GRANT = (
-    "UPDATE {table} SET remote_chat_grant = ?, updated_at = ? WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET remote_chat_grant = ?, updated_at = ? WHERE peer_id = ?"
+)
 
 _SET_RAG_SUBGRANT = (
-    "UPDATE {table} SET rag_subgrant = ?, updated_at = ? WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET rag_subgrant = ?, updated_at = ? WHERE peer_id = ?"
+)
 
 # N.9 (S256): the device-class marker write (NULL clears it).
 _SET_DEVICE_CLASS = (
-    "UPDATE {table} SET device_class = ?, updated_at = ? WHERE peer_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"UPDATE {_safe_table(TABLE_NAME)} SET device_class = ?, updated_at = ? WHERE peer_id = ?"
+)
 
 # The one-row local-identity meta table (SYN-02): this installation's stable
 # device id, minted once. INSERT OR IGNORE under the CHECK(id = 1) constraint
 # keeps the first minted value under concurrency.
 _CREATE_META = (
-    "CREATE TABLE IF NOT EXISTS {table} ("
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(META_TABLE_NAME)} ("
     "id INTEGER PRIMARY KEY CHECK (id = 1), "
     "device_id TEXT NOT NULL, "
     "created_at TEXT NOT NULL"
     ")"
-).format(table=_safe_table(META_TABLE_NAME))
+)
 
 _SELECT_DEVICE_ID = (
-    "SELECT device_id FROM {table} WHERE id = 1"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"SELECT device_id FROM {_safe_table(META_TABLE_NAME)} WHERE id = 1"
+)
 
 _INSERT_DEVICE_ID = (
-    "INSERT OR IGNORE INTO {table} (id, device_id, created_at) VALUES (1, ?, ?)"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"INSERT OR IGNORE INTO {_safe_table(META_TABLE_NAME)} (id, device_id, created_at) VALUES (1, ?, ?)"
+)
 
 # S206 (PAIR-02): this device's own last-generated pairing material, pinned in
 # the one-row meta table when the self payload is built. The confirmation code
@@ -298,12 +297,12 @@ _INSERT_DEVICE_ID = (
 # makes the codes visibly disagree, the documented re-run failure). Public
 # material only (Kerckhoffs), like the device id beside it.
 _PIN_SELF_MATERIAL = (
-    "UPDATE {table} SET self_pairing_material = ? WHERE id = 1"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"UPDATE {_safe_table(META_TABLE_NAME)} SET self_pairing_material = ? WHERE id = 1"
+)
 
 _SELECT_SELF_MATERIAL = (
-    "SELECT self_pairing_material FROM {table} WHERE id = 1"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"SELECT self_pairing_material FROM {_safe_table(META_TABLE_NAME)} WHERE id = 1"
+)
 
 
 @dataclass(frozen=True)
@@ -367,13 +366,13 @@ class PeerRecord:
     watermark: int = 0
     added_at: str = ""
     updated_at: str = ""
-    last_epoch: Optional[str] = None
-    signing_pub: Optional[str] = None
+    last_epoch: str | None = None
+    signing_pub: str | None = None
     pending: bool = False
     key_changed: bool = False
     remote_chat_enabled: bool = True
     rag_subgrant: bool = False
-    device_class: Optional[str] = None
+    device_class: str | None = None
 
 
 def _check_peer_id(peer_id: object) -> None:
@@ -406,10 +405,10 @@ class PeerStore:
     store is safe to share across threads.
     """
 
-    def __init__(self, root: Optional[Path | str] = None) -> None:
-        self._root: Optional[Path] = Path(root) if root is not None else None
-        self._db_path: Optional[Path] = None
-        self._connection: Optional[sqlite3.Connection] = None
+    def __init__(self, root: Path | str | None = None) -> None:
+        self._root: Path | None = Path(root) if root is not None else None
+        self._db_path: Path | None = None
+        self._connection: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
     def _resolve_db_path(self) -> Path:
@@ -443,28 +442,20 @@ class PeerStore:
             cols = {
                 row[1]
                 for row in conn.execute(
-                    "PRAGMA table_info({table})".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"PRAGMA table_info({_safe_table(TABLE_NAME)})"
                 ).fetchall()
             }
             if "last_epoch" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN last_epoch TEXT".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN last_epoch TEXT"
                 )
             if "signing_pub" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN signing_pub TEXT".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN signing_pub TEXT"
                 )
             if "pending" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN pending INTEGER".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN pending INTEGER"
                 )
             # cas 7 Lot 2 (S235): the per-device remote-inference grant columns,
             # the same additive guarded idiom. Nullable on purpose: NULL means a
@@ -472,15 +463,11 @@ class PeerStore:
             # the RAG read-only sub-grant OFF (the conservative default).
             if "remote_chat_grant" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN remote_chat_grant INTEGER".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN remote_chat_grant INTEGER"
                 )
             if "rag_subgrant" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN rag_subgrant INTEGER".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN rag_subgrant INTEGER"
                 )
             # N.9 (S256): the per-device class marker, the same additive
             # guarded idiom. Nullable on purpose: NULL is the grandfathered
@@ -489,9 +476,7 @@ class PeerStore:
             # "phone".
             if "device_class" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN device_class TEXT".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN device_class TEXT"
                 )
             conn.execute(_CREATE_META)
             # S206 (PAIR-02): the pinned self pairing material on the meta
@@ -499,17 +484,13 @@ class PeerStore:
             meta_cols = {
                 row[1]
                 for row in conn.execute(
-                    "PRAGMA table_info({table})".format(
-                        table=_safe_table(META_TABLE_NAME)
-                    )
+                    f"PRAGMA table_info({_safe_table(META_TABLE_NAME)})"
                 ).fetchall()
             }
             if "self_pairing_material" not in meta_cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN "
-                    "self_pairing_material TEXT".format(
-                        table=_safe_table(META_TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(META_TABLE_NAME)} ADD COLUMN "
+                    "self_pairing_material TEXT"
                 )
             conn.commit()
             self._connection = conn
@@ -618,7 +599,7 @@ class PeerStore:
         routing_key: str,
         *,
         label: str = "",
-        signing_pub: Optional[str] = None,
+        signing_pub: str | None = None,
         pending: bool = False,
     ) -> PeerRecord:
         """Register a peer, or refresh an existing one's routing key and label.
@@ -753,7 +734,7 @@ class PeerStore:
             return cur.rowcount > 0
 
     def set_device_class(
-        self, peer_id: str, device_class: Optional[str]
+        self, peer_id: str, device_class: str | None
     ) -> bool:
         """Mark or clear a peer's device class (N.9, S256).
 
@@ -772,9 +753,7 @@ class PeerStore:
             return False
         if device_class is not None and device_class not in DEVICE_CLASSES:
             raise ValueError(
-                "device_class must be one of {} or None".format(
-                    sorted(DEVICE_CLASSES)
-                )
+                f"device_class must be one of {sorted(DEVICE_CLASSES)} or None"
             )
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
@@ -803,7 +782,7 @@ class PeerStore:
             conn.execute(_PIN_SELF_MATERIAL, (material,))
             conn.commit()
 
-    def get_self_pairing_material(self) -> Optional[str]:
+    def get_self_pairing_material(self) -> str | None:
         """This device's pinned pairing material, or ``None`` when never pinned."""
         with self._lock:
             conn = self._conn()
@@ -813,7 +792,7 @@ class PeerStore:
         value = row[0]
         return value if isinstance(value, str) and value else None
 
-    def get_peer(self, peer_id: str) -> Optional[PeerRecord]:
+    def get_peer(self, peer_id: str) -> PeerRecord | None:
         """Return a peer's record, or ``None`` when it is not registered."""
         if not isinstance(peer_id, str) or not peer_id:
             return None
@@ -871,7 +850,7 @@ class PeerStore:
             row = conn.execute(_SELECT_WATERMARK, (peer_id,)).fetchone()
         return int(row[0]) if row is not None else 0
 
-    def get_last_epoch(self, peer_id: str) -> Optional[str]:
+    def get_last_epoch(self, peer_id: str) -> str | None:
         """The peer's last-seen feed epoch, or ``None`` (CHF-05).
 
         ``None`` covers a pre-epoch peer (its batches carry no epoch yet), a
@@ -954,11 +933,11 @@ class PeerStore:
 
 # Module-level singleton with a reset hook (one store per process, testable).
 
-_store: Optional[PeerStore] = None
+_store: PeerStore | None = None
 _store_lock = threading.Lock()
 
 
-def get_peer_store(root: Optional[Path | str] = None) -> PeerStore:
+def get_peer_store(root: Path | str | None = None) -> PeerStore:
     """Return the process peer store, creating it once (with ``root`` if given)."""
     global _store
     with _store_lock:
@@ -967,7 +946,7 @@ def get_peer_store(root: Optional[Path | str] = None) -> PeerStore:
         return _store
 
 
-def set_peer_store(store: Optional[PeerStore]) -> None:
+def set_peer_store(store: PeerStore | None) -> None:
     """Install a specific store as the process singleton (used by tests)."""
     global _store
     with _store_lock:

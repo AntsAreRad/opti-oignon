@@ -69,7 +69,7 @@ try:
         get_model_limits as cm_get_model_limits,
     )
     from .context_manager import (
-        smart_truncate as cm_smart_truncate,
+        smart_truncate as cm_smart_truncate,  # noqa: F401
     )
     CONTEXT_MANAGER_AVAILABLE = True
 except ImportError:
@@ -172,6 +172,8 @@ except ImportError:
 try:
     from .prompt_optimization import (
         prompt_budget_manager as _prompt_budget_manager,
+    )
+    from .prompt_optimization import (
         prompt_template_engine as _prompt_template_engine,
     )
     PROMPT_OPTIMIZATION_AVAILABLE = True
@@ -184,7 +186,11 @@ except ImportError:
 try:
     from .conversation_compressor import (
         CompressedContext,
+    )
+    from .conversation_compressor import (
         check_retrieval_trigger as _check_retrieval_trigger,
+    )
+    from .conversation_compressor import (
         conversation_compressor as _conversation_compressor,
     )
     CONVERSATION_COMPRESSOR_AVAILABLE = True
@@ -196,8 +202,8 @@ except ImportError:
 
 # Cascading inference (v1.7.1 -- S69)
 try:
-    from .cascading import cascading_inference as _cascading_inference
     from .cascading import CascadeResult as _CascadeResult
+    from .cascading import cascading_inference as _cascading_inference
     CASCADING_AVAILABLE = True
 except ImportError:
     CASCADING_AVAILABLE = False
@@ -206,8 +212,8 @@ except ImportError:
 
 # Speculative generation (v1.7.2 -- S70)
 try:
-    from .speculative import speculative_generator as _speculative_generator
     from .speculative import SpeculativeResult as _SpeculativeResult
+    from .speculative import speculative_generator as _speculative_generator
     SPECULATIVE_AVAILABLE = True
 except ImportError:
     SPECULATIVE_AVAILABLE = False
@@ -219,9 +225,15 @@ except ImportError:
 # governor leaves every path exactly as it was.
 try:
     from .resource_governor import (
-        get_resource_governor as _get_resource_governor,
-        set_active_ticket as _governor_set_ticket,
         clear_active_ticket as _governor_clear_ticket,
+    )
+    from .resource_governor import (
+        get_resource_governor as _get_resource_governor,
+    )
+    from .resource_governor import (
+        set_active_ticket as _governor_set_ticket,
+    )
+    from .resource_governor import (
         ticket_scope as _governor_ticket_scope,
     )
     RESOURCE_GOVERNOR_AVAILABLE = True
@@ -2326,7 +2338,7 @@ class Executor:
                 elif event_type == "chunk":
                     full_response += content
                     yield content
-                    last_yield_time = time.time()
+                    last_yield_time = time.time()  # noqa: F841
                 elif event_type == "cancel":
                     full_response += "\n\n[Generation cancelled]"
                     yield "\n\n[Generation cancelled]"

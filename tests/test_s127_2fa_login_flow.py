@@ -19,11 +19,11 @@ import importlib.util
 import os
 import re
 import sys
-import time
 import threading
-from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+import time
 from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

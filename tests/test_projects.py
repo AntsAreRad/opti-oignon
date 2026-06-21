@@ -419,7 +419,7 @@ class TestProjectCRUD:
 
     def test_update_project_updates_timestamp(self, store, project):
         old_updated = project.updated_at
-        import time; time.sleep(0.01)
+        time.sleep(0.01)
         updated = store.update_project(project.id, name="Newer")
         assert updated.updated_at >= old_updated
 
@@ -557,7 +557,7 @@ class TestFileManagement:
 
     def test_add_file_touches_project(self, store, project):
         old_updated = project.updated_at
-        import time; time.sleep(0.01)
+        time.sleep(0.01)
         store.add_file(project.id, "new.txt", b"data")
         updated_project = store.get_project(project.id)
         assert updated_project.updated_at >= old_updated

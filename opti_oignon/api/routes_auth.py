@@ -27,7 +27,7 @@ import threading
 import time
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -281,12 +281,13 @@ def _extract_client_ip(request: Request) -> str:
 
 def _get_security_jwt_config() -> dict:
     """Load JWT cookie configuration from security.yaml (S125)."""
-    import yaml
     from pathlib import Path
+
+    import yaml
     cfg_path = Path(__file__).parent.parent / "config" / "security.yaml"
     try:
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("jwt", {})
     except Exception:
@@ -639,8 +640,9 @@ def set_auth_mode(req: AuthModeRequest) -> dict:
     S109: Allows users to switch auth on/off from the Settings UI.
     Updates both the in-memory config and the YAML file on disk.
     """
-    import yaml
     from pathlib import Path
+
+    import yaml
 
     mgr = _get_auth_manager()
 
@@ -651,7 +653,7 @@ def set_auth_mode(req: AuthModeRequest) -> dict:
     config_path = Path(__file__).parent.parent / "config" / "auth.yaml"
     try:
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {}

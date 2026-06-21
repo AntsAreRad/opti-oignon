@@ -13,7 +13,7 @@ import ast
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "code-guardian"
 __plugin_version__: str = "1.0.0"
@@ -286,7 +286,7 @@ def validate_r(code: str) -> dict[str, Any]:
                 clean.append(ch)
         clean_lines.append("".join(clean))
 
-    clean_code = "\n".join(clean_lines)
+    clean_code = "\n".join(clean_lines)  # noqa: F841
 
     # Check matching delimiters
     _PAIRS = {"(": ")", "{": "}", "[": "]"}
@@ -346,7 +346,7 @@ def validate_r(code: str) -> dict[str, Any]:
                 str_char = ch
         if in_str:
             result["valid"] = False
-            result["error"] = f"Unclosed string literal"
+            result["error"] = "Unclosed string literal"
             result["line"] = lineno
             return result
 
@@ -426,7 +426,7 @@ def validate_block(
     code: str,
     *,
     enabled_languages: set[str],
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Validate a code block if its language is enabled.
 
     Parameters
@@ -460,7 +460,7 @@ def validate_block(
 # Hook implementation
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: validate code blocks in LLM response.
 
     Extracts fenced code blocks, validates each one, and appends

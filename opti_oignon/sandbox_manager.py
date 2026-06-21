@@ -2542,7 +2542,7 @@ class SandboxManager:
         is_binary = False
 
         try:
-            with open(resolved, "r", encoding="utf-8") as fh:
+            with open(resolved, encoding="utf-8") as fh:
                 content = fh.read(max_bytes)
         except UnicodeDecodeError:
             is_binary = True

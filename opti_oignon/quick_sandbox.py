@@ -29,7 +29,7 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,10 +40,12 @@ logger = logging.getLogger(__name__)
 
 try:
     from opti_oignon.sandbox_manager import (
+        SANDBOX_AVAILABLE,
         SandboxManager,
         SandboxSession,
+    )
+    from opti_oignon.sandbox_manager import (
         sandbox_manager as _default_sandbox_manager,
-        SANDBOX_AVAILABLE,
     )
 except ImportError:
     SANDBOX_AVAILABLE = False
@@ -53,10 +55,10 @@ except ImportError:
 
 try:
     from opti_oignon.file_tools import (
-        _handle_sandbox_bash,
-        _handle_sandbox_view,
-        _handle_sandbox_create_file,
         FILE_TOOLS_AVAILABLE,
+        _handle_sandbox_bash,
+        _handle_sandbox_create_file,
+        _handle_sandbox_view,
     )
 except ImportError:
     FILE_TOOLS_AVAILABLE = False
@@ -129,7 +131,7 @@ class QuickSandboxSession:
     ):
         self._session_id = session_id
         self._mgr = sandbox_mgr or _default_sandbox_manager
-        self._sandbox_session: "SandboxSession | None" = None
+        self._sandbox_session: SandboxSession | None = None
         self._created_at = time.time()
         self._last_activity = time.time()
         self._auto_destroy_seconds = auto_destroy_minutes * 60

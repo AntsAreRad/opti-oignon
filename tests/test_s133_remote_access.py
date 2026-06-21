@@ -27,7 +27,7 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_DIR = os.path.join(PROJECT_ROOT, "opti_oignon")
@@ -204,7 +204,7 @@ class TestSecurityModeMiddlewareNonLocal(unittest.TestCase):
     def test_middleware_file_has_non_local_rejection(self):
         """Middleware contains non-local IP rejection logic for Bulbe."""
         path = os.path.join(API_DIR, "security_mode_middleware.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("non_local_rejected", content)
         self.assertIn("127.0.0.1", content)
@@ -213,7 +213,7 @@ class TestSecurityModeMiddlewareNonLocal(unittest.TestCase):
     def test_middleware_rejects_external_ip_pattern(self):
         """Middleware checks client.host against localhost addresses."""
         path = os.path.join(API_DIR, "security_mode_middleware.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Verify the defense-in-depth pattern exists
         self.assertIn("request.client.host", content)
@@ -222,7 +222,7 @@ class TestSecurityModeMiddlewareNonLocal(unittest.TestCase):
     def test_audit_function_exists(self):
         """_audit_non_local_request function is defined."""
         path = os.path.join(API_DIR, "security_mode_middleware.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("def _audit_non_local_request", content)
 
@@ -334,7 +334,7 @@ class TestTLSManagerDaily(unittest.TestCase):
         # This is verified by code inspection:
         # is_cert_revoked reads from disk every time
         path = os.path.join(BACKEND_DIR, "tls_manager.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("no caching", content.lower())
         self.assertNotIn("_crl_cache", content)
@@ -387,7 +387,7 @@ class TestRemoteSessionGuard(unittest.TestCase):
     def test_constant_time_comparison(self):
         """Fingerprint comparison uses hmac.compare_digest."""
         path = os.path.join(BACKEND_DIR, "remote_session_guard.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("hmac.compare_digest", content)
 
@@ -459,7 +459,7 @@ class TestRemoteAccessAPIRoutes(unittest.TestCase):
     def test_routes_security_has_remote_endpoints(self):
         """routes_security.py defines all 6 remote access endpoints."""
         path = os.path.join(API_DIR, "routes_security.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("/remote-access/status", content)
         self.assertIn("/remote-access/enable", content)
@@ -471,7 +471,7 @@ class TestRemoteAccessAPIRoutes(unittest.TestCase):
     def test_routes_reject_bulbe(self):
         """All remote access routes call _require_daily_mode."""
         path = os.path.join(API_DIR, "routes_security.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Count calls to _require_daily_mode in remote-access section
         remote_section = content.split("S133: Remote Access API")[1] if "S133: Remote Access API" in content else ""
@@ -481,7 +481,7 @@ class TestRemoteAccessAPIRoutes(unittest.TestCase):
     def test_localhost_required_for_cert_gen(self):
         """generate-client-cert endpoint requires localhost."""
         path = os.path.join(API_DIR, "routes_security.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Find the generate endpoint and verify _require_localhost
         idx = content.index("generate-client-cert")
@@ -491,7 +491,7 @@ class TestRemoteAccessAPIRoutes(unittest.TestCase):
     def test_localhost_required_for_enable(self):
         """enable endpoint requires localhost."""
         path = os.path.join(API_DIR, "routes_security.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         idx = content.index("/remote-access/enable")
         section = content[idx:idx+500]
@@ -518,7 +518,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_panel_has_bulbe_disabled_state(self):
         """RemoteAccessPanel shows disabled message in Bulbe mode."""
         path = os.path.join(COMPONENTS_DIR, "RemoteAccessPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("disabled in Bulbe mode", content)
         self.assertIn("isBulbe", content)
@@ -526,7 +526,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_panel_no_controls_in_bulbe(self):
         """Bulbe state renders no interactive controls (no enable toggle)."""
         path = os.path.join(COMPONENTS_DIR, "RemoteAccessPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Bulbe block should have no buttons
         bulbe_section = content.split("{#if isBulbe}")[1].split("{:else")[0]
@@ -536,7 +536,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_security_panel_has_remote_tab(self):
         """SecurityPanel.svelte includes the Remote Access tab."""
         path = os.path.join(COMPONENTS_DIR, "SecurityPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("Remote Access", content)
         self.assertIn("RemoteAccessPanel", content)
@@ -545,7 +545,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_api_client_has_all_functions(self):
         """remoteAccess.ts exports all required API functions."""
         path = os.path.join(API_TS_DIR, "remoteAccess.ts")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("getRemoteAccessStatus", content)
         self.assertIn("enableRemoteAccess", content)
@@ -557,7 +557,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_panel_css_variables_only(self):
         """RemoteAccessPanel uses only --oo-* CSS variables."""
         path = os.path.join(COMPONENTS_DIR, "RemoteAccessPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Find all hex colors
         hex_colors = re.findall(r"#[0-9a-fA-F]{6}", content)
@@ -571,7 +571,7 @@ class TestFrontendRemoteAccess(unittest.TestCase):
     def test_panel_html_balance(self):
         """RemoteAccessPanel has balanced div tags."""
         path = os.path.join(COMPONENTS_DIR, "RemoteAccessPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         div_open = len(re.findall(r"<div[\s>]", content))
         div_close = len(re.findall(r"</div>", content))
@@ -588,7 +588,7 @@ class TestIntegration(unittest.TestCase):
     def test_version_bump(self):
         """Version is 2.9.4."""
         path = os.path.join(BACKEND_DIR, "__version__.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn('"3.0.0"', content)
 
@@ -604,7 +604,7 @@ class TestIntegration(unittest.TestCase):
             os.path.join(BACKEND_DIR, "remote_session_guard.py"),
         ]
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 content = f.read()
             matches = french_patterns.findall(content)
             self.assertEqual(
@@ -624,7 +624,7 @@ class TestIntegration(unittest.TestCase):
             re.IGNORECASE,
         )
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 content = f.read()
             matches = secret_patterns.findall(content)
             self.assertEqual(
@@ -635,7 +635,7 @@ class TestIntegration(unittest.TestCase):
     def test_argon2id_for_ca_key(self):
         """TLS manager uses Argon2id (not PBKDF2) for CA key derivation."""
         path = os.path.join(BACKEND_DIR, "tls_manager.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("argon2", content.lower())
         self.assertIn("ARGON2_MEMORY_COST", content)
@@ -644,7 +644,7 @@ class TestIntegration(unittest.TestCase):
     def test_launch_sh_bulbe_hardcode(self):
         """launch.sh hardcodes 127.0.0.1 in Bulbe mode."""
         path = os.path.join(PROJECT_ROOT, "launch.sh")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("Bulbe mode", content)
         self.assertIn("BIND_HOST=\"127.0.0.1\"", content)
@@ -653,7 +653,7 @@ class TestIntegration(unittest.TestCase):
     def test_main_py_uses_bind_guard(self):
         """main.py imports and uses get_safe_bind_address."""
         path = os.path.join(BACKEND_DIR, "main.py")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("get_safe_bind_address", content)
         self.assertIn("network_bind_guard", content)
@@ -666,7 +666,7 @@ class TestIntegration(unittest.TestCase):
             os.path.join(BACKEND_DIR, "remote_session_guard.py"),
         ]
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 try:
                     ast.parse(f.read(), filename=fpath)
                 except SyntaxError as e:

@@ -120,7 +120,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import yaml
 
@@ -259,7 +259,7 @@ def _parse_parameter_size_b(value: Any) -> float:
     return 0.0
 
 
-def _gb_from_size_string(size: Any) -> Optional[float]:
+def _gb_from_size_string(size: Any) -> float | None:
     """Parse a human size string ("20.5GB", "512.0MB", "100B") to GB.
 
     Mirrors the formats emitted by inference_backend._parse_gguf_filename.
@@ -330,7 +330,7 @@ def _resolve_context_manager() -> Any:
         return None
 
 
-def _parse_duration_s(value: Any) -> Optional[float]:
+def _parse_duration_s(value: Any) -> float | None:
     """Parse a keep_alive-style duration ('30m', '1h', '90s', 300) to
     seconds; None when unparseable or non-positive (conservative)."""
     if value is None:
@@ -354,7 +354,7 @@ def _parse_duration_s(value: Any) -> Optional[float]:
         return None
 
 
-def _coerce_epoch_s(value: Any) -> Optional[float]:
+def _coerce_epoch_s(value: Any) -> float | None:
     """Coerce an S1 expiry (epoch number, datetime, ISO string) to epoch
     seconds; None when it cannot be interpreted (conservative). Expiries
     are wall-clock stamps, so callers compare against time.time(), never
@@ -389,7 +389,7 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
-def _as_opt_float(value: Any, default: Optional[float]) -> Optional[float]:
+def _as_opt_float(value: Any, default: float | None) -> float | None:
     if value is None:
         return None
     try:
@@ -482,7 +482,7 @@ def _as_weights_override_map(value: Any) -> dict[str, float]:
     return out
 
 
-def _as_opt_int(value: Any, default: Optional[int]) -> Optional[int]:
+def _as_opt_int(value: Any, default: int | None) -> int | None:
     if value is None:
         return None
     try:
@@ -511,7 +511,7 @@ class GovernorConfig:
     """
 
     enabled: bool = True
-    total_vram_gb: Optional[float] = None
+    total_vram_gb: float | None = None
     safety_margin_gb: float = 1.5
     snapshot_ttl_s: float = 2.0
     # GiB of KV cache per 1024 tokens of requested num_ctx (DI-4).
@@ -554,16 +554,16 @@ class GovernorConfig:
     queue_depth: int = 2
     queue_wait_s: float = 30.0
     rlimits_enabled: bool = False
-    rlimits_as_gb: Optional[float] = None
-    rlimits_data_gb: Optional[float] = None
-    ollama_max_loaded_models: Optional[int] = None
-    ollama_num_parallel: Optional[int] = None
-    ollama_max_queue: Optional[int] = None
+    rlimits_as_gb: float | None = None
+    rlimits_data_gb: float | None = None
+    ollama_max_loaded_models: int | None = None
+    ollama_num_parallel: int | None = None
+    ollama_max_queue: int | None = None
     ollama_spawn_applies: bool = True
     ollama_external_advisory: bool = True
 
 
-def load_config(config_path: Optional[str | Path] = None) -> GovernorConfig:
+def load_config(config_path: str | Path | None = None) -> GovernorConfig:
     """Load resource_governor.yaml with defaults for missing keys.
 
     Follows the telemetry/sandbox merge idiom: a dataclass of defaults
@@ -751,7 +751,7 @@ def build_ollama_spawn_env(config: GovernorConfig) -> dict[str, str]:
 
 
 def compute_ollama_limits_advisory(
-    config: GovernorConfig, env: Optional[Mapping[str, str]] = None
+    config: GovernorConfig, env: Mapping[str, str] | None = None
 ) -> dict[str, Any]:
     """Posture (b): compare the configured ollama_limits to what is visible.
 
@@ -772,8 +772,8 @@ def compute_ollama_limits_advisory(
     precedent). Never raises.
     """
     source: Mapping[str, str] = os.environ if env is None else env
-    configured: dict[str, Optional[int]] = {}
-    visible: dict[str, Optional[str]] = {}
+    configured: dict[str, int | None] = {}
+    visible: dict[str, str | None] = {}
     mismatches: list[dict[str, Any]] = []
     unknown_keys: list[str] = []
 
@@ -848,12 +848,12 @@ def compute_ollama_limits_advisory(
 # llama.cpp load seam may call the applier on every load and stays
 # once-effective by construction. Distinct configurations are honestly
 # observable only in separate processes (the child-process test idiom).
-_RLIMITS_OUTCOME: Optional[dict[str, Any]] = None
+_RLIMITS_OUTCOME: dict[str, Any] | None = None
 _RLIMITS_LOCK = threading.Lock()
 
 
 def apply_llamacpp_rlimits(
-    config: Optional[GovernorConfig] = None,
+    config: GovernorConfig | None = None,
 ) -> dict[str, Any]:
     """Optional, off-by-default rlimits for the in-process backend.
 
@@ -957,9 +957,9 @@ class LoadedModelView:
 
     name: str
     size_vram_bytes: int = 0
-    expires_at: Optional[float] = None
-    context_length: Optional[int] = None
-    digest: Optional[str] = None
+    expires_at: float | None = None
+    context_length: int | None = None
+    digest: str | None = None
 
     @property
     def size_vram_gb(self) -> float:
@@ -988,7 +988,7 @@ class BackendResidentView:
 
     name: str
     backend: str
-    estimated_gb: Optional[float] = None
+    estimated_gb: float | None = None
     basis: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
@@ -1017,10 +1017,10 @@ class ResourceSnapshot:
     ttl_s: float
     loaded: list[LoadedModelView] = field(default_factory=list)
     backend_resident: list[BackendResidentView] = field(default_factory=list)
-    capacity_gb: Optional[float] = None
+    capacity_gb: float | None = None
     capacity_source: str = "unknown"
     vram_in_use_gb: float = 0.0
-    vram_available_gb: Optional[float] = None
+    vram_available_gb: float | None = None
     vram_status: str = "ok"
     ram_available_mb: float = 0.0
     sources: list[str] = field(default_factory=list)
@@ -1073,19 +1073,19 @@ class AdmissionDecision:
 
     admitted: bool
     model: str
-    num_ctx: Optional[int] = None
-    num_gpu: Optional[int] = None
-    keep_alive: Optional[str] = None
+    num_ctx: int | None = None
+    num_gpu: int | None = None
+    keep_alive: str | None = None
     action: str = "admit"
     reason: str = ""
     provenance: list[str] = field(default_factory=list)
     ticket_id: str = ""
     # -- internal companions (not part of the 4.4 minimum shape) ----------
     caller: str = "chat"
-    requested_ctx: Optional[int] = None
+    requested_ctx: int | None = None
     load_expected: bool = False
     conditional_on_eviction: bool = False
-    shortfall_gb: Optional[float] = None
+    shortfall_gb: float | None = None
     is_estop: bool = False
     payload: dict[str, Any] = field(default_factory=dict)
 
@@ -1153,12 +1153,12 @@ class GovernorRefusal(RuntimeError):
 _ticket_local = threading.local()
 
 
-def get_active_ticket() -> Optional[AdmissionDecision]:
+def get_active_ticket() -> AdmissionDecision | None:
     """The calling thread's active admission ticket, if a funnel set one."""
     return getattr(_ticket_local, "ticket", None)
 
 
-def set_active_ticket(decision: Optional[AdmissionDecision]) -> None:
+def set_active_ticket(decision: AdmissionDecision | None) -> None:
     """Set the thread-local ticket the backend gate will see (4.4)."""
     _ticket_local.ticket = decision
 
@@ -1169,7 +1169,7 @@ def clear_active_ticket() -> None:
 
 
 @contextmanager
-def ticket_scope(decision: Optional[AdmissionDecision]):
+def ticket_scope(decision: AdmissionDecision | None):
     """Hold an admission ticket around a backend call (Section 4.4).
 
     The pass-through mechanism arbitrated at the S224 read gate: a thread
@@ -1269,10 +1269,10 @@ class AdaptStore:
     def record_model_cost(
         self,
         name: str,
-        digest: Optional[str],
+        digest: str | None,
         size_vram_bytes: int,
-        num_ctx: Optional[int] = None,
-        observed_at: Optional[float] = None,
+        num_ctx: int | None = None,
+        observed_at: float | None = None,
     ) -> None:
         """Persist an observed per-model VRAM cost (supersedes statics)."""
         with self._lock:
@@ -1295,8 +1295,8 @@ class AdaptStore:
                 conn.close()
 
     def get_model_cost(
-        self, name: str, digest: Optional[str] = None
-    ) -> Optional[dict[str, Any]]:
+        self, name: str, digest: str | None = None
+    ) -> dict[str, Any] | None:
         """Latest learned cost for a model; exact digest row preferred."""
         with self._lock:
             conn = self._connect()
@@ -1331,7 +1331,7 @@ class AdaptStore:
 
     # -- learned capacity ceiling (fast down, slow up) -----------------------
 
-    def get_learned_ceiling(self) -> Optional[float]:
+    def get_learned_ceiling(self) -> float | None:
         with self._lock:
             conn = self._connect()
             try:
@@ -1345,7 +1345,7 @@ class AdaptStore:
                 conn.close()
 
     def _write_ceiling(
-        self, conn: Any, ceiling_gb: Optional[float], successes: int, now: float
+        self, conn: Any, ceiling_gb: float | None, successes: int, now: float
     ) -> None:
         conn.execute(
             """INSERT OR REPLACE INTO ceiling
@@ -1359,7 +1359,7 @@ class AdaptStore:
         observed_in_use_gb: float,
         safety_margin_gb: float,
         floor_gb: float,
-        now: Optional[float] = None,
+        now: float | None = None,
     ) -> float:
         """Fast-down: a failure whose admission predicted a fit lowers the
         working ceiling to (observed in-use at failure) minus the safety
@@ -1387,9 +1387,9 @@ class AdaptStore:
     def record_load_success(
         self,
         total_in_use_gb: float,
-        configured_capacity_gb: Optional[float],
-        now: Optional[float] = None,
-    ) -> Optional[float]:
+        configured_capacity_gb: float | None,
+        now: float | None = None,
+    ) -> float | None:
         """Slow-up: a stretch of successes ABOVE the learned ceiling
         relaxes it back toward the configured capacity.
 
@@ -1434,12 +1434,12 @@ class AdaptStore:
         self,
         caller: str,
         model: str,
-        requested_ctx: Optional[int],
-        admitted_ctx: Optional[int],
+        requested_ctx: int | None,
+        admitted_ctx: int | None,
         decision: str,
         reason: str = "",
         ring_size: int = 200,
-        ts: Optional[float] = None,
+        ts: float | None = None,
     ) -> None:
         """Append one admission decision and prune the ring by count.
 
@@ -1527,8 +1527,8 @@ class ResourceGovernor:
 
     def __init__(
         self,
-        config_path: Optional[str | Path] = None,
-        db_path: Optional[str | Path] = None,
+        config_path: str | Path | None = None,
+        db_path: str | Path | None = None,
         warmup: Any = _UNSET,
         registry: Any = _UNSET,
         clock: Callable[[], float] = time.monotonic,
@@ -1548,14 +1548,14 @@ class ResourceGovernor:
         )
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
-        self._snapshot: Optional[ResourceSnapshot] = None
-        self._pending_attribution: dict[str, Optional[int]] = {}
+        self._snapshot: ResourceSnapshot | None = None
+        self._pending_attribution: dict[str, int | None] = {}
         self._refresh_in_flight = False
         self._capacity_warning_emitted = False
         # S224 (R-04 wiring): the admission path observes the estop flag;
         # a transition triggers the drain/resume invalidation hooks
         # without editing emergency_stop. None until first observation.
-        self._last_estop_seen: Optional[bool] = None
+        self._last_estop_seen: bool | None = None
         # S225 (Bloc 2): runtime backpressure state. The refusal-rate
         # window is in-memory by design (a runtime signal, never
         # persisted; the maxlen is a memory bound, the time window is
@@ -1563,9 +1563,9 @@ class ResourceGovernor:
         # survive a process restart: the warmup re-initialises at its
         # own default, which is the honest restore in that case.
         self._refusal_events: deque = deque(maxlen=512)
-        self._pressure_soft_since: Optional[float] = None
-        self._keep_alive_original: Optional[str] = None
-        self._last_pressure_level: Optional[str] = None
+        self._pressure_soft_since: float | None = None
+        self._keep_alive_original: str | None = None
+        self._last_pressure_level: str | None = None
         # S225 queue: waiters block on the condition in bounded slices;
         # the invalidation hooks notify it (capacity may have moved).
         self._queue_cond = threading.Condition()
@@ -1653,7 +1653,7 @@ class ResourceGovernor:
     # -- eager invalidation hooks (callable; Bloc 1 wires the callers) --------
 
     def invalidate_on_load(
-        self, model: str, requested_num_ctx: Optional[int] = None
+        self, model: str, requested_num_ctx: int | None = None
     ) -> None:
         """An admitted load happened: drop the cache and register the
         model for post-load cost attribution at the next fresh ps view."""
@@ -1662,7 +1662,7 @@ class ResourceGovernor:
             self._snapshot = None
         self._notify_queue()
 
-    def invalidate_on_evict(self, model: Optional[str] = None) -> None:
+    def invalidate_on_evict(self, model: str | None = None) -> None:
         with self._cache_lock:
             self._snapshot = None
         self._notify_queue()
@@ -1691,7 +1691,7 @@ class ResourceGovernor:
 
     # -- estimation API --------------------------------------------------------
 
-    def resolve_kv_coefficient(self, model: Optional[str]) -> float:
+    def resolve_kv_coefficient(self, model: str | None) -> float:
         """Per-model KV coefficient (S259).
 
         Resolution order: an exact entry in ``kv_override_models``, else
@@ -1708,7 +1708,7 @@ class ResourceGovernor:
         exact = self._config.kv_override_models.get(name)
         if exact is not None:
             return exact
-        best: Optional[float] = None
+        best: float | None = None
         best_len = -1
         for family, coeff in self._config.kv_override_families.items():
             if family and family in name and len(family) > best_len:
@@ -1718,7 +1718,7 @@ class ResourceGovernor:
         return self._config.kv_coefficient
 
     def estimate_kv_cache_gb(
-        self, num_ctx: Optional[int], model: Optional[str] = None
+        self, num_ctx: int | None, model: str | None = None
     ) -> float:
         """KV-cache increment as a function of the requested num_ctx.
 
@@ -1733,8 +1733,8 @@ class ResourceGovernor:
         return (float(num_ctx) / 1024.0) * self.resolve_kv_coefficient(model)
 
     def estimate_model_vram_gb(
-        self, model: str, digest: Optional[str] = None
-    ) -> tuple[Optional[float], str]:
+        self, model: str, digest: str | None = None
+    ) -> tuple[float | None, str]:
         """Best-available weight-cost estimate for one model, with basis.
 
         Order: live S1 observation (when the cached snapshot holds the
@@ -1767,8 +1767,8 @@ class ResourceGovernor:
         return None, "unknown"
 
     def resolve_weights_override(
-        self, model: Optional[str]
-    ) -> Optional[float]:
+        self, model: str | None
+    ) -> float | None:
         """Per-model weights-residency override in GiB (S261).
 
         Resolution order: an exact entry in ``weights_override_models``,
@@ -1786,7 +1786,7 @@ class ResourceGovernor:
         exact = self._config.weights_override_models.get(name)
         if exact is not None:
             return exact
-        best: Optional[float] = None
+        best: float | None = None
         best_len = -1
         for family, gib in self._config.weights_override_families.items():
             if family and family in name and len(family) > best_len:
@@ -1807,7 +1807,7 @@ class ResourceGovernor:
 
     def _estimate_from_backend(
         self, backend: Any, model: str
-    ) -> tuple[Optional[float], str]:
+    ) -> tuple[float | None, str]:
         """S3-then-file-size estimation from one backend's metadata."""
         try:
             info = backend.model_info(model)
@@ -1974,7 +1974,7 @@ class ResourceGovernor:
             sources.append("S4-capacity-learned")
 
         if configured is not None and learned_ceiling is not None:
-            capacity: Optional[float] = min(configured, learned_ceiling)
+            capacity: float | None = min(configured, learned_ceiling)
             capacity_source = "config+learned"
         elif configured is not None:
             capacity = configured
@@ -2000,7 +2000,7 @@ class ResourceGovernor:
 
         if capacity is None:
             vram_status = "disabled_capacity_unknown"
-            available: Optional[float] = None
+            available: float | None = None
             if not self._capacity_warning_emitted:
                 logger.warning(
                     "Resource governor: total VRAM capacity unknown "
@@ -2045,7 +2045,7 @@ class ResourceGovernor:
         )
         return new_ceiling
 
-    def record_load_success(self, total_in_use_gb: float) -> Optional[float]:
+    def record_load_success(self, total_in_use_gb: float) -> float | None:
         """Feed a successful load into the slow-up rule (Section 3.2)."""
         return self._store.record_load_success(
             total_in_use_gb, self._config.total_vram_gb
@@ -2055,8 +2055,8 @@ class ResourceGovernor:
         self,
         caller: str,
         model: str,
-        requested_ctx: Optional[int],
-        admitted_ctx: Optional[int],
+        requested_ctx: int | None,
+        admitted_ctx: int | None,
         decision: str,
         reason: str = "",
     ) -> None:
@@ -2106,7 +2106,7 @@ class ResourceGovernor:
     ) -> dict[str, Any]:
         cfg = self._config
         effective = snapshot.capacity_gb
-        ratio: Optional[float] = None
+        ratio: float | None = None
         ratio_level = "none"
         if effective is not None and effective > 0:
             ratio = snapshot.vram_in_use_gb / effective
@@ -2246,10 +2246,10 @@ class ResourceGovernor:
     def admit(
         self,
         model: str,
-        requested_ctx: Optional[int] = None,
+        requested_ctx: int | None = None,
         caller: str = "chat",
-        extra_models: Optional[list[str]] = None,
-        digest: Optional[str] = None,
+        extra_models: list[str] | None = None,
+        digest: str | None = None,
     ) -> AdmissionDecision:
         """R-01: does (model, requested num_ctx) fit the machine right now?
 
@@ -2342,7 +2342,7 @@ class ResourceGovernor:
         # (Section 5, escalation step 1) when capacity is known. The
         # same read drives the sustained-write/restore policy.
         pressure = self._pressure_from_snapshot(snapshot)
-        ka_override: Optional[str] = (
+        ka_override: str | None = (
             self._config.pressure_keep_alive
             if (
                 pressure.get("level") in ("soft", "hard")
@@ -2360,7 +2360,7 @@ class ResourceGovernor:
         # Weights cost (4.2): zero when already resident; unknown is never
         # "too large" (3.1) and contributes zero to the fit.
         if already_loaded:
-            weights_gb: Optional[float] = 0.0
+            weights_gb: float | None = 0.0
         else:
             weights_gb, _basis = self.estimate_model_vram_gb(model, digest)
             # S261: an operator-named weights-residency override (the
@@ -2386,7 +2386,7 @@ class ResourceGovernor:
         effective_ctx = self._clamp_ctx(model, requested_ctx)
         known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
 
-        def _cost(ctx: Optional[int]) -> float:
+        def _cost(ctx: int | None) -> float:
             return known_weights + self.estimate_kv_cache_gb(ctx, model=model)
 
         if snapshot.capacity_gb is None:
@@ -2427,7 +2427,7 @@ class ResourceGovernor:
         budget_unconditional = snapshot.capacity_gb - in_use - margin
         budget_with_eviction = budget_unconditional + evictable
 
-        def _fit(ctx: Optional[int]) -> Optional[bool]:
+        def _fit(ctx: int | None) -> bool | None:
             """True: fits now. False: fits only after eviction. None: no."""
             cost = _cost(ctx)
             if cost <= budget_unconditional:
@@ -2436,7 +2436,7 @@ class ResourceGovernor:
                 return False
             return None
 
-        candidates: list[Optional[int]] = [effective_ctx]
+        candidates: list[int | None] = [effective_ctx]
         floor = self._config.ctx_floor.get(caller)
         if effective_ctx is not None and floor is not None:
             steps = sorted(
@@ -2521,8 +2521,8 @@ class ResourceGovernor:
             self.invalidate_on_resume()
 
     def _clamp_ctx(
-        self, model: str, requested_ctx: Optional[int]
-    ) -> Optional[int]:
+        self, model: str, requested_ctx: int | None
+    ) -> int | None:
         """Clamp the requested context to the model's window (spec 4.2).
 
         ModelLimits stays the authority: the window is read through
@@ -2596,8 +2596,8 @@ class ResourceGovernor:
         self,
         model: str,
         trigger: str = "manual",
-        ticket_id: Optional[str] = None,
-        needed_gb: Optional[float] = None,
+        ticket_id: str | None = None,
+        needed_gb: float | None = None,
     ) -> bool:
         """Per-model eviction through the backends' narrowed primitives.
 
@@ -2693,8 +2693,8 @@ class ResourceGovernor:
         self,
         model: str,
         trigger: str,
-        ticket_id: Optional[str],
-        needed_gb: Optional[float],
+        ticket_id: str | None,
+        needed_gb: float | None,
     ) -> None:
         """Append the eviction to the signed audit chain OFF the hot
         path (a short-lived daemon thread; evictions are rare). The
@@ -2733,10 +2733,10 @@ class ResourceGovernor:
     def admit_or_wait(
         self,
         model: str,
-        requested_ctx: Optional[int] = None,
+        requested_ctx: int | None = None,
         caller: str = "benchmark",
-        extra_models: Optional[list[str]] = None,
-        digest: Optional[str] = None,
+        extra_models: list[str] | None = None,
+        digest: str | None = None,
     ) -> AdmissionDecision:
         """admit() with the Section 5 bounded queue for enrolled callers.
 
@@ -2844,13 +2844,13 @@ class ResourceGovernor:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_governor: Optional[ResourceGovernor] = None
+_governor: ResourceGovernor | None = None
 _governor_lock = threading.Lock()
 
 
 def get_resource_governor(
-    config_path: Optional[str | Path] = None,
-    db_path: Optional[str | Path] = None,
+    config_path: str | Path | None = None,
+    db_path: str | Path | None = None,
 ) -> ResourceGovernor:
     """Return the module-level governor, creating it on first use."""
     global _governor
@@ -2875,7 +2875,7 @@ def reset_resource_governor() -> None:
 
 
 def backend_admission_gate(
-    model: str, options: Optional[dict] = None
+    model: str, options: dict | None = None
 ) -> None:
     """The internal hook body behind the four generate/stream heads.
 
@@ -2901,7 +2901,7 @@ def backend_admission_gate(
             governor.invalidate_on_load(model, ticket.num_ctx)
             ticket.load_expected = False
         return
-    requested: Optional[int] = None
+    requested: int | None = None
     if isinstance(options, dict):
         raw = options.get("num_ctx")
         if isinstance(raw, int) and raw > 0:

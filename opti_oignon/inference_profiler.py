@@ -25,8 +25,8 @@ import logging
 import math
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +327,7 @@ class InferenceProfiler:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_profiler: Optional[InferenceProfiler] = None
+_profiler: InferenceProfiler | None = None
 _profiler_lock = threading.Lock()
 
 

@@ -11,7 +11,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 # S136 audit fix: use encrypted DB connections
@@ -36,7 +36,7 @@ class PluginReview:
     created_at: float
     # REV-2 (S219): authenticated owner identity; None on legacy rows
     # written before the user_id column existed.
-    user_id: Optional[str] = None
+    user_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for API responses."""
@@ -156,7 +156,7 @@ class PluginReviewStore:
         title: str = "",
         text: str = "",
         author: str = "anonymous",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> PluginReview:
         """Add a review for a plugin.
 
@@ -282,7 +282,7 @@ class PluginReviewStore:
         try:
             rows = conn.execute(
                 "SELECT * FROM plugin_reviews WHERE plugin_name = ? "
-                "ORDER BY {} DESC LIMIT ? OFFSET ?".format(col),
+                f"ORDER BY {col} DESC LIMIT ? OFFSET ?",
                 (plugin_name, limit, offset),
             ).fetchall()
             return [self._row_to_review(r) for r in rows]

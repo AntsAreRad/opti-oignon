@@ -120,7 +120,7 @@ def _corrupt_row(feed, record_id, *, column, value):
     with feed._lock:
         conn = feed._conn()
         conn.execute(
-            "UPDATE veilid_change_feed SET {} = ? WHERE record_id = ?".format(column),
+            f"UPDATE veilid_change_feed SET {column} = ? WHERE record_id = ?",
             (value, record_id),
         )
         conn.commit()

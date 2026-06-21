@@ -18,8 +18,9 @@ File-content / manifest only, so the suite collects without the backend.
 """
 
 import re
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 

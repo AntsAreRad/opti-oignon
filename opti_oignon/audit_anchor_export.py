@@ -26,7 +26,7 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class VerificationResult:
     anchor_entry_count: int
     current_tip_hash: str
     anchor_tip_hash: str
-    hmac_valid: Optional[bool] = None
+    hmac_valid: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -298,7 +298,7 @@ def verify_anchor(
     current_tip = chain._get_tip_hash() if current_count > 0 else ""
 
     # HMAC verification (if present)
-    hmac_valid: Optional[bool] = None
+    hmac_valid: bool | None = None
     if anchor_hmac:
         # Reconstruct the payload without the HMAC for verification
         payload_fields = {

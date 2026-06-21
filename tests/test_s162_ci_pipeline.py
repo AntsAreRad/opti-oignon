@@ -15,7 +15,6 @@ import unittest
 
 import yaml
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -29,7 +28,7 @@ README_PATH = os.path.join(PROJECT_ROOT, "README.md")
 
 def _load_workflow():
     """Load and parse the CI workflow YAML."""
-    with open(WORKFLOW_PATH, "r", encoding="utf-8") as f:
+    with open(WORKFLOW_PATH, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -226,7 +225,7 @@ class TestScriptsExistAndExecutable(unittest.TestCase):
 
     def test_badge_script_is_valid_python(self):
         path = os.path.join(SCRIPTS_DIR, "generate_coverage_badge.py")
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source)
         func_names = [
@@ -245,7 +244,7 @@ class TestScriptCIFlags(unittest.TestCase):
 
     def _read_script(self, name):
         path = os.path.join(SCRIPTS_DIR, name)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return f.read()
 
     def test_run_tests_supports_ci_flag(self):
@@ -295,7 +294,7 @@ class TestCoverageThreshold(unittest.TestCase):
 
     def test_overall_threshold_defined(self):
         path = os.path.join(SCRIPTS_DIR, "run_coverage.sh")
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
         self.assertIn("OVERALL_FAIL_UNDER=", content)
         # Extract value
@@ -307,7 +306,7 @@ class TestCoverageThreshold(unittest.TestCase):
 
     def test_security_module_thresholds_defined(self):
         path = os.path.join(SCRIPTS_DIR, "run_coverage.sh")
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
         self.assertIn("SECURITY_MODULE_THRESHOLDS", content)
 
@@ -350,7 +349,7 @@ class TestCoverageBadgeGeneration(unittest.TestCase):
         try:
             self.mod.generate_badge(42.5, output_path)
             self.assertTrue(os.path.isfile(output_path))
-            with open(output_path, "r", encoding="utf-8") as f:
+            with open(output_path, encoding="utf-8") as f:
                 svg = f.read()
             self.assertIn("<svg", svg)
             self.assertIn("coverage", svg)
@@ -379,7 +378,7 @@ class TestReadmeBadges(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with open(README_PATH, "r", encoding="utf-8") as f:
+        with open(README_PATH, encoding="utf-8") as f:
             cls.readme = f.read()
 
     def test_ci_badge_present(self):
@@ -407,7 +406,7 @@ class TestBranchProtectionDocs(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         doc_path = os.path.join(DOCS_DIR, "BRANCH_PROTECTION.md")
-        with open(doc_path, "r", encoding="utf-8") as f:
+        with open(doc_path, encoding="utf-8") as f:
             cls.content = f.read()
 
     def test_file_exists(self):

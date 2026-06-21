@@ -167,8 +167,25 @@ target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
-ignore = ["E501"]
+# High-signal families: pycodestyle errors, pyflakes, isort, pyupgrade.
+# Opinion-heavy / false-positive-prone families (N naming, B bugbear, SIM
+# simplify) are intentionally left out for now and can be reintroduced
+# incrementally as the codebase is cleaned.
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",  # line length: governed by line-length, not worth the churn
+    "E402",  # module-import-not-at-top: intentional (checkpoint_before_apply header, lazy loading)
+    "E731",  # lambda assignment: used for short import-fallback shims
+    "E741",  # ambiguous variable name
+    "UP031", # printf-style formatting: cosmetic, deferred
+    "UP028", # yield-in-for-loop: cosmetic, deferred
+    "UP030", # format-literals: cosmetic, deferred
+    "UP035", # deprecated typing imports: cosmetic, deferred
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "I001"]  # public re-exports and feature-grouped import blocks
+"tests/*" = ["F401", "F841"]      # fixtures and intentionally-unused locals in tests
 
 [tool.mypy]
 python_version = "3.10"

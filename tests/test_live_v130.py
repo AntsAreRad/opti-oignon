@@ -523,9 +523,9 @@ def test_context_summary():
     normal_msg = {"role": "user", "content": "Hello"}
     system_msg = {"role": "system", "content": "You are a helpful assistant."}
 
-    assert is_summary_message(summary_msg) == True
-    assert is_summary_message(normal_msg) == False
-    assert is_summary_message(system_msg) == False
+    assert is_summary_message(summary_msg) == True  # noqa: E712
+    assert is_summary_message(normal_msg) == False  # noqa: E712
+    assert is_summary_message(system_msg) == False  # noqa: E712
     ok("is_summary_message detection")
 
     # --- Test 3: extract_summary_text ---
@@ -605,7 +605,7 @@ def test_context_summary():
 
     # --- Test 12: Executor integration (import check) ---
     from opti_oignon.executor import CONTEXT_SUMMARY_AVAILABLE
-    assert CONTEXT_SUMMARY_AVAILABLE == True
+    assert CONTEXT_SUMMARY_AVAILABLE == True  # noqa: E712
     ok("Executor has CONTEXT_SUMMARY_AVAILABLE=True")
 
     # --- Test 13: Executor _summarize_old_messages exists ---
@@ -3634,14 +3634,14 @@ def test_token_budget():
 
     # --- Test 12: allocate pas besoin de trim ---
     alloc = mgr.allocate("qwen3:32b", system_tokens=500, history_tokens=3000)
-    assert alloc["needs_trimming"] == False
+    assert alloc["needs_trimming"] == False  # noqa: E712
     assert alloc["tokens_to_trim"] == 0
     assert alloc["history_current"] == 3000
     ok("allocate no trimming needed")
 
     # --- Test 13: allocate besoin de trim ---
     alloc_big = mgr.allocate("phi3:mini", system_tokens=500, history_tokens=5000)
-    assert alloc_big["needs_trimming"] == True
+    assert alloc_big["needs_trimming"] == True  # noqa: E712
     assert alloc_big["tokens_to_trim"] > 0
     ok("allocate trimming needed for small model")
 
@@ -3694,15 +3694,15 @@ def test_sliding_window():
     ok("_estimate_tokens handles empty/None")
 
     # --- Test 4: _has_code_blocks ---
-    assert swm._has_code_blocks("Here is code:\n```python\nprint('hi')\n```") == True
-    assert swm._has_code_blocks("No code here, just text.") == False
+    assert swm._has_code_blocks("Here is code:\n```python\nprint('hi')\n```") == True  # noqa: E712
+    assert swm._has_code_blocks("No code here, just text.") == False  # noqa: E712
     ok("_has_code_blocks detection")
 
     # --- Test 5: _has_artifact_markers ---
-    assert swm._has_artifact_markers("```html\n<div>test</div>\n```") == True
-    assert swm._has_artifact_markers("<!DOCTYPE html>") == True
-    assert swm._has_artifact_markers("<svg viewBox='0 0 100 100'>") == True
-    assert swm._has_artifact_markers("Just plain text.") == False
+    assert swm._has_artifact_markers("```html\n<div>test</div>\n```") == True  # noqa: E712
+    assert swm._has_artifact_markers("<!DOCTYPE html>") == True  # noqa: E712
+    assert swm._has_artifact_markers("<svg viewBox='0 0 100 100'>") == True  # noqa: E712
+    assert swm._has_artifact_markers("Just plain text.") == False  # noqa: E712
     ok("_has_artifact_markers detection")
 
     # --- Test 6: _is_summary_message ---
@@ -3711,8 +3711,8 @@ def test_sliding_window():
         "content": "[Summary of earlier conversation]\nUser discussed R code."
     }
     normal_msg = {"role": "user", "content": "Hello"}
-    assert swm._is_summary_message(summary_msg) == True
-    assert swm._is_summary_message(normal_msg) == False
+    assert swm._is_summary_message(summary_msg) == True  # noqa: E712
+    assert swm._is_summary_message(normal_msg) == False  # noqa: E712
     ok("_is_summary_message detection")
 
     # --- Test 7: _score_message importance ---
@@ -3725,8 +3725,8 @@ def test_sliding_window():
     score_first = swm._score_message(msgs[0], 0, 4)
     score_code = swm._score_message(msgs[2], 2, 4)
     assert score_code.importance > score_first.importance
-    assert score_code.has_code == True
-    assert score_first.has_code == False
+    assert score_code.has_code == True  # noqa: E712
+    assert score_first.has_code == False  # noqa: E712
     ok("_score_message: code messages score higher")
 
     # --- Test 8: _score_message recency ---
@@ -3872,7 +3872,7 @@ def test_sliding_window():
         {"role": "assistant", "content": "New answer"},
     ]
     score_summary = swm_big._score_message(msgs_with_summary[0], 0, 5)
-    assert score_summary.is_summary == True
+    assert score_summary.is_summary == True  # noqa: E712
     assert score_summary.importance >= 0.90
     ok("Summary messages scored with high importance")
 

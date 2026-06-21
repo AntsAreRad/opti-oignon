@@ -24,10 +24,10 @@ Usage:
     pytest tests/test_e2e_s85.py -v -k "TestOnboarding"
 """
 
+import json
 import os
 import re
 import sys
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +58,7 @@ def _read(path):
 def _get_test_client():
     """Create a FastAPI TestClient for API integration tests."""
     from fastapi.testclient import TestClient
+
     from opti_oignon.api.app import app
     return TestClient(app)
 

@@ -46,12 +46,12 @@ def _read(filepath: Path) -> str:
     return filepath.read_text(encoding="utf-8")
 
 
-def _svelte_files(directory: Path) -> List[Path]:
+def _svelte_files(directory: Path) -> list[Path]:
     """Recursively find all .svelte files in a directory."""
     return list(directory.rglob("*.svelte"))
 
 
-def _ts_files(directory: Path) -> List[Path]:
+def _ts_files(directory: Path) -> list[Path]:
     """Recursively find all .ts files in a directory."""
     return list(directory.rglob("*.ts"))
 

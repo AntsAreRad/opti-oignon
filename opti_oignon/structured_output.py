@@ -26,7 +26,7 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 
 try:
-    from .config import config
+    from .config import config  # noqa: F401
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False

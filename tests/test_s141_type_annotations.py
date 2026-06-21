@@ -493,7 +493,7 @@ class TestASTValidity(unittest.TestCase):
                         ast.parse(fh.read())
                 except SyntaxError as e:
                     errors.append(f"{path}: {e}")
-        self.assertEqual(errors, [], f"AST errors:\n" + "\n".join(errors))
+        self.assertEqual(errors, [], "AST errors:\n" + "\n".join(errors))
 
     def test_route_files_parse(self):
         """All routes_*.py files must be valid Python."""
@@ -510,7 +510,7 @@ class TestASTValidity(unittest.TestCase):
                     ast.parse(fh.read())
             except SyntaxError as e:
                 errors.append(f"{fname}: {e}")
-        self.assertEqual(errors, [], f"Route AST errors:\n" + "\n".join(errors))
+        self.assertEqual(errors, [], "Route AST errors:\n" + "\n".join(errors))
 
 
 if __name__ == "__main__":

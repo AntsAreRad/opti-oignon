@@ -12,7 +12,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 # S136 audit fix: use encrypted DB connections
@@ -455,14 +455,14 @@ class PluginRegistry:
         logger.info("Unregistered plugin '%s'", name)
         return True
 
-    def get(self, name: str) -> Optional[PluginRecord]:
+    def get(self, name: str) -> PluginRecord | None:
         """Get a plugin record by name, or None."""
         return self._plugins.get(name)
 
     def list_plugins(
         self,
         *,
-        state: Optional[str] = None,
+        state: str | None = None,
     ) -> list[PluginRecord]:
         """List all registered plugins, optionally filtered by state."""
         records = list(self._plugins.values())
@@ -564,7 +564,7 @@ class PluginRegistry:
         manifests: list[PluginManifest] = []
         for manifest_path in sorted(base.glob("*/manifest.yaml")):
             try:
-                with open(manifest_path, "r", encoding="utf-8") as fh:
+                with open(manifest_path, encoding="utf-8") as fh:
                     data = _yaml.safe_load(fh)
                 if not isinstance(data, dict):
                     logger.warning("Skipping %s: not a valid YAML dict", manifest_path)

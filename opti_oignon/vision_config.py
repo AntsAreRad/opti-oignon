@@ -25,7 +25,6 @@ Config persisted in opti_oignon/config/vision.yaml.
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ except ImportError:
 class VisionConfig:
     """Manages vision model selection with multi-strategy detection."""
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         self._config_path = config_path or _CONFIG_FILE
         self._vision_model: str = "auto"
         self._detection_strategy: str = "both"
@@ -78,7 +77,7 @@ class VisionConfig:
             logger.debug("Vision config not found at %s, using defaults", self._config_path)
             return
         try:
-            with open(self._config_path, "r", encoding="utf-8") as fh:
+            with open(self._config_path, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
             self._vision_model = str(data.get("vision_model", "auto"))
             strategy = data.get("detection_strategy", "both")
@@ -294,7 +293,7 @@ class VisionConfig:
                 seen.add(model_name)
         return result
 
-    def get_effective_model(self, available_models: list[str]) -> Optional[str]:
+    def get_effective_model(self, available_models: list[str]) -> str | None:
         """Return the effective vision model to use.
 
         If configured to 'auto', runs detection. Otherwise returns

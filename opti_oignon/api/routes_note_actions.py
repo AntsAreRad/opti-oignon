@@ -46,7 +46,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -100,7 +100,7 @@ class _OneShotOllamaClient:
     runner's clean failure.
     """
 
-    def __init__(self, model: str, *, host: Optional[str] = None) -> None:
+    def __init__(self, model: str, *, host: str | None = None) -> None:
         self._model = model
         self._host = host
 
@@ -116,7 +116,7 @@ class _OneShotOllamaClient:
             return str(getattr(msg, "content", "") if msg is not None else "")
 
 
-def _resolve_one_shot_client(model: Optional[str]) -> Any:
+def _resolve_one_shot_client(model: str | None) -> Any:
     """Build a one-shot model client from the selected model, or None.
 
     Mirrors ``routes_agent._resolve_model_client``: None when no model is
@@ -131,7 +131,7 @@ def _resolve_one_shot_client(model: Optional[str]) -> Any:
         return None
 
 
-def _client_builder_dep() -> Callable[[Optional[str]], Any]:
+def _client_builder_dep() -> Callable[[str | None], Any]:
     """The one-shot client builder seam (a model -> client callable).
 
     A FastAPI dependency so tests inject a fake builder through
@@ -159,7 +159,7 @@ def _mode_dep() -> str:
 @note_actions_router.post("/run", response_model=NoteActionResultSchema)
 def run_note_action(
     request: NoteActionRequest,
-    build_client: Callable[[Optional[str]], Any] = Depends(_client_builder_dep),
+    build_client: Callable[[str | None], Any] = Depends(_client_builder_dep),
     mode: str = Depends(_mode_dep),
     current_user: dict = Depends(_get_current_user),
 ) -> NoteActionResultSchema:

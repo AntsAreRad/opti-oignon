@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ REASON_CAPTION_FAILED = "caption_failed"
 # A captioner is a callable over the sandbox handle: (sandbox, session_id,
 # input_filename) -> (caption_text, ocr_text). It runs the tool INSIDE the
 # sandbox. Either leg may be None when the tool did not produce it.
-Captioner = Callable[[Any, str, str], Tuple[Optional[str], Optional[str]]]
+Captioner = Callable[[Any, str, str], tuple[str | None, str | None]]
 
 
 @dataclass
@@ -121,8 +121,8 @@ class CaptionResult:
 
     ok: bool
     attachment_id: str
-    caption_text: Optional[str] = None
-    ocr_text: Optional[str] = None
+    caption_text: str | None = None
+    ocr_text: str | None = None
     written_back: bool = False
     refused: bool = False
     reason: str = ""
@@ -145,7 +145,7 @@ def _refused(attachment_id: str, reason: str) -> CaptionResult:
     )
 
 
-def _coerce(raw: Any) -> Tuple[Optional[str], Optional[str]]:
+def _coerce(raw: Any) -> tuple[str | None, str | None]:
     """Coerce the captioner's return into a ``(caption, ocr)`` pair of str|None.
 
     A 2-tuple/list maps directly (each leg str|None); a bare string is taken as
@@ -165,11 +165,11 @@ def _coerce(raw: Any) -> Tuple[Optional[str], Optional[str]]:
 def caption_attachment(
     attachment_id: str,
     *,
-    user_id: Optional[str],
+    user_id: str | None,
     store: Any,
     blobs: Any,
     sandbox: Any,
-    captioner: Optional[Captioner],
+    captioner: Captioner | None,
     approve: bool = False,
     input_filename: str = DEFAULT_INPUT_NAME,
 ) -> CaptionResult:
@@ -275,8 +275,8 @@ def caption_attachment(
 def build_live_captioner(
     *,
     binary: str = "tesseract",
-    extra_args: Optional[list[str]] = None,
-) -> Optional[Captioner]:
+    extra_args: list[str] | None = None,
+) -> Captioner | None:
     """Build the live vision/OCR captioner, or None when the opt-in dep is off.
 
     HOST-ASSURED. The vision/OCR tooling is absent in-container, so this returns
@@ -295,7 +295,7 @@ def build_live_captioner(
 
     def _run(
         sandbox: Any, session_id: str, input_filename: str
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         # Run the OCR tool inside the sandbox; the output text file is produced in
         # the workspace, approved, and copied out. The command is assembled from
         # the fixed binary name and the in-workspace input/output names (no host

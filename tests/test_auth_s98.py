@@ -62,7 +62,7 @@ def _load_module(name, path):
 
 def _read(path):
     """Read file contents as string."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -801,7 +801,7 @@ class TestAuthConfig(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.path = os.path.join(CONFIG_DIR, "auth.yaml")
-        with open(cls.path, "r") as f:
+        with open(cls.path) as f:
             cls.cfg = yaml.safe_load(f)
 
     def test_file_exists(self):

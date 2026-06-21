@@ -24,10 +24,10 @@ Target: ~70 tests
 """
 
 import ast
-import importlib.util
-import json
 import hashlib
 import hmac
+import importlib.util
+import json
 import os
 import secrets
 import socket
@@ -39,7 +39,7 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -776,7 +776,7 @@ class TestPluginsYamlConfig(unittest.TestCase):
     def setUpClass(cls) -> None:
         import yaml
         config_path = os.path.join(_PKG, "config", "plugins.yaml")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             cls.config = yaml.safe_load(f)
 
     def test_subprocess_section_exists(self) -> None:

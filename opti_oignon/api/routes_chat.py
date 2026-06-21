@@ -69,12 +69,12 @@ except ImportError:
 # S45: Import conditionnel de l'executeur agentique
 try:
     from opti_oignon.agentic_executor import (
-        PIPELINE_CONSENSUS,
-        PIPELINE_DIRECT,
-        PIPELINE_REASONING,
-        PIPELINE_SELF_CORRECT,
-        PIPELINE_THINK_TOOLS,
-        PIPELINE_TOOLS,
+        PIPELINE_CONSENSUS,  # noqa: F401
+        PIPELINE_DIRECT,  # noqa: F401
+        PIPELINE_REASONING,  # noqa: F401
+        PIPELINE_SELF_CORRECT,  # noqa: F401
+        PIPELINE_THINK_TOOLS,  # noqa: F401
+        PIPELINE_TOOLS,  # noqa: F401
     )
     from opti_oignon.agentic_executor import (
         agentic_executor as _agentic_executor,
@@ -88,10 +88,10 @@ except ImportError:
 try:
     from opti_oignon.consensus import (
         ConsensusEngine,
-        ConsensusResult,
+        ConsensusResult,  # noqa: F401
     )
     from opti_oignon.consensus import (
-        ModelResponse as ConsensusModelResponse,
+        ModelResponse as ConsensusModelResponse,  # noqa: F401
     )
     from opti_oignon.consensus import (
         consensus_engine as _consensus_engine,
@@ -112,8 +112,10 @@ except ImportError:
 # S117: Import conditionnel du quick sandbox
 try:
     from opti_oignon.quick_sandbox import (
-        quick_sandbox_manager as _quick_sandbox_manager,
         QUICK_SANDBOX_AVAILABLE,
+    )
+    from opti_oignon.quick_sandbox import (
+        quick_sandbox_manager as _quick_sandbox_manager,
     )
     from opti_oignon.tool_registry import tool_registry as _tool_registry
 except ImportError:
@@ -123,8 +125,8 @@ except ImportError:
 
 # S128: Import conditionnel du tool call approval (Bulbe mode)
 try:
-    from opti_oignon.tool_call_approval import tool_call_approval as _tool_call_approval
     from opti_oignon.tool_call_approval import ApprovalStatus as _ApprovalStatus
+    from opti_oignon.tool_call_approval import tool_call_approval as _tool_call_approval
     TOOL_CALL_APPROVAL_AVAILABLE = True
 except ImportError:
     TOOL_CALL_APPROVAL_AVAILABLE = False
@@ -161,13 +163,17 @@ WS_CLOSE_INVALID_DATA = 1003
 # S118: Import conditionnel du chat coding agent
 try:
     from opti_oignon.chat_coding_agent import (
-        chat_coding_manager as _chat_coding_manager,
+        CHAT_CODING_AVAILABLE,
         ChatCodingSession,
         CodingEvent,
         LLMCallContext,
         LLMCallResult,
+    )
+    from opti_oignon.chat_coding_agent import (
+        chat_coding_manager as _chat_coding_manager,
+    )
+    from opti_oignon.chat_coding_agent import (
         parse_directives as _parse_coding_directives,
-        CHAT_CODING_AVAILABLE,
     )
 except ImportError:
     CHAT_CODING_AVAILABLE = False

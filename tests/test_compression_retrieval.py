@@ -21,7 +21,6 @@ from opti_oignon.conversation_compressor import (
 )
 from opti_oignon.executor import Executor
 
-
 # ============================================================================
 # Trigger pattern coverage — English
 # ============================================================================

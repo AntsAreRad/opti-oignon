@@ -80,11 +80,11 @@ def _ensure_stubs() -> None:
 
 
 def _load(name: str):
-    full = "opti_oignon.veilid.{}".format(name)
+    full = f"opti_oignon.veilid.{name}"
     if full in sys.modules:
         return sys.modules[full]
     spec = importlib.util.spec_from_file_location(
-        full, str(VEILID / "{}.py".format(name))
+        full, str(VEILID / f"{name}.py")
     )
     mod = importlib.util.module_from_spec(spec)
     sys.modules[full] = mod  # register before exec (3.12+ dataclass processing)

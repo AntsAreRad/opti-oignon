@@ -40,7 +40,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -144,7 +144,7 @@ def append_note_update(
     payload (decision N9-D3): the engine attaches the local author's signature
     at publish through the store's best-effort sync glue.
     """
-    user_id: Optional[str] = current_user.get("sub")
+    user_id: str | None = current_user.get("sub")
     blob = _decode_blob(request.update_blob_b64)
     try:
         record = store.append_update(note_id, blob, user_id=user_id)
@@ -170,7 +170,7 @@ def list_note_updates(
     ``after_seq``, in ascending ``seq`` order; a fresh or behind device
     bootstraps from the checkpoint body and then replays this tail.
     """
-    user_id: Optional[str] = current_user.get("sub")
+    user_id: str | None = current_user.get("sub")
     records = store.list_updates(
         note_id, user_id=user_id, after_seq=after_seq, limit=limit
     )

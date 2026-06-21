@@ -47,7 +47,6 @@ from opti_oignon.conversation_compressor import (
     detect_retrieval_trigger,
 )
 
-
 # ============================================================================
 # CompressedContext tests
 # ============================================================================

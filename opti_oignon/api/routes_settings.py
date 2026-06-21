@@ -6,7 +6,11 @@ Endpoints pour lire/ecrire les preferences utilisateur
 et recharger la configuration depuis le disque.
 """
 
+# Import theme engine via importlib to avoid triggering __init__.py chain
+import importlib.util as _ilu
 import logging
+import os as _os
+import sys as _sys
 
 from fastapi import APIRouter, HTTPException
 
@@ -26,11 +30,6 @@ from .schemas import (
     ThemePresetResponse,
     ThemePresetsListResponse,
 )
-
-# Import theme engine via importlib to avoid triggering __init__.py chain
-import importlib.util as _ilu
-import os as _os
-import sys as _sys
 
 _te_path = _os.path.join(
     _os.path.dirname(_os.path.dirname(__file__)), "theme_engine.py"

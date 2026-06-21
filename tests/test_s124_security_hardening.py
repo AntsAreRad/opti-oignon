@@ -245,7 +245,7 @@ class TestRestrictedPathAccessor:
         with tempfile.TemporaryDirectory() as td:
             with self._Accessor([Path(td)]):
                 with pytest.raises(self._Violation, match="io.open"):
-                    io.open("/etc/passwd")
+                    open("/etc/passwd")
 
     def test_path_read_text_blocked(self):
         """Path.read_text blocked for restricted paths."""
@@ -276,7 +276,7 @@ class TestRestrictedPathAccessor:
             # Should work after exit
             content = Path("/etc/passwd").read_text()
             assert len(content) > 0
-            f = io.open("/etc/passwd")
+            f = open("/etc/passwd")
             f.close()
 
 

@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 
 # S125: Data-at-rest encryption
 try:
-    from ..encryption import encrypt_field as _encrypt, decrypt_field as _decrypt
+    from ..encryption import decrypt_field as _decrypt
+    from ..encryption import encrypt_field as _encrypt
     _HAS_ENCRYPTION = True
 except ImportError:
     _HAS_ENCRYPTION = False

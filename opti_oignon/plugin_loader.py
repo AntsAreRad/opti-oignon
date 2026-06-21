@@ -10,13 +10,11 @@ default), manage lifecycle (install, enable, disable, uninstall).
 import importlib.util
 import io
 import logging
-import os
 import shutil
 import sys
-import time
 import types
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +471,7 @@ class LoadedPlugin:
         module: types.ModuleType,
         plugin_dir: Path,
         hooks: dict[str, Any],
-        importer: Optional[_RestrictedImporter] = None,
+        importer: _RestrictedImporter | None = None,
     ) -> None:
         self.name = name
         self.version = version
@@ -511,7 +509,7 @@ class LoadedPlugin:
             self._importer.deactivate()
         self._initialized = False
 
-    def get_hook(self, hook_name: str) -> Optional[Any]:
+    def get_hook(self, hook_name: str) -> Any | None:
         """Get a hook callable by name, or None."""
         return self.hooks.get(hook_name)
 
@@ -577,7 +575,7 @@ class SubprocessPluginAdapter(LoadedPlugin):
             )
         self._initialized = False
 
-    def get_hook(self, hook_name: str) -> Optional[Any]:
+    def get_hook(self, hook_name: str) -> Any | None:
         """Get a hook callable (RPC proxy) by name, or None."""
         return self.hooks.get(hook_name)
 
@@ -593,7 +591,7 @@ def _make_rpc_hook_proxy(
     it accepts a HookContext (or dict) and returns a dict or None.
     """
 
-    def _rpc_proxy(context: Any) -> Optional[dict[str, Any]]:
+    def _rpc_proxy(context: Any) -> dict[str, Any] | None:
         """Proxy a hook call to the plugin subprocess via JSON-RPC."""
         # Accept both HookContext objects and plain dicts
         if hasattr(context, "data"):
@@ -771,7 +769,7 @@ class PluginLoader:
             raise PluginLoadError("PyYAML required for plugin loading")
 
         try:
-            with open(manifest_file, "r", encoding="utf-8") as fh:
+            with open(manifest_file, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh)
         except Exception as exc:
             raise PluginLoadError(
@@ -896,7 +894,7 @@ class PluginLoader:
             raise PluginLoadError("PyYAML required for plugin loading")
 
         try:
-            with open(manifest_file, "r", encoding="utf-8") as fh:
+            with open(manifest_file, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh)
         except Exception as exc:
             raise PluginLoadError(
@@ -1066,7 +1064,7 @@ class PluginLoader:
         source_dir: Path | str,
         *,
         auto_enable: bool = False,
-    ) -> Optional[LoadedPlugin]:
+    ) -> LoadedPlugin | None:
         """Install a plugin from a source directory.
 
         Copies files to the plugins base directory, registers with the
@@ -1088,7 +1086,7 @@ class PluginLoader:
         except ImportError:
             raise PluginLoadError("PyYAML required")
 
-        with open(manifest_file, "r", encoding="utf-8") as fh:
+        with open(manifest_file, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
 
         from opti_oignon.plugin_manifest import PluginManifest
@@ -1208,7 +1206,7 @@ class PluginLoader:
             )
         return removed
 
-    def enable_plugin(self, name: str) -> Optional[LoadedPlugin]:
+    def enable_plugin(self, name: str) -> LoadedPlugin | None:
         """Enable a plugin: load it, register hooks, then mark enabled.
 
         PI-10: the registry state flips to "enabled" only AFTER a
@@ -1287,8 +1285,8 @@ class PluginLoader:
 PLUGIN_LOADER_AVAILABLE = True
 
 try:
-    from opti_oignon.plugin_manifest import plugin_registry as _registry
     from opti_oignon.config import DATA_DIR as _DATA_DIR
+    from opti_oignon.plugin_manifest import plugin_registry as _registry
 
     _plugins_dir = Path(_DATA_DIR) / "plugins"
     _plugins_dir.mkdir(parents=True, exist_ok=True)

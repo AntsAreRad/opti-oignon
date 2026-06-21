@@ -17,7 +17,7 @@ import sys
 import time
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 import yaml
@@ -58,8 +58,7 @@ def _ensure_modules():
 
 _ensure_modules()
 
-from opti_oignon.semantic_cache import SemanticCache, CacheEntry
-
+from opti_oignon.semantic_cache import CacheEntry, SemanticCache
 
 # ---------------------------------------------------------------------------
 # Fixtures

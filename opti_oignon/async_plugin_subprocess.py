@@ -28,7 +28,7 @@ import signal
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ class AsyncPluginProcess:
         return self.process.returncode is None
 
     @property
-    def pid(self) -> Optional[int]:
+    def pid(self) -> int | None:
         """Return the PID of the subprocess, or None if exited."""
         return self.process.pid if self.is_alive else None
 
@@ -264,7 +264,7 @@ class AsyncPluginSubprocessManager:
     def __init__(
         self,
         *,
-        worker_script: Optional[Path | str] = None,
+        worker_script: Path | str | None = None,
         default_call_timeout: float = DEFAULT_CALL_TIMEOUT_S,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_S,
         shutdown_grace: float = DEFAULT_SHUTDOWN_GRACE_S,
@@ -303,8 +303,8 @@ class AsyncPluginSubprocessManager:
         plugin_dir: str | Path,
         entry_point: str,
         *,
-        call_timeout: Optional[float] = None,
-        env_extra: Optional[dict[str, str]] = None,
+        call_timeout: float | None = None,
+        env_extra: dict[str, str] | None = None,
     ) -> AsyncPluginProcess:
         """Launch a plugin in a new async subprocess.
 
@@ -410,7 +410,7 @@ class AsyncPluginSubprocessManager:
     async def stop_plugin(
         self,
         plugin_name: str,
-        grace: Optional[float] = None,
+        grace: float | None = None,
     ) -> bool:
         """Gracefully stop a plugin subprocess.
 
@@ -440,7 +440,7 @@ class AsyncPluginSubprocessManager:
         logger.info("Stopped async plugin '%s'", plugin_name)
         return True
 
-    async def stop_all(self, grace: Optional[float] = None) -> int:
+    async def stop_all(self, grace: float | None = None) -> int:
         """Stop all running plugin subprocesses. Returns count stopped."""
         async with self._lock:
             names = list(self._plugins.keys())
@@ -456,7 +456,7 @@ class AsyncPluginSubprocessManager:
             app = self._plugins.get(plugin_name)
         return app is not None and app.is_alive
 
-    async def get_status(self, plugin_name: str) -> Optional[dict[str, Any]]:
+    async def get_status(self, plugin_name: str) -> dict[str, Any] | None:
         """Return status dict for a plugin, or None if not found."""
         async with self._lock:
             app = self._plugins.get(plugin_name)
@@ -476,9 +476,9 @@ class AsyncPluginSubprocessManager:
         self,
         plugin_name: str,
         method: str,
-        params: Optional[dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Send an RPC-style call to a plugin and await its response.
 
@@ -646,7 +646,7 @@ class AsyncPluginSubprocessManager:
 
 ASYNC_PLUGIN_SUBPROCESS_AVAILABLE = True
 
-_default_manager: Optional[AsyncPluginSubprocessManager] = None
+_default_manager: AsyncPluginSubprocessManager | None = None
 
 
 def get_async_plugin_manager(

@@ -30,7 +30,7 @@ import os
 import re
 import socket
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -114,7 +114,7 @@ def check_dns_encryption() -> DnsCheckResult:
     # Strategy 2: Check /etc/resolv.conf
     try:
         if os.path.isfile("/etc/resolv.conf"):
-            with open("/etc/resolv.conf", "r", encoding="utf-8") as fh:
+            with open("/etc/resolv.conf", encoding="utf-8") as fh:
                 resolv = fh.read()
             # Known DoH/DoT stub resolvers
             stub_resolvers = {
@@ -185,7 +185,7 @@ def _load_proxy_config() -> str:
             os.path.dirname(__file__), "config", "security.yaml"
         )
         if os.path.isfile(config_path):
-            with open(config_path, "r", encoding="utf-8") as fh:
+            with open(config_path, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
             return data.get("network", {}).get("socks_proxy", "")
     except Exception:
@@ -231,7 +231,7 @@ def check_proxy_config() -> ProxyCheckResult:
         sock.connect((host, port))
         sock.close()
         result.reachable = True
-    except (socket.error, OSError) as exc:
+    except OSError as exc:
         result.reachable = False
         result.error = f"Proxy unreachable at {host}:{port}: {exc}"
 

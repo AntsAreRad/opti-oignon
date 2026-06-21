@@ -7,7 +7,6 @@ drift detection, optimization recommendations, and metric history.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query
 
@@ -37,7 +36,7 @@ def get_performance_summary() -> dict:
 
 @router.get("/latency")
 def get_latency_stats(
-    model: Optional[str] = Query(None, description="Filter by model name"),
+    model: str | None = Query(None, description="Filter by model name"),
     window: int = Query(300, description="Rolling window in seconds"),
 ) -> dict:
     """Get latency statistics (p50/p95/p99) for a model or all models."""
@@ -119,7 +118,7 @@ def get_recommendations() -> dict:
 
 @router.get("/history")
 def get_performance_history(
-    model: Optional[str] = Query(None, description="Filter by model name"),
+    model: str | None = Query(None, description="Filter by model name"),
     hours: int = Query(24, description="How many hours of history"),
     limit: int = Query(500, description="Max records to return"),
 ) -> dict:

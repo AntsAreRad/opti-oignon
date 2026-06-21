@@ -11,9 +11,8 @@ import hashlib
 import logging
 import shutil
 import tempfile
-import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -264,8 +263,8 @@ class RemotePluginInstaller:
         Raises PluginInstallError on failure.
         """
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
         except ImportError:
             raise PluginInstallError("urllib not available for downloading")
 
@@ -377,7 +376,7 @@ class RemotePluginInstaller:
     # Plugin root discovery
     # -----------------------------------------------------------------
 
-    def _find_plugin_root(self, extract_dir: Path) -> Optional[Path]:
+    def _find_plugin_root(self, extract_dir: Path) -> Path | None:
         """Find the directory containing manifest.yaml in extracted files.
 
         Handles GitHub's pattern of wrapping in a repo-name-branch/ dir.
@@ -419,7 +418,7 @@ class RemotePluginInstaller:
             raise PluginInstallError("PyYAML required for manifest validation")
 
         try:
-            with open(manifest_path, "r", encoding="utf-8") as fh:
+            with open(manifest_path, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh)
         except Exception as exc:
             raise PluginInstallError(

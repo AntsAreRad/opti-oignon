@@ -13,13 +13,13 @@ Covers:
 - Graceful fallback when proxy unreachable
 """
 
-import sys
-import types
 import importlib.util
+import sys
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+import types
 from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 

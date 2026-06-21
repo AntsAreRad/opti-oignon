@@ -91,7 +91,7 @@ def _load_config() -> dict[str, Any]:
         import yaml
         config_path = Path(__file__).parent / "config" / "branches.yaml"
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 loaded = yaml.safe_load(f) or {}
             # Merge with defaults
             merged = dict(_DEFAULT_CONFIG)
@@ -1146,7 +1146,7 @@ class ConversationBranchManager:
         merge_cfg = self._config.get("merge", {})
         max_merge = merge_cfg.get("max_messages_per_merge", 200)
         tag_merged = merge_cfg.get("tag_merged_messages", True)
-        preserve_ts = merge_cfg.get("preserve_timestamps", True)
+        preserve_ts = merge_cfg.get("preserve_timestamps", True)  # noqa: F841
 
         # Get source messages
         source_msgs = self.get_branch_only_messages(source_branch_id)
@@ -1220,9 +1220,7 @@ class ConversationBranchManager:
                 # Delete messages for all branches
                 placeholders = ",".join("?" * len(branch_ids))
                 conn.execute(
-                    "DELETE FROM branch_messages WHERE branch_id IN ({})".format(
-                        placeholders
-                    ),
+                    f"DELETE FROM branch_messages WHERE branch_id IN ({placeholders})",
                     branch_ids,
                 )
 

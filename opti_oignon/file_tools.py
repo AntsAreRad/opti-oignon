@@ -23,17 +23,18 @@ Author: Leon
 import difflib
 import logging
 import os
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Conditional import of sandbox manager
 try:
     from opti_oignon.sandbox_manager import (
+        SANDBOX_AVAILABLE,
         SandboxManager,
         validate_sandbox_path,
+    )
+    from opti_oignon.sandbox_manager import (
         sandbox_manager as _default_sandbox_manager,
-        SANDBOX_AVAILABLE,
     )
 except ImportError:
     SANDBOX_AVAILABLE = False

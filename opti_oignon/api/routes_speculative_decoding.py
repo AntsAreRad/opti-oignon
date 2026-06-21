@@ -12,10 +12,10 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from .deps import (
-    SPECULATIVE_DECODING_AVAILABLE,
-    get_speculative_decoding_manager,
     INFERENCE_BACKEND_AVAILABLE,
+    SPECULATIVE_DECODING_AVAILABLE,
     get_backend_registry,
+    get_speculative_decoding_manager,
 )
 from .schemas import (
     CompatibleDraftsResponse,

@@ -61,7 +61,7 @@ te = _load_module()
 
 
 def read_file(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

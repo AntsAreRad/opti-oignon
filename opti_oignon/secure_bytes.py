@@ -274,7 +274,7 @@ class SecureBytes:
     def __del__(self) -> None:
         self.wipe()
 
-    def __enter__(self) -> "SecureBytes":
+    def __enter__(self) -> SecureBytes:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -328,7 +328,7 @@ def wipe_bytes_object(data: bytes) -> None:
     try:
         # CPython bytes internal buffer offset
         # This is fragile and version-specific
-        buf_addr = id(data) + sys.getsizeof(bytes()) - 1
+        buf_addr = id(data) + sys.getsizeof(b"") - 1
         _libc.memset(buf_addr, 0, len(data))
     except Exception:
         pass  # Best effort only
@@ -406,7 +406,7 @@ def check_swap_encrypted() -> SwapCheckResult:
         return result
 
     try:
-        with open(proc_swaps, "r", encoding="utf-8") as fh:
+        with open(proc_swaps, encoding="utf-8") as fh:
             lines = fh.readlines()
     except PermissionError:
         result.error = "Permission denied reading /proc/swaps"
@@ -500,7 +500,7 @@ def swap_startup_check() -> None:
             os.path.dirname(__file__), "config", "security.yaml"
         )
         if os.path.isfile(config_path):
-            with open(config_path, "r", encoding="utf-8") as fh:
+            with open(config_path, encoding="utf-8") as fh:
                 data = _yaml.safe_load(fh) or {}
             hardening = data.get("hardening", {})
             require_encrypted = hardening.get("require_encrypted_swap", True)

@@ -43,7 +43,7 @@ import hmac
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +122,9 @@ class NotesBlobStore:
 
     def __init__(
         self,
-        root: Optional[Path | str] = None,
+        root: Path | str | None = None,
         *,
-        master_key: Optional[bytes] = None,
+        master_key: bytes | None = None,
     ) -> None:
         base = Path(root) if root is not None else _default_root()
         self._blob_dir = base / BLOB_DIRNAME
@@ -132,7 +132,7 @@ class NotesBlobStore:
         # The injected key is held only as raw bytes for derivation; tests pass a
         # deterministic key, production leaves it None so get_encryption_key is
         # consulted at use time.
-        self._injected_master: Optional[bytes] = (
+        self._injected_master: bytes | None = (
             bytes(master_key) if master_key is not None else None
         )
 
@@ -143,7 +143,7 @@ class NotesBlobStore:
     def _blob_path(self, attachment_id: str) -> Path:
         return self._blob_dir / (attachment_id + BLOB_SUFFIX)
 
-    def _master_raw(self) -> Optional[bytes]:
+    def _master_raw(self) -> bytes | None:
         if self._injected_master is not None:
             return self._injected_master
         key = get_encryption_key()
@@ -218,7 +218,7 @@ class NotesBlobStore:
 
 
 # Module-level singleton with a reset for test isolation (the S171 lesson).
-_blob_store: Optional[NotesBlobStore] = None
+_blob_store: NotesBlobStore | None = None
 
 
 def get_notes_blob_store() -> NotesBlobStore:

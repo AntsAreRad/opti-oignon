@@ -26,7 +26,6 @@ __author__ = "Leon"
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +339,7 @@ def load_pii_config_from_yaml() -> PIISanitizeConfig:
         PIISanitizeConfig loaded from YAML, or defaults if unavailable
     """
     try:
-        from .config import load_yaml, CONFIG_DIR
+        from .config import CONFIG_DIR, load_yaml
         data = load_yaml(CONFIG_DIR / "web_search.yaml")
         pii_section = data.get("pii_sanitization", {})
         return PIISanitizeConfig.from_dict(pii_section)

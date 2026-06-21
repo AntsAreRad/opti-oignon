@@ -24,19 +24,17 @@ Author: Leon
 """
 
 import base64
-import copy
 import difflib
 import enum
 import io
 import logging
 import os
-import shutil
 import tarfile
-import time
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generator
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +51,11 @@ except ImportError:
 
 try:
     from opti_oignon.sandbox_manager import (
-        SandboxManager,
-        sandbox_manager as _default_sandbox_manager,
         SANDBOX_AVAILABLE,
+        SandboxManager,
+    )
+    from opti_oignon.sandbox_manager import (
+        sandbox_manager as _default_sandbox_manager,
     )
 except ImportError:
     SANDBOX_AVAILABLE = False
@@ -82,9 +82,9 @@ except ImportError:
 
 try:
     from opti_oignon.session_fingerprint import (
+        FINGERPRINT_AVAILABLE,
         FingerprintManager,
         UserPreferencesStore,
-        FINGERPRINT_AVAILABLE,
     )
 except ImportError:
     FINGERPRINT_AVAILABLE = False
@@ -98,11 +98,11 @@ except ImportError:
 
 try:
     from opti_oignon.json_repair import (
-        repair_json,
-        repair_json_or_list,
-        parse_numbered_list,
         JSON_RETRY_SUFFIX,
         SIMPLIFIED_PLAN_SUFFIX,
+        parse_numbered_list,
+        repair_json,
+        repair_json_or_list,
     )
     JSON_REPAIR_AVAILABLE = True
 except ImportError:
@@ -115,8 +115,10 @@ except ImportError:
 
 try:
     from opti_oignon.coding_history import (
-        coding_history_store as _history_store,
         CODING_HISTORY_AVAILABLE as _HISTORY_AVAILABLE,
+    )
+    from opti_oignon.coding_history import (
+        coding_history_store as _history_store,
     )
 except ImportError:
     _HISTORY_AVAILABLE = False
@@ -124,8 +126,8 @@ except ImportError:
 
 try:
     from opti_oignon.cascading import (
-        CascadingInference,
         CascadeResult,
+        CascadingInference,
     )
     CASCADING_AVAILABLE = True
 except ImportError:

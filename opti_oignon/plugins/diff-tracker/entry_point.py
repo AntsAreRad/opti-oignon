@@ -18,7 +18,7 @@ import difflib
 import logging
 import re
 import threading
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "diff-tracker"
 __plugin_version__: str = "1.0.0"
@@ -185,7 +185,7 @@ def find_best_match(
     block: dict[str, Any],
     history: list[dict[str, Any]],
     threshold: float,
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Find the best matching previous code block.
 
     Strategy:
@@ -209,7 +209,7 @@ def find_best_match(
     """
     current_names = block["names"]
     current_code = block["code"]
-    best_match: Optional[dict[str, Any]] = None
+    best_match: dict[str, Any] | None = None
     best_score: float = 0.0
 
     for prev in history:
@@ -374,7 +374,7 @@ def annotate_response(
 # =========================================================================
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: detect code iterations and append diffs.
 
     Scans the response for code blocks, matches them against

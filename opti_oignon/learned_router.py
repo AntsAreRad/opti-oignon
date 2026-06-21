@@ -47,9 +47,9 @@ except ImportError:
 
 try:
     import joblib
-    from sklearn.linear_model import LogisticRegression
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import cross_val_score
     from sklearn.pipeline import Pipeline
     SKLEARN_AVAILABLE = True

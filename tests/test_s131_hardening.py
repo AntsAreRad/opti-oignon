@@ -368,7 +368,7 @@ class TestRoutesSecurityHardening(unittest.TestCase):
 
     def setUp(self):
         self.path = os.path.join(API_DIR, "routes_security.py")
-        with open(self.path, "r", encoding="utf-8") as f:
+        with open(self.path, encoding="utf-8") as f:
             self.content = f.read()
         self.tree = ast.parse(self.content)
 
@@ -412,7 +412,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_hardening_ts_exports(self):
         """hardening.ts exports key functions."""
         path = os.path.join(API_TS_DIR, "hardening.ts")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("wipeConversation", content)
         self.assertIn("wipeAllConversations", content)
@@ -422,7 +422,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_hardening_ts_types(self):
         """hardening.ts defines required types."""
         path = os.path.join(API_TS_DIR, "hardening.ts")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         for t in ("WipeResult", "HardeningStatus", "SwapStatus",
                    "OllamaLogStatus", "NetworkStatus"):
@@ -436,7 +436,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_hardening_panel_sections(self):
         """HardeningPanel has all 4 sections."""
         path = os.path.join(COMPONENTS_DIR, "HardeningPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("Conversation RAM Wipe", content)
         self.assertIn("Ollama Logging", content)
@@ -446,7 +446,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_hardening_panel_html_balance(self):
         """HardeningPanel.svelte has balanced div tags."""
         path = os.path.join(COMPONENTS_DIR, "HardeningPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Strip Svelte blocks to avoid false matches in {#if ...} etc.
         stripped = re.sub(r"\{[#/:][^}]*\}", "", content)
@@ -457,7 +457,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_hardening_panel_css_vars(self):
         """HardeningPanel uses only --oo-* CSS variables (hex only in fallback)."""
         path = os.path.join(COMPONENTS_DIR, "HardeningPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         # Find hex colors: must be 3 or 6 hex digits preceded by #
         # Exclude Svelte syntax like {#each, {#if, etc.
@@ -471,7 +471,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_security_panel_hardening_tab(self):
         """SecurityPanel.svelte includes Hardening tab."""
         path = os.path.join(COMPONENTS_DIR, "SecurityPanel.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("HardeningPanel", content)
         self.assertIn("hardening", content)
@@ -480,7 +480,7 @@ class TestFrontendS131(unittest.TestCase):
     def test_chat_control_bar_wipe_button(self):
         """ChatControlBar.svelte has wipe conversation button."""
         path = os.path.join(CHAT_DIR, "ChatControlBar.svelte")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("handleWipeConversation", content)
         self.assertIn("wipeAvailable", content)
@@ -497,7 +497,7 @@ class TestFrontendS131(unittest.TestCase):
             os.path.join(COMPONENTS_DIR, "HardeningPanel.svelte"),
         ]
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 content = f.read()
             matches = french.findall(content)
             self.assertEqual(len(matches), 0,
@@ -514,14 +514,14 @@ class TestVersionAndDocs(unittest.TestCase):
     def test_version_bump(self):
         """Version is 2.9.3."""
         version_path = os.path.join(BACKEND_DIR, "__version__.py")
-        with open(version_path, "r") as f:
+        with open(version_path) as f:
             content = f.read()
         self.assertIn('"3.0.0"', content)
 
     def test_install_md_high_security(self):
         """INSTALL.md has High-Security Deployment section."""
         path = os.path.join(PROJECT_ROOT, "INSTALL.md")
-        with open(path, "r") as f:
+        with open(path) as f:
             content = f.read()
         self.assertIn("High-Security Deployment", content)
         self.assertIn("Swap Configuration", content)
@@ -532,7 +532,7 @@ class TestVersionAndDocs(unittest.TestCase):
         """security.yaml has hardening section."""
         path = os.path.join(BACKEND_DIR, "config", "security.yaml")
         import yaml
-        with open(path, "r") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
         self.assertIn("hardening", data)
         self.assertTrue(data["hardening"]["auto_wipe_on_close"])
@@ -543,7 +543,7 @@ class TestVersionAndDocs(unittest.TestCase):
         """security.yaml has ollama section."""
         path = os.path.join(BACKEND_DIR, "config", "security.yaml")
         import yaml
-        with open(path, "r") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
         self.assertIn("ollama", data)
         self.assertTrue(data["ollama"]["log_sanitization"])
@@ -560,7 +560,7 @@ class TestVersionAndDocs(unittest.TestCase):
             os.path.join(BACKEND_DIR, "network_hardening.py"),
         ]
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 content = f.read()
             matches = french.findall(content)
             self.assertEqual(len(matches), 0,
@@ -576,7 +576,7 @@ class TestVersionAndDocs(unittest.TestCase):
             os.path.join(API_DIR, "routes_security.py"),
         ]
         for fpath in files:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 tree = ast.parse(f.read())
             self.assertIsNotNone(tree, f"AST failed for {fpath}")
 

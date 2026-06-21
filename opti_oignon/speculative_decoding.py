@@ -40,7 +40,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -379,8 +379,8 @@ class DraftModelSelector:
 
     def __init__(
         self,
-        family_compat: Optional[dict[str, list[dict]]] = None,
-        vram_calculator: Optional[VRAMBudgetCalculator] = None,
+        family_compat: dict[str, list[dict]] | None = None,
+        vram_calculator: VRAMBudgetCalculator | None = None,
     ):
         self._family_compat = family_compat or _DEFAULT_FAMILY_COMPAT
         self._vram_calc = vram_calculator or VRAMBudgetCalculator()
@@ -488,7 +488,7 @@ class DraftModelSelector:
         main_model_params_b: float,
         main_model_quant: str,
         available_models: list[dict],
-    ) -> Optional[DraftCandidate]:
+    ) -> DraftCandidate | None:
         """Pick the single best draft model for the main model.
 
         Returns None if no compatible draft is found.
@@ -512,7 +512,7 @@ class SpeculativeDecodingManager:
     llama.cpp CLI flags, and tracks acceptance rate stats.
     """
 
-    def __init__(self, config_path: Optional[str] = None, stats_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None, stats_path: str | None = None):
         self._config = SpeculativeConfig()
         self._family_compat = dict(_DEFAULT_FAMILY_COMPAT)
         self._vram_budget_cfg: dict = {}
@@ -525,7 +525,7 @@ class SpeculativeDecodingManager:
         self._stats_path = Path(stats_path) if stats_path else _RESULTS_PATH
         self._load_config(config_path)
 
-    def _load_config(self, config_path: Optional[str] = None) -> None:
+    def _load_config(self, config_path: str | None = None) -> None:
         """Load configuration from YAML."""
         p = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
         if not p.is_file():
@@ -533,7 +533,7 @@ class SpeculativeDecodingManager:
             return
 
         try:
-            with open(p, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning("Failed to load speculative_decoding.yaml: %s", exc)
@@ -567,7 +567,7 @@ class SpeculativeDecodingManager:
         if not self._stats_path.is_file():
             return
         try:
-            with open(self._stats_path, "r", encoding="utf-8") as f:
+            with open(self._stats_path, encoding="utf-8") as f:
                 data = json.load(f)
             self._stats = AcceptanceStats.from_dict(data)
         except Exception as exc:
@@ -746,12 +746,12 @@ class SpeculativeDecodingManager:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_manager: Optional[SpeculativeDecodingManager] = None
+_manager: SpeculativeDecodingManager | None = None
 _init_lock = threading.Lock()
 
 
 def get_speculative_decoding_manager(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
 ) -> SpeculativeDecodingManager:
     """Get or create the module-level singleton manager."""
     global _manager
@@ -824,7 +824,7 @@ _RE_SPEEDUP = re.compile(
 )
 
 
-def parse_llamacpp_log_line(line: str) -> Optional[dict]:
+def parse_llamacpp_log_line(line: str) -> dict | None:
     """Parse a llama.cpp server log line for speculative acceptance data.
 
     Supports several log formats emitted by llama-server when running

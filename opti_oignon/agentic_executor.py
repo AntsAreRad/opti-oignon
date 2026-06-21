@@ -164,8 +164,8 @@ except ImportError:
 # Conditional import of the CascadingInference (S69)
 try:
     from .cascading import (
-        CascadingInference,
         CascadeResult,
+        CascadingInference,
     )
     from .cascading import (
         cascading_inference as _default_cascading_inference,

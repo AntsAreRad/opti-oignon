@@ -10,7 +10,7 @@ Gracefully degrades to [unverified] when web search is unavailable.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "fact-checker"
 __plugin_version__: str = "1.0.0"
@@ -25,7 +25,7 @@ _WEB_SEARCH_AVAILABLE = False
 _web_search_fn = None
 
 try:
-    from opti_oignon.web_search import web_searcher, DDGS_AVAILABLE
+    from opti_oignon.web_search import DDGS_AVAILABLE, web_searcher
     if DDGS_AVAILABLE:
         _WEB_SEARCH_AVAILABLE = True
         _web_search_fn = web_searcher.search
@@ -208,7 +208,7 @@ def verify_claim(
     claim: Claim,
     *,
     max_results: int = 3,
-    trusted_domains: Optional[list[str]] = None,
+    trusted_domains: list[str] | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against web search results.
 
@@ -361,7 +361,7 @@ def annotate_response(
 # Hook implementation
 # =========================================================================
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: verify factual claims in LLM response.
 
     Reads ctx.data["response"], extracts claims, verifies via web

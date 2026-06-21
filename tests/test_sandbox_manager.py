@@ -10,6 +10,8 @@ isolation, degraded mode confirmation, never-bind enforcement, and
 bwrap command building.
 """
 
+# Direct imports to avoid needing full opti_oignon package resolution
+import importlib.util
 import os
 import re
 import shutil
@@ -17,12 +19,9 @@ import sqlite3
 import subprocess
 import tempfile
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Direct imports to avoid needing full opti_oignon package resolution
-import importlib.util
 
 _mod_path = os.path.join(
     os.path.dirname(__file__), os.pardir,

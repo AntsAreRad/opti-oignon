@@ -65,7 +65,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 from opti_oignon.veilid.records import (
     RECORD_FORMAT_VERSION,
@@ -115,12 +115,12 @@ _TABLES: frozenset[str] = frozenset({TABLE_NAME, META_TABLE_NAME})
 def _safe_table(name: str) -> str:
     """Return the table name only if it is in the allowlist, else raise."""
     if name not in _TABLES:
-        raise ValueError("table identifier not in allowlist: {!r}".format(name))
+        raise ValueError(f"table identifier not in allowlist: {name!r}")
     return name
 
 
 _CREATE_TABLE = (
-    "CREATE TABLE IF NOT EXISTS {table} ("
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(TABLE_NAME)} ("
     "seq INTEGER PRIMARY KEY AUTOINCREMENT, "
     "kind TEXT NOT NULL, "
     "record_id TEXT NOT NULL, "
@@ -129,23 +129,23 @@ _CREATE_TABLE = (
     "content_hash TEXT NOT NULL, "
     "deleted INTEGER NOT NULL DEFAULT 0, "
     "updated_at TEXT NOT NULL DEFAULT '', "
-    "payload TEXT NOT NULL DEFAULT '{{}}', "
+    "payload TEXT NOT NULL DEFAULT '{}', "
     "journaled_at TEXT NOT NULL, "
     "signature TEXT"
     ")"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _CREATE_INDEX = (
     "CREATE INDEX IF NOT EXISTS idx_veilid_change_feed_key "
-    "ON {table}(kind, record_id)"
-).format(table=_safe_table(TABLE_NAME))
+    f"ON {_safe_table(TABLE_NAME)}(kind, record_id)"
+)
 
 _INSERT = (
-    "INSERT INTO {table} "
+    f"INSERT INTO {_safe_table(TABLE_NAME)} "
     "(kind, record_id, clock, device, content_hash, deleted, updated_at, "
     "payload, journaled_at, signature) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-).format(table=_safe_table(TABLE_NAME))
+)
 
 _SELECT_COLUMNS = (
     "seq, kind, record_id, clock, device, content_hash, deleted, updated_at, "
@@ -153,30 +153,30 @@ _SELECT_COLUMNS = (
 )
 
 _SELECT_SINCE = (
-    "SELECT {cols} FROM {table} WHERE seq > ? ORDER BY seq ASC"
-).format(cols=_SELECT_COLUMNS, table=_safe_table(TABLE_NAME))
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} WHERE seq > ? ORDER BY seq ASC"
+)
 
 # S203 (PRT-04): the bounded page read. Same WHERE/ORDER as _SELECT_SINCE with a
 # row cap; the byte cap is applied in Python over the fetched rows so the page's
 # wire size is bounded by the same encoding the envelope ships. Names the feed
 # table only, through the allowlist.
 _SELECT_SINCE_LIMIT = (
-    "SELECT {cols} FROM {table} WHERE seq > ? ORDER BY seq ASC LIMIT ?"
-).format(cols=_SELECT_COLUMNS, table=_safe_table(TABLE_NAME))
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} WHERE seq > ? ORDER BY seq ASC LIMIT ?"
+)
 
 _SELECT_ALL = (
-    "SELECT {cols} FROM {table} ORDER BY seq ASC"
-).format(cols=_SELECT_COLUMNS, table=_safe_table(TABLE_NAME))
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} ORDER BY seq ASC"
+)
 
-_SELECT_MAX_SEQ = "SELECT MAX(seq) FROM {table}".format(table=_safe_table(TABLE_NAME))
-_SELECT_COUNT = "SELECT COUNT(*) FROM {table}".format(table=_safe_table(TABLE_NAME))
-_DELETE_ALL = "DELETE FROM {table}".format(table=_safe_table(TABLE_NAME))
+_SELECT_MAX_SEQ = f"SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)}"
+_SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
+_DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
 # S199 (SYN-01, clock discipline): the read side of per-key clocks. Uses the
 # existing (kind, record_id) index; a read-only query, no schema change.
 _SELECT_MAX_CLOCK = (
-    "SELECT MAX(clock) FROM {table} WHERE kind = ? AND record_id = ?"
-).format(table=_safe_table(TABLE_NAME))
+    f"SELECT MAX(clock) FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ?"
+)
 
 # S202 (CHF-02): the transparent supersession rule -- delete any row superseded
 # by a later sequence for the same (kind, record_id). One bounded statement: the
@@ -185,9 +185,9 @@ _SELECT_MAX_CLOCK = (
 # carries). Names the feed table only, through the allowlist, so a future meta
 # table (CHF-05) is untouched by construction.
 _DELETE_SUPERSEDED = (
-    "DELETE FROM {table} WHERE seq NOT IN "
-    "(SELECT MAX(seq) FROM {table} GROUP BY kind, record_id)"
-).format(table=_safe_table(TABLE_NAME))
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE seq NOT IN "
+    f"(SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)} GROUP BY kind, record_id)"
+)
 
 # S204 (CHF-05): the one-row meta table holding the feed epoch, minted once per
 # journal file. INSERT OR IGNORE under the CHECK(id = 1) constraint keeps the
@@ -195,20 +195,20 @@ _DELETE_SUPERSEDED = (
 # (peers.py, veilid_local_identity). These are the only statements that name the
 # meta table; the compaction statement above names the feed table only.
 _CREATE_META = (
-    "CREATE TABLE IF NOT EXISTS {table} ("
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(META_TABLE_NAME)} ("
     "id INTEGER PRIMARY KEY CHECK (id = 1), "
     "epoch TEXT NOT NULL, "
     "created_at TEXT NOT NULL"
     ")"
-).format(table=_safe_table(META_TABLE_NAME))
+)
 
 _SELECT_EPOCH = (
-    "SELECT epoch FROM {table} WHERE id = 1"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"SELECT epoch FROM {_safe_table(META_TABLE_NAME)} WHERE id = 1"
+)
 
 _INSERT_EPOCH = (
-    "INSERT OR IGNORE INTO {table} (id, epoch, created_at) VALUES (1, ?, ?)"
-).format(table=_safe_table(META_TABLE_NAME))
+    f"INSERT OR IGNORE INTO {_safe_table(META_TABLE_NAME)} (id, epoch, created_at) VALUES (1, ?, ?)"
+)
 
 
 @dataclass(frozen=True)
@@ -235,9 +235,9 @@ class ChangeFeed:
 
     def __init__(
         self,
-        root: Optional[Path | str] = None,
+        root: Path | str | None = None,
         *,
-        compact_every: Optional[int] = None,
+        compact_every: int | None = None,
     ) -> None:
         # S202 (CHF-02): the optional every-N-appends compaction trigger. OFF by
         # default (None) -- a convenience, not the guarantee; ``compact()`` is the
@@ -250,11 +250,11 @@ class ChangeFeed:
                 or compact_every < 1
             ):
                 raise ValueError("compact_every must be a positive integer or None")
-        self._compact_every: Optional[int] = compact_every
+        self._compact_every: int | None = compact_every
         self._appends_since_compact: int = 0
-        self._root: Optional[Path] = Path(root) if root is not None else None
-        self._db_path: Optional[Path] = None
-        self._connection: Optional[sqlite3.Connection] = None
+        self._root: Path | None = Path(root) if root is not None else None
+        self._db_path: Path | None = None
+        self._connection: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
     def _resolve_db_path(self) -> Path:
@@ -284,16 +284,12 @@ class ChangeFeed:
             cols = {
                 row[1]
                 for row in conn.execute(
-                    "PRAGMA table_info({table})".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"PRAGMA table_info({_safe_table(TABLE_NAME)})"
                 ).fetchall()
             }
             if "signature" not in cols:
                 conn.execute(
-                    "ALTER TABLE {table} ADD COLUMN signature TEXT".format(
-                        table=_safe_table(TABLE_NAME)
-                    )
+                    f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN signature TEXT"
                 )
             conn.execute(_CREATE_META)
             conn.commit()
@@ -394,7 +390,7 @@ class ChangeFeed:
             self._maybe_autocompact(conn, len(recs))
         return seqs
 
-    def _row_to_record(self, rest: tuple) -> Optional[SyncRecord]:
+    def _row_to_record(self, rest: tuple) -> SyncRecord | None:
         (
             kind,
             record_id,
@@ -755,11 +751,11 @@ class ChangeFeed:
 
 # Module-level singleton with a reset hook (one journal per process, testable).
 
-_feed: Optional[ChangeFeed] = None
+_feed: ChangeFeed | None = None
 _feed_lock = threading.Lock()
 
 
-def get_change_feed(root: Optional[Path | str] = None) -> ChangeFeed:
+def get_change_feed(root: Path | str | None = None) -> ChangeFeed:
     """Return the process change feed, creating it once (with ``root`` if given)."""
     global _feed
     with _feed_lock:
@@ -768,7 +764,7 @@ def get_change_feed(root: Optional[Path | str] = None) -> ChangeFeed:
         return _feed
 
 
-def set_change_feed(feed: Optional[ChangeFeed]) -> None:
+def set_change_feed(feed: ChangeFeed | None) -> None:
     """Install a specific feed as the process singleton (used by tests)."""
     global _feed
     with _feed_lock:

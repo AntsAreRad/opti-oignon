@@ -149,7 +149,7 @@ def _peers():
 
 def _guard_attr(mod, name: str):
     obj = getattr(mod, name, None)
-    assert obj is not None, "S260 surface absent: {!r}".format(name)
+    assert obj is not None, f"S260 surface absent: {name!r}"
     return obj
 
 
@@ -661,8 +661,8 @@ class TestStructure:
     @pytest.mark.parametrize("path", _ASCII_ENFORCED, ids=lambda p: p.name)
     def test_sources_ascii(self, path):
         raw = _read(path)
-        assert raw, "{} absent".format(path.name)
-        assert all(ord(ch) < 128 for ch in raw), "non-ASCII in {}".format(path.name)
+        assert raw, f"{path.name} absent"
+        assert all(ord(ch) < 128 for ch in raw), f"non-ASCII in {path.name}"
 
     def test_this_suite_avoids_the_selection_literal(self):
         here = Path(__file__).read_text(encoding="utf-8")

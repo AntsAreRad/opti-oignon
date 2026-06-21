@@ -60,7 +60,8 @@ except ImportError:
         TimeoutException = Exception
 
 try:
-    from .pii_sanitizer import PIISanitizer, PIISanitizeConfig, pii_sanitizer as _default_pii
+    from .pii_sanitizer import PIISanitizeConfig, PIISanitizer
+    from .pii_sanitizer import pii_sanitizer as _default_pii
     PII_AVAILABLE = True
 except ImportError:
     PII_AVAILABLE = False
@@ -116,7 +117,7 @@ def _load_search_safety_config() -> dict:
     cfg_path = Path(__file__).parent / "config" / "security.yaml"
     try:
         if cfg_path.exists():
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("search_safety", {})
     except Exception:
@@ -321,7 +322,7 @@ class WebSearchConfig:
 def _load_config_from_yaml() -> WebSearchConfig:
     """Load web search config from web_search.yaml."""
     try:
-        from .config import load_yaml, CONFIG_DIR
+        from .config import CONFIG_DIR, load_yaml
         data = load_yaml(CONFIG_DIR / "web_search.yaml")
         return WebSearchConfig.from_dict(data)
     except Exception as e:
@@ -459,7 +460,7 @@ class WebSearcher:
                 timeout=self.config.proxy_timeout,
             )
             # Lightweight search to verify connectivity
-            results = ddgs.text("test", max_results=1)
+            results = ddgs.text("test", max_results=1)  # noqa: F841
             elapsed = (time.monotonic() - start) * 1000
 
             status.reachable = True
@@ -479,8 +480,8 @@ class WebSearcher:
     def _get_tor_exit_ip(self) -> str | None:
         """Attempt to retrieve Tor exit node IP via a check service."""
         try:
-            import urllib.request
             import json
+            import urllib.request
 
             proxy_handler = urllib.request.ProxyHandler({
                 "https": self.config.proxy,

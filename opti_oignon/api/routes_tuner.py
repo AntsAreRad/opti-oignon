@@ -14,7 +14,8 @@ backend is available (testing/CI).
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path as PathParam
+from fastapi import APIRouter, HTTPException
+from fastapi import Path as PathParam
 
 from .deps import (
     AUTO_TUNER_AVAILABLE,
@@ -23,13 +24,13 @@ from .deps import (
     get_backend_registry,
 )
 from .schemas import (
+    ParameterSpaceSchema,
     TunerConfigSchema,
     TunerJobSchema,
     TunerProfileSchema,
     TunerResultsResponse,
     TunerRunRequest,
     TunerStatusResponse,
-    ParameterSpaceSchema,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,9 +109,9 @@ def _resolve_benchmark_fn(model_name: str):
         A callable(params: dict) -> BenchmarkResult.
     """
     from opti_oignon.auto_tuner import (
+        create_llamacpp_benchmark_fn,
         create_mock_benchmark_fn,
         create_ollama_benchmark_fn,
-        create_llamacpp_benchmark_fn,
     )
 
     # Try Ollama first.

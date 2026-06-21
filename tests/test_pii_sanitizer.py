@@ -13,9 +13,9 @@ Covers:
 - Edge cases
 """
 
+import importlib.util
 import sys
 import types
-import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 

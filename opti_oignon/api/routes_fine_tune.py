@@ -102,7 +102,7 @@ class CompareResponse(BaseModel):
 def _get_exporter():
     """Get the fine-tune exporter singleton, raising 503 if unavailable."""
     try:
-        from opti_oignon.api.deps import fine_tune_exporter, FINE_TUNE_EXPORT_AVAILABLE
+        from opti_oignon.api.deps import FINE_TUNE_EXPORT_AVAILABLE, fine_tune_exporter
         if not FINE_TUNE_EXPORT_AVAILABLE or fine_tune_exporter is None:
             raise HTTPException(status_code=503, detail="Fine-tune export not available")
         return fine_tune_exporter
@@ -113,7 +113,7 @@ def _get_exporter():
 def _get_tracker():
     """Get the fine-tune tracker singleton, raising 503 if unavailable."""
     try:
-        from opti_oignon.api.deps import fine_tune_tracker, FINE_TUNE_TRACKER_AVAILABLE
+        from opti_oignon.api.deps import FINE_TUNE_TRACKER_AVAILABLE, fine_tune_tracker
         if not FINE_TUNE_TRACKER_AVAILABLE or fine_tune_tracker is None:
             raise HTTPException(status_code=503, detail="Fine-tune tracker not available")
         return fine_tune_tracker
@@ -152,7 +152,7 @@ def export_training_data(req: ExportRequest) -> dict:
             content=result.data,
             media_type="application/jsonl",
             headers={
-                "Content-Disposition": f"attachment; filename=training_data.jsonl",
+                "Content-Disposition": "attachment; filename=training_data.jsonl",
             },
         )
 

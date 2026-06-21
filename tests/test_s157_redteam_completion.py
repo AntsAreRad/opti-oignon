@@ -98,7 +98,7 @@ class TestASTValidity:
         (REDTEAM_INIT_PATH, "redteam/__init__.py"),
     ])
     def test_ast_valid(self, path, label):
-        source = open(path, "r", encoding="utf-8").read()
+        source = open(path, encoding="utf-8").read()
         tree = ast.parse(source)
         assert tree is not None, f"{label} has syntax errors"
 
@@ -124,7 +124,7 @@ class TestNoFrench:
         CLI_CLIENT_PATH,
     ])
     def test_no_french(self, path):
-        source = open(path, "r", encoding="utf-8").read()
+        source = open(path, encoding="utf-8").read()
         matches = self._FRENCH_PATTERNS.findall(source)
         assert not matches, f"French detected in {path}: {matches}"
 
@@ -137,7 +137,7 @@ class TestCheckpointSentinel:
     """Verify checkpoint_before_apply = True in new modules."""
 
     def test_feedback_has_sentinel(self):
-        source = open(FEEDBACK_PATH, "r", encoding="utf-8").read()
+        source = open(FEEDBACK_PATH, encoding="utf-8").read()
         assert "checkpoint_before_apply = True" in source
 
 
@@ -384,7 +384,7 @@ class TestApplySuggestionToConfig:
 
             # Verify the pattern was written
             import yaml
-            with open(path, "r") as fh:
+            with open(path) as fh:
                 config = yaml.safe_load(fh)
             patterns = config["rag"]["sanitization"]["custom_patterns"]
             assert len(patterns) == 1
@@ -434,7 +434,7 @@ class TestApplySuggestionToConfig:
             assert result is True  # Succeeds (skips silently)
 
             import yaml
-            with open(path, "r") as fh:
+            with open(path) as fh:
                 config = yaml.safe_load(fh)
             patterns = config["rag"]["sanitization"]["custom_patterns"]
             assert len(patterns) == 1  # Not duplicated
@@ -554,44 +554,44 @@ class TestCLIStructure:
     """Verify CLI commands exist in main.py source."""
 
     def test_redteam_group_exists(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def redteam()" in source
 
     def test_redteam_run_command(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def redteam_run(" in source
         assert "--quick" in source
 
     def test_redteam_report_command(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def redteam_report_cmd(" in source
 
     def test_redteam_compare_command(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def redteam_compare(" in source
 
     def test_redteam_status_command(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def redteam_status_cmd(" in source
 
     def test_print_summary_helper(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def _print_redteam_summary(" in source
 
     def test_print_comparison_helper(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert "def _print_redteam_comparison(" in source
 
     def test_quick_option_sets_attacks_per_category(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert 'body["attacks_per_category"] = 2' in source
 
     def test_category_option(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert '"--category"' in source or "'--category'" in source
 
     def test_target_option(self):
-        source = open(CLI_MAIN_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_MAIN_PATH, encoding="utf-8").read()
         assert '"--target"' in source or "'--target'" in source
 
 
@@ -603,11 +603,11 @@ class TestCLIClientDelete:
     """Verify the delete method was added to OOClient."""
 
     def test_delete_method_exists(self):
-        source = open(CLI_CLIENT_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_CLIENT_PATH, encoding="utf-8").read()
         assert "def delete(self, path:" in source
 
     def test_delete_uses_httpx(self):
-        source = open(CLI_CLIENT_PATH, "r", encoding="utf-8").read()
+        source = open(CLI_CLIENT_PATH, encoding="utf-8").read()
         assert "client.delete(" in source
 
 
@@ -619,37 +619,37 @@ class TestAPIEndpointsStructure:
     """Verify S157 API endpoints exist in routes_security.py source."""
 
     def test_report_store_defined(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "_redteam_report_store" in source
         assert "_redteam_report_counter" in source
 
     def test_list_reports_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_list_reports(' in source
         assert '"/redteam/reports"' in source
 
     def test_get_report_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_get_report(' in source
         assert '"/redteam/reports/{report_id}"' in source
 
     def test_delete_report_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_delete_report(' in source
         assert "@router.delete" in source
 
     def test_compare_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_compare_reports(' in source
         assert '"/redteam/compare"' in source
 
     def test_compare_returns_regressions(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert '"regressions"' in source
         assert '"improvements"' in source
 
     def test_delete_checks_admin_role(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         # Find the delete function and verify it checks admin
         idx = source.find("async def redteam_delete_report")
         assert idx != -1
@@ -658,7 +658,7 @@ class TestAPIEndpointsStructure:
 
     def test_auto_store_on_campaign(self):
         """Verify _run_campaign stores report automatically."""
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert '_redteam_report_store[report_id]' in source
         assert '"id": report_id' in source
 
@@ -671,26 +671,26 @@ class TestFeedbackAPIStructure:
     """Verify feedback loop endpoints exist."""
 
     def test_suggestions_list_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_list_suggestions(' in source
         assert '"/redteam/suggestions"' in source
 
     def test_accept_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_accept_suggestion(' in source
         assert "/accept" in source
 
     def test_reject_endpoint(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert 'async def redteam_reject_suggestion(' in source
         assert "/reject" in source
 
     def test_accept_applies_to_config(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "apply_suggestion_to_config" in source
 
     def test_campaign_extracts_suggestions(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "extract_suggestions" in source
         assert '"suggestions"' in source
 
@@ -703,27 +703,27 @@ class TestSecurityScoreIntegration:
     """Verify red team resistance check in security score."""
 
     def test_redteam_resistance_check_exists(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert '"redteam_resistance"' in source
 
     def test_score_uses_percentage_grading(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "max_possible" in source
         assert "pct" in source
 
     def test_bypass_rate_thresholds(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         # Check that different bypass rate thresholds yield different scores
         assert "bypass_rate > 0.3" in source  # critical
         assert "bypass_rate > 0.1" in source  # elevated
 
     def test_stale_run_detection(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "redteam_max_age_days" in source
         assert "stale" in source
 
     def test_status_endpoint_returns_dynamic_max(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         idx = source.find("def get_security_status")
         assert idx != -1
         block = source[idx:idx + 500]
@@ -731,7 +731,7 @@ class TestSecurityScoreIntegration:
         assert 'sum(c["max_points"]' in block
 
     def test_health_includes_redteam(self):
-        source = open(APP_PATH, "r", encoding="utf-8").read()
+        source = open(APP_PATH, encoding="utf-8").read()
         assert '"redteam"' in source
         assert "last_run_id" in source
         assert "_redteam_report_store" in source
@@ -745,7 +745,7 @@ class TestRedteamInit:
     """Verify feedback exports in redteam __init__.py."""
 
     def test_feedback_exports(self):
-        source = open(REDTEAM_INIT_PATH, "r", encoding="utf-8").read()
+        source = open(REDTEAM_INIT_PATH, encoding="utf-8").read()
         assert '"Suggestion"' in source
         assert '"SuggestionStore"' in source
         assert '"suggestion_store"' in source
@@ -753,7 +753,7 @@ class TestRedteamInit:
         assert '"apply_suggestion_to_config"' in source
 
     def test_feedback_import_block(self):
-        source = open(REDTEAM_INIT_PATH, "r", encoding="utf-8").read()
+        source = open(REDTEAM_INIT_PATH, encoding="utf-8").read()
         assert "from .feedback import" in source
 
 
@@ -766,16 +766,16 @@ class TestCompareLogic:
 
     def test_regression_threshold(self):
         """Regressions require > 5% increase in bypass rate."""
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "diff > 0.05" in source
 
     def test_improvement_threshold(self):
         """Improvements require > 5% decrease in bypass rate."""
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "diff < -0.05" in source
 
     def test_target_diffs_computed(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert '"by_target"' in source
         idx = source.find("async def redteam_compare_reports")
         block = source[idx:]
@@ -790,7 +790,7 @@ class TestModuleDocstring:
     """Verify routes_security.py docstring includes S157 endpoints."""
 
     def test_docstring_includes_s157(self):
-        source = open(ROUTES_SECURITY_PATH, "r", encoding="utf-8").read()
+        source = open(ROUTES_SECURITY_PATH, encoding="utf-8").read()
         assert "S157" in source[:2000]  # Should be in docstring
         assert "DELETE" in source[:2000]
         assert "compare" in source[:2000]
@@ -827,5 +827,5 @@ class TestVersion:
     """Verify version is still 3.2.5 (no accidental bump)."""
 
     def test_version_is_325(self):
-        source = open(VERSION_PATH, "r", encoding="utf-8").read()
+        source = open(VERSION_PATH, encoding="utf-8").read()
         assert '"3.2.5"' in source

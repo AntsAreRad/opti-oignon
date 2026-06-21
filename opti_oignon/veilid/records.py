@@ -41,7 +41,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +281,7 @@ def encode_record(record: SyncRecord) -> dict[str, Any]:
     return wire
 
 
-def decode_record(obj: Any) -> Optional[SyncRecord]:
+def decode_record(obj: Any) -> SyncRecord | None:
     """Decode one wire object to a record, or return ``None`` on any problem.
 
     Defensive throughout: a non-mapping, an unknown or mismatched format version, a

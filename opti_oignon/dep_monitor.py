@@ -21,7 +21,7 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class AuditResult:
     filtered_findings: list[VulnerabilityRecord] = field(default_factory=list)
     severity_threshold: str = "high"
     total_raw: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def filtered_count(self) -> int:
@@ -116,7 +116,7 @@ class DependencyMonitor:
         return self._severity_threshold
 
     @property
-    def last_result(self) -> Optional[AuditResult]:
+    def last_result(self) -> AuditResult | None:
         """Most recent audit result, or None."""
         return self._results[-1] if self._results else None
 

@@ -60,12 +60,11 @@ from __future__ import annotations
 import base64
 import logging
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from dataclasses import dataclass
+from typing import Any, Mapping
 
 from opti_oignon.veilid.change_feed import ChangeFeed, get_change_feed
 from opti_oignon.veilid.deferred_ledger import (
-    OFFER_DUPLICATE,
     OFFER_INSERTED,
     OFFER_REPLACED,
     DeferredEntry,
@@ -79,6 +78,14 @@ from opti_oignon.veilid.peers import (
     PeerStore,
     get_peer_store,
 )
+from opti_oignon.veilid.producers import (
+    conversation_record,
+    memory_archive_record,
+    memory_canonical_record,
+    note_record,
+    note_update_record,
+    skill_record,
+)
 from opti_oignon.veilid.protocol import (
     Peer,
     RecordBatch,
@@ -87,14 +94,6 @@ from opti_oignon.veilid.protocol import (
     build_delta_request,
     parse_record_batch,
     respond_to_request,
-)
-from opti_oignon.veilid.producers import (
-    conversation_record,
-    memory_archive_record,
-    memory_canonical_record,
-    note_record,
-    note_update_record,
-    skill_record,
 )
 from opti_oignon.veilid.records import (
     RecordKind,
@@ -308,7 +307,7 @@ def _audit(action: str, **details: Any) -> None:
         logger.debug("sync audit log unavailable", exc_info=True)
 
 
-def _default_note_gate() -> Optional[Any]:
+def _default_note_gate() -> Any | None:
     """The process-default note gate: the ALREADY-initialised notes store.
 
     N.9 (S256). Read-only and side-effect free by design: it never
@@ -367,7 +366,7 @@ def _update_sink_for(store_like: Any) -> Any:
             return False
         if isinstance(seq, bool) or not isinstance(seq, int) or seq < 1:
             return False
-        if record.record_id != "{0}:{1}".format(note_id, seq):
+        if record.record_id != f"{note_id}:{seq}":
             return False
         if not isinstance(blob_b64, str):
             return False
@@ -394,7 +393,7 @@ def _update_sink_for(store_like: Any) -> Any:
     return _sink
 
 
-def _default_update_sink() -> Optional[Any]:
+def _default_update_sink() -> Any | None:
     """The process-default note_update apply sink, or ``None``.
 
     The ``_default_note_gate`` idiom (S256): read-only and side-effect free,
@@ -415,7 +414,7 @@ def _default_update_sink() -> Optional[Any]:
     return _update_sink_for(store)
 
 
-def _default_update_watermark_gate() -> Optional[Any]:
+def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
     S264 (the spec's section 3 republish contract): the phone-class serve
@@ -451,13 +450,13 @@ class SyncEngine:
         self,
         *,
         device: str = "local",
-        feed: Optional[ChangeFeed] = None,
-        store: Optional[PeerStore] = None,
-        signer: Optional[Any] = None,
-        ledger: Optional[DeferredLedger] = None,
-        note_gate: Optional[Any] = None,
-        update_sink: Optional[Any] = None,
-        update_watermark_gate: Optional[Any] = None,
+        feed: ChangeFeed | None = None,
+        store: PeerStore | None = None,
+        signer: Any | None = None,
+        ledger: DeferredLedger | None = None,
+        note_gate: Any | None = None,
+        update_sink: Any | None = None,
+        update_watermark_gate: Any | None = None,
     ) -> None:
         if not isinstance(device, str) or not device:
             raise ValueError("device must be a non-empty string")
@@ -499,7 +498,7 @@ class SyncEngine:
     def _resolve_store(self) -> PeerStore:
         return self._store if self._store is not None else get_peer_store()
 
-    def _resolve_note_gate(self) -> Optional[Any]:
+    def _resolve_note_gate(self) -> Any | None:
         # N.9 (S256): the injected gate wins; otherwise the lazy process
         # default (the initialised notes store singleton, or no gate at all
         # -- fail-secure at the filter).
@@ -507,7 +506,7 @@ class SyncEngine:
             return self._note_gate
         return _default_note_gate()
 
-    def _resolve_update_sink(self) -> Optional[Any]:
+    def _resolve_update_sink(self) -> Any | None:
         # S264: the injected sink wins; otherwise the lazy process default
         # (the initialised update-store singleton, or no sink at all --
         # fail-secure at the landing seam: the record refuses).
@@ -515,7 +514,7 @@ class SyncEngine:
             return self._update_sink
         return _default_update_sink()
 
-    def _resolve_update_watermark_gate(self) -> Optional[Any]:
+    def _resolve_update_watermark_gate(self) -> Any | None:
         # S264: the injected reader wins; otherwise the lazy process default
         # (the initialised update-store singleton's checkpoint reader, or
         # None -- no checkpoint state exists, the watermark is 0).
@@ -602,7 +601,7 @@ class SyncEngine:
     def publish_conversation(
         self,
         conversation_id: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         deleted: bool = False,
@@ -627,7 +626,7 @@ class SyncEngine:
     def publish_note(
         self,
         note_id: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         deleted: bool = False,
@@ -657,7 +656,7 @@ class SyncEngine:
         self,
         note_id: str,
         seq: int,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         updated_at: str = "",
@@ -689,7 +688,7 @@ class SyncEngine:
     def publish_memory_canonical(
         self,
         fact_id: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         deleted: bool = False,
@@ -710,7 +709,7 @@ class SyncEngine:
     def publish_memory_archive(
         self,
         entry_id: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         deleted: bool = False,
@@ -731,7 +730,7 @@ class SyncEngine:
     def publish_skill(
         self,
         skill_id: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         clock: int,
         deleted: bool = False,
@@ -799,7 +798,7 @@ class SyncEngine:
         routing_key: str,
         *,
         label: str = "",
-        signing_pub: Optional[str] = None,
+        signing_pub: str | None = None,
         pending: bool = False,
     ) -> PeerRecord:
         """Pair a peer (or refresh its route); audited. Not gated by Bulbe.
@@ -848,7 +847,7 @@ class SyncEngine:
         return ok
 
     def set_device_class(
-        self, peer_id: str, device_class: Optional[str]
+        self, peer_id: str, device_class: str | None
     ) -> bool:
         """Mark or clear a paired peer's device class; audited. Not gated by Bulbe.
 
@@ -877,7 +876,7 @@ class SyncEngine:
             )
         return ok
 
-    def self_signing_pub(self) -> Optional[str]:
+    def self_signing_pub(self) -> str | None:
         """This device's signing PUBLIC key, base64url, or ``None``.
 
         What the pairing payload carries (S205) and half of what the PAIR-02
@@ -976,7 +975,7 @@ class SyncEngine:
         half.
         """
         assert_sync_allowed()
-        rec: Optional[Any] = None
+        rec: Any | None = None
         if peer_id:
             store = self._resolve_store()
             rec = (
@@ -1026,7 +1025,7 @@ class SyncEngine:
             return batch, 0
         gate = self._resolve_note_gate()
         wm_gate_resolved = False
-        wm_gate: Optional[Any] = None
+        wm_gate: Any | None = None
         kept: list[Any] = []
         dropped = 0
         for wire in records:
@@ -1167,7 +1166,7 @@ class SyncEngine:
             return list(records_in), 0, len(records_in)
 
         store = self._resolve_store()
-        own_pub: Optional[bytes] = None
+        own_pub: bytes | None = None
         own_pub_resolved = False
         key_cache: dict[str, Any] = {}
         appliable: list[SyncRecord] = []
@@ -1262,8 +1261,8 @@ class SyncEngine:
         """
         appliable: list[SyncRecord] = []
         deferred = 0
-        ledger: Optional[DeferredLedger] = None
-        feed: Optional[ChangeFeed] = None
+        ledger: DeferredLedger | None = None
+        feed: ChangeFeed | None = None
         for r in records_in:
             if r.kind.value not in SENSITIVE_KINDS:
                 appliable.append(r)
@@ -1377,7 +1376,7 @@ class SyncEngine:
         kinds pass through untouched.
         """
         kept: list[SyncRecord] = []
-        sink: Optional[Any] = None
+        sink: Any | None = None
         sink_resolved = False
         for r in records_in:
             if r.kind.value != RecordKind.NOTE_UPDATE.value:
@@ -1860,11 +1859,11 @@ class SyncEngine:
 # SYN-04: creation is guarded by a lock, the same idiom as the change feed, the
 # peer store, and the status store singletons.
 
-_engine: Optional[SyncEngine] = None
+_engine: SyncEngine | None = None
 _engine_lock = threading.Lock()
 
 
-def _resolve_default_device(store: Optional[PeerStore]) -> str:
+def _resolve_default_device(store: PeerStore | None) -> str:
     """The persistent per-install device identity, fail-safe to "local".
 
     SYN-02: a production engine must not label every device "local" -- the
@@ -1885,11 +1884,11 @@ def _resolve_default_device(store: Optional[PeerStore]) -> str:
 
 def get_sync_engine(
     *,
-    device: Optional[str] = None,
-    feed: Optional[ChangeFeed] = None,
-    store: Optional[PeerStore] = None,
-    signer: Optional[Any] = None,
-    ledger: Optional[DeferredLedger] = None,
+    device: str | None = None,
+    feed: ChangeFeed | None = None,
+    store: PeerStore | None = None,
+    signer: Any | None = None,
+    ledger: DeferredLedger | None = None,
 ) -> SyncEngine:
     """Return the process sync engine, creating it once (with the args if given).
 
@@ -1909,7 +1908,7 @@ def get_sync_engine(
         return _engine
 
 
-def set_sync_engine(engine: Optional[SyncEngine]) -> None:
+def set_sync_engine(engine: SyncEngine | None) -> None:
     """Install a specific engine as the process singleton (used by tests)."""
     global _engine
     with _engine_lock:

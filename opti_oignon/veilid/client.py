@@ -38,7 +38,7 @@ import concurrent.futures
 import inspect
 import logging
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from opti_oignon.veilid.guard import (
     VeilidError,
@@ -68,14 +68,14 @@ class VeilidClient:
     def __init__(
         self,
         *,
-        api_factory: Optional[Callable[[Callable[[Any], None]], Any]] = None,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
+        api_factory: Callable[[Callable[[Any], None]], Any] | None = None,
+        host: str | None = None,
+        port: int | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         self._lock = threading.RLock()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
         self._api: Any = None
         self._api_factory = api_factory
         self._host = host
@@ -119,7 +119,7 @@ class VeilidClient:
                 pass
             loop.close()
 
-    def _submit(self, coro: Any, timeout: Optional[float] = None) -> Any:
+    def _submit(self, coro: Any, timeout: float | None = None) -> Any:
         """Run a coroutine on the dedicated loop from a worker thread, bounded."""
         budget = self._timeout if timeout is None else float(timeout)
         loop = self._ensure_loop()
@@ -134,7 +134,7 @@ class VeilidClient:
         except Exception as exc:
             raise VeilidError(f"veilid operation failed: {exc}") from exc
 
-    async def _await_on_loop(self, coro: Any, timeout: Optional[float] = None) -> Any:
+    async def _await_on_loop(self, coro: Any, timeout: float | None = None) -> Any:
         """Await a dedicated-loop coroutine from another loop, without blocking it."""
         budget = self._timeout if timeout is None else float(timeout)
         loop = self._ensure_loop()
@@ -278,7 +278,7 @@ class VeilidClient:
         with self._attach_lock:
             return self._last_attachment
 
-    def app_call(self, target: Any, message: Any, *, timeout: Optional[float] = None) -> Any:
+    def app_call(self, target: Any, message: Any, *, timeout: float | None = None) -> Any:
         """Send a request to a peer over a private route, bounded; return the reply.
 
         Submits the request/response coroutine to the dedicated loop and waits with
@@ -315,7 +315,7 @@ class VeilidClient:
                 self._stop_loop()
 
     async def aapp_call(
-        self, target: Any, message: Any, *, timeout: Optional[float] = None
+        self, target: Any, message: Any, *, timeout: float | None = None
     ) -> Any:
         """Await a request/response over a private route from the FastAPI loop.
 

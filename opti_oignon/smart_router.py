@@ -76,12 +76,14 @@ except ImportError:
 # Conditional import of learned router (S67)
 try:
     from .learned_router import (
+        LEARNED_ROUTER_AVAILABLE as _LR_AVAIL,
+    )
+    from .learned_router import (
         LearnedRouter,
         RoutingPrediction,
     )
     from .learned_router import (
         learned_router as _default_learned_router,
-        LEARNED_ROUTER_AVAILABLE as _LR_AVAIL,
     )
     LEARNED_ROUTER_IN_SMART = _LR_AVAIL
 except ImportError:

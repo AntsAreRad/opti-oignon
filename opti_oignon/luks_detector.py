@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -272,7 +270,7 @@ def _check_proc_mounts() -> dict[str, Any] | None:
         root_device = ""
         encrypted_devs: list[str] = []
 
-        with open(mounts_path, "r", encoding="utf-8") as f:
+        with open(mounts_path, encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) < 2:

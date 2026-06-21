@@ -16,13 +16,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from opti_oignon.agentic_executor import AgenticExecutor
 from opti_oignon.executor import (
     CONVERSATION_COMPRESSOR_AVAILABLE,
     Executor,
     _conversation_compressor,
 )
-from opti_oignon.agentic_executor import AgenticExecutor
-
 
 # ============================================================================
 # Helpers

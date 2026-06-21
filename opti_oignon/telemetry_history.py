@@ -26,9 +26,9 @@ import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 # S136 audit fix: use encrypted DB connections
@@ -140,7 +140,7 @@ class TelemetryHistoryStore:
         self._lock = threading.RLock()
         self._total_stored: int = 0
         self._auto_purge_enabled: bool = False
-        self._auto_purge_timer: Optional[threading.Timer] = None
+        self._auto_purge_timer: threading.Timer | None = None
 
         if self._db_path:
             os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
@@ -419,7 +419,7 @@ class TelemetryHistoryStore:
             for r in rows
         ]
 
-    def purge(self, *, older_than_days: Optional[int] = None) -> int:
+    def purge(self, *, older_than_days: int | None = None) -> int:
         """Delete old events based on retention policy.
 
         Parameters
@@ -505,8 +505,8 @@ class TelemetryHistoryStore:
     def update_settings(
         self,
         *,
-        retention_days: Optional[int] = None,
-        auto_purge_enabled: Optional[bool] = None,
+        retention_days: int | None = None,
+        auto_purge_enabled: bool | None = None,
     ) -> dict[str, Any]:
         """Update retention configuration at runtime.
 
@@ -630,7 +630,7 @@ class TelemetryHistoryStore:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_store: Optional[TelemetryHistoryStore] = None
+_store: TelemetryHistoryStore | None = None
 _store_lock = threading.Lock()
 
 TELEMETRY_HISTORY_AVAILABLE = True

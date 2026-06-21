@@ -96,7 +96,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -164,15 +164,15 @@ class ParsedPairing:
 
     peer_id: str
     routing_key: str
-    signing_pub: Optional[str] = None
-    device_class: Optional[str] = None
+    signing_pub: str | None = None
+    device_class: str | None = None
 
 
 def pairing_canonical_material(
     peer_id: str,
     routing_key: str,
-    signing_pub: Optional[str] = None,
-    device_class: Optional[str] = None,
+    signing_pub: str | None = None,
+    device_class: str | None = None,
 ) -> str:
     """The canonical JSON of a payload's public fields (no integrity field).
 
@@ -221,8 +221,8 @@ def pairing_canonical_material(
 def pairing_integrity(
     peer_id: str,
     routing_key: str,
-    signing_pub: Optional[str] = None,
-    device_class: Optional[str] = None,
+    signing_pub: str | None = None,
+    device_class: str | None = None,
 ) -> str:
     """The integrity check for a pairing payload: SHA-256 over the public fields.
 
@@ -309,14 +309,14 @@ def confirmation_code(material_a: str, material_b: str) -> str:
     )
     value = int.from_bytes(digest[:8], "big") % (10**CONFIRM_CODE_DIGITS)
     half = 10 ** (CONFIRM_CODE_DIGITS // 2)
-    return "{:04d} {:04d}".format(value // half, value % half)
+    return f"{value // half:04d} {value % half:04d}"
 
 
 def build_pairing_payload(
     peer_id: str,
     routing_key: str,
-    signing_pub: Optional[str] = None,
-    device_class: Optional[str] = None,
+    signing_pub: str | None = None,
+    device_class: str | None = None,
 ) -> dict[str, Any]:
     """Build this device's pairing payload, computing its integrity check.
 
@@ -344,9 +344,7 @@ def build_pairing_payload(
         raise ValueError("signing_pub must be a non-empty string or None")
     if device_class is not None and device_class not in PAIRING_DEVICE_CLASSES:
         raise ValueError(
-            "device_class must be one of {} or None".format(
-                sorted(PAIRING_DEVICE_CLASSES)
-            )
+            f"device_class must be one of {sorted(PAIRING_DEVICE_CLASSES)} or None"
         )
     payload: dict[str, Any] = {
         "v": PAIRING_FORMAT_VERSION,
@@ -364,7 +362,7 @@ def build_pairing_payload(
     return payload
 
 
-def parse_pairing_payload(obj: Any) -> Optional[ParsedPairing]:
+def parse_pairing_payload(obj: Any) -> ParsedPairing | None:
     """Parse a pairing payload defensively, or return ``None`` on any problem.
 
     Never raises into the caller. A non-mapping, a wrong format version or type, a
@@ -452,7 +450,7 @@ def encode_pairing_json(payload: Mapping[str, Any]) -> str:
     return json.dumps(dict(payload), separators=(",", ":"), ensure_ascii=False)
 
 
-def decode_pairing_json(text: Any) -> Optional[ParsedPairing]:
+def decode_pairing_json(text: Any) -> ParsedPairing | None:
     """Parse a pairing payload from JSON text defensively, or return ``None``.
 
     Never raises: invalid JSON, or a top-level value that is not an object, yields
@@ -469,10 +467,10 @@ def decode_pairing_json(text: Any) -> Optional[ParsedPairing]:
 
 
 def resolve_pairing_device_class(
-    declared: Optional[str],
-    prior_exists: Optional[bool],
-    prior_class: Optional[str],
-) -> tuple[bool, Optional[str]]:
+    declared: str | None,
+    prior_exists: bool | None,
+    prior_class: str | None,
+) -> tuple[bool, str | None]:
     """Decide the class the accept seam records: the MONOTONE rule (S258).
 
     Pure and stdlib-only, so the whole policy is testable in isolation.
@@ -506,7 +504,7 @@ def resolve_pairing_device_class(
       default.
     """
     if declared is None:
-        target: Optional[str] = None
+        target: str | None = None
     elif isinstance(declared, str) and declared in PAIRING_DEVICE_CLASSES:
         target = declared
     else:
@@ -533,8 +531,8 @@ def resolve_pairing_device_class(
 def _apply_pairing_device_class(
     engine: Any,
     parsed: ParsedPairing,
-    prior_exists: Optional[bool],
-    prior_class: Optional[str],
+    prior_exists: bool | None,
+    prior_class: str | None,
 ) -> None:
     """Record the declared class through the engine's setter, best-effort.
 
@@ -598,7 +596,7 @@ def _apply_pairing_device_class(
 
 def accept_pairing_payload(
     engine: Any, obj: Any, *, label: str = "", store: Any = None
-) -> Optional[Any]:
+) -> Any | None:
     """Accept a peer's pairing payload and register it through the engine.
 
     Parses the payload defensively; on anything malformed or tampered returns
@@ -648,8 +646,8 @@ def accept_pairing_payload(
     # Guarded and fail-secure: a missing or raising lookup leaves the prior
     # INDETERMINABLE, under which the decision function only ever writes a
     # phone resolution.
-    prior_exists: Optional[bool] = None
-    prior_class: Optional[str] = None
+    prior_exists: bool | None = None
+    prior_class: str | None = None
     if store is not None:
         getter = getattr(store, "get_peer", None)
         if callable(getter):

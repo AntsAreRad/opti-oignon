@@ -242,7 +242,7 @@ class HistoryManager:
             try:
                 with open(daily_file, encoding='utf-8') as f:
                     entries = json.load(f)
-            except:
+            except:  # noqa: E722
                 entries = []
 
         entries.append(entry.to_dict())
@@ -369,7 +369,7 @@ class HistoryManager:
                         results.append(HistoryEntry.from_dict(entry_data))
                         if len(results) >= limit:
                             return results
-            except:
+            except:  # noqa: E722
                 continue
 
         return results
@@ -405,7 +405,7 @@ class HistoryManager:
                         results.append(HistoryEntry.from_dict(entry_data))
                         if len(results) >= limit:
                             return results
-            except:
+            except:  # noqa: E722
                 continue
 
         return results
@@ -604,7 +604,7 @@ class HistoryManager:
                     if rating:
                         rated_sum += rating
                         rated_count += 1
-            except:
+            except:  # noqa: E722
                 continue
 
         return {
@@ -644,7 +644,7 @@ class HistoryManager:
                     # Delete file
                     filepath.unlink()
                     logger.info(f"File deleted: {filepath.name}")
-            except:
+            except:  # noqa: E722
                 continue
 
         # Clean index

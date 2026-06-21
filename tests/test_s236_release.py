@@ -54,8 +54,9 @@ never edited):
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 

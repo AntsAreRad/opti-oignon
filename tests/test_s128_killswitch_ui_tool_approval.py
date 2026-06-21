@@ -20,8 +20,8 @@ import importlib.util
 import os
 import re
 import sys
-import time
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

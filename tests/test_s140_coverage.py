@@ -25,12 +25,12 @@ import sqlite3
 import stat
 import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -79,7 +79,7 @@ def _load_module(name, path):
 
 
 def _read(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

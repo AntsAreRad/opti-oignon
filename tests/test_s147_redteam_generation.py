@@ -34,7 +34,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 # ---------------------------------------------------------------------------
 # Isolated module loading (avoids __init__ import chain)

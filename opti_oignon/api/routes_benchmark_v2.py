@@ -11,7 +11,6 @@ CRUD, question preview, auto-trigger management, and test poll.
 
 import csv
 import io
-import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -26,7 +25,6 @@ from .deps import (
     CUSTOM_PROFILES_AVAILABLE,
     auto_trigger,
     benchmark_evaluator,
-    benchmark_judge,
     benchmark_recommender,
     benchmark_runner,
     custom_profile_store,
@@ -43,8 +41,8 @@ from .schemas import (
     BenchmarkV2CompareResponse,
     BenchmarkV2CustomProfileCreate,
     BenchmarkV2CustomProfileResponse,
-    BenchmarkV2CustomProfileUpdate,
     BenchmarkV2CustomProfilesListResponse,
+    BenchmarkV2CustomProfileUpdate,
     BenchmarkV2HeadToHeadMetric,
     BenchmarkV2HeadToHeadResponse,
     BenchmarkV2HistoryEntry,

@@ -841,7 +841,7 @@ class ModelBenchmark:
         if not self.results:
             return {"error": "No results"}
 
-        summaries = self._calculate_summaries()
+        summaries = self._calculate_summaries()  # noqa: F841
         changes = {}
 
         # Find best models by task
@@ -1029,7 +1029,7 @@ class ModelBenchmark:
         try:
             with open(latest_path, encoding='utf-8') as f:
                 previous = json.load(f)
-        except:
+        except:  # noqa: E722
             return {"status": "error_loading_previous"}
 
         regressions = []

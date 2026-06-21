@@ -15,7 +15,7 @@ Pure text processing -- no external dependencies, no permissions needed.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 __plugin_name__: str = "markdown-beautifier"
 __plugin_version__: str = "1.0.0"
@@ -433,7 +433,7 @@ def beautify(
     # Fence-level rules run on raw text
     fence_rules = {"fence_repair", "code_block_spacing"}
     # Content-level rules need code block protection
-    content_rules = {"header_spacing", "list_formatting", "table_alignment"}
+    content_rules = {"header_spacing", "list_formatting", "table_alignment"}  # noqa: F841
 
     # Apply in defined order
     for rule_name in RULE_ORDER:
@@ -462,7 +462,7 @@ def beautify(
 # =========================================================================
 
 
-def hook_post_inference(ctx: Any) -> Optional[dict[str, Any]]:
+def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
     """Post-inference hook: beautify markdown in the LLM response.
 
     Applies configured rules to normalize headers, lists, tables,

@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -168,7 +167,7 @@ def user_collection_name(user_id: str, collection_name: str) -> str:
     Returns:
         Namespaced collection name.
     """
-    return "{}{}_{}".format(_RAG_USER_PREFIX, user_id, collection_name)
+    return f"{_RAG_USER_PREFIX}{user_id}_{collection_name}"
 
 
 def is_user_collection(user_id: str, collection_name: str) -> bool:
@@ -181,19 +180,19 @@ def is_user_collection(user_id: str, collection_name: str) -> bool:
     export and cascade-delete. (A user_id containing "_" can still collide;
     that deeper case is tracked as a hardening item.)
     """
-    prefix = "{}{}_".format(_RAG_USER_PREFIX, user_id)
+    prefix = f"{_RAG_USER_PREFIX}{user_id}_"
     return collection_name.startswith(prefix)
 
 
 def get_user_collections(user_id: str, all_collections: list[str]) -> list[str]:
     """Filter collections belonging to a specific user."""
-    prefix = "{}{}_".format(_RAG_USER_PREFIX, user_id)
+    prefix = f"{_RAG_USER_PREFIX}{user_id}_"
     return [c for c in all_collections if c.startswith(prefix)]
 
 
 def strip_user_prefix(user_id: str, collection_name: str) -> str:
     """Remove the user prefix from a collection name for display."""
-    prefix = "{}{}_".format(_RAG_USER_PREFIX, user_id)
+    prefix = f"{_RAG_USER_PREFIX}{user_id}_"
     if collection_name.startswith(prefix):
         return collection_name[len(prefix):]
     return collection_name
