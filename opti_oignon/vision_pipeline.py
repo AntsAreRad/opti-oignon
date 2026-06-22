@@ -19,6 +19,7 @@ Configuration lives in config/vision.yaml (delegation_* keys).
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -354,7 +355,7 @@ class VisionPipeline:
         message: str,
         images: list[str] | None,
         current_model: str,
-        on_status: callable | None = None,
+        on_status: Callable | None = None,
     ) -> tuple[str, list[str] | None, dict]:
         """Run the full vision delegation pipeline.
 
