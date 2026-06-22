@@ -8,7 +8,11 @@
  *   npx playwright test --headed     # visible browser
  *   npx playwright show-report       # view HTML report
  */
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   /* Test directory — E2E specs live in tests/e2e/ at project root */

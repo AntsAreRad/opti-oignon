@@ -135,7 +135,7 @@ jobs:
 
       - name: TypeScript check (svelte-check)
         working-directory: frontend
-        run: npm run check
+        run: npx svelte-kit sync && npm run check
 
       - name: Lint (eslint)
         working-directory: frontend
