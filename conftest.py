@@ -44,3 +44,37 @@ def pytest_configure(config):
     except (ValueError, KeyError):
         # asyncio_mode ini option not registered (older pytest-asyncio versions)
         pass
+
+
+# ---------------------------------------------------------------------------
+# Public-repo guard: skip per-session meta-tests that read development
+# bookkeeping documents (roadmaps, specs, inventories) which are intentionally
+# not shipped in the public repository. Such a test is ignored only when the
+# bookkeeping file it references is genuinely absent, so it still runs in a
+# full development checkout where those files exist.
+# ---------------------------------------------------------------------------
+import pathlib as _pl
+import re as _re
+
+_REPO_ROOT = _pl.Path(__file__).parent.resolve()
+_TESTS_DIR = _REPO_ROOT / "tests"
+_MD_REF = _re.compile(r"""["']([A-Za-z0-9_./-]+\.md)["']""")
+_BOOKKEEPING_HINTS = (
+    "ROADMAP", "_SPEC", "INVENTORY", "AUDIT", "SHAKEDOWN", "LIVE_WALK",
+    "REDESIGN", "ODYSSEUS", "VEILID", "MOBILE_", "PROMPT_S",
+    "SESSION_TRACKING", "BASELINE", "DEBT_LOT", "FIX_REPORT", "_E2E_",
+    "SIDE_QUESTS", "THREAT_MODEL",
+)
+
+collect_ignore = []
+if _TESTS_DIR.is_dir():
+    for _tf in sorted(_TESTS_DIR.glob("test_*.py")):
+        try:
+            _src = _tf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for _ref in _MD_REF.findall(_src):
+            _name = _pl.Path(_ref).name
+            if any(_h in _name for _h in _BOOKKEEPING_HINTS) and not (_REPO_ROOT / _name).exists():
+                collect_ignore.append(str(_tf.relative_to(_REPO_ROOT)))
+                break
