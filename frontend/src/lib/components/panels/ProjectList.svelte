@@ -337,7 +337,6 @@
 									}}
 								/>
 								{#if openMenuId === project.id}
-									<!-- svelte-ignore a11y-no-static-element-interactions -->
 									<div
 										class="oo-menu-list"
 										role="menu"

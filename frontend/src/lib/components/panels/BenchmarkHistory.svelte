@@ -94,7 +94,7 @@
 				<div class="detail-meta">
 					<h3>Run {$selectedRun.id.slice(0, 8)}</h3>
 					<span class="detail-status {statusCls($selectedRun.status)}">
-						{@html statusIcon($selectedRun.status)} {$selectedRun.status}
+						{statusIcon($selectedRun.status)} {$selectedRun.status}
 					</span>
 				</div>
 				<div class="detail-stats">
@@ -215,7 +215,7 @@
 							<div class="run-card-top">
 								<div class="run-card-info">
 									<span class="run-id">{run.id.slice(0, 8)}</span>
-									<span class="run-status {statusCls(run.status)}">{@html statusIcon(run.status)}</span>
+									<span class="run-status {statusCls(run.status)}">{statusIcon(run.status)}</span>
 								</div>
 								<span class="run-date">{formatDate(run.started_at)}</span>
 							</div>

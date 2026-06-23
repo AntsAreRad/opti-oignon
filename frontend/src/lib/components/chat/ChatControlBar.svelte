@@ -105,7 +105,7 @@
 				const data = await resp.json();
 				cacheEnabled.set(data.enabled || false);
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 		// S69: Load initial cascading status
 		try {
 			const resp = await fetch('/api/cascading/status');
@@ -113,7 +113,7 @@
 				const data = await resp.json();
 				cascadingEnabled.set(data.enabled || false);
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 		// S86: Load initial humanizer status
 		try {
 			const resp = await fetch('/api/humanizer/config');
@@ -121,7 +121,7 @@
 				const data = await resp.json();
 				humanizeEnabled.set(data.enabled || false);
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 		// S87: Check if duckduckgo-search is available
 		try {
 			const resp = await fetch('/api/search/config');
@@ -296,7 +296,7 @@
 				method: 'POST',
 				credentials: 'include',
 			});
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 		wipeBusy = false;
 	}
 </script>

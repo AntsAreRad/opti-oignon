@@ -55,5 +55,17 @@ module.exports = {
 			'warn',
 			{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
 		],
+		// Svelte compiler *warnings* (a11y hints, unused-export-let) are
+		// already surfaced by svelte-check (`npm run check`) and the build.
+		// ESLint should flag only genuine Svelte compile *errors*, not
+		// duplicate the compiler's stylistic warnings.
+		'svelte/valid-compile': ['error', { ignoreWarnings: true }],
+		// Intentional infinite loops (event pumps, stream readers) use
+		// `while (true)`; do not flag the constant loop condition.
+		'no-constant-condition': ['error', { checkLoops: false }],
+		// Code is tab-indented; continued lines (multi-line attribute values,
+		// JSDoc asterisks) use spaces for alignment. Smart-tabs permits
+		// spaces *after* tabs and still flags spaces *before* tabs.
+		'no-mixed-spaces-and-tabs': ['error', 'smart-tabs'],
 	},
 };

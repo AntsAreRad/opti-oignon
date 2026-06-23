@@ -31,7 +31,7 @@
 				const data = await resp.json();
 				appVersion = data.version || '';
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 	});
 
 	// Palette-aware quick toggle: switch to the light/dark default palette.

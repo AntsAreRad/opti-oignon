@@ -21,10 +21,10 @@
 	let activeTab: Tab = 'evaluation';
 
 	const tabs: { id: Tab; label: string; icon: string }[] = [
-		{ id: 'evaluation', label: 'Quality Evaluation', icon: '&#9670;' },
-		{ id: 'run', label: 'Run Benchmark', icon: '&#9654;' },
-		{ id: 'history', label: 'History', icon: '&#9776;' },
-		{ id: 'models', label: 'Model Assignment', icon: '&#9881;' },
+		{ id: 'evaluation', label: 'Quality Evaluation', icon: '◆' },
+		{ id: 'run', label: 'Run Benchmark', icon: '▶' },
+		{ id: 'history', label: 'History', icon: '☰' },
+		{ id: 'models', label: 'Model Assignment', icon: '⚙' },
 	];
 
 	let storeLoading = true;
@@ -74,7 +74,7 @@
 				aria-selected={activeTab === tab.id}
 				on:click={() => (activeTab = tab.id)}
 			>
-				<span class="tab-icon">{@html tab.icon}</span>
+				<span class="tab-icon">{tab.icon}</span>
 				{tab.label}
 			</button>
 		{/each}

@@ -84,7 +84,7 @@
 				const data = await resp.json();
 				auditEvents = data.events || [];
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 	}
 
 	async function loadEncryptionStatus() {
@@ -93,14 +93,14 @@
 			if (resp.ok) {
 				encryptionStatus = await resp.json();
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 		try {
 			const resp = await fetch('/api/auth/status', { credentials: 'include' });
 			if (resp.ok) {
 				const data = await resp.json();
 				cookieMode = data.cookie_mode ?? true;
 			}
-		} catch {}
+		} catch { /* best-effort: ignore if endpoint unavailable */ }
 	}
 
 	function gradeColor(g: string): string {

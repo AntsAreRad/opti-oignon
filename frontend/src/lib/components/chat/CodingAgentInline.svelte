@@ -36,7 +36,7 @@
 	$: planSteps = (codingResult.plan || '')
 		.split('\n')
 		.filter((l) => l.trim())
-		.filter((l) => /^\d+[\.\)]/.test(l.trim()));
+		.filter((l) => /^\d+[.)]/.test(l.trim()));
 
 	$: hasPlan = planSteps.length > 0;
 	$: hasFiles = (codingResult.files_written || []).length > 0;
@@ -135,7 +135,7 @@
 							style="color: var(--oo-success);">
 							<path d="M5 13l4 4L19 7" />
 						</svg>
-						<span>{step.replace(/^\d+[\.\)]\s*/, '')}</span>
+						<span>{step.replace(/^\d+[.)]\s*/, '')}</span>
 					</div>
 				{/each}
 			</div>

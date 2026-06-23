@@ -146,7 +146,6 @@
 	{/if}
 
 	<!-- S132: Sidebar with swipe-to-close on mobile -->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<nav
 		aria-label="Sidebar navigation"
 		bind:this={sidebarEl}
@@ -219,7 +218,6 @@
 				>
 					<!-- Resize handle (desktop only) -->
 					{#if !isMobile}
-						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<div
 							class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors
 								{resizing ? '' : ''}"

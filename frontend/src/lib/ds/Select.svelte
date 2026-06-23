@@ -111,7 +111,6 @@
 	{#if isSearchable}
 		<!-- WAI-ARIA combobox (searchable single) -->
 		<div class="oo-combo">
-			<!-- svelte-ignore a11y-role-has-required-aria-props -->
 			<input
 				id={`${uid}-combo`}
 				class="oo-field-control"

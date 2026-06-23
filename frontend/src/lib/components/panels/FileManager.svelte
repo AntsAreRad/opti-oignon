@@ -154,7 +154,6 @@
 
 <div class="space-y-3">
 	<!-- Drop zone / upload area -->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		class="relative rounded-lg border-2 border-dashed transition-colors text-center py-6 px-4"
 		style="border-color: {dragging ? 'var(--oo-acc-500)' : 'var(--oo-bd-subtle)'};

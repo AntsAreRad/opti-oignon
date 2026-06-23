@@ -281,7 +281,6 @@
 
 		{#if !importData && !importResult}
 			<!-- Drop zone -->
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
 			<div
 				class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
 				style="border-color: {dragOver
