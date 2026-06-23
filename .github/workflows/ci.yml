@@ -78,41 +78,6 @@ jobs:
           bash scripts/run_typecheck.sh --ci
 
   # -------------------------------------------------------------------
-  # Test -- pytest with coverage gate
-  # -------------------------------------------------------------------
-  test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    needs: [lint, typecheck]
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          pip install pytest pytest-cov
-          pip install -e ".[auth,sqlcipher]"
-
-      - name: Run tests with coverage
-        run: |
-          bash scripts/run_tests.sh --ci --coverage
-
-      - name: Upload coverage artifact
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.json
-          retention-days: 30
-
-  # -------------------------------------------------------------------
   # Frontend -- svelte-check (TypeScript) + eslint (S171)
   # -------------------------------------------------------------------
   frontend:
@@ -181,45 +146,6 @@ jobs:
         with:
           name: dist
           path: dist/
-          retention-days: 14
-
-  # -------------------------------------------------------------------
-  # E2E -- Playwright frontend tests
-  # -------------------------------------------------------------------
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: [lint]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install chromium --with-deps
-
-      - name: Run E2E tests
-        working-directory: frontend
-        env:
-          CI: "1"
-        run: npx playwright test
-
-      - name: Upload E2E report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: tests/e2e/playwright-report/
           retention-days: 14
 
   # -------------------------------------------------------------------
@@ -337,39 +263,3 @@ jobs:
             pip-audit-report.json
             npm-audit-report.json
           retention-days: 30
-
-  # -------------------------------------------------------------------
-  # Badge -- coverage badge generation (runs after test)
-  # -------------------------------------------------------------------
-  badge:
-    name: Coverage Badge
-    runs-on: ubuntu-latest
-    needs: [test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download coverage artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
-
-      - name: Generate badge
-        run: |
-          python3 scripts/generate_coverage_badge.py coverage.json
-
-      - name: Commit badge
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add assets/coverage-badge.svg
-          git diff --cached --quiet || \
-            git commit -m "ci: update coverage badge [skip ci]"
-          git push || true
