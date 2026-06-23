@@ -30,7 +30,7 @@ CLI:
 Author: Léon
 """
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 __author__ = "Léon"
 
 # Main imports

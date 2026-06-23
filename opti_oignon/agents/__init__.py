@@ -104,7 +104,7 @@ except ImportError:
     DYNAMIC_PIPELINE_AVAILABLE = False
 
 # Version
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 # Public exports
 __all__ = [

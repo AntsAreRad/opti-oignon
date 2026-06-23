@@ -3,6 +3,29 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
+## 2.0.1 -- 2026-06-23
+
+Maintenance release: a version-reporting fix, a small frontend security
+hardening, and repository cleanup. No functional changes to the application.
+
+### Fixed
+
+- The command line and the package metadata now both report 2.0.1. The version
+  module had carried a stale internal version string over from pre-release
+  development, so the 2.0.0 build reported the wrong number from `oo --version`.
+
+### Security
+
+- Removed unnecessary `{@html}` rendering in the benchmark panels, eliminating
+  an unused HTML-injection surface in the frontend. [SECURITY]
+
+### Internal
+
+- The public continuous-integration pipeline (Python lint, frontend type-check
+  and lint, install smoke test, security scan) now passes.
+- Removed a dead pytest configuration block from `pyproject.toml` that referenced
+  a test suite not shipped in the public distribution.
+
 ## 2.0.0 -- 2026-06-20
 
 A complete rewrite and public re-release. Opti-Oignon began as a Gradio-based
