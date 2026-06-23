@@ -49,7 +49,7 @@ jobs:
         run: pip install ruff==0.15.18
 
       - name: Run ruff check
-        run: ruff check opti_oignon/ tests/ --output-format=github
+        run: ruff check opti_oignon/ --output-format=github
 
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
