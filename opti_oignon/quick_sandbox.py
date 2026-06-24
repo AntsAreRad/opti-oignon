@@ -128,8 +128,10 @@ class QuickSandboxSession:
         session_id: str,
         sandbox_mgr: "SandboxManager | None" = None,
         auto_destroy_minutes: int = 30,
+        conversation_id: str | None = None,
     ):
         self._session_id = session_id
+        self._conversation_id = conversation_id
         self._mgr = sandbox_mgr or _default_sandbox_manager
         self._sandbox_session: SandboxSession | None = None
         self._created_at = time.time()
@@ -141,6 +143,11 @@ class QuickSandboxSession:
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    @property
+    def conversation_id(self) -> str | None:
+        """The conversation that owns this sandbox (None if detached)."""
+        return self._conversation_id
 
     @property
     def active(self) -> bool:
@@ -159,6 +166,31 @@ class QuickSandboxSession:
     @property
     def created_at(self) -> float:
         return self._created_at
+
+    @property
+    def auto_destroy_minutes(self) -> int:
+        """Current inactivity timeout before auto-destroy, in minutes."""
+        return int(self._auto_destroy_seconds // 60)
+
+    @property
+    def seconds_until_expiry(self) -> float:
+        """Seconds of inactivity remaining before auto-destroy (>= 0)."""
+        remaining = self._auto_destroy_seconds - (
+            time.time() - self._last_activity
+        )
+        return max(0.0, remaining)
+
+    def set_auto_destroy_minutes(self, minutes: int) -> None:
+        """Change the inactivity timeout after the session was created.
+
+        The activity clock is reset so the new window starts now, giving a
+        predictable fresh countdown (useful to keep a session alive longer).
+        """
+        if minutes <= 0:
+            raise ValueError("auto_destroy_minutes must be positive")
+        with self._lock:
+            self._auto_destroy_seconds = minutes * 60
+            self._last_activity = time.time()
 
     @property
     def files_created(self) -> list[str]:
@@ -378,6 +410,7 @@ class QuickSandboxManager:
                 session_id=rid,
                 sandbox_mgr=self._mgr,
                 auto_destroy_minutes=self._config.auto_destroy_minutes,
+                conversation_id=request_id,
             )
             self._sessions[rid] = session
             return session
@@ -409,6 +442,21 @@ class QuickSandboxManager:
                 count += 1
         return count
 
+    def set_session_auto_destroy(
+        self, session_id: str, minutes: int
+    ) -> bool:
+        """Change the auto-destroy timeout of an existing session.
+
+        Returns True if the session exists and was updated, False otherwise.
+        Raises ValueError if minutes is not positive.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if session is None:
+            return False
+        session.set_auto_destroy_minutes(minutes)
+        return True
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all active quick sandbox sessions."""
         with self._lock:
@@ -420,6 +468,8 @@ class QuickSandboxManager:
                     "expired": session.expired,
                     "created_at": session.created_at,
                     "files_created": session.files_created,
+                    "auto_destroy_minutes": session.auto_destroy_minutes,
+                    "seconds_until_expiry": session.seconds_until_expiry,
                 })
             return result
 

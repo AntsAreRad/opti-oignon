@@ -115,3 +115,4 @@ opti_oignon/data/rag/
 opti_oignon/data/notes_blobs/
 data/.security_mode_lock
 data/.audit_chain_anchor
+data/sandbox_exports/

@@ -33,6 +33,7 @@ from .schemas import (
     # S117
     QuickSandboxStatusResponse,
     QuickSandboxToggleRequest,
+    QuickSandboxTTLRequest,
     SandboxApplyEntry,
     SandboxApplyRefusedEntry,
     SandboxApplyRequest,
@@ -410,6 +411,30 @@ def list_sessions() -> list:
         except Exception:  # pragma: no cover - enrichment must not break
             logger.exception("has_cloned_baseline enrichment failed")
 
+    # bound_conversation_id (frontend contract): the explicit workspace
+    # binding takes priority; otherwise fall back to the conversation that
+    # created the quick-sandbox session (auto-created sessions are keyed by
+    # conversation_id but never explicitly bound). None means detached.
+    for row in rows:
+        sid = row.get("session_id", "")
+        bound: str | None = None
+        if WORKSPACE_BINDING_AVAILABLE and _ws is not None:
+            try:
+                bound = _ws.get_conversation_for(sid)
+            except Exception:  # pragma: no cover - enrichment must not break
+                bound = None
+        if (
+            bound is None
+            and QUICK_SANDBOX_AVAILABLE
+            and _qs_manager is not None
+        ):
+            try:
+                qs = _qs_manager.get_session(sid)
+                bound = qs.conversation_id if qs is not None else None
+            except Exception:  # pragma: no cover - enrichment must not break
+                bound = None
+        row["bound_conversation_id"] = bound
+
     return [SandboxSessionInfo(**s) for s in rows]
 
 
@@ -768,6 +793,41 @@ def destroy_quick_sandbox_session(session_id: str) -> dict:
             detail=f"Quick sandbox session not found: {session_id}",
         )
     return {"session_id": session_id, "destroyed": True}
+
+
+@router.post(
+    "/quick/{session_id}/ttl", response_model=QuickSandboxSessionInfo
+)
+def set_quick_sandbox_ttl(
+    session_id: str, request: QuickSandboxTTLRequest
+) -> QuickSandboxSessionInfo:
+    """Change a quick sandbox session's auto-destroy (inactivity) timeout.
+
+    The activity clock is reset so the new window starts now.
+    """
+    if not QUICK_SANDBOX_AVAILABLE or _qs_manager is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Quick sandbox not available",
+        )
+    try:
+        updated = _qs_manager.set_session_auto_destroy(
+            session_id, request.auto_destroy_minutes
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Quick sandbox session not found: {session_id}",
+        )
+    for s in _qs_manager.list_sessions():
+        if s["session_id"] == session_id:
+            return QuickSandboxSessionInfo(**s)
+    raise HTTPException(
+        status_code=404,
+        detail=f"Quick sandbox session not found: {session_id}",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1276,6 +1276,7 @@ class SandboxStatusResponse(BaseModel):
 class SandboxSessionInfo(BaseModel):
     """Info about a sandbox session."""
     session_id: str
+    bound_conversation_id: str | None = None
     workspace_path: str
     isolation_backend: str = ""
     created_at: float = 0.0
@@ -1635,6 +1636,13 @@ class QuickSandboxSessionInfo(BaseModel):
     expired: bool = False
     created_at: float = 0.0
     files_created: list[str] = Field(default_factory=list)
+    auto_destroy_minutes: int = 30
+    seconds_until_expiry: float = 0.0
+
+
+class QuickSandboxTTLRequest(BaseModel):
+    """Request to change a quick sandbox session's auto-destroy timeout."""
+    auto_destroy_minutes: int = Field(gt=0, le=1440)
 
 
 # -- Chat Coding Agent (S118) --

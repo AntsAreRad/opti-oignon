@@ -260,7 +260,13 @@ class ToolRegistry:
         if not available:
             return ""
 
-        lines = ["You have access to the following tools:\n"]
+        lines = [
+            "You have access to the following tools. When the user asks "
+            "you to create, read, edit, modify, list, or run files or "
+            "code, call the appropriate tool to perform the action "
+            "directly instead of only printing or describing it. This "
+            "applies whatever language the user writes in.\n"
+        ]
         for tool in available:
             lines.append(f"## {tool.name}")
             lines.append(f"{tool.description}")
@@ -276,6 +282,27 @@ class ToolRegistry:
                         f": {param.description}"
                     )
             lines.append("")
+
+        # When a quick sandbox session is active, list the files already in
+        # the workspace so the model edits them in place (read_file +
+        # write_file) instead of regenerating their content as text.
+        if getattr(self, "_quick_sandbox_mode", False):
+            _qs_session = getattr(self, "_quick_sandbox_session", None)
+            _existing: list[str] = []
+            if _qs_session is not None:
+                try:
+                    _existing = list(_qs_session.files_created)
+                except Exception:
+                    _existing = []
+            if _existing:
+                lines.append(
+                    "Files already in your sandbox workspace: "
+                    + ", ".join(_existing)
+                    + "\nTo change an existing file, call read_file to get "
+                    "its current content, then call write_file with the "
+                    "same path and the updated content. Do not just print "
+                    "the new version in your reply.\n"
+                )
 
         lines.append(
             "To use a tool, respond with a JSON object containing:\n"

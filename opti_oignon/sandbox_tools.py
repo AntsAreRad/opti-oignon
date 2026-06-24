@@ -116,6 +116,7 @@ _BINARY_SNIFF_BYTES = 8192
 DIAGNOSTICS_DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "tools": ["ruff", "pyflakes", "py_compile"],
+    "type_tool": "mypy",
     "timeout_s": 10,
     "max_block_bytes": 4096,
     "max_findings": 25,
@@ -124,6 +125,7 @@ _DIAG_PROBE_COMMANDS = {
     "ruff": "command -v ruff",
     "pyflakes": "command -v pyflakes",
     "py_compile": "command -v python3",
+    "mypy": "command -v mypy",
 }
 _DIAG_TRUNCATED_MARKER = "[diagnostics truncated]"
 
@@ -310,6 +312,8 @@ class SandboxToolSession:
         # cached; the cache is cleared on every lifecycle change.
         self._diag_probed: bool = False
         self._diag_tool: str | None = None
+        self._type_probed: bool = False
+        self._type_tool: str | None = None
 
     @property
     def active(self) -> bool:
@@ -956,6 +960,8 @@ class SandboxToolSession:
         """Clear the per-session diagnostics probe cache."""
         self._diag_probed = False
         self._diag_tool = None
+        self._type_probed = False
+        self._type_tool = None
 
     def _backend_is_bwrap(self) -> bool:
         """Whether the active session runs on the bwrap isolation backend.
@@ -1002,6 +1008,10 @@ class SandboxToolSession:
             else:
                 rel = os.path.relpath(resolved, workspace)
                 findings = self._run_python_ladder(rel, cfg)
+                # Complementary type-aware pass (AGT borrow from OpenCode's
+                # LSP feedback): mypy surfaces semantic/type errors the
+                # linter ladder cannot. Merged into the same suffix block.
+                findings = findings + self._run_python_type_check(rel, cfg)
             if not findings:
                 return ""
             return self._format_diag_block(findings, cfg)
@@ -1067,6 +1077,70 @@ class SandboxToolSession:
         )
         lines = [line for line in text.splitlines() if line.strip()]
         return lines or [f"{tool} exited {rc}"]
+
+    def _probe_type_tool(self, cfg: dict[str, Any]) -> str | None:
+        """Probe the optional type-checker (mypy), once per session, cached.
+
+        Mirrors _probe_diag_tool: the probe runs inside the sandbox via
+        execute_command (validator and signed audit log included), so the
+        audit chain sees it like any other execution.
+        """
+        if self._type_probed:
+            return self._type_tool
+        self._type_probed = True
+        self._type_tool = None
+        tool = cfg.get("type_tool")
+        if not tool:
+            return None
+        probe = _DIAG_PROBE_COMMANDS.get(tool)
+        if probe is None:
+            return None
+        try:
+            result = self._mgr.execute_command(
+                self._session_id, probe, timeout=int(cfg["timeout_s"])
+            )
+        except Exception:
+            logger.debug("type-check probe failed for %s", tool, exc_info=True)
+            return None
+        if getattr(result, "blocked", False) or getattr(result, "timed_out", False):
+            return None
+        if getattr(result, "return_code", 1) == 0:
+            self._type_tool = tool
+        return self._type_tool
+
+    def _run_python_type_check(self, rel: str, cfg: dict[str, Any]) -> list[str]:
+        """Complementary type-aware pass (mypy) on the workspace copy.
+
+        Runs IN ADDITION to the linter ladder: a type checker surfaces
+        semantic errors (wrong types, bad signatures, undefined attributes)
+        that ruff/pyflakes/py_compile do not. The disposable sandbox holds
+        only the edited file, so missing-import noise is suppressed to keep
+        findings about THIS file. Fail-silent like the rest of the path.
+        """
+        tool = self._probe_type_tool(cfg)
+        if tool is None:
+            return []
+        quoted = shlex.quote(rel)
+        cmd = (
+            "mypy --no-error-summary --no-color-output "
+            "--ignore-missing-imports --follow-imports=silent "
+            f"--show-column-numbers {quoted}"
+        )
+        try:
+            result = self._mgr.execute_command(
+                self._session_id, cmd, timeout=int(cfg["timeout_s"])
+            )
+        except Exception:
+            logger.debug("type-check run failed for %s", rel, exc_info=True)
+            return []
+        if getattr(result, "blocked", False) or getattr(result, "timed_out", False):
+            return []
+        if getattr(result, "return_code", 0) == 0:
+            return []
+        text = (getattr(result, "stdout", "") or "") + "\n" + (
+            getattr(result, "stderr", "") or ""
+        )
+        return [line for line in text.splitlines() if line.strip()]
 
     def _format_diag_block(self, findings: list[str], cfg: dict[str, Any]) -> str:
         """Assemble the capped suffix block (count, lines, truncation marker)."""

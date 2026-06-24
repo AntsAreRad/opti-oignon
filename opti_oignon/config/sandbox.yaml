@@ -266,6 +266,6 @@ blocked_patterns:
 # This is opt-in: default is disabled.
 
 quick_sandbox:
-  enabled: false
+  enabled: true
   auto_destroy_minutes: 30
   max_concurrent_quick_sessions: 3

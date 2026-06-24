@@ -321,6 +321,7 @@ def _select_pipeline(
     tool_executor_available: bool,
     verification_available: bool,
     reasoning_available: bool = False,
+    sandbox_active: bool = False,
 ) -> str:
     """Select the optimal pipeline according to classification.
 
@@ -335,18 +336,30 @@ def _select_pipeline(
     Returns:
         Pipeline name to use (PIPELINE_*)
     """
+    # When the disposable sandbox is active, the file/exec tools are always
+    # available and the MODEL decides whether to call them. This drops the
+    # classifier as a gate on tool ACCESS, so create/read/edit/modify/run
+    # works in any language with no keyword misses; the classifier still
+    # shapes the rest (think vs direct, web, reasoning).
+    tools_armed = tool_executor_available and (
+        bool(classification.get("needs_tools")) or sandbox_active
+    )
+
     # Explicit overrides take priority
     if web_search_override is True:
         return PIPELINE_WEB_SEARCH
 
     if think_override is True:
-        # Think + tools when needed
-        if classification.get("needs_tools") and tool_executor_available:
+        # Think + tools when available
+        if tools_armed:
             return PIPELINE_THINK_TOOLS
         return PIPELINE_THINK
 
     if think_override is False and web_search_override is False:
-        # Everything forced off, but still check code
+        # Forced off -- but tools stay available (CODE_VERIFY is unsafe in
+        # sandbox mode, so armed tools take precedence over it).
+        if tools_armed:
+            return PIPELINE_TOOLS
         if classification.get("is_code") and verification_available:
             return PIPELINE_CODE_VERIFY
         return PIPELINE_DIRECT
@@ -359,7 +372,7 @@ def _select_pipeline(
     if classification.get("needs_reasoning") and reasoning_available:
         return PIPELINE_REASONING
 
-    if classification.get("needs_tools") and tool_executor_available:
+    if tools_armed:
         if classification.get("is_complex"):
             return PIPELINE_THINK_TOOLS
         return PIPELINE_TOOLS
@@ -597,6 +610,24 @@ class AgenticExecutor:
             registry = _default_tool_registry
             if registry is not None and hasattr(registry, 'sandbox_mode'):
                 return registry.sandbox_mode
+        except Exception:
+            pass
+        return False
+
+    def _is_quick_sandbox_active(self) -> bool:
+        """Check if the tool_registry is in QUICK sandbox mode.
+
+        Quick sandbox redirects the file/exec tools to a disposable
+        sandbox. When it is on, those tools are always available and the
+        model decides whether to call them, so the tools pipeline must be
+        armed for every turn -- independently of the hard sandbox flag.
+        """
+        try:
+            registry = _default_tool_registry
+            if registry is not None and hasattr(
+                registry, 'quick_sandbox_mode'
+            ):
+                return registry.quick_sandbox_mode
         except Exception:
             pass
         return False
@@ -960,6 +991,10 @@ class AgenticExecutor:
             tool_executor_available=self.tool_executor_available,
             verification_available=self.verification_available,
             reasoning_available=self.reasoning_available,
+            sandbox_active=(
+                self._is_sandbox_mode_active()
+                or self._is_quick_sandbox_active()
+            ),
         )
         self._last_pipeline = pipeline
 
@@ -1577,13 +1612,13 @@ class AgenticExecutor:
 
             # Save the user message
             conversation_manager.add_message(
-                conversation_id=conversation_id,
+                conv_id=conversation_id,
                 role="user",
                 content=user_message,
             )
             # Save the response
             conversation_manager.add_message(
-                conversation_id=conversation_id,
+                conv_id=conversation_id,
                 role="assistant",
                 content=assistant_response,
                 metadata={"model": model},
