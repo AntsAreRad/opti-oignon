@@ -3,6 +3,38 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
+## 2.0.2 -- 2026-06-25
+
+Data-integrity release: fixes a bug that caused agentic conversations to be
+lost, plus related persistence hardening.
+
+### Fixed
+
+- Agentic conversations (those using the in-session sandbox and tool calls) were
+  not saved: the history was empty after a page reload and the context token
+  counter showed 0. The persistence call passed an unexpected keyword argument,
+  raising an error that was silently swallowed, so every agentic turn was
+  dropped. This affected anyone running 2.0.1.
+- Turns that combined a reasoning pass with tool use persisted only the
+  reasoning; the tool output was dropped on reload. The complete turn is now
+  saved.
+
+### Changed
+
+- The streaming idle-disconnect timeout is now configurable through the
+  `OPTI_IDLE_TIMEOUT_S` environment variable, and its default was raised from
+  60 to 600 seconds so slower local models that stream in bursts are not cut off
+  mid-response.
+
+### Internal
+
+- Conversation persistence now records the generating model on assistant
+  messages and fails loudly (a logged warning with traceback) instead of
+  silently, so a future persistence regression is visible.
+- Added defensive persistence to the cascading and speculative generation
+  pipelines so they cannot drop a turn if they are ever wired into a saved
+  conversation.
+
 ## 2.0.1 -- 2026-06-23
 
 Maintenance release: a version-reporting fix, a small frontend security

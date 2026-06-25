@@ -1208,8 +1208,13 @@ class AgenticExecutor:
         """
         # Phase 1: direct call with think mode for the reasoning pass
         full_response = ""
+        model = getattr(routing, 'model', self._default_model)
 
         try:
+            # persist=False: this pipeline owns the final save below, after the
+            # Phase 2 tool-output block is appended. Letting the Executor save
+            # here would duplicate the user message and persist only the
+            # reasoning text, dropping the tool output on reload.
             gen = self._executor.execute(
                 question=message,
                 routing=routing,
@@ -1219,6 +1224,7 @@ class AgenticExecutor:
                 think=True,
                 web_search=False,
                 on_status=on_status,
+                persist=False,
             )
             for chunk in gen:
                 if chunk:
@@ -1242,7 +1248,6 @@ class AgenticExecutor:
                 message, getattr(routing, 'model', self._default_model)
             )
         ):
-            model = getattr(routing, 'model', self._default_model)
             conv_messages = self._get_conversation_context(conversation_id)
 
             # S62: Prior tool call history for multi-turn context
@@ -1264,10 +1269,12 @@ class AgenticExecutor:
                 for tc in result.tool_calls:
                     self._emit_tool_call(tc)
 
-                # When the tools produced results, append them
+                # When the tools produced results, append them (and fold them
+                # into full_response so the final save persists the tool output)
                 if result.tool_calls and result.response:
                     yield "\n\n"
                     yield result.response
+                    full_response += "\n\n" + result.response
 
             except Exception as e:
                 logger.warning(f"Tools phase failed (think+tools): {e}")
@@ -1275,6 +1282,13 @@ class AgenticExecutor:
         # Transfer the verifications from the executor
         if hasattr(self._executor, 'last_verification_results'):
             self._last_verification_results = self._executor.last_verification_results
+
+        # Persist the full turn (reasoning + any tool output). The Executor's
+        # internal save was suppressed (persist=False) so this single save owns
+        # the complete assistant message. _save_to_conversation no-ops on an
+        # empty response, so a Phase 1 hard error (which returns early above)
+        # persists nothing here.
+        self._save_to_conversation(conversation_id, message, full_response, model)
 
     def _execute_reasoning_pipeline(
         self,
@@ -1621,11 +1635,15 @@ class AgenticExecutor:
                 conv_id=conversation_id,
                 role="assistant",
                 content=assistant_response,
+                model=model,
                 metadata={"model": model},
             )
 
         except Exception as e:
-            logger.debug(f"Conversation save failed: {e}")
+            # WARNING + traceback, not DEBUG: a swallowed DEBUG here is exactly
+            # what hid the v2.0.1 data-loss bug (every agentic turn dropped
+            # silently). A persistence failure must be visible in normal logs.
+            logger.warning("Conversation save failed: %s", e, exc_info=True)
 
     def _execute_cascading_pipeline(
         self,
@@ -1655,6 +1673,16 @@ class AgenticExecutor:
 
             if result.final_response:
                 yield result.final_response
+                # Persistence: this pipeline does not run through the Executor,
+                # so it must save the turn itself. Without this, cascading
+                # conversations were empty on reload (same data-loss class as
+                # the v2.0.1 tools-pipeline bug).
+                self._save_to_conversation(
+                    conversation_id,
+                    message,
+                    result.final_response,
+                    getattr(result, "model", None) or self._default_model,
+                )
 
             # Emit cascade result as structured event
             yield ("cascade_done", result)
@@ -1702,6 +1730,16 @@ class AgenticExecutor:
 
             if result.final_response:
                 yield result.final_response
+                # Persistence: this pipeline does not run through the Executor,
+                # so it must save the turn itself. Without this, speculative
+                # conversations were empty on reload (same data-loss class as
+                # the v2.0.1 tools-pipeline bug).
+                self._save_to_conversation(
+                    conversation_id,
+                    message,
+                    result.final_response,
+                    getattr(result, "model", None) or self._default_model,
+                )
 
             # Emit speculative result as structured event
             yield ("speculative_done", result)

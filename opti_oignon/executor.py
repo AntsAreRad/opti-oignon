@@ -1546,6 +1546,7 @@ class Executor:
         web_search: bool = False,
         images: list[str] | None = None,
         no_cache: bool = False,
+        persist: bool = True,
     ) -> Generator[str, None, tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -1570,6 +1571,12 @@ class Executor:
             images: Optional list of base64-encoded images for vision models (S48).
                 Passed directly to ollama.chat() via the images parameter.
             no_cache: S68: If True, bypass all cache layers for this call.
+            persist: If True (default), save the user and assistant messages
+                to the conversation after execution. Callers that own the
+                final persistence themselves (e.g. the think+tools pipeline,
+                which appends a tool-output block after this call) pass False
+                to avoid a duplicated user message and a truncated assistant
+                message.
 
         Yields:
             Response chunks in streaming. When think=True, thinking chunks
@@ -2088,7 +2095,7 @@ class Executor:
                 yield cached.response
 
                 # Save multi-turn even on cache hit (S19 G3)
-                if use_conversation and cached.response:
+                if use_conversation and persist and cached.response:
                     try:
                         conversation_manager.add_message(
                             conversation_id, "user", user_content
@@ -2396,7 +2403,7 @@ class Executor:
 
         # Step 5: Multi-turn save (NEW: v1.3.0)
         # Save messages to conversation after full reception
-        if use_conversation and full_response and not thread_result["error"]:
+        if use_conversation and persist and full_response and not thread_result["error"]:
             try:
                 conversation_manager.add_message(
                     conversation_id, "user", user_content

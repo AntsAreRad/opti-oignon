@@ -9,6 +9,7 @@ endpoints for the SvelteKit frontend.
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 
@@ -152,7 +153,12 @@ except ImportError:
 # S159: Configurable backpressure defaults
 _BP_MAX_SIZE = 100
 _BP_SLOW_THRESHOLD = 0.8
-_BP_IDLE_TIMEOUT = 60.0
+# Idle disconnect: stop a stream the client has stopped consuming. Raised from
+# the original 60s and made overridable (OPTI_IDLE_TIMEOUT_S) so slow local
+# models -- e.g. a MoE that spills to RAM and streams in bursts -- are not cut
+# off mid-thought. This measures the gap since the last consumed event, not the
+# total duration, so it still catches a genuinely dead client.
+_BP_IDLE_TIMEOUT = float(os.environ.get("OPTI_IDLE_TIMEOUT_S", "600"))
 
 # S171: RFC 6455 WebSocket close codes for graceful server-side shutdown.
 # 1011 = internal error (server hit an unexpected condition); 1003 = the
