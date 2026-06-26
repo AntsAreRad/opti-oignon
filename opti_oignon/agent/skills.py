@@ -789,6 +789,78 @@ class SkillRegistry:
             )
         return True
 
+    def apply_synced_skill(
+        self,
+        record_id: str,
+        payload: dict[str, Any],
+        *,
+        deleted: bool = False,
+        updated_at: str = "",
+    ) -> bool:
+        """Materialise a synced SKILL (SYN-01 apply, receive half).
+
+        The RECEIVING half of a sync round for ``SKILL`` -- a GATED, sensitive
+        kind. By the time a record reaches this method the engine's human gate
+        has ALREADY approved its adoption (the round defers an unapproved skill
+        to the per-record ledger and never lands it), so this is purely the
+        materialisation of an approved skill onto this device's file store.
+
+        Deliberately HOOK-FREE -- it never calls ``_sync_publish_skill`` -- so
+        applying a received skill cannot re-publish it and start an
+        apply -> write -> publish echo. The skill is rebuilt BYTE-FAITHFULLY:
+        the ``markdown`` field is the exact ``to_markdown`` text the producer
+        wrote, so it is written verbatim, with no frontmatter re-serialisation.
+
+        Security: the write is routed through :meth:`_skill_path`, which
+        sanitises ``category``/``name`` to ``[a-z0-9_-]`` and refuses any path
+        that escapes the registry root -- a hostile pair cannot write outside
+        the skills directory (it either lands as a sanitised subdirectory of
+        the root or is refused). The nested identity must agree with the record
+        key (``_skill_sync_key``) or the apply is refused (integrity). Only
+        ``SKILL.md`` is touched, so the device-local ``_usage.json`` and the
+        ``.versions/`` audit are preserved across an update.
+
+        A ``deleted`` record unlinks the published skill (and its usage
+        sidecar); the ``.versions`` history is device-local audit and is left
+        in place (no archive on a remote tombstone). Fail-secure: a malformed
+        payload, a key mismatch, an out-of-root path, or any write error
+        returns False and never raises into the round.
+        """
+        try:
+            if not isinstance(payload, dict):
+                return False
+            skill = payload.get("skill")
+            if not isinstance(skill, dict):
+                return False
+            category = skill.get("category")
+            name = skill.get("name")
+            if (
+                not isinstance(category, str)
+                or not isinstance(name, str)
+                or not category
+                or not name
+            ):
+                return False
+            # Integrity: the nested identity must hash to the record key.
+            if _skill_sync_key(category, name) != record_id:
+                return False
+            path = self._skill_path(category, name, draft=False)
+            if path is None:  # would escape the registry root -- refuse
+                return False
+            if deleted:
+                path.unlink(missing_ok=True)
+                (path.parent / USAGE_FILENAME).unlink(missing_ok=True)
+                return True
+            markdown = skill.get("markdown")
+            if not isinstance(markdown, str) or not markdown:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(markdown, encoding="utf-8")
+            return True
+        except Exception:
+            logger.debug("skill apply failed for %s", record_id, exc_info=True)
+            return False
+
     # Usage sidecar (written separately; never rewrites SKILL.md)
 
     def _usage_path(self, name: str, category: str) -> Path | None:
