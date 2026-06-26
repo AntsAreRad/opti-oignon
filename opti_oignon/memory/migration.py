@@ -144,3 +144,26 @@ def migrate_legacy_to_store(
         logger.warning("legacy memory migration failed, swallowed: %s", exc)
         result["error"] = str(exc)
     return result
+
+
+def run_boot_migration() -> dict:
+    """Startup adapter for the one-shot legacy -> store migration (M3a-startup).
+
+    The application lifespan calls this once at boot. It delegates to
+    ``migrate_legacy_to_store`` with defaults -- which resolves the data-dir
+    marker, is idempotent (the store's dedup merges a re-run), and is
+    marker-guarded -- so it is a no-op after the first successful pass. Like
+    ``migrate_legacy_to_store`` it NEVER raises: a migration problem must not
+    break the boot. Returns the migration result dict.
+    """
+    try:
+        return migrate_legacy_to_store()
+    except Exception as exc:  # noqa: BLE001 - boot must never break on migration
+        logger.warning("boot migration adapter failed, swallowed: %s", exc)
+        return {
+            "scanned": 0,
+            "added": 0,
+            "merged": 0,
+            "skipped_marker": False,
+            "error": str(exc),
+        }
