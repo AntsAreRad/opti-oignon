@@ -614,6 +614,90 @@ class CanonicalMemoryStore:
                 _sync_publish_memory_fact(fid, deleted=True, updated_at=ts)
             return count
 
+    def apply_synced_memory_canonical(
+        self,
+        record_id: str,
+        payload: dict[str, Any],
+        *,
+        deleted: bool = False,
+        updated_at: str = "",
+    ) -> bool:
+        """Materialise a synced canonical memory fact (SYN-01 apply, receive half).
+
+        The RECEIVING half of a sync round for ``MEMORY_CANONICAL``: a winning
+        record, already reconciled and signature-verified upstream, is written
+        into the store so the fact surfaces on this device. Deliberately
+        HOOK-FREE -- it never calls ``_sync_publish_memory_fact`` -- so applying
+        a received record cannot re-publish it and start an
+        apply -> write -> publish echo (which would inflate the clock and
+        ping-pong between devices forever; the same posture as the
+        conversation/note landings).
+
+        Full-state and idempotent: a non-tombstone UPSERTs the wire-carried
+        columns by id, so applying the same winner twice converges to the same
+        row. ``use_count`` is device-local (the producer strips it from the
+        payload) and is PRESERVED across an apply -- an existing row keeps its
+        count, a new row starts at 0 -- so a remote LWW win on a fact's content
+        never zeroes this device's usage telemetry. (The ``ON CONFLICT DO
+        UPDATE`` touches only the wire columns; an ``INSERT OR REPLACE`` would
+        wipe ``use_count``.) The ``active`` flag is STATE (soft-delete/restore
+        round-trips), written verbatim. Fact text is stored as-is into the
+        SQLCipher store (no per-field layer, unlike conversation messages). A
+        ``deleted`` record HARD-deletes the fact by id (the converged deletion;
+        a soft delete is the ``active`` flag, never a tombstone).
+
+        Fail-secure: a malformed payload (not a dict, no nested ``fact``, no id,
+        a non-string text, or a nested id that does not match the record key)
+        or any write error returns False and never raises into the round -- the
+        caller drops a False-returning record rather than journalling unapplied
+        state.
+        """
+        try:
+            if deleted:
+                with self._lock, self._conn() as conn:
+                    conn.execute(
+                        "DELETE FROM memory_facts WHERE id = ?", (record_id,)
+                    )
+                return True
+            if not isinstance(payload, dict):
+                return False
+            fact = payload.get("fact")
+            if not isinstance(fact, dict):
+                return False
+            fid = fact.get("id")
+            if not isinstance(fid, str) or not fid or fid != record_id:
+                return False
+            text = fact.get("text")
+            if not isinstance(text, str):
+                return False
+            uid = payload.get("user_id") or DEFAULT_LOCAL_USER
+            category = fact.get("category") or DEFAULT_CATEGORY
+            if category not in CATEGORIES:
+                category = DEFAULT_CATEGORY
+            source = fact.get("source") or ""
+            created_at = fact.get("created_at") or ""
+            upd = fact.get("updated_at") or updated_at or ""
+            active = 1 if fact.get("active", True) else 0
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO memory_facts "
+                    "(id, text, category, source, user_id, created_at, "
+                    "updated_at, active, use_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "text=excluded.text, category=excluded.category, "
+                    "source=excluded.source, user_id=excluded.user_id, "
+                    "created_at=excluded.created_at, "
+                    "updated_at=excluded.updated_at, active=excluded.active",
+                    (fid, text, category, source, uid, created_at, upd, active),
+                )
+            return True
+        except Exception:
+            logger.debug(
+                "memory-canonical apply failed for %s", record_id, exc_info=True
+            )
+            return False
+
 
 # Module-level singleton with a reset for test isolation (S171 lesson: never
 # leak shared state across pytest invocations).

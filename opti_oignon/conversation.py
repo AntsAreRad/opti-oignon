@@ -766,6 +766,124 @@ class ConversationManager:
     # Messages
     # -----------------------------------------------------------------------
 
+    def apply_synced_conversation(
+        self,
+        payload: dict[str, Any],
+        *,
+        deleted: bool = False,
+        updated_at: str = "",
+    ) -> bool:
+        """Materialise a synced conversation record into the local store (SYN-01 apply).
+
+        The RECEIVING half of a sync round: a winning CONVERSATION record,
+        already reconciled and signature-verified upstream, is written into the
+        domain store so it surfaces in this device's app. Deliberately
+        HOOK-FREE -- it never calls ``_sync_publish_conversation`` -- so
+        applying a received record cannot re-publish it and start an
+        apply -> write -> publish echo (which would inflate the clock and
+        ping-pong between devices forever; the same reason the note_update
+        landing suppresses its store's publish glue).
+
+        Full-state and idempotent: the conversation row is INSERT-OR-REPLACEd
+        and its messages are cleared and re-inserted from the payload, so
+        applying the same winner twice converges to the same state. Message
+        content arrives as plaintext (the journal is cross-device portable) and
+        is RE-ENCRYPTED here under this install's S125 field key, exactly like
+        :meth:`add_message`, so at rest it stays ciphertext on every device. A
+        ``deleted`` record removes the conversation and its messages
+        (a converged deletion).
+
+        Fail-secure: a malformed payload or any write error returns False and
+        never raises into the round (the caller drops a False-returning record
+        rather than journalling unapplied state). The conversations/messages
+        tables are flat (no per-row user column), so the store path itself is
+        the scope; ``payload['user_id']`` is informational here.
+        """
+        try:
+            conv = payload.get("conversation") if isinstance(payload, dict) else None
+            if not isinstance(conv, dict):
+                return False
+            conv_id = conv.get("id")
+            if not isinstance(conv_id, str) or not conv_id:
+                return False
+            with self._lock:
+                conn = self._get_connection()
+                try:
+                    if deleted:
+                        conn.execute(
+                            "DELETE FROM messages WHERE conversation_id = ?",
+                            (conv_id,),
+                        )
+                        conn.execute(
+                            "DELETE FROM conversations WHERE id = ?", (conv_id,)
+                        )
+                        conn.commit()
+                        return True
+
+                    meta_json = json.dumps(conv.get("metadata") or {})
+                    conn.execute(
+                        """INSERT OR REPLACE INTO conversations
+                           (id, title, created_at, updated_at, model,
+                            task_type, preset, metadata)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            conv_id,
+                            conv.get("title") or "New conversation",
+                            conv.get("created_at") or "",
+                            conv.get("updated_at") or updated_at or "",
+                            conv.get("model"),
+                            conv.get("task_type"),
+                            conv.get("preset"),
+                            meta_json,
+                        ),
+                    )
+                    # Full-state: clear and re-insert the messages from the
+                    # payload. Local message ids are device-local and excluded
+                    # from the wire, so a fresh insert is correct.
+                    conn.execute(
+                        "DELETE FROM messages WHERE conversation_id = ?",
+                        (conv_id,),
+                    )
+                    messages = conv.get("messages")
+                    if isinstance(messages, list):
+                        for m in messages:
+                            if not isinstance(m, dict):
+                                continue
+                            role = m.get("role")
+                            content = m.get("content")
+                            if not isinstance(role, str) or not isinstance(content, str):
+                                continue
+                            token_estimate = m.get("token_estimate")
+                            if not isinstance(token_estimate, int) or isinstance(
+                                token_estimate, bool
+                            ):
+                                token_estimate = _estimate_tokens(content, m.get("model"))
+                            conn.execute(
+                                """INSERT INTO messages
+                                   (conversation_id, role, content, timestamp,
+                                    token_estimate, model, metadata)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                (
+                                    conv_id,
+                                    role,
+                                    _encrypt(content),  # S125: ciphertext at rest
+                                    m.get("timestamp") or "",
+                                    token_estimate,
+                                    m.get("model"),
+                                    json.dumps(m.get("metadata") or {}),
+                                ),
+                            )
+                    conn.commit()
+                    return True
+                finally:
+                    conn.close()
+        except Exception:
+            logger.warning(
+                "veilid sync apply failed for a conversation (no domain change)",
+                exc_info=True,
+            )
+            return False
+
     def add_message(
         self,
         conv_id: str,

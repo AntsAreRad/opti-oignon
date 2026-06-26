@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -414,6 +415,172 @@ def _default_update_sink() -> Any | None:
     return _update_sink_for(store)
 
 
+def _default_conversation_sink() -> Any | None:
+    """The process-default CONVERSATION apply sink, or ``None``.
+
+    The ``_default_update_sink`` idiom (S199, SYN-01): read-only and
+    side-effect free. It does NOT import (and thereby construct) the
+    conversation manager -- applying a round must not seed a database -- it
+    only consults the manager when the application has ALREADY opened the
+    conversation module. Anything else resolves to ``None``, fail-secure at the
+    landing seam (the record is dropped: not materialised, not served onward).
+    The sink is hook-free by construction (``apply_synced_conversation`` never
+    re-publishes), so a landed record is journalled verbatim, signature
+    preserved.
+    """
+    mod = sys.modules.get("opti_oignon.conversation")
+    if mod is None:
+        return None
+    manager = getattr(mod, "conversation_manager", None)
+    apply = getattr(manager, "apply_synced_conversation", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "conversation sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
+def _default_note_sink() -> Any | None:
+    """The process-default NOTE apply sink, or ``None``.
+
+    The ``_default_note_gate`` idiom (S199, SYN-01): read-only, no seed -- it
+    only consults the already-initialised notes store singleton (importing the
+    module is cheap; the ``_store`` singleton is None until the application
+    opens it). Anything else resolves to ``None``, fail-secure at the landing
+    seam. The sink is hook-free (``apply_synced_note`` never re-publishes), so a
+    landed record is journalled verbatim, signature preserved. The note id is
+    the record id (the note payload does not carry it).
+    """
+    try:
+        from opti_oignon.notes import notes_store as _ns
+    except Exception:
+        return None
+    store = getattr(_ns, "_store", None)
+    apply = getattr(store, "apply_synced_note", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "note sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
+def _default_memory_canonical_sink() -> Any | None:
+    """The process-default MEMORY_CANONICAL apply sink, or ``None``.
+
+    The ``_default_note_sink`` idiom (SYN-01, Direction D): read-only, no seed
+    -- it only consults the already-initialised canonical-memory store
+    singleton (importing the module is cheap; the ``_store`` singleton is None
+    until the application opens it). Anything else resolves to ``None``,
+    fail-secure at the landing seam. The sink is hook-free
+    (``apply_synced_memory_canonical`` never re-publishes), so a landed record
+    is journalled verbatim, signature preserved. The fact id is the record id.
+    """
+    try:
+        from opti_oignon.memory import canonical_store as _cs
+    except Exception:
+        return None
+    store = getattr(_cs, "_store", None)
+    apply = getattr(store, "apply_synced_memory_canonical", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "memory-canonical sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
+def _default_skill_sink() -> Any | None:
+    """The process-default SKILL apply sink, or ``None``.
+
+    The ``_default_note_sink`` idiom (SYN-01, Direction D): read-only, no seed
+    -- it only consults the already-initialised skill registry singleton
+    (``_REGISTRY``), never constructing one from a sync round. Anything else
+    resolves to ``None``, fail-secure at the landing seam (the skill drops:
+    not materialised, not served). The sink is hook-free (``apply_synced_skill``
+    never re-publishes), so a landed skill is journalled verbatim, signature
+    preserved. The skill key is the record id. SKILL is sensitive: a record
+    only reaches this sink AFTER the engine's human gate has approved it
+    upstream (an unapproved skill is deferred to the ledger and never lands).
+    """
+    try:
+        from opti_oignon.agent import skills as _sk
+    except Exception:
+        return None
+    reg = getattr(_sk, "_REGISTRY", None)
+    apply = getattr(reg, "apply_synced_skill", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "skill sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
 def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
@@ -456,6 +623,10 @@ class SyncEngine:
         ledger: DeferredLedger | None = None,
         note_gate: Any | None = None,
         update_sink: Any | None = None,
+        conversation_sink: Any | None = None,
+        note_sink: Any | None = None,
+        memory_canonical_sink: Any | None = None,
+        skill_sink: Any | None = None,
         update_watermark_gate: Any | None = None,
     ) -> None:
         if not isinstance(device, str) or not device:
@@ -484,6 +655,26 @@ class SyncEngine:
         # unresolvable watermark reader means no checkpoint state (0), and a
         # reader that raises at serve time drops fail-secure.
         self._update_sink = update_sink
+        # S199 (SYN-01): the injectable CONVERSATION apply sink
+        # (``record -> bool``). None resolves lazily to the already-loaded
+        # conversation manager (the note_gate/update_sink idiom); an
+        # unresolvable sink DROPS the record fail-secure at the landing seam.
+        self._conversation_sink = conversation_sink
+        # S199 (SYN-01): the injectable NOTE apply sink. None resolves lazily
+        # to the already-initialised notes store singleton (the note_gate
+        # idiom); an unresolvable sink DROPS the record fail-secure.
+        self._note_sink = note_sink
+        # SYN-01 (Direction D): the injectable MEMORY_CANONICAL apply sink. None
+        # resolves lazily to the already-initialised canonical-memory store
+        # singleton (the note_sink idiom); an unresolvable sink DROPS the record
+        # fail-secure at the landing seam.
+        self._memory_canonical_sink = memory_canonical_sink
+        # SYN-01 (Direction D): the injectable SKILL apply sink. SKILL is the
+        # sensitive kind -- a record reaches the sink only after the round's
+        # human gate approves it; None resolves lazily to the already-
+        # initialised skill registry singleton (no seed), and an unresolvable
+        # sink DROPS the record fail-secure at the landing seam.
+        self._skill_sink = skill_sink
         self._update_watermark_gate = update_watermark_gate
         # One warning per engine when signing degrades, not one per publish.
         self._warned_unsigned = False
@@ -513,6 +704,40 @@ class SyncEngine:
         if self._update_sink is not None:
             return self._update_sink
         return _default_update_sink()
+
+    def _resolve_conversation_sink(self) -> Any | None:
+        # S199: the injected sink wins; otherwise the lazy process default
+        # (the already-loaded conversation manager, or no sink at all --
+        # fail-secure at the landing seam: the record drops).
+        if self._conversation_sink is not None:
+            return self._conversation_sink
+        return _default_conversation_sink()
+
+    def _resolve_note_sink(self) -> Any | None:
+        # S199: the injected sink wins; otherwise the lazy process default
+        # (the already-initialised notes store singleton, or no sink at all --
+        # fail-secure at the landing seam: the record drops).
+        if self._note_sink is not None:
+            return self._note_sink
+        return _default_note_sink()
+
+    def _resolve_memory_canonical_sink(self) -> Any | None:
+        # SYN-01 (Direction D): the injected sink wins; otherwise the lazy
+        # process default (the already-initialised canonical-memory store
+        # singleton, or no sink at all -- fail-secure at the landing seam: the
+        # record drops).
+        if self._memory_canonical_sink is not None:
+            return self._memory_canonical_sink
+        return _default_memory_canonical_sink()
+
+    def _resolve_skill_sink(self) -> Any | None:
+        # SYN-01 (Direction D): the injected sink wins; otherwise the lazy
+        # process default (the already-initialised skill registry singleton,
+        # no seed, or no sink at all -- fail-secure at the landing seam: the
+        # skill drops). A skill only reaches this seam once gate-approved.
+        if self._skill_sink is not None:
+            return self._skill_sink
+        return _default_skill_sink()
 
     def _resolve_update_watermark_gate(self) -> Any | None:
         # S264: the injected reader wins; otherwise the lazy process default
@@ -1354,6 +1579,215 @@ class SyncEngine:
                 )
         return appliable, deferred
 
+    def _land_conversations(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified CONVERSATION records into the conversation store.
+
+        The full-state analogue of :meth:`_land_note_updates` (S199, SYN-01):
+        sits AFTER the signature seam and the gate, BEFORE the feed journal. A
+        winning CONVERSATION record is written into the conversation store so it
+        surfaces in this device's app, then KEPT so it still enters the feed and
+        can be served onward (the relay role). The apply is hook-free
+        (``apply_synced_conversation`` never re-publishes), so the kept record
+        is journalled verbatim by the apply seam, signature preserved -- the
+        same posture as the note_update landing. Fail-secure: an unresolvable
+        sink (the conversation module not loaded) or an apply that returns False
+        DROPS the record -- not materialised, not journalled, not served (a
+        record that cannot be persisted must not converge). Other kinds pass
+        through untouched.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.CONVERSATION.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_conversation_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "conversation sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a conversation at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_conversation_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
+    def _land_notes(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified NOTE records into the notes store.
+
+        The full-state analogue of :meth:`_land_conversations` for NOTE
+        (S199, SYN-01): existence + metadata land into the notes store (the
+        text body converges separately through NOTE_UPDATE, so a stale snapshot
+        never regresses it, and ``mobile_allowed`` is never written from the
+        wire). The record is KEPT for the feed/relay; a refused or unappliable
+        record is DROPPED (fail-secure: a record that cannot be persisted must
+        not converge). Other kinds pass through untouched. NOTE and NOTE_UPDATE
+        land on independent stores, so their relative order in the batch does
+        not affect convergence.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.NOTE.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_note_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "note sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a note at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_note_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
+    def _land_memory_canonical(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified MEMORY_CANONICAL records into the canonical store.
+
+        The full-state analogue of :meth:`_land_conversations` for canonical
+        memory (SYN-01, Direction D): a winning fact lands into the canonical
+        store (preserving the device-local ``use_count``; a tombstone is a hard
+        delete). The record is KEPT for the feed/relay; a refused or unappliable
+        record is DROPPED (fail-secure: a record that cannot be persisted must
+        not converge). Other kinds pass through untouched. Canonical memory is
+        user data -- it lands ungated, on the same seam as conversation/note.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.MEMORY_CANONICAL.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_memory_canonical_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "memory-canonical sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a canonical memory fact at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_memory_canonical_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
+    def _land_skills(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified, APPROVED SKILL records into the skill registry.
+
+        The full-state analogue of :meth:`_land_conversations` for SKILL
+        (SYN-01, Direction D). SKILL is the sensitive kind: a record only
+        reaches this lander AFTER the round's human gate has approved its
+        adoption (the partition defers an unapproved skill to the per-record
+        ledger and excludes it from the appliable set), so by construction this
+        only ever materialises approved skills. The skill lands byte-faithfully
+        into the registry; the record is KEPT for the feed/relay (each peer
+        re-gates independently); a refused or unappliable record is DROPPED
+        (fail-secure). Other kinds pass through untouched.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.SKILL.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_skill_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "skill sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a skill at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_skill_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
     def _land_note_updates(
         self, records_in: list[SyncRecord], *, peer_id: str
     ) -> list[SyncRecord]:
@@ -1609,6 +2043,24 @@ class SyncEngine:
             # feed journal (sections 3 and 5); a refused update never enters
             # the feed and is therefore never served onward.
             appliable = self._land_note_updates(appliable, peer_id=peer_id)
+            # S199 (SYN-01): materialise CONVERSATION winners into the domain
+            # store on the same seam, BEFORE the feed journal -- a refused
+            # conversation never enters the feed and is never served onward.
+            appliable = self._land_conversations(appliable, peer_id=peer_id)
+            # S199 (SYN-01): materialise NOTE existence + metadata into the
+            # notes store on the same seam (the body converges via NOTE_UPDATE).
+            appliable = self._land_notes(appliable, peer_id=peer_id)
+            # SYN-01 (Direction D): materialise MEMORY_CANONICAL winners into
+            # the canonical store on the same post-gate seam, BEFORE the feed
+            # journal -- a refused fact never enters the feed and is never
+            # served onward. Canonical memory is user data: it lands ungated,
+            # alongside conversation/note.
+            appliable = self._land_memory_canonical(appliable, peer_id=peer_id)
+            # SYN-01 (Direction D): materialise approved SKILL winners into the
+            # registry on the same post-gate seam. SKILL is sensitive, so the
+            # partition above has ALREADY deferred any unapproved skill to the
+            # ledger -- only gate-approved skills remain in ``appliable`` here.
+            appliable = self._land_skills(appliable, peer_id=peer_id)
             filtered = RecordBatch(
                 device=batch.device,
                 high_water=batch.high_water,

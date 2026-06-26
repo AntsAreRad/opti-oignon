@@ -42,6 +42,7 @@ import hashlib
 import hmac
 import logging
 import os
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,26 @@ ATTACHMENT_SUBKEY_PREFIX = b"oo-notes-attachment-"
 BLOB_DIRNAME = "notes_blobs"
 BLOB_SUFFIX = ".blob"
 _NONCE_SIZE = 12  # AES-256-GCM nonce; bytes [1:1+12] of the encrypt_bytes format
+
+# Framed AEAD blob format (SYN-01, the vault on-demand transfer): a versioned,
+# chunked container so multi-GB media is sealed and opened in CONSTANT memory.
+# Header: MAGIC(4) || version(1) || u32(chunk_size). Then a sequence of frames,
+# each: u32(frame_len) || encrypt_bytes(subkey, u32(index) || u8(is_final) ||
+# chunk_plaintext). Every chunk is GCM-sealed under the SAME per-attachment
+# subkey with a fresh random nonce (encrypt_bytes); the 5-byte index/final
+# prefix is bound by that chunk's tag, so a reordered, dropped, duplicated, or
+# truncated frame is detected on open WITHOUT introducing an AAD primitive --
+# the seal stays on the audited encrypt_bytes surface. A distinct magic keeps
+# legacy single-seal blobs (which have no magic) openable unchanged (D-A3).
+FRAMED_MAGIC = b"OOBF"
+FRAMED_VERSION = 1
+_FRAMED_HEADER = struct.Struct(">4sBI")  # magic, version, chunk_size
+_FRAME_PREFIX = struct.Struct(">IB")     # chunk index, is_final
+_FRAME_LEN = struct.Struct(">I")         # length prefix of each frame
+DEFAULT_CHUNK_SIZE = 1024 * 1024         # 1 MiB plaintext per chunk (D-A1)
+# Sanity bound when reading a frame length from disk: reject an absurd u32 (a
+# corrupt header could otherwise request a multi-GB allocation).
+MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 
 # Guarded backend integration (the canonical_store / signing idiom): the real
@@ -115,6 +136,27 @@ def _attachment_subkey(master_raw: bytes, attachment_id: str) -> bytes:
     beyond the derivation."""
     info = ATTACHMENT_SUBKEY_PREFIX + attachment_id.encode("ascii")
     return hmac.new(master_raw, info, hashlib.sha256).digest()
+
+
+def _rechunk(chunks: Any, size: int) -> Any:
+    """Re-slice an iterable of byte pieces into fixed-``size`` pieces.
+
+    Yields pieces of exactly ``size`` bytes while the running buffer overflows,
+    then a final shorter piece with the remainder. This lets a caller stream
+    plaintext in whatever piece sizes it has (a 64 KiB file read, a wire frame)
+    while the on-disk frames stay uniform; the final (possibly short) piece is
+    the one ``seal_stream`` marks is_final. An all-empty input yields nothing.
+    """
+    buf = bytearray()
+    for c in chunks:
+        if not c:
+            continue
+        buf += c
+        while len(buf) >= size:
+            yield bytes(buf[:size])
+            del buf[:size]
+    if buf:
+        yield bytes(buf)
 
 
 class NotesBlobStore:
@@ -196,6 +238,128 @@ class NotesBlobStore:
         subkey = self._subkey_for(attachment_id)
         blob = self._blob_path(attachment_id).read_bytes()
         return decrypt_bytes(subkey, blob)
+
+    def seal_stream(
+        self,
+        attachment_id: str,
+        chunks: Any,
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> Path:
+        """Seal a (possibly huge) plaintext stream into the framed blob format.
+
+        ``chunks`` is any iterable of plaintext byte pieces -- a file read in a
+        loop, the on-the-wire pieces of a synced blob, anything. The blob is
+        written frame-by-frame to a ``.tmp`` sibling and atomically renamed,
+        holding at most ONE chunk in memory at a time, so a multi-GB video never
+        sits whole in RAM. Each frame is GCM-sealed under the per-attachment
+        subkey with a fresh nonce; the index/final prefix binds ordering. An
+        empty stream still yields a single final empty chunk (a valid one-frame
+        blob). On any failure the partial ``.tmp`` is removed, never promoted.
+        """
+        if chunk_size <= 0:
+            chunk_size = DEFAULT_CHUNK_SIZE
+        subkey = self._subkey_for(attachment_id)
+        path = self._blob_path(attachment_id)
+        tmp = self._blob_dir / (attachment_id + BLOB_SUFFIX + ".tmp")
+        try:
+            with open(tmp, "wb") as f:
+                f.write(
+                    _FRAMED_HEADER.pack(FRAMED_MAGIC, FRAMED_VERSION, chunk_size)
+                )
+                index = 0
+                pending: bytes | None = None
+                for piece in _rechunk(chunks, chunk_size):
+                    if pending is not None:
+                        self._write_frame(f, subkey, index, False, pending)
+                        index += 1
+                    pending = piece
+                if pending is None:
+                    pending = b""
+                self._write_frame(f, subkey, index, True, pending)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                if tmp.is_file():
+                    tmp.unlink()
+            except Exception:
+                pass
+            raise
+        return path
+
+    @staticmethod
+    def _write_frame(
+        f: Any, subkey: bytes, index: int, is_final: bool, data: bytes
+    ) -> None:
+        frame = encrypt_bytes(
+            subkey, _FRAME_PREFIX.pack(index, 1 if is_final else 0) + data
+        )
+        f.write(_FRAME_LEN.pack(len(frame)))
+        f.write(frame)
+
+    def is_framed(self, attachment_id: str) -> bool:
+        """Whether the on-disk blob uses the framed format (vs legacy single-seal)."""
+        try:
+            with open(self._blob_path(attachment_id), "rb") as f:
+                return f.read(len(FRAMED_MAGIC)) == FRAMED_MAGIC
+        except OSError:
+            return False
+
+    def open_stream(self, attachment_id: str) -> Any:
+        """Yield the blob plaintext one chunk at a time, in constant memory.
+
+        For a framed blob each frame is decrypted and verified independently:
+        the per-frame GCM tag rejects any byte tamper, the index must advance
+        with no gap, exactly one frame carries is_final and it must be last, and
+        a stream that ends without a final frame is a truncation -- each raises
+        :class:`NotesBlobUnavailable`. A legacy single-seal blob (no framed
+        magic) is decrypted whole and yielded as one chunk, so a caller can read
+        either format uniformly. The file handle is held for the generator's
+        life and released when iteration ends or the consumer stops early.
+        """
+        subkey = self._subkey_for(attachment_id)
+        with open(self._blob_path(attachment_id), "rb") as f:
+            head = f.read(_FRAMED_HEADER.size)
+            if len(head) < _FRAMED_HEADER.size or head[: len(FRAMED_MAGIC)] != FRAMED_MAGIC:
+                # Legacy single-seal: decrypt the whole (small) blob.
+                f.seek(0)
+                yield decrypt_bytes(subkey, f.read())
+                return
+            _magic, version, _chunk_size = _FRAMED_HEADER.unpack(head)
+            if version != FRAMED_VERSION:
+                raise NotesBlobUnavailable(
+                    "unsupported framed blob version: " + repr(version)
+                )
+            expected = 0
+            seen_final = False
+            while True:
+                lp = f.read(_FRAME_LEN.size)
+                if not lp:
+                    break
+                if len(lp) < _FRAME_LEN.size:
+                    raise NotesBlobUnavailable("truncated frame length")
+                (frame_len,) = _FRAME_LEN.unpack(lp)
+                if frame_len <= 0 or frame_len > MAX_FRAME_BYTES:
+                    raise NotesBlobUnavailable("implausible frame length")
+                frame = f.read(frame_len)
+                if len(frame) < frame_len:
+                    raise NotesBlobUnavailable("truncated frame body")
+                plain = decrypt_bytes(subkey, frame)  # GCM tag check
+                if len(plain) < _FRAME_PREFIX.size:
+                    raise NotesBlobUnavailable("malformed frame")
+                index, final_flag = _FRAME_PREFIX.unpack(
+                    plain[: _FRAME_PREFIX.size]
+                )
+                if seen_final:
+                    raise NotesBlobUnavailable("a frame follows the final frame")
+                if index != expected:
+                    raise NotesBlobUnavailable("out-of-order frame")
+                expected += 1
+                if final_flag:
+                    seen_final = True
+                yield plain[_FRAME_PREFIX.size:]
+            if not seen_final:
+                raise NotesBlobUnavailable("blob ended without a final frame")
 
     def open_secure(self, attachment_id: str) -> Any:
         """The blob plaintext wrapped in SecureBytes (mlock); the caller wipes."""
