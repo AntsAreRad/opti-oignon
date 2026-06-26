@@ -150,7 +150,9 @@ def _default_root() -> Path:
 _SYNC_LOCK = threading.Lock()
 
 
-def _note_sync_payload(record: NoteRecord) -> dict[str, Any]:
+def _note_sync_payload(
+    record: NoteRecord, attachments: list[AttachmentRecord]
+) -> dict[str, Any]:
     """The full-state, JSON-safe payload a note journals (opaque downstream).
 
     The opaque CRDT body rides base64-encoded; the tags OR-Set rides as the
@@ -161,7 +163,30 @@ def _note_sync_payload(record: NoteRecord) -> dict[str, Any]:
     serve-time filter's LIVE lookup (N9-D1) keys on the serving store, so
     the wire never needs the flag. ``user_id`` is likewise not carried: the
     journal is the single user's own device mesh, and the applier scopes.
+
+    ``attachments`` is the eager vault manifest (SYN-01): the AUTHORITATIVE set
+    of the note's media, each entry carrying its id, kind, mime, plaintext
+    ``content_hash``, ``blob_ref``, and a small ``thumbnail`` -- but NOT the
+    full bytes, which a peer fetches on demand. A peer reconciles its attachment
+    rows to exactly this set (added, removed), so the caller MUST pass the
+    note's CURRENT full attachment list (an empty list legitimately clears it);
+    the argument is required so no publisher can silently wipe a peer's media.
     """
+    manifest: list[dict[str, Any]] = []
+    for a in attachments:
+        manifest.append(
+            {
+                "id": a.id,
+                "kind": a.kind,
+                "mime": a.mime,
+                "byte_size": int(a.byte_size),
+                "blob_ref": a.blob_ref,
+                "content_hash": a.content_hash,
+                "thumbnail_b64": base64.b64encode(
+                    bytes(a.thumbnail or b"")
+                ).decode("ascii"),
+            }
+        )
     return {
         "title": record.title,
         "body_crdt_b64": base64.b64encode(
@@ -170,6 +195,7 @@ def _note_sync_payload(record: NoteRecord) -> dict[str, Any]:
         "tags": record.tags,
         "pinned": bool(record.pinned),
         "created_at": record.created_at,
+        "attachments": manifest,
     }
 
 
@@ -294,6 +320,14 @@ class AttachmentRecord:
     transcript_text: str | None = None
     caption_text: str | None = None
     ocr_text: str | None = None
+    # Vault sync (SYN-01): the eager manifest fields that ride the NOTE record
+    # so a peer sees the item before any bytes transfer. ``content_hash`` is the
+    # PLAINTEXT SHA-256 of the blob (cross-device integrity, set at upload);
+    # ``thumbnail`` is a small downscaled preview (generated frontend-side at
+    # upload, dep-free; empty for a video until a poster frame exists). The full
+    # bytes are fetched on demand (the chunked transfer is a separate lot).
+    content_hash: str = ""
+    thumbnail: bytes = b""
 
 
 def _row_to_note(row: sqlite3.Row) -> NoteRecord:
@@ -329,6 +363,12 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRecord:
         transcript_text=row["transcript_text"],
         caption_text=row["caption_text"],
         ocr_text=row["ocr_text"],
+        content_hash=row["content_hash"] if "content_hash" in row.keys() else "",
+        thumbnail=(
+            bytes(row["thumbnail"])
+            if "thumbnail" in row.keys() and row["thumbnail"] is not None
+            else b""
+        ),
     )
 
 
@@ -426,6 +466,28 @@ class NotesStore:
                     "ALTER TABLE note ADD COLUMN "
                     "mobile_allowed INTEGER NOT NULL DEFAULT 0"
                 )
+            # Vault sync (SYN-01): the eager manifest columns on attachment,
+            # same table_info guard (the AU-06 idiom). ``content_hash`` is the
+            # PLAINTEXT blob digest (cross-device integrity); ``thumbnail`` is a
+            # small preview that rides the NOTE record so a peer sees the item
+            # before the bytes transfer. Both take empty defaults, so every
+            # pre-existing row reads empty after the migration.
+            acols = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(attachment)"
+                ).fetchall()
+            }
+            if "content_hash" not in acols:
+                conn.execute(
+                    "ALTER TABLE attachment ADD COLUMN "
+                    "content_hash TEXT NOT NULL DEFAULT ''"
+                )
+            if "thumbnail" not in acols:
+                conn.execute(
+                    "ALTER TABLE attachment ADD COLUMN "
+                    "thumbnail BLOB NOT NULL DEFAULT x''"
+                )
 
     @property
     def db_path(self) -> Path:
@@ -486,7 +548,7 @@ class NotesStore:
             )
         # S257: journal the creation, best-effort, after the commit.
         _sync_publish_note(
-            rid, lambda: _note_sync_payload(record), updated_at=ts
+            rid, lambda: _note_sync_payload(record, []), updated_at=ts
         )
         return record
 
@@ -579,14 +641,9 @@ class NotesStore:
         with self._lock, self._conn() as conn:
             conn.execute(sql, params)
         record = self.get_note(note_id, user_id=uid)
-        # S257: journal the fresh state, best-effort, only when the row
-        # exists (an unknown id matched nothing and must not journal).
-        if record is not None:
-            _sync_publish_note(
-                note_id,
-                lambda: _note_sync_payload(record),
-                updated_at=record.updated_at,
-            )
+        # S257: journal the fresh state (with the current attachment manifest),
+        # best-effort, only when the row exists.
+        self._republish_note_full_state(note_id, record, user_id=uid)
         return record
 
     def delete_note(self, note_id: str, *, user_id: str | None = None) -> bool:
@@ -605,6 +662,216 @@ class NotesStore:
         if changed > 0:
             _sync_publish_note(note_id, None, deleted=True, updated_at=ts)
         return changed > 0
+
+    def apply_synced_note(
+        self,
+        note_id: str,
+        payload: dict[str, Any] | None,
+        *,
+        deleted: bool = False,
+        updated_at: str = "",
+    ) -> bool:
+        """Materialise a synced note record into the local store (SYN-01 apply).
+
+        The receiving half for notes. Deliberately HOOK-FREE -- it never calls
+        ``_sync_publish_note`` -- so applying a received record cannot
+        re-publish it and start an apply -> write -> publish echo. Two
+        invariants the apply path MUST hold, both load-bearing:
+
+          * It NEVER writes ``mobile_allowed``. The wire never carries the flag
+            (decision N9-D3); a received note must not be able to opt ITSELF
+            onto the phone. On create the row takes the schema default (0, the
+            secure OFF); on update the column is untouched -- exactly what
+            ``create_note`` and ``update_note`` already guarantee.
+          * It NEVER overwrites ``body_crdt`` of an EXISTING note. The text body
+            converges through NOTE_UPDATE (the CRDT relay's append seam), so the
+            full-state record owns only existence + metadata (title, tags,
+            pinned). The body is seeded ONLY when the note is first created
+            here; thereafter NOTE_UPDATE owns it and a stale snapshot can never
+            regress it.
+
+        A ``deleted`` record tombstones (``deleted = 1``), CRDT-safe, never a
+        hard delete, so the deletion converges and tombstone-wins downstream.
+        Idempotent (INSERT/UPDATE by id) and fail-secure (False on a malformed
+        payload or any write error, never raising into the round). Scoped to the
+        local user via the ``effective_user_id`` pattern; the note id is the
+        record id (the note payload does not carry it).
+        """
+        try:
+            if not isinstance(note_id, str) or not note_id:
+                return False
+            if not deleted and not isinstance(payload, dict):
+                return False
+            uid = effective_user_id(None, self._single_user_mode)
+            ts = updated_at if isinstance(updated_at, str) and updated_at else _now()
+            with self._lock, self._conn() as conn:
+                exists = (
+                    conn.execute(
+                        "SELECT 1 FROM note WHERE id = ? AND user_id = ?",
+                        (note_id, uid),
+                    ).fetchone()
+                    is not None
+                )
+
+                if deleted:
+                    if exists:
+                        conn.execute(
+                            "UPDATE note SET deleted = 1, updated_at = ? "
+                            "WHERE id = ? AND user_id = ?",
+                            (ts, note_id, uid),
+                        )
+                    else:
+                        # Record the tombstone even for a note never seen here,
+                        # so a later out-of-order non-tombstone cannot silently
+                        # resurrect it; mobile_allowed stays the secure default.
+                        conn.execute(
+                            "INSERT INTO note "
+                            "(id, user_id, title, body_crdt, tags, pinned, "
+                            "created_at, updated_at, deleted) "
+                            "VALUES (?, ?, '', x'', '[]', 0, ?, ?, 1)",
+                            (note_id, uid, ts, ts),
+                        )
+                    # A tombstoned note drops its attachment manifest too.
+                    conn.execute(
+                        "DELETE FROM attachment WHERE note_id = ? AND user_id = ?",
+                        (note_id, uid),
+                    )
+                    return True
+
+                title = payload.get("title")
+                if not isinstance(title, str):
+                    title = ""
+                tags = payload.get("tags")
+                if not isinstance(tags, str):
+                    tags = "[]"
+                pinned = 1 if payload.get("pinned") else 0
+
+                if exists:
+                    # Metadata only: body_crdt (CRDT, owned by NOTE_UPDATE) and
+                    # mobile_allowed (N9-D3) are deliberately untouched. deleted
+                    # is cleared so a later edit resurrects a tombstoned note.
+                    conn.execute(
+                        "UPDATE note SET title = ?, tags = ?, pinned = ?, "
+                        "deleted = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                        (title, tags, pinned, ts, note_id, uid),
+                    )
+                else:
+                    created_at = payload.get("created_at")
+                    if not isinstance(created_at, str) or not created_at:
+                        created_at = ts
+                    body_b64 = payload.get("body_crdt_b64")
+                    body = b""
+                    if isinstance(body_b64, str):
+                        try:
+                            body = base64.b64decode(body_b64)
+                        except Exception:
+                            body = b""
+                    # mobile_allowed omitted -> schema default 0 (secure OFF).
+                    conn.execute(
+                        "INSERT INTO note "
+                        "(id, user_id, title, body_crdt, tags, pinned, "
+                        "created_at, updated_at, deleted) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        (note_id, uid, title, body, tags, pinned, created_at, ts),
+                    )
+
+                # Reconcile the eager vault manifest to the authoritative set:
+                # UPSERT each entry (no blob bytes -- fetched on demand -- and
+                # ON CONFLICT preserves an already-downloaded blob's local nonce
+                # and derived text), then prune rows no longer in the set.
+                manifest = payload.get("attachments")
+                if not isinstance(manifest, list):
+                    manifest = []
+                seen: list[str] = []
+                for a in manifest:
+                    if not isinstance(a, dict):
+                        continue
+                    aid = a.get("id")
+                    kind = a.get("kind")
+                    if not isinstance(aid, str) or not aid:
+                        continue
+                    if kind not in ATTACHMENT_KINDS:
+                        continue
+                    seen.append(aid)
+                    blob_ref = a.get("blob_ref")
+                    blob_ref = blob_ref if isinstance(blob_ref, str) else ""
+                    mime = a.get("mime")
+                    mime = mime if isinstance(mime, str) else ""
+                    content_hash = a.get("content_hash")
+                    content_hash = content_hash if isinstance(content_hash, str) else ""
+                    byte_size = a.get("byte_size")
+                    if not isinstance(byte_size, int) or isinstance(byte_size, bool):
+                        byte_size = 0
+                    thumb_b64 = a.get("thumbnail_b64")
+                    thumb = b""
+                    if isinstance(thumb_b64, str):
+                        try:
+                            thumb = base64.b64decode(thumb_b64)
+                        except Exception:
+                            thumb = b""
+                    conn.execute(
+                        "INSERT INTO attachment "
+                        "(id, note_id, user_id, kind, blob_ref, mime, bytes, "
+                        "created_at, content_hash, thumbnail) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(id) DO UPDATE SET "
+                        "kind=excluded.kind, blob_ref=excluded.blob_ref, "
+                        "mime=excluded.mime, bytes=excluded.bytes, "
+                        "content_hash=excluded.content_hash, "
+                        "thumbnail=excluded.thumbnail",
+                        (
+                            aid,
+                            note_id,
+                            uid,
+                            kind,
+                            blob_ref,
+                            mime,
+                            int(byte_size),
+                            ts,
+                            content_hash,
+                            thumb,
+                        ),
+                    )
+                for r in conn.execute(
+                    "SELECT id FROM attachment WHERE note_id = ? AND user_id = ?",
+                    (note_id, uid),
+                ).fetchall():
+                    if r[0] not in seen:
+                        conn.execute(
+                            "DELETE FROM attachment WHERE id = ? AND user_id = ?",
+                            (r[0], uid),
+                        )
+                return True
+        except Exception:
+            logger.warning(
+                "veilid sync apply failed for a note (no domain change)",
+                exc_info=True,
+            )
+            return False
+
+    def _republish_note_full_state(
+        self,
+        note_id: str,
+        record: "NoteRecord | None",
+        *,
+        user_id: str | None = None,
+    ) -> None:
+        """Journal a note's fresh full state WITH its current attachment manifest.
+
+        The single place the SYN-01 note publish is assembled, so every
+        publisher (create, update, mobile-allowed flip, attachment add/remove)
+        carries the authoritative manifest and none can silently wipe a peer's
+        media. Best-effort: a ``None`` record (the row is gone) journals
+        nothing, and the hook itself no-ops when sync is unavailable.
+        """
+        if record is None:
+            return
+        attachments = self.list_attachments(note_id, user_id=user_id)
+        _sync_publish_note(
+            note_id,
+            lambda: _note_sync_payload(record, attachments),
+            updated_at=record.updated_at,
+        )
 
     # Notes -- the per-item mobile-allowed flag (N.9, S256)
 
@@ -634,12 +901,7 @@ class NotesStore:
         # allowed note; security stays with the serve filter's live lookup.
         if changed > 0:
             record = self.get_note(note_id, user_id=uid)
-            if record is not None:
-                _sync_publish_note(
-                    note_id,
-                    lambda: _note_sync_payload(record),
-                    updated_at=record.updated_at,
-                )
+            self._republish_note_full_state(note_id, record, user_id=uid)
         return changed > 0
 
     def is_mobile_allowed(
@@ -684,6 +946,8 @@ class NotesStore:
         transcript_text: str | None = None,
         caption_text: str | None = None,
         ocr_text: str | None = None,
+        content_hash: str = "",
+        thumbnail: bytes = b"",
     ) -> AttachmentRecord:
         """Insert an attachment manifest row. ``kind`` is allowlisted."""
         if kind not in ATTACHMENT_KINDS:
@@ -704,13 +968,16 @@ class NotesStore:
             transcript_text=transcript_text,
             caption_text=caption_text,
             ocr_text=ocr_text,
+            content_hash=content_hash,
+            thumbnail=thumbnail,
         )
         with self._lock, self._conn() as conn:
             conn.execute(
                 "INSERT INTO attachment "
                 "(id, note_id, user_id, kind, blob_ref, mime, bytes, nonce, "
-                "created_at, transcript_text, caption_text, ocr_text) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at, transcript_text, caption_text, ocr_text, "
+                "content_hash, thumbnail) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     aid,
                     note_id,
@@ -724,8 +991,16 @@ class NotesStore:
                     transcript_text,
                     caption_text,
                     ocr_text,
+                    content_hash,
+                    thumbnail,
                 ),
             )
+        # Vault sync (SYN-01): the note's manifest gained an item, so republish
+        # its full state with the new manifest (best-effort) so peers reconcile
+        # the item in.
+        self._republish_note_full_state(
+            note_id, self.get_note(note_id, user_id=uid), user_id=uid
+        )
         return record
 
     def get_attachment(
@@ -762,12 +1037,22 @@ class NotesStore:
         f-string SQL, no caller-controlled identifier in the statement.
         """
         uid = effective_user_id(user_id, self._single_user_mode)
+        existing = self.get_attachment(attachment_id, user_id=uid)
         with self._lock, self._conn() as conn:
             cur = conn.execute(
                 "DELETE FROM attachment WHERE id = ? AND user_id = ?",
                 (attachment_id, uid),
             )
-            return cur.rowcount > 0
+            changed = cur.rowcount > 0
+        if changed and existing is not None:
+            # Vault sync (SYN-01): the note's manifest lost an item, so
+            # republish so peers reconcile it out (best-effort).
+            self._republish_note_full_state(
+                existing.note_id,
+                self.get_note(existing.note_id, user_id=uid),
+                user_id=uid,
+            )
+        return changed
 
     def update_attachment(
         self,

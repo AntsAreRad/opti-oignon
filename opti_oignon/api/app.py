@@ -93,8 +93,16 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management."""
     # Startup: singletons initialize on import; heavy deps lazy-loaded (S134)
     logger.info("Opti-Oignon API started")
+    # Veilid sync auto-driver: armed only when explicitly opted in
+    # (OPTI_SYNC_AUTORUN); a no-op otherwise, and never breaks startup. The
+    # mode boundary (Bulbe hard-stop) is enforced on every pass inside the
+    # driver, not here.
+    from opti_oignon.veilid.sync_service import arm_if_enabled
+    arm_if_enabled()
     yield
-    # Shutdown: cleanup if needed
+    # Shutdown: stop the sync driver if it was armed (a no-op otherwise).
+    from opti_oignon.veilid.sync_service import reset_sync_service
+    reset_sync_service()
     logger.info("Opti-Oignon API stopped")
 
 

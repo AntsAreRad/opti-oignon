@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -414,6 +415,88 @@ def _default_update_sink() -> Any | None:
     return _update_sink_for(store)
 
 
+def _default_conversation_sink() -> Any | None:
+    """The process-default CONVERSATION apply sink, or ``None``.
+
+    The ``_default_update_sink`` idiom (S199, SYN-01): read-only and
+    side-effect free. It does NOT import (and thereby construct) the
+    conversation manager -- applying a round must not seed a database -- it
+    only consults the manager when the application has ALREADY opened the
+    conversation module. Anything else resolves to ``None``, fail-secure at the
+    landing seam (the record is dropped: not materialised, not served onward).
+    The sink is hook-free by construction (``apply_synced_conversation`` never
+    re-publishes), so a landed record is journalled verbatim, signature
+    preserved.
+    """
+    mod = sys.modules.get("opti_oignon.conversation")
+    if mod is None:
+        return None
+    manager = getattr(mod, "conversation_manager", None)
+    apply = getattr(manager, "apply_synced_conversation", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "conversation sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
+def _default_note_sink() -> Any | None:
+    """The process-default NOTE apply sink, or ``None``.
+
+    The ``_default_note_gate`` idiom (S199, SYN-01): read-only, no seed -- it
+    only consults the already-initialised notes store singleton (importing the
+    module is cheap; the ``_store`` singleton is None until the application
+    opens it). Anything else resolves to ``None``, fail-secure at the landing
+    seam. The sink is hook-free (``apply_synced_note`` never re-publishes), so a
+    landed record is journalled verbatim, signature preserved. The note id is
+    the record id (the note payload does not carry it).
+    """
+    try:
+        from opti_oignon.notes import notes_store as _ns
+    except Exception:
+        return None
+    store = getattr(_ns, "_store", None)
+    apply = getattr(store, "apply_synced_note", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "note sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
 def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
@@ -456,6 +539,8 @@ class SyncEngine:
         ledger: DeferredLedger | None = None,
         note_gate: Any | None = None,
         update_sink: Any | None = None,
+        conversation_sink: Any | None = None,
+        note_sink: Any | None = None,
         update_watermark_gate: Any | None = None,
     ) -> None:
         if not isinstance(device, str) or not device:
@@ -484,6 +569,15 @@ class SyncEngine:
         # unresolvable watermark reader means no checkpoint state (0), and a
         # reader that raises at serve time drops fail-secure.
         self._update_sink = update_sink
+        # S199 (SYN-01): the injectable CONVERSATION apply sink
+        # (``record -> bool``). None resolves lazily to the already-loaded
+        # conversation manager (the note_gate/update_sink idiom); an
+        # unresolvable sink DROPS the record fail-secure at the landing seam.
+        self._conversation_sink = conversation_sink
+        # S199 (SYN-01): the injectable NOTE apply sink. None resolves lazily
+        # to the already-initialised notes store singleton (the note_gate
+        # idiom); an unresolvable sink DROPS the record fail-secure.
+        self._note_sink = note_sink
         self._update_watermark_gate = update_watermark_gate
         # One warning per engine when signing degrades, not one per publish.
         self._warned_unsigned = False
@@ -513,6 +607,22 @@ class SyncEngine:
         if self._update_sink is not None:
             return self._update_sink
         return _default_update_sink()
+
+    def _resolve_conversation_sink(self) -> Any | None:
+        # S199: the injected sink wins; otherwise the lazy process default
+        # (the already-loaded conversation manager, or no sink at all --
+        # fail-secure at the landing seam: the record drops).
+        if self._conversation_sink is not None:
+            return self._conversation_sink
+        return _default_conversation_sink()
+
+    def _resolve_note_sink(self) -> Any | None:
+        # S199: the injected sink wins; otherwise the lazy process default
+        # (the already-initialised notes store singleton, or no sink at all --
+        # fail-secure at the landing seam: the record drops).
+        if self._note_sink is not None:
+            return self._note_sink
+        return _default_note_sink()
 
     def _resolve_update_watermark_gate(self) -> Any | None:
         # S264: the injected reader wins; otherwise the lazy process default
@@ -1354,6 +1464,113 @@ class SyncEngine:
                 )
         return appliable, deferred
 
+    def _land_conversations(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified CONVERSATION records into the conversation store.
+
+        The full-state analogue of :meth:`_land_note_updates` (S199, SYN-01):
+        sits AFTER the signature seam and the gate, BEFORE the feed journal. A
+        winning CONVERSATION record is written into the conversation store so it
+        surfaces in this device's app, then KEPT so it still enters the feed and
+        can be served onward (the relay role). The apply is hook-free
+        (``apply_synced_conversation`` never re-publishes), so the kept record
+        is journalled verbatim by the apply seam, signature preserved -- the
+        same posture as the note_update landing. Fail-secure: an unresolvable
+        sink (the conversation module not loaded) or an apply that returns False
+        DROPS the record -- not materialised, not journalled, not served (a
+        record that cannot be persisted must not converge). Other kinds pass
+        through untouched.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.CONVERSATION.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_conversation_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "conversation sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a conversation at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_conversation_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
+    def _land_notes(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified NOTE records into the notes store.
+
+        The full-state analogue of :meth:`_land_conversations` for NOTE
+        (S199, SYN-01): existence + metadata land into the notes store (the
+        text body converges separately through NOTE_UPDATE, so a stale snapshot
+        never regresses it, and ``mobile_allowed`` is never written from the
+        wire). The record is KEPT for the feed/relay; a refused or unappliable
+        record is DROPPED (fail-secure: a record that cannot be persisted must
+        not converge). Other kinds pass through untouched. NOTE and NOTE_UPDATE
+        land on independent stores, so their relative order in the batch does
+        not affect convergence.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.NOTE.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_note_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "note sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a note at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_note_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
     def _land_note_updates(
         self, records_in: list[SyncRecord], *, peer_id: str
     ) -> list[SyncRecord]:
@@ -1609,6 +1826,13 @@ class SyncEngine:
             # feed journal (sections 3 and 5); a refused update never enters
             # the feed and is therefore never served onward.
             appliable = self._land_note_updates(appliable, peer_id=peer_id)
+            # S199 (SYN-01): materialise CONVERSATION winners into the domain
+            # store on the same seam, BEFORE the feed journal -- a refused
+            # conversation never enters the feed and is never served onward.
+            appliable = self._land_conversations(appliable, peer_id=peer_id)
+            # S199 (SYN-01): materialise NOTE existence + metadata into the
+            # notes store on the same seam (the body converges via NOTE_UPDATE).
+            appliable = self._land_notes(appliable, peer_id=peer_id)
             filtered = RecordBatch(
                 device=batch.device,
                 high_water=batch.high_water,
