@@ -538,6 +538,49 @@ def _default_memory_canonical_sink() -> Any | None:
     return _sink
 
 
+def _default_skill_sink() -> Any | None:
+    """The process-default SKILL apply sink, or ``None``.
+
+    The ``_default_note_sink`` idiom (SYN-01, Direction D): read-only, no seed
+    -- it only consults the already-initialised skill registry singleton
+    (``_REGISTRY``), never constructing one from a sync round. Anything else
+    resolves to ``None``, fail-secure at the landing seam (the skill drops:
+    not materialised, not served). The sink is hook-free (``apply_synced_skill``
+    never re-publishes), so a landed skill is journalled verbatim, signature
+    preserved. The skill key is the record id. SKILL is sensitive: a record
+    only reaches this sink AFTER the engine's human gate has approved it
+    upstream (an unapproved skill is deferred to the ledger and never lands).
+    """
+    try:
+        from opti_oignon.agent import skills as _sk
+    except Exception:
+        return None
+    reg = getattr(_sk, "_REGISTRY", None)
+    apply = getattr(reg, "apply_synced_skill", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "skill sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
 def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
@@ -583,6 +626,7 @@ class SyncEngine:
         conversation_sink: Any | None = None,
         note_sink: Any | None = None,
         memory_canonical_sink: Any | None = None,
+        skill_sink: Any | None = None,
         update_watermark_gate: Any | None = None,
     ) -> None:
         if not isinstance(device, str) or not device:
@@ -625,6 +669,12 @@ class SyncEngine:
         # singleton (the note_sink idiom); an unresolvable sink DROPS the record
         # fail-secure at the landing seam.
         self._memory_canonical_sink = memory_canonical_sink
+        # SYN-01 (Direction D): the injectable SKILL apply sink. SKILL is the
+        # sensitive kind -- a record reaches the sink only after the round's
+        # human gate approves it; None resolves lazily to the already-
+        # initialised skill registry singleton (no seed), and an unresolvable
+        # sink DROPS the record fail-secure at the landing seam.
+        self._skill_sink = skill_sink
         self._update_watermark_gate = update_watermark_gate
         # One warning per engine when signing degrades, not one per publish.
         self._warned_unsigned = False
@@ -679,6 +729,15 @@ class SyncEngine:
         if self._memory_canonical_sink is not None:
             return self._memory_canonical_sink
         return _default_memory_canonical_sink()
+
+    def _resolve_skill_sink(self) -> Any | None:
+        # SYN-01 (Direction D): the injected sink wins; otherwise the lazy
+        # process default (the already-initialised skill registry singleton,
+        # no seed, or no sink at all -- fail-secure at the landing seam: the
+        # skill drops). A skill only reaches this seam once gate-approved.
+        if self._skill_sink is not None:
+            return self._skill_sink
+        return _default_skill_sink()
 
     def _resolve_update_watermark_gate(self) -> Any | None:
         # S264: the injected reader wins; otherwise the lazy process default
@@ -1677,6 +1736,58 @@ class SyncEngine:
             )
         return kept
 
+    def _land_skills(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified, APPROVED SKILL records into the skill registry.
+
+        The full-state analogue of :meth:`_land_conversations` for SKILL
+        (SYN-01, Direction D). SKILL is the sensitive kind: a record only
+        reaches this lander AFTER the round's human gate has approved its
+        adoption (the partition defers an unapproved skill to the per-record
+        ledger and excludes it from the appliable set), so by construction this
+        only ever materialises approved skills. The skill lands byte-faithfully
+        into the registry; the record is KEPT for the feed/relay (each peer
+        re-gates independently); a refused or unappliable record is DROPPED
+        (fail-secure). Other kinds pass through untouched.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.SKILL.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_skill_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "skill sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a skill at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_skill_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
     def _land_note_updates(
         self, records_in: list[SyncRecord], *, peer_id: str
     ) -> list[SyncRecord]:
@@ -1945,6 +2056,11 @@ class SyncEngine:
             # served onward. Canonical memory is user data: it lands ungated,
             # alongside conversation/note.
             appliable = self._land_memory_canonical(appliable, peer_id=peer_id)
+            # SYN-01 (Direction D): materialise approved SKILL winners into the
+            # registry on the same post-gate seam. SKILL is sensitive, so the
+            # partition above has ALREADY deferred any unapproved skill to the
+            # ledger -- only gate-approved skills remain in ``appliable`` here.
+            appliable = self._land_skills(appliable, peer_id=peer_id)
             filtered = RecordBatch(
                 device=batch.device,
                 high_water=batch.high_water,
