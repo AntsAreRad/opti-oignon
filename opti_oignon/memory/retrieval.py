@@ -343,6 +343,50 @@ class MemoryRetriever:
                     self._canonical.touch(memory.id, user_id=uid)
         return self.format_for_prompt(selected, max_tokens=max_tokens, header=header)
 
+    def composed_memories(
+        self,
+        query: str | None = None,
+        *,
+        user_id: str | None = None,
+        salient_n: int = DEFAULT_TOP_N,
+        relevant_n: int = DEFAULT_TOP_N,
+        query_embedding: list[float] | None = None,
+        mark_used: bool = False,
+    ) -> list[ScoredMemory]:
+        """Salient baseline + query-relevant facts, deduplicated, salient-first.
+
+        The SALIENCE FLOOR (most-used then most-recent active facts) is ALWAYS
+        included regardless of the query, so durable facts -- identity,
+        preferences -- stay in the working set even on an unrelated turn; this is
+        the property the query-only :meth:`retrieve` lacks (it drops every fact
+        scoring 0). Query-relevant facts are appended after, skipping any already
+        in the floor. The order is salient-first so the budget truncation (a tail
+        cut in :meth:`fit_to_budget`) keeps the durable facts. ``mark_used``
+        touches exactly the facts returned -- the reinforcement loop: an injected
+        fact gains use_count, an unused one decays out of the working set but
+        stays in the searchable archive.
+        """
+        uid = self._canonical.resolve_user(user_id)
+        salient = self.recent_memories(user_id=uid, top_n=salient_n)
+        seen = {m.id for m in salient}
+        relevant: list[ScoredMemory] = []
+        if query and query.strip():
+            for m in self.retrieve(
+                query,
+                user_id=uid,
+                top_n=relevant_n,
+                query_embedding=query_embedding,
+                mark_used=False,
+            ):
+                if m.id not in seen:
+                    seen.add(m.id)
+                    relevant.append(m)
+        combined = salient + relevant
+        if mark_used:
+            for m in combined:
+                self._canonical.touch(m.id, user_id=uid)
+        return combined
+
     def recover(
         self,
         query: str,
@@ -434,6 +478,75 @@ def working_memory_block(
     return get_retriever().working_block(
         query, user_id=user_id, max_tokens=max_tokens, top_n=top_n, mark_used=mark_used
     )
+
+
+def _norm_text(text: str) -> str:
+    """Whitespace/case-normalised form for cross-store deduplication."""
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def build_memory_block(
+    query: str | None = None,
+    *,
+    user_id: str | None = None,
+    max_tokens: int = MEMORY_TOKEN_BUDGET,
+    legacy_facts: Any = None,
+    mark_used: bool = False,
+    header: str = "Relevant memories:",
+    retriever: MemoryRetriever | None = None,
+) -> str:
+    """The unified working-memory block injected into the prompt (M1).
+
+    Composes, in ONE token budget and ONE deduplicated block:
+
+      1. the salient baseline + query-relevant facts from the new MemoryStore
+         (:meth:`MemoryRetriever.composed_memories`) -- so durable facts persist
+         and relevant ones surface, replacing the either/or that let a stale
+         query drop everything;
+      2. a LEGACY BRIDGE: facts in ``legacy_facts`` (each exposing ``text`` /
+         ``category`` -- the legacy memories.db rows), merged after the canonical
+         facts and deduplicated against them by normalised text, so an existing
+         legacy store keeps surfacing during the migration. This argument is
+         temporary and is removed once the writes are unified.
+
+    Graceful: a missing embedder only drops the vector contribution; the
+    canonical (SQL) facts still rank and inject. The block is unwrapped (the
+    agent wraps it as untrusted context). Returns "" when nothing fits.
+    """
+    r = retriever if retriever is not None else get_retriever()
+    try:
+        memories = list(
+            r.composed_memories(query, user_id=user_id, mark_used=mark_used)
+        )
+    except Exception:
+        logger.debug("composed_memories failed; memory block empty", exc_info=True)
+        memories = []
+
+    # Legacy bridge: wrap the legacy rows as ScoredMemory and dedup by text.
+    seen_text = {_norm_text(m.text) for m in memories}
+    for fact in legacy_facts or ():
+        text = getattr(fact, "text", None)
+        if not isinstance(text, str) or not text.strip():
+            continue
+        norm = _norm_text(text)
+        if norm in seen_text:
+            continue
+        seen_text.add(norm)
+        category = getattr(fact, "category", "") or ""
+        memories.append(
+            ScoredMemory(
+                id="legacy:" + norm[:48],
+                text=text,
+                category=str(category),
+                score=0.0,
+                vector_similarity=0.0,
+                keyword_score=0.0,
+                category_match=False,
+                record=None,
+            )
+        )
+
+    return r.format_for_prompt(memories, max_tokens=max_tokens, header=header)
 
 
 def recover_memories(
