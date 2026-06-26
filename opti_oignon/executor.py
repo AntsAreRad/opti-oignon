@@ -110,10 +110,12 @@ except ImportError:
 # untrusted context, S175).
 try:
     from .memory.retrieval import working_memory_block as _working_memory_block
+    from .memory.retrieval import build_memory_block as _build_memory_block
     DUAL_LAYER_MEMORY_AVAILABLE = True
 except Exception:
     DUAL_LAYER_MEMORY_AVAILABLE = False
     _working_memory_block = None
+    _build_memory_block = None
 
 # Intelligent sliding window (v1.4.0 -- S16/S17)
 try:
@@ -1166,11 +1168,12 @@ class Executor:
     def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
         """Append the memory block to the system prompt if available and enabled.
 
-        Prefers the S66 dual-layer working block from the new MemoryStore-backed
-        retriever (query-relevant when a question is given, recent otherwise),
-        falling back to the legacy flat block when the new layer yields nothing.
-        The full uncompressed archive remains searchable for recovery; the block
-        is unwrapped (the agent wraps it as untrusted context, S175).
+        Builds the unified working block (M1): the salient durable facts (always
+        present, ranked by use_count x recency) plus query-relevant facts plus a
+        bridge over the legacy store, composed in one token budget and
+        deduplicated. The full uncompressed archive remains searchable for
+        recovery; the block is unwrapped (the agent wraps it as untrusted
+        context, S175).
 
         Args:
             system_prompt: the current system prompt
@@ -1182,16 +1185,33 @@ class Executor:
         if not self._memory_enabled:
             return system_prompt
 
-        memory_block = ""
-        # S174: dual-layer working block from the new MemoryStore.
-        if DUAL_LAYER_MEMORY_AVAILABLE and _working_memory_block is not None:
+        # M1: unified working block -- the salient durable facts (always present)
+        # + query-relevant facts + a legacy bridge, composed in one token budget.
+        # The bridge reads the legacy memories.db so an existing store keeps
+        # surfacing during the migration; it is dropped once writes are unified.
+        legacy_facts = None
+        if MEMORY_AVAILABLE and _memory_manager is not None:
             try:
-                memory_block = _working_memory_block(question, max_tokens=500) or ""
+                legacy_facts = _memory_manager.get_all_facts(active_only=True)
             except Exception as e:
-                logger.debug(f"Dual-layer memory block skipped: {e}")
+                logger.debug(f"Legacy memory read skipped: {e}")
+                legacy_facts = None
+
+        memory_block = ""
+        if DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
+            try:
+                memory_block = _build_memory_block(
+                    question,
+                    max_tokens=500,
+                    legacy_facts=legacy_facts,
+                    mark_used=True,
+                ) or ""
+            except Exception as e:
+                logger.debug(f"Unified memory block skipped: {e}")
                 memory_block = ""
 
-        # Legacy fallback when the new layer has nothing to contribute.
+        # Belt-and-suspenders: if the unified composer is entirely unavailable
+        # but the legacy store is, fall back to its flat block (prior behaviour).
         if not memory_block and MEMORY_AVAILABLE and _memory_manager is not None:
             try:
                 memory_block = _memory_manager.format_for_prompt(max_tokens=500) or ""
