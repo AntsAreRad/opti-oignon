@@ -3,6 +3,59 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
+## 2.1.0 -- 2026-06-27
+
+A capability release on two fronts: an agentic robustness cycle that makes local
+tool use far more reliable, and a memory-system overhaul that closes the
+capture -> store -> injection loop on a single source of truth.
+
+### Added
+
+- Native model function-calling for agentic tool use: when a model advertises the
+  capability, tool calls go through its native function-calling interface, with a
+  JSON-schema-constrained path as the unconditional fallback otherwise.
+- Automatic memory capture: after a turn is saved, facts are extracted and stored
+  in the background every few messages, so memory accumulates without a manual
+  `/extract`. Gated and throttled, fire-and-forget.
+- Memory health endpoint: `GET /api/memory/health` reports the canonical, archive
+  (semantic) and embedder tiers, so a degraded recall path is visible instead of
+  silent.
+
+### Changed
+
+- Agentic tool loop hardened (the robustness cycle): enum-forcing for constrained
+  arguments, intent-transpiler salvage and argument auto-repair for malformed tool
+  calls, an error-feedback retry so a failed call self-heals, an anti-spin guard
+  plus a verification pass to stop the agent looping, and capability-aware
+  reasoning handling that avoids the think=True / HTTP 400 case on models that do
+  not support it, with an explicit optimize toggle.
+- Memory unified on one source of truth (the coordinated MemoryStore): the
+  `/api/memory` surface (list/add/delete/clear/extract) is re-backed by the new
+  store and mapped onto the existing schema, so the frontend is unchanged. The
+  working block now keeps a salience floor -- durable facts are always injected,
+  not dropped on an unrelated turn -- and marks injected facts as used.
+- The memory vector (semantic) layer degrades gracefully: when chromadb is not
+  installed it falls back to canonical keyword/recency recall instead of raising,
+  so the memory tab, list and migration keep working without it; only similarity
+  search is disabled, and health reports the archive tier as unavailable.
+
+### Fixed
+
+- The memory tab and the injector no longer read different stores: facts entered
+  in the tab now surface in recall. Previously the tab wrote the legacy store
+  while the injector read the new one, so tab-entered facts never appeared.
+- An unrelated query no longer drops durable memories from the working block (the
+  old retrieval path discarded every fact scoring zero).
+
+### Internal
+
+- One-shot legacy `memories.db` -> MemoryStore migration runs once at application
+  boot: idempotent (the store's dedup merges a re-run), marker-guarded, and
+  fail-safe -- a migration problem is logged and swallowed, never breaking
+  startup.
+- The silent no-embedder path now logs once and is surfaced by the health probe
+  rather than degrading recall invisibly.
+
 ## 2.0.2 -- 2026-06-25
 
 Data-integrity release: fixes a bug that caused agentic conversations to be

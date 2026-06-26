@@ -6,4 +6,4 @@ All other files (main.py, app.py, launch.sh, pyproject.toml, setup.py)
 MUST read from this module instead of hardcoding version strings.
 """
 
-__version__ = "2.0.2"
+__version__ = "2.1.0"
