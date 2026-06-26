@@ -16,6 +16,7 @@ decisions structurees du LLM via ToolCallRequest.
 Author: Leon
 """
 
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -56,6 +57,22 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
+# Robust tool-calling primitives (Lot 1+2: native function-calling, enum
+# forcing, intent transpiler). Stdlib-only, but guarded to match the module's
+# conditional-import style; the format= path stays the fallback if absent.
+try:
+    from .tool_calling import (
+        forced_decision_schema,
+        model_supports_native_tools,
+        native_tool_schemas,
+        parse_native_tool_calls,
+        repair_arguments,
+        transpile_intent,
+    )
+    ROBUST_TOOLCALLING_AVAILABLE = True
+except ImportError:
+    ROBUST_TOOLCALLING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +88,10 @@ class ToolCallResult(BaseModel):
     success: bool = True
     execution_time: float = 0.0
     reasoning: str = ""
+    # Lot 3: a soft failure the model could fix by adjusting its call (missing
+    # argument, handler error). Hard failures (approval denied, tool not found
+    # or disabled) leave this False so the loop stops instead of retrying.
+    retryable: bool = False
 
 
 class ToolExecutionResult(BaseModel):
@@ -106,11 +127,15 @@ class ToolExecutor:
         structured_engine=None,
         max_tool_calls: int = 5,
         default_model: str = "qwen3:32b",
+        max_tool_retries: int = 2,
     ):
         self.registry = registry or _default_registry
         self.structured_engine = structured_engine or _structured_engine
         self.max_tool_calls = max_tool_calls
         self.default_model = default_model
+        # Lot 3: consecutive retryable tool failures tolerated before the ReAct
+        # loop gives up (the model gets the error fed back to self-correct).
+        self.max_tool_retries = max_tool_retries
         # S128: Optional pre-execution approval hook.
         # Callable(tool_name, arguments) -> bool.
         # If set, called before each tool execution. Returns True to
@@ -229,46 +254,88 @@ class ToolExecutor:
                     f"Result: {prior_tc.result}"
                 )
 
-        # ReAct loop: ask LLM, execute tool, re-ask
+        # ReAct loop: decide -> execute -> re-decide. _decide_tools layers
+        # native function-calling (Layer 1) over the existing format= path and
+        # can return multiple calls per turn (native parallel tool calls). Lot 3:
+        # a retryable failure (bad argument, handler error) is fed back into the
+        # next decision instead of stopping the loop, so the model can correct
+        # itself; bounded by max_tool_retries consecutive retryable failures.
+        consecutive_failures = 0
         for iteration in range(self.max_tool_calls):
-            # Ask LLM which tool to use
-            decision = self._ask_llm_for_tool(
-                message, _model, tools_prompt,
-                tool_results_context, context_messages,
+            decisions = self._decide_tools(
+                message, _model, context_messages, tool_results_context,
             )
-
-            if decision is None:
-                # Structured generation failed, generate direct response
-                logger.warning("Structured decision failed, direct response")
+            if not decisions:
                 break
 
-            # "none" means the LLM doesn't need a tool (or no more tools)
-            if decision.tool_name == "none" or decision.tool_name == "":
+            hard_stop = False
+            retryable_failure = False
+            for tool_name, arguments in decisions:
+                call_result = self._execute_tool(
+                    tool_name, arguments, "", approval_fn=approval_fn,
+                )
+                tool_calls.append(call_result)
+                tool_results_context.append(
+                    f"[Tool: {call_result.tool_name}] "
+                    f"Arguments: {call_result.arguments}\n"
+                    f"Result: {call_result.result}"
+                )
+                if not call_result.success:
+                    if call_result.retryable:
+                        retryable_failure = True
+                    else:
+                        hard_stop = True
+                    break
+            if hard_stop:
                 break
+            if retryable_failure:
+                consecutive_failures += 1
+                if consecutive_failures >= self.max_tool_retries:
+                    break
+                continue  # re-decide; the error is now in the context
+            consecutive_failures = 0
 
-            # Execute the tool
-            call_result = self._execute_tool(
-                decision.tool_name, decision.arguments, decision.reasoning,
-                approval_fn=approval_fn,
+        # Layer 2b -- deterministic salvage: if no tool fired, the model may
+        # have narrated code/commands in prose instead of calling a tool.
+        # Recover those calls and execute them, then regenerate with results.
+        if not tool_calls and ROBUST_TOOLCALLING_AVAILABLE:
+            candidate = self._generate_final_response(
+                message, _model, [], [], context_messages,
             )
-            tool_calls.append(call_result)
-
-            # Accumulate results for context
-            tool_results_context.append(
-                f"[Tool: {call_result.tool_name}] "
-                f"Arguments: {call_result.arguments}\n"
-                f"Result: {call_result.result}"
+            available_names = (
+                {t.name for t in self.registry.list_available()}
+                if self.registry else set()
             )
-
-            # If tool failed, stop the loop
-            if not call_result.success:
-                break
-
-        # Generate final response integrating tool results
-        final_response = self._generate_final_response(
-            message, _model, tool_calls, tool_results_context,
-            context_messages,
-        )
+            salvaged = transpile_intent(candidate, message, available_names)
+            if salvaged:
+                logger.info(
+                    "Salvaged %d tool call(s) from a narrated response",
+                    len(salvaged),
+                )
+                for tool_name, arguments in salvaged:
+                    call_result = self._execute_tool(
+                        tool_name, arguments, "intent-transpiled",
+                        approval_fn=approval_fn,
+                    )
+                    tool_calls.append(call_result)
+                    tool_results_context.append(
+                        f"[Tool: {call_result.tool_name}] "
+                        f"Arguments: {call_result.arguments}\n"
+                        f"Result: {call_result.result}"
+                    )
+                    if not call_result.success:
+                        break
+                final_response = self._generate_final_response(
+                    message, _model, tool_calls, tool_results_context,
+                    context_messages,
+                )
+            else:
+                final_response = candidate
+        else:
+            final_response = self._generate_final_response(
+                message, _model, tool_calls, tool_results_context,
+                context_messages,
+            )
 
         return ToolExecutionResult(
             response=final_response,
@@ -322,6 +389,117 @@ class ToolExecutor:
 
         if result.success and result.data:
             return result.data
+        return None
+
+    def _decide_tools(
+        self,
+        message: str,
+        model: str,
+        context_messages: list[dict],
+        previous_results: list[str],
+        force: bool = False,
+    ) -> list[tuple[str, dict]]:
+        """Decide which tool(s) to call next; an empty list means stop.
+
+        Layer 1: native Ollama function-calling for capable models -- it matches
+        what the model was trained on, so selection is far more reliable, and
+        parallel calls come for free. Layer 2a: when a capable model declines
+        but ``force`` is set, an enum-constrained format= schema (no "none")
+        guarantees a selection. Non-capable models, or any failure, fall back to
+        the existing format= ToolDecision path with unchanged behavior.
+        """
+        available = self.registry.list_available() if self.registry else []
+        if not available:
+            return []
+
+        use_native = (
+            ROBUST_TOOLCALLING_AVAILABLE
+            and OLLAMA_AVAILABLE
+            and model_supports_native_tools(model)
+        )
+        if use_native:
+            messages = self._build_decision_messages(
+                message, context_messages, previous_results,
+            )
+            resp = None
+            try:
+                resp = ollama.chat(
+                    model=model,
+                    messages=messages,
+                    tools=native_tool_schemas(available),
+                    options={"temperature": 0.0},
+                )
+            except Exception as e:
+                logger.warning(
+                    "Native tool call failed (%s); falling back to format=", e,
+                )
+            if resp is not None:
+                calls = parse_native_tool_calls(resp)
+                if calls:
+                    return calls
+                if force:
+                    forced = self._enum_force_tool(
+                        messages, model, [t.name for t in available],
+                    )
+                    return [forced] if forced else []
+                return []  # a capable model that called nothing is done
+
+        # Fallback: the existing format= ToolDecision path (unchanged behavior).
+        decision = self._ask_llm_for_tool(
+            message, model, self.registry.get_tools_prompt(),
+            previous_results, context_messages,
+        )
+        if decision is None or decision.tool_name in ("none", ""):
+            return []
+        return [(decision.tool_name, decision.arguments)]
+
+    def _build_decision_messages(
+        self,
+        message: str,
+        context_messages: list[dict],
+        previous_results: list[str],
+    ) -> list[dict]:
+        """Assemble the chat messages for a tool decision (with prior results)."""
+        messages = list(context_messages)
+        if previous_results:
+            results_text = "\n\n".join(previous_results)
+            content = (
+                f"{message}\n\n"
+                f"Previous tool results:\n{results_text}\n\n"
+                f"Call the next tool if needed; otherwise answer directly."
+            )
+        else:
+            content = message
+        messages.append({"role": "user", "content": content})
+        return messages
+
+    def _enum_force_tool(
+        self, messages: list[dict], model: str, tool_names: list[str],
+    ) -> tuple[str, dict] | None:
+        """Force a tool selection via an enum-constrained format= schema.
+
+        The schema's tool_name enum excludes "none", so the sampler cannot
+        decline -- a tool is guaranteed when the caller knows one is needed.
+        """
+        try:
+            resp = ollama.chat(
+                model=model,
+                messages=messages,
+                format=forced_decision_schema(tool_names),
+                options={"temperature": 0.0},
+            )
+            raw = (
+                resp["message"]["content"]
+                if isinstance(resp, dict)
+                else resp.message.content
+            )
+            data = json.loads(raw)
+            name = data.get("tool_name")
+            if name in tool_names:
+                args = data.get("arguments")
+                return (name, args if isinstance(args, dict) else {})
+        except Exception as e:
+            logger.warning("Enum-force tool selection failed: %s", e)
         return None
 
     def _execute_tool(
@@ -394,6 +572,12 @@ class ToolExecutor:
                 reasoning=reasoning,
             )
 
+        # Lot 3: auto-repair near-miss argument names (path -> filename, code ->
+        # content, etc.) before resolving, so a slightly mis-keyed call succeeds
+        # instead of failing on a missing required parameter.
+        if ROBUST_TOOLCALLING_AVAILABLE:
+            arguments = repair_arguments(list(tool.parameters), arguments)
+
         # Apply default values for optional parameters
         resolved_args = {}
         for param_name, param_def in tool.parameters.items():
@@ -408,8 +592,12 @@ class ToolExecutor:
                 return ToolCallResult(
                     tool_name=tool_name,
                     arguments=arguments,
-                    result=f"Missing required parameter: {param_name}",
+                    result=(
+                        f"Missing required parameter: {param_name}. "
+                        f"Provide it and call the tool again."
+                    ),
                     success=False,
+                    retryable=True,
                     execution_time=time.time() - start_time,
                     reasoning=reasoning,
                 )
@@ -433,8 +621,12 @@ class ToolExecutor:
             return ToolCallResult(
                 tool_name=tool_name,
                 arguments=resolved_args,
-                result=f"Execution error: {e}",
+                result=(
+                    f"Execution error: {e}. "
+                    f"Adjust the arguments or approach and retry."
+                ),
                 success=False,
+                retryable=True,
                 execution_time=time.time() - start_time,
                 reasoning=reasoning,
             )
