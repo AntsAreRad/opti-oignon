@@ -1176,12 +1176,11 @@ class Executor:
     def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
         """Append the memory block to the system prompt if available and enabled.
 
-        Builds the unified working block (M1): the salient durable facts (always
-        present, ranked by use_count x recency) plus query-relevant facts plus a
-        bridge over the legacy store, composed in one token budget and
-        deduplicated. The full uncompressed archive remains searchable for
-        recovery; the block is unwrapped (the agent wraps it as untrusted
-        context, S175).
+        Builds the unified working block: the salient durable facts (always
+        present, ranked by use_count x recency) plus query-relevant facts,
+        composed from the memory store in one token budget and deduplicated. The
+        full uncompressed archive remains searchable for recovery; the block is
+        unwrapped (the agent wraps it as untrusted context, S175).
 
         Args:
             system_prompt: the current system prompt
@@ -1193,33 +1192,22 @@ class Executor:
         if not self._memory_enabled:
             return system_prompt
 
-        # M1: unified working block -- the salient durable facts (always present)
-        # + query-relevant facts + a legacy bridge, composed in one token budget.
-        # The bridge reads the legacy memories.db so an existing store keeps
-        # surfacing during the migration; it is dropped once writes are unified.
-        legacy_facts = None
-        if MEMORY_AVAILABLE and _memory_manager is not None:
-            try:
-                legacy_facts = _memory_manager.get_all_facts(active_only=True)
-            except Exception as e:
-                logger.debug(f"Legacy memory read skipped: {e}")
-                legacy_facts = None
-
+        # M3: the memory store is now the single source of truth (the legacy
+        # store has been migrated into it and the write paths are unified), so
+        # the working block is composed from the store alone -- the legacy
+        # bridge is gone.
         memory_block = ""
         if DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
             try:
                 memory_block = _build_memory_block(
-                    question,
-                    max_tokens=500,
-                    legacy_facts=legacy_facts,
-                    mark_used=True,
+                    question, max_tokens=500, mark_used=True
                 ) or ""
             except Exception as e:
                 logger.debug(f"Unified memory block skipped: {e}")
                 memory_block = ""
 
-        # Belt-and-suspenders: if the unified composer is entirely unavailable
-        # but the legacy store is, fall back to its flat block (prior behaviour).
+        # Belt-and-suspenders: if the unified composer is entirely unavailable,
+        # fall back to the (frozen, migrated) legacy flat block.
         if not memory_block and MEMORY_AVAILABLE and _memory_manager is not None:
             try:
                 memory_block = _memory_manager.format_for_prompt(max_tokens=500) or ""
