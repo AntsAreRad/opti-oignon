@@ -39,7 +39,7 @@ VALID_QUALITY_TIERS = ("high", "medium", "low")
 # Known capabilities (non-restrictive, documentation purpose)
 KNOWN_CAPABILITIES = (
     "code", "reasoning", "general", "multilingual", "vision",
-    "fast", "creative", "long_context", "tool_use",
+    "fast", "creative", "long_context", "tool_use", "thinking",
 )
 
 

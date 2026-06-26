@@ -37,6 +37,7 @@ Author: Leon
 """
 
 import logging
+import os
 import time
 from collections.abc import Callable, Generator
 from typing import Any
@@ -70,6 +71,16 @@ except ImportError:
     ToolExecutor = None
     ToolExecutionResult = None
     ToolCallResult = None
+
+# Capability gate for the think=True/400 guard (option A). Stdlib-only primitive;
+# guarded like the rest so a non-thinking active model is never sent think=True.
+# If absent, thinking_available defaults True at the call site (no behavior change
+# relative to the pre-guard baseline).
+try:
+    from .tool_calling import model_supports_thinking
+    THINKING_GATE_AVAILABLE = True
+except ImportError:
+    THINKING_GATE_AVAILABLE = False
 
 # Conditional import of the StructuredOutputEngine (S42)
 try:
@@ -322,6 +333,7 @@ def _select_pipeline(
     verification_available: bool,
     reasoning_available: bool = False,
     sandbox_active: bool = False,
+    thinking_available: bool = True,
 ) -> str:
     """Select the optimal pipeline according to classification.
 
@@ -332,6 +344,11 @@ def _select_pipeline(
         tool_executor_available: Whether the ToolExecutor is available
         verification_available: Whether the VerificationEngine is available
         reasoning_available: Whether the ReasoningEngine is available (S49)
+        thinking_available: Whether the active model accepts the Ollama native
+            think switch (the think=True/400 guard, option A). When False, no
+            think-emitting pipeline (THINK, THINK_TOOLS, REASONING) is selected,
+            so think=True is never sent to a runner that would answer HTTP 400;
+            the request degrades to the plain tools or direct pipeline instead.
 
     Returns:
         Pipeline name to use (PIPELINE_*)
@@ -350,10 +367,13 @@ def _select_pipeline(
         return PIPELINE_WEB_SEARCH
 
     if think_override is True:
-        # Think + tools when available
+        # Think + tools when available. The think=True/400 guard (option A): a
+        # model that cannot accept the native think switch degrades to the tools
+        # (or direct) pipeline rather than emitting think=True and taking an
+        # Ollama 400 that would drop the turn.
         if tools_armed:
-            return PIPELINE_THINK_TOOLS
-        return PIPELINE_THINK
+            return PIPELINE_THINK_TOOLS if thinking_available else PIPELINE_TOOLS
+        return PIPELINE_THINK if thinking_available else PIPELINE_DIRECT
 
     if think_override is False and web_search_override is False:
         # Forced off -- but tools stay available (CODE_VERIFY is unsafe in
@@ -368,22 +388,66 @@ def _select_pipeline(
     if classification.get("needs_web"):
         return PIPELINE_WEB_SEARCH
 
-    # S49: Advanced reasoning when detected and available
-    if classification.get("needs_reasoning") and reasoning_available:
+    # S49: Advanced reasoning when detected and available. Gated by the think
+    # guard too -- the reasoning pipeline emits think=True internally.
+    if (
+        classification.get("needs_reasoning")
+        and reasoning_available
+        and thinking_available
+    ):
         return PIPELINE_REASONING
 
     if tools_armed:
-        if classification.get("is_complex"):
+        if classification.get("is_complex") and thinking_available:
             return PIPELINE_THINK_TOOLS
         return PIPELINE_TOOLS
 
-    if classification.get("is_complex"):
+    if classification.get("is_complex") and thinking_available:
         return PIPELINE_THINK
 
     if classification.get("is_code") and verification_available:
         return PIPELINE_CODE_VERIFY
 
     return PIPELINE_DIRECT
+
+
+def _thinking_capability_lookup(model: str):
+    """Profile-backed verdict for the ``thinking`` capability (option A).
+
+    Returns True when the model profile lists the ``thinking`` capability, else
+    None -- for an unregistered model, OR a profile that does not list it -- in
+    which case the name heuristic in :func:`model_supports_thinking` decides.
+    Fully defensive: any failure yields None (fall through to the heuristic), so
+    a profile-system hiccup can never break pipeline selection.
+    """
+    try:
+        from .model_profiles import get_profile
+
+        profile = get_profile(model)
+        if profile is None:
+            return None
+        # The capability list is additive: a profile that lists `thinking`
+        # turns the switch ON for a model the name heuristic would miss. Its
+        # ABSENCE is deliberately "no opinion" (None -> heuristic decides), not
+        # an explicit OFF, so a profiled but not-yet-tagged thinking-capable
+        # model (e.g. qwen3:32b, deepseek-r1) keeps thinking instead of silently
+        # losing it. To force a family OFF, narrow _THINKING_FAMILIES.
+        return True if profile.has_capability("thinking") else None
+    except Exception:
+        return None
+
+
+def _select_tool_model(selected_model, optimize, fast_tool_model):
+    """Capability-aware tool-model selection (Lot 5), strictly OPT-IN.
+
+    Tool-bound work routes to ``fast_tool_model`` ONLY when the user enabled
+    ``optimize`` AND a fast tool-capable model is configured. Otherwise the
+    selected model is preserved, so the strong models stay the default for
+    agentic work -- a big model is never silently downgraded.
+    """
+    if optimize and fast_tool_model:
+        return fast_tool_model
+    return selected_model
 
 
 # =============================================================================
@@ -411,6 +475,7 @@ class AgenticExecutor:
         cascading_inference=None,
         speculative_generator=None,
         default_model: str = "qwen3:32b",
+        fast_tool_model: str | None = None,
     ):
         """Initialize the agentic executor.
 
@@ -425,6 +490,9 @@ class AgenticExecutor:
             cascading_inference: CascadingInference instance (or None, S69)
             speculative_generator: SpeculativeGenerator instance (or None, S70)
             default_model: Default model for task analysis
+            fast_tool_model: Optional fast tool-capable model; tool-bound work
+                routes to it only when execute() is called with optimize=True
+                (opt-in). None keeps the selected model for all work.
         """
         self._executor = executor or _default_executor
         self._tool_executor = tool_executor or _default_tool_executor
@@ -436,6 +504,10 @@ class AgenticExecutor:
         self._cascading_inference = cascading_inference or _default_cascading_inference
         self._speculative_generator = speculative_generator or _default_speculative_generator
         self._default_model = default_model
+        # Lot 5: optional fast tool-capable model. Tool-bound work routes to it
+        # only when the caller passes optimize=True to execute(); None keeps the
+        # selected model for everything (the strong models stay the default).
+        self._fast_tool_model = fast_tool_model
 
         # Results of the last execution
         self._last_tool_calls: list = []
@@ -842,6 +914,7 @@ class AgenticExecutor:
         on_correction_step: Callable | None = None,
         use_llm_analysis: bool = False,
         approval_fn: Callable[[str, dict], bool] | None = None,
+        optimize: bool | None = None,
     ) -> Generator:
         """Execute with intelligent pipeline selection.
 
@@ -983,6 +1056,47 @@ class AgenticExecutor:
             use_llm=use_llm_analysis,
         )
 
+        # Lot 5 capability-aware tool routing (opt-in): for tool-bound work,
+        # route to the configured fast tool model ONLY when optimize=True, so the
+        # selected (possibly strong) model stays the default otherwise. The think
+        # guard below is evaluated on the EFFECTIVE model, so swapping to a fast
+        # non-thinking model steers selection to the plain tools pipeline rather
+        # than emitting think=True and taking an Ollama 400.
+        _selected_model = getattr(routing, 'model', self._default_model)
+        sandbox_active = (
+            self._is_sandbox_mode_active() or self._is_quick_sandbox_active()
+        )
+        tool_bound = bool(classification.get("needs_tools")) or sandbox_active
+        effective_model = (
+            _select_tool_model(_selected_model, optimize, self._fast_tool_model)
+            if tool_bound else _selected_model
+        )
+        if effective_model != _selected_model:
+            logger.info(
+                "AgenticExecutor: optimize on; routing tool-bound work from %s "
+                "to the fast tool model %s",
+                _selected_model, effective_model,
+            )
+
+        # The think=True/400 guard (option A), evaluated on the effective model:
+        # a non-thinking model is steered away from every think-emitting pipeline,
+        # so it never emits think=True and takes an Ollama 400 that drops the
+        # turn. The profile (capability "thinking") is authoritative; the name
+        # heuristic decides when no profile is registered. If the gate primitive
+        # is unavailable, default True (the pre-guard behavior, no regression).
+        if THINKING_GATE_AVAILABLE:
+            thinking_available = model_supports_thinking(
+                effective_model, _thinking_capability_lookup
+            )
+        else:
+            thinking_available = True
+        if think is True and not thinking_available:
+            logger.info(
+                "AgenticExecutor: think requested but model %s lacks the "
+                "thinking capability; routing without think=True (no Ollama 400)",
+                effective_model,
+            )
+
         # Select the pipeline
         pipeline = _select_pipeline(
             classification=classification,
@@ -991,10 +1105,8 @@ class AgenticExecutor:
             tool_executor_available=self.tool_executor_available,
             verification_available=self.verification_available,
             reasoning_available=self.reasoning_available,
-            sandbox_active=(
-                self._is_sandbox_mode_active()
-                or self._is_quick_sandbox_active()
-            ),
+            sandbox_active=sandbox_active,
+            thinking_available=thinking_available,
         )
         self._last_pipeline = pipeline
 
@@ -1007,13 +1119,13 @@ class AgenticExecutor:
         if pipeline == PIPELINE_TOOLS:
             yield from self._execute_tools_pipeline(
                 message, routing, conversation_id, on_status,
-                approval_fn=approval_fn,
+                approval_fn=approval_fn, model_override=effective_model,
             )
 
         elif pipeline == PIPELINE_THINK_TOOLS:
             yield from self._execute_think_tools_pipeline(
                 message, routing, conversation_id, on_status,
-                approval_fn=approval_fn,
+                approval_fn=approval_fn, model_override=effective_model,
             )
 
         elif pipeline == PIPELINE_REASONING:
@@ -1129,6 +1241,7 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
         approval_fn: Callable[[str, dict], bool] | None = None,
+        model_override: str | None = None,
     ) -> Generator:
         """Tools pipeline: ReAct loop via the ToolExecutor.
 
@@ -1148,7 +1261,8 @@ class AgenticExecutor:
             )
             return
 
-        model = getattr(routing, 'model', self._default_model)
+        # Lot 5: honor the optimize-selected model when provided.
+        model = model_override or getattr(routing, 'model', self._default_model)
 
         # Fetch the conversation context when available
         conv_messages = self._get_conversation_context(conversation_id)
@@ -1198,6 +1312,7 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
         approval_fn: Callable[[str, dict], bool] | None = None,
+        model_override: str | None = None,
     ) -> Generator:
         """Think+tools pipeline: thinking first, then tools when needed.
 
@@ -1208,7 +1323,10 @@ class AgenticExecutor:
         """
         # Phase 1: direct call with think mode for the reasoning pass
         full_response = ""
-        model = getattr(routing, 'model', self._default_model)
+        # Lot 5: the tool phase (Phase 2 below) honors the optimize-selected
+        # model; the reasoning pass (Phase 1, via routing) stays on the selected
+        # model to preserve reasoning quality.
+        model = model_override or getattr(routing, 'model', self._default_model)
 
         try:
             # persist=False: this pipeline owns the final save below, after the
@@ -1784,4 +1902,9 @@ class AgenticExecutor:
 # SINGLETON
 # =============================================================================
 
-agentic_executor = AgenticExecutor()
+# Lot 5: the fast tool model is configured out of band (OPTI_FAST_TOOL_MODEL),
+# so optimize is inert until it is set -- the selected (strong) model stays the
+# default for agentic work otherwise.
+agentic_executor = AgenticExecutor(
+    fast_tool_model=os.getenv("OPTI_FAST_TOOL_MODEL") or None,
+)
