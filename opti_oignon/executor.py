@@ -117,6 +117,14 @@ except Exception:
     _working_memory_block = None
     _build_memory_block = None
 
+# M2: automatic memory capture. After a turn is saved, fire the extraction so
+# the memory store grows without the manual /extract route. The helper is gated
+# (OPTI_AUTO_CAPTURE), throttled, and fire-and-forget; it never blocks the turn.
+try:
+    from .memory.auto_capture import maybe_capture as _maybe_capture
+except Exception:
+    _maybe_capture = None
+
 # Intelligent sliding window (v1.4.0 -- S16/S17)
 try:
     from .context_window import sliding_window_manager, token_budget_manager
@@ -2443,6 +2451,17 @@ class Executor:
                 )
             except Exception as e:
                 logger.error(f"Conversation save error: {e}")
+
+            # M2: auto-capture durable facts from the conversation (gated,
+            # throttled, fire-and-forget; never blocks or breaks the turn).
+            if _maybe_capture is not None:
+                try:
+                    _maybe_capture(
+                        conversation_id,
+                        conversation_manager.get_context_messages(conversation_id),
+                    )
+                except Exception as _cap_err:
+                    logger.debug(f"Auto-capture skipped: {_cap_err}")
 
         # Step 6: Cache storage (S18 -- C3, S19 -- G3 multi-turn)
         # Store the response in cache for successful requests (single AND multi-turn)
