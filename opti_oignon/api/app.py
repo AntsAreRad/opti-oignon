@@ -93,6 +93,14 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management."""
     # Startup: singletons initialize on import; heavy deps lazy-loaded (S134)
     logger.info("Opti-Oignon API started")
+    # One-shot legacy -> store memory migration (M3a-startup). Idempotent and
+    # marker-guarded (a no-op after the first successful pass), and it never
+    # raises -- a migration problem must not break the boot.
+    try:
+        from ..memory.migration import run_boot_migration
+        run_boot_migration()
+    except Exception:  # noqa: BLE001 - startup must not break on import/call
+        logger.warning("boot: legacy memory migration call failed", exc_info=True)
     yield
     # Shutdown: cleanup if needed
     logger.info("Opti-Oignon API stopped")

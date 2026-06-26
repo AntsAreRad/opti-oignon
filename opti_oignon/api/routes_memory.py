@@ -23,6 +23,58 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
+# ---------------------------------------------------------------------------
+# M3: the legacy /api/memory surface (list/add/delete/clear/extract) is now
+# backed by the coordinated MemoryStore -- a single source of truth -- mapped
+# onto the existing MemoryFactSchema so the frontend (memory.ts, MemoryPanel)
+# is unchanged. memory_manager is retained only for the one-shot migration and
+# is otherwise frozen. Single-user mode resolves user_id=None to the local user.
+# ---------------------------------------------------------------------------
+try:
+    from ..memory.dedup import get_memory_store as _get_store
+    from ..memory.extraction import extract_and_store as _extract_and_store
+    from ..memory.migration import migrate_legacy_to_store as _migrate_legacy
+    from ..conversation import conversation_manager as _conv_manager
+
+    _STORE_OK = True
+except Exception:  # pragma: no cover - store optional
+    _STORE_OK = False
+    _get_store = _extract_and_store = _migrate_legacy = _conv_manager = None
+
+try:
+    from ..memory.canonical_store import CATEGORIES as _CANON_CATEGORIES
+
+    _MEM_CATEGORIES = frozenset(_CANON_CATEGORIES)
+except Exception:  # pragma: no cover
+    _MEM_CATEGORIES = frozenset(
+        {"identity", "preference", "fact", "contact", "project", "goal"}
+    )
+
+
+def _require_store():
+    if not _STORE_OK or _get_store is None:
+        raise HTTPException(status_code=503, detail="Memory store not available")
+    return _get_store()
+
+
+def _map_cat(category: str | None) -> str:
+    cat = (category or "").strip().lower()
+    return cat if cat in _MEM_CATEGORIES else "fact"
+
+
+def _store_to_fact_schema(record) -> MemoryFactSchema:
+    """Map a MemoryStore record onto the legacy MemoryFactSchema (frontend contract)."""
+    return MemoryFactSchema(
+        id=record.id,
+        fact=record.text,
+        category=record.category,
+        source_conversation_id="",
+        created_at=record.created_at or "",
+        updated_at=record.updated_at or "",
+        confidence=1.0,
+        active=record.active,
+    )
+
 
 def _check_available():
     """Check that the memory module is available."""
@@ -38,63 +90,34 @@ def list_facts(
     active_only: bool = True,
     category: str = "",
 ) -> list:
-    """List all facts in memory."""
-    _check_available()
-
-    facts = memory_manager.get_all_facts(
-        active_only=active_only,
-        category=category or None,
+    """List facts from the unified memory store."""
+    store = _require_store()
+    records = store.list(
+        category=category or None, active_only=active_only, user_id=None
     )
-    return [
-        MemoryFactSchema(
-            id=f.id,
-            fact=f.fact,
-            category=f.category,
-            source_conversation_id=f.source_conversation_id,
-            created_at=f.created_at,
-            updated_at=f.updated_at,
-            confidence=f.confidence,
-            active=f.active,
-        )
-        for f in facts
-    ]
+    return [_store_to_fact_schema(r) for r in records]
 
 
 @router.post("", response_model=MemoryFactSchema)
 def add_fact(request: MemoryAddRequest) -> dict:
-    """Add a fact to memory."""
-    _check_available()
-
+    """Add a fact to the unified memory store (deduplicated)."""
     if not request.fact.strip():
         raise HTTPException(status_code=422, detail="Fact cannot be empty")
 
-    result = memory_manager.add_fact(
-        fact=request.fact,
-        category=request.category,
-        source_conversation_id=request.source_conversation_id,
-        confidence=request.confidence,
+    store = _require_store()
+    record, _decision = store.add(
+        request.fact, _map_cat(request.category), source="manual", user_id=None
     )
-    if result is None:
+    if record is None:
         raise HTTPException(status_code=500, detail="Failed to add fact")
-
-    return MemoryFactSchema(
-        id=result.id,
-        fact=result.fact,
-        category=result.category,
-        source_conversation_id=result.source_conversation_id,
-        created_at=result.created_at,
-        updated_at=result.updated_at,
-        confidence=result.confidence,
-        active=result.active,
-    )
+    return _store_to_fact_schema(record)
 
 
 @router.delete("/{fact_id}")
 def delete_fact(fact_id: str) -> dict:
-    """Delete a specific fact."""
-    _check_available()
-
-    deleted = memory_manager.delete_fact(fact_id)
+    """Soft-delete a fact (recoverable via the store's restore)."""
+    store = _require_store()
+    deleted = store.soft_delete(fact_id, user_id=None)
     if not deleted:
         raise HTTPException(status_code=404, detail="Fact not found")
     return {"deleted": True, "id": fact_id}
@@ -102,33 +125,80 @@ def delete_fact(fact_id: str) -> dict:
 
 @router.delete("")
 def clear_all_facts() -> dict:
-    """Delete all facts in memory."""
-    _check_available()
-
-    count = memory_manager.clear_all()
+    """Soft-delete all active facts (recoverable; the store has no hard clear)."""
+    store = _require_store()
+    records = store.list(active_only=True, user_id=None)
+    count = 0
+    for r in records:
+        try:
+            if store.soft_delete(r.id, user_id=None):
+                count += 1
+        except Exception as e:
+            logger.warning(f"clear: soft-delete failed for {r.id}: {e}")
     return {"cleared": True, "count": count}
 
 
 @router.post("/extract/{conv_id}", response_model=MemoryExtractResponse)
 def extract_facts(conv_id: str) -> dict:
-    """Extract facts from a conversation and store them.
+    """Extract facts from a conversation into the unified store.
 
     Necessite un modele Ollama disponible pour l'extraction LLM.
     """
-    _check_available()
+    _require_store()
+    if _extract_and_store is None or _conv_manager is None:
+        raise HTTPException(status_code=503, detail="Extraction not available")
 
     try:
-        added = memory_manager.extract_and_store(conv_id)
-        return MemoryExtractResponse(
-            conversation_id=conv_id,
-            facts_added=added,
+        messages = _conv_manager.get_context_messages(conv_id)
+        results = _extract_and_store(messages, source=f"extract:{conv_id}")
+        added = sum(
+            1 for _r, d in results if getattr(d, "action", "add") != "merge"
         )
+        return MemoryExtractResponse(conversation_id=conv_id, facts_added=added)
     except Exception as e:
         logger.error(f"Extraction error for {conv_id}: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Extraction failed: {str(e)}",
         )
+
+
+@router.post("/migrate")
+def migrate_memory() -> dict:
+    """Re-run the one-shot legacy -> store migration (idempotent; dedup-merged)."""
+    if _migrate_legacy is None:
+        raise HTTPException(status_code=503, detail="Migration not available")
+    return _migrate_legacy(force=True)
+
+
+@router.get("/health")
+def memory_health() -> dict:
+    """Memory store health.
+
+    The canonical tier (keyword/recency over SQLite) is always available; the
+    archive tier (semantic recall over the vector layer) is "degraded" when the
+    embedder is down. ``degraded`` is the single overall flag the UI can surface.
+    """
+    result = {
+        "canonical": "ok",
+        "archive": "ok",
+        "embedder": {"status": "unknown"},
+        "degraded": False,
+    }
+    try:
+        from ..memory.vector_store import get_vector_store
+
+        emb = get_vector_store().health()
+        result["embedder"] = emb
+        if emb.get("status") != "ok":
+            result["archive"] = "degraded"
+            result["degraded"] = True
+    except Exception as e:
+        logger.debug(f"memory health probe failed: {e}")
+        result["embedder"] = {"status": "unknown", "detail": str(e)}
+        result["archive"] = "degraded"
+        result["degraded"] = True
+    return result
 
 
 # ---------------------------------------------------------------------------

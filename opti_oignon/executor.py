@@ -110,10 +110,20 @@ except ImportError:
 # untrusted context, S175).
 try:
     from .memory.retrieval import working_memory_block as _working_memory_block
+    from .memory.retrieval import build_memory_block as _build_memory_block
     DUAL_LAYER_MEMORY_AVAILABLE = True
 except Exception:
     DUAL_LAYER_MEMORY_AVAILABLE = False
     _working_memory_block = None
+    _build_memory_block = None
+
+# M2: automatic memory capture. After a turn is saved, fire the extraction so
+# the memory store grows without the manual /extract route. The helper is gated
+# (OPTI_AUTO_CAPTURE), throttled, and fire-and-forget; it never blocks the turn.
+try:
+    from .memory.auto_capture import maybe_capture as _maybe_capture
+except Exception:
+    _maybe_capture = None
 
 # Intelligent sliding window (v1.4.0 -- S16/S17)
 try:
@@ -1166,11 +1176,11 @@ class Executor:
     def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
         """Append the memory block to the system prompt if available and enabled.
 
-        Prefers the S66 dual-layer working block from the new MemoryStore-backed
-        retriever (query-relevant when a question is given, recent otherwise),
-        falling back to the legacy flat block when the new layer yields nothing.
-        The full uncompressed archive remains searchable for recovery; the block
-        is unwrapped (the agent wraps it as untrusted context, S175).
+        Builds the unified working block: the salient durable facts (always
+        present, ranked by use_count x recency) plus query-relevant facts,
+        composed from the memory store in one token budget and deduplicated. The
+        full uncompressed archive remains searchable for recovery; the block is
+        unwrapped (the agent wraps it as untrusted context, S175).
 
         Args:
             system_prompt: the current system prompt
@@ -1182,16 +1192,22 @@ class Executor:
         if not self._memory_enabled:
             return system_prompt
 
+        # M3: the memory store is now the single source of truth (the legacy
+        # store has been migrated into it and the write paths are unified), so
+        # the working block is composed from the store alone -- the legacy
+        # bridge is gone.
         memory_block = ""
-        # S174: dual-layer working block from the new MemoryStore.
-        if DUAL_LAYER_MEMORY_AVAILABLE and _working_memory_block is not None:
+        if DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
             try:
-                memory_block = _working_memory_block(question, max_tokens=500) or ""
+                memory_block = _build_memory_block(
+                    question, max_tokens=500, mark_used=True
+                ) or ""
             except Exception as e:
-                logger.debug(f"Dual-layer memory block skipped: {e}")
+                logger.debug(f"Unified memory block skipped: {e}")
                 memory_block = ""
 
-        # Legacy fallback when the new layer has nothing to contribute.
+        # Belt-and-suspenders: if the unified composer is entirely unavailable,
+        # fall back to the (frozen, migrated) legacy flat block.
         if not memory_block and MEMORY_AVAILABLE and _memory_manager is not None:
             try:
                 memory_block = _memory_manager.format_for_prompt(max_tokens=500) or ""
@@ -2423,6 +2439,17 @@ class Executor:
                 )
             except Exception as e:
                 logger.error(f"Conversation save error: {e}")
+
+            # M2: auto-capture durable facts from the conversation (gated,
+            # throttled, fire-and-forget; never blocks or breaks the turn).
+            if _maybe_capture is not None:
+                try:
+                    _maybe_capture(
+                        conversation_id,
+                        conversation_manager.get_context_messages(conversation_id),
+                    )
+                except Exception as _cap_err:
+                    logger.debug(f"Auto-capture skipped: {_cap_err}")
 
         # Step 6: Cache storage (S18 -- C3, S19 -- G3 multi-turn)
         # Store the response in cache for successful requests (single AND multi-turn)

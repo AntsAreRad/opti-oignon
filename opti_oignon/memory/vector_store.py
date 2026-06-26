@@ -119,6 +119,7 @@ class MemoryVectorStore:
         client: Any | None = None,
     ) -> None:
         self._embedder = embedder if embedder is not None else _default_embedder()
+        self._warned_no_embedder = False
         if collection is not None:
             self._collection = collection
         else:
@@ -146,12 +147,44 @@ class MemoryVectorStore:
 
     def embed(self, text: str) -> list[float] | None:
         if self._embedder is None:
+            if not self._warned_no_embedder:
+                logger.warning(
+                    "memory embedder unavailable; semantic recall degraded "
+                    "(keyword/canonical retrieval only)"
+                )
+                self._warned_no_embedder = True
             return None
         try:
             return self._embedder.embed_single(text)
         except Exception as exc:  # pragma: no cover - runtime embedding failures
             logger.warning("memory embedding failed: %s", exc)
             return None
+
+    def health(self) -> dict[str, Any]:
+        """Report the embedder state for the archive (semantic) tier.
+
+        Returns a dict with ``status`` ("ok" | "degraded" | "unavailable"),
+        ``available`` (bool), and ``dim`` / ``detail``. Never raises. "ok" means
+        embeddings flow; "degraded" means an embedder is configured but not
+        returning vectors (e.g. Ollama down or the embed model missing);
+        "unavailable" means no embedder is configured. In every non-ok case the
+        canonical (keyword/recency) tier still works -- recall is degraded, not
+        down.
+        """
+        if self._embedder is None:
+            return {
+                "status": "unavailable",
+                "available": False,
+                "detail": "no embedder configured; semantic recall disabled",
+            }
+        probe = self.embed("ok")
+        if isinstance(probe, list) and probe:
+            return {"status": "ok", "available": True, "dim": len(probe)}
+        return {
+            "status": "degraded",
+            "available": False,
+            "detail": "embedder configured but not returning vectors",
+        }
 
     def _resolve_embedding(
         self, text: str, embedding: list[float] | None
