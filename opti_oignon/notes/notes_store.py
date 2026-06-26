@@ -852,7 +852,7 @@ class NotesStore:
     def _republish_note_full_state(
         self,
         note_id: str,
-        record: "NoteRecord | None",
+        record: NoteRecord | None,
         *,
         user_id: str | None = None,
     ) -> None:
