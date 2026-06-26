@@ -114,6 +114,8 @@ class ChatRequest(BaseModel):
     consensus_strategy: str | None = None      # best_of_n, weighted_vote, llm_merge
     # S51: Auto-correction
     self_correct: bool | None = None          # None = auto, True = force
+    # Lot 5: opt-in optimization -- route tool-bound work to the fast tool model
+    optimize: bool | None = None              # None/False = keep selected model
     # S117: Quick sandbox mode for chat code execution
     quick_sandbox: bool | None = None         # None = use config, True = force on
     # S118: Chat coding agent mode (conversational coding with persistent sandbox)

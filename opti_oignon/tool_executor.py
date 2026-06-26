@@ -76,6 +76,65 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _call_signature(tool_name: str, arguments: dict) -> str:
+    """Stable identity of a tool call (name + canonical args) for the Lot 4
+    anti-spin progress guard. Argument order and value types are normalized so
+    two calls that differ only cosmetically still compare equal.
+    """
+    try:
+        canonical = json.dumps(arguments or {}, sort_keys=True, default=str)
+    except Exception:
+        canonical = repr(sorted(
+            (str(k), str(v)) for k, v in (arguments or {}).items()
+        ))
+    return f"{tool_name}\x00{canonical}"
+
+
+# Lot 4 verification pass (deterministic-light). The artifact-producing handlers
+# (execute_code / write_file) never raise -- they capture every outcome as text
+# and the tool call is reported success=True regardless -- so a failed run or a
+# failed write cannot be seen through ToolCallResult.success. These are the
+# well-known FAILURE markers their result text carries. The set is intentionally
+# conservative (clear failure signals only): a false retry costs more than a
+# missed check, which merely leaves behavior as it was.
+_EXEC_FAILURE_MARKERS = (
+    "Traceback (most recent call last):",
+    "Execution Failed (return code:",
+    "Code execution error:",
+)
+_WRITE_FAILURE_MARKERS = (
+    "Write file error:",
+)
+
+
+def _verification_hint(tool_calls: list) -> str | None:
+    """Deterministic-light success check off executed results.
+
+    Scans back to the most recent artifact-producing call (execute_code /
+    write_file) and returns a corrective observation when its result text shows
+    a clear failure, else None (criterion met, or nothing to verify). Only that
+    last artifact action is judged -- it is the success criterion for the turn.
+    """
+    for tc in reversed(tool_calls):
+        name = getattr(tc, "tool_name", "")
+        result = getattr(tc, "result", "") or ""
+        if name == "execute_code":
+            if any(m in result for m in _EXEC_FAILURE_MARKERS):
+                return (
+                    "[Verification] The last code execution reported an error. "
+                    "Inspect the output above, fix the code, and run it again."
+                )
+            return None
+        if name == "write_file":
+            if any(m in result for m in _WRITE_FAILURE_MARKERS):
+                return (
+                    "[Verification] The last file write failed. Check the path "
+                    "and content, then write the file again."
+                )
+            return None
+    return None
+
+
 # =============================================================================
 # RESULT MODELS
 # =============================================================================
@@ -261,16 +320,46 @@ class ToolExecutor:
         # next decision instead of stopping the loop, so the model can correct
         # itself; bounded by max_tool_retries consecutive retryable failures.
         consecutive_failures = 0
+        # Lot 4 anti-spin progress guard: an identical consecutive call to one
+        # that already SUCCEEDED makes no further progress, so stop instead of
+        # repeating it. last_signature holds only successful calls, so this does
+        # not pre-empt the Lot 3 retry path -- a repeated FAILING call is left to
+        # the max_tool_retries budget (which also feeds the error back).
+        last_signature: str | None = None
+        # Lot 4 verification pass: when the model stops issuing calls, confirm
+        # the success criterion off the executed results before declaring done.
+        # A single corrective iteration is injected at most (verification_done).
+        verification_done = False
         for iteration in range(self.max_tool_calls):
             decisions = self._decide_tools(
                 message, _model, context_messages, tool_results_context,
             )
             if not decisions:
+                if not verification_done and tool_calls:
+                    hint = _verification_hint(tool_calls)
+                    if hint is not None:
+                        verification_done = True
+                        tool_results_context.append(hint)
+                        logger.info(
+                            "Verification: success criterion not met; running "
+                            "one corrective iteration"
+                        )
+                        continue
                 break
 
             hard_stop = False
             retryable_failure = False
+            spin_detected = False
             for tool_name, arguments in decisions:
+                signature = _call_signature(tool_name, arguments)
+                if last_signature is not None and signature == last_signature:
+                    logger.info(
+                        "Anti-spin: identical consecutive call to %s after it "
+                        "already succeeded; stopping the ReAct loop",
+                        tool_name,
+                    )
+                    spin_detected = True
+                    break
                 call_result = self._execute_tool(
                     tool_name, arguments, "", approval_fn=approval_fn,
                 )
@@ -286,6 +375,9 @@ class ToolExecutor:
                     else:
                         hard_stop = True
                     break
+                last_signature = signature
+            if spin_detected:
+                break
             if hard_stop:
                 break
             if retryable_failure:

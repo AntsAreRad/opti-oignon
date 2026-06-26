@@ -243,6 +243,41 @@ def model_supports_native_tools(model: str, capability_lookup=None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Capability gate -- the think=True/400 guard (option A)
+# ---------------------------------------------------------------------------
+# Families whose Ollama runners accept the native `think` switch. The default is
+# deliberately conservative: a model not matched here (and without a profile
+# verdict) is treated as NON-thinking, so `think=True` is never sent to a runner
+# that would reject it with HTTP 400 and drop the turn. A model that does support
+# thinking but is missing from this list is only under-served (its reasoning pass
+# is skipped), never broken -- tag `thinking` in its model profile to restore it.
+_THINKING_FAMILIES = (
+    "qwen3", "qwq", "deepseek-r1",
+)
+
+
+def model_supports_thinking(model: str, capability_lookup=None) -> bool:
+    """Whether ``model`` accepts the Ollama native ``think=True`` switch.
+
+    Mirrors :func:`model_supports_native_tools`. If ``capability_lookup`` is
+    given (the model-profile system -- option A), it is consulted first: a
+    callable(model) -> bool | None, where None means "no opinion" and falls
+    through to the name heuristic. The heuristic defaults to False for an
+    unrecognized model, so the think switch is never sent to a runner that would
+    answer it with HTTP 400.
+    """
+    if capability_lookup is not None:
+        try:
+            verdict = capability_lookup(model)
+            if verdict is not None:
+                return bool(verdict)
+        except Exception:
+            pass
+    name = (model or "").lower()
+    return any(fam in name for fam in _THINKING_FAMILIES)
+
+
+# ---------------------------------------------------------------------------
 # Lot 3 -- argument auto-repair (tolerate near-miss argument names)
 # ---------------------------------------------------------------------------
 # A model often emits the right intent under a slightly wrong key ("path" for

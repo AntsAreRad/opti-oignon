@@ -545,6 +545,8 @@ async def _stream_response(
                     consensus_strategy=request.consensus_strategy,
                     # S51: Auto-correction
                     self_correct=request.self_correct if hasattr(request, 'self_correct') and request.self_correct is not None else None,
+                    # Lot 5: opt-in tool-model optimization
+                    optimize=getattr(request, 'optimize', None),
                     on_tool_call=_on_tool_call_callback,
                     on_reasoning_step=_on_reasoning_step_callback,
                     on_consensus_model=_on_consensus_model_callback,
