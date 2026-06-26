@@ -171,6 +171,36 @@ def migrate_memory() -> dict:
     return _migrate_legacy(force=True)
 
 
+@router.get("/health")
+def memory_health() -> dict:
+    """Memory store health.
+
+    The canonical tier (keyword/recency over SQLite) is always available; the
+    archive tier (semantic recall over the vector layer) is "degraded" when the
+    embedder is down. ``degraded`` is the single overall flag the UI can surface.
+    """
+    result = {
+        "canonical": "ok",
+        "archive": "ok",
+        "embedder": {"status": "unknown"},
+        "degraded": False,
+    }
+    try:
+        from ..memory.vector_store import get_vector_store
+
+        emb = get_vector_store().health()
+        result["embedder"] = emb
+        if emb.get("status") != "ok":
+            result["archive"] = "degraded"
+            result["degraded"] = True
+    except Exception as e:
+        logger.debug(f"memory health probe failed: {e}")
+        result["embedder"] = {"status": "unknown", "detail": str(e)}
+        result["archive"] = "degraded"
+        result["degraded"] = True
+    return result
+
+
 # ---------------------------------------------------------------------------
 # S174: MemoryStore-backed surface (the two-tier memory store).
 #
