@@ -497,6 +497,47 @@ def _default_note_sink() -> Any | None:
     return _sink
 
 
+def _default_memory_canonical_sink() -> Any | None:
+    """The process-default MEMORY_CANONICAL apply sink, or ``None``.
+
+    The ``_default_note_sink`` idiom (SYN-01, Direction D): read-only, no seed
+    -- it only consults the already-initialised canonical-memory store
+    singleton (importing the module is cheap; the ``_store`` singleton is None
+    until the application opens it). Anything else resolves to ``None``,
+    fail-secure at the landing seam. The sink is hook-free
+    (``apply_synced_memory_canonical`` never re-publishes), so a landed record
+    is journalled verbatim, signature preserved. The fact id is the record id.
+    """
+    try:
+        from opti_oignon.memory import canonical_store as _cs
+    except Exception:
+        return None
+    store = getattr(_cs, "_store", None)
+    apply = getattr(store, "apply_synced_memory_canonical", None)
+    if not callable(apply):
+        return None
+
+    def _sink(record: SyncRecord) -> bool:
+        try:
+            return bool(
+                apply(
+                    record.record_id,
+                    record.payload,
+                    deleted=record.deleted,
+                    updated_at=record.updated_at,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "memory-canonical sink raised for %s",
+                getattr(record, "record_id", "?"),
+                exc_info=True,
+            )
+            return False
+
+    return _sink
+
+
 def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
@@ -541,6 +582,7 @@ class SyncEngine:
         update_sink: Any | None = None,
         conversation_sink: Any | None = None,
         note_sink: Any | None = None,
+        memory_canonical_sink: Any | None = None,
         update_watermark_gate: Any | None = None,
     ) -> None:
         if not isinstance(device, str) or not device:
@@ -578,6 +620,11 @@ class SyncEngine:
         # to the already-initialised notes store singleton (the note_gate
         # idiom); an unresolvable sink DROPS the record fail-secure.
         self._note_sink = note_sink
+        # SYN-01 (Direction D): the injectable MEMORY_CANONICAL apply sink. None
+        # resolves lazily to the already-initialised canonical-memory store
+        # singleton (the note_sink idiom); an unresolvable sink DROPS the record
+        # fail-secure at the landing seam.
+        self._memory_canonical_sink = memory_canonical_sink
         self._update_watermark_gate = update_watermark_gate
         # One warning per engine when signing degrades, not one per publish.
         self._warned_unsigned = False
@@ -623,6 +670,15 @@ class SyncEngine:
         if self._note_sink is not None:
             return self._note_sink
         return _default_note_sink()
+
+    def _resolve_memory_canonical_sink(self) -> Any | None:
+        # SYN-01 (Direction D): the injected sink wins; otherwise the lazy
+        # process default (the already-initialised canonical-memory store
+        # singleton, or no sink at all -- fail-secure at the landing seam: the
+        # record drops).
+        if self._memory_canonical_sink is not None:
+            return self._memory_canonical_sink
+        return _default_memory_canonical_sink()
 
     def _resolve_update_watermark_gate(self) -> Any | None:
         # S264: the injected reader wins; otherwise the lazy process default
@@ -1571,6 +1627,56 @@ class SyncEngine:
             )
         return kept
 
+    def _land_memory_canonical(
+        self, records_in: list[SyncRecord], *, peer_id: str
+    ) -> list[SyncRecord]:
+        """Materialise verified MEMORY_CANONICAL records into the canonical store.
+
+        The full-state analogue of :meth:`_land_conversations` for canonical
+        memory (SYN-01, Direction D): a winning fact lands into the canonical
+        store (preserving the device-local ``use_count``; a tombstone is a hard
+        delete). The record is KEPT for the feed/relay; a refused or unappliable
+        record is DROPPED (fail-secure: a record that cannot be persisted must
+        not converge). Other kinds pass through untouched. Canonical memory is
+        user data -- it lands ungated, on the same seam as conversation/note.
+        """
+        kept: list[SyncRecord] = []
+        sink: Any | None = None
+        sink_resolved = False
+        for r in records_in:
+            if r.kind.value != RecordKind.MEMORY_CANONICAL.value:
+                kept.append(r)
+                continue
+            if not sink_resolved:
+                sink_resolved = True
+                sink = self._resolve_memory_canonical_sink()
+            ok = False
+            if sink is not None:
+                try:
+                    ok = bool(sink(r))
+                except Exception:
+                    logger.debug(
+                        "memory-canonical sink raised for %s",
+                        r.record_id,
+                        exc_info=True,
+                    )
+                    ok = False
+            if ok:
+                kept.append(r)
+                continue
+            logger.warning(
+                "sync: refused a canonical memory fact at the landing seam "
+                "(id=%s origin=%s): not materialised, not served",
+                r.record_id,
+                r.device,
+            )
+            _audit(
+                "sync_memory_canonical_refused",
+                peer_id=peer_id,
+                id=r.record_id,
+            )
+        return kept
+
     def _land_note_updates(
         self, records_in: list[SyncRecord], *, peer_id: str
     ) -> list[SyncRecord]:
@@ -1833,6 +1939,12 @@ class SyncEngine:
             # S199 (SYN-01): materialise NOTE existence + metadata into the
             # notes store on the same seam (the body converges via NOTE_UPDATE).
             appliable = self._land_notes(appliable, peer_id=peer_id)
+            # SYN-01 (Direction D): materialise MEMORY_CANONICAL winners into
+            # the canonical store on the same post-gate seam, BEFORE the feed
+            # journal -- a refused fact never enters the feed and is never
+            # served onward. Canonical memory is user data: it lands ungated,
+            # alongside conversation/note.
+            appliable = self._land_memory_canonical(appliable, peer_id=peer_id)
             filtered = RecordBatch(
                 device=batch.device,
                 high_water=batch.high_water,
