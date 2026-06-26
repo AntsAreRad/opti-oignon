@@ -107,10 +107,29 @@ async def lifespan(app: FastAPI):
         run_boot_migration()
     except Exception:  # noqa: BLE001 - startup must not break on import/call
         logger.warning("boot: legacy memory migration call failed", exc_info=True)
+    # Load all enabled plugins and register their hooks, so plugin effects apply
+    # during inference AFTER a restart -- not only right after enable_plugin().
+    # (The registry persists "enabled" state; the loaded instances do not, so
+    # without this the hooks are never re-registered on boot.) Guarded: a plugin
+    # load failure must not break the boot.
+    try:
+        from opti_oignon.plugin_loader import plugin_loader
+        if plugin_loader is not None:
+            _loaded = plugin_loader.load_all_enabled()
+            logger.info("plugins: loaded %d enabled plugin(s) at startup", len(_loaded))
+    except Exception:  # noqa: BLE001 - startup must not break on plugin loading
+        logger.warning("plugins: load_all_enabled at startup failed", exc_info=True)
     yield
     # Shutdown: stop the sync driver if it was armed (a no-op otherwise).
     from opti_oignon.veilid.sync_service import reset_sync_service
     reset_sync_service()
+    # Shut down loaded plugins (unload + stop the subprocess watchdog). Defensive.
+    try:
+        from opti_oignon.plugin_loader import plugin_loader
+        if plugin_loader is not None:
+            plugin_loader.shutdown_all()
+    except Exception:  # noqa: BLE001 - shutdown is defensive
+        logger.debug("plugins: shutdown_all failed", exc_info=True)
     logger.info("Opti-Oignon API stopped")
 
 
