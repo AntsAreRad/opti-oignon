@@ -127,17 +127,26 @@ class MemoryVectorStore:
 
     def _build_collection(self, chroma_dir: Path | str | None, client: Any | None) -> Any:
         if not _HAS_CHROMADB:
-            raise RuntimeError(
-                "chromadb is not available; inject a collection or install chromadb"
+            logger.warning(
+                "chromadb not installed; memory vector store unavailable "
+                "(canonical keyword/recency recall only)"
             )
-        if client is None:
-            path = str(chroma_dir if chroma_dir is not None else _default_chroma_dir())
-            client = chromadb.PersistentClient(
-                path=path, settings=ChromaSettings(anonymized_telemetry=False)
+            return None
+        try:
+            if client is None:
+                path = str(chroma_dir if chroma_dir is not None else _default_chroma_dir())
+                client = chromadb.PersistentClient(
+                    path=path, settings=ChromaSettings(anonymized_telemetry=False)
+                )
+            return client.get_or_create_collection(
+                name=COLLECTION_NAME, metadata=dict(COLLECTION_METADATA)
             )
-        return client.get_or_create_collection(
-            name=COLLECTION_NAME, metadata=dict(COLLECTION_METADATA)
-        )
+        except Exception as exc:  # noqa: BLE001 - a broken backend degrades, never crashes
+            logger.warning(
+                "chromadb collection unavailable (%s); memory vector store "
+                "degraded to canonical recall only", exc
+            )
+            return None
 
     @property
     def collection(self) -> Any:
@@ -167,10 +176,17 @@ class MemoryVectorStore:
         ``available`` (bool), and ``dim`` / ``detail``. Never raises. "ok" means
         embeddings flow; "degraded" means an embedder is configured but not
         returning vectors (e.g. Ollama down or the embed model missing);
-        "unavailable" means no embedder is configured. In every non-ok case the
-        canonical (keyword/recency) tier still works -- recall is degraded, not
-        down.
+        "unavailable" means no embedder is configured, or the vector backend
+        (chromadb) is absent. In every non-ok case the canonical (keyword/recency)
+        tier still works -- recall is degraded, not down.
         """
+        if self._collection is None:
+            return {
+                "status": "unavailable",
+                "available": False,
+                "detail": "vector store unavailable (chromadb not installed); "
+                "canonical recall only",
+            }
         if self._embedder is None:
             return {
                 "status": "unavailable",
@@ -217,6 +233,10 @@ class MemoryVectorStore:
         source: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> str:
+        # Degraded (no chromadb): the fact lives in the canonical store; the
+        # vector mirror is a no-op. Short-circuit before computing an embedding.
+        if self._collection is None:
+            return fact_id
         emb = self._resolve_embedding(text, embedding)
         md = {"user_id": str(user_id), "category": str(category), "source": str(source)}
         if metadata:
@@ -240,6 +260,8 @@ class MemoryVectorStore:
         source: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
+        if self._collection is None:
+            return False
         existing = self.get(fact_id)
         if existing is None:
             return False
@@ -273,6 +295,8 @@ class MemoryVectorStore:
     # Delete (scoped)
 
     def delete(self, fact_id: str, *, user_id: str | None = None) -> bool:
+        if self._collection is None:
+            return False
         record = self.get(fact_id)
         if record is None:
             return False
@@ -284,6 +308,8 @@ class MemoryVectorStore:
         return True
 
     def clear(self, *, user_id: str | None = None) -> int:
+        if self._collection is None:
+            return 0
         where = self._where(user_id)
         targets = self._collection.get(where=where, include=[]).get("ids", [])
         if targets:
@@ -293,6 +319,8 @@ class MemoryVectorStore:
     # Read
 
     def get(self, fact_id: str) -> dict[str, Any] | None:
+        if self._collection is None:
+            return None
         res = self._collection.get(
             ids=[fact_id], include=["documents", "metadatas", "embeddings"]
         )
@@ -310,6 +338,8 @@ class MemoryVectorStore:
         }
 
     def count(self, *, user_id: str | None = None) -> int:
+        if self._collection is None:
+            return 0
         if user_id is None:
             return int(self._collection.count())
         res = self._collection.get(where=self._where(user_id), include=[])
@@ -326,6 +356,8 @@ class MemoryVectorStore:
         threshold: float | None = None,
     ) -> list[SimilarMemory]:
         """Return up to top_k neighbours, optionally filtered by a similarity floor."""
+        if self._collection is None:
+            return []
         res = self._collection.query(
             query_embeddings=[list(embedding)],
             n_results=top_k,
