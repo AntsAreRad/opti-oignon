@@ -109,8 +109,8 @@ except ImportError:
 # stays searchable for recovery. The block is unwrapped (the agent wraps it as
 # untrusted context, S175).
 try:
-    from .memory.retrieval import working_memory_block as _working_memory_block
     from .memory.retrieval import build_memory_block as _build_memory_block
+    from .memory.retrieval import working_memory_block as _working_memory_block
     DUAL_LAYER_MEMORY_AVAILABLE = True
 except Exception:
     DUAL_LAYER_MEMORY_AVAILABLE = False

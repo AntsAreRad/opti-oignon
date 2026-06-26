@@ -31,10 +31,10 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 # is otherwise frozen. Single-user mode resolves user_id=None to the local user.
 # ---------------------------------------------------------------------------
 try:
+    from ..conversation import conversation_manager as _conv_manager
     from ..memory.dedup import get_memory_store as _get_store
     from ..memory.extraction import extract_and_store as _extract_and_store
     from ..memory.migration import migrate_legacy_to_store as _migrate_legacy
-    from ..conversation import conversation_manager as _conv_manager
 
     _STORE_OK = True
 except Exception:  # pragma: no cover - store optional
