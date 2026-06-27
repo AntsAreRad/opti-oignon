@@ -41,9 +41,11 @@ def _load_blob_store():
             "opti_oignon.notes.blob_store")
     saved = {k: sys.modules.get(k) for k in keys}
 
-    pkg = types.ModuleType("opti_oignon"); pkg.__path__ = []
+    pkg = types.ModuleType("opti_oignon")
+    pkg.__path__ = []
     sys.modules["opti_oignon"] = pkg
-    npkg = types.ModuleType("opti_oignon.notes"); npkg.__path__ = []
+    npkg = types.ModuleType("opti_oignon.notes")
+    npkg.__path__ = []
     sys.modules["opti_oignon.notes"] = npkg
 
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -147,7 +149,9 @@ def test_corrupted_wire_caught_by_hash():
                 first = True
                 for c in src:
                     if first and c:
-                        b = bytearray(c); b[0] ^= 0x01; c = bytes(b)
+                        b = bytearray(c)
+                        b[0] ^= 0x01
+                        c = bytes(b)
                         first = False
                     yield c
 
