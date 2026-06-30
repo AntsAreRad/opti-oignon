@@ -1300,11 +1300,15 @@ class BackendRegistry:
         self._backends: dict[str, InferenceBackend] = {}
         self._active_name: str | None = None
         self._lock = threading.Lock()
+        # BR: model -> backend name, for resolve_backend (positive resolutions
+        # only; cleared whenever the backend set changes).
+        self._route_cache: dict[str, str] = {}
 
     def register(self, backend: InferenceBackend) -> None:
         """Register a backend."""
         with self._lock:
             self._backends[backend.name] = backend
+            self._route_cache.clear()
             logger.info("Registered inference backend: %s", backend.display_name)
 
     def unregister(self, name: str) -> bool:
@@ -1314,6 +1318,7 @@ class BackendRegistry:
                 if self._active_name == name:
                     self._active_name = None
                 del self._backends[name]
+                self._route_cache.clear()
                 return True
             return False
 
@@ -1357,6 +1362,57 @@ class BackendRegistry:
             self._active_name = name
             logger.info("Active inference backend: %s", name)
             return True
+
+    def resolve_backend(self, model: str) -> InferenceBackend | None:
+        """Select the backend that should serve ``model`` (BR, per-model routing).
+
+        Health-gated probe of each registered backend's ``model_info(model)``: a
+        backend that recognises the model is a candidate. The active backend is
+        preferred when it is itself a candidate (stability -- no needless
+        switch); otherwise the first healthy recogniser is returned. When no
+        backend recognises the model the active backend is returned, so a
+        single-backend deployment behaves exactly as before (backward
+        compatible). Returns None only when there is no usable backend at all,
+        matching ``active`` -- the executor's existing ``if backend:`` guard then
+        falls through to its direct path.
+
+        Resolutions are cached (model -> backend name); the whole cache is
+        cleared on register/unregister (a topology change), a cache hit is
+        re-``health_check``ed so a backend that died since caching is never
+        served, and only positive resolutions are cached (an unrecognised model
+        is not pinned to the fallback -- a later pull may make a backend
+        recognise it). ``model_info`` may hit the network for Ollama or the
+        filesystem for llama.cpp, so the cache removes that cost on the hot path.
+        In Bulbe an HTTP backend fails ``health_check`` and is never resolved.
+        """
+        cached_name = self._route_cache.get(model)
+        if cached_name is not None:
+            cached = self._backends.get(cached_name)
+            if cached is not None:
+                try:
+                    if cached.health_check():
+                        return cached
+                except Exception:
+                    pass
+            self._route_cache.pop(model, None)
+        active = self.active
+        candidates: list[InferenceBackend] = []
+        for backend in self.backends():
+            try:
+                if not backend.health_check():
+                    continue
+                if backend.model_info(model) is not None:
+                    candidates.append(backend)
+            except Exception:
+                continue
+        if not candidates:
+            return active
+        if active is not None and any(active is c for c in candidates):
+            chosen = active
+        else:
+            chosen = candidates[0]
+        self._route_cache[model] = chosen.name
+        return chosen
 
     def list_backends(self) -> list[dict]:
         """Return status of all registered backends."""
