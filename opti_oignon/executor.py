@@ -938,7 +938,7 @@ class Executor:
 
             # S105: Use backend abstraction when available
             if INFERENCE_BACKEND_AVAILABLE and get_backend_registry:
-                backend = get_backend_registry().active
+                backend = get_backend_registry().resolve_backend(model)
                 if backend:
                     # S224: ticket pass-through (thread-local, 4.4).
                     _governor_hold_ticket(_admission)
@@ -2247,7 +2247,7 @@ class Executor:
                 )
 
                 if _use_backend:
-                    backend = get_backend_registry().active
+                    backend = get_backend_registry().resolve_backend(routing.model)
                     stream_iter = backend.stream(
                         model=routing.model,
                         messages=messages,
@@ -2897,7 +2897,7 @@ class Executor:
 
             # S105: Use backend abstraction when available
             if INFERENCE_BACKEND_AVAILABLE and get_backend_registry:
-                backend = get_backend_registry().active
+                backend = get_backend_registry().resolve_backend(model)
                 if backend:
                     # S224: ticket pass-through (thread-local, 4.4).
                     _governor_hold_ticket(_admission)
