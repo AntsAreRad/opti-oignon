@@ -45,6 +45,11 @@ class ToolDefinition:
     handler: Callable | None = None
     requires: list[str] = field(default_factory=list)
     enabled: bool = True
+    # True when the tool needs outbound network access to do its work.
+    # This flag on the definition is the single source of truth the
+    # per-call mode gate and the capability manifest derive from; no
+    # hand-maintained list of network tools exists anywhere else.
+    network: bool = False
 
 
 class ToolRegistry:
@@ -99,18 +104,42 @@ class ToolRegistry:
         """Retrieve a tool by its name."""
         return self._tools.get(name)
 
+    @staticmethod
+    def _network_allowed() -> bool:
+        """Whether network-bound tools may exist right now.
+
+        The isolated security mode means physical network isolation, so a
+        tool flagged ``network`` is mechanically absent from every
+        availability view while it is active. Evaluated per call (the mode
+        can change between requests) and fail-closed: an indeterminable
+        mode never opens network capability.
+        """
+        try:
+            from opti_oignon.security_mode import is_bulbe
+            return not is_bulbe()
+        except Exception:
+            return False
+
     def list_available(self) -> list[ToolDefinition]:
         """Liste les outils actifs et disponibles."""
-        return [t for t in self._tools.values() if t.enabled]
+        allow_network = self._network_allowed()
+        return [
+            t for t in self._tools.values()
+            if t.enabled and (allow_network or not t.network)
+        ]
 
     def list_all(self) -> list[ToolDefinition]:
         """Liste tous les outils enregistres (actifs ou non)."""
         return list(self._tools.values())
 
     def is_available(self, name: str) -> bool:
-        """Check if a tool is registered and active."""
+        """Check if a tool is registered, active and reachable in this mode."""
         tool = self._tools.get(name)
-        return tool is not None and tool.enabled
+        if tool is None or not tool.enabled:
+            return False
+        if tool.network and not self._network_allowed():
+            return False
+        return True
 
     @property
     def sandbox_mode(self) -> bool:
@@ -250,13 +279,16 @@ class ToolRegistry:
 
         return affected
 
-    def get_tools_prompt(self) -> str:
+    def get_tools_prompt(self, tools: list[ToolDefinition] | None = None) -> str:
         """Generate a prompt describing the available tools for the LLM.
 
         Formate les descriptions et parametres de each outil actif
         dans un format lisible par le LLM pour la prise de decision.
+        When ``tools`` is given, render exactly that view (the capability
+        manifest passes its filtered set here); the default renders the
+        live availability list, unchanged.
         """
-        available = self.list_available()
+        available = self.list_available() if tools is None else list(tools)
         if not available:
             return ""
 
@@ -512,6 +544,7 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
         },
         handler=_handle_web_search,
         requires=["web_search"],
+        network=True,
     ))
 
     # 2. execute_code

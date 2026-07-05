@@ -1563,6 +1563,7 @@ class Executor:
         images: list[str] | None = None,
         no_cache: bool = False,
         persist: bool = True,
+        capability_block: str | None = None,
     ) -> Generator[str, None, tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -1941,6 +1942,9 @@ class Executor:
                         project_id=_active_project_id,
                         rag_query=refined_question,
                         project_active=_active_project_id is not None,
+                        # The capability block is pinned above the
+                        # compressed history when the caller supplies one.
+                        manifest_block=capability_block,
                     )
                     messages = opt_result.messages
                     context_tokens = opt_result.total_tokens

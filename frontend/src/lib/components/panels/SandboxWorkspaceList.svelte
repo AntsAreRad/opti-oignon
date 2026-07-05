@@ -51,6 +51,17 @@
 			session.bound_conversation_id === activeConversationId
 		);
 	}
+
+	function isQuickAuto(session: SandboxSessionInfo): boolean {
+		// Quick sessions are keyed by the conversation that spawned them,
+		// so their manager id IS that conversation id. Their binding is
+		// implicit (the chat lifecycle owns it): the explicit unbind route
+		// is a no-op for them, so neither Unbind nor Select is offered.
+		return (
+			session.bound_conversation_id !== null &&
+			session.session_id === session.bound_conversation_id
+		);
+	}
 </script>
 
 {#if sessions.length === 0}
@@ -88,16 +99,24 @@
 					</span>
 					<span title="Last activity">active {formatLastActivity(session.last_activity)}</span>
 					{#if session.bound_conversation_id}
-						<span class="workspace-bound" class:is-bound-active={boundToActive(session)} title="Bound conversation">
+						<span
+							class="workspace-bound"
+							class:is-bound-active={boundToActive(session)}
+							title={isQuickAuto(session)
+								? 'Auto-created by the chat for this conversation; the chat lifecycle manages it'
+								: 'Bound conversation'}
+						>
 							bound {boundToActive(session)
 								? 'to this conversation'
-								: session.bound_conversation_id.slice(0, 8)}
+								: session.bound_conversation_id.slice(0, 8)}{isQuickAuto(session) ? ' (auto)' : ''}
 						</span>
 					{/if}
 				</div>
 
 				<div class="workspace-actions">
-					{#if boundToActive(session)}
+					{#if isQuickAuto(session)}
+						<!-- Implicit chat-owned binding: no explicit bind action applies. -->
+					{:else if boundToActive(session)}
 						<Button
 							size="sm"
 							variant="ghost"

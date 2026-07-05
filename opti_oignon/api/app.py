@@ -91,6 +91,21 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management."""
+    # Startup security checklist: run every runtime guard once at boot so the
+    # result is cached for GET /api/security/startup-checks and a blocked
+    # verdict (a critical guard failure, e.g. Ollama exposed on a wildcard
+    # address in Bulbe mode) refuses startup on every launch path -- CLI
+    # launcher, UI launcher subprocess, and direct ASGI server invocation
+    # alike. Guarded so unavailable check machinery can never break the boot:
+    # only the deliberate blocked verdict propagates, aborting the ASGI
+    # startup phase before any service below is armed.
+    _boot_guard = None
+    try:
+        from opti_oignon.startup_checks import enforce_boot_checks as _boot_guard
+    except Exception:  # noqa: BLE001 - boot must not break on import failure
+        logger.warning("boot: startup security checks unavailable", exc_info=True)
+    if _boot_guard is not None:
+        _boot_guard()
     # Startup: singletons initialize on import; heavy deps lazy-loaded (S134)
     logger.info("Opti-Oignon API started")
     # Veilid sync auto-driver: armed only when explicitly opted in

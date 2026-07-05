@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AGENTIC EXECUTOR - OPTI-OIGNON v1.5.0 (S45)
-=============================================
+AGENTIC EXECUTOR - OPTI-OIGNON
+==============================
 
 Unified agentic executor -- the single entry point that orchestrates
 every available capability: tool calling, code verification,
@@ -27,11 +27,10 @@ Architecture:
         |
         +--> Web search            --> Web search + LLM synthesis
 
-S261: comments, docstrings, and log literals normalised to English
-(the project rule: no French anywhere in code); the French detection
-keywords below are functional data and stay. S261 also threads the
-per-invocation approval_fn (S185, EX-02) through the tools and
-think+tools dispatch, which previously dropped it.
+Comments, docstrings, and log literals are English by project rule;
+the French detection keywords below are functional data and stay. The
+per-invocation approval_fn is threaded through the tools and
+think+tools dispatch.
 
 Author: Leon
 """
@@ -81,6 +80,16 @@ try:
     THINKING_GATE_AVAILABLE = True
 except ImportError:
     THINKING_GATE_AVAILABLE = False
+
+# Matching normalization (accent-stripped, apostrophe-folded, lowercased) so
+# the keyword heuristics match accented French phrasings against their
+# unaccented entries. Stdlib-only, guarded like the other seams; absence
+# degrades to plain lowercasing (the previous behavior).
+try:
+    from .response_hygiene import normalize_for_match as _normalize_for_match
+except ImportError:
+    def _normalize_for_match(text: str) -> str:
+        return (text or "").lower()
 
 # Conditional import of the StructuredOutputEngine (S42)
 try:
@@ -212,6 +221,14 @@ except ImportError:
     TOOL_REGISTRY_AVAILABLE = False
     _default_tool_registry = None
 
+# Conditional import of the capability manifest (per-request tool truth)
+try:
+    from .capability_manifest import build_manifest
+    CAPABILITY_MANIFEST_AVAILABLE = True
+except ImportError:
+    CAPABILITY_MANIFEST_AVAILABLE = False
+    build_manifest = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -287,6 +304,21 @@ _REASONING_KEYWORDS = [
     "consider all options", "considere toutes les options",
 ]
 
+# Normalized views of the keyword lists above, so accented French phrasings
+# ("actualite" written with its accent, a typographic apostrophe) match the
+# unaccented entries. The raw lists stay the source of truth.
+_TOOL_KEYWORDS_NORM = tuple(_normalize_for_match(k) for k in _TOOL_KEYWORDS)
+_WEB_SEARCH_KEYWORDS_NORM = tuple(
+    _normalize_for_match(k) for k in _WEB_SEARCH_KEYWORDS
+)
+_CODE_KEYWORDS_NORM = tuple(_normalize_for_match(k) for k in _CODE_KEYWORDS)
+_COMPLEXITY_KEYWORDS_NORM = tuple(
+    _normalize_for_match(k) for k in _COMPLEXITY_KEYWORDS
+)
+_REASONING_KEYWORDS_NORM = tuple(
+    _normalize_for_match(k) for k in _REASONING_KEYWORDS
+)
+
 
 def _quick_classify(message: str) -> dict:
     """Fast heuristic classification of the request.
@@ -295,14 +327,14 @@ def _quick_classify(message: str) -> dict:
     Never calls the LLM -- used as the fallback when the
     StructuredOutputEngine is not available.
     """
-    msg_lower = message.lower()
+    msg_lower = _normalize_for_match(message)
 
-    needs_tools = any(kw in msg_lower for kw in _TOOL_KEYWORDS)
-    needs_web = any(kw in msg_lower for kw in _WEB_SEARCH_KEYWORDS)
-    is_code = any(kw in msg_lower for kw in _CODE_KEYWORDS)
-    is_complex = any(kw in msg_lower for kw in _COMPLEXITY_KEYWORDS)
+    needs_tools = any(kw in msg_lower for kw in _TOOL_KEYWORDS_NORM)
+    needs_web = any(kw in msg_lower for kw in _WEB_SEARCH_KEYWORDS_NORM)
+    is_code = any(kw in msg_lower for kw in _CODE_KEYWORDS_NORM)
+    is_complex = any(kw in msg_lower for kw in _COMPLEXITY_KEYWORDS_NORM)
     # S49: Advanced-reasoning need detection
-    needs_reasoning = any(kw in msg_lower for kw in _REASONING_KEYWORDS)
+    needs_reasoning = any(kw in msg_lower for kw in _REASONING_KEYWORDS_NORM)
 
     # Length heuristic: long messages are often complex
     word_count = len(message.split())
@@ -325,6 +357,59 @@ def _quick_classify(message: str) -> dict:
     }
 
 
+def _build_request_manifest(model: str, web_search_override: bool | None):
+    """Build the per-request capability manifest; None means legacy path.
+
+    None is returned when the manifest module is absent, when building it
+    fails, or when it carries no tools (e.g. an explicit negative
+    tool-calling verdict for the model): every one of those degrades to
+    the exact pre-manifest behavior, so nothing regresses.
+    """
+    if not CAPABILITY_MANIFEST_AVAILABLE or build_manifest is None:
+        return None
+    try:
+        manifest = build_manifest(
+            model=model, web_search_override=web_search_override,
+        )
+    except Exception as exc:
+        logger.warning("Capability manifest unavailable: %s", exc)
+        return None
+    if manifest is None or not getattr(manifest, "has_tools", False):
+        return None
+    return manifest
+
+
+def _manifest_prompt_block(manifest) -> str | None:
+    """The pinned capability block of a manifest, or None.
+
+    None means "no block to pin", the exact pre-manifest behavior: the
+    direct-family pipelines then thread nothing to the optimizer.
+    """
+    if manifest is None:
+        return None
+    block = getattr(manifest, "prompt_block", "") or ""
+    return block or None
+
+
+def _phase2_tools_armed(
+    tool_executor_available: bool,
+    keyword_verdict: bool,
+    manifest,
+) -> bool:
+    """Whether the tools phase of the think+tools pipeline runs.
+
+    A populated manifest arms the phase regardless of keywords (the model
+    decides against the full reachable set); without a manifest the
+    legacy keyword verdict is preserved unchanged. An unavailable tool
+    executor can never be armed.
+    """
+    if not tool_executor_available:
+        return False
+    if manifest is not None and getattr(manifest, "has_tools", False):
+        return True
+    return bool(keyword_verdict)
+
+
 def _select_pipeline(
     classification: dict,
     think_override: bool | None,
@@ -334,6 +419,7 @@ def _select_pipeline(
     reasoning_available: bool = False,
     sandbox_active: bool = False,
     thinking_available: bool = True,
+    capabilities_armed: bool = False,
 ) -> str:
     """Select the optimal pipeline according to classification.
 
@@ -344,6 +430,10 @@ def _select_pipeline(
         tool_executor_available: Whether the ToolExecutor is available
         verification_available: Whether the VerificationEngine is available
         reasoning_available: Whether the ReasoningEngine is available (S49)
+        capabilities_armed: Whether the per-request capability manifest
+            announced a non-empty tool set; arms the tools pipelines the
+            same way an explicit tool keyword or an active sandbox does,
+            so the model decides instead of a keyword gate
         thinking_available: Whether the active model accepts the Ollama native
             think switch (the think=True/400 guard, option A). When False, no
             think-emitting pipeline (THINK, THINK_TOOLS, REASONING) is selected,
@@ -359,7 +449,9 @@ def _select_pipeline(
     # works in any language with no keyword misses; the classifier still
     # shapes the rest (think vs direct, web, reasoning).
     tools_armed = tool_executor_available and (
-        bool(classification.get("needs_tools")) or sandbox_active
+        bool(classification.get("needs_tools"))
+        or sandbox_active
+        or capabilities_armed
     )
 
     # Explicit overrides take priority
@@ -474,7 +566,7 @@ class AgenticExecutor:
         self_correction_engine=None,
         cascading_inference=None,
         speculative_generator=None,
-        default_model: str = "qwen3:32b",
+        default_model: str | None = None,
         fast_tool_model: str | None = None,
     ):
         """Initialize the agentic executor.
@@ -503,7 +595,9 @@ class AgenticExecutor:
         self._self_correction_engine = self_correction_engine or _default_self_correction_engine
         self._cascading_inference = cascading_inference or _default_cascading_inference
         self._speculative_generator = speculative_generator or _default_speculative_generator
-        self._default_model = default_model
+        # None resolves from the tool executor (itself configuration-backed),
+        # else from the configuration seam directly; an explicit name wins.
+        self._default_model = default_model or self._resolve_default_model()
         # Lot 5: optional fast tool-capable model. Tool-bound work routes to it
         # only when the caller passes optimize=True to execute(); None keeps the
         # selected model for everything (the strong models stay the default).
@@ -512,6 +606,10 @@ class AgenticExecutor:
         # Results of the last execution
         self._last_tool_calls: list = []
         self._last_verification_results: list = []
+        # Corrective hint injections of the last ReAct run (the tool
+        # loop's verification pass) -- distinct from the code-verification
+        # engine results above.
+        self._last_verification_hints: int = 0
         self._last_pipeline: str = PIPELINE_DIRECT
         self._last_task_analysis: Any | None = None
         # S49: Last reasoning result
@@ -538,6 +636,25 @@ class AgenticExecutor:
     # Public properties
     # -----------------------------------------------------------------
 
+    def _resolve_default_model(self) -> str:
+        """Default analysis model, without a hardcoded name.
+
+        Prefers the tool executor's configuration-backed default, then the
+        configuration seam directly; the historical fallback holds only when
+        both are unavailable.
+        """
+        te_default = getattr(self._tool_executor, "default_model", None)
+        if isinstance(te_default, str) and te_default.strip():
+            return te_default.strip()
+        try:
+            from .config import get_model
+            name = get_model("general", "primary")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        except Exception:
+            pass
+        return "qwen3:32b"
+
     @property
     def last_tool_calls(self) -> list:
         """Tool calls made during the last execution."""
@@ -547,6 +664,11 @@ class AgenticExecutor:
     def last_verification_results(self) -> list:
         """Verification results of the last execution."""
         return self._last_verification_results
+
+    @property
+    def last_verification_hints(self) -> int:
+        """Corrective hint injections of the last ReAct run."""
+        return self._last_verification_hints
 
     @property
     def last_pipeline(self) -> str:
@@ -966,6 +1088,7 @@ class AgenticExecutor:
         # Reset the results of the last execution
         self._last_tool_calls = []
         self._last_verification_results = []
+        self._last_verification_hints = 0
         self._last_task_analysis = None
         # S49: Last reasoning result
         self._last_reasoning_result = None
@@ -1097,6 +1220,10 @@ class AgenticExecutor:
                 effective_model,
             )
 
+        # Per-request capability manifest: the tool truth for this model
+        # in this mode (None -> exact legacy behavior).
+        request_manifest = _build_request_manifest(effective_model, web_search)
+
         # Select the pipeline
         pipeline = _select_pipeline(
             classification=classification,
@@ -1107,6 +1234,7 @@ class AgenticExecutor:
             reasoning_available=self.reasoning_available,
             sandbox_active=sandbox_active,
             thinking_available=thinking_available,
+            capabilities_armed=request_manifest is not None,
         )
         self._last_pipeline = pipeline
 
@@ -1120,12 +1248,14 @@ class AgenticExecutor:
             yield from self._execute_tools_pipeline(
                 message, routing, conversation_id, on_status,
                 approval_fn=approval_fn, model_override=effective_model,
+                manifest=request_manifest,
             )
 
         elif pipeline == PIPELINE_THINK_TOOLS:
             yield from self._execute_think_tools_pipeline(
                 message, routing, conversation_id, on_status,
                 approval_fn=approval_fn, model_override=effective_model,
+                manifest=request_manifest,
             )
 
         elif pipeline == PIPELINE_REASONING:
@@ -1138,6 +1268,7 @@ class AgenticExecutor:
                 message, routing, conversation_id, on_status,
                 think=True, web_search=False,
                 verify_code=classification.get("is_code", False),
+                capability_block=_manifest_prompt_block(request_manifest),
             )
 
         elif pipeline == PIPELINE_WEB_SEARCH:
@@ -1145,6 +1276,7 @@ class AgenticExecutor:
                 message, routing, conversation_id, on_status,
                 think=False, web_search=True,
                 verify_code=False,
+                capability_block=_manifest_prompt_block(request_manifest),
             )
 
         elif pipeline == PIPELINE_CODE_VERIFY:
@@ -1152,6 +1284,7 @@ class AgenticExecutor:
                 message, routing, conversation_id, on_status,
                 think=False, web_search=False,
                 verify_code=True,
+                capability_block=_manifest_prompt_block(request_manifest),
             )
 
         else:
@@ -1160,6 +1293,7 @@ class AgenticExecutor:
                 message, routing, conversation_id, on_status,
                 think=False, web_search=False,
                 verify_code=False,
+                capability_block=_manifest_prompt_block(request_manifest),
             )
 
         duration = time.time() - start_time
@@ -1167,7 +1301,8 @@ class AgenticExecutor:
             f"AgenticExecutor: finished in {duration:.2f}s, "
             f"pipeline={pipeline}, "
             f"tool_calls={len(self._last_tool_calls)}, "
-            f"verifications={len(self._last_verification_results)}"
+            f"verifications={len(self._last_verification_results)}, "
+            f"correction_hints={self._last_verification_hints}"
         )
 
     # -----------------------------------------------------------------
@@ -1183,11 +1318,14 @@ class AgenticExecutor:
         think: bool = False,
         web_search: bool = False,
         verify_code: bool = False,
+        capability_block: str | None = None,
     ) -> Generator:
         """Direct pipeline: LLM call via the existing Executor.
 
         Optionally enables the think mode, the web search, and/or
-        the code verification after the generation.
+        the code verification after the generation. When a capability
+        block is supplied it is threaded to the Executor so the optimizer
+        can pin it above the compressed history.
         """
         full_response = ""
 
@@ -1201,6 +1339,7 @@ class AgenticExecutor:
                 think=think,
                 web_search=web_search,
                 on_status=on_status,
+                capability_block=capability_block,
             )
             for chunk in gen:
                 if chunk:
@@ -1242,6 +1381,7 @@ class AgenticExecutor:
         on_status: Callable | None,
         approval_fn: Callable[[str, dict], bool] | None = None,
         model_override: str | None = None,
+        manifest=None,
     ) -> Generator:
         """Tools pipeline: ReAct loop via the ToolExecutor.
 
@@ -1271,23 +1411,64 @@ class AgenticExecutor:
         prior_tool_history = self.get_tool_history(conversation_id) if conversation_id else []
 
         try:
+            if hasattr(self._tool_executor, "stream_with_tools"):
+                # Streaming path: the final answer reaches the user chunk by
+                # chunk as it is generated; tool activity flows live through
+                # on_tool_call. The generator's return value carries the
+                # result used for history and persistence.
+                stream = self._tool_executor.stream_with_tools(
+                    message=message,
+                    model=model,
+                    conversation_messages=conv_messages,
+                    tool_history=prior_tool_history if prior_tool_history else None,
+                    approval_fn=approval_fn,
+                    on_tool_call=self._emit_tool_call,
+                    manifest=manifest,
+                )
+                full_response = ""
+                result = None
+                try:
+                    while True:
+                        chunk = next(stream)
+                        if chunk:
+                            full_response += chunk
+                            yield chunk
+                except StopIteration as stop:
+                    result = stop.value
+
+                if result is not None:
+                    self._last_tool_calls = list(result.tool_calls)
+                    self._last_verification_hints = getattr(
+                        result, "verification_hints", 0,
+                    )
+                    self._record_tool_calls(conversation_id, result.tool_calls)
+                    full_response = result.response or full_response
+
+                self._save_to_conversation(
+                    conversation_id, message, full_response, model,
+                )
+                return
+
             result = self._tool_executor.execute_with_tools(
                 message=message,
                 model=model,
                 conversation_messages=conv_messages,
                 tool_history=prior_tool_history if prior_tool_history else None,
                 approval_fn=approval_fn,
+                # Live progress: each tool call is signalled as it executes,
+                # not batched after the loop finishes.
+                on_tool_call=self._emit_tool_call,
+                manifest=manifest,
             )
 
             # Store the tool calls
             self._last_tool_calls = list(result.tool_calls)
+            self._last_verification_hints = getattr(
+                result, "verification_hints", 0,
+            )
 
             # S62: Record tool calls in per-conversation history
             self._record_tool_calls(conversation_id, result.tool_calls)
-
-            # Signal each tool call via the callback
-            for tc in result.tool_calls:
-                self._emit_tool_call(tc)
 
             # Yield the final response
             if result.response:
@@ -1313,6 +1494,7 @@ class AgenticExecutor:
         on_status: Callable | None,
         approval_fn: Callable[[str, dict], bool] | None = None,
         model_override: str | None = None,
+        manifest=None,
     ) -> Generator:
         """Think+tools pipeline: thinking first, then tools when needed.
 
@@ -1343,6 +1525,7 @@ class AgenticExecutor:
                 web_search=False,
                 on_status=on_status,
                 persist=False,
+                capability_block=_manifest_prompt_block(manifest),
             )
             for chunk in gen:
                 if chunk:
@@ -1359,12 +1542,18 @@ class AgenticExecutor:
             yield f"\n\n[Error during thinking: {e}]"
             return
 
-        # Phase 2: run the tools when the tool_executor detects a need
-        if (
-            self.tool_executor_available
-            and self._tool_executor.should_use_tools(
+        # Phase 2: run the tools. With a capability manifest the phase is
+        # armed by the manifest itself (the model decides against the full
+        # reachable set); the keyword verdict remains the legacy gate when
+        # no manifest is present.
+        _keyword_verdict = (
+            self._tool_executor.should_use_tools(
                 message, getattr(routing, 'model', self._default_model)
             )
+            if self.tool_executor_available else False
+        )
+        if _phase2_tools_armed(
+            self.tool_executor_available, _keyword_verdict, manifest,
         ):
             conv_messages = self._get_conversation_context(conversation_id)
 
@@ -1378,14 +1567,18 @@ class AgenticExecutor:
                     conversation_messages=conv_messages,
                     tool_history=prior_tool_history if prior_tool_history else None,
                     approval_fn=approval_fn,
+                    # Live progress: each tool call is signalled as it
+                    # executes, not batched after the loop finishes.
+                    on_tool_call=self._emit_tool_call,
+                    manifest=manifest,
                 )
                 self._last_tool_calls = list(result.tool_calls)
+                self._last_verification_hints = getattr(
+                    result, "verification_hints", 0,
+                )
 
                 # S62: Record tool calls in per-conversation history
                 self._record_tool_calls(conversation_id, result.tool_calls)
-
-                for tc in result.tool_calls:
-                    self._emit_tool_call(tc)
 
                 # When the tools produced results, append them (and fold them
                 # into full_response so the final save persists the tool output)
@@ -1882,6 +2075,7 @@ class AgenticExecutor:
         """Reset state between executions."""
         self._last_tool_calls = []
         self._last_verification_results = []
+        self._last_verification_hints = 0
         self._last_pipeline = PIPELINE_DIRECT
         self._last_task_analysis = None
         self._last_reasoning_result = None

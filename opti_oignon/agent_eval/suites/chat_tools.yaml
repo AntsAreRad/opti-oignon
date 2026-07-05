@@ -1,0 +1,113 @@
+# Opti-Oignon chat tool-loop eval -- baseline suite v1.
+#
+# Four deterministic tasks across the chat pipeline's mechanics: a single
+# read, a three-step list/read/write chain, a direct answer with no tools,
+# and a retryable-failure recovery. Each task carries the standard fields
+# (validated by the standard loader) plus the additive `script` key the
+# chat harness consumes: one model turn per backend call, the last turn
+# being the user-facing answer.
+#
+# Every task is green by construction -- the suite is a baseline
+# instrument, not a trap set. Scripted answers speak in first person and
+# never quote runtime scaffolding, so the hygiene checkers measure the
+# pipeline, not the script. Checks are built-in checker names, not sandbox
+# commands.
+
+suite: chat_tools
+
+tasks:
+  - id: c01-read-report
+    title: Read one file and report its content
+    prompt: >
+      Read the file notes.txt and tell me exactly what it says.
+    fixture:
+      notes.txt: "Backups run nightly at 02:00.\n"
+    checks:
+      - "expect_tool:read_file"
+      - "max_calls:1"
+      - "final_nonempty"
+      - "no_misattribution"
+      - "no_internal_markers"
+      - "tools_before_stream"
+    script:
+      - tool_calls:
+          - name: read_file
+            arguments: {filename: notes.txt}
+      - content: ""
+      - content: >
+          I read notes.txt with my read_file tool; it contains a single
+          line stating that backups run nightly at 02:00.
+
+  - id: c02-multi-step
+    title: List, read, then write a summary
+    prompt: >
+      List the workspace files, read status.txt, and write a one-line
+      summary to summary.txt.
+    fixture:
+      status.txt: "All services nominal.\nQueue depth: 3.\n"
+    checks:
+      - "expect_tool:write_file"
+      - "expect_file:summary.txt"
+      - "max_calls:3"
+      - "final_nonempty"
+      - "no_misattribution"
+      - "no_internal_markers"
+      - "tools_before_stream"
+    script:
+      - tool_calls:
+          - name: list_files
+            arguments: {}
+      - tool_calls:
+          - name: read_file
+            arguments: {filename: status.txt}
+      - tool_calls:
+          - name: write_file
+            arguments:
+              filename: summary.txt
+              content: "Services nominal; queue depth 3.\n"
+      - content: ""
+      - content: >
+          I listed the workspace, read status.txt, and wrote a one-line
+          summary to summary.txt using my file tools. Everything is
+          nominal with a queue depth of three.
+
+  - id: c03-direct-answer
+    title: Answer directly with no tools
+    prompt: >
+      In one sentence, explain why the sky is blue.
+    checks:
+      - "expect_no_tools"
+      - "final_nonempty"
+      - "no_misattribution"
+      - "no_internal_markers"
+    script:
+      - content: ""
+      - content: >
+          Sunlight scatters off air molecules, and the shorter blue
+          wavelengths scatter the most, so the sky looks blue.
+
+  - id: c04-retry-recovery
+    title: Recover from a failed read
+    prompt: >
+      Read report.txt; if it is missing, read notes.txt instead, then
+      tell me what you found.
+    fixture:
+      notes.txt: "Fallback content: rotation completed.\n"
+    checks:
+      - "expect_tool:read_file"
+      - "max_calls:2"
+      - "final_nonempty"
+      - "no_misattribution"
+      - "no_internal_markers"
+      - "tools_before_stream"
+    script:
+      - tool_calls:
+          - name: read_file
+            arguments: {filename: report.txt}
+      - tool_calls:
+          - name: read_file
+            arguments: {filename: notes.txt}
+      - content: ""
+      - content: >
+          My first read_file call failed because report.txt does not
+          exist, so I read notes.txt instead: the rotation completed.

@@ -545,11 +545,16 @@ class PluginRegistry:
         _visit(name, [])
         return order
 
-    def discover(self, search_dir: Path | str | None = None) -> list[PluginManifest]:
-        """Scan a directory for plugin manifests (manifest.yaml files).
+    def discover_with_paths(
+        self, search_dir: Path | str | None = None,
+    ) -> list[tuple[PluginManifest, Path]]:
+        """Scan a directory for plugin manifests, keeping their folders.
 
-        Returns a list of valid manifests found. Invalid manifests are
-        logged as warnings and skipped.
+        Returns (manifest, plugin directory) pairs -- the directory is
+        the folder each manifest was found in, which is the only path a
+        registration may record: a folder name is free to differ from
+        the manifest name, so re-deriving the path from the name builds
+        phantoms. Invalid manifests are logged as warnings and skipped.
         """
         try:
             import yaml as _yaml
@@ -561,7 +566,7 @@ class PluginRegistry:
         if base is None or not base.is_dir():
             return []
 
-        manifests: list[PluginManifest] = []
+        found: list[tuple[PluginManifest, Path]] = []
         for manifest_path in sorted(base.glob("*/manifest.yaml")):
             try:
                 with open(manifest_path, encoding="utf-8") as fh:
@@ -570,10 +575,21 @@ class PluginRegistry:
                     logger.warning("Skipping %s: not a valid YAML dict", manifest_path)
                     continue
                 manifest = PluginManifest.from_dict(data)
-                manifests.append(manifest)
+                found.append((manifest, manifest_path.parent))
             except Exception as exc:
                 logger.warning("Skipping %s: %s", manifest_path, exc)
-        return manifests
+        return found
+
+    def discover(self, search_dir: Path | str | None = None) -> list[PluginManifest]:
+        """Scan a directory for plugin manifests (manifest.yaml files).
+
+        Returns a list of valid manifests found. Invalid manifests are
+        logged as warnings and skipped.
+        """
+        return [
+            manifest
+            for manifest, _plugin_dir in self.discover_with_paths(search_dir)
+        ]
 
     @property
     def plugin_count(self) -> int:
@@ -604,8 +620,12 @@ def _discover_builtins(
 
     PI-21: when a builtin is already registered but its on-disk manifest
     carries a different version, the registry record is refreshed (state
-    and installed_at are preserved by register()).  The ``builtin_dir``
-    parameter exists for tests; production callers use the default.
+    and installed_at are preserved by register()).  A record whose
+    persisted directory no longer exists -- or differs from the folder
+    the manifest was actually found in -- is refreshed the same way, so
+    phantom name-derived paths heal on the next discovery pass.  The
+    ``builtin_dir`` parameter exists for tests; production callers use
+    the default.
 
     Returns the number of newly registered builtins.
     """
@@ -614,22 +634,38 @@ def _discover_builtins(
     if not builtin_dir.is_dir():
         return 0
 
-    manifests = registry.discover(builtin_dir)
+    pairs = registry.discover_with_paths(builtin_dir)
     registered = 0
-    for manifest in manifests:
-        # Skip if already registered at the same version
+    for manifest, real_dir in pairs:
+        # Skip if already registered at the same version AND the
+        # persisted directory is the real, existing one.
         existing = registry.get(manifest.name)
         if existing is not None:
-            if existing.manifest.version != manifest.version:
+            needs_refresh = existing.manifest.version != manifest.version
+            recorded = (
+                Path(existing.plugin_dir) if existing.plugin_dir else None
+            )
+            if (
+                recorded is None
+                or not recorded.exists()
+                or recorded.resolve() != real_dir.resolve()
+            ):
+                # Heal a phantom or stale path: registration used to
+                # re-derive the directory from the manifest NAME, so a
+                # folder named differently persisted a path that never
+                # existed. register() without auto_enable preserves the
+                # record's state.
+                needs_refresh = True
+            if needs_refresh:
                 try:
                     registry.register(
                         manifest,
-                        str(builtin_dir / manifest.name),
+                        str(real_dir),
                         auto_enable=False,
                     )
                     logger.info(
-                        "Refreshed builtin '%s' to version %s",
-                        manifest.name, manifest.version,
+                        "Refreshed builtin '%s' (version %s, dir %s)",
+                        manifest.name, manifest.version, real_dir,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -638,8 +674,7 @@ def _discover_builtins(
                     )
             continue
         try:
-            plugin_dir = str(builtin_dir / manifest.name)
-            registry.register(manifest, plugin_dir, auto_enable=True)
+            registry.register(manifest, str(real_dir), auto_enable=True)
             registered += 1
         except Exception as exc:
             logger.warning("Failed to auto-register builtin '%s': %s", manifest.name, exc)

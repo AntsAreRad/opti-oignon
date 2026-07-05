@@ -114,7 +114,16 @@ and every provision run are audited (per-session log and hash-chain rows).
 
 Plugin subprocess isolation runs each plugin in a separate process with
 HMAC-signed JSON-RPC IPC, resource limits (CPU, memory, file descriptors),
-and stdout/stderr capture. The coding agent operates entirely inside the
+and stdout/stderr capture. Each worker additionally enforces a
+host-package import boundary: a meta-path guard inside the worker
+process rejects any import of the host application package with an
+immediate, explicitly labelled isolation error, instead of letting such
+an import stall on the worker's minimal environment. A plugin that
+tries to reach back into the application from its worker fails fast and
+its declared fallbacks engage; the standard library remains available,
+since the process boundary itself is the isolation. The refusal is
+deterministic by construction — it never depends on the environment
+layout the worker happens to start with. The coding agent operates entirely inside the
 sandbox; the apply phase is the only exit path and always requires explicit
 human approval. Command validator with blocklists detects
 base64-pipe-to-shell and write-then-execute patterns.
@@ -261,11 +270,11 @@ verification.
 
 ```bash
 # Sign an archive (auto-selects GPG key or specify --key)
-./scripts/sign_release.sh opti-oignon-v3.3.0.zip
+./scripts/sign_release.sh opti-oignon-v2.1.0.zip
 
 # Produces:
-#   opti-oignon-v3.3.0.zip.sig    (detached GPG signature)
-#   opti-oignon-v3.3.0.zip.sha256 (SHA-256 checksum)
+#   opti-oignon-v2.1.0.zip.sig    (detached GPG signature)
+#   opti-oignon-v2.1.0.zip.sha256 (SHA-256 checksum)
 ```
 
 ### Verifying a release
@@ -275,10 +284,14 @@ verification.
 gpg --import opti-oignon-release.pub
 
 # Verify signature and checksum
-./scripts/verify_release.sh opti-oignon-v3.3.0.zip
+./scripts/verify_release.sh opti-oignon-v2.1.0.zip
+
+# Before trusting an imported key, check its fingerprint against the
+# project's published fingerprint through an independent channel:
+gpg --fingerprint --keyid-format=long
 
 # Strict mode (fails on missing checksum file)
-./scripts/verify_release.sh opti-oignon-v3.3.0.zip --strict
+./scripts/verify_release.sh opti-oignon-v2.1.0.zip --strict
 ```
 
 ### CI/CD integration

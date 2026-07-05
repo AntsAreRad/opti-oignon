@@ -474,6 +474,7 @@ class ContextOptimizer:
         project_active: bool = False,
         fingerprint_active: bool = False,
         context_window_override: int = 0,
+        manifest_block: str | None = None,
     ) -> OptimizedContext:
         """Run the full optimization pipeline.
 
@@ -493,6 +494,11 @@ class ContextOptimizer:
             project_active: Whether a project is active.
             fingerprint_active: Whether session fingerprinting is active.
             context_window_override: Override context window size.
+            manifest_block: Optional capability block pinned above the
+                compressed history. Its cost is carved from the history
+                budget and it survives every trim, including emergency
+                truncation. None or an empty string is the exact
+                pre-pin behavior (no zone, no extra message).
 
         Returns:
             OptimizedContext with final messages and report.
@@ -509,6 +515,15 @@ class ContextOptimizer:
             context_window_override=context_window_override,
             preset=preset,
             custom_ratios=custom_ratios,
+        )
+
+        # Capability block: a pinned segment sitting above the
+        # compressed history. Measured once with the same estimator the
+        # zones use; its cost is carved from the history budget so the
+        # summary cedes room to it, and it survives every trim below.
+        manifest_block = manifest_block or ""
+        manifest_tokens = (
+            self._estimate_tokens(manifest_block, model) if manifest_block else 0
         )
 
         # -- Step 2: Inject project context with budget passthrough --
@@ -561,8 +576,23 @@ class ContextOptimizer:
             detail="Reserved for generation headroom",
         ))
 
+        # -- Pinned capability zone --
+        # Recorded only when a block is present, so the no-block path keeps
+        # its exact historical zone set. It never trims.
+        if manifest_block:
+            zones.append(ZoneReport(
+                zone="manifest",
+                budgeted_tokens=manifest_tokens,
+                actual_tokens=manifest_tokens,
+                trimmed_tokens=0,
+                strategy="pinned",
+                detail="Capability block pinned above the compressed history",
+            ))
+
         # -- Step 3: Compress history within budget --
-        history_budget = budget.history_tokens
+        # The pinned block's measure is carved from the history budget: the
+        # summary is what cedes room to the capability block, nothing else.
+        history_budget = max(0, budget.history_tokens - manifest_tokens)
         history_before_tokens = self._estimate_messages_tokens(history, model)
         history, history_zone = self._compress_history(
             history=history,
@@ -588,8 +618,11 @@ class ContextOptimizer:
                 history_zone.detail += f" | Sliding window: {sw_zone.detail}"
 
         # -- Step 5: Emergency truncation --
+        # The pinned block occupies space too, so it counts toward the
+        # overflow trigger and is subtracted from the history target: the
+        # block is never what gets cut.
         total_used = (
-            system_actual + user_actual
+            system_actual + user_actual + manifest_tokens
             + self._estimate_messages_tokens(history, model)
         )
         overflow = False
@@ -600,7 +633,7 @@ class ContextOptimizer:
                     history=history,
                     target_tokens=(
                         budget.total_window - budget.reserve_tokens
-                        - system_actual - user_actual
+                        - system_actual - user_actual - manifest_tokens
                     ),
                     model=model,
                     min_recent=emergency_cfg.get("min_recent_messages", 2),
@@ -612,7 +645,11 @@ class ContextOptimizer:
                 history_zone.detail += f" | Emergency truncation: {trimmed}t removed"
 
         # -- Build final messages --
+        # Order: system prompt, then the pinned capability block (when
+        # present), then the compressed history, then the current turn.
         messages: list[dict[str, str]] = [{"role": "system", "content": final_system}]
+        if manifest_block:
+            messages.append({"role": "system", "content": manifest_block})
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 

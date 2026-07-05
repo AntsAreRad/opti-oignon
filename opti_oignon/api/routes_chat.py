@@ -124,6 +124,16 @@ except ImportError:
     _quick_sandbox_manager = None
     _tool_registry = None
 
+# The conversation <-> workspace binding store; guarded so the chat route
+# still loads if the module is absent. Resolution failures fall back to
+# the pre-bridge behavior (a fresh per-conversation sandbox).
+try:
+    from opti_oignon.sandbox_workspace import (
+        get_workspace_bindings as _get_workspace_bindings,
+    )
+except ImportError:
+    _get_workspace_bindings = None
+
 # S128: Import conditionnel du tool call approval (Bulbe mode)
 try:
     from opti_oignon.tool_call_approval import ApprovalStatus as _ApprovalStatus
@@ -334,8 +344,19 @@ async def _stream_response(
         )
         if qs_enabled and _quick_sandbox_manager.available:
             try:
+                _bound_workspace_id = None
+                if _get_workspace_bindings is not None and conversation_id:
+                    try:
+                        _bound_workspace_id = (
+                            _get_workspace_bindings().get_sandbox_for(
+                                conversation_id
+                            )
+                        )
+                    except Exception:
+                        _bound_workspace_id = None
                 _qs_session = _quick_sandbox_manager.get_or_create_session(
-                    request_id=conversation_id or None
+                    request_id=conversation_id or None,
+                    bound_sandbox_id=_bound_workspace_id,
                 )
                 _tool_registry.set_quick_sandbox_mode(
                     True, session=_qs_session
@@ -497,6 +518,12 @@ async def _stream_response(
     def _generate():
         """Generation thread: calls executor.execute() and collects chunks."""
         nonlocal full_response, error_occurred
+        # A live turn pins the quick sandbox for the whole generation: the
+        # workspace must survive long inferences between tool calls (the
+        # inactivity timeout is a between-turns notion). The finally below
+        # guarantees the release on every exit path.
+        if _qs_active and _qs_session is not None:
+            _qs_session.begin_turn()
         try:
             # S48: Retrieve the images from routing
             _images = getattr(routing, "images", None) or (request.images if request else None)
@@ -634,6 +661,8 @@ async def _stream_response(
             chunks.append(("error", str(e)))
             error_occurred = True
         finally:
+            if _qs_active and _qs_session is not None:
+                _qs_session.end_turn()
             generation_done.set()
 
     # S114: Fire pre_inference hooks before starting generation
@@ -1078,7 +1107,10 @@ async def _stream_response(
     if _qs_active and _qs_session is not None:
         sandbox_files = _qs_session.get_sandbox_files()
         done_metadata["sandbox_active"] = True
-        done_metadata["sandbox_session_id"] = _qs_session.session_id
+        # The servable id: the adopted workspace id when bound, the
+        # session's own id otherwise. The files/preview/approve routes
+        # are keyed by this id, not by the conversation-keyed one.
+        done_metadata["sandbox_session_id"] = _qs_session.effective_sandbox_id
         done_metadata["sandbox_files"] = sandbox_files
         done_metadata["sandbox_files_created"] = _qs_session.files_created
     await _send_token(websocket, "done", full_response, metadata=done_metadata)
@@ -1562,6 +1594,17 @@ async def chat_retry(websocket: WebSocket) -> None:
             await websocket.close()
             return
 
+        # Recover the model of the turn being retried before the history is
+        # rewound: an explicit request override wins, then the conversation's
+        # last used model, then the newest assistant message that recorded
+        # one. None (no model anywhere) keeps the default routing behavior.
+        retry_model = retry_req.model or conv.model
+        if not retry_model:
+            for msg in reversed(messages):
+                if msg.role == "assistant" and getattr(msg, "model", None):
+                    retry_model = msg.model
+                    break
+
         # Supprimer le dernier message assistant
         conversation_manager.delete_last_message(conv_id, role="assistant")
 
@@ -1586,6 +1629,7 @@ async def chat_retry(websocket: WebSocket) -> None:
         chat_request = ChatRequest(
             conversation_id=conv_id,
             message=last_user_message,
+            model=retry_model,
         )
 
         # Stream la new reponse

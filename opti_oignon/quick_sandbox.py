@@ -129,15 +129,30 @@ class QuickSandboxSession:
         sandbox_mgr: "SandboxManager | None" = None,
         auto_destroy_minutes: int = 30,
         conversation_id: str | None = None,
+        existing_sandbox_id: str | None = None,
     ):
         self._session_id = session_id
         self._conversation_id = conversation_id
         self._mgr = sandbox_mgr or _default_sandbox_manager
         self._sandbox_session: SandboxSession | None = None
+        # When set, the session adopts this already-existing workspace
+        # (typically one bound to the conversation) instead of creating a
+        # fresh sandbox. The adopted workspace is never destroyed by this
+        # wrapper: the binding layer owns its lifecycle.
+        self._existing_sandbox_id = existing_sandbox_id
+        self._adopted = False
+        # The manager-side identifier all tool calls are routed to: the
+        # session's own id, or the adopted workspace id after adoption.
+        self._effective_id = session_id
         self._created_at = time.time()
         self._last_activity = time.time()
         self._auto_destroy_seconds = auto_destroy_minutes * 60
         self._files_created: list[str] = []
+        # Number of chat turns currently executing against this session.
+        # While positive the inactivity timeout does not apply: a long
+        # inference between tool calls must never destroy the workspace
+        # mid-turn. begin_turn / end_turn bracket the whole generation.
+        self._active_turns = 0
         self._lock = threading.Lock()
 
     @property
@@ -150,6 +165,21 @@ class QuickSandboxSession:
         return self._conversation_id
 
     @property
+    def bound_sandbox_id(self) -> str | None:
+        """The workspace this session adopts (None for an own sandbox)."""
+        return self._existing_sandbox_id
+
+    @property
+    def effective_sandbox_id(self) -> str:
+        """The manager-side id the sandbox API serves this session under.
+
+        The session's own id until adoption, the adopted workspace id
+        after. The done metadata must carry this id: the UI lists,
+        previews, approves and downloads against it.
+        """
+        return self._effective_id
+
+    @property
     def active(self) -> bool:
         return (
             self._sandbox_session is not None
@@ -158,7 +188,13 @@ class QuickSandboxSession:
 
     @property
     def expired(self) -> bool:
-        """Whether the session has exceeded its auto-destroy timeout."""
+        """Whether the session has exceeded its auto-destroy timeout.
+
+        A session with a turn in flight never expires: the inactivity
+        window is a between-turns notion (see begin_turn / end_turn).
+        """
+        if self._active_turns > 0:
+            return False
         return (
             time.time() - self._last_activity > self._auto_destroy_seconds
         )
@@ -174,7 +210,13 @@ class QuickSandboxSession:
 
     @property
     def seconds_until_expiry(self) -> float:
-        """Seconds of inactivity remaining before auto-destroy (>= 0)."""
+        """Seconds of inactivity remaining before auto-destroy (>= 0).
+
+        While a turn is in flight the full window is reported: the
+        countdown only starts once the turn closes.
+        """
+        if self._active_turns > 0:
+            return float(self._auto_destroy_seconds)
         remaining = self._auto_destroy_seconds - (
             time.time() - self._last_activity
         )
@@ -192,10 +234,51 @@ class QuickSandboxSession:
             self._auto_destroy_seconds = minutes * 60
             self._last_activity = time.time()
 
+    def begin_turn(self) -> None:
+        """Mark a chat turn as executing against this session.
+
+        While at least one turn is in flight the session cannot expire,
+        so a long inference between tool calls never loses its workspace.
+        Callers must pair every begin_turn with end_turn (try/finally).
+        """
+        with self._lock:
+            self._active_turns += 1
+            self._last_activity = time.time()
+
+    def end_turn(self) -> None:
+        """Mark the end of a chat turn.
+
+        The inactivity window restarts from the end of the turn. Extra
+        calls are harmless: the counter never goes below zero.
+        """
+        with self._lock:
+            if self._active_turns > 0:
+                self._active_turns -= 1
+            self._last_activity = time.time()
+
     @property
     def files_created(self) -> list[str]:
         """List of file paths created in this session."""
         return list(self._files_created)
+
+    # Upper bound on adopted file names announced to the model through the
+    # tools prompt (large workspaces stay listable via list_files).
+    ADOPTED_FILES_ANNOUNCE_CAP = 50
+
+    def _list_adopted_files(self) -> list[str]:
+        """Relative paths already present in the adopted workspace."""
+        if self._mgr is None:
+            return []
+        try:
+            entries = self._mgr.extract_files(self._effective_id)
+        except Exception:
+            return []
+        names = [
+            str(entry.get("path"))
+            for entry in entries
+            if entry.get("path")
+        ]
+        return names[: self.ADOPTED_FILES_ANNOUNCE_CAP]
 
     def _ensure_sandbox(self) -> None:
         """Lazily create the sandbox on first use."""
@@ -204,6 +287,22 @@ class QuickSandboxSession:
             return
         if self._mgr is None:
             raise RuntimeError("Sandbox manager not available")
+        if self._existing_sandbox_id is not None:
+            adopted = self._mgr.get_session(self._existing_sandbox_id)
+            if adopted is not None and adopted.active:
+                self._sandbox_session = adopted
+                self._adopted = True
+                self._effective_id = self._existing_sandbox_id
+                self._files_created = self._list_adopted_files()
+                logger.info(
+                    "Quick sandbox adopted bound workspace %s for %s",
+                    self._existing_sandbox_id, self._session_id,
+                )
+                return
+            logger.warning(
+                "Bound workspace %s unavailable; creating a fresh sandbox "
+                "for %s", self._existing_sandbox_id, self._session_id,
+            )
         self._sandbox_session = self._mgr.create_sandbox(
             self._session_id, allow_degraded=True
         )
@@ -239,12 +338,16 @@ class QuickSandboxSession:
 
         try:
             result = _handle_sandbox_bash(
-                self._session_id, cmd, timeout,
+                self._effective_id, cmd, timeout,
                 _sandbox_manager=self._mgr,
             )
             return result
         except Exception as exc:
             return f"Quick sandbox execution error: {exc}"
+        finally:
+            # Completion also counts as activity: a call that outlives the
+            # window must not leave the session already expired at return.
+            self._last_activity = time.time()
 
     def handle_write_file(self, path: str, content: str) -> str:
         """Write a file inside the sandbox."""
@@ -253,7 +356,7 @@ class QuickSandboxSession:
 
         try:
             result = _handle_sandbox_create_file(
-                self._session_id, path, content,
+                self._effective_id, path, content,
                 _sandbox_manager=self._mgr,
             )
             with self._lock:
@@ -262,6 +365,8 @@ class QuickSandboxSession:
             return result
         except Exception as exc:
             return f"Quick sandbox write error: {exc}"
+        finally:
+            self._last_activity = time.time()
 
     def handle_read_file(self, path: str) -> str:
         """Read a file from inside the sandbox."""
@@ -270,12 +375,14 @@ class QuickSandboxSession:
 
         try:
             result = _handle_sandbox_view(
-                self._session_id, path, 0, 0,
+                self._effective_id, path, 0, 0,
                 _sandbox_manager=self._mgr,
             )
             return result
         except Exception as exc:
             return f"Quick sandbox read error: {exc}"
+        finally:
+            self._last_activity = time.time()
 
     def handle_list_files(self, path: str = ".") -> str:
         """List files inside the sandbox."""
@@ -284,19 +391,21 @@ class QuickSandboxSession:
 
         try:
             result = _handle_sandbox_view(
-                self._session_id, path, 0, 0,
+                self._effective_id, path, 0, 0,
                 _sandbox_manager=self._mgr,
             )
             return result
         except Exception as exc:
             return f"Quick sandbox list error: {exc}"
+        finally:
+            self._last_activity = time.time()
 
     def get_sandbox_files(self) -> list[dict[str, Any]]:
         """Get the list of files in the sandbox for the UI."""
         if not self.active or self._mgr is None:
             return []
         try:
-            return self._mgr.extract_files(self._session_id)
+            return self._mgr.extract_files(self._effective_id)
         except Exception:
             return []
 
@@ -304,6 +413,15 @@ class QuickSandboxSession:
         """Destroy the sandbox session and clean up."""
         if self._mgr is None or self._sandbox_session is None:
             return False
+        if self._adopted:
+            # The bound workspace belongs to the binding layer; only the
+            # wrapper is dropped, the workspace and its files survive.
+            self._sandbox_session = None
+            logger.info(
+                "Quick sandbox wrapper detached; bound workspace %s "
+                "preserved", self._effective_id,
+            )
+            return True
         try:
             result = self._mgr.destroy_sandbox(self._session_id)
             self._sandbox_session = None
@@ -362,13 +480,19 @@ class QuickSandboxManager:
         )
 
     def get_or_create_session(
-        self, request_id: str | None = None
+        self, request_id: str | None = None,
+        bound_sandbox_id: str | None = None,
     ) -> QuickSandboxSession:
         """Get an existing session or create a new one for a request.
 
         Args:
             request_id: A unique ID for the chat request (conversation_id
                 or a generated UUID). Used as the session key.
+            bound_sandbox_id: An existing workspace explicitly bound to
+                the conversation. When provided, the session adopts that
+                workspace instead of creating a fresh sandbox; a live
+                session adopting a different workspace (or none) is
+                replaced so a rebinding takes effect immediately.
 
         Returns:
             A QuickSandboxSession ready for tool calls.
@@ -385,12 +509,25 @@ class QuickSandboxManager:
         rid = request_id or f"qs-{uuid.uuid4().hex[:12]}"
 
         with self._lock:
-            # Return existing active session
+            # Return existing active session (unless a binding points it
+            # at a different workspace: the binding takes priority).
             existing = self._sessions.get(rid)
             if existing is not None and not existing.expired:
-                return existing
+                if (
+                    bound_sandbox_id is not None
+                    and existing.bound_sandbox_id != bound_sandbox_id
+                ):
+                    existing.destroy()
+                    del self._sessions[rid]
+                    logger.info(
+                        "Quick sandbox rebinding %s to workspace %s",
+                        rid, bound_sandbox_id,
+                    )
+                else:
+                    return existing
 
             # Clean up expired session if it exists
+            existing = self._sessions.get(rid)
             if existing is not None and existing.expired:
                 existing.destroy()
                 del self._sessions[rid]
@@ -411,6 +548,7 @@ class QuickSandboxManager:
                 sandbox_mgr=self._mgr,
                 auto_destroy_minutes=self._config.auto_destroy_minutes,
                 conversation_id=request_id,
+                existing_sandbox_id=bound_sandbox_id,
             )
             self._sessions[rid] = session
             return session

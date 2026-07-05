@@ -146,6 +146,9 @@ class ChatCancelRequest(BaseModel):
 class ChatRetryRequest(BaseModel):
     """Request de retry via WebSocket."""
     conversation_id: str
+    # Optional explicit override; None means the retry reuses the model
+    # the conversation was using (last turn or conversation record).
+    model: str | None = None
 
 
 # -- Artifacts --

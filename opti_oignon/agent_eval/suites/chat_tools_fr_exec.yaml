@@ -1,0 +1,47 @@
+# Chat-loop evaluation suite: scripted execution failure and its
+# correction, in French.
+#
+# Companion piece to the chat_tools_fr suite, kept as its own file so
+# the baseline French suite stays byte-stable for its consumers. The
+# single task scripts a failed code run through the reserved
+# execution-failure sentinel (see SCRIPTED_EXEC_FAILURE_SENTINEL in the
+# harness) and its correction, so the executor's verification pass runs
+# a real corrective iteration on the execution branch -- the write
+# branch is exercised by the baseline French suite already.
+#
+# The task is green by construction -- the suite is a baseline
+# instrument, not a trap set. The scripted answer speaks in first person
+# and never quotes runtime scaffolding. Checks are built-in checker
+# names. Comments are English; French appears only in task data.
+
+suite: chat_tools_fr_exec
+
+tasks:
+  - id: e01-execution-corrigee
+    title: Recover from a scripted execution failure (verification pass)
+    prompt: >
+      Exécute le script de contrôle ; s’il échoue, corrige-le puis
+      relance-le et confirme le résultat.
+    checks:
+      - "expect_tool:execute_code"
+      - "max_calls:2"
+      - "final_nonempty"
+      - "no_misattribution"
+      - "no_internal_markers"
+      - "tools_before_stream"
+    script:
+      - tool_calls:
+          - name: execute_code
+            arguments:
+              code: "# scripted: fail\nprint('contrôle')\n"
+      - content: ""
+      - tool_calls:
+          - name: execute_code
+            arguments:
+              code: "print('contrôle : 42')\n"
+      - content: ""
+      - content: >
+          Ma première exécution du script de contrôle a échoué avec un
+          code de retour non nul ; j’ai corrigé le script puis je l’ai
+          relancé : il s’est terminé correctement et le contrôle affiche
+          la valeur 42.

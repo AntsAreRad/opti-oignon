@@ -13,7 +13,7 @@
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-	import type { MessageItem, VerificationInfo, ToolCallInfo, ReasoningStepInfo, ReasoningMetaInfo } from '$lib/types';
+	import type { MessageItem, VerificationInfo, ToolCallInfo, ReasoningStepInfo, ReasoningMetaInfo, SandboxFileEntry } from '$lib/types';
 	import SearchResults from './SearchResults.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
 	import ReasoningDisplay from './ReasoningDisplay.svelte';
@@ -106,6 +106,9 @@
 	// S117: Sandbox metadata (present when quick sandbox was used)
 	$: sandboxMeta = (message as Record<string, unknown>).sandbox_meta as { sandbox_session_id: string; sandbox_files: unknown[]; sandbox_files_created: string[] } | undefined;
 	$: hasSandbox = !isStreaming && !!sandboxMeta?.sandbox_session_id;
+	// Snapshot from the done metadata: the file manager shows it at once
+	// and before any fetch of its own.
+	$: sandboxInitialFiles = (sandboxMeta?.sandbox_files ?? []) as SandboxFileEntry[];
 	// S118: Chat coding agent metadata (present when coding agent was used)
 	$: codingMeta = (message as Record<string, unknown>).coding_meta as {
 		chat_coding: boolean;
@@ -374,7 +377,10 @@
 		<!-- S117: Inline sandbox file manager (when quick sandbox was used, not coding agent) -->
 		{#if !isUser && hasSandbox && sandboxMeta && !hasCoding}
 			<div class="mt-2 rounded-lg overflow-hidden" style="border: 1px solid var(--oo-bd-default);">
-				<SandboxFileManager sessionId={sandboxMeta.sandbox_session_id} />
+				<SandboxFileManager
+					sessionId={sandboxMeta.sandbox_session_id}
+					initialFiles={sandboxInitialFiles}
+				/>
 			</div>
 		{/if}
 

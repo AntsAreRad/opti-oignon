@@ -21,7 +21,6 @@
   stated honestly, the exfiltration warning when on, and the provision row.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { Button, Card, Icon, Input, InlineError, Select } from '$lib/ds';
 	import SandboxWorkspaceList from './SandboxWorkspaceList.svelte';
 	import SandboxUploadZone from './SandboxUploadZone.svelte';
@@ -39,7 +38,9 @@
 	} from '$lib/api/sandbox';
 	import type { SandboxSessionInfo, SandboxStatusResponse } from '$lib/types';
 	import { activeConversationId } from '$lib/stores/conversations';
+	import { workspaceBinding } from '$lib/stores/workspaceBinding';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { handleApiError, parseApiError } from '$lib/api/errorHandler';
 
 	let status: SandboxStatusResponse | null = null;
 	let sessions: SandboxSessionInfo[] = [];
@@ -82,7 +83,7 @@
 			status = st;
 			sessions = list;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load sandbox state';
+			error = parseApiError(e, 'loading the sandbox state').message;
 		} finally {
 			loading = false;
 		}
@@ -102,7 +103,7 @@
 			newTimeout = '';
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to create workspace');
+			handleApiError(e, 'creating the workspace');
 		} finally {
 			creating = false;
 		}
@@ -119,7 +120,7 @@
 			toastSuccess(liveMessage);
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to stop the command');
+			handleApiError(e, 'stopping the command');
 		} finally {
 			busyId = null;
 		}
@@ -134,7 +135,7 @@
 			toastSuccess(liveMessage);
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to destroy the workspace');
+			handleApiError(e, 'destroying the workspace');
 		} finally {
 			busyId = null;
 		}
@@ -151,9 +152,16 @@
 			await bindConversation({ conversation_id: convId, session_id: sessionId });
 			liveMessage = `Workspace ${sessionId} bound to this conversation`;
 			toastSuccess(liveMessage);
+			workspaceBinding.applyBound(convId, sessionId);
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to bind the workspace');
+			// Surface the server detail (409: held by another conversation)
+			// instead of the bare status line, and resync the stale list
+			// that invited the doomed action.
+			const parsed = handleApiError(e, 'binding the workspace');
+			if (parsed.status === 409) {
+				await load();
+			}
 		} finally {
 			busyId = null;
 		}
@@ -168,9 +176,10 @@
 			await unbindConversation(conversationId);
 			liveMessage = `Workspace ${sessionId} unbound`;
 			toastSuccess(liveMessage);
+			workspaceBinding.applyUnbound(conversationId);
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to unbind the workspace');
+			handleApiError(e, 'unbinding the workspace');
 		} finally {
 			busyId = null;
 		}
@@ -218,7 +227,15 @@
 		void load();
 	}
 
-	onMount(load);
+	// The panel lives in the chat layout and survives navigation: the
+	// workspace list must follow the active conversation instead of
+	// freezing on its mount-time state (binding badges, Select/Unbind
+	// availability and the copy-in target all derive from it).
+	let loadedForConv: string | null | undefined;
+	$: if (convId !== loadedForConv) {
+		loadedForConv = convId;
+		void load();
+	}
 </script>
 
 <section class="sandbox-panel" aria-label="Sandbox workspaces">

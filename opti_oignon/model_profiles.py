@@ -67,6 +67,11 @@ class ModelProfile:
     quantization: str | None = None          # e.g. "Q4_K_M"
     family: str | None = None                # e.g. "qwen3"
     auto_detected: bool = False                 # True if context_window was auto-detected
+    # Explicit tool-calling verdict. True: capable; False: the model
+    # cannot drive tools at all (the capability manifest omits the tool
+    # set); None: no opinion -- heuristics and the historical fallback
+    # protocol decide, so auto-created profiles keep their tools.
+    tool_calling: bool | None = None
 
     def __post_init__(self):
         """Post-initialization validation."""
@@ -175,6 +180,8 @@ class ModelProfile:
             d["family"] = self.family
         if self.auto_detected:
             d["auto_detected"] = True
+        if self.tool_calling is not None:
+            d["tool_calling"] = self.tool_calling
         return d
 
 
@@ -313,6 +320,7 @@ class ModelProfileManager:
                     parameter_count=profile_data.get("parameter_count"),
                     quantization=profile_data.get("quantization"),
                     family=profile_data.get("family"),
+                    tool_calling=profile_data.get("tool_calling"),
                 )
                 self._profiles[model_name] = profile
             except Exception as e:
@@ -563,6 +571,8 @@ class ModelProfileManager:
                     pdata["parameter_count"] = profile.parameter_count
                 if profile.quantization:
                     pdata["quantization"] = profile.quantization
+                if profile.tool_calling is not None:
+                    pdata["tool_calling"] = profile.tool_calling
                 if profile.family:
                     pdata["family"] = profile.family
                 data["profiles"][name] = pdata

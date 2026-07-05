@@ -8,6 +8,7 @@
 	import SandboxFileManager from '$lib/components/panels/SandboxFileManager.svelte';
 	import SandboxIsolationBadge from '$lib/components/chat/SandboxIsolationBadge.svelte';
 	import { Card } from '$lib/ds';
+	import type { SandboxFileEntry } from '$lib/types';
 
 	/** Coding result from done metadata. */
 	export let codingResult: {
@@ -27,6 +28,8 @@
 
 	/** Number of files in sandbox. */
 	export let sandboxFiles: unknown[] = [];
+	// Snapshot from the done metadata for the embedded file manager.
+	$: sandboxInitialFiles = (sandboxFiles ?? []) as SandboxFileEntry[];
 
 	/** Turn count in the coding session. */
 	export let turnCount: number = 0;
@@ -158,6 +161,6 @@
 
 	<!-- Sandbox file manager -->
 	{#if sandboxSessionId}
-		<SandboxFileManager sessionId={sandboxSessionId} />
+		<SandboxFileManager sessionId={sandboxSessionId} initialFiles={sandboxInitialFiles} />
 	{/if}
 </Card>

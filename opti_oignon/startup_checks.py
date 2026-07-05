@@ -176,6 +176,53 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
 
 
 # ---------------------------------------------------------------------------
+# Boot enforcement
+# ---------------------------------------------------------------------------
+
+class StartupBlockedError(RuntimeError):
+    """Raised at boot when a critical startup security check fails.
+
+    Propagating this exception out of the application lifespan aborts
+    the ASGI startup phase, so the server refuses to serve. Only a
+    deliberate blocked verdict raises it; check machinery failures
+    never do.
+    """
+
+
+def enforce_boot_checks() -> StartupCheckResult | None:
+    """Run the startup checklist at boot and refuse startup when blocked.
+
+    Intended to be called once from the application lifespan, on every
+    launch path (CLI launcher, UI launcher subprocess, direct ASGI
+    server invocation). Behaviour:
+
+      - Runs ``run_startup_checks()``; the result is cached, so the
+        ``GET /api/security/startup-checks`` endpoint serves the
+        boot-time report without re-running.
+      - Raises :class:`StartupBlockedError` when the aggregated result
+        is blocked (a critical check failed, e.g. Ollama exposed on a
+        wildcard address in Bulbe mode).
+      - Never raises on check machinery failure: any other exception is
+        logged and swallowed and ``None`` is returned, so an unavailable
+        or crashing check can never break the boot on its own.
+
+    Returns:
+        The StartupCheckResult when the checks ran and did not block,
+        or None when the check machinery itself failed.
+    """
+    try:
+        result = run_startup_checks()
+    except Exception as exc:  # noqa: BLE001 - boot must not break on machinery
+        logger.warning("Startup checks unavailable at boot: %s", exc)
+        return None
+    if result.blocked:
+        raise StartupBlockedError(
+            result.block_reason or "Critical startup security check failed"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
 

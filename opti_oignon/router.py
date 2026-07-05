@@ -291,6 +291,7 @@ class ModelRouter:
         force_variant: str | None = None,
         images: list[str] | None = None,
         message: str | None = None,
+        require_tool_calling: bool = False,
     ) -> RoutingResult:
         """
         Route to optimal model based on analysis.
@@ -349,13 +350,15 @@ class ModelRouter:
                 )
                 model, priority_used, alternatives, profile_used = (
                     self._select_model_with_profiles(
-                        model_type, task_type, priority
+                        model_type, task_type, priority,
+                        require_tool_calling=require_tool_calling,
                     )
                 )
         else:
             # S46: Try profile-based routing first
             model, priority_used, alternatives, profile_used = self._select_model_with_profiles(
-                model_type, task_type, priority
+                model_type, task_type, priority,
+                require_tool_calling=require_tool_calling,
             )
 
         temperature = self._determine_temperature(task_type, analysis.complexity.value)
@@ -438,6 +441,7 @@ class ModelRouter:
         model_type: str,
         task_type: str,
         priority: str,
+        require_tool_calling: bool = False,
     ) -> tuple[str, str, list[str], bool]:
         """
         Select model using profiles when available, fallback to config.
@@ -451,6 +455,13 @@ class ModelRouter:
             model_type: Model type from analyzer
             task_type: Specific task type (ex: "code_python")
             priority: Priority (fast, balanced, quality)
+            require_tool_calling: When True, profiled models whose
+                tool-calling verdict is negative are skipped, so the pick
+                is a tool-capable model. Off by default, so ordinary
+                routing is unchanged. If every profiled candidate is
+                filtered out (or the predicate is unavailable), the method
+                fails open to the config selection rather than returning
+                nothing.
 
         Returns:
             (model, reason, alternatives, profile_used)
@@ -486,12 +497,32 @@ class ModelRouter:
                     available = self.get_available_models()
                     alternatives = [p.name for p in best_profiles]  # noqa: F841
 
-                    for profile in best_profiles:
-                        if profile.name in available:
-                            alt_names = [p.name for p in best_profiles if p.name != profile.name]
-                            return profile.name, "profile", alt_names, True
+                    # Optionally require a tool-calling-capable model.
+                    # The verdict is the capability manifest's own; a
+                    # defensive lazy import keeps the router decoupled and
+                    # fails open (no filtering) if the predicate is absent.
+                    tool_verdict = None
+                    if require_tool_calling:
+                        try:
+                            from .capability_manifest import model_tool_capable
+                            tool_verdict = model_tool_capable
+                        except Exception:
+                            tool_verdict = None
 
-                    # No profiled model available, config fallback
+                    for profile in best_profiles:
+                        if profile.name not in available:
+                            continue
+                        if (
+                            require_tool_calling
+                            and tool_verdict is not None
+                            and not tool_verdict(profile.name)
+                        ):
+                            continue
+                        alt_names = [p.name for p in best_profiles if p.name != profile.name]
+                        return profile.name, "profile", alt_names, True
+
+                    # No profiled model available (or none tool-capable when
+                    # required), config fallback.
                     logger.debug(
                         f"No profiled model available for {task_type}, config fallback"
                     )

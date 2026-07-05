@@ -145,6 +145,37 @@ def apply_resource_limits(
 # Plugin loading (simplified, no sandbox — isolation is via process boundary)
 # ---------------------------------------------------------------------------
 
+class _HostPackageGuard:
+    """Meta-path finder that refuses the host package inside the worker.
+
+    The worker runs plugin code behind a process boundary with a
+    minimal, secret-free environment: no PYTHONPATH, no encryption
+    keys, no search credentials. The host package cannot work there,
+    and an attempt to import it must fail fast and deterministically --
+    not hang the initialization handshake on whatever the host install
+    layout happens to drag in. Plugins are expected to catch the
+    ImportError and engage their standalone fallbacks.
+    """
+
+    _BLOCKED_TOP_LEVEL = "opti_oignon"
+
+    def find_spec(self, fullname: str, path=None, target=None):
+        if fullname.split(".")[0] == self._BLOCKED_TOP_LEVEL:
+            raise ImportError(
+                f"'{fullname}' is not importable inside the plugin "
+                "isolation boundary (the worker forwards no host "
+                "package, no PYTHONPATH and no secrets)"
+            )
+        return None
+
+
+def install_host_package_guard() -> None:
+    """Install the host-package import guard (idempotent)."""
+    if any(isinstance(f, _HostPackageGuard) for f in sys.meta_path):
+        return
+    sys.meta_path.insert(0, _HostPackageGuard())
+
+
 def load_plugin_module(
     plugin_name: str,
     plugin_dir: str,
@@ -170,6 +201,11 @@ def load_plugin_module(
     if not entry_path.exists():
         raise FileNotFoundError(f"Entry point not found: {entry_path}")
 
+    # The plugin's module-level imports run inside exec_module below:
+    # the boundary must be in place before any of them can reach for
+    # the host package.
+    install_host_package_guard()
+
     module_name = f"_oo_worker_plugin_{plugin_name}"
     spec = importlib.util.spec_from_file_location(module_name, str(entry_path))
     if spec is None or spec.loader is None:
@@ -187,6 +223,49 @@ def load_plugin_module(
 # Hook execution
 # ---------------------------------------------------------------------------
 
+class WorkerHookContext:
+    """Context object handed to plugin hook callbacks in the worker.
+
+    Mirrors the public surface of the host-side hook context (the seven
+    fields plus ``get``/``set``) so plugin code written against it runs
+    unchanged across the process boundary. The host RPC proxy serializes
+    that object into a seven-field wire payload; this class rebuilds the
+    object the plugins expect. Mutating the context (including ``set()``)
+    affects only this local view: to propagate changes downstream a hook
+    must RETURN a dict, exactly as in-process.
+    """
+
+    def __init__(
+        self,
+        wire: dict[str, Any],
+        *,
+        hook_name: str,
+        plugin_name: str,
+    ) -> None:
+        self.hook_name = str(wire.get("hook_name") or hook_name)
+        self.plugin_name = str(wire.get("plugin_name") or plugin_name)
+        self.conversation_id = wire.get("conversation_id")
+        self.model = wire.get("model")
+        data = wire.get("data")
+        self.data: dict[str, Any] = dict(data) if isinstance(data, dict) else {}
+        config = wire.get("config")
+        self.config: dict[str, Any] = (
+            dict(config) if isinstance(config, dict) else {}
+        )
+        metadata = wire.get("metadata")
+        self.metadata: dict[str, Any] = (
+            dict(metadata) if isinstance(metadata, dict) else {}
+        )
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value from the data dict."""
+        return self.data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        """Set a value in this hook's LOCAL data view (never propagated)."""
+        self.data[key] = value
+
+
 def execute_hook(
     module: types.ModuleType,
     hook_name: str,
@@ -195,6 +274,8 @@ def execute_hook(
     """Execute a hook function on the loaded plugin module.
 
     Looks for either a ``HOOKS`` dict mapping or ``hook_<name>`` function.
+    ``data`` is the wire context payload built by the host RPC proxy; the
+    callback receives it rebuilt as a :class:`WorkerHookContext`.
 
     Returns
     -------
@@ -215,7 +296,12 @@ def execute_hook(
     if callback is None or not callable(callback):
         return {"status": "no_handler", "hook_name": hook_name}
 
-    result = callback(data)
+    context = WorkerHookContext(
+        data,
+        hook_name=hook_name,
+        plugin_name=getattr(module, "__plugin_name__", ""),
+    )
+    result = callback(context)
     if isinstance(result, dict):
         return result
     return {"status": "ok"}

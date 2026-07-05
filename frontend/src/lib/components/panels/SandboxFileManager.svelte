@@ -6,7 +6,10 @@
 	 * checkbox selection, approve & download, and reject all.
 	 * No file is ever copied out without explicit user action.
 	 */
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
+	import { SandboxFilesPoller } from '$lib/sandbox/filesPolling';
+	import type { PollState } from '$lib/sandbox/filesPolling';
+	import { ApiError } from '$lib/api/client';
 	import {
 		listSandboxFiles,
 		previewSandboxFile,
@@ -25,6 +28,8 @@
 
 	// -- Props --
 	export let sessionId: string = '';
+	/** Snapshot from the done metadata: shown at once, before any fetch. */
+	export let initialFiles: SandboxFileEntry[] | null = null;
 
 	// -- State --
 	let files: SandboxFileEntry[] = [];
@@ -41,23 +46,58 @@
 	let previewFile: SandboxPreviewResponse | null = null;
 	let previewLoading = false;
 
-	// Polling
-	let pollInterval: ReturnType<typeof setInterval> | null = null;
+	// Polling, delegated to the dependency-free scheduler: a 404 is
+	// terminal for a given id (absent when never listed, expired after
+	// life) instead of an endless request spam, transient failures back
+	// off, and switching ids re-arms the machine.
+	const poller = new SandboxFilesPoller();
+	let lifecycle: PollState = 'idle';
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let trackedSession = '';
+
+	function stopPolling() {
+		if (pollTimer !== null) {
+			clearTimeout(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	function schedule(delayMs: number | null) {
+		stopPolling();
+		if (delayMs === null) return;
+		pollTimer = setTimeout(() => {
+			void fetchFiles();
+		}, delayMs);
+	}
+
+	function seedFiles(entries: SandboxFileEntry[] | null): SandboxFileEntry[] {
+		if (!entries) return [];
+		return entries
+			.filter((entry) => entry && typeof entry.path === 'string')
+			.map((entry) => ({
+				path: entry.path,
+				size: Number(entry.size ?? 0),
+				modified: Number(entry.modified ?? 0),
+				approved: Boolean(entry.approved ?? false)
+			}));
+	}
 
 	// -- Lifecycle --
-	onMount(() => {
+	onDestroy(stopPolling);
+
+	$: if (sessionId !== trackedSession) {
+		trackedSession = sessionId;
+		stopPolling();
 		if (sessionId) {
-			fetchFiles();
-			pollInterval = setInterval(fetchFiles, 5000);
+			files = seedFiles(initialFiles);
+			selectedPaths = new Set();
+			const decision = poller.onSessionChange();
+			lifecycle = decision.state;
+			schedule(decision.nextDelayMs);
+		} else {
+			files = [];
+			lifecycle = 'idle';
 		}
-	});
-
-	onDestroy(() => {
-		if (pollInterval) clearInterval(pollInterval);
-	});
-
-	$: if (sessionId) {
-		fetchFiles();
 	}
 
 	// -- Data fetching --
@@ -67,12 +107,22 @@
 			const res: SandboxFilesResponse = await listSandboxFiles(sessionId);
 			files = res.files;
 			approvalState = res.approval_state;
-		} catch (e: any) {
-			// Session may have been destroyed
-			if (e?.message?.includes('404') || e?.message?.includes('not found')) {
+			const decision = poller.onSuccess();
+			lifecycle = decision.state;
+			schedule(decision.nextDelayMs);
+		} catch (e: unknown) {
+			const notFound =
+				(e instanceof ApiError && e.status === 404) ||
+				(e instanceof Error && e.message.includes('not found'));
+			const decision = notFound
+				? poller.onNotFound()
+				: poller.onTransientError();
+			lifecycle = decision.state;
+			if (decision.state === 'expired') {
+				// The workspace existed and is gone: the stale list would lie.
 				files = [];
-				approvalState = 'expired';
 			}
+			schedule(decision.nextDelayMs);
 		}
 	}
 
@@ -189,10 +239,15 @@
 <div class="sfm-root">
 	{#if !sessionId}
 		<p class="sfm-empty">No active sandbox session.</p>
-	{:else if approvalState === 'expired'}
+	{:else if lifecycle === 'expired'}
 		<div class="sfm-expired">
 			<span class="sfm-badge sfm-badge-expired">EXPIRED</span>
-			<p>This sandbox session has been destroyed.</p>
+			<p>This sandbox workspace existed and has been destroyed.</p>
+		</div>
+	{:else if lifecycle === 'absent'}
+		<div class="sfm-expired">
+			<span class="sfm-badge sfm-badge-absent">NO WORKSPACE</span>
+			<p>No sandbox workspace exists under this id (none was created).</p>
 		</div>
 	{:else}
 		<!-- Header -->
@@ -374,6 +429,11 @@
 
 	.sfm-badge-expired {
 		background: var(--oo-error-bg, rgba(239, 68, 68, 0.15));
+		color: var(--oo-fg-tertiary);
+	}
+
+	.sfm-badge-absent {
+		background: var(--oo-bg-elevated);
 		color: var(--oo-fg-tertiary);
 	}
 

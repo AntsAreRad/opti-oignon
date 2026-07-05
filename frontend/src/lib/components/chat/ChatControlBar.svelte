@@ -26,6 +26,8 @@
 		loadOptions,
 	} from '$lib/stores/chatOptions';
 	import { activeConversationId } from '$lib/stores/conversations';
+	import { workspaceBinding } from '$lib/stores/workspaceBinding';
+	import { getConversationBinding } from '$lib/api/sandbox';
 
 	let loaded = false;
 
@@ -286,6 +288,15 @@
 		? 'Toggle web search (DuckDuckGo)'
 		: 'Install duckduckgo-search to enable (pip install duckduckgo-search)';
 
+	// The workspace bound to the active conversation feeds the chip in the
+	// bar. The store is conversation-scoped: switching clears it at once
+	// and late responses from a left conversation are dropped, so the
+	// indication never bleeds across conversations.
+	$: void workspaceBinding.refreshFor(
+		$activeConversationId ? String($activeConversationId) : null,
+		getConversationBinding
+	);
+
 	// S131: Wipe current conversation
 	async function handleWipeConversation() {
 		const convId = $activeConversationId;
@@ -507,6 +518,24 @@
 		</svg>
 		<span class="hidden sm:inline">Code</span>
 	</button>
+
+	<!-- Workspace bound to this conversation (indicator, not a toggle) -->
+	{#if $workspaceBinding.sessionId}
+		<span
+			class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0 select-none"
+			style="background-color: var(--oo-bg-surface); color: var(--oo-fg-secondary); border: 1px solid var(--oo-bd-default);"
+			title="Workspace bound to this conversation: {$workspaceBinding.sessionId}"
+			aria-label="Workspace bound to this conversation: {$workspaceBinding.sessionId}"
+			role="status"
+		>
+			<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"
+				stroke-linecap="round" stroke-linejoin="round">
+				<path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+				<path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+			</svg>
+			<span>{$workspaceBinding.sessionId.slice(0, 8)}</span>
+		</span>
+	{/if}
 
 	<!-- S131: Wipe Conversation (visible only when available + in a conversation) -->
 	{#if wipeAvailable && $activeConversationId}
