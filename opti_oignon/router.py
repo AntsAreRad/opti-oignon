@@ -36,6 +36,36 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+class ToolCapableModelUnavailable(RuntimeError):
+    """Raised when a tool-calling-capable model is required but none exists.
+
+    A tool-bound turn must never silently run on a model whose profile
+    carries an explicit negative tool-calling verdict. When the profile
+    filter matches no tool-capable model and the config fallback is
+    explicitly non-capable too, selection fails secure with this error
+    instead of returning a model that cannot call tools.
+    """
+
+
+def _tool_calling_verdict_or_open(model: str) -> bool:
+    """Tool-calling verdict for the fail-secure guard, via the manifest.
+
+    Delegates to the capability manifest's public predicate -- the single
+    source of truth -- so the router never reimplements the capability
+    rule. A model with no profile stays capable there (the historical
+    fallback), so only a model with an explicit negative verdict reads as
+    False. If the predicate cannot be imported the capability subsystem is
+    absent; the guard then declines to refuse (returns True) rather than
+    blocking every tool-bound turn on an infrastructure gap.
+    """
+    try:
+        from .capability_manifest import model_tool_capable
+        return bool(model_tool_capable(model))
+    except Exception:
+        return True
+
+
 # =============================================================================
 # ROUTING RESULT
 # =============================================================================
@@ -458,10 +488,15 @@ class ModelRouter:
             require_tool_calling: When True, profiled models whose
                 tool-calling verdict is negative are skipped, so the pick
                 is a tool-capable model. Off by default, so ordinary
-                routing is unchanged. If every profiled candidate is
-                filtered out (or the predicate is unavailable), the method
-                fails open to the config selection rather than returning
-                nothing.
+                routing is unchanged. Fail-secure: when no profiled model
+                is both available and tool-capable and the config fallback
+                is itself explicitly non-capable, this raises
+                ToolCapableModelUnavailable rather than returning a model
+                that cannot call tools. A model with no profile stays
+                capable (the historical fallback), so a refusal happens
+                only when the selected model is known to be incapable; if
+                the capability predicate cannot be imported at all the
+                guard declines to refuse and the config fallback stands.
 
         Returns:
             (model, reason, alternatives, profile_used)
@@ -529,7 +564,53 @@ class ModelRouter:
 
         # Fallback: selection config classique
         model, reason = self._select_model(model_type, priority)
+        # Fail-secure for a tool-bound selection: never hand back a model
+        # that is known to be unable to call tools. A model with no profile
+        # stays capable (the historical fallback), so this refuses only when
+        # the fallback carries an explicit negative verdict; an unavailable
+        # predicate declines to refuse and the fallback stands.
+        if require_tool_calling and not _tool_calling_verdict_or_open(model):
+            raise ToolCapableModelUnavailable(
+                "No tool-calling-capable model is available for task "
+                f"'{task_type}': the profile filter matched none and the "
+                f"config fallback '{model}' is explicitly not tool-capable."
+            )
         return model, reason, [], False
+
+    def select_tool_capable_model(
+        self,
+        *,
+        model_type: str,
+        task_type: str,
+        priority: str = "balanced",
+    ) -> str:
+        """Select a tool-calling-capable model for a tool-bound turn.
+
+        Runs the profile filter with the tool-calling requirement engaged,
+        so a model whose profile carries an explicit negative tool-calling
+        verdict is excluded from the selection. This is the real entry
+        point that turns the requirement on; ordinary routing keeps its
+        default (off). Fails secure: raises ToolCapableModelUnavailable
+        when no tool-calling-capable model can be found, instead of handing
+        back a model that cannot call tools.
+
+        Args:
+            model_type: Model type from the analyzer.
+            task_type: Specific task type (e.g. "code_python").
+            priority: Selection priority (fast, balanced, quality).
+
+        Returns:
+            The name of a tool-calling-capable model.
+
+        Raises:
+            ToolCapableModelUnavailable: When no tool-capable model exists.
+        """
+        model, _reason, _alternatives, _profile_used = (
+            self._select_model_with_profiles(
+                model_type, task_type, priority, require_tool_calling=True,
+            )
+        )
+        return model
 
     def _determine_prompt_variant(
         self,
