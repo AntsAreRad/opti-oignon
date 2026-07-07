@@ -11,14 +11,42 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 _TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+
+
+def _is_loopback_url(url: str) -> bool:
+    """Return True only if url addresses the local host.
+
+    The hostname must be the literal "localhost" or an address in a
+    loopback range (127.0.0.0/8, ::1). No DNS resolution is performed:
+    an unresolved hostname is treated as non-local and refused, so the
+    check itself never reaches the network.
+    """
+    host = (urlparse(url).hostname or "").strip()
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _assert_loopback(url: str) -> None:
+    """Raise ValueError unless url addresses the local host."""
+    if not _is_loopback_url(url):
+        raise ValueError(
+            "Ollama endpoint must be on the local host (loopback); "
+            f"refusing non-local URL: {url!r}"
+        )
 
 
 @dataclass
@@ -171,6 +199,9 @@ class RedTeamConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
+        # The red team must never reach off the local host.
+        _assert_loopback(self.ollama_url)
+
         # Validate categories
         invalid_cats = set(self.categories) - VALID_CATEGORIES
         if invalid_cats:

@@ -12,6 +12,12 @@ Formats:
 
 Reports include timestamp, config snapshot, per-target heatmap data,
 and per-category / per-strategy / per-target breakdowns.
+
+Reports name which attack categories bypass the defenses, so they are
+written owner-only (directory 0o700, files 0o600): on a shared host
+other local users must not be able to read them, and the default umask
+must not leave them world-readable. The output directory is intended to
+stay out of version control.
 """
 
 __all__ = [
@@ -23,6 +29,7 @@ __all__ = [
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -387,6 +394,19 @@ def generate_markdown_report(
 # Save helper
 # ---------------------------------------------------------------------------
 
+def _write_owner_only(path: Path, text: str) -> None:
+    """Write text to path readable only by the owner (0o600).
+
+    The file is created 0o600 from the start (no world-readable window
+    between creation and a later chmod) and its mode is reasserted on the
+    open descriptor to cover a pre-existing path.
+    """
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
 def save_report(
     campaign_score: Any,
     output_dir: str | Path = _DEFAULT_OUTPUT_DIR,
@@ -419,6 +439,11 @@ def save_report(
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # Restrict to the owner: reports name where the defenses are weak.
+    try:
+        os.chmod(out, 0o700)
+    except OSError:
+        logger.warning("Could not restrict permissions on %s", out)
 
     timestamp_slug = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     saved: dict[str, str] = {}
@@ -428,8 +453,9 @@ def save_report(
             campaign_score, config_snapshot, campaign_run
         )
         path = out / f"report_{timestamp_slug}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        _write_owner_only(
+            path, json.dumps(report, indent=2, ensure_ascii=False)
+        )
         saved["json"] = str(path)
         logger.info("JSON report saved to %s", path)
 
@@ -438,8 +464,7 @@ def save_report(
             campaign_score, config_snapshot, campaign_run
         )
         path = out / f"report_{timestamp_slug}.txt"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
+        _write_owner_only(path, text)
         saved["text"] = str(path)
         logger.info("Text report saved to %s", path)
 
@@ -448,8 +473,7 @@ def save_report(
             campaign_score, config_snapshot, campaign_run
         )
         path = out / f"report_{timestamp_slug}.md"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(md)
+        _write_owner_only(path, md)
         saved["markdown"] = str(path)
         logger.info("Markdown report saved to %s", path)
 

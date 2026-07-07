@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 
 _LOCALHOST_ADDRESSES = ("127.0.0.1", "::1", "localhost")
+_RECOGNIZED_MODES = ("daily", "bulbe")
 _SECURITY_YAML = Path(__file__).resolve().parent / "config" / "security.yaml"
 
 
@@ -197,17 +198,32 @@ def is_remote_access_allowed() -> bool:
 # ---------------------------------------------------------------------------
 
 def _get_current_mode() -> str:
-    """Load the current security mode. Defaults to 'bulbe' on error."""
+    """Load the current security mode, normalized and fail-secure.
+
+    Any value that is not exactly a recognized mode is treated as Bulbe:
+    an unreadable mode (exception) and an unrecognized or malformed mode
+    string (a hand-edited config carrying a stray capitalization, a
+    trailing space, or an empty value) both resolve to the restrictive
+    interpretation. The guard must never fall to the permissive path on
+    an undetermined mode.
+    """
     try:
         from opti_oignon.security_mode import get_current_mode
-        return get_current_mode()
+        raw = get_current_mode()
     except Exception:
-        # Fail secure: if we cannot determine mode, assume Bulbe
         logger.warning(
             "Cannot determine security mode; defaulting to 'bulbe' "
             "(fail-secure)."
         )
         return "bulbe"
+    if raw not in _RECOGNIZED_MODES:
+        logger.warning(
+            "Unrecognized security mode %r; defaulting to 'bulbe' "
+            "(fail-secure).",
+            raw,
+        )
+        return "bulbe"
+    return raw
 
 
 def _is_remote_enabled_in_config() -> bool:

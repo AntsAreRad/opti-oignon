@@ -52,6 +52,35 @@ class ToolDefinition:
     network: bool = False
 
 
+# The manifest permission that authorises a plugin to open outbound network
+# connections. Mirrors the entry in the plugin manifest's valid-permission
+# set; kept as a local constant so this lower layer never imports the plugin
+# package. A plugin tool's network capability is derived solely from this
+# validated permission, never from a value the plugin supplies for its own
+# tool -- the plugin is untrusted for its own capability claim.
+PLUGIN_NETWORK_PERMISSION = "network_outbound"
+
+
+def _plugin_tool_network(plugin_permissions) -> bool:
+    """Derive the network capability of a plugin-provided tool.
+
+    The capability is taken only from the validated manifest permissions.
+    Fail-secure for the isolated mode: when the permission set cannot be
+    established (None, or not iterable) the tool is treated as network-bound
+    so it is masked while the isolated mode is active, rather than leaking. A
+    known permission set that does not carry the permission yields a
+    non-network tool -- its network imports are already blocked, so it is
+    safe to expose in the isolated mode.
+    """
+    if plugin_permissions is None:
+        return True
+    try:
+        perms = set(plugin_permissions)
+    except TypeError:
+        return True
+    return PLUGIN_NETWORK_PERMISSION in perms
+
+
 class ToolRegistry:
     """Registre des outils disponibles.
 
@@ -99,6 +128,23 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         status = "actif" if tool.enabled else "inactif"
         logger.debug(f"Outil enregistre: {tool.name} ({status})")
+
+    def register_plugin_tool(
+        self, tool: ToolDefinition, *, plugin_permissions,
+    ) -> ToolDefinition:
+        """Register a plugin-provided tool with a trusted network capability.
+
+        Any ``network`` value carried by ``tool`` is discarded and replaced
+        by the capability derived from the plugin's validated manifest
+        permissions (see ``_plugin_tool_network``). This is the single entry
+        point through which a plugin tool may enter the registry, so the
+        mode-aware capability manifest and the per-call gate see a network
+        flag that reflects what the plugin actually declared rather than a
+        value the plugin chose for itself. Returns the registered tool.
+        """
+        tool.network = _plugin_tool_network(plugin_permissions)
+        self.register(tool)
+        return tool
 
     def get(self, name: str) -> ToolDefinition | None:
         """Retrieve a tool by its name."""

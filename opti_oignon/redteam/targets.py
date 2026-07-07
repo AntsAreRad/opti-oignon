@@ -31,6 +31,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from opti_oignon.redteam.config import _assert_loopback
+
 logger = logging.getLogger(__name__)
 
 
@@ -563,6 +565,7 @@ class ChatTarget(TargetAdapter):
         system_prompt: str | None = None,
         timeout: int = 60,
     ) -> None:
+        _assert_loopback(ollama_url)
         self._model = model
         self._ollama_url = ollama_url
         self._system_prompt = system_prompt or _CHAT_SAFETY_SYSTEM_PROMPT

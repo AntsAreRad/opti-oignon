@@ -52,6 +52,42 @@ jobs:
         run: ruff check opti_oignon/ --output-format=github
 
   # -------------------------------------------------------------------
+  # Public-clean -- reject internal session nomenclature on ADDED lines
+  # of a diff over the public source and test trees (diff-only, so it
+  # guards against regressions without failing on pre-existing debt).
+  # -------------------------------------------------------------------
+  public-clean:
+    name: Public-clean Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Determine diff base
+        id: base
+        env:
+          PR_BASE: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            git fetch --no-tags --depth=1 origin "$PR_BASE"
+            echo "ref=origin/$PR_BASE" >> "$GITHUB_OUTPUT"
+          elif [ -n "$PUSH_BEFORE" ] && ! printf '%s' "$PUSH_BEFORE" | grep -qE '^0+$'; then
+            echo "ref=$PUSH_BEFORE" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run public-clean guard (added lines only)
+        run: python .github/scripts/public_clean_guard.py "${{ steps.base.outputs.ref }}"
+
+  # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
   # -------------------------------------------------------------------
   typecheck:

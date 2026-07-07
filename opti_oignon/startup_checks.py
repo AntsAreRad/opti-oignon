@@ -391,6 +391,42 @@ def _check_security_mode() -> CheckItem:
         )
 
 
+def _dm_device_is_crypt(device: str) -> bool:
+    """Return True only when a /dev/mapper or /dev/dm-* device is a
+    confirmed crypt target (its dm UUID starts with 'CRYPT-').
+
+    A dm/mapper path alone is not proof of encryption: plain LVM logical
+    volumes share the same /dev/mapper and /dev/dm-* namespace. Fail
+    secure -- an unconfirmed device is reported as not-crypt.
+    """
+    dev_name = device.rsplit("/", 1)[-1] if device else ""
+    if not dev_name:
+        return False
+    try:
+        if dev_name.startswith("dm-"):
+            dm_name = dev_name
+        else:
+            dm_name = None
+            sys_block = Path("/sys/block")
+            if sys_block.exists():
+                for dm_dir in sys_block.glob("dm-*"):
+                    name_file = dm_dir / "dm" / "name"
+                    if (
+                        name_file.exists()
+                        and name_file.read_text().strip() == dev_name
+                    ):
+                        dm_name = dm_dir.name
+                        break
+            if dm_name is None:
+                return False
+        uuid_path = Path(f"/sys/block/{dm_name}/dm/uuid")
+        if uuid_path.exists():
+            return uuid_path.read_text().strip().startswith("CRYPT-")
+    except (OSError, PermissionError):
+        pass
+    return False
+
+
 def _check_encrypted_swap() -> CheckItem:
     """Check if swap is encrypted (advisory)."""
     try:
@@ -419,11 +455,15 @@ def _check_encrypted_swap() -> CheckItem:
                 score_impact=0,
             )
 
-        # Check if swap devices are on dm-crypt
+        # A dm/mapper swap device is only encrypted when its dm UUID
+        # confirms a CRYPT- target. A plain LVM swap volume lives under the
+        # same /dev/mapper and /dev/dm-* namespace, so a path match alone
+        # must not be taken as proof of encryption.
         has_unencrypted = False
         for entry in swap_entries:
             device = entry.split()[0] if entry.split() else ""
-            if "/dm-" not in device and "/mapper/" not in device:
+            is_dm = "/dm-" in device or "/mapper/" in device
+            if not (is_dm and _dm_device_is_crypt(device)):
                 has_unencrypted = True
                 break
 

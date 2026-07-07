@@ -8,10 +8,10 @@ PUT    /api/security/config       -- Update security settings (admin only)
 GET    /api/security/encryption   -- Encryption status (S125)
 POST   /api/security/encryption/setup -- Initialize encryption (S125)
 GET    /api/security/audit        -- Security audit trail (S125)
-POST   /api/security/audit/export-qr     -- QR code of chain tip (S146)
-POST   /api/security/audit/export-anchor -- Signed JSON anchor file (S146)
-GET    /api/security/audit/anchor-text   -- Plain-text anchor for clipboard (S146)
-POST   /api/security/audit/verify-anchor -- Verify imported anchor (S146)
+POST   /api/security/audit/export-qr     -- QR code of the signed anchor
+POST   /api/security/audit/export-anchor -- Signed JSON anchor file
+GET    /api/security/audit/anchor-text   -- Plain-text anchor for clipboard
+POST   /api/security/audit/verify-anchor -- Verify imported anchor
 POST   /api/security/redteam/run         -- Launch red team campaign (S148)
 GET    /api/security/redteam/status      -- Campaign progress (S148)
 GET    /api/security/redteam/results     -- Latest results (S148)
@@ -46,11 +46,26 @@ try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
 except ImportError:
-    _auth_dep = []
+    # Fail closed: an undetermined authentication state is treated as
+    # untrusted. When the auth subsystem cannot be loaded, every security
+    # endpoint is refused rather than served without authentication.
+    async def _auth_unavailable() -> dict:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Authentication subsystem unavailable; "
+                "security endpoints are disabled."
+            ),
+        )
+
+    _auth_dep = [Depends(_auth_unavailable)]
 
     async def _get_current_user() -> dict:  # type: ignore[no-redef]
-        """Fallback when the auth routes are unavailable (degraded mode)."""
-        return {}
+        """Retained symbol for degraded mode; also refuses (fail closed)."""
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication subsystem unavailable.",
+        )
 
 router = APIRouter(
     prefix="/api/security",
@@ -1875,7 +1890,7 @@ async def audit_chain_export() -> Any:
 
 
 # =========================================================================
-# S146: Audit Chain External Anchor Export & Verification
+# Audit Chain External Anchor Export & Verification
 # =========================================================================
 
 
@@ -1895,6 +1910,10 @@ class VerifyAnchorRequest(BaseModel):
     timestamp: float = Field(default=0, description="Anchor creation timestamp")
     version: str = Field(default="", description="App version at anchor time")
     anchor_version: int = Field(default=1, description="Anchor format version")
+    key_id: str = Field(
+        default="",
+        description="Non-secret id of the anchor key that signed the payload",
+    )
     hmac_sha256: str | None = Field(
         default=None, description="HMAC signature (if signed anchor)",
     )

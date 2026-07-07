@@ -44,6 +44,8 @@ import math
 from enum import Enum
 from typing import Any, Callable
 
+from opti_oignon.redteam.config import _assert_loopback
+
 logger = logging.getLogger(__name__)
 
 # Type alias for strategy functions
@@ -203,6 +205,8 @@ def strategy_multilingual(
     str
         Translated payload (or prefixed fallback).
     """
+    _assert_loopback(ollama_url)
+
     import json
     import urllib.request
 

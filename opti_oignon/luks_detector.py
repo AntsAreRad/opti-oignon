@@ -212,11 +212,14 @@ def _check_lsblk() -> dict[str, Any] | None:
 
         _walk(devices)
 
-        # Check if any encrypted device is an ancestor of the root mount
-        root_encrypted = _is_root_on_crypt(devices, encrypted_devs)
+        # The root is encrypted only when the "/" mountpoint is on, or
+        # descends from, a crypt device. An unrelated crypt device
+        # elsewhere in the tree (a backup drive, encrypted swap mounted
+        # elsewhere) must not make the root report encrypted.
+        root_encrypted = _root_under_crypt(devices)
 
         return {
-            "encrypted": root_encrypted or len(encrypted_devs) > 0,
+            "encrypted": root_encrypted,
             "devices": encrypted_devs,
         }
     except (
@@ -228,26 +231,33 @@ def _check_lsblk() -> dict[str, Any] | None:
         return None
 
 
-def _is_root_on_crypt(
-    devices: list[dict], crypt_names: list[str],
-) -> bool:
-    """Check if the root mountpoint sits on a crypt device."""
-    if not crypt_names:
-        return False
+def _root_under_crypt(devices: list[dict]) -> bool:
+    """Return True when "/" is on, or descends from, a crypt device.
 
-    def _find_root(dev_list: list[dict]) -> bool:
+    A crypt device "covers" its entire subtree: a root LVM volume layered
+    on top of a crypt device (the common LUKS-on-LVM full-disk encryption
+    layout) is encrypted, while a crypt device that is not an ancestor of
+    "/" (a backup drive, encrypted swap mounted elsewhere) is not proof
+    that the root filesystem is encrypted.
+    """
+
+    def _walk(dev_list: list[dict], under_crypt: bool) -> bool:
         for dev in dev_list:
-            mp = dev.get("mountpoint") or ""
             dev_type = (dev.get("type") or "").lower()
-            name = dev.get("name", "")
-            if mp == "/" and (dev_type == "crypt" or name in crypt_names):
+            fstype = (dev.get("fstype") or "").lower()
+            mp = dev.get("mountpoint") or ""
+            here_crypt = (
+                under_crypt
+                or dev_type == "crypt"
+                or fstype.startswith("crypto_luks")
+            )
+            if mp == "/" and here_crypt:
                 return True
-            children = dev.get("children") or []
-            if _find_root(children):
+            if _walk(dev.get("children") or [], here_crypt):
                 return True
         return False
 
-    return _find_root(devices)
+    return _walk(devices, False)
 
 
 # ---------------------------------------------------------------------------
@@ -289,17 +299,16 @@ def _check_proc_mounts() -> dict[str, Any] | None:
             or "/mapper/" in root_device
         )
 
-        # Additional check: see if the dm device is actually crypt
+        # A dm/mapper root is NOT proof of encryption on its own: plain
+        # LVM logical volumes live under /dev/mapper and /dev/dm-* too.
+        # Report encrypted only when the dm UUID confirms a CRYPT- target;
+        # otherwise fail secure and report unconfirmed (advisory, tips).
         if is_dm:
             dev_name = root_device.split("/")[-1]
-            # Check /sys/block/dm-*/dm/uuid for CRYPT prefix
-            crypt_confirmed = _check_dm_uuid(dev_name)
-            if crypt_confirmed:
+            if _check_dm_uuid(dev_name):
                 encrypted_devs.append(dev_name)
                 return {"encrypted": True, "devices": encrypted_devs}
-            # Even without UUID confirmation, dm-mapper is a strong signal
-            encrypted_devs.append(dev_name)
-            return {"encrypted": True, "devices": encrypted_devs}
+            return {"encrypted": False, "devices": []}
 
         return {"encrypted": False, "devices": []}
 

@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from opti_oignon.redteam.config import _assert_loopback
+
 logger = logging.getLogger(__name__)
 
 
@@ -157,6 +159,7 @@ class AttackGenerator:
         min_attack_length: int = 10,
         max_attack_length: int = 2000,
     ) -> None:
+        _assert_loopback(ollama_url)
         self.model = model
         self.ollama_url = ollama_url.rstrip("/")
         self.seed_fallback = seed_fallback

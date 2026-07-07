@@ -45,6 +45,9 @@ data/.audit_chain_anchor
 # --- Plugin execution logs ---
 data/plugin_logs/
 
+# --- Red team report output ---
+data/redteam_results/
+
 # --- Master key material (keyfile mode, K-01): never commit or back up ---
 data/.keyfile
 
