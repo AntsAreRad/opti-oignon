@@ -542,6 +542,35 @@ def _select_tool_model(selected_model, optimize, fast_tool_model):
     return selected_model
 
 
+def _ensure_tool_capable_model(model, routing):
+    """Guarantee a tool-bound turn runs on a tool-calling-capable model.
+
+    Called only for tool-bound turns whose tools are actually reachable.
+    When the already-selected model can call tools it is returned
+    unchanged, so a correctly routed turn is never perturbed. Otherwise the
+    router re-selects a tool-capable model for the task with the
+    tool-calling requirement engaged, which excludes non-capable models and
+    fails secure -- an explicit refusal (ToolCapableModelUnavailable)
+    propagates to the caller when no tool-capable model exists. The
+    capability verdict is the manifest's own predicate (the single source
+    of truth), never a local reimplementation; if that predicate cannot be
+    imported the guard leaves the model as routed, matching the router's
+    own decline-to-refuse posture on an absent capability subsystem.
+    """
+    try:
+        from .capability_manifest import model_tool_capable
+        already_capable = bool(model_tool_capable(model))
+    except Exception:
+        already_capable = True
+    if already_capable:
+        return model
+    from .router import router as _model_router
+    return _model_router.select_tool_capable_model(
+        model_type=getattr(routing, "model_type", "general"),
+        task_type=getattr(routing, "task_type", "general"),
+    )
+
+
 # =============================================================================
 # AGENTIC EXECUTOR
 # =============================================================================
@@ -1200,6 +1229,19 @@ class AgenticExecutor:
                 "to the fast tool model %s",
                 _selected_model, effective_model,
             )
+
+        # A tool-bound turn must run on a model that can actually call tools,
+        # but only when tools are truly reachable this turn: with no tool
+        # executor no tool runs regardless of the model, so enforcing here
+        # would refuse on an unrelated gap. When tools are reachable a
+        # non-capable model is re-selected to a capable one, or the turn
+        # refuses explicitly (ToolCapableModelUnavailable propagates to the
+        # caller) rather than silently answering tool-less. Non-tool-bound
+        # turns are deliberately untouched, so a plain chat keeps access to
+        # models with no tool-calling profile. Placed before the think guard
+        # so the guard and the manifest below see the final effective model.
+        if tool_bound and self.tool_executor_available:
+            effective_model = _ensure_tool_capable_model(effective_model, routing)
 
         # The think=True/400 guard (option A), evaluated on the effective model:
         # a non-thinking model is steered away from every think-emitting pipeline,
