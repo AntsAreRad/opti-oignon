@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Recommendations — S89
+Benchmark Recommendations
 
 Generates automated model recommendations based on benchmark results.
 Identifies best models for different use cases (fast, quality, code, value)
@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit hardening: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -464,7 +464,7 @@ class BenchmarkRecommender:
         conn = _safe_connect(self._db_path)
         conn.row_factory = sqlite3.Row
         try:
-            # S193 BMK-11: aggregate only over the latest `limit` completed
+            # Aggregate only over the latest `limit` completed
             # runs. The previous query applied LIMIT to the GROUP BY (capping
             # the number of MODELS) while the aggregate silently spanned the
             # entire history, and source_run_ids then misreported the scope.

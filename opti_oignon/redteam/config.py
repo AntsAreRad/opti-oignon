@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Red Team Configuration — load & validate config/redteam.yaml.
+Red Team Configuration -- load and validate config/redteam.yaml.
 
 Provides RedTeamConfig dataclass and load_redteam_config() helper.
 """
@@ -51,7 +51,7 @@ def _assert_loopback(url: str) -> None:
 
 @dataclass
 class SchedulerConfig:
-    """Configuration for automated security scheduling (S158)."""
+    """Configuration for automated security scheduling."""
 
     enabled: bool = True
     interval: str = "weekly"
@@ -194,7 +194,7 @@ class RedTeamConfig:
     # Per-category toggles
     category_toggles: dict[str, bool] = field(default_factory=dict)
 
-    # S158: scheduler configuration
+    # Scheduler configuration
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     def __post_init__(self) -> None:
@@ -285,7 +285,7 @@ def load_redteam_config(
     known_fields = {f.name for f in RedTeamConfig.__dataclass_fields__.values()}
     filtered = {k: v for k, v in raw.items() if k in known_fields}
 
-    # S158: convert nested scheduler dict to SchedulerConfig
+    # Convert nested scheduler dict to SchedulerConfig
     if "scheduler" in filtered and isinstance(filtered["scheduler"], dict):
         sched_known = {f.name for f in SchedulerConfig.__dataclass_fields__.values()}
         sched_filtered = {k: v for k, v in filtered["scheduler"].items() if k in sched_known}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ADAPTIVE ROUTING -- Feedback-Driven Score Adjustments (S62)
+ADAPTIVE ROUTING -- Feedback-Driven Score Adjustments
 =============================================================
 
 Connects feedback data to SmartRouter scoring. When
@@ -8,8 +8,6 @@ auto_adjust_routing is enabled in feedback.yaml, accumulated
 user feedback adjusts model task_scores via a weighted moving
 average. Recent feedback carries more weight, and adjustments
 are capped to prevent runaway drift.
-
-Author: Leon
 """
 
 import logging

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LEARNED ROUTER -- ML-based Query Classification (S67)
+LEARNED ROUTER -- ML-based Query Classification
 ======================================================
 
 Supplements the YAML heuristic router with a sklearn classifier trained
@@ -17,8 +17,6 @@ Architecture:
     - TrainingResult: dataclass for train() return value
     - RoutingPrediction: dataclass for classify() return value
     - LEARNED_ROUTER_AVAILABLE: flag (False when sklearn/joblib missing)
-
-Author: Leon
 """
 
 import hashlib
@@ -33,7 +31,7 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit hardening: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -77,7 +75,7 @@ _DEFAULT_MODEL_PATH = _DATA_DIR / "learned_router.pkl"
 
 
 # ---------------------------------------------------------------------------
-# Persisted-model integrity (LR-01, S185)
+# Persisted-model integrity
 #
 # joblib.load is pickle deserialization: loading a tampered or swapped
 # learned_router.pkl is arbitrary code execution at init. The file is plaintext
@@ -563,7 +561,7 @@ class LearnedRouter:
             # Persist model
             self._model_path.parent.mkdir(parents=True, exist_ok=True)
             joblib.dump(pipe, str(self._model_path))
-            # LR-01 (S185): write a keyed MAC so the artifact is authenticated
+            # Write a keyed MAC so the artifact is authenticated
             # on load. Without a master key the model is persisted but cannot be
             # reloaded (verify fails safe); warn so the operator knows.
             if not write_model_mac(
@@ -609,7 +607,7 @@ class LearnedRouter:
         """
         if not SKLEARN_AVAILABLE or not self._model_path.exists():
             return False
-        # LR-01 (S185): joblib.load is pickle deserialization (arbitrary code
+        # Caution: joblib.load is pickle deserialization (arbitrary code
         # execution on a tampered/swapped file). Verify a keyed MAC BEFORE
         # loading and refuse on mismatch, missing MAC, or no key (fail-safe).
         if not verify_model_mac(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-INFERENCE AUTO-TUNER -- OPTI-OIGNON S110 + S111
+INFERENCE AUTO-TUNER -- OPTI-OIGNON
 =================================================
 
 Automatically finds optimal inference parameters (batch size, threads,
@@ -15,7 +15,7 @@ Architecture:
     AutoTuner           -- orchestrates parameter sweep + hill climbing
     AutoTunerManager    -- singleton managing tuner state + persistence
 
-S111 additions:
+Later additions:
     create_ollama_benchmark_fn()    -- real benchmark via Ollama API
     create_llamacpp_benchmark_fn()  -- real benchmark via llama-cpp-python
 
@@ -266,7 +266,7 @@ def get_hardware_fingerprint() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tuner Recommendations (S112)
+# Tuner Recommendations
 # ---------------------------------------------------------------------------
 
 
@@ -642,7 +642,7 @@ class AutoTuner:
                 job.progress = job.completed_steps / max(job.total_steps, 1)
                 self._report_progress(job)
 
-            # Phase 3: Refinement — re-confirm the best with extra runs
+            # Phase 3: Refinement -- re-confirm the best with extra runs
             job.current_step = "Confirming best configuration..."
             self._report_progress(job)
             confirmed = self._run_averaged(
@@ -1013,7 +1013,7 @@ class AutoTunerManager:
                 self._profiles[model_name] = profile
                 self._save_results()
         except ValueError:
-            # Cancelled — job already updated by tuner.
+            # Cancelled -- job already updated by tuner.
             pass
         except Exception as exc:
             logger.error("Tuning failed for %s: %s", model_name, exc)

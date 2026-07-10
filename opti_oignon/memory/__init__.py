@@ -1,24 +1,23 @@
-"""opti_oignon.memory -- personal memory package (S173, Theme 3 / Odysseus Core).
+"""opti_oignon.memory -- personal memory package.
 
-A two-tier personal-memory store, aligned with the S66 dual-layer principle:
+A two-tier personal-memory store, aligned with the dual-layer principle:
 
 - ``canonical_store`` -- the SQLite WAL source of truth.
-- ``vector_store``    -- the ``oo_memories`` ChromaDB layer (added in S173).
+- ``vector_store``    -- the ``oo_memories`` ChromaDB layer.
 - ``dedup``           -- double deduplication (Jaccard then cosine).
 - ``retrieval``       -- hybrid retrieval under the context-window budget.
 
-Fold-in (resolved in S173): the former ``opti_oignon/memory.py`` and its
+Fold-in: the former ``opti_oignon/memory.py`` and its
 ``MemoryManager`` / ``MemoryFact`` were relocated verbatim into
 ``opti_oignon/memory/legacy.py``. This ``__init__`` is the single compatibility
 seam: it re-exports the legacy public surface so existing imports such as
 ``from opti_oignon.memory import MemoryManager`` keep working unchanged, and it
-exposes the new package layer alongside it. The decision is recorded in
-ODYSSEUS_SPEC.md Section 4.1.
+exposes the new package layer alongside it.
 """
 
 from __future__ import annotations
 
-# New canonical store (S173).
+# Canonical store.
 from .canonical_store import (
     CATEGORIES,
     CanonicalMemoryStore,
@@ -27,7 +26,7 @@ from .canonical_store import (
     reset_canonical_store,
 )
 
-# New vector layer (S173).
+# Vector layer.
 from .vector_store import (
     COLLECTION_NAME,
     MemoryVectorStore,
@@ -36,7 +35,7 @@ from .vector_store import (
     reset_vector_store,
 )
 
-# New deduplication and coordinated CRUD (S173).
+# Deduplication and coordinated CRUD.
 from .dedup import (
     COSINE_THRESHOLD,
     JACCARD_THRESHOLD,
@@ -48,7 +47,7 @@ from .dedup import (
     reset_memory_store,
 )
 
-# New hybrid retrieval (S173) and S66 dual-layer assembly (S174).
+# Hybrid retrieval and dual-layer assembly.
 from .retrieval import (
     MEMORY_TOKEN_BUDGET,
     DualLayerMemory,

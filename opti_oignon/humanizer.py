@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Humanizer Engine -- S86
+Humanizer Engine
 
 Post-processing to reduce "statistically perfect" LLM output.
 Makes local model responses feel more natural and less machine-generated.
@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# HUM-05 (S194): guard the yaml import so a missing PyYAML degrades the
-# module instead of breaking its import (VL-02 sibling-consistency class).
+# Guard the yaml import so a missing PyYAML degrades the
+# module instead of breaking its import (sibling-consistency class).
 try:
     import yaml
     YAML_AVAILABLE = True
@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - PyYAML is a core dependency
     YAML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit hardening: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -361,7 +361,7 @@ class HumanizerFeedbackDB:
 # Humanizer strategies (rule-based)
 # ---------------------------------------------------------------------------
 
-# HUM-01 (S194): fenced blocks and inline code are masked before any
+# Fenced blocks and inline code are masked before any
 # rule-based transform and restored afterwards, so vocabulary swaps,
 # contraction injection, phrase stripping, and whitespace cleanup can
 # never touch code. Placeholders use a private-use unicode sentinel
@@ -420,7 +420,7 @@ def _apply_vocabulary_replacements(
 def _strip_banned_phrases(text: str, phrases: list[str]) -> tuple[str, int]:
     """Remove banned filler phrases from text.
 
-    HUM-04 (S194): patterns are anchored on a leading word boundary
+    Patterns are anchored on a leading word boundary
     (no substring matches like "note that" inside "denote that"), and
     the whitespace cleanup only runs when something was removed, only
     collapses runs that do not start a line (markdown indentation is
@@ -460,7 +460,7 @@ def _apply_contractions(
         return text, 0
 
     count = 0
-    # HUM-02 (S194): split CAPTURING the separators and rejoin them
+    # Split CAPTURING the separators and rejoin them
     # exactly, so newlines and paragraph breaks after sentence enders
     # survive (the previous " ".join flattened all structure).
     parts = re.split(r"((?<=[.!?])\s+)", text)
@@ -490,7 +490,7 @@ def _apply_contractions(
 def _reduce_hedging(text: str, hedging_phrases: list[str]) -> tuple[str, int]:
     """Reduce excessive hedging phrases.
 
-    HUM-04 (S194): leading word-boundary anchor, cleanup conditional on
+    Leading word-boundary anchor, cleanup conditional on
     a removal and scoped off line starts, plus capitalization of a
     sentence left lowercase at the very start of the text.
 
@@ -616,8 +616,8 @@ class HumanizerEngine:
     def _apply_rules(self, text: str) -> tuple[str, list[str], int]:
         """Apply all rule-based strategies.
 
-        HUM-01 (S194): code segments are masked for the whole pass.
-        HUM-03 (S194): hedging runs BEFORE contractions, otherwise
+        Code segments are masked for the whole pass.
+        Hedging runs BEFORE contractions, otherwise
         contracting "it is" -> "it's" makes multiword hedges like
         "It is possible that" unmatchable.
 
@@ -644,7 +644,7 @@ class HumanizerEngine:
                 strategies.append("filler_reduction")
                 total_replacements += count
 
-        # Hedging calibration (before contractions, HUM-03)
+        # Hedging calibration (before contractions)
         if self._config.hedging_excess:
             text, count = _reduce_hedging(text, self._config.hedging_excess)
             if count > 0:

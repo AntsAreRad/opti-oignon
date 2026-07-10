@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Autonomous Benchmark Evaluator — S88
+Autonomous Benchmark Evaluator
 
 Measures factual accuracy, code quality, structural quality, and
 performance without requiring a judge LLM. Scoring is deterministic
@@ -307,7 +307,7 @@ def score_exact(response: str, expected: list[str]) -> tuple[float, str]:
         Tuple of (score 0.0-1.0, matched answer or empty string).
     """
     answer = _normalize_text(_extract_answer(response))
-    # S193 BJD-01: an empty extracted answer must never match (the previous
+    # An empty extracted answer must never match (the previous
     # reverse containment scored empty responses 1.0), and reverse
     # containment (answer inside the expected string) needs a minimum
     # length so degenerate one-character answers do not match.
@@ -833,7 +833,7 @@ def evaluate_performance(
     """
     targets = speed_targets or {}
 
-    # S193 BJD-02: a generation that never produced a token is a failure,
+    # A generation that never produced a token is a failure,
     # not an instant answer; ttft=0 must not read as "fast" (the previous
     # behaviour scored a failed/empty query 0.6).
     if tokens_per_second <= 0 and ttft_ms <= 0:
@@ -910,9 +910,9 @@ def compute_composite_score(
         evaluated: Optional set of axis names actually evaluated
             ('accuracy', 'code', 'structure', 'speed'). When provided,
             non-evaluated axes are excluded and the remaining weights
-            renormalized (S193 BJD-03), so e.g. a profile without code
+            renormalized, so e.g. a profile without code
             questions is no longer capped below 1.0 by a dead code axis.
-            Note: composites stored before S193 were computed without
+            Note: composites stored by earlier releases were computed without
             renormalization and are not directly comparable.
 
     Returns:
@@ -946,7 +946,7 @@ class BenchmarkEvaluator:
     """Facade that holds loaded questions and profiles for reuse.
 
     Merges built-in profiles from benchmark_profiles.yaml with user-defined
-    custom profiles from CustomProfileStore (S90). Custom profiles appear
+    custom profiles from CustomProfileStore. Custom profiles appear
     alongside built-in ones in every listing and lookup method.
     """
 

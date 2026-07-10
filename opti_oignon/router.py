@@ -13,8 +13,6 @@ The Router takes Analyzer results and determines:
 - Which temperature to apply
 - Which system prompt to load
 - Additional parameters
-
-Author: Léon
 """
 
 import logging
@@ -26,7 +24,7 @@ import ollama
 from .analyzer import AnalysisResult, TaskType
 from .config import config
 
-# S46: Conditional import of model profiles
+# Conditional import of model profiles
 try:
     from .model_profiles import ModelProfile, RoutingReason, profile_manager  # noqa: F401
     MODEL_PROFILES_AVAILABLE = True
@@ -81,9 +79,9 @@ class RoutingResult:
     priority_used: str           # Which priority was used (primary, fast, fallback)
     explanation: str             # Why this model was chosen
     timeout: int                 # Timeout in seconds
-    # S46: Transparent routing data
+    # Transparent routing data
     routing_reason: dict | None = None  # Detailed reason for the frontend
-    # S48: Vision routing
+    # Vision routing
     vision_routed: bool = False            # True if auto-routed to vision
     images: list[str] = field(default_factory=list)  # Base64 images for Ollama
 
@@ -205,7 +203,7 @@ class ModelRouter:
         return preferred, "unavailable"
 
     # -------------------------------------------------------------------------
-    # S48: Vision Detection
+    # Vision Detection
     # -------------------------------------------------------------------------
 
     # Regex to detect base64 image data in a message
@@ -294,7 +292,7 @@ class ModelRouter:
         if not vision_profiles:
             return None
 
-        # S48: Strictly filter models with vision capability
+        # Strictly filter models with vision capability
         vision_only = [p for p in vision_profiles if p.has_capability("vision")]
         if not vision_only:
             return None
@@ -329,7 +327,7 @@ class ModelRouter:
         Uses model profiles when available for smarter selection,
         falls back to config-based routing otherwise.
 
-        S48: When images are detected in the message or provided
+        When images are detected in the message or provided
         explicitly, automatically routes to the best vision-capable model.
 
         Args:
@@ -337,8 +335,8 @@ class ModelRouter:
             priority: "fast" (speed), "balanced" (default), "quality" (max quality)
             force_model: Force a specific model (ignores auto-selection)
             force_variant: Force a prompt variant
-            images: Optional list of base64-encoded images (S48)
-            message: Optional raw message text for vision detection (S48)
+            images: Optional list of base64-encoded images
+            message: Optional raw message text for vision detection
 
         Returns:
             RoutingResult with complete configuration
@@ -353,7 +351,7 @@ class ModelRouter:
         vision_routed = False
         image_list = images or []
 
-        # S48: Image detection and vision routing
+        # Image detection and vision routing
         has_images = self.detect_images_in_message(
             message or "", images=images,
         )
@@ -385,7 +383,7 @@ class ModelRouter:
                     )
                 )
         else:
-            # S46: Try profile-based routing first
+            # Try profile-based routing first
             model, priority_used, alternatives, profile_used = self._select_model_with_profiles(
                 model_type, task_type, priority,
                 require_tool_calling=require_tool_calling,
@@ -398,7 +396,7 @@ class ModelRouter:
             analysis, model, model_type, priority, priority_used
         )
 
-        # S46: Build the routing reason for the frontend
+        # Build the routing reason for the frontend
         routing_reason = None
         if MODEL_PROFILES_AVAILABLE and profile_manager is not None:
             reason = profile_manager.build_routing_reason(
@@ -476,7 +474,7 @@ class ModelRouter:
         """
         Select model using profiles when available, fallback to config.
 
-        S46: Enrich the selection with model profiles.
+        Enrich the selection with model profiles.
         First looks for recommended models for the task_type,
         filtered by tier if priority requires, then verifies
         availability via Ollama.

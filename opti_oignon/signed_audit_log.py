@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hash-Chain Append-Only Signed Audit Log (S130).
+Hash-Chain Append-Only Signed Audit Log.
 
 Every security-relevant event is recorded as an append-only entry whose
 SHA-512 hash chains back to the previous entry, forming a tamper-evident
@@ -54,7 +54,7 @@ _GENESIS_PREV_HASH = "0" * 128  # 128 hex chars = 64 bytes (SHA-512)
 SIGNED_AUDIT_AVAILABLE = True
 
 # ---------------------------------------------------------------------------
-# Truncation anchor (S136 / A-01)
+# Truncation anchor
 # ---------------------------------------------------------------------------
 #
 # The anchor is keyed on the master encryption key (domain-separated), not on
@@ -188,7 +188,7 @@ class SignedAuditLog:
     def _check_integrity_on_init(self) -> None:
         """Run a quick chain check on startup and warn if broken.
 
-        S136 audit fix: also checks for truncation by comparing the
+        Audit hardening: also checks for truncation by comparing the
         chain tip against a separate anchor file. If someone deleted
         the DB and recreated it with a fresh genesis, the anchor
         file will detect the discrepancy.
@@ -206,7 +206,7 @@ class SignedAuditLog:
                     "Audit chain OK: %d entries verified.", total,
                 )
 
-            # S136: Truncation detection via anchor file
+            # Truncation detection via anchor file
             self._check_anchor(total)
         except Exception as exc:
             logger.warning("Audit chain init check failed: %s", exc)
@@ -252,7 +252,7 @@ class SignedAuditLog:
         """Save the chain tip to the anchor file for truncation detection.
 
         Format: ``v2|{key_id}|{count}|{tip}|{mac}``. The MAC is keyed on the
-        master encryption key (domain-separated), not on the DB path (A-01).
+        master encryption key (domain-separated), not on the DB path.
         """
         anchor_path = self._get_anchor_path()
         try:
@@ -424,7 +424,7 @@ class SignedAuditLog:
                 )
                 conn.commit()
 
-                # S136: Update anchor for truncation detection
+                # Update anchor for truncation detection
                 try:
                     self._save_anchor(next_id, entry_hash)
                 except Exception:

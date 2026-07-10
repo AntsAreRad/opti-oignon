@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-TOOL REGISTRY - OPTI-OIGNON v1.5.0 (S44)
-==========================================
+TOOL REGISTRY - OPTI-OIGNON
+===========================
 
-Registre des outils appelables par le LLM.
+Registry of the tools callable by the LLM.
 
-Definit les outils disponibles (web_search, execute_code, read_file,
-write_file, list_files) avec leurs schemas de parametres et handlers.
+Defines the available tools (web_search, execute_code, read_file,
+write_file, list_files) with their parameter schemas and handlers.
 Each tool checks the availability of its dependencies at
-de l'enregistrement.
-
-Author: Leon
+registration time.
 """
 
 import logging
@@ -21,14 +19,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# -- Limites de securite pour les operations fichier --
+# -- Safety limits for file operations --
 MAX_FILE_READ_SIZE = 1024 * 1024  # 1 Mo
 ALLOWED_FILE_DIR = os.path.expanduser("~/.opti-oignon/workspace")
 
 
 @dataclass
 class ToolParam:
-    """Definition of a parameter d'outil."""
+    """Definition of a tool parameter."""
     name: str
     type: str  # "string", "int", "float", "bool", "list"
     description: str
@@ -38,7 +36,7 @@ class ToolParam:
 
 @dataclass
 class ToolDefinition:
-    """Definition of a outil appelable par le LLM."""
+    """Definition of a tool callable by the LLM."""
     name: str
     description: str
     parameters: dict[str, ToolParam] = field(default_factory=dict)
@@ -82,10 +80,10 @@ def _plugin_tool_network(plugin_permissions) -> bool:
 
 
 class ToolRegistry:
-    """Registre des outils disponibles.
+    """Registry of the available tools.
 
-    Gere l'enregistrement, la resolution et la generation
-    de prompts pour les outils appelables par le LLM.
+    Handles registration, resolution and prompt generation
+    for the tools callable by the LLM.
     """
 
     # Tools that are UNSAFE outside a sandbox. When sandbox mode is
@@ -103,18 +101,18 @@ class ToolRegistry:
         self._tools: dict[str, ToolDefinition] = {}
         self._sandbox_mode = False
         self._disabled_by_sandbox: set[str] = set()
-        # S117: Quick sandbox mode — transparent handler replacement
+        # Quick sandbox mode -- transparent handler replacement
         self._quick_sandbox_mode = False
         self._original_handlers: dict[str, Callable | None] = {}
         self._quick_sandbox_session = None
 
     def register(self, tool: ToolDefinition) -> None:
-        """Enregistre un outil dans le registre.
+        """Register a tool in the registry.
 
         Check the availability of dependencies and deactivate
-        l'outil si un module requis est manquant.
+        the tool if a required module is missing.
         """
-        # Check les dependances
+        # Check the dependencies
         if tool.requires:
             for req in tool.requires:
                 if not self._check_requirement(req):
@@ -167,7 +165,7 @@ class ToolRegistry:
             return False
 
     def list_available(self) -> list[ToolDefinition]:
-        """Liste les outils actifs et disponibles."""
+        """List the active and available tools."""
         allow_network = self._network_allowed()
         return [
             t for t in self._tools.values()
@@ -175,7 +173,7 @@ class ToolRegistry:
         ]
 
     def list_all(self) -> list[ToolDefinition]:
-        """Liste tous les outils enregistres (actifs ou non)."""
+        """List every registered tool (active or not)."""
         return list(self._tools.values())
 
     def is_available(self, name: str) -> bool:
@@ -239,7 +237,7 @@ class ToolRegistry:
 
         return affected
 
-    # -- S117: Quick sandbox mode (transparent handler replacement) --
+    # -- Quick sandbox mode (transparent handler replacement) --
 
     @property
     def quick_sandbox_mode(self) -> bool:
@@ -328,8 +326,8 @@ class ToolRegistry:
     def get_tools_prompt(self, tools: list[ToolDefinition] | None = None) -> str:
         """Generate a prompt describing the available tools for the LLM.
 
-        Formate les descriptions et parametres de each outil actif
-        dans un format lisible par le LLM pour la prise de decision.
+        Formats the descriptions and parameters of each active tool
+        in a form the LLM can read for its decision-making.
         When ``tools`` is given, render exactly that view (the capability
         manifest passes its filtered set here); the default renders the
         live availability list, unchanged.
@@ -394,7 +392,7 @@ class ToolRegistry:
 
     def _check_requirement(self, requirement: str) -> bool:
         """Check if a module or feature is available."""
-        # Check les flags de disponibilite connus
+        # Check the known availability flags
         availability_map = {
             "web_search": self._check_web_search,
             "code_executor": self._check_code_executor,
@@ -405,7 +403,7 @@ class ToolRegistry:
         if checker:
             return checker()
 
-        # Tenter un import generique
+        # Try a generic import
         try:
             __import__(requirement)
             return True
@@ -433,7 +431,7 @@ class ToolRegistry:
     @staticmethod
     def _check_filesystem() -> bool:
         """Check if file operations are available."""
-        return True  # Toujours disponible sur un systeme standard
+        return True  # Always available on a standard system
 
     @staticmethod
     def _check_sandbox() -> bool:
@@ -449,11 +447,11 @@ class ToolRegistry:
 
 
 # =============================================================================
-# HANDLERS DES OUTILS INTEGRES
+# BUILT-IN TOOL HANDLERS
 # =============================================================================
 
 def _handle_web_search(query: str, max_results: int = 5) -> str:
-    """Handler pour l'outil web_search."""
+    """Handler for the web_search tool."""
     try:
         from opti_oignon.web_search import web_search_engine
         results = web_search_engine.search(query, max_results=max_results)
@@ -475,7 +473,7 @@ def _handle_web_search(query: str, max_results: int = 5) -> str:
 def _handle_execute_code(
     code: str, language: str = "python", timeout: int = 30
 ) -> str:
-    """Handler pour l'outil execute_code."""
+    """Handler for the execute_code tool."""
     try:
         from opti_oignon.code_executor import code_executor
         result = code_executor.execute(code, language=language, timeout=timeout)
@@ -495,9 +493,9 @@ def _handle_execute_code(
 
 
 def _handle_read_file(path: str) -> str:
-    """Handler pour l'outil read_file."""
+    """Handler for the read_file tool."""
     try:
-        # Securite: resoudre le chemin et check la taille
+        # Safety: resolve the path and check the size
         resolved = os.path.abspath(path)
         if not os.path.isfile(resolved):
             return f"File not found: {path}"
@@ -517,18 +515,18 @@ def _handle_read_file(path: str) -> str:
 
 
 def _handle_write_file(path: str, content: str) -> str:
-    """Handler pour l'outil write_file."""
+    """Handler for the write_file tool."""
     try:
-        # Creer le repertoire de travail si required
+        # Create the working directory if required
         os.makedirs(ALLOWED_FILE_DIR, exist_ok=True)
 
-        # Securite: ecrire uniquement dans le repertoire autorise
+        # Safety: write only inside the allowed directory
         if not os.path.isabs(path):
             resolved = os.path.join(ALLOWED_FILE_DIR, path)
         else:
             resolved = os.path.abspath(path)
 
-        # Creer les sous-repertoires si required
+        # Create subdirectories if required
         os.makedirs(os.path.dirname(resolved), exist_ok=True)
 
         with open(resolved, "w", encoding="utf-8") as f:
@@ -539,7 +537,7 @@ def _handle_write_file(path: str, content: str) -> str:
 
 
 def _handle_list_files(path: str = ".") -> str:
-    """Handler pour l'outil list_files."""
+    """Handler for the list_files tool."""
     try:
         resolved = os.path.abspath(path)
         if not os.path.isdir(resolved):
@@ -563,11 +561,11 @@ def _handle_list_files(path: str = ".") -> str:
 
 
 # =============================================================================
-# ENREGISTREMENT DES OUTILS INTEGRES
+# BUILT-IN TOOL REGISTRATION
 # =============================================================================
 
 def _register_builtin_tools(registry: ToolRegistry) -> None:
-    """Enregistre les 5 outils integres dans le registre."""
+    """Register the 5 built-in tools in the registry."""
 
     # 1. web_search
     registry.register(ToolDefinition(
@@ -683,7 +681,7 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
 
 
 def _register_sandbox_tools(registry: ToolRegistry) -> None:
-    """Register sandboxed file tools (S73) if available."""
+    """Register sandboxed file tools if available."""
     try:
         from opti_oignon.file_tools import (
             FILE_TOOLS_AVAILABLE,

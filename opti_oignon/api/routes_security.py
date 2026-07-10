@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """
-Security status and configuration API routes (S124, S125, S146, S148, S157, S158).
+Security status and configuration API routes.
 
 GET    /api/security/status       -- Overall security posture with letter grade
 GET    /api/security/config       -- Current security configuration
 PUT    /api/security/config       -- Update security settings (admin only)
-GET    /api/security/encryption   -- Encryption status (S125)
-POST   /api/security/encryption/setup -- Initialize encryption (S125)
-GET    /api/security/audit        -- Security audit trail (S125)
+GET    /api/security/encryption   -- Encryption status
+POST   /api/security/encryption/setup -- Initialize encryption
+GET    /api/security/audit        -- Security audit trail
 POST   /api/security/audit/export-qr     -- QR code of the signed anchor
 POST   /api/security/audit/export-anchor -- Signed JSON anchor file
 GET    /api/security/audit/anchor-text   -- Plain-text anchor for clipboard
 POST   /api/security/audit/verify-anchor -- Verify imported anchor
-POST   /api/security/redteam/run         -- Launch red team campaign (S148)
-GET    /api/security/redteam/status      -- Campaign progress (S148)
-GET    /api/security/redteam/results     -- Latest results (S148)
-GET    /api/security/redteam/report      -- Download report JSON/text/MD (S148)
-GET    /api/security/redteam/reports     -- List all stored reports (S157)
-GET    /api/security/redteam/reports/{id} -- Get specific stored report (S157)
-DELETE /api/security/redteam/reports/{id} -- Delete stored report (S157)
-GET    /api/security/redteam/compare     -- Diff two reports (S157)
-GET    /api/security/redteam/suggestions -- List feedback suggestions (S157)
-POST   /api/security/redteam/suggestions/{id}/accept -- Accept suggestion (S157)
-POST   /api/security/redteam/suggestions/{id}/reject -- Reject suggestion (S157)
-GET    /api/security/scheduler           -- Full scheduler status (S158)
-POST   /api/security/scheduler/trigger   -- Manually trigger scheduled task (S158)
+POST   /api/security/redteam/run         -- Launch red team campaign
+GET    /api/security/redteam/status      -- Campaign progress
+GET    /api/security/redteam/results     -- Latest results
+GET    /api/security/redteam/report      -- Download report JSON/text/MD
+GET    /api/security/redteam/reports     -- List all stored reports
+GET    /api/security/redteam/reports/{id} -- Get specific stored report
+DELETE /api/security/redteam/reports/{id} -- Delete stored report
+GET    /api/security/redteam/compare     -- Diff two reports
+GET    /api/security/redteam/suggestions -- List feedback suggestions
+POST   /api/security/redteam/suggestions/{id}/accept -- Accept suggestion
+POST   /api/security/redteam/suggestions/{id}/reject -- Reject suggestion
+GET    /api/security/scheduler           -- Full scheduler status
+POST   /api/security/scheduler/trigger   -- Manually trigger scheduled task
 """
 
 import logging
@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: import auth dependency so ALL security endpoints
+# Audit hardening: import auth dependency so ALL security endpoints
 # require authentication. Previously, 39 state-changing endpoints
 # (mode change, kill switch, plugin allowlist, 2FA, encryption setup)
 # had ZERO authentication.
@@ -289,7 +289,7 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
             "detail": "Plugin hooks module not available",
         })
 
-    # 9. Red team resistance (S157): +10
+    # 9. Red team resistance: +10
     # Score deduction if last run has critical findings (bypass rate > 30%).
     # Warning if no run in configurable days (default: 30).
     rt_points = 0
@@ -396,8 +396,8 @@ class SecurityConfigUpdate(BaseModel):
 def get_security_status() -> dict:
     """Get overall security posture with letter grade (A+ to F).
 
-    The score is computed from 9 security checks (S157: includes red team
-    resistance) with percentage-based grading. S158 adds scheduler summary.
+    The score is computed from 9 security checks (including red team
+    resistance) with percentage-based grading, plus a scheduler summary.
     """
     score, grade, checks = _compute_security_score()
     max_score = sum(c["max_points"] for c in checks)
@@ -409,7 +409,7 @@ def get_security_status() -> dict:
         "checks": checks,
     }
 
-    # S158: attach scheduler summary if available
+    # Attach scheduler summary if available
     try:
         from opti_oignon.security_scheduler import get_scheduler
         scheduler = get_scheduler()
@@ -508,12 +508,12 @@ def update_security_config(update: SecurityConfigUpdate) -> dict:
 
 
 # =========================================================================
-# S125: Encryption endpoints
+# Encryption endpoints
 # =========================================================================
 
 @router.get("/encryption")
 def get_encryption_status() -> dict:
-    """Get data-at-rest encryption status (S125)."""
+    """Get data-at-rest encryption status."""
     try:
         from opti_oignon.encryption import get_encryption_manager
         mgr = get_encryption_manager()
@@ -538,7 +538,7 @@ class EncryptionSetupRequest(BaseModel):
 
 @router.post("/encryption/setup")
 def setup_encryption(req: EncryptionSetupRequest) -> dict:
-    """Initialize data-at-rest encryption (S125).
+    """Initialize data-at-rest encryption.
 
     Generates an encryption key and saves it to the keyfile.
     Use mode='random' for auto-generated key, or mode='passphrase'
@@ -595,7 +595,7 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
 
 
 # =========================================================================
-# S125: Security Audit Trail
+# Security Audit Trail
 # =========================================================================
 
 @router.get("/audit")
@@ -605,7 +605,7 @@ def get_security_audit(
     limit: int = Query(default=50, ge=1, le=500, description="Max events to return"),
     since: float | None = Query(default=None, description="Unix timestamp to filter events after"),
 ) -> dict:
-    """Get aggregated security audit trail (S125).
+    """Get aggregated security audit trail.
 
     Collects security-relevant events from:
     - Auth: login attempts, registrations, password changes
@@ -767,7 +767,7 @@ def get_security_audit(
 
 
 # =========================================================================
-# Security Mode (Daily/Bulbe) — S126
+# Security Mode (Daily/Bulbe)
 # =========================================================================
 
 try:
@@ -969,7 +969,7 @@ async def confirm_mode_downgrade(
         raise HTTPException(status_code=401, detail="Invalid password")
 
     # 2FA verification would go here when auth_2fa is available
-    # For S126, we proceed without 2FA (it will be added in Phase 5)
+    # For now, we proceed without 2FA (it will be added in Phase 5)
 
     result = security_mode_manager.confirm_downgrade(
         user_id=session_user_id,
@@ -1006,7 +1006,7 @@ async def cancel_mode_downgrade() -> dict[str, Any]:
 
 
 # =========================================================================
-# Plugin Allowlist (Bulbe mode) — S126
+# Plugin Allowlist (Bulbe mode)
 # =========================================================================
 
 try:
@@ -1138,7 +1138,7 @@ async def verify_plugin_allowlist(plugin_id: str) -> dict[str, Any]:
 
 
 # =========================================================================
-# SQLCipher Database Encryption — S126
+# SQLCipher Database Encryption
 # =========================================================================
 
 try:
@@ -1200,7 +1200,7 @@ async def migrate_databases(body: MigrateDBRequest) -> dict[str, Any]:
 
 
 # =========================================================================
-# Web Search Kill Switch — S126
+# Web Search Kill Switch
 # =========================================================================
 
 try:
@@ -1340,7 +1340,7 @@ async def update_domain_allowlist(body: DomainAllowlistUpdate) -> dict[str, Any]
 
 
 # =========================================================================
-# Emergency stop — S215
+# Emergency stop
 #
 # A panic control that makes the machine quiet immediately, plus a resume.
 # An availability/safety control, NOT a security boundary: explicitly
@@ -1426,7 +1426,7 @@ async def resume_from_emergency_stop(
 
 
 # =========================================================================
-# Two-Factor Authentication — S126
+# Two-Factor Authentication
 # =========================================================================
 
 try:
@@ -1683,7 +1683,7 @@ async def disable_all_2fa() -> dict[str, Any]:
 
 
 # =========================================================================
-# Tool Call Approval (Bulbe mode) — S128
+# Tool Call Approval (Bulbe mode)
 # =========================================================================
 
 try:
@@ -1742,7 +1742,7 @@ async def get_tool_approval_audit(limit: int = 50) -> dict[str, Any]:
 
 
 # =========================================================================
-# PQC Signatures (S129)
+# PQC Signatures
 # =========================================================================
 
 try:
@@ -1810,7 +1810,7 @@ async def remove_pqc_keys() -> dict[str, Any]:
 
 
 # =========================================================================
-# S130: Hash-Chain Signed Audit Log endpoints
+# Hash-Chain Signed Audit Log endpoints
 # =========================================================================
 
 try:
@@ -2012,7 +2012,7 @@ async def audit_verify_anchor(body: VerifyAnchorRequest) -> dict[str, Any]:
 
 
 # =========================================================================
-# S131: Conversation Wipe + Hardening Status
+# Conversation Wipe + Hardening Status
 # =========================================================================
 
 def _get_wipe_manager():
@@ -2028,7 +2028,7 @@ def _get_wipe_manager():
 async def conversation_wipe_all(purge_disk: bool = False) -> dict[str, Any]:
     """Emergency wipe: zero all conversation buffers in RAM.
 
-    CW-01 (S185): pass ``?purge_disk=true`` for a full wipe that also deletes
+    Optionally pass ``?purge_disk=true`` for a full wipe that also deletes
     all persisted conversation rows from disk. Off by default (RAM-only).
     """
     mgr = _get_wipe_manager()
@@ -2053,7 +2053,7 @@ async def conversation_wipe_single(
 ) -> dict[str, Any]:
     """Manually wipe a single conversation from RAM.
 
-    CW-01 (S185): pass ``?purge_disk=true`` for a full wipe that also deletes
+    Optionally pass ``?purge_disk=true`` for a full wipe that also deletes
     the conversation's persisted rows from disk. Off by default (RAM-only).
     """
     mgr = _get_wipe_manager()
@@ -2092,14 +2092,14 @@ async def hardening_status() -> dict[str, Any]:
     else:
         status["conversation_wipe"] = {"available": False}
 
-    # Swap protection status (S131 Phase 3)
+    # Swap protection status
     try:
         from opti_oignon.secure_bytes import check_swap_encrypted
         status["swap"] = check_swap_encrypted().__dict__
     except (ImportError, AttributeError):
         status["swap"] = {"available": False}
 
-    # Ollama log status (S131 Phase 2)
+    # Ollama log status
     try:
         from opti_oignon.ollama_log_proxy import check_ollama_log_config
         cfg = check_ollama_log_config()
@@ -2112,7 +2112,7 @@ async def hardening_status() -> dict[str, Any]:
     except (ImportError, AttributeError):
         status["ollama_log"] = {"available": False}
 
-    # Network hardening status (S131 Phase 4)
+    # Network hardening status
     try:
         from opti_oignon.network_hardening import get_full_network_status
         status["network"] = get_full_network_status()
@@ -2136,7 +2136,7 @@ async def hardening_network() -> dict[str, Any]:
 
 
 # =========================================================================
-# S133: Remote Access API (Daily mode only)
+# Remote Access API (Daily mode only)
 #
 # All endpoints return 403 in Bulbe mode. This is defense layer 6 of 6.
 # Client cert .p12 download: only accessible from localhost.
@@ -2377,7 +2377,7 @@ def _audit_remote_event(event: str, **details) -> None:
 
 
 # =========================================================================
-# Startup Security Checklist (S145)
+# Startup Security Checklist
 # =========================================================================
 
 @router.get("/startup-checks")
@@ -2390,7 +2390,7 @@ async def get_startup_checks(force: bool = False) -> dict[str, Any]:
     - LUKS full-disk encryption detection
     - Security mode verification
     - Encrypted swap check
-    - Resource governor Ollama limits advisory (R-03, S226)
+    - Resource governor Ollama limits advisory
 
     Args:
         force: If true, re-run checks even if cached.
@@ -2415,7 +2415,7 @@ async def get_startup_checks(force: bool = False) -> dict[str, Any]:
 
 
 # =========================================================================
-# Red Team Audit Endpoints (S148)
+# Red Team Audit Endpoints
 # =========================================================================
 
 # In-memory campaign state (per-process singleton)
@@ -2426,7 +2426,7 @@ _redteam_campaign_state: dict[str, Any] = {
     "error": None,
 }
 
-# S157: persistent report store -- maps report_id to report data
+# Persistent report store -- maps report_id to report data
 _redteam_report_store: dict[str, dict[str, Any]] = {}
 _redteam_report_counter: int = 0
 
@@ -2455,7 +2455,7 @@ async def redteam_run_campaign(
 ) -> dict[str, Any]:
     """Launch a red team audit campaign.
 
-    Runs the full attack → strategy → target pipeline asynchronously.
+    Runs the full attack -> strategy -> target pipeline asynchronously.
     Check progress via GET /api/security/redteam/status.
 
     Returns
@@ -2551,7 +2551,7 @@ async def redteam_run_campaign(
                 "reports": saved,
             }
 
-            # S157: auto-store report with sequential ID
+            # Auto-store report with sequential ID
             global _redteam_report_counter
             _redteam_report_counter += 1
             report_id = f"rt-{_redteam_report_counter:04d}"
@@ -2564,7 +2564,7 @@ async def redteam_run_campaign(
             }
             _redteam_campaign_state["results"]["id"] = report_id
 
-            # S157: extract feedback suggestions from bypass results
+            # Extract feedback suggestions from bypass results
             try:
                 from opti_oignon.redteam.feedback import (
                     extract_suggestions as _extract_suggestions,
@@ -2749,7 +2749,7 @@ async def redteam_report(
 
 
 # =========================================================================
-# Red Team Report Storage & Comparison (S157)
+# Red Team Report Storage & Comparison
 # =========================================================================
 
 @router.get("/redteam/reports")
@@ -2948,7 +2948,7 @@ async def redteam_compare_reports(
 
 
 # =========================================================================
-# Red Team Feedback Loop (S157)
+# Red Team Feedback Loop
 # =========================================================================
 
 @router.get("/redteam/suggestions")
@@ -3093,7 +3093,7 @@ async def redteam_reject_suggestion(
 
 
 # =========================================================================
-# S158: Security Scheduler endpoints
+# Security Scheduler endpoints
 # =========================================================================
 
 

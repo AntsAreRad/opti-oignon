@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
-CONTEXT OPTIMIZER — Opti-Oignon S123
+CONTEXT OPTIMIZER -- Opti-Oignon
 =====================================
 
 Unified context window orchestrator that replaces the manual 5-step
 pipeline in executor.py with a single ``optimize()`` entry point.
 
 Pipeline steps (executed in order):
-1. Calculate 6-zone budget via PromptTokenBudgetManager (S65)
+1. Calculate 6-zone budget via PromptTokenBudgetManager
 2. Pass ``project_tokens`` budget to ProjectContextBuilder.build_context()
    -- fixes the disconnected RAG budget gap
-3. Apply ConversationCompressor (S66) within ``history_tokens`` budget
-4. Fall back to SlidingWindowManager (S16) if still over budget
+3. Apply ConversationCompressor within ``history_tokens`` budget
+4. Fall back to SlidingWindowManager if still over budget
 5. Validate total fits in context window; emergency truncation if needed
 
 All existing modules are wrapped, never modified. When the optimizer
 is disabled (default), executor keeps its existing manual pipeline.
-
-Author: Leon
 """
 
 from __future__ import annotations
@@ -88,7 +86,7 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
         try:
             with open(target, encoding="utf-8") as fh:
                 loaded = yaml.safe_load(fh) or {}
-            # Shallow merge — top-level keys
+            # Shallow merge -- top-level keys
             for key, val in loaded.items():
                 if isinstance(val, dict) and isinstance(defaults.get(key), dict):
                     defaults[key].update(val)
@@ -277,10 +275,10 @@ class ContextOptimizer:
         Args:
             config: Direct config dict (overrides file loading).
             config_path: Path to YAML config.
-            budget_manager: PromptTokenBudgetManager instance (S65).
-            project_context_builder: ProjectContextBuilder instance (S58).
-            conversation_compressor: ConversationCompressor instance (S66).
-            sliding_window_manager: SlidingWindowManager instance (S16).
+            budget_manager: PromptTokenBudgetManager instance.
+            project_context_builder: ProjectContextBuilder instance.
+            conversation_compressor: ConversationCompressor instance.
+            sliding_window_manager: SlidingWindowManager instance.
             context_manager: ContextManager instance (S1) for token estimation.
         """
         self._config = config if config is not None else _load_config(config_path)
@@ -416,7 +414,7 @@ class ContextOptimizer:
     def _estimate_tokens(self, text: str, model: str = "") -> int:
         """Estimate token count using best available method.
 
-        Priority: context_manager (S1) > calibrated estimation (S123) > fallback.
+        Priority: context_manager > calibrated estimation > fallback.
 
         Args:
             text: Text to estimate.
@@ -430,7 +428,7 @@ class ContextOptimizer:
                 return self._context_manager.estimate_tokens(text, model)
             except Exception:
                 pass
-        # S123: Use calibrated module-level estimation when model is known
+        # Use calibrated module-level estimation when model is known
         if model:
             try:
                 from opti_oignon.context_manager import estimate_tokens_calibrated

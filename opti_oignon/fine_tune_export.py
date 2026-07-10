@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FINE-TUNE DATA EXPORT -- Training Dataset Generation (S96)
+FINE-TUNE DATA EXPORT -- Training Dataset Generation
 ===========================================================
 
 Exports conversation data as training datasets for fine-tuning local
@@ -9,8 +9,6 @@ filtering by conversation, date range, model, and quality score.
 
 Includes a quality scoring engine that combines user feedback (thumbs
 up/down) with benchmark scores to rank conversations.
-
-Author: Leon
 """
 
 import json
@@ -20,8 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# FT-04 (S194): guard the yaml import so a missing PyYAML degrades the
-# module instead of breaking its import (VL-02 sibling-consistency class).
+# Guard the yaml import so a missing PyYAML degrades the
+# module instead of breaking its import (sibling-consistency class).
 try:
     import yaml
     YAML_AVAILABLE = True
@@ -567,7 +565,7 @@ class FineTuneExporter:
             logger.warning("No conversation manager available for export")
             return []
 
-        # FT-02 (S194): the manager passes `limit` straight into SQL
+        # The manager passes `limit` straight into SQL
         # (LIMIT ? OFFSET ?), and SQLite returns zero rows for LIMIT 0,
         # so "limit=0 means all" never held. Page through the store in
         # fixed-size chunks until exhaustion instead.

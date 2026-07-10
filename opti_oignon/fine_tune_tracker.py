@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FINE-TUNE TRACKER -- Variant Management & A/B Comparison (S96)
+FINE-TUNE TRACKER -- Variant Management & A/B Comparison
 ================================================================
 
 Tracks fine-tuned model variants with their base model mappings,
@@ -8,8 +8,6 @@ training metadata, and performance history. Supports A/B comparison
 between base and fine-tuned models via side-by-side inference.
 
 SQLite-backed storage for variant registry and comparison results.
-
-Author: Leon
 """
 
 import concurrent.futures
@@ -24,8 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# FT-04 (S194): guard the yaml import so a missing PyYAML degrades the
-# module instead of breaking its import (VL-02 sibling-consistency class).
+# Guard the yaml import so a missing PyYAML degrades the
+# module instead of breaking its import (sibling-consistency class).
 try:
     import yaml
     YAML_AVAILABLE = True
@@ -34,7 +32,7 @@ except ImportError:  # pragma: no cover - PyYAML is a core dependency
     YAML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit hardening: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -716,7 +714,7 @@ class FineTuneTracker:
     ) -> tuple[str, float]:
         """Run inference with timing, bounded by `comparison_timeout`.
 
-        FT-03 (S194): the call runs in a worker thread and is abandoned
+        The call runs in a worker thread and is abandoned
         past the configured timeout. The thread itself cannot be killed
         and may keep holding a backend slot until the model returns, but
         the comparison no longer blocks on it.

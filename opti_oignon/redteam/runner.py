@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Red Team Runner — Opti-Oignon S148
+Red Team Runner -- Opti-Oignon.
 ====================================
 
 Orchestrates the full red team pipeline:
-  attack generation → strategy application → target evaluation → scoring.
+  attack generation -> strategy application -> target evaluation -> scoring.
 
 Supports:
-- Full campaign mode (all categories × strategies × targets)
-- Focused single-shot mode (one category × one strategy × one target)
+- Full campaign mode (all categories x strategies x targets)
+- Focused single-shot mode (one category x one strategy x one target)
 - Progress callbacks for UI integration
 - Async-capable parallel target execution
 """
@@ -34,7 +34,7 @@ class RunProgress:
     Attributes
     ----------
     total_steps : int
-        Total number of attack × strategy × target combinations.
+        Total number of attack x strategy x target combinations.
     completed_steps : int
         Number completed so far.
     current_category : str
@@ -56,7 +56,7 @@ class RunProgress:
 
     @property
     def percent(self) -> float:
-        """Completion percentage (0.0–100.0)."""
+        """Completion percentage (0.0-100.0)."""
         if self.total_steps == 0:
             return 0.0
         return (self.completed_steps / self.total_steps) * 100.0
@@ -243,7 +243,7 @@ class RedTeamRunner:
         target: str,
         count: int = 1,
     ) -> list[tuple[Any, str, Any]]:
-        """Run a focused test: one category × one strategy × one target.
+        """Run a focused test: one category x one strategy x one target.
 
         Parameters
         ----------
@@ -291,7 +291,7 @@ class RedTeamRunner:
         return results
 
     def run_campaign(self) -> CampaignRun:
-        """Execute a full campaign: all categories × strategies × targets.
+        """Execute a full campaign: all categories x strategies x targets.
 
         Returns
         -------
@@ -309,8 +309,8 @@ class RedTeamRunner:
         # Calculate total steps
         # For each category we generate N attacks, then apply each strategy
         # to each attack, then run through each target.
-        # Total = sum(attacks_generated × strategies × targets) per category.
-        # Estimate: attacks_per_category × strategies × targets × categories
+        # Total = sum(attacks_generated x strategies x targets) per category.
+        # Estimate: attacks_per_category x strategies x targets x categories
         estimated_steps = (
             self._config.attacks_per_category
             * len(strategies)

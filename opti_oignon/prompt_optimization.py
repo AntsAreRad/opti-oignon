@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prompt Optimization — Opti-Oignon v1.6.4 (S65)
+Prompt Optimization -- Opti-Oignon
 ================================================
 
 Foundation layer for prompt intelligence: dynamic token budget
@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# POP-03 (S194): guard the yaml import so a missing PyYAML degrades the
-# module instead of breaking its import (VL-02 sibling-consistency class).
+# Guard the yaml import so a missing PyYAML degrades the
+# module instead of breaking its import (sibling-consistency class).
 try:
     import yaml
     YAML_AVAILABLE = True
@@ -73,7 +73,7 @@ class PromptTokenBudget:
         history_tokens: Tokens for conversation history.
         user_tokens: Tokens for current user message + document.
         reserve_tokens: Tokens reserved for generation headroom.
-        fingerprint_tokens: Tokens for session fingerprint (S75, carved from history).
+        fingerprint_tokens: Tokens for session fingerprint (carved from history).
         total_window: Total context window size of the model.
         model: Model name this budget was calculated for.
     """
@@ -256,7 +256,7 @@ class PromptTokenBudgetManager:
     def _query_ollama_show(self, model: str) -> int | None:
         """Query ollama.show() for context window size.
 
-        POP-01 (S194): handles both the legacy dict response and the
+        Handles both the legacy dict response and the
         typed ShowResponse of modern ollama-python clients. The object
         branch was previously dead code nested inside the dict branch,
         so live detection silently fell back to YAML/defaults on
@@ -410,9 +410,9 @@ class PromptTokenBudgetManager:
         proportionally across history and user sections.
 
         The fingerprint budget is carved from the history section when
-        fingerprint_active is True (S75 session fingerprinting).
+        fingerprint_active is True (session fingerprinting).
 
-        S123: priority_overrides allows per-call ratio adjustments. Keys
+        priority_overrides allows per-call ratio adjustments. Keys
         are 'system_ratio', 'project_ratio', 'history_ratio', 'user_ratio',
         'reserve_ratio'. Missing keys use the configured defaults.
 
@@ -422,7 +422,7 @@ class PromptTokenBudgetManager:
             project_active: Whether a project context is active.
             context_window_override: Override context window size (0 = auto-detect).
             fingerprint_active: Whether to allocate a fingerprint budget zone.
-            priority_overrides: Optional per-call ratio overrides (S123).
+            priority_overrides: Optional per-call ratio overrides.
 
         Returns:
             PromptTokenBudget with per-section allocation.
@@ -433,7 +433,7 @@ class PromptTokenBudgetManager:
         else:
             total_window = self.get_context_window(model)
 
-        # S123: Apply priority overrides or use configured ratios
+        # Apply priority overrides or use configured ratios
         if priority_overrides:
             sys_ratio = float(priority_overrides.get("system_ratio", self._system_ratio))
             proj_ratio = float(priority_overrides.get("project_ratio", self._project_ratio)) if project_active else 0.0
@@ -450,7 +450,7 @@ class PromptTokenBudgetManager:
         fp_ratio = self._fingerprint_ratio if fingerprint_active else 0.0
 
         # Redistribute the project ratio when no project is active.
-        # POP-02 (S194): use the EFFECTIVE ratios -- the withheld amount
+        # Use the EFFECTIVE ratios -- the withheld amount
         # comes from the override when provided (so an explicit
         # project_ratio: 0.0 opts out of redistribution entirely), and
         # the shares from the effective history/user ratios rather than
@@ -946,7 +946,7 @@ class PromptTemplateEngine:
 # Module-level singletons
 # ============================================================================
 
-# POP-03 (S194): guarded like every sibling store (VL-02 consistency);
+# Guarded like every sibling store, for consistency;
 # consumers (executor, deps, routes) already None-check both names.
 try:
     prompt_budget_manager = PromptTokenBudgetManager()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Auto-Trigger — S90
+Benchmark Auto-Trigger
 
 Watches Ollama model list for changes (new models, updated digests,
 removed models) and auto-triggers benchmark runs when changes are
@@ -8,7 +8,7 @@ detected.
 
 STRICTLY OPT-IN: disabled by default. User must explicitly enable
 via the UI toggle or the API. Never runs benchmarks without consent.
-Local machines have limited GPU/RAM — unsolicited runs would degrade
+Local machines have limited GPU/RAM -- unsolicited runs would degrade
 performance.
 
 Lifecycle:
@@ -545,7 +545,7 @@ class AutoTrigger:
         with self._lock:
             old = self._last_snapshot
 
-        # First poll — just record baseline, do not trigger
+        # First poll -- just record baseline, do not trigger
         if not old.models:
             with self._lock:
                 self._last_snapshot = snapshot
@@ -574,7 +574,7 @@ class AutoTrigger:
             trigger_type = "new_model" if diff.added else "updated_model"
             event = self._do_trigger(filtered, trigger_type)
 
-        # S193 BMK-16: only commit the new snapshot once the change has been
+        # Only commit the new snapshot once the change has been
         # acted on. If the trigger was skipped (cooldown / runner busy /
         # resource guard) keep the old snapshot so the model is re-detected on
         # the next poll once the skip condition clears; previously the change
@@ -588,7 +588,7 @@ class AutoTrigger:
         return diff
 
     def _polling_loop(self) -> None:
-        """Main polling loop — runs in a daemon thread."""
+        """Main polling loop -- runs in a daemon thread."""
         logger.info("Auto-trigger polling loop started")
 
         # Take initial baseline snapshot

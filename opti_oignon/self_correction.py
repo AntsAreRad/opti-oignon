@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SELF-CORRECTION ENGINE - OPTI-OIGNON v1.5.5 (S51)
+SELF-CORRECTION ENGINE - OPTI-OIGNON
 ===================================================
 
 Moteur d'auto-correction pour les sorties non-code.
@@ -26,9 +26,7 @@ Trois axes de verification:
 4. Self-Repair Loop:
    If the score is below the threshold, generates a corrected version.
    Maximum N iterations (configurable). Returns the best
-   version avec les metadonnees de correction.
-
-Author: Leon
+   version with the correction metadata.
 """
 
 import json
@@ -65,7 +63,7 @@ def _generate_text(result: Any) -> str:
     .get), so an object-form response no longer raises an AttributeError
     that silently degraded every LLM check to heuristics and made
     _generate_correction return None -- i.e. the loop never corrected
-    (SCR-01, S192; the S189/S191 dict-vs-object class, mirrors
+    (the dict-vs-object class of failure; mirrors
     memory/legacy._reply_text).
     """
     if result is None:
@@ -78,7 +76,7 @@ def _generate_text(result: Any) -> str:
 
 
 def _clamp01(value: Any, default: float) -> float:
-    """Clamp an LLM-returned score into [0, 1] (SCR-02, S192).
+    """Clamp an LLM-returned score into [0, 1].
 
     A model returning an out-of-range score (e.g. 5.0) would otherwise
     pass the correction thresholds wrongly.
