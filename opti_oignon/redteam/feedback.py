@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Red Team Feedback Loop -- Opti-Oignon S157.
+Red Team Feedback Loop -- Opti-Oignon.
 
 When a red team campaign produces bypasses with high confidence, this module
 auto-generates candidate injection-detection patterns (regex) that can be
@@ -30,7 +30,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Sentinel -- all new S157 modules carry this
+# Sentinel -- every new module carries this
 checkpoint_before_apply = True
 
 # Path to RAG config
@@ -317,11 +317,32 @@ def apply_suggestion_to_config(
         logger.error("Failed to read rag.yaml: %s", exc)
         return False
 
-    # Navigate to sanitization.custom_patterns
-    rag_section = config.get("rag", config)
-    sanitization = rag_section.get("sanitization", {})
-    custom_patterns = sanitization.get("custom_patterns", [])
+    # Navigate to sanitization.custom_patterns. Normalize each container
+    # level up front: a hand-edited file whose rag or sanitization key
+    # holds a non-mapping value degrades to an empty mapping instead of
+    # raising mid-navigation. Normalizing config["rag"] in place also keeps
+    # the write-back below (which assigns into config["rag"]) safe. This
+    # mirrors the custom_patterns list guard.
+    if "rag" in config:
+        if not isinstance(config["rag"], dict):
+            logger.warning(
+                "rag.yaml 'rag' section is not a mapping; replacing it to "
+                "apply the accepted pattern."
+            )
+            config["rag"] = {}
+        rag_section = config["rag"]
+    else:
+        rag_section = config
 
+    sanitization = rag_section.get("sanitization", {})
+    if not isinstance(sanitization, dict):
+        logger.warning(
+            "rag.yaml 'sanitization' section is not a mapping; replacing "
+            "it to apply the accepted pattern."
+        )
+        sanitization = {}
+
+    custom_patterns = sanitization.get("custom_patterns", [])
     if not isinstance(custom_patterns, list):
         custom_patterns = []
 

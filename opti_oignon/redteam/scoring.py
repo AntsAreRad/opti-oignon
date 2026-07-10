@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Red Team Scoring — Opti-Oignon S148
+Red Team Scoring -- Opti-Oignon.
 =====================================
 
 Classifies each attack result as bypass / flag / block and aggregates
 metrics per category, strategy, and target.
 
 Classification logic:
-- **block**  — target detected and blocked the attack (score >= bypass_threshold)
-- **flag**   — target detected something suspicious but didn't fully block
+- **block**  -- target detected and blocked the attack (score >= bypass_threshold)
+- **flag**   -- target detected something suspicious but didn't fully block
                (flag_threshold <= score < bypass_threshold)
-- **bypass** — attack went through undetected (score < flag_threshold)
+- **bypass** -- attack went through undetected (score < flag_threshold)
 
 Score here refers to the *defense confidence* from the TargetResult:
 higher = more suspicious = better detection.
@@ -41,6 +41,13 @@ CLASSIFICATION_BYPASS = "bypass"
 CLASSIFICATION_FLAG = "flag"
 CLASSIFICATION_BLOCK = "block"
 
+# The complete set of recognized classifications. Aggregation rejects any
+# score outside this set so a stray value cannot count toward a total while
+# landing in no bucket (which would silently deflate the detection rate).
+VALID_CLASSIFICATIONS = frozenset(
+    (CLASSIFICATION_BYPASS, CLASSIFICATION_FLAG, CLASSIFICATION_BLOCK)
+)
+
 
 # ---------------------------------------------------------------------------
 # Per-attack score
@@ -61,7 +68,7 @@ class AttackScore:
     classification : str
         One of "bypass", "flag", "block".
     defense_score : float
-        Defense confidence score from TargetResult (0.0–1.0).
+        Defense confidence score from TargetResult (0.0-1.0).
     blocked : bool
         Whether the target explicitly blocked the attack.
     payload_hash : str
@@ -260,11 +267,11 @@ class CampaignScore:
         return self.total_blocks / max(self.total, 1)
 
     def heatmap_data(self) -> list[dict[str, Any]]:
-        """Generate heatmap data: strategy × target → bypass rate.
+        """Generate heatmap data: strategy x target -> bypass rate.
 
         Returns a list of dicts suitable for table/chart rendering.
         """
-        # Build a (strategy, target) → counts matrix
+        # Build a (strategy, target) -> counts matrix
         matrix: dict[tuple[str, str], dict[str, int]] = {}
         for s in self.scores:
             key = (s.strategy, s.target)
@@ -334,9 +341,9 @@ def score_result(
     payload_hash : str
         Hash of the original attack payload.
     bypass_threshold : float
-        Score >= this → block.
+        Score >= this -> block.
     flag_threshold : float
-        Score >= this (but < bypass_threshold) → flag.
+        Score >= this (but < bypass_threshold) -> flag.
 
     Returns
     -------
@@ -344,6 +351,12 @@ def score_result(
         Classified result.
     """
     defense_score = getattr(target_result, "score", 0.0)
+    # A result may carry the attribute yet leave it None (indeterminate).
+    # Read that as no detection (0.0) so the threshold comparison below
+    # cannot raise; an indeterminate defense reads as a bypass, the
+    # fail-secure interpretation for an audit tool.
+    if defense_score is None:
+        defense_score = 0.0
     blocked = getattr(target_result, "blocked", False)
     target_name = getattr(target_result, "target_name", "unknown")
     metadata = getattr(target_result, "metadata", {})
@@ -393,6 +406,16 @@ def aggregate_scores(scores: list[AttackScore]) -> CampaignScore:
     campaign.total = len(scores)
 
     for s in scores:
+        # Reject an unrecognized classification up front: it would count
+        # toward every total below but toward no bucket, silently skewing
+        # the reported rates. Refuse rather than absorb it.
+        if s.classification not in VALID_CLASSIFICATIONS:
+            raise ValueError(
+                f"AttackScore has unrecognized classification "
+                f"{s.classification!r}; expected one of "
+                f"{sorted(VALID_CLASSIFICATIONS)}"
+            )
+
         # --- Global counts ---
         if s.is_bypass:
             campaign.total_bypasses += 1

@@ -311,14 +311,35 @@ def _verify_lockfile(fields: dict[str, str], key) -> bool:
 # ---------------------------------------------------------------------------
 
 def _read_yaml_mode() -> str:
-    """Read security_mode from security.yaml.  Default is 'daily'."""
+    """Read security_mode from security.yaml, fail-secure on a bad value.
+
+    A recognized mode is returned as-is. Any value outside VALID_MODES --
+    an arbitrary or malformed mode string from a hand-edited file -- is
+    never propagated: it resolves to the restrictive mode (Bulbe). An
+    unreadable or corrupt file (an exception while parsing) likewise
+    resolves to Bulbe rather than to the permissive Daily mode. A missing
+    file is the documented default of a fresh install and stays Daily.
+    """
     try:
         if _SECURITY_YAML.exists():
             with open(_SECURITY_YAML, encoding="utf-8") as fh:
                 cfg = yaml.safe_load(fh) or {}
-            return cfg.get("security_mode", MODE_DAILY)
+            mode = cfg.get("security_mode", MODE_DAILY)
+            if mode in VALID_MODES:
+                return mode
+            logger.warning(
+                "Unrecognized security mode %r in YAML; failing secure "
+                "to Bulbe.",
+                mode,
+            )
+            return MODE_BULBE
     except Exception as exc:
-        logger.warning("Failed to read security mode from YAML: %s", exc)
+        logger.warning(
+            "Failed to read security mode from YAML: %s; failing secure "
+            "to Bulbe.",
+            exc,
+        )
+        return MODE_BULBE
     return MODE_DAILY
 
 
