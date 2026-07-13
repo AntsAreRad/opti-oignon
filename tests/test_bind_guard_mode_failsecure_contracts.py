@@ -35,28 +35,21 @@ import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 def _load_guard_module(mode="daily", audit_events=None):
-    """Load network_bind_guard.py in isolation with a driven mode stub."""
-    keys = (
-        "opti_oignon",
-        "opti_oignon.network_bind_guard",
-        "opti_oignon.security_mode",
-        "opti_oignon.signed_audit_log",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
+    """Load network_bind_guard.py in isolation with a driven mode stub.
 
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
+    The mode stub IS the subject: the guard must refuse a non-loopback bind
+    under the fortress. So the real security_mode must be unreachable, or the
+    guard would read the live mode instead of the driven one and the clauses
+    would pass or fail on whatever the host happens to be running.
+    """
     mode_stub = types.ModuleType("opti_oignon.security_mode")
     mode_stub.get_current_mode = lambda: mode
-    sys.modules["opti_oignon.security_mode"] = mode_stub
-    pkg.security_mode = mode_stub
 
     audit_stub = types.ModuleType("opti_oignon.signed_audit_log")
 
@@ -65,25 +58,17 @@ def _load_guard_module(mode="daily", audit_events=None):
             audit_events.append(kwargs)
 
     audit_stub.chain_log = _chain_log
-    sys.modules["opti_oignon.signed_audit_log"] = audit_stub
-    pkg.signed_audit_log = audit_stub
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.network_bind_guard", _OO / "network_bind_guard.py",
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.network_bind_guard": source("network_bind_guard.py"),
+        },
+        seeded={
+            "opti_oignon.security_mode": mode_stub,
+            "opti_oignon.signed_audit_log": audit_stub,
+        },
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.network_bind_guard"] = mod
-    spec.loader.exec_module(mod)
-    pkg.network_bind_guard = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    return loaded["opti_oignon.network_bind_guard"], restore
 
 
 class _EnvGuard:

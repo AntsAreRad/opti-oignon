@@ -142,6 +142,7 @@ def download_gguf_model(request: GGUFDownloadRequest) -> dict:
             url=request.url,
             filename=request.filename,
             target_dir=request.target_dir,
+            expected_sha256=request.expected_sha256,
         )
 
         return GGUFDownloadResponse(
@@ -151,6 +152,8 @@ def download_gguf_model(request: GGUFDownloadRequest) -> dict:
             size=result.get("size", 0),
             size_human=result.get("size_human", ""),
             message=result.get("message", ""),
+            sha256=result.get("sha256", ""),
+            provenance=result.get("provenance", {}),
         ).model_dump()
 
     except ValueError as exc:

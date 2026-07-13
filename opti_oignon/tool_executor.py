@@ -155,6 +155,31 @@ def _resolve_tool_transcript() -> str:
     return TOOL_TRANSCRIPT_FLAT
 
 
+def _allowed_transcript_models() -> tuple[str, ...] | None:
+    """The per-model native-transcript allowlist, or None when unusable.
+
+    None means "no usable allowlist": the key is absent, its value is not a
+    list, or the configuration could not be read at all. Every one of those
+    cases keeps the historical flat reconstruction, so an unreadable or
+    hand-edited configuration can never widen the surface. Entries that are
+    not non-empty strings are dropped, and surrounding whitespace is
+    stripped, so a stray blank line cannot name a model.
+    """
+    try:
+        from .config import config
+        value = config.get_user_preference(
+            "tool_transcript_models", None,
+        )
+    except Exception:
+        return None
+    if not isinstance(value, list):
+        return None
+    return tuple(
+        entry.strip() for entry in value
+        if isinstance(entry, str) and entry.strip()
+    )
+
+
 def _extract_message_content(resp) -> str | None:
     """The assistant text of an Ollama chat response, dict/attr-safe.
 
@@ -360,10 +385,18 @@ class ToolExecutor:
         # How executed tool calls are replayed to the model; an explicit
         # valid value wins, otherwise the configured preference (flat by
         # default -- the historical behavior).
+        #
+        # The channel the mode came through is remembered: an explicit,
+        # valid constructor value is the caller's own decision (the eval
+        # harness measuring flat against native) and is used as given. A
+        # mode that came from the configuration is only a REQUEST -- the
+        # per-model allowlist decides whether it is honored. Requesting
+        # native in the configuration therefore cannot, by itself, open the
+        # native replay for a model nobody vouched for.
+        _explicit = tool_transcript in _TOOL_TRANSCRIPT_MODES
+        self._transcript_explicit = _explicit
         self.tool_transcript = (
-            tool_transcript
-            if tool_transcript in _TOOL_TRANSCRIPT_MODES
-            else _resolve_tool_transcript()
+            tool_transcript if _explicit else _resolve_tool_transcript()
         )
         # S128: Optional pre-execution approval hook.
         # Callable(tool_name, arguments) -> bool.
@@ -610,6 +643,7 @@ class ToolExecutor:
             final_messages = self._final_messages(
                 message, tool_results_context, context_messages,
                 native_transcript, manifest_block=_manifest_block,
+                model=_model,
             )
             marker_filter = (
                 StreamMarkerFilter() if RESPONSE_HYGIENE_AVAILABLE else None
@@ -998,7 +1032,7 @@ class ToolExecutor:
         if use_native:
             messages = self._build_decision_messages(
                 message, context_messages, previous_results,
-                native_transcript,
+                native_transcript, model=model,
             )
             if manifest_block:
                 messages = (
@@ -1056,12 +1090,39 @@ class ToolExecutor:
             return []
         return [(decision.tool_name, decision.arguments)]
 
+    def _effective_transcript(self, model: str | None) -> str:
+        """The transcript mode this run actually gets, for this model.
+
+        The single place where the native replay can be turned on, so every
+        activation path is judged by the same rule. A flat request is
+        returned untouched and never consults the allowlist. A native mode
+        set explicitly by the caller (the eval harness) is used as given --
+        that channel is inert by default and is what makes the comparison
+        measurable. A native mode coming from the configuration is honored
+        only for a model the allowlist names: an absent, malformed or
+        unreadable allowlist, and any model it does not name, keep the flat
+        reconstruction. The shipped default (no allowlist at all) is
+        therefore flat everywhere.
+        """
+        if self.tool_transcript != TOOL_TRANSCRIPT_NATIVE:
+            return self.tool_transcript
+        if self._transcript_explicit:
+            return TOOL_TRANSCRIPT_NATIVE
+        allowed = _allowed_transcript_models()
+        if allowed is None:
+            return TOOL_TRANSCRIPT_FLAT
+        name = (model or "").strip()
+        if name and name in allowed:
+            return TOOL_TRANSCRIPT_NATIVE
+        return TOOL_TRANSCRIPT_FLAT
+
     def _build_decision_messages(
         self,
         message: str,
         context_messages: list[dict],
         previous_results: list[str],
         native_transcript: list[dict] | None = None,
+        model: str | None = None,
     ) -> list[dict]:
         """Assemble the chat messages for a tool decision (with prior results).
 
@@ -1071,8 +1132,8 @@ class ToolExecutor:
         user message.
         """
         if (
-            self.tool_transcript == TOOL_TRANSCRIPT_NATIVE
-            and native_transcript
+            native_transcript
+            and self._effective_transcript(model) == TOOL_TRANSCRIPT_NATIVE
         ):
             messages = list(context_messages)
             messages.extend(native_transcript)
@@ -1256,6 +1317,7 @@ class ToolExecutor:
         context_messages: list[dict],
         native_transcript: list[dict] | None = None,
         manifest_block: str = "",
+        model: str | None = None,
     ) -> list[dict]:
         """Chat messages for the final user-facing answer.
 
@@ -1277,8 +1339,8 @@ class ToolExecutor:
         if manifest_block:
             lead.append({"role": "system", "content": manifest_block})
         if (
-            self.tool_transcript == TOOL_TRANSCRIPT_NATIVE
-            and native_transcript
+            native_transcript
+            and self._effective_transcript(model) == TOOL_TRANSCRIPT_NATIVE
         ):
             messages = list(lead)
             messages.extend(context_messages)
@@ -1368,6 +1430,7 @@ class ToolExecutor:
         messages = self._final_messages(
             message, tool_results_context, context_messages,
             native_transcript, manifest_block=manifest_block,
+            model=model,
         )
 
         try:

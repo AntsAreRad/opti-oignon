@@ -90,6 +90,57 @@ jobs:
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # Isolation -- the test windows, under BOTH install layouts
+  #
+  # An editable install registers a finder that resolves a submodule from a
+  # NAME table and ignores the parent package's path. A test window that
+  # stands in a parent whose path is empty therefore blocks nothing there,
+  # while blocking correctly under a plain layout. Running one layout only
+  # makes a whole class of void window invisible, which is how this defect
+  # survived: the seal must hold under both, so both are run.
+  # -------------------------------------------------------------------
+  isolation:
+    name: Isolation windows (${{ matrix.layout }} install)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: ["plain", "editable"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pytest
+          pip install -r requirements-backend.txt
+
+      - name: Install the project (editable layout only)
+        if: matrix.layout == 'editable'
+        run: pip install -e .
+
+      - name: Isolation-seal guard (the ledger may only shrink)
+        run: python .github/scripts/isolation_seal_guard.py tests
+
+      - name: Contracts for the shared window
+        run: python -m pytest tests/test_isolation_window_contracts.py -q
+
+      - name: Suites on the shared window
+        run: |
+          python -m pytest -q \
+            tests/test_agent_toolset_mode_exposure_contracts.py \
+            tests/test_agentic_tool_bound_capability_contracts.py \
+            tests/test_quick_sandbox_turn_guard_contracts.py \
+            tests/test_scheduler_curation_trigger_contracts.py \
+            tests/test_bind_guard_mode_failsecure_contracts.py \
+            tests/test_security_mode_yaml_failsecure_contracts.py
+
   typecheck:
     name: Typecheck (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

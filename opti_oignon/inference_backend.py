@@ -109,6 +109,55 @@ def _governor_admission(model: str, options: dict | None) -> None:
         logger.debug("Governor gate failed open: %s", exc)
 
 
+# Model integrity seam. Deliberately the OPPOSITE posture to the governor gate
+# above, and the contrast is the point: an absent resource governor means an
+# unguarded but otherwise correct load, so it fails open. An absent integrity
+# proof does not mean "load unverified" -- it means no proof exists, so it
+# fails secure.
+
+
+def _provenance_mode() -> str:
+    """The live security mode, fail-secure to bulbe when undeterminable."""
+    try:
+        from opti_oignon.security_mode import get_current_mode
+
+        return str(get_current_mode() or "").strip().lower() or "bulbe"
+    except Exception:
+        return "bulbe"
+
+
+def _provenance_guard(gguf_path: Path) -> None:
+    """Verify the model's pinned digest before its bytes reach llama.cpp.
+
+    The path guard in _resolve_model_path proved WHERE the file is; it never
+    proved WHAT it contains. This gate does, and it raises to refuse.
+
+    An unresolvable provenance module is itself a refusal whenever the mode
+    enforces. Swallowing that import would reintroduce, on the one seam that
+    hands raw bytes to a native parser, exactly the silent fail-open shape
+    this gate exists to remove.
+
+    Raises:
+        ProvenanceRefusal: When the model's provenance does not verify.
+        RuntimeError: When verification is unavailable and the mode enforces.
+    """
+    try:
+        from opti_oignon import model_provenance as _provenance
+    except Exception as exc:
+        if _provenance_mode() != "daily":
+            raise RuntimeError(
+                "Model provenance verification is unavailable and the current "
+                "security mode enforces it; refusing to load "
+                f"{gguf_path.name}"
+            ) from exc
+        logger.warning(
+            "Model provenance unavailable; load continues unverified: %s", exc
+        )
+        return
+
+    _provenance.guard_model_load(gguf_path)
+
+
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -992,6 +1041,12 @@ class LlamaCppBackend(InferenceBackend):
                     f"GGUF model not found: {model_name}. "
                     f"Searched directories: {[str(d) for d in self._model_dirs]}"
                 )
+
+            # The path is now proven to sit inside a configured model
+            # directory. Nothing has yet proven the bytes are the bytes we
+            # pinned, and they are about to be parsed by native code, so the
+            # integrity gate runs here: after containment, before the load.
+            _provenance_guard(gguf_path)
 
             logger.info("Loading GGUF model: %s", gguf_path)
             start = time.time()

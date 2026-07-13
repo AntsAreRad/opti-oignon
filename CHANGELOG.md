@@ -3,6 +3,33 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
+## Unreleased
+
+### Added
+
+- [SECURITY] Model weight provenance. GGUF files are now pinned to the sha256 of
+  their bytes in a manifest sealed with ML-DSA-65 (or HMAC-SHA512 where liboqs is
+  absent), and the llama.cpp in-process load seam verifies that pin before the
+  bytes reach the native parser. The path guard already proved WHERE a model file
+  sits and the SSRF guard proved WHERE it was fetched from; nothing proved WHAT it
+  contained, and a trojaned or corrupted model was parsed by native code
+  regardless.
+- [SECURITY] `POST /api/backends/gguf/download` accepts an optional
+  `expected_sha256`. It is verified against the partial file BEFORE the download is
+  promoted to a loadable `.gguf`, so a mismatch never materialises a model. Taken
+  from a model card rather than from the serving host, it is the only check on that
+  path that is not trust-on-first-use. Successful downloads are enrolled in the
+  manifest automatically.
+
+### Changed
+
+- [SECURITY] **Breaking in Bulbe.** Bulbe now REFUSES to load a GGUF whose
+  provenance does not verify -- including one that is simply not enrolled yet.
+  Enrol existing models before switching to Bulbe. Configuration cannot weaken
+  this; a security mode that cannot be resolved is treated as Bulbe. Daily is
+  unchanged by default: it observes and logs without blocking. Models served
+  through Ollama are not affected, as the gate sits on the in-process load seam.
+
 ## 2.1.0 -- 2026-06-27
 
 A capability release on two fronts: an agentic robustness cycle that makes local

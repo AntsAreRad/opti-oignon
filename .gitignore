@@ -38,6 +38,14 @@ opti_oignon/data/*.db-wal
 opti_oignon/data/*.db-shm
 opti_oignon/data/*.db-journal
 
+# Model provenance manifest: local host state, sealed with a local key.
+# Committing it would publish the digests of one machine's model files
+# and invite a seal made with somebody else's key.
+data/model_provenance.json
+data/model_provenance.json.tmp
+opti_oignon/data/model_provenance.json
+opti_oignon/data/model_provenance.json.tmp
+
 # --- Audit chain anchor (per-install integrity tip; not a shared artifact) ---
 .audit_chain_anchor
 data/.audit_chain_anchor

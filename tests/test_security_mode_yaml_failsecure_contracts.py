@@ -32,38 +32,26 @@ import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 _MOD_NAME = "opti_oignon.security_mode"
 
 
 def _load_security_mode():
-    """Load the security_mode module in isolation under a stub package."""
-    saved = {
-        name: sys.modules.get(name)
-        for name in ("opti_oignon", _MOD_NAME)
-    }
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
+    """Load the security_mode module in isolation under a stub package.
 
-    spec = importlib.util.spec_from_file_location(
-        _MOD_NAME, _OO / "security_mode.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[_MOD_NAME] = mod
-    spec.loader.exec_module(mod)
-    return mod, saved
+    Every sibling must be unreachable: the fail-secure clauses turn on what the
+    module does when a source cannot be read, and a sibling resolved out of the
+    cache or through a name-answering finder would let live state decide.
+    """
+    loaded, restore = isolate(targets={_MOD_NAME: source("security_mode.py")})
+    return loaded[_MOD_NAME], restore
 
 
-def _restore(saved):
-    sys.modules.pop(_MOD_NAME, None)
-    for name, value in saved.items():
-        if value is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = value
+def _restore(restore):
+    restore()
 
 
 def _with_yaml(mod, text):

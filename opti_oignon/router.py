@@ -46,22 +46,30 @@ class ToolCapableModelUnavailable(RuntimeError):
     """
 
 
-def _tool_calling_verdict_or_open(model: str) -> bool:
-    """Tool-calling verdict for the fail-secure guard, via the manifest.
+def _tool_verdict_for_requirement(context: str):
+    """Resolve the capability predicate for a POSED tool-calling requirement.
 
     Delegates to the capability manifest's public predicate -- the single
     source of truth -- so the router never reimplements the capability
     rule. A model with no profile stays capable there (the historical
     fallback), so only a model with an explicit negative verdict reads as
-    False. If the predicate cannot be imported the capability subsystem is
-    absent; the guard then declines to refuse (returns True) rather than
-    blocking every tool-bound turn on an infrastructure gap.
+    False. Unlike ordinary routing, where an absent capability subsystem
+    deliberately declines to constrain anything, a caller that POSES the
+    requirement gets fail-secure semantics: when the predicate cannot be
+    imported the capability is indeterminable, and an indeterminable
+    capability under a posed requirement refuses by name instead of
+    silently selecting a model that may not call tools.
     """
     try:
         from .capability_manifest import model_tool_capable
-        return bool(model_tool_capable(model))
-    except Exception:
-        return True
+    except Exception as exc:
+        raise ToolCapableModelUnavailable(
+            f"A tool-calling-capable model is required ({context}) but the "
+            "capability predicate is unavailable "
+            f"({exc.__class__.__name__}): an indeterminable capability "
+            "fails secure under a posed requirement."
+        )
+    return model_tool_capable
 
 
 # =============================================================================
@@ -252,6 +260,7 @@ class ModelRouter:
     def find_best_vision_model(
         self,
         priority: str = "balanced",
+        require_tool_calling: bool = False,
     ) -> tuple[str, str, list[str]] | None:
         """Find the best available vision-capable model.
 
@@ -260,6 +269,12 @@ class ModelRouter:
 
         Args:
             priority: Selection priority (fast, balanced, quality)
+            require_tool_calling: When True, vision candidates whose
+                tool-calling verdict is explicitly negative are skipped,
+                so vision auto-routing never silently downgrades a
+                tool-bound turn; with no capable candidate this returns
+                None and the caller falls through to the
+                requirement-aware standard selection.
 
         Returns:
             Tuple (model_name, reason, alternatives) or None if none available
@@ -300,10 +315,17 @@ class ModelRouter:
         available = self.get_available_models()
         alternatives = [p.name for p in vision_only]  # noqa: F841
 
+        tool_verdict = None
+        if require_tool_calling:
+            tool_verdict = _tool_verdict_for_requirement("vision auto-routing")
+
         for profile in vision_only:
-            if profile.name in available:
-                alt_names = [p.name for p in vision_only if p.name != profile.name]
-                return profile.name, "vision_auto", alt_names
+            if profile.name not in available:
+                continue
+            if tool_verdict is not None and not tool_verdict(profile.name):
+                continue
+            alt_names = [p.name for p in vision_only if p.name != profile.name]
+            return profile.name, "vision_auto", alt_names
 
         return None
 
@@ -337,6 +359,11 @@ class ModelRouter:
             force_variant: Force a prompt variant
             images: Optional list of base64-encoded images
             message: Optional raw message text for vision detection
+            require_tool_calling: When True, the selection is constrained
+                to tool-calling-capable models on every branch (profiles,
+                config fallback, forcing, vision auto-routing) and refuses
+                by name (ToolCapableModelUnavailable) instead of silently
+                selecting a model that cannot call tools.
 
         Returns:
             RoutingResult with complete configuration
@@ -358,9 +385,22 @@ class ModelRouter:
 
         if force_model:
             model, priority_used = self._validate_forced_model(force_model)
+            # A posed requirement outranks the forcing: a forced selection
+            # that is explicitly unable to call tools refuses by name
+            # instead of silently producing a tool-less turn.
+            if require_tool_calling and not _tool_verdict_for_requirement(
+                f"forced selection '{model}'"
+            )(model):
+                raise ToolCapableModelUnavailable(
+                    f"The forced selection '{model}' is explicitly not "
+                    "tool-calling-capable but a tool-calling-capable model "
+                    "is required for this turn."
+                )
         elif has_images:
             # Auto-route to a vision model
-            vision_result = self.find_best_vision_model(priority)
+            vision_result = self.find_best_vision_model(
+                priority, require_tool_calling=require_tool_calling,
+            )
             if vision_result:
                 model, priority_used, alternatives = vision_result
                 profile_used = True
@@ -492,13 +532,22 @@ class ModelRouter:
                 ToolCapableModelUnavailable rather than returning a model
                 that cannot call tools. A model with no profile stays
                 capable (the historical fallback), so a refusal happens
-                only when the selected model is known to be incapable; if
-                the capability predicate cannot be imported at all the
-                guard declines to refuse and the config fallback stands.
+                only when the selected model is known to be incapable; an
+                unimportable capability predicate is an indeterminable
+                capability and refuses by name up front rather than
+                silently disabling the filter.
 
         Returns:
             (model, reason, alternatives, profile_used)
         """
+        # A posed requirement resolves the capability predicate up front,
+        # on every path through this selection (profiles present or not):
+        # an unimportable predicate refuses by name here rather than
+        # silently disabling the filter.
+        tool_verdict = None
+        if require_tool_calling:
+            tool_verdict = _tool_verdict_for_requirement(f"task '{task_type}'")
+
         # Try the profiles
         if MODEL_PROFILES_AVAILABLE and profile_manager is not None:
             profile_manager._ensure_loaded()
@@ -530,25 +579,11 @@ class ModelRouter:
                     available = self.get_available_models()
                     alternatives = [p.name for p in best_profiles]  # noqa: F841
 
-                    # Optionally require a tool-calling-capable model.
-                    # The verdict is the capability manifest's own; a
-                    # defensive lazy import keeps the router decoupled and
-                    # fails open (no filtering) if the predicate is absent.
-                    tool_verdict = None
-                    if require_tool_calling:
-                        try:
-                            from .capability_manifest import model_tool_capable
-                            tool_verdict = model_tool_capable
-                        except Exception:
-                            tool_verdict = None
-
                     for profile in best_profiles:
                         if profile.name not in available:
                             continue
-                        if (
-                            require_tool_calling
-                            and tool_verdict is not None
-                            and not tool_verdict(profile.name)
+                        if tool_verdict is not None and not tool_verdict(
+                            profile.name
                         ):
                             continue
                         alt_names = [p.name for p in best_profiles if p.name != profile.name]
@@ -564,10 +599,9 @@ class ModelRouter:
         model, reason = self._select_model(model_type, priority)
         # Fail-secure for a tool-bound selection: never hand back a model
         # that is known to be unable to call tools. A model with no profile
-        # stays capable (the historical fallback), so this refuses only when
-        # the fallback carries an explicit negative verdict; an unavailable
-        # predicate declines to refuse and the fallback stands.
-        if require_tool_calling and not _tool_calling_verdict_or_open(model):
+        # stays capable (the historical fallback), so this refuses only
+        # when the fallback carries an explicit negative verdict.
+        if tool_verdict is not None and not tool_verdict(model):
             raise ToolCapableModelUnavailable(
                 "No tool-calling-capable model is available for task "
                 f"'{task_type}': the profile filter matched none and the "
@@ -699,11 +733,18 @@ def route(
     force_model: str | None = None,
     images: list[str] | None = None,
     message: str | None = None,
+    require_tool_calling: bool = False,
 ) -> RoutingResult:
-    """Convenience function to route a task."""
+    """Convenience function to route a task.
+
+    Forwards the tool-calling requirement, so a convenience caller can
+    pose it and gets the same constrained selection and named refusals as
+    the instance path.
+    """
     return router.route(
         analysis, priority, force_model,
         images=images, message=message,
+        require_tool_calling=require_tool_calling,
     )
 
 

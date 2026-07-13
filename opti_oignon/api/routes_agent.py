@@ -361,6 +361,35 @@ def _resolve_model_client(model: str | None) -> Any:
         return None
 
 
+# Named refusal reasons for the run entry's model-capability gate. Stable
+# strings: clients key on them and tests pin them by identity.
+REASON_MODEL_NOT_TOOL_CAPABLE = "model_not_tool_capable"
+REASON_TOOL_CAPABILITY_UNAVAILABLE = "tool_capability_unavailable"
+
+
+def _model_capability_refusal(model: str) -> str | None:
+    """Why ``model`` must not drive the tool loop, or None when it may.
+
+    The agent loop is tool-bound by construction, so the run entry poses
+    the tool-calling requirement itself. The verdict is the capability
+    manifest's public predicate -- the single source of truth, never a
+    local reimplementation: a model with an explicit negative verdict is
+    refused by name, and a model with no profile passes (the textual
+    fallback protocol drives tools for models without native function
+    calling). Fail-secure: when the predicate cannot be imported the
+    capability is indeterminable, and an indeterminable capability under
+    this intrinsic requirement refuses by name rather than silently
+    starting a loop whose model may answer tool-less.
+    """
+    try:
+        from opti_oignon.capability_manifest import model_tool_capable
+    except Exception:
+        return REASON_TOOL_CAPABILITY_UNAVAILABLE
+    if not model_tool_capable(model):
+        return REASON_MODEL_NOT_TOOL_CAPABLE
+    return None
+
+
 def _resolve_memory_provider() -> Callable[..., str] | None:
     """The S66 working-memory block provider, guarded."""
     try:
@@ -483,6 +512,9 @@ try:
         model_client = _resolve_model_client(request.model or None)
         if model_client is None:
             raise HTTPException(status_code=503, detail="No model client available")
+        refusal = _model_capability_refusal(request.model)
+        if refusal is not None:
+            raise HTTPException(status_code=422, detail=refusal)
         result = get_run_manager().start(
             request.task,
             model_client=model_client,

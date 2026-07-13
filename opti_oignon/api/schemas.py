@@ -2669,6 +2669,9 @@ class GGUFDownloadRequest(BaseModel):
     url: str
     filename: str | None = None
     target_dir: str | None = None
+    # Out-of-band integrity pin, taken from the model card rather than from
+    # the server being downloaded from. A mismatch discards the download.
+    expected_sha256: str | None = None
 
 
 class GGUFDownloadResponse(BaseModel):
@@ -2679,6 +2682,8 @@ class GGUFDownloadResponse(BaseModel):
     size: int = 0
     size_human: str = ""
     message: str = ""
+    sha256: str = ""
+    provenance: dict = Field(default_factory=dict)
 
 
 class GGUFStorageResponse(BaseModel):

@@ -21,6 +21,7 @@ Author: Leon
 """
 
 import hashlib
+import hmac
 import http.client
 import logging
 import socket
@@ -594,6 +595,49 @@ def urlopen_ssrf_safe(
 # Model manager
 # ---------------------------------------------------------------------------
 
+def _sha256_file(path: Path | str, chunk_size: int = 1024 * 1024) -> str:
+    """Streaming sha256 over a file's bytes.
+
+    Deliberately local and stdlib-only. This is the primitive that decides
+    whether a substituted file is rejected, so it must not be reachable only
+    through an optional import: a check that can be skipped because a module
+    is missing is not a check.
+
+    Streaming is not tidiness -- a GGUF routinely runs to tens of gigabytes,
+    so reading it whole is not an option.
+    """
+    hasher = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            block = handle.read(chunk_size)
+            if not block:
+                break
+            hasher.update(block)
+    return hasher.hexdigest()
+
+
+def _record_provenance(target_path: Path, digest: str) -> dict:
+    """Pin a freshly downloaded model in the provenance manifest.
+
+    Reported rather than raised: the bytes are already on disk and verified
+    against the expected digest if one was given, so failing the whole
+    download over a manifest write would be the wrong trade. It is also safe,
+    because an unenrolled model is refused by the load gate under enforcement
+    -- an absent pin degrades to a refusal, never to a silent pass.
+    """
+    try:
+        from opti_oignon.model_provenance import record_model
+
+        recorded = record_model(target_path)
+        return {"recorded": True, "scheme": recorded.get("scheme", "")}
+    except Exception as exc:
+        logger.warning(
+            "Model downloaded but not pinned in the provenance manifest: %s",
+            exc,
+        )
+        return {"recorded": False, "sha256": digest, "error": str(exc)}
+
+
 class ModelManager:
     """Manages local GGUF model files.
 
@@ -786,11 +830,19 @@ class ModelManager:
         filename: str | None = None,
         target_dir: str | None = None,
         progress_callback: Callable[[dict], None] | None = None,
+        expected_sha256: str | None = None,
     ) -> dict:
         """Download a GGUF model from a URL.
 
         S136 audit fix: validates URL to prevent SSRF attacks.
         Only HTTPS URLs to public hosts are allowed.
+
+        The SSRF guard proves WHERE the bytes came from. Only a digest proves
+        WHAT they are. ``expected_sha256`` is the one check on this path that
+        does not reduce to trust on first use: the caller supplies it out of
+        band -- from the model card, not from the server that just served the
+        file -- so a compromised or substituting mirror cannot satisfy it. It
+        is verified BEFORE the partial file is promoted to a loadable .gguf.
 
         Args:
             url: Direct URL to the .gguf file.
@@ -798,9 +850,12 @@ class ModelManager:
             target_dir: Directory to save to (defaults to default_dir).
             progress_callback: Called with progress dicts:
                 {"status": "downloading", "downloaded": N, "total": M, "percent": P}
+            expected_sha256: Optional out-of-band digest. When supplied, a
+                mismatch discards the download and no .gguf is ever created.
 
         Returns:
-            Dict with download result info.
+            Dict with download result info, including the computed sha256 and
+            the outcome of enrolling it in the provenance manifest.
         """
         # S136/MM-01 audit fix: SSRF protection. urlopen_ssrf_safe (below)
         # re-validates and pins every redirect hop, so neither redirect
@@ -891,11 +946,33 @@ class ModelManager:
                                 "percent": round(percent, 1),
                             })
 
+            # Integrity gate. Hashing happens on the .part file, so a
+            # mismatch is discarded by the ValueError handler below and NO
+            # loadable .gguf is ever materialised. Computed with no import
+            # dependency at all: the check that refuses a substituted file
+            # must not be capable of being skipped because an optional
+            # module failed to load.
+            digest = _sha256_file(temp_path)
+            if expected_sha256:
+                expected = str(expected_sha256).strip().lower()
+                if not hmac.compare_digest(digest, expected):
+                    raise ValueError(
+                        "Downloaded file does not match the expected sha256 "
+                        f"(expected {expected[:16]}..., got {digest[:16]}...)"
+                    )
+
             # Rename temp to final
             temp_path.rename(target_path)
 
             # Clear metadata cache for this path
             self._metadata_cache.pop(str(target_path), None)
+
+            # Enrol the digest so the load seam can verify it later. A failure
+            # here is reported, never swallowed into a false success -- and it
+            # is not fatal, because an unenrolled model is already refused by
+            # the load gate under enforcement. The fail-secure property
+            # composes: a missing pin cannot become a silent pass.
+            provenance = _record_provenance(target_path, digest)
 
             result = {
                 "status": "completed",
@@ -903,6 +980,8 @@ class ModelManager:
                 "filename": filename,
                 "size": downloaded,
                 "size_human": _format_size(downloaded),
+                "sha256": digest,
+                "provenance": provenance,
             }
 
             if progress_callback:
