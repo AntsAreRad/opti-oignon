@@ -340,6 +340,63 @@ def test_i8_a_failure_while_loading_still_closes_the_window(tmp_path):
     )
 
 
+# I9 -- a finder the WINDOW did not install is still taken back off
+
+
+class _ProductionFinder:
+    """A finder a module under contract installs on itself, in-process.
+
+    Production code that owns its whole process legitimately installs a
+    finder and never removes it -- a plugin worker sealing itself off from
+    the host package is the real case. A contract suite that loads such a
+    module IN-PROCESS runs that code inside the test runner, and the finder
+    outlives the suite. It is not the window's guard, so removing the
+    window's guard by identity leaves it in place, at the HEAD of the meta
+    path, refusing project imports for every later suite in the process.
+    """
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == PACKAGE or fullname.startswith(PACKAGE + "."):
+            raise ImportError(f"sealed off by the module under contract: {fullname}")
+        return None
+
+
+def test_i9_a_finder_installed_inside_the_window_does_not_survive_restore(tmp_path):
+    before_meta = list(sys.meta_path)
+
+    loaded, restore = isolate(targets={_REAL: _REAL_PATH})
+    # Exactly what loading a self-sealing module in-process does: the finder
+    # arrives from the code under contract, not from the window.
+    sys.meta_path.insert(0, _ProductionFinder())
+    restore()
+
+    assert list(sys.meta_path) == before_meta, (
+        "restore must put the meta path back to what it found, not merely "
+        "withdraw the window's own guard. A finder the module under contract "
+        "installed on itself is the one that poisons the process, and it is "
+        "the one identity-removal cannot reach."
+    )
+
+    # The witness with teeth. The poison is a REFUSAL raised out of find_spec by
+    # a finder at the head of the chain, so ask the RESTORED chain for a project
+    # name and let no finder refuse. Deliberately hermetic: import_module would
+    # drag the package __init__ and the whole runtime behind it, and a contract
+    # on the window must not be hostage to what the host happens to have
+    # installed -- that is the very disease the window exists to cure.
+    for finder in sys.meta_path:
+        find_spec = getattr(finder, "find_spec", None)
+        if find_spec is None:
+            continue
+        try:
+            find_spec(_REAL, None, None)
+        except ImportError as exc:
+            raise AssertionError(
+                f"a finder left on the restored meta path still refuses "
+                f"{_REAL!r}: {exc}. Every later suite in this process would "
+                f"inherit that refusal."
+            ) from exc
+
+
 def _main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

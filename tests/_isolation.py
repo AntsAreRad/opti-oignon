@@ -165,12 +165,21 @@ def isolate(*, targets, blocked=(), seeded=None, packages=()):
     )
     saved = {key: sys.modules.get(key, _ABSENT) for key in touched}
 
+    # The meta path is snapshotted WHOLE, not merely marked for the removal of
+    # the guard below. A module under contract may install a finder ON ITSELF
+    # -- a worker that seals itself off from the host package is the real case,
+    # and in production it owns the process and never has to take it back off.
+    # Loaded in-process by a suite, that finder outlives the suite, sits at the
+    # HEAD of the meta path, and refuses project imports for everything that
+    # runs after. It is not the window's guard, so withdrawing the window's
+    # guard by identity cannot reach it. Restoring the list itself does.
+    saved_meta_path = list(sys.meta_path)
+
     guard = _NameGuard()
     sys.meta_path.insert(0, guard)
 
     def restore():
-        if guard in sys.meta_path:
-            sys.meta_path.remove(guard)
+        sys.meta_path[:] = saved_meta_path
         for key, value in saved.items():
             if value is _ABSENT:
                 sys.modules.pop(key, None)

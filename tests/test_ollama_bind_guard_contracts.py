@@ -30,12 +30,16 @@ stub package; the security mode and audit chain it imports lazily are
 seeded as stubs so both mode outcomes are driven deterministically.
 """
 
-import importlib.util
 import os
+import subprocess
 import sys
 import traceback
 import types
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 _REPO = Path(__file__).resolve().parent.parent
 _OO = _REPO / "opti_oignon"
@@ -43,24 +47,41 @@ _OO = _REPO / "opti_oignon"
 _OLLAMA_PORT_HEX = f"{11434:04X}"  # 2CAA
 
 
-def _load_guard_module(mode="daily", audit_events=None):
-    """Load network_bind_guard.py in isolation with a driven mode stub."""
-    keys = (
-        "opti_oignon",
-        "opti_oignon.network_bind_guard",
-        "opti_oignon.security_mode",
-        "opti_oignon.signed_audit_log",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
+def _subprocess_stand_in(run):
+    """A stand-in ``subprocess`` module whose ``run`` the caller drives.
 
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
+    The guard reaches ``subprocess.run`` for its ``ss`` fallback and catches
+    ``subprocess.TimeoutExpired``, so the stand-in carries the real exception
+    types by reference -- it never mutates the real module. Driving the
+    fallback by REPLACING the module the guard binds, rather than by writing
+    ``mod.subprocess.run = ...``, is the whole point: ``mod.subprocess`` IS the
+    process-wide module object, and an attribute written on it outlives this
+    suite, outlives its restore, and hands every later suite in the process a
+    canned answer to every subprocess call it makes.
+    """
+    stand_in = types.ModuleType("subprocess")
+    for name in (
+        "CalledProcessError",
+        "CompletedProcess",
+        "DEVNULL",
+        "PIPE",
+        "STDOUT",
+        "SubprocessError",
+        "TimeoutExpired",
+    ):
+        setattr(stand_in, name, getattr(subprocess, name))
+    stand_in.run = run
+    return stand_in
 
+
+def _load_guard_module(mode="daily", audit_events=None, run=None):
+    """Load network_bind_guard.py in isolation with a driven mode stub.
+
+    ``run`` -- when given, the ``subprocess.run`` the guard will see. It is
+    SEEDED into the window, never written onto the real module.
+    """
     mode_stub = types.ModuleType("opti_oignon.security_mode")
     mode_stub.get_current_mode = lambda: mode
-    sys.modules["opti_oignon.security_mode"] = mode_stub
-    pkg.security_mode = mode_stub
 
     audit_stub = types.ModuleType("opti_oignon.signed_audit_log")
 
@@ -69,25 +90,21 @@ def _load_guard_module(mode="daily", audit_events=None):
             audit_events.append(kwargs)
 
     audit_stub.chain_log = _chain_log
-    sys.modules["opti_oignon.signed_audit_log"] = audit_stub
-    pkg.signed_audit_log = audit_stub
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.network_bind_guard", _OO / "network_bind_guard.py",
+    seeded = {
+        "opti_oignon.security_mode": mode_stub,
+        "opti_oignon.signed_audit_log": audit_stub,
+    }
+    if run is not None:
+        seeded["subprocess"] = _subprocess_stand_in(run)
+
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.network_bind_guard": source("network_bind_guard.py"),
+        },
+        seeded=seeded,
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.network_bind_guard"] = mod
-    spec.loader.exec_module(mod)
-    pkg.network_bind_guard = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    return loaded["opti_oignon.network_bind_guard"], restore
 
 
 class _EnvGuard:
@@ -280,14 +297,13 @@ def test_c5_ss_fallback_normalizes_wildcard():
             return completed
         return _run
 
-    mod, restore = _load_guard_module(mode="daily")
+    _star = (
+        "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n"
+        "LISTEN 0      4096   *:11434            *:*\n"
+    )
+    mod, restore = _load_guard_module(mode="daily", run=_ss_stub(_star))
     try:
-        _star = (
-            "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n"
-            "LISTEN 0      4096   *:11434            *:*\n"
-        )
         mod._check_ollama_proc_net_tcp = lambda port: None
-        mod.subprocess.run = _ss_stub(_star)
         with _EnvGuard(None):
             result = mod.check_ollama_bind()
         assert result.method == "ss_command"
@@ -299,14 +315,13 @@ def test_c5_ss_fallback_normalizes_wildcard():
     finally:
         restore()
 
-    mod, restore = _load_guard_module(mode="daily")
+    _loop = (
+        "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n"
+        "LISTEN 0      4096   127.0.0.1:11434    0.0.0.0:*\n"
+    )
+    mod, restore = _load_guard_module(mode="daily", run=_ss_stub(_loop))
     try:
-        _loop = (
-            "State  Recv-Q Send-Q Local Address:Port Peer Address:Port\n"
-            "LISTEN 0      4096   127.0.0.1:11434    0.0.0.0:*\n"
-        )
         mod._check_ollama_proc_net_tcp = lambda port: None
-        mod.subprocess.run = _ss_stub(_loop)
         with _EnvGuard(None):
             result = mod.check_ollama_bind()
         assert result.method == "ss_command"

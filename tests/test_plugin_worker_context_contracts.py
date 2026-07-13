@@ -48,15 +48,27 @@ _PLUGINS_DIR = _OO / "plugins"
 
 
 def _load_worker():
-    """Load plugin_worker.py from file under a private module name."""
+    """Load plugin_worker.py from file under a private module name.
+
+    The worker seals itself off from the host package by inserting a
+    ``_HostPackageGuard`` at the head of ``sys.meta_path`` (plugin_worker.py:176)
+    and never takes it back off -- correct in production, where the worker OWNS
+    its process. Loaded in-process by this suite, that guard outlives the clause
+    and refuses ``opti_oignon.*`` for every later suite in the runner, with an
+    honest-looking ImportError that has nothing to do with the code under test.
+    Restoring the module cache alone does not reach it. The meta path is
+    therefore snapshotted whole and put back whole.
+    """
     name = "_plugin_worker_under_contract"
     saved = sys.modules.get(name)
+    saved_meta_path = list(sys.meta_path)
     spec = importlib.util.spec_from_file_location(name, _OO / "plugin_worker.py")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
 
     def restore():
+        sys.meta_path[:] = saved_meta_path
         if saved is None:
             sys.modules.pop(name, None)
         else:

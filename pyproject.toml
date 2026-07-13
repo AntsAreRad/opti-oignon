@@ -70,6 +70,19 @@ auth = [
     "pyotp>=2.9.0",
     "qrcode[pil]>=7.4",
 ]
+# Post-quantum signatures (ML-DSA-65). The root of trust for signed backups,
+# the model provenance seal and Veilid device keys. It was never declared as a
+# dependency anywhere, so a clean install silently produced a host with no
+# signature primitive at all -- and the code met that with a log line.
+pqc = [
+    "liboqs-python>=0.10.0",
+]
+# Audit chain anchor export (QR rendering). qrcode lived under `auth` alone,
+# so an install without 2FA left audit_anchor_export importable but unable to
+# render, which reads as a test failure rather than a missing extra.
+anchor = [
+    "qrcode[pil]>=7.4",
+]
 # SQLCipher encrypted database support.
 # S171: migrated to sqlcipher3-binary (prebuilt wheels, no manual build step).
 # The runtime in db_encryption.py imports the sqlcipher3 module, which this

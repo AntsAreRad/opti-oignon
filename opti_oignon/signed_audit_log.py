@@ -634,5 +634,13 @@ def chain_log(
             details=details if details else None,
         )
     except Exception as exc:
-        logger.debug("chain_log failed: %s", exc)
+        # NEVER debug. This is the tamper-evidence chain refusing an entry, and
+        # no caller reads the return value -- so a debug line is the only trace
+        # that the record of a security event was never written at all. An
+        # attacker who can make appends fail can make their own traces vanish.
+        logger.error(
+            "AUDIT CHAIN APPEND FAILED -- this event is NOT in the tamper-"
+            "evidence chain: %s (event_type=%s, action=%s)",
+            exc, event_type, action,
+        )
         return None

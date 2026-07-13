@@ -25,63 +25,84 @@ test loaded from source.
 """
 
 import hashlib
+import contextlib
 import hmac as hmac_mod
-import importlib.util
 import json
 import socket
 import sqlite3
 import sys
 import tempfile
 import traceback
-import types
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parents[1]
 _OO = _ROOT / "opti_oignon"
 
 
 def _load_modules():
-    """Load db_utils, signed_audit_log and audit_anchor_export for real.
+    """Load the chain modules through the shared isolation window.
 
-    Registered under their canonical dotted names beneath a package stub so
-    intra-package imports resolve without triggering the full package
-    __init__ (which requires the inference client).
+    The window is what makes this suite safe to run beside any other. The
+    hand-rolled predecessor DELETED every ``opti_oignon.*`` key from the cache
+    and never put one back, then stood in a package whose ``__path__`` was the
+    REAL source directory -- so the next real import of ``plugin_hooks`` (or of
+    anything else) rebuilt a SECOND module object, with a SECOND module-level
+    singleton. No ImportError, no honest red: production writes into one object
+    and the test interrogates the other. The window neutralises rather than
+    deletes, names every lateral it needs, and restores ``sys.modules`` and
+    ``sys.meta_path`` exactly on the way out.
+
+    Returns ``(signed_audit_log, audit_anchor_export, restore)``.
     """
-    for name in list(sys.modules):
-        if name == "opti_oignon" or name.startswith("opti_oignon."):
-            del sys.modules[name]
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = [str(_OO)]
-    sys.modules["opti_oignon"] = pkg
-
-    def _load(dotted, path):
-        spec = importlib.util.spec_from_file_location(dotted, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[dotted] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    _load("opti_oignon.db_utils", _OO / "db_utils.py")
-
-    # Importing the chain module instantiates its module-level singleton,
-    # which touches the default chain db under the repository root. Leave
-    # a real repository's chain strictly alone; only remove artifacts this
-    # very load created in a tree that had none.
+    # Importing the chain module instantiates its module-level singleton, which
+    # touches the default chain db under the repository root. Leave a real
+    # repository's chain strictly alone; only remove artifacts this very load
+    # created in a tree that had none.
     default_db = _ROOT / "data" / "audit_chain.db"
     default_anchor = _ROOT / "data" / ".audit_chain_anchor"
     had_db = default_db.exists()
     had_anchor = default_anchor.exists()
 
-    sal = _load("opti_oignon.signed_audit_log", _OO / "signed_audit_log.py")
-    aae = _load("opti_oignon.audit_anchor_export", _OO / "audit_anchor_export.py")
+    # Ordered: a target may import one that precedes it. signed_audit_log binds
+    # db_utils.safe_connect at its top; audit_anchor_export binds
+    # signed_audit_log._anchor_mac at its top. The three laterals below are
+    # reached LAZILY, inside functions, and are loaded from their real sources
+    # so this suite exercises exactly the code paths it exercised before.
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.db_utils": source("db_utils.py"),
+            "opti_oignon.encryption": source("encryption.py"),
+            "opti_oignon.db_encryption": source("db_encryption.py"),
+            "opti_oignon.security_mode": source("security_mode.py"),
+            "opti_oignon.signed_audit_log": source("signed_audit_log.py"),
+            "opti_oignon.audit_anchor_export": source("audit_anchor_export.py"),
+        },
+    )
 
     if not had_db and default_db.exists():
         default_db.unlink()
     if not had_anchor and default_anchor.exists():
         default_anchor.unlink()
 
-    return sal, aae
+    return (
+        loaded["opti_oignon.signed_audit_log"],
+        loaded["opti_oignon.audit_anchor_export"],
+        restore,
+    )
+
+
+@contextlib.contextmanager
+def _loaded_modules():
+    """Context-manager form; closes the window on every exit path."""
+    sal, aae, restore = _load_modules()
+    try:
+        yield sal, aae
+    finally:
+        restore()
 
 
 def _fresh_chain(sal, tmpdir, n_entries=5):
@@ -122,8 +143,8 @@ def _canonical_digest(anchor_dict):
 
 
 def test_c1_keyed_anchor_round_trips_authenticated_on_intact_chain():
-    sal, aae = _load_modules()
-    with tempfile.TemporaryDirectory() as tmp:
+    with _loaded_modules() as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
         chain, _ = _fresh_chain(sal, tmp)
         _keyed(chain)
 
@@ -161,8 +182,8 @@ def _flatten(anchor):
 
 
 def test_c2_post_anchor_alteration_is_detected_and_localized():
-    sal, aae = _load_modules()
-    with tempfile.TemporaryDirectory() as tmp:
+    with _loaded_modules() as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
         chain, db_path = _fresh_chain(sal, tmp, n_entries=6)
         _keyed(chain)
 
@@ -198,8 +219,8 @@ def test_c2_post_anchor_alteration_is_detected_and_localized():
 
 
 def test_c3_anchor_forged_from_public_source_is_never_authenticated():
-    sal, aae = _load_modules()
-    with tempfile.TemporaryDirectory() as tmp:
+    with _loaded_modules() as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
         chain, _ = _fresh_chain(sal, tmp)
         _keyed(chain)
 
@@ -236,8 +257,8 @@ def test_c3_anchor_forged_from_public_source_is_never_authenticated():
 
 
 def test_c4_bundle_renders_the_same_anchor_in_all_three_formats():
-    sal, aae = _load_modules()
-    with tempfile.TemporaryDirectory() as tmp:
+    with _loaded_modules() as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
         chain, _ = _fresh_chain(sal, tmp)
         _keyed(chain)
 
@@ -267,7 +288,7 @@ def test_c4_bundle_renders_the_same_anchor_in_all_three_formats():
 
 
 def test_c5_export_and_verification_touch_no_network():
-    sal, aae = _load_modules()
+    sal, aae, restore = _load_modules()
 
     def _deny(*_a, **_k):
         raise AssertionError("network access attempted on the anchor path")
@@ -292,6 +313,7 @@ def test_c5_export_and_verification_touch_no_network():
             assert result.match is True
     finally:
         socket.socket, socket.create_connection, socket.getaddrinfo = saved
+        restore()
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +323,8 @@ def test_c5_export_and_verification_touch_no_network():
 
 
 def test_c6_bit_flipped_signature_is_rejected_outright():
-    sal, aae = _load_modules()
-    with tempfile.TemporaryDirectory() as tmp:
+    with _loaded_modules() as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
         chain, _ = _fresh_chain(sal, tmp)
         _keyed(chain)
 

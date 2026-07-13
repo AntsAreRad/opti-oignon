@@ -27,7 +27,7 @@ web search (which itself passes through PII sanitization).
 - LLM prompt injection via RAG context or plugin output
 - Sandbox escape from LLM-driven filesystem tools
 - Data exfiltration through crafted LLM tool calls
-- Tampering with the audit log (hash-chain with post-quantum signatures)
+- Tampering with the audit log (SHA-512 hash-chain, keyed HMAC-SHA256)
 - Man-in-the-middle on localhost (Bulbe mode socket-level binding)
 - Supply chain attacks on releases (GPG signing, SHA-256 checksums)
 - Dependency vulnerabilities (automated pip-audit monitoring)
@@ -61,8 +61,10 @@ state-changing endpoints.
 AES-256-GCM encryption for sensitive data fields. SQLCipher on all
 databases via the centralized `safe_connect` wrapper. Per-user
 encryption keys derived from the user's password via Argon2id KDF.
-ML-DSA-65 post-quantum signatures on audit chain entries (Ed25519
-fallback). `SecureBytes` class uses mlock to prevent key material
+The audit chain is keyed with HMAC-SHA256, not signed (see below).
+ML-DSA-65 post-quantum signatures cover backup exports, the model
+provenance seal and Veilid device keys. `SecureBytes` uses mlock to
+prevent key material
 from being swapped to disk, with memset wipe on deallocation and a
 SIGTERM handler that wipes all tracked key instances.
 
@@ -142,8 +144,22 @@ breaker for anomaly detection.
 ### Layer 5 -- Audit and monitoring
 
 SHA-512 hash-chain audit log where each entry includes the hash of its
-predecessor (tamper-evident). Entries are signed with ML-DSA-65
-post-quantum signatures. External anchoring via QR code export, signed
+predecessor (tamper-evident). Anchors are authenticated with a keyed
+HMAC-SHA256 derived from the master encryption key -- NOT with a
+post-quantum signature, and not with any asymmetric signature at all.
+
+The distinction is load-bearing and is stated here rather than implied.
+An HMAC is symmetric: the party that verifies holds the same secret as
+the party that authenticates. The chain is therefore tamper-EVIDENT
+against an attacker who does not hold the master key, and it is NOT
+tamper-PROOF against one who does -- such an attacker can recompute
+every anchor and produce a chain that verifies clean. Nor can an anchor
+be verified by a third party, or by yourself on a machine that does not
+already hold the key; there is no public half. Binding the chain to an
+asymmetric key the host does not hold is the remaining work, and it is
+tracked as such.
+
+External anchoring via QR code export, signed
 JSON for USB backup, and plain-text clipboard anchor. HMAC verification
 on imported anchors. Startup security checklist with scoring API runs
 on every backend start.
