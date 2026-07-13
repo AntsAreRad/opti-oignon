@@ -88,7 +88,11 @@ FEATURE_AVAILABLE = True
 # The signing key envelope format and suite. The algorithm string matches
 # pqc_signatures (liboqs naming for ML-DSA-65).
 SIGNING_KEY_FORMAT = "veilid-signing-v1"
-SIGNING_ALGORITHM = "Dilithium3"
+# The DECLARED mechanism. What a minted envelope records is the mechanism that
+# actually resolved in the installed liboqs (see _resolved_algorithm), never
+# this constant: a name hardcoded here and a name resolved there are how an
+# envelope comes to claim an algorithm it was not signed with.
+SIGNING_ALGORITHM = "ML-DSA-65"
 KEY_FILENAME = ".veilid_signing_key"
 
 # The domain-separation label for the at-rest key-wrapping subkey
@@ -181,6 +185,21 @@ def _default_key_path() -> Path:
     return Path(DATA_DIR) / KEY_FILENAME
 
 
+def _resolved_algorithm() -> str:
+    """The mechanism the signing backend ACTUALLY resolved, never a constant.
+
+    Lazily imported so this module stays isolatable. Falls back to the declared
+    name only when the backend cannot be reached at all -- in which case nothing
+    can be minted anyway, and no envelope is written.
+    """
+    try:
+        from opti_oignon.pqc_signatures import PQC_MECHANISM
+
+        return PQC_MECHANISM or SIGNING_ALGORITHM
+    except Exception:  # pragma: no cover - defensive
+        return SIGNING_ALGORITHM
+
+
 class SigningUnavailable(RuntimeError):
     """Signing cannot proceed: no PQC backend, or no master key to wrap with."""
 
@@ -242,7 +261,7 @@ class PqcRecordSigner:
             private_key = b"\x00" * len(private_key)  # best-effort wipe
         envelope = {
             "format": SIGNING_KEY_FORMAT,
-            "algorithm": SIGNING_ALGORITHM,
+            "algorithm": _resolved_algorithm(),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "public_key": _b64encode(public_key),
             "private_key_enc": _b64encode(blob),
@@ -262,7 +281,7 @@ class PqcRecordSigner:
             )
         logger.info(
             "signing: device signing keypair minted (%s): %s",
-            SIGNING_ALGORITHM,
+            _resolved_algorithm(),
             fpath,
         )
         return envelope

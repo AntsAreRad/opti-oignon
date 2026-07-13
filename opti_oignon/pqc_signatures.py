@@ -44,23 +44,124 @@ logger = logging.getLogger(__name__)
 # Feature detection
 # ---------------------------------------------------------------------------
 
+# Mechanism names, in preference order. ML-DSA-65 is the FIPS 204 name;
+# Dilithium3 is the pre-standardisation name that older liboqs builds carry.
+# They are NOT the same algorithm and their signatures do not interverify, so
+# the mechanism that ACTUALLY resolved travels with every artefact rather than
+# being assumed from a constant.
+#
+# A hardcoded name is a primitive waiting to die: the library renames a
+# mechanism at standardisation, the constant stops resolving, and the signing
+# primitive goes out under the operator's feet. Resolving against the installed
+# build is what makes that survivable, and the contract suite refuses a build
+# whose preferred names resolve to nothing.
+_MECHANISM_PREFERENCE = ("ML-DSA-65", "Dilithium3")
+
 PQC_AVAILABLE = False
-_PQC_ALGORITHM = "Dilithium3"  # ML-DSA-65 in liboqs naming
+PQC_MECHANISM: str | None = None
+
+
+def _resolve_mechanism(module: Any) -> str | None:
+    """The first preferred mechanism the INSTALLED liboqs actually offers.
+
+    Returns None when the build offers none of them -- which is a dead signing
+    primitive, not a missing optional dependency.
+    """
+    try:
+        offered = set(module.get_enabled_sig_mechanisms())
+    except Exception:
+        offered = set()
+    for name in _MECHANISM_PREFERENCE:
+        if offered and name not in offered:
+            continue
+        try:
+            probe = module.Signature(name)
+            del probe
+            return name
+        except Exception:
+            continue
+    return None
+
 
 try:
     import oqs  # type: ignore[import-untyped]
-    # Verify the algorithm is actually available in this build
-    _sig_test = oqs.Signature(_PQC_ALGORITHM)
-    del _sig_test
-    PQC_AVAILABLE = True
-    logger.info("PQC signatures available (liboqs: %s)", _PQC_ALGORITHM)
+
+    PQC_MECHANISM = _resolve_mechanism(oqs)
+    if PQC_MECHANISM is None:
+        # liboqs is HERE and offers nothing this build can use. That is not an
+        # absent optional dependency: it is the signing primitive dying in
+        # place. Record signing will refuse and provenance falls back to a
+        # symmetric MAC, which anyone holding the key can forge -- so this is
+        # CRITICAL, and pqc_posture() carries it to the startup surface. It
+        # must never pass for "PQC simply was not configured".
+        logger.critical(
+            "liboqs is installed but offers none of %s. Post-quantum signing "
+            "is UNAVAILABLE: record signing will refuse, and provenance falls "
+            "back to a symmetric MAC that is not publicly verifiable.",
+            ", ".join(_MECHANISM_PREFERENCE),
+        )
+    else:
+        PQC_AVAILABLE = True
+        logger.info("PQC signatures available (liboqs mechanism: %s)", PQC_MECHANISM)
 except ImportError:
     logger.info(
         "liboqs-python not installed. PQC signatures disabled. "
         "Install with: pip install liboqs-python"
     )
-except Exception as exc:
-    logger.warning("PQC signature init failed: %s", exc)
+except Exception as exc:  # pragma: no cover - defensive
+    logger.critical("PQC signature init failed: %s", exc)
+
+# The resolved mechanism is what every call site uses. Keeping the private name
+# means the key envelope, the signer and the verifier all speak of the same
+# mechanism, and it is the one that resolved rather than the one that was hoped
+# for.
+_PQC_ALGORITHM = PQC_MECHANISM or _MECHANISM_PREFERENCE[0]
+
+
+class PQCUnavailable(RuntimeError):
+    """Post-quantum signing was ASKED FOR and cannot be provided."""
+
+
+def pqc_requested() -> bool:
+    """The operator's INTENT, read from configuration alone.
+
+    Deliberately blind to runtime availability. ``is_pqc_enabled`` answers "is
+    it on", and it answers False both when post-quantum signing was never asked
+    for AND when it was asked for and could not be provided. Those are not the
+    same thing: the second is a broken promise. Collapsing them into one boolean
+    is exactly how a dead primitive degrades in silence.
+    """
+    return bool(_load_pqc_config().get("backup_signatures", False))
+
+
+def pqc_posture() -> dict[str, Any]:
+    """What was asked for, what is available, and whether they disagree."""
+    requested = pqc_requested()
+    return {
+        "requested": requested,
+        "available": PQC_AVAILABLE,
+        "mechanism": PQC_MECHANISM,
+        "degraded": requested and not PQC_AVAILABLE,
+    }
+
+
+def assert_pqc_posture() -> None:
+    """Refuse a broken promise: asked for, and not there.
+
+    A symmetric MAC substituted for a signature is not a weaker signature -- it
+    is a different security property. A signature is publicly verifiable against
+    a public key; a MAC is forgeable by anyone holding the shared secret. When
+    the operator asked for post-quantum signing and the primitive is absent, the
+    honest answer is a refusal, never a quiet substitution.
+    """
+    if pqc_requested() and not PQC_AVAILABLE:
+        raise PQCUnavailable(
+            "Post-quantum backup signatures are enabled in configuration, but "
+            "no usable liboqs mechanism resolved "
+            f"(tried: {', '.join(_MECHANISM_PREFERENCE)}). Refusing to "
+            "substitute a symmetric MAC for a signature. Install or repair "
+            "liboqs, or turn the setting off deliberately."
+        )
 
 
 # ---------------------------------------------------------------------------
