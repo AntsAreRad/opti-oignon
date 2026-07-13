@@ -7,6 +7,7 @@ Provides SecurityScheduler singleton that runs periodic security tasks:
 - Dependency vulnerability audits via pip-audit
 - Regression detection with alert storage
 - Quiet hours enforcement
+- A manual, conservative memory-curation trigger (no timer of its own)
 
 All scheduling uses threading.Timer for lightweight, non-blocking operation.
 """
@@ -172,6 +173,33 @@ class SecurityScheduler:
             Audit result summary.
         """
         return self._execute_dep_audit()
+
+    def trigger_curation(self) -> dict[str, Any]:
+        """Manually trigger a conservative memory-curation pass.
+
+        Delegates to the pinned curation entry point with its conservative
+        defaults: the fingerprint gate stays honored (no forced pass), the
+        model pass stays allowed behind its own confidence gate, and the
+        hard-delete channel is never opened from this trigger -- the pass
+        stays recoverable. The entry point resolves the local user itself.
+
+        Returns
+        -------
+        dict
+            Curation pass report (skipped flag, counts, retired ids).
+        """
+        from opti_oignon.memory.curation import curate
+
+        report = curate(force=False, use_llm=True, hard_delete=False)
+        return {
+            "status": "completed",
+            "skipped": bool(getattr(report, "skipped", True)),
+            "fingerprint": str(getattr(report, "fingerprint", "")),
+            "considered": int(getattr(report, "considered", 0)),
+            "consolidated": int(getattr(report, "consolidated", 0)),
+            "retired": int(getattr(report, "retired", 0)),
+            "retired_ids": list(getattr(report, "retired_ids", [])),
+        }
 
     def get_status(self) -> dict[str, Any]:
         """Return full scheduler status."""

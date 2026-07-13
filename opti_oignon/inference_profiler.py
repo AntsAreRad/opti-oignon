@@ -118,10 +118,13 @@ def _percentile(sorted_values: list[float], p: float) -> float:
 class InferenceProfiler:
     """Per-request inference profiler.
 
-    Registers as a telemetry consumer and records detailed time
-    breakdowns for each inference request.  Maintains a ring buffer
-    of recent profiles and computes per-model aggregated statistics
-    on demand.
+    Implements the telemetry consumer protocol and records detailed time
+    breakdowns for each inference request.  Maintains a ring buffer of
+    recent profiles and computes per-model aggregated statistics on
+    demand.
+
+    The profiler does not subscribe itself.  The telemetry bus registers
+    it, and only when its consumer toggle is explicitly armed.
     """
 
     def __init__(self, max_profiles: int = DEFAULT_MAX_PROFILES) -> None:
@@ -334,7 +337,15 @@ _profiler_lock = threading.Lock()
 def get_profiler(
     max_profiles: int = DEFAULT_MAX_PROFILES,
 ) -> InferenceProfiler:
-    """Get or create the singleton InferenceProfiler."""
+    """Get or create the singleton InferenceProfiler.
+
+    This is a pure accessor. It does NOT subscribe the profiler to the
+    telemetry bus, and it must never be made to: the bus owns the consumer
+    registry and consults the configuration toggle before wiring anything.
+    Subscribing from here would arm a per-request collector as a side
+    effect of merely reading it -- the REST route is the only caller -- and
+    would bypass that toggle entirely.
+    """
     global _profiler
     if _profiler is not None:
         return _profiler
@@ -342,17 +353,6 @@ def get_profiler(
         if _profiler is not None:
             return _profiler
         _profiler = InferenceProfiler(max_profiles=max_profiles)
-
-        # Auto-register as telemetry consumer if telemetry is available.
-        try:
-            from opti_oignon.telemetry import get_telemetry
-
-            collector = get_telemetry()
-            collector.register_consumer(_profiler.consume)
-            logger.info("InferenceProfiler registered as telemetry consumer")
-        except Exception as exc:
-            logger.debug("Could not register profiler with telemetry: %s", exc)
-
         return _profiler
 
 

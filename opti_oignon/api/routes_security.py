@@ -3130,8 +3130,33 @@ class SchedulerTriggerRequest(BaseModel):
 
     task: str = Field(
         "redteam",
-        description="Task to trigger: 'redteam' or 'dep_audit'",
+        description=(
+            "Task to trigger: 'redteam', 'dep_audit' or 'memory_curation'"
+        ),
     )
+
+
+_CURATION_TASK = "memory_curation"
+
+
+def _refuse_curation_when_stopped() -> None:
+    """Fail-closed emergency-stop gate for the memory-curation task.
+
+    The curation pass mutates the memory store, so an engaged emergency
+    stop refuses it before any dispatch -- and an unavailable emergency-
+    stop module refuses it too: an indeterminable stop state never opens
+    a mutating trigger. The two established tasks keep their historical,
+    ungated dispatch.
+    """
+    if _emergency_stop is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Emergency-stop state unavailable; the memory-curation "
+                "trigger is refused (fail closed)."
+            ),
+        )
+    _emergency_stop.guard_http()
 
 
 @router.post("/scheduler/trigger")
@@ -3140,22 +3165,28 @@ async def trigger_scheduler_run(
 ) -> dict[str, Any]:
     """Manually trigger a scheduled security task.
 
-    Bypasses quiet hours. Supports 'redteam' and 'dep_audit' tasks.
+    Bypasses quiet hours. Supports 'redteam', 'dep_audit' and
+    'memory_curation' tasks. The curation task mutates the memory store,
+    so it is refused while the emergency stop is engaged (and refused,
+    fail closed, when the stop state cannot be determined).
 
     Parameters
     ----------
     body : SchedulerTriggerRequest
-        Task selection (redteam or dep_audit).
+        Task selection (redteam, dep_audit or memory_curation).
 
     Returns
     -------
     dict
         Run result summary.
     """
-    if body.task not in ("redteam", "dep_audit"):
+    if body.task not in ("redteam", "dep_audit", _CURATION_TASK):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid task: {body.task!r}. Use 'redteam' or 'dep_audit'.",
+            detail=(
+                f"Invalid task: {body.task!r}. Use 'redteam', 'dep_audit' "
+                f"or '{_CURATION_TASK}'."
+            ),
         )
 
     try:
@@ -3170,8 +3201,13 @@ async def trigger_scheduler_run(
     try:
         if body.task == "redteam":
             result = scheduler.trigger_redteam()
-        else:
+        elif body.task == "dep_audit":
             result = scheduler.trigger_dep_audit()
+        else:
+            _refuse_curation_when_stopped()
+            result = scheduler.trigger_curation()
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=500,

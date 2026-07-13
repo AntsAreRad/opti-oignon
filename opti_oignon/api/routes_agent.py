@@ -67,6 +67,41 @@ except Exception:  # pragma: no cover - constrained environments only
     _emergency_stop = None  # type: ignore[assignment]
 
 
+# Teacher escalation wiring (driver-side). The chokepoints themselves live
+# in ``agent.teacher`` (decision + escalation, never raising) and
+# ``agent.skills.publish_teacher_draft`` (human gate first, sandbox-tested)
+# and keep their own contracts; the driver only decides WHEN to consult
+# them. Event kinds are stable strings: clients key on them.
+EVENT_TEACHER_GUIDANCE = "teacher_guidance"
+EVENT_TEACHER_DRAFT = "teacher_draft"
+
+# The failure context handed to the teacher is size-bounded here; the
+# escalation module wraps it as untrusted data itself.
+_TEACHER_CONTEXT_MAX_CHARS = 4000
+_TEACHER_FAILED_RESULTS_TAIL = 5
+
+
+def _clip_teacher_text(text: Any) -> str:
+    """Clip a context string to the bounded tail (the freshest part)."""
+    value = str(text or "")
+    if len(value) <= _TEACHER_CONTEXT_MAX_CHARS:
+        return value
+    return value[-_TEACHER_CONTEXT_MAX_CHARS:]
+
+
+def _teacher_failure_observations(result: Any) -> str:
+    """The bounded tail of failed tool observations from a run result."""
+    parts: list[str] = []
+    tail = list(getattr(result, "tool_results", []) or [])
+    for item in tail[-_TEACHER_FAILED_RESULTS_TAIL:]:
+        if bool(getattr(item, "executed", False)):
+            continue
+        text = str(getattr(item, "observation", "") or "")
+        if text:
+            parts.append(text)
+    return _clip_teacher_text("\n".join(parts))
+
+
 # The run engine (no web dependency)
 
 
@@ -94,6 +129,10 @@ class AgentRunManager:
         # attached, if any. One run at a time, so a single slot suffices;
         # detached (never destroyed) when the run ends.
         self._owned_sandbox: Any = None
+        # The active run's task, mode and gate bindings: the post-run
+        # teacher hook forwards these to the gated publish entry so a
+        # draft is judged by the run's own human gate, never a substitute.
+        self._teacher_ctx: dict[str, Any] = {}
 
     # status / control
 
@@ -243,6 +282,15 @@ class AgentRunManager:
             logger.exception("agent run setup failed")
             return {"started": False, "reason": "setup_error"}
 
+        with self._lock:
+            self._teacher_ctx = {
+                "task": task,
+                "mode": mode,
+                "conversation_id": conversation_id,
+                "approval_fn": approval_fn,
+                "approval_manager": approval_manager,
+                "sandbox": sandbox,
+            }
         kwargs: dict[str, Any] = dict(
             task=task,
             model_client=model_client,
@@ -275,6 +323,7 @@ class AgentRunManager:
             with self._lock:
                 self._stop_reason = getattr(result, "stop_reason", "")
                 self._rounds = getattr(result, "rounds", self._rounds)
+            self._teacher_post_run(result)
         except BaseException:  # the loop is built not to raise; be defensive anyway
             with self._lock:
                 self._stop_reason = "error"
@@ -300,6 +349,123 @@ class AgentRunManager:
             owned.detach()
         except Exception:  # pragma: no cover - release must not raise
             logger.debug("workspace detach failed", exc_info=True)
+
+    # Teacher escalation (post-run driver hook)
+
+    @staticmethod
+    def _teacher_policy_opt_in() -> Any:
+        """The escalation policy, armed only by an explicit opt-in.
+
+        Waking the escalation path is a deployment decision: the agent
+        configuration must load AND carry an explicit truthy
+        ``teacher.enabled`` flag. An absent or falsy flag, or an
+        unreadable configuration, leaves the path dormant (None) -- the
+        escalation module's own policy default is deliberately not
+        consulted here.
+        """
+        try:
+            from opti_oignon.agent import config_loader as agent_config
+
+            cfg = agent_config.get_agent_config()
+            teacher_cfg = dict(getattr(cfg, "teacher", {}) or {})
+            if not bool(teacher_cfg.get("enabled", False)):
+                return None
+            return cfg.teacher_policy()
+        except Exception:  # an unreadable configuration stays dormant
+            logger.debug("teacher opt-in resolution failed", exc_info=True)
+            return None
+
+    @staticmethod
+    def _teacher_estop_blocked() -> bool:
+        """True when the emergency stop is engaged or indeterminable.
+
+        The hook calls a model and may submit a draft to the approval
+        gate, so an engaged stop skips it -- and an unavailable stop
+        module skips it too: an indeterminable stop state never wakes
+        the path (fail closed).
+        """
+        if _emergency_stop is None:
+            return True
+        try:
+            return bool(_emergency_stop.is_stopped())
+        except Exception:  # pragma: no cover - defensive
+            return True
+
+    def _teacher_post_run(self, result: Any) -> None:
+        """Consult the pinned teacher chokepoints after the loop returns.
+
+        Armed only by the explicit configuration opt-in; skipped for a
+        cancelled run and under an engaged (or indeterminable) emergency
+        stop. The guidance surfaces as a run event; a proposed draft is
+        submitted only through the gated publish entry, carrying the
+        run's own approval gate, sandbox, conversation and approval
+        manager, and only in the daily mode (mirroring the skill tool's
+        exposure). Never raises into the run thread.
+        """
+        try:
+            with self._lock:
+                ctx = dict(self._teacher_ctx)
+            policy = self._teacher_policy_opt_in()
+            if policy is None:
+                return
+            if self._cancel.is_set():
+                return
+            if self._teacher_estop_blocked():
+                return
+            from opti_oignon.agent import teacher as agent_teacher
+
+            escalator = agent_teacher.TeacherEscalator(policy=policy)
+            decision = escalator.should_escalate(result)
+            if not getattr(decision, "escalate", False):
+                return
+            model = str(getattr(policy, "teacher_model", "") or "")
+            client = _OllamaModelClient(model) if model else None
+            outcome = escalator.escalate(
+                str(ctx.get("task", "")),
+                attempts=_clip_teacher_text(
+                    getattr(result, "final_text", "")
+                ),
+                observations=_teacher_failure_observations(result),
+                teacher_client=client,
+            )
+            rounds = int(getattr(result, "rounds", 0) or 0)
+            self._on_event(agent_loop.AgentEvent(
+                kind=EVENT_TEACHER_GUIDANCE,
+                round=rounds,
+                data={
+                    "escalated": bool(getattr(outcome, "escalated", False)),
+                    "reason": str(getattr(outcome, "reason", "")),
+                    "has_draft": getattr(outcome, "draft", None) is not None,
+                    "teacher_model": str(
+                        getattr(outcome, "teacher_model", "")
+                    ),
+                },
+            ))
+            draft = getattr(outcome, "draft", None)
+            if draft is None or not bool(getattr(outcome, "escalated", False)):
+                return
+            if str(ctx.get("mode", "")).strip().lower() != "daily":
+                return
+            publication = agent_skills.publish_teacher_draft(
+                draft,
+                approval_fn=ctx.get("approval_fn"),
+                sandbox=ctx.get("sandbox"),
+                conversation_id=str(ctx.get("conversation_id", "")),
+                manager=ctx.get("approval_manager"),
+            )
+            self._on_event(agent_loop.AgentEvent(
+                kind=EVENT_TEACHER_DRAFT,
+                round=rounds,
+                data={
+                    "published": bool(
+                        getattr(publication, "published", False)
+                    ),
+                    "reason": str(getattr(publication, "reason", "")),
+                    "name": str(getattr(draft, "name", "")),
+                },
+            ))
+        except Exception:  # the hook never breaks the run
+            logger.debug("teacher post-run hook failed", exc_info=True)
 
     def join(self, timeout: float | None = None) -> None:
         """Wait for the run thread to finish (used by tests)."""

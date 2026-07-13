@@ -16,6 +16,11 @@ consumers:
   live_metrics: true
   performance_monitor: true
   speculative_decoding: true
+  # Per-request profiling (time breakdown, served by /api/profiler).
+  # Off by default: it keeps a ring buffer of per-request records that a
+  # REST route exposes, so it is only collected when explicitly asked for.
+  # Must be the boolean true -- "true", 1 or [] will not arm it.
+  inference_profiler: false
 
 # Token-level tracking granularity.
 token_tracking:

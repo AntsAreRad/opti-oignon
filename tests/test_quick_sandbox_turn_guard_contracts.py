@@ -36,15 +36,15 @@ packages when installed, minimal stand-ins otherwise).
 """
 
 import asyncio
-import importlib.util
 import sys
 import time as real_time
 import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -105,23 +105,19 @@ class FakeManager:
 # Isolated loading of the quick sandbox module (fake clock + slow handlers)
 # ---------------------------------------------------------------------------
 def _load_quick_sandbox(clock: FakeClock, handler_delay: float = 0.0):
-    keys = (
-        "opti_oignon", "opti_oignon.sandbox_manager",
-        "opti_oignon.file_tools", "opti_oignon.quick_sandbox",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
+    """Load the quick sandbox against a fake clock and stubbed handlers.
 
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
+    The sandbox manager and the file tools are handed in; every other project
+    module must be UNREACHABLE, so the module under test cannot reach a live
+    sandbox, a live audit sink or a live clock. A stand-in parent package whose
+    path is empty does not achieve that wherever a finder answers on the module
+    name, and the turn-guard clauses would then be reporting on live machinery.
+    """
     sm = types.ModuleType("opti_oignon.sandbox_manager")
     sm.SANDBOX_AVAILABLE = True
     sm.SandboxManager = FakeManager
     sm.SandboxSession = FakeSandbox
     sm.sandbox_manager = None
-    sys.modules["opti_oignon.sandbox_manager"] = sm
-    pkg.sandbox_manager = sm
 
     ft = types.ModuleType("opti_oignon.file_tools")
     ft.FILE_TOOLS_AVAILABLE = True
@@ -154,29 +150,21 @@ def _load_quick_sandbox(clock: FakeClock, handler_delay: float = 0.0):
     ft._handle_sandbox_bash = _bash
     ft._handle_sandbox_view = _view
     ft._handle_sandbox_create_file = _create_file
-    sys.modules["opti_oignon.file_tools"] = ft
-    pkg.file_tools = ft
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.quick_sandbox", _OO / "quick_sandbox.py",
+    loaded, restore = isolate(
+        targets={"opti_oignon.quick_sandbox": source("quick_sandbox.py")},
+        seeded={
+            "opti_oignon.sandbox_manager": sm,
+            "opti_oignon.file_tools": ft,
+        },
     )
-    qs = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.quick_sandbox"] = qs
-    spec.loader.exec_module(qs)
-    pkg.quick_sandbox = qs
+    qs = loaded["opti_oignon.quick_sandbox"]
 
     if not qs.QUICK_SANDBOX_AVAILABLE:
+        restore()
         raise RuntimeError("quick sandbox reports unavailable under stubs")
 
     # Route every wall-clock read of the module through the fake clock.
     qs.time = types.SimpleNamespace(time=clock.time)
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
 
     return qs, restore
 
@@ -462,26 +450,30 @@ class StreamFakeWebSocket:
         self.sent.append(data)
 
 
+# Conditional imports of the chat routes module. Their ABSENCE selects the
+# inert branches, and that absence is what the route clauses reason about, so
+# it is declared here and PROVEN by the window before the routes are loaded.
+_ROUTE_CONDITIONAL = (
+    "opti_oignon.tool_executor", "opti_oignon.emergency_stop",
+    "opti_oignon.pipelines", "opti_oignon.agentic_executor",
+    "opti_oignon.consensus", "opti_oignon.plugin_hooks",
+    "opti_oignon.quick_sandbox", "opti_oignon.tool_registry",
+    "opti_oignon.sandbox_workspace", "opti_oignon.tool_call_approval",
+    "opti_oignon.security_mode", "opti_oignon.sse_backpressure",
+    "opti_oignon.chat_coding_agent",
+)
+
+
 def _load_routes():
-    keys = (
-        "fastapi", "fastapi.responses", "pydantic",
-        "opti_oignon", "opti_oignon.api", "opti_oignon.api.deps",
-        "opti_oignon.api.schemas", "opti_oignon.api.routes_chat",
-        # Conditional imports of the chat routes module: cleared so a warm
-        # interpreter (full-suite run) cannot leak the real modules into
-        # this isolated load -- their absence selects the inert branches.
-        "opti_oignon.tool_executor", "opti_oignon.emergency_stop",
-        "opti_oignon.pipelines", "opti_oignon.agentic_executor",
-        "opti_oignon.consensus", "opti_oignon.plugin_hooks",
-        "opti_oignon.quick_sandbox", "opti_oignon.tool_registry",
-        "opti_oignon.sandbox_workspace", "opti_oignon.tool_call_approval",
-        "opti_oignon.security_mode", "opti_oignon.sse_backpressure",
-        "opti_oignon.chat_coding_agent",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-    for key in keys:
-        if key.startswith("opti_oignon"):
-            sys.modules.pop(key, None)
+    """Load the chat routes over stubbed dependencies; returns (rc, schemas, restore).
+
+    The third-party frameworks are shimmed only when they are genuinely absent;
+    the project window is the isolation module's, so every conditional import
+    above is neutralised AND proven unreachable, whatever a finder further down
+    the meta path would have answered for it.
+    """
+    ext_keys = ("fastapi", "fastapi.responses", "pydantic")
+    ext_saved = {k: sys.modules.get(k) for k in ext_keys}
 
     try:
         import fastapi  # noqa: F401
@@ -495,14 +487,6 @@ def _load_routes():
     except ImportError:
         sys.modules["pydantic"] = _pydantic_shim()
 
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    api_pkg = types.ModuleType("opti_oignon.api")
-    api_pkg.__path__ = []
-    sys.modules["opti_oignon.api"] = api_pkg
-    pkg.api = api_pkg
-
     deps = types.ModuleType("opti_oignon.api.deps")
     deps.ANALYZER_AVAILABLE = False
     deps.CONVERSATION_AVAILABLE = False
@@ -514,29 +498,30 @@ def _load_routes():
     deps.executor = None
     deps.preset_manager = None
     deps.router = None
-    sys.modules["opti_oignon.api.deps"] = deps
-    api_pkg.deps = deps
 
-    def _real(dotted: str, path: Path):
-        spec = importlib.util.spec_from_file_location(dotted, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[dotted] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    schemas = _real("opti_oignon.api.schemas", _OO / "api" / "schemas.py")
-    api_pkg.schemas = schemas
-    rc = _real("opti_oignon.api.routes_chat", _OO / "api" / "routes_chat.py")
-    api_pkg.routes_chat = rc
+    loaded, close = isolate(
+        targets={
+            "opti_oignon.api.schemas": source("api", "schemas.py"),
+            "opti_oignon.api.routes_chat": source("api", "routes_chat.py"),
+        },
+        blocked=_ROUTE_CONDITIONAL,
+        seeded={"opti_oignon.api.deps": deps},
+        packages=("opti_oignon.api",),
+    )
 
     def restore():
-        for key, value in saved.items():
+        close()
+        for key, value in ext_saved.items():
             if value is None:
                 sys.modules.pop(key, None)
             else:
                 sys.modules[key] = value
 
-    return rc, schemas, restore
+    return (
+        loaded["opti_oignon.api.routes_chat"],
+        loaded["opti_oignon.api.schemas"],
+        restore,
+    )
 
 
 def _run_stream(rc, schemas, executor, spy_pool, spy_registry):

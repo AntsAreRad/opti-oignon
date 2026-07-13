@@ -364,6 +364,8 @@ class FeedbackRoutingAdapter:
                 continue
 
             score = self._normalize_entry_score(entry)
+            if score is None:
+                continue
             timestamp = getattr(entry, "timestamp", 0.0) or 0.0
 
             key = f"{model}:{task}"
@@ -427,19 +429,28 @@ class FeedbackRoutingAdapter:
             return store.list_feedback(limit=10000)
         return []
 
-    def _normalize_entry_score(self, entry) -> float:
+    def _normalize_entry_score(self, entry) -> float | None:
         """Normalize a feedback entry to a 0-1 score.
 
         Thumbs: 0 (down) or 1 (up)
         Stars: (value - 1) / 4 to map 1-5 to 0-1
+
+        Returns None when the rating value cannot be read as a number, so a
+        malformed or crafted entry is skipped rather than breaking the whole
+        adjustment computation.
         """
         rating_type = getattr(entry, "rating_type", "thumbs")
         rating_value = getattr(entry, "rating_value", 1)
 
+        try:
+            numeric = float(rating_value)
+        except (TypeError, ValueError):
+            return None
+
         if rating_type == "stars":
-            return (float(rating_value) - 1.0) / 4.0
+            return (numeric - 1.0) / 4.0
         # Thumbs: already 0 or 1
-        return float(rating_value)
+        return numeric
 
     def _temporal_weight(self, timestamp: float, now: float) -> float:
         """Compute temporal weight using exponential decay.

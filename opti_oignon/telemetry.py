@@ -9,6 +9,10 @@ single point and fans out to downstream consumers:
     - LiveMetricsCollector  (S111) -- real-time tok/s, GPU, memory
     - PerformanceMonitor    (S72)  -- execution records, drift, latency
     - SpeculativeDecodingManager (S110) -- acceptance rate tracking
+    - InferenceProfiler -- per-request time breakdown, off by default
+
+Every consumer is registered here and nowhere else, and each one is gated
+by its own toggle in the consumers section of the configuration.
 
 Architecture:
     TelemetryConfig         -- dataclass from YAML
@@ -66,6 +70,12 @@ class TelemetryConfig:
     consumer_live_metrics: bool = True
     consumer_performance_monitor: bool = True
     consumer_speculative_decoding: bool = True
+    # The profiler keeps a per-request ring buffer that a REST route serves.
+    # Wiring a collector must never widen the collected surface on its own,
+    # so this one is inert until it is explicitly armed. Every path that
+    # cannot produce a true here -- key absent, section malformed, file
+    # unreadable -- lands on this default and leaves the profiler off.
+    consumer_inference_profiler: bool = False
     token_tracking_enabled: bool = True
     token_tracking_max_per_request: int = 8192
     debug_logging: bool = False
@@ -153,6 +163,16 @@ def _load_config(path: Path | None = None) -> TelemetryConfig:
         )
         cfg.consumer_speculative_decoding = consumers.get(
             "speculative_decoding", cfg.consumer_speculative_decoding
+        )
+        # Strict identity, not truthiness: this toggle is the profiler's only
+        # arming path, so a string, a number or a list must not switch a
+        # collector on by being merely truthy. Anything that is not the
+        # boolean true falls back to the default.
+        cfg.consumer_inference_profiler = (
+            consumers.get(
+                "inference_profiler", cfg.consumer_inference_profiler
+            )
+            is True
         )
 
     tt = raw.get("token_tracking", {})
@@ -490,6 +510,12 @@ class TelemetryCollector:
                 self._consumers.append(consumer)
                 logger.debug("Telemetry: registered speculative_decoding consumer")
 
+        if self._config.consumer_inference_profiler:
+            consumer = _create_inference_profiler_consumer()
+            if consumer:
+                self._consumers.append(consumer)
+                logger.debug("Telemetry: registered inference_profiler consumer")
+
     def shutdown(self) -> None:
         """Flush remaining events and stop background thread."""
         self.stop_flush_thread()
@@ -587,6 +613,30 @@ def _create_speculative_decoding_consumer() -> TelemetryConsumer | None:
 
     consumer.__name__ = "speculative_decoding_consumer"  # type: ignore[attr-defined]
     return consumer
+
+
+def _create_inference_profiler_consumer() -> TelemetryConsumer | None:
+    """Create a consumer that feeds InferenceProfiler.
+
+    The bus is the only party that subscribes the profiler. The profiler
+    itself never reaches back here: an accessor that called into the bus
+    while the bus was building its consumers would re-enter the singleton
+    locks, so the dependency runs one way only, exactly as it does for the
+    sibling consumers above.
+    """
+    try:
+        from opti_oignon.inference_profiler import get_profiler
+
+        profiler = get_profiler()
+    except Exception:
+        return None
+
+    if profiler is None:
+        return None
+
+    # The bound method already carries the consumer protocol and its own
+    # __name__, which _dispatch uses when reporting a consumer failure.
+    return profiler.consume
 
 
 # ---------------------------------------------------------------------------

@@ -21,58 +21,43 @@ Loads the allowlists, skills, and tools modules in isolation. Local-only.
 Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_AGENT = _REPO / "opti_oignon" / "agent"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 _MODULES = ("allowlists", "skills", "tools")
-# security_mode is snapshotted and BLOCKED (None entry) too: the live-mode
-# clause needs the lateral import to fail inside the isolation window. A bare
-# eviction is not enough -- a residual real module in a shared process, or an
-# editable-install meta-path finder that resolves the name without consulting
-# the stand-in package path, would both let the import succeed. A None entry
-# in sys.modules raises ImportError before any finder runs, deterministically.
-_KEYS = ("opti_oignon", "opti_oignon.agent", "opti_oignon.security_mode") + tuple(
-    f"opti_oignon.agent.{m}" for m in _MODULES
-)
 
 
 def _load():
-    saved = {k: sys.modules.get(k) for k in _KEYS}
+    """Load the agent tool set in isolation; returns (allowlists, tools, restore).
 
-    root = types.ModuleType("opti_oignon")
-    root.__path__ = []
-    agent = types.ModuleType("opti_oignon.agent")
-    agent.__path__ = []
-    sys.modules["opti_oignon"] = root
-    sys.modules["opti_oignon.agent"] = agent
-    sys.modules["opti_oignon.security_mode"] = None  # block the lateral import
-
-    loaded = {}
-    for m in _MODULES:
-        full = f"opti_oignon.agent.{m}"
-        spec = importlib.util.spec_from_file_location(full, _AGENT / f"{m}.py")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[full] = mod
-        setattr(agent, m, mod)
-        spec.loader.exec_module(mod)
-        loaded[m] = mod
-
-    loaded["skills"]._sync_publish_skill = lambda *a, **k: None
-    loaded["skills"]._audit = lambda *a, **k: None
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-    return loaded["allowlists"], loaded["tools"], restore
+    ``security_mode`` is declared absent, and the window PROVES it absent
+    before any target runs. MX2 asserts what the tool set resolves to when no
+    mode source can be reached at all: that absence IS the condition of the
+    clause. A window that merely hopes for it -- by standing in a parent
+    package whose path is empty, say -- lets the live module resolve behind
+    the test's back wherever a finder answers on the module name, and MX2 then
+    reports on the running mode rather than on the fail-secure path it names.
+    """
+    loaded, restore = isolate(
+        targets={
+            f"opti_oignon.agent.{m}": source("agent", f"{m}.py")
+            for m in _MODULES
+        },
+        blocked=("opti_oignon.security_mode",),
+        packages=("opti_oignon.agent",),
+    )
+    skills = loaded["opti_oignon.agent.skills"]
+    skills._sync_publish_skill = lambda *a, **k: None
+    skills._audit = lambda *a, **k: None
+    return (
+        loaded["opti_oignon.agent.allowlists"],
+        loaded["opti_oignon.agent.tools"],
+        restore,
+    )
 
 
 _GUIDANCE_MARK = "consult the skill registry"

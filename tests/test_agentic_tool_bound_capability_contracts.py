@@ -38,14 +38,14 @@ then the capability predicate and the router are supplied as controllable
 stand-ins so the guard's lazy imports resolve against them.
 """
 
-import importlib.util
 import sys
 import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 TOOL_BOUND = "please calculate 17 times 23"      # needs_tools, not web
 KEYWORDLESS = "Tell me about the aqueducts of ancient Lyon."  # no heuristic
@@ -74,53 +74,40 @@ class _StubRouter:
         return self._result_model
 
 
-_KEYS = (
-    "opti_oignon", "opti_oignon.agentic_executor",
-    "opti_oignon.capability_manifest", "opti_oignon.router",
-)
-
-
 def _load_agentic_with_stubs(*, capable_names, stub_router):
     """Load the executor alone; supply the capability predicate + router.
 
     ``capable_names`` is the set the stubbed predicate calls tool-capable;
-    ``stub_router`` backs the ``router`` object the guard re-selects
-    through. Every other sibling import fails soft, so the manifest system
-    is absent (legacy path) and no live runtime is touched. Returns
-    ``(ae_module, restore)``.
+    ``stub_router`` backs the ``router`` object the guard re-selects through.
+
+    Every other sibling import must FAIL, so the executor takes its soft-import
+    fallbacks: the manifest system is absent (legacy path) and no live runtime
+    is touched. That failure has to be manufactured. The executor reaches its
+    siblings with module-level ``from .sibling import ...`` inside try blocks,
+    and a stand-in parent package whose path is empty does not stop those
+    wherever a finder answers on the module name -- the real executor, router
+    and tool machinery then load, and the clauses report on the live pipeline
+    instead of the guarded one. The window refuses every project name it was
+    not handed, so the fallbacks are taken whatever the install layout is.
+
+    Returns ``(ae_module, restore)``.
     """
-    saved = {k: sys.modules.get(k) for k in _KEYS}
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.agentic_executor", _OO / "agentic_executor.py",
-    )
-    ae = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.agentic_executor"] = ae
-    spec.loader.exec_module(ae)
-    pkg.agentic_executor = ae
-
     capable = set(capable_names)
+
     cm = types.ModuleType("opti_oignon.capability_manifest")
     cm.model_tool_capable = lambda name: name in capable
-    sys.modules["opti_oignon.capability_manifest"] = cm
-    pkg.capability_manifest = cm
 
     rt = types.ModuleType("opti_oignon.router")
     rt.router = stub_router
-    sys.modules["opti_oignon.router"] = rt
-    pkg.router = rt
 
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return ae, restore
+    loaded, restore = isolate(
+        targets={"opti_oignon.agentic_executor": source("agentic_executor.py")},
+        seeded={
+            "opti_oignon.capability_manifest": cm,
+            "opti_oignon.router": rt,
+        },
+    )
+    return loaded["opti_oignon.agentic_executor"], restore
 
 
 def _routing(model):
@@ -214,17 +201,6 @@ def _drive(ae, *, message, model, stub_router):
     # Tools are "reachable": pair the truthy tool executor with the module
     # availability flag so tool_executor_available is True this turn.
     ae.TOOL_EXECUTOR_AVAILABLE = True
-
-    # Hermetic legacy baseline so the pipeline choice does not depend on
-    # which optional siblings happen to be installed in the running
-    # environment: no capability manifest (the manifest-armed tools path is
-    # exercised by the wiring suite, not here) and no sandbox registry. The
-    # guard under test keys off tool_bound (needs_tools or sandbox), which
-    # the message alone sets, so neutralizing these leaves it unaffected --
-    # a keywordless turn stays non-tool-bound and takes the direct pipeline.
-    ae.CAPABILITY_MANIFEST_AVAILABLE = False
-    ae.build_manifest = None
-    ae._default_tool_registry = None
 
     def _stub_tools(*args, **kwargs):
         yield "TOOLS-REACHED"
