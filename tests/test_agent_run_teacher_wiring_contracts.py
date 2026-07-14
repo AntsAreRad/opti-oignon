@@ -120,6 +120,22 @@ def _load_driver(*, teacher_cfg, result=None, seed_estop=True,
     escalate_calls, publish_calls, events (decoded run events).
     """
     saved = {k: sys.modules.get(k) for k in _FACADE_KEYS}
+
+    # The keys the window governs are EMPTIED, not merely remembered. A guard on
+    # the meta path is consulted only on a cache MISS: a key another module left
+    # in sys.modules short-circuits the import machinery before the guard is ever
+    # asked -- and pytest imports EVERY test module at collection, long before the
+    # first test runs, so a module-level import anywhere in the suite lands here.
+    #
+    # This clause is why it matters. T4's second face deliberately declines to
+    # seed opti_oignon.emergency_stop, so that the driver cannot determine the
+    # stop state and must fail CLOSED. A live emergency_stop surviving in the
+    # cache answers "not stopped" instead, the driver escalates, and the proof of
+    # a fail-closed path silently becomes its opposite. A contract that a polluted
+    # cache can invert is not a contract.
+    for key in _FACADE_KEYS:
+        sys.modules.pop(key, None)
+
     guard = _IsolationGuard()
     sys.meta_path.insert(0, guard)
 

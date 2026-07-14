@@ -43,6 +43,8 @@ import tempfile
 import types
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TARGET = _REPO_ROOT / "opti_oignon" / "semantic_cache.py"
 
@@ -74,6 +76,42 @@ def _load_semantic_cache():
     sys.modules["opti_oignon.semantic_cache"] = module
     spec.loader.exec_module(module)
     return module
+
+@pytest.fixture
+def module():
+    """The module under contract, loaded fresh for each clause.
+
+    Without this, every clause in this file is an ERROR under pytest: the
+    ``module`` parameter reads as a request for a fixture that does not exist,
+    and pytest refuses the test before a single assertion runs. The clauses were
+    written for the __main__ runner below, which passes the module positionally
+    -- so they PASS there and have never once executed under pytest, the runner
+    whose junitxml is this project's authority. A contract that only one runner
+    can see is not a contract; it is a file that looks like one.
+    """
+    # The loader registers modules under the project namespace and hands none of
+    # them back. That leak was DORMANT only because these clauses never ran: the
+    # missing fixture made every one of them an ERROR under pytest. Wiring them
+    # in without this would trade twenty-six errors for a fresh contamination
+    # front -- a stub ``opti_oignon`` package sitting in the cache, served to
+    # every suite that imports the project after this one.
+    prefix = "opti_oignon"
+    saved = {
+        key: value for key, value in sys.modules.items()
+        if key == prefix or key.startswith(prefix + ".")
+    }
+    saved_meta_path = list(sys.meta_path)
+    try:
+        yield _load_semantic_cache()
+    finally:
+        for key in [
+            k for k in sys.modules
+            if k == prefix or k.startswith(prefix + ".")
+        ]:
+            del sys.modules[key]
+        sys.modules.update(saved)
+        sys.meta_path[:] = saved_meta_path
+
 
 
 def _fresh_cache(
