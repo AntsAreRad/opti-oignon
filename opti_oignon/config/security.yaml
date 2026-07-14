@@ -1,3 +1,16 @@
 rate_limiting:
   enabled: true
 security_mode: daily
+
+pqc:
+  # Sign exported backups and the model provenance manifest with the
+  # post-quantum signature primitive.
+  #
+  # Fortress mode requires the signature REGARDLESS of this setting. There the
+  # signature is a property of the mode, like the socket bind: not a policy a
+  # file may switch off. This flag carries the DAILY-mode intent, nothing more.
+  #
+  # A file that is PRESENT and unreadable is treated as having asked for the
+  # signature. An unreadable policy is an unknown, not a default, and the strict
+  # reading is the only one that cannot be wrong.
+  backup_signatures: false

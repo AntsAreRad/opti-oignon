@@ -40,6 +40,8 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 _REPO = Path(__file__).resolve().parent.parent
 _OO = _REPO / "opti_oignon"
 
@@ -312,6 +314,21 @@ def test_signed_document_embeds_public_key_never_private():
         ctx.restore()
 
 
+@pytest.mark.skip(
+    reason=(
+        "SUPERSEDED, and kept verbatim as the record of what this estate once "
+        "guaranteed. The behaviour pinned below -- a signer that fails "
+        "mid-flight yields an unsigned document, and the export survives -- is "
+        "the defect, not the contract. It made a promise broken by BREAKAGE "
+        "quieter than a promise broken by ABSENCE, which already refused; and "
+        "the breakage case is the more dangerous of the two, because a missing "
+        "key is discoverable and a swallowed exception is not. What replaces it "
+        "lives in test_pqc_requirement_is_enforced_contracts.py: where signing "
+        "was required, a signer that dies mid-flight refuses. Nothing here is "
+        "edited or deleted -- a superseded assertion is evidence, and evidence "
+        "is not tidied away."
+    )
+)
 def test_signing_failure_degrades_to_unsigned_never_raises():
     """BX5 -- a signer failure yields an unsigned document, export survives."""
     ctx = _load(_PQCState(enabled=True, keypair_exists=True, sign_raises=True))

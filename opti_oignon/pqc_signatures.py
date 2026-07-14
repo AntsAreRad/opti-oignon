@@ -506,12 +506,24 @@ def load_pqc_keypair(
     Args:
         path: Optional custom path (default: data/.pqc_keypair).
 
+    The file records the algorithm that minted it, and that field is CHECKED
+    here rather than logged. A key minted under a mechanism this host no longer
+    resolves is not a weaker key, it is the wrong key: the two names the estate
+    accepts are different algorithms whose keys and signatures do not
+    interoperate. Reading the field and returning the bytes anyway is how a
+    rename turns into an unsigned document that its author believes is signed.
+
+    A key that does not say what minted it is refused for the same reason: an
+    unknown provenance cannot be shown to agree, and cannot-be-shown-to-agree is
+    the only reading that is never wrong.
+
     Returns:
         Tuple of (public_key, private_key) as raw bytes.
 
     Raises:
         FileNotFoundError: If keypair file does not exist.
-        ValueError: If the file format is invalid.
+        ValueError: If the file format is invalid, or the algorithm that minted
+            the key does not agree with the mechanism that resolved.
     """
     fpath = path or _DEFAULT_KEYPAIR_PATH
     if not fpath.exists():
@@ -530,13 +542,22 @@ def load_pqc_keypair(
     if not pub_b64 or not priv_b64:
         raise ValueError("PQC keypair file missing public_key or private_key")
 
+    minted_under = raw.get("algorithm")
+    if minted_under != _PQC_ALGORITHM:
+        raise ValueError(
+            f"the keypair was minted under {minted_under!r} and the resolved "
+            f"mechanism is {_PQC_ALGORITHM!r}. These are different algorithms, "
+            "not two spellings of one: their keys are different lengths and "
+            "their signatures do not interoperate. The backend would reject "
+            "these bytes deep inside the signer, or -- worse -- return a "
+            "signature nobody can verify. Mint a new keypair under the "
+            "resolved mechanism."
+        )
+
     public_key = base64.urlsafe_b64decode(pub_b64)
     private_key = base64.urlsafe_b64decode(priv_b64)
 
-    logger.debug(
-        "Loaded PQC keypair from %s (algorithm=%s)",
-        fpath, raw.get("algorithm", "unknown"),
-    )
+    logger.debug("Loaded PQC keypair from %s (algorithm=%s)", fpath, minted_under)
     return public_key, private_key
 
 
@@ -595,7 +616,12 @@ def get_pqc_status() -> dict[str, Any]:
         "reason": PQC_UNAVAILABLE_REASON,
         "config_readable": cfg is not None,
         "config_enabled": bool((cfg or {}).get("backup_signatures", False)),
-        "effective_enabled": is_pqc_enabled(),
+        # Whether a backup will ACTUALLY be signed -- which is the requirement,
+        # not the policy file. A fortress signs whatever that file says, so a
+        # report that reads the file and answers "off" while the signer signs is
+        # not a report. ``config_enabled`` above still carries the file's own
+        # word, so nothing is hidden: the two fields disagreeing IS the news.
+        "effective_enabled": pqc_required(),
         "keypair_exists": keypair_path.is_file(),
         "keypair_path": str(keypair_path),
     }
@@ -607,6 +633,12 @@ def get_pqc_status() -> dict[str, Any]:
             pub_b64 = raw.get("public_key", "")
             priv_b64 = raw.get("private_key", "")
             status["key_algorithm"] = raw.get("algorithm", "unknown")
+            # Knowable at rest, so said at rest. The loader's refusal is correct
+            # and it is also LATE: it fires when the operator is already trying
+            # to export something. A key minted before the primitive was renamed
+            # is not a weaker key, it is the wrong key, and the operator should
+            # learn that from a dashboard rather than from a failed export.
+            status["key_algorithm_agrees"] = raw.get("algorithm") == _PQC_ALGORITHM
             status["public_key_size"] = len(base64.urlsafe_b64decode(pub_b64)) if pub_b64 else 0
             status["private_key_size"] = len(base64.urlsafe_b64decode(priv_b64)) if priv_b64 else 0
         except Exception:

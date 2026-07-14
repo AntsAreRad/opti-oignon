@@ -12,9 +12,17 @@ into a model directory can substitute the weights that llama.cpp parses
 in-process.
 
 This module closes that gap. It keeps a manifest pinning each model file to
-the sha256 of its bytes, seals that manifest with the strongest scheme the
-host supports (ML-DSA-65 when liboqs is present, HMAC-SHA512 otherwise), and
-gives the load seam one decision: verified, or refused.
+the sha256 of its bytes, seals that manifest with the strongest scheme the host
+is ALLOWED to use, and gives the load seam one decision: verified, or refused.
+
+Allowed, not merely available. Where a post-quantum signature is required -- the
+operator asked, or the mode is a fortress -- HMAC-SHA512 is not a fallback for
+it. A MAC is forgeable by whoever holds the shared secret and verifiable by
+nobody else; a signature is neither. Substituting one for the other is not a
+downgrade, it is a change of security property, and doing it on a warning line
+is the whole of how a provenance seal comes to guarantee nothing. So a required
+seal that cannot be produced is a refusal. Where nothing was required, the HMAC
+seal stands.
 
 Posture
 -------
@@ -269,24 +277,94 @@ def _extract_key_bytes(key: Any) -> bytes | None:
     return bytes(key)
 
 
-def resolve_seal_keys() -> SealKeys | None:
-    """The strongest seal scheme this host can actually perform.
+def _pqc_required() -> bool:
+    """May this host substitute a symmetric MAC for a signature?
 
-    ML-DSA-65 when liboqs is present, enabled, and a keypair exists; the local
-    HMAC secret otherwise. None when no key material is reachable at all --
-    which, under enforcement, is a refusal rather than a pass.
+    Fortress mode says no, and it does not say it through a policy file: there
+    the signature is a property of the MODE, like the socket bind. The signing
+    module computes this answer correctly and nothing here ever asked it.
+
+    A module that cannot be IMPORTED is a machinery failure, not a mode verdict,
+    and no function may manufacture a refusal out of a broken import.
     """
-    if _pqc_enabled():
-        try:
-            from opti_oignon.pqc_signatures import load_pqc_keypair
+    try:
+        from opti_oignon.pqc_signatures import pqc_required
 
-            public, private = load_pqc_keypair()
-            if public and private:
-                return SealKeys(
-                    scheme=SCHEME_PQC, sign_key=private, verify_key=public
-                )
-        except Exception as exc:
-            logger.warning("PQC keypair unavailable for the model seal: %s", exc)
+        return bool(pqc_required())
+    except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
+        logger.error(
+            "the post-quantum requirement could not be determined: %s", exc
+        )
+        return False
+
+
+def _pqc_seal_keys() -> tuple[SealKeys | None, str | None]:
+    """Post-quantum seal keys, or None and the reason there are none.
+
+    This function does not decide what an unusable keypair MEANS -- it reports.
+    The decision belongs to exactly one place, and putting it here as well was a
+    mistake that a directed mutation caught: two refusal sites, and the second
+    silently covered for the first, so neither could be pinned. A guard whose
+    failure another guard conceals is not a guard, it is a comfort.
+    """
+    try:
+        from opti_oignon.pqc_signatures import load_pqc_keypair
+
+        public, private = load_pqc_keypair()
+    except Exception as exc:  # noqa: BLE001 - the caller decides what it means
+        return None, str(exc)
+
+    if public and private:
+        return SealKeys(scheme=SCHEME_PQC, sign_key=private, verify_key=public), None
+    return None, "the keypair file yielded no key material"
+
+
+def resolve_seal_keys() -> SealKeys | None:
+    """The strongest seal scheme this host is ALLOWED to perform.
+
+    Not the strongest it can manage. Asking ``is_pqc_enabled`` -- the policy
+    file alone -- was the hole: with no signing block in that file the intent
+    read False, and this function walked straight past a live signing primitive
+    into the HMAC branch. A fortress host sealed its model manifests with a
+    forgeable MAC while the boot checklist reported the primitive green, because
+    the checklist was asking whether the primitive RESOLVED, and it had.
+
+    Where a signature is required and none can be produced, this returns None
+    rather than raising. None is not a shrug: the estate already has a meaning
+    for it on each of the two paths that ask, and both are right.
+
+      * Sealing refuses outright -- there is nothing to sign with, and
+        ``record_model`` says so.
+      * Classifying reports KEY_UNAVAILABLE, and the enforcement policy refuses
+        the model through the seam built for exactly that. ``enforcement_mode``
+        already ENFORCES for every mode that is not Daily, so a fortress refuses
+        the load without any of this needing to know it is a fortress.
+
+    Raising here would have been worse than the defect it replaced. It would
+    have broken the "no policy, no raise" contract ``classify_model`` states
+    about itself, and turned an unsealed model in a fortress from a refusal the
+    caller can render into an exception it cannot -- a denial of service on the
+    whole model-loading path, bought with no security at all.
+    """
+    required = _pqc_required()
+
+    keys, why = (
+        _pqc_seal_keys() if (_pqc_enabled() or required) else (None, None)
+    )
+    if keys is not None:
+        return keys
+
+    if required:
+        logger.error(
+            "a post-quantum seal was required and no keypair could be used "
+            "(%s); refusing to substitute a symmetric MAC for a signature, "
+            "which is forgeable by whoever holds the shared secret",
+            why,
+        )
+        return None
+
+    if why:
+        logger.warning("PQC keypair unavailable for the model seal: %s", why)
 
     raw = _extract_key_bytes(_hmac_key())
     if raw:

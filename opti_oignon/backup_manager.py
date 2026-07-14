@@ -67,6 +67,7 @@ try:
         is_pqc_enabled,
         load_pqc_keypair,
         pqc_keypair_exists,
+        pqc_required,
     )
     from opti_oignon.pqc_signatures import (
         sign_backup as _pqc_sign,
@@ -81,6 +82,12 @@ except ImportError:
         return False
 
     def pqc_keypair_exists(path=None) -> bool:
+        return False
+
+    def pqc_required() -> bool:
+        # Unreachable: the refusal below fires first. Present so that a caller
+        # asking the requirement finds a name rather than a NameError, and so
+        # that the shape of this fallback matches the module it stands in for.
         return False
 
     def assert_pqc_posture() -> None:
@@ -659,19 +666,27 @@ class BackupManager:
         '_pqc_public_key' keys at the top level.
 
         A broken promise is a REFUSAL, never a no-op. When post-quantum
-        signing was required -- the operator asked for it, or the mode is
-        Bulbe, or the policy could not be read to tell -- and the primitive did
-        not resolve, this raises rather than let a backup leave the machine
+        signing was required -- the operator asked for it, or the mode is a
+        fortress, or the policy could not be read to tell -- and the primitive
+        did not resolve, this raises rather than let a backup leave the machine
         unsigned while the caller believes it is signed. A symmetric MAC is not
         a weaker signature; it is a different security property, forgeable by
         whoever holds the shared secret.
+
+        The gate is the REQUIREMENT, not the policy file. Asking the policy
+        alone was the hole: with no signing block in it, the intent read False,
+        this method returned, and a backup left a fortress host unsigned while
+        every posture check upstream reported green -- because every one of them
+        was asking whether the PRIMITIVE resolved, and it had. A fortress does
+        not take instructions from a config file about its own trust root, any
+        more than it does about its socket bind.
 
         When nothing was promised, it stays a no-op. A refusal there would be a
         denial of service the operator never asked for.
         """
         assert_pqc_posture()
 
-        if not is_pqc_enabled():
+        if not pqc_required():
             return
         if not pqc_keypair_exists():
             # The operator asked for signed backups, the primitive works, and
@@ -698,7 +713,19 @@ class BackupManager:
             backup[_PQC_PUBLIC_KEY_KEY] = base64.urlsafe_b64encode(public_key).decode("ascii")
             logger.info("PQC signature applied to backup (%d bytes)", len(signature))
         except Exception as exc:
-            logger.warning("PQC signing failed (backup still valid): %s", exc)
+            # The asymmetry this replaces was indefensible. A promise broken by
+            # ABSENCE -- no keypair -- refused, loudly, above. A promise broken
+            # by BREAKAGE -- the key will not load, the backend rejects it, the
+            # signer dies mid-flight -- logged a warning that called the result
+            # valid, and shipped the document unsigned. The second is the more
+            # dangerous of the two: a missing key is discoverable, a swallowed
+            # exception is not. Signing was REQUIRED by the time we got here.
+            raise RuntimeError(
+                "Post-quantum backup signing was required and failed: "
+                f"{exc}. Refusing to export a backup the caller would believe "
+                "is signed. A document nobody can distinguish from a signed one "
+                "is worse than no document, because it will be trusted."
+            ) from exc
 
     def _verify_backup_pqc(self, data: dict[str, Any]) -> bool | None:
         """Verify PQC signature on an imported backup.
