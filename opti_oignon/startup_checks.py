@@ -147,6 +147,9 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
     # --- Check 6: Resource governor Ollama limits advisory (S226) ---
     result.checks.append(_check_governor_ollama_limits())
 
+    # --- Check 7: Post-quantum signature primitive ---
+    result.checks.append(_check_pqc_primitive())
+
     # --- Aggregate ---
     result.all_passed = all(c.passed for c in result.checks)
     result.total_score_impact = sum(c.score_impact for c in result.checks)
@@ -225,6 +228,82 @@ def enforce_boot_checks() -> StartupCheckResult | None:
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
+
+def _check_pqc_primitive() -> CheckItem:
+    """Verify the post-quantum signature primitive resolved where it is required.
+
+    The backend already knows how to refuse: it separates what the operator
+    ASKED for from what is AVAILABLE, and calls the disagreement degraded. The
+    refusal was simply never fired. This is where it fires for the question "may
+    this host run at all".
+
+    Critical means the boot is refused, and the aggregate turns a critical
+    failure into a StartupBlockedError that aborts the ASGI lifespan. That is
+    the right hammer for a degraded posture and only for one: the primitive was
+    required -- asked for, or the mode is Bulbe, or the policy could not be read
+    to tell -- and it did not resolve, so backups would export unsigned and the
+    provenance seal would fall back to a symmetric MAC that whoever holds the
+    key can forge.
+
+    A check that cannot even IMPORT the module it inspects returns a warning and
+    never a refusal. A broken tree is a machinery failure, not a security
+    verdict, and no check may brick a machine on the strength of its own
+    inability to run.
+    """
+    try:
+        from opti_oignon.pqc_signatures import pqc_posture
+    except Exception as exc:  # noqa: BLE001 - machinery failure is not a verdict
+        return CheckItem(
+            name="pqc_primitive",
+            passed=False,
+            severity="warning",
+            detail=f"Signature primitive could not be inspected: {exc}",
+            score_impact=-10,
+        )
+
+    posture = pqc_posture()
+
+    if posture["available"]:
+        return CheckItem(
+            name="pqc_primitive",
+            passed=True,
+            severity="info",
+            detail=f"Signature primitive resolved: {posture['mechanism']}",
+            score_impact=0,
+        )
+
+    reason = posture["reason"] or "the signature primitive did not resolve"
+    tips = [
+        "Install the signature library: pip install 'opti-oignon[pqc]'",
+        "Check what the library offers: python -c "
+        '"import oqs; print(oqs.get_enabled_sig_mechanisms())"',
+    ]
+
+    if posture["degraded"]:
+        return CheckItem(
+            name="pqc_primitive",
+            passed=False,
+            severity="critical",
+            detail=(
+                f"Signature primitive REQUIRED and absent: {reason} Backups "
+                f"would export unsigned and the provenance seal would fall back "
+                f"to a symmetric MAC, which is not a weaker signature but a "
+                f"different security property: forgeable by whoever holds the "
+                f"key, and verifiable by nobody else."
+            ),
+            score_impact=-25,
+            tips=tips,
+        )
+
+    return CheckItem(
+        name="pqc_primitive",
+        passed=False,
+        severity="info",
+        detail=f"Signature primitive unavailable, and not required here: {reason}",
+        score_impact=0,
+        tips=tips,
+    )
+
 
 def _check_code_signing_scripts() -> CheckItem:
     """Verify that code signing scripts exist and are executable."""

@@ -60,6 +60,13 @@ _MECHANISM_PREFERENCE = ("ML-DSA-65", "Dilithium3")
 PQC_AVAILABLE = False
 PQC_MECHANISM: str | None = None
 
+# WHY the primitive is unavailable, in one actionable line; None when it is
+# available. A log line is not a reason: nothing above it can read a log. The
+# posture and the startup surface carry this, so an operator can tell an absent
+# optional package from a signing primitive that died in place -- two different
+# situations with two different remedies, which reported identically until now.
+PQC_UNAVAILABLE_REASON: str | None = None
+
 
 def _resolve_mechanism(module: Any) -> str | None:
     """The first preferred mechanism the INSTALLED liboqs actually offers.
@@ -88,6 +95,14 @@ try:
 
     PQC_MECHANISM = _resolve_mechanism(oqs)
     if PQC_MECHANISM is None:
+        try:
+            _offered = ", ".join(oqs.get_enabled_sig_mechanisms()) or "(nothing)"
+        except Exception:  # noqa: BLE001 - an unusable library is a reason too
+            _offered = "(the build would not say)"
+        PQC_UNAVAILABLE_REASON = (
+            f"liboqs is installed but offers none of "
+            f"{', '.join(_MECHANISM_PREFERENCE)}. It offers: {_offered}."
+        )
         # liboqs is HERE and offers nothing this build can use. That is not an
         # absent optional dependency: it is the signing primitive dying in
         # place. Record signing will refuse and provenance falls back to a
@@ -104,18 +119,28 @@ try:
         PQC_AVAILABLE = True
         logger.info("PQC signatures available (liboqs mechanism: %s)", PQC_MECHANISM)
 except ImportError:
-    logger.info(
-        "liboqs-python not installed. PQC signatures disabled. "
-        "Install with: pip install liboqs-python"
+    PQC_UNAVAILABLE_REASON = (
+        "liboqs-python is not installed. Install with: "
+        "pip install 'opti-oignon[pqc]'"
     )
+    # Not info. Under Bulbe, and wherever the operator asked for signing, this
+    # is the root of trust being absent, and the boot will refuse on it.
+    logger.warning("PQC signatures unavailable -- %s", PQC_UNAVAILABLE_REASON)
 except Exception as exc:  # pragma: no cover - defensive
+    PQC_UNAVAILABLE_REASON = f"PQC signature init failed: {exc}"
     logger.critical("PQC signature init failed: %s", exc)
 
 # The resolved mechanism is what every call site uses. Keeping the private name
 # means the key envelope, the signer and the verifier all speak of the same
 # mechanism, and it is the one that resolved rather than the one that was hoped
 # for.
-_PQC_ALGORITHM = PQC_MECHANISM or _MECHANISM_PREFERENCE[0]
+# It is the one that RESOLVED, or nothing. The old fallback to the first
+# preferred name meant a host with no usable library still announced ML-DSA-65
+# from its status surface -- the mechanism that was hoped for, which the comment
+# above forbids in as many words. Every signing path is already guarded by
+# `if not PQC_AVAILABLE: raise`, so None can reach no call to oqs; it can only
+# reach the envelope and the status, which is exactly where the truth belongs.
+_PQC_ALGORITHM: str | None = PQC_MECHANISM
 
 
 class PQCUnavailable(RuntimeError):
@@ -131,17 +156,57 @@ def pqc_requested() -> bool:
     same thing: the second is a broken promise. Collapsing them into one boolean
     is exactly how a dead primitive degrades in silence.
     """
-    return bool(_load_pqc_config().get("backup_signatures", False))
+    cfg = _load_pqc_config()
+    if cfg is None:
+        # Present and unreadable: the intent is UNKNOWN. The strict reading is
+        # the only one that cannot be wrong, and the alternative -- reading it
+        # as "never asked for" -- is precisely what disarmed the refusal below.
+        return True
+    return bool(cfg.get("backup_signatures", False))
+
+
+def _bulbe() -> bool:
+    """Is this host a fortress?
+
+    security_mode owns the fail-secure determination of the mode itself (an
+    unknown mode is already Bulbe there). A module that cannot even be IMPORTED
+    is a machinery failure, not a mode verdict, and this function must not
+    manufacture a boot refusal out of a broken import -- that would be a denial
+    of service on ourselves with no security bought.
+    """
+    try:
+        from opti_oignon.security_mode import get_current_mode
+
+        return get_current_mode() == "bulbe"
+    except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
+        logger.error("the security mode could not be determined: %s", exc)
+        return False
+
+
+def pqc_required() -> bool:
+    """Is the primitive REQUIRED here, whatever the operator asked for?
+
+    Two ways to require it. The operator asks (``pqc_requested``). Or the mode
+    is Bulbe -- and Bulbe is a physical constraint, not a policy. The socket
+    bind is not configurable under Bulbe; it is physical. The root of trust
+    cannot be less than that: a fortress does not ask politely for it in a
+    config file, and one with no signing key has nothing left to be a fortress
+    with. Whoever wants to run without the primitive runs Daily.
+    """
+    return pqc_requested() or _bulbe()
 
 
 def pqc_posture() -> dict[str, Any]:
     """What was asked for, what is available, and whether they disagree."""
     requested = pqc_requested()
+    required = pqc_required()
     return {
         "requested": requested,
+        "required": required,
         "available": PQC_AVAILABLE,
         "mechanism": PQC_MECHANISM,
-        "degraded": requested and not PQC_AVAILABLE,
+        "reason": PQC_UNAVAILABLE_REASON,
+        "degraded": required and not PQC_AVAILABLE,
     }
 
 
@@ -154,7 +219,7 @@ def assert_pqc_posture() -> None:
     the operator asked for post-quantum signing and the primitive is absent, the
     honest answer is a refusal, never a quiet substitution.
     """
-    if pqc_requested() and not PQC_AVAILABLE:
+    if pqc_required() and not PQC_AVAILABLE:
         raise PQCUnavailable(
             "Post-quantum backup signatures are enabled in configuration, but "
             "no usable liboqs mechanism resolved "
@@ -172,18 +237,55 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_KEYPAIR_PATH = _PROJECT_ROOT / "data" / ".pqc_keypair"
 
 
-def _load_pqc_config() -> dict[str, Any]:
-    """Load PQC configuration from security.yaml."""
+def _load_pqc_config() -> dict[str, Any] | None:
+    """PQC configuration, or None when security.yaml cannot be READ.
+
+    An ABSENT file is a default: the operator did not configure signing, and
+    that is a documented choice. A file that is PRESENT and unreadable is not a
+    default -- it is an unknown, and the two must never collapse into the same
+    empty mapping.
+
+    They did, and the consequence was that the whole refusal mechanism switched
+    off. ``pqc_requested`` gates ``assert_pqc_posture``; an empty mapping made
+    the intent read False; so a truncated write, a disk error or a YAML typo was
+    enough to let a forgeable symmetric MAC be substituted for a signature,
+    without one word anywhere. A configuration read that FAILS OPEN disarms the
+    very refusal it gates.
+    """
+    cfg_path = Path(__file__).parent / "config" / "security.yaml"
+    if not cfg_path.exists():
+        return {}
+
     try:
         import yaml
-        cfg_path = Path(__file__).parent / "config" / "security.yaml"
-        if cfg_path.exists():
-            with open(cfg_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            return data.get("pqc", {})
-    except Exception:
-        pass
-    return {}
+        with open(cfg_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception as exc:  # noqa: BLE001 - unreadable is a verdict, not a shrug
+        logger.critical(
+            "security.yaml is present and could not be read (%s). The "
+            "post-quantum signing intent cannot be determined; treating it as "
+            "REQUESTED, which is the only reading that cannot be wrong.", exc,
+        )
+        return None
+
+    if data is None:
+        return {}  # an empty file is an empty configuration, not a broken one
+    if not isinstance(data, dict):
+        logger.critical(
+            "security.yaml does not contain a mapping. The post-quantum "
+            "signing intent cannot be determined; treating it as REQUESTED."
+        )
+        return None
+
+    section = data.get("pqc", {})
+    if not isinstance(section, dict):
+        logger.critical(
+            "security.yaml has a 'pqc' key that is not a mapping. The "
+            "post-quantum signing intent cannot be determined; treating it as "
+            "REQUESTED."
+        )
+        return None
+    return section
 
 
 def is_pqc_enabled() -> bool:
@@ -199,6 +301,11 @@ def is_pqc_enabled() -> bool:
     if not PQC_AVAILABLE:
         return False
     cfg = _load_pqc_config()
+    if cfg is None:
+        # The policy could not be read and the primitive IS there. Signing more
+        # than was asked for is never the risk; signing less than was asked for,
+        # in silence, is the whole of it.
+        return True
     return bool(cfg.get("backup_signatures", False))
 
 
@@ -485,7 +592,9 @@ def get_pqc_status() -> dict[str, Any]:
     status: dict[str, Any] = {
         "available": PQC_AVAILABLE,
         "algorithm": _PQC_ALGORITHM,
-        "config_enabled": bool(cfg.get("backup_signatures", False)),
+        "reason": PQC_UNAVAILABLE_REASON,
+        "config_readable": cfg is not None,
+        "config_enabled": bool((cfg or {}).get("backup_signatures", False)),
         "effective_enabled": is_pqc_enabled(),
         "keypair_exists": keypair_path.is_file(),
         "keypair_path": str(keypair_path),

@@ -180,6 +180,23 @@ def _load(pqc_state=None, humanizer_raises=False, presets_existing=None):
     pqc.is_pqc_enabled = lambda: False
     pqc.pqc_keypair_exists = lambda path=None: state.keypair_exists
     pqc.load_pqc_keypair = lambda path=None: (b"PUB", b"PRIV")
+
+    # The stand-in must pose the WHOLE world it stands in for, refusal included.
+    # backup_manager now asks the posture BEFORE it signs, because a backup that
+    # leaves unsigned while the caller believes it is signed is the defect the
+    # posture exists to refuse. A stand-in that omits the refusal is a world
+    # where the refusal cannot happen -- which is precisely the world under test
+    # everywhere else, and it must not be the one the harness quietly supplies.
+    def _assert_pqc_posture():
+        if not state.available and state.enabled:
+            raise RuntimeError(
+                "Post-quantum signing was required and no usable mechanism "
+                "resolved. Refusing to substitute a symmetric MAC."
+            )
+
+    pqc.assert_pqc_posture = _assert_pqc_posture
+    pqc.pqc_required = lambda: bool(state.enabled)
+    pqc.pqc_requested = lambda: bool(state.enabled)
     pqc.sign_backup = lambda payload, private_key: b"SIGBYTES"
 
     def _verify_backup(payload, signature, public_key):

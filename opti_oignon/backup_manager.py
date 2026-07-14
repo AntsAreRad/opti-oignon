@@ -63,6 +63,7 @@ try:
         PQC_AVAILABLE as _PQC_LIB_AVAILABLE,
     )
     from opti_oignon.pqc_signatures import (
+        assert_pqc_posture,
         is_pqc_enabled,
         load_pqc_keypair,
         pqc_keypair_exists,
@@ -81,6 +82,17 @@ except ImportError:
 
     def pqc_keypair_exists(path=None) -> bool:
         return False
+
+    def assert_pqc_posture() -> None:
+        # The signing module itself would not import. That is a broken tree, not
+        # a posture -- and it must not silently license an unsigned export. A
+        # backup nobody can distinguish from a signed one is worse than no
+        # backup, because it will be trusted.
+        raise RuntimeError(
+            "opti_oignon.pqc_signatures could not be imported: the signature "
+            "posture cannot be determined, so an unsigned export cannot be "
+            "distinguished from a signed one. Refusing."
+        )
 
 # Key name for storing PQC signature in backup dict
 _PQC_SIGNATURE_KEY = "_pqc_signature"
@@ -646,13 +658,31 @@ class BackupManager:
         Modifies the backup dict in-place, adding '_pqc_signature' and
         '_pqc_public_key' keys at the top level.
 
-        If PQC is not enabled or keys are not available, this is a no-op.
+        A broken promise is a REFUSAL, never a no-op. When post-quantum
+        signing was required -- the operator asked for it, or the mode is
+        Bulbe, or the policy could not be read to tell -- and the primitive did
+        not resolve, this raises rather than let a backup leave the machine
+        unsigned while the caller believes it is signed. A symmetric MAC is not
+        a weaker signature; it is a different security property, forgeable by
+        whoever holds the shared secret.
+
+        When nothing was promised, it stays a no-op. A refusal there would be a
+        denial of service the operator never asked for.
         """
+        assert_pqc_posture()
+
         if not is_pqc_enabled():
             return
         if not pqc_keypair_exists():
-            logger.debug("PQC signing skipped: no keypair available")
-            return
+            # The operator asked for signed backups, the primitive works, and
+            # there is no key. That is a promise broken by absence rather than
+            # by breakage, and it was a debug line.
+            raise RuntimeError(
+                "Post-quantum backup signatures are enabled and no keypair "
+                "exists. Refusing to export a backup that would silently carry "
+                "no signature. Generate a keypair, or turn the setting off "
+                "deliberately."
+            )
 
         try:
             public_key, private_key = load_pqc_keypair()

@@ -45,6 +45,7 @@ _CHECK_NAMES = (
     "_check_security_mode",
     "_check_encrypted_swap",
     "_check_governor_ollama_limits",
+    "_check_pqc_primitive",
 )
 
 
