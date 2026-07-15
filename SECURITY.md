@@ -82,6 +82,16 @@ Application-layer encryption of the vector store (encrypt the chunk
 text before storing, decrypt on retrieval) is a planned cycle
 (ROADMAP_POST_S183, RAG-at-rest cycle).
 
+Known exception (MP-01): enforcement of the model provenance seal at
+load is wired on the `llama_cpp` backend only. The Ollama backend (the
+default) and the llama-server backend load model weights without an
+integrity check, so under Bulbe the "only a verified model loads"
+guarantee holds for `llama_cpp` but not for those two backends.
+Extending the gate to the Ollama blob store is the remaining work, and
+it is tracked as such. The startup security checklist reports the
+active backend's provenance coverage as an advisory warning.
+
+
 ### Layer 3 -- Isolation and sandboxing
 
 Sandbox Manager runs every LLM filesystem, shell, and code tool inside a

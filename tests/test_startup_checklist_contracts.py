@@ -21,21 +21,18 @@ endpoint both rely on:
     JSON with coherent pass/fail counters.
 
 Local-only (the public distribution ships no tests). Runs under pytest
-or the __main__ runner. The checklist module is loaded in isolation
-under a stub package; the guard modules it imports lazily are seeded
-as stubs in sys.modules so every clause is deterministic.
+or the __main__ runner. The checklist module is loaded on the shared
+isolation window; the guard modules it imports lazily are seeded as
+stand-ins so every clause is deterministic.
 """
 
-import importlib.util
 import json
 import sys
 import traceback
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+from _isolation import isolate, source  # noqa: E402
 
 _CHECK_NAMES = (
     "_check_code_signing_scripts",
@@ -45,42 +42,22 @@ _CHECK_NAMES = (
     "_check_encrypted_swap",
     "_check_governor_ollama_limits",
     "_check_pqc_primitive",
+    "_check_backend_provenance_coverage",
 )
 
 
 def _load_checklist_module(seed=None):
-    """Load startup_checks.py in isolation under a stub package.
+    """Load startup_checks.py on the shared isolation window.
 
-    ``seed`` maps dotted module names to stub modules pre-registered in
-    sys.modules so the checklist's lazy imports resolve to them.
+    ``seed`` maps dotted module names to stand-in modules so the
+    checklist's lazy imports resolve to them; nothing else in the
+    package resolves.
     """
-    seed = seed or {}
-    keys = ("opti_oignon", "opti_oignon.startup_checks", *seed.keys())
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    for name, stub in seed.items():
-        sys.modules[name] = stub
-        setattr(pkg, name.rsplit(".", 1)[-1], stub)
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.startup_checks", _OO / "startup_checks.py",
+    loaded, restore = isolate(
+        targets={"opti_oignon.startup_checks": source("startup_checks.py")},
+        seeded=seed or {},
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.startup_checks"] = mod
-    spec.loader.exec_module(mod)
-    pkg.startup_checks = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    return loaded["opti_oignon.startup_checks"], restore
 
 
 def _stub_module(name, **attrs):
@@ -90,9 +67,13 @@ def _stub_module(name, **attrs):
     return stub
 
 
-def _install_stub_checks(mod, failing=None):
+def _install_stub_checks(mod, failing=None, real=()):
     saved = {n: getattr(mod, n) for n in _CHECK_NAMES}
     for n in _CHECK_NAMES:
+        if n in real:
+            # Leave the real implementation in place (exercise it inside
+            # run_startup_checks while every other check is stubbed).
+            continue
         if n == failing:
             setattr(
                 mod, n,
@@ -284,6 +265,85 @@ def test_c5_report_serializes_with_coherent_counters():
             assert payload["passed_count"] + payload["failed_count"] == (
                 payload["check_count"]
             )
+        finally:
+            undo()
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# Contract 6-8 -- active-backend provenance coverage advisory
+# ---------------------------------------------------------------------------
+def _coverage_seed(backend, mode):
+    """Seed the two modules the coverage check imports, with controlled
+    return values, so every branch is deterministic under isolation."""
+    return {
+        "opti_oignon.security_mode": _stub_module(
+            "opti_oignon.security_mode",
+            _default_backend=lambda: backend,
+            get_current_mode=lambda: mode,
+        ),
+        "opti_oignon.model_provenance": _stub_module(
+            "opti_oignon.model_provenance",
+            backend_enforces_provenance=lambda b: b == "llama_cpp",
+        ),
+    }
+
+
+def test_c6_gated_backend_reports_coverage_as_info():
+    mod, restore = _load_checklist_module(
+        seed=_coverage_seed("llama_cpp", "daily")
+    )
+    try:
+        item = mod._check_backend_provenance_coverage()
+        assert item.passed is True
+        assert item.severity == "info"
+        assert "llama_cpp" in item.detail
+    finally:
+        restore()
+
+
+def test_c7_ungated_backend_warns_and_never_blocks():
+    mod, restore = _load_checklist_module(
+        seed=_coverage_seed("ollama", "daily")
+    )
+    try:
+        item = mod._check_backend_provenance_coverage()
+        assert item.passed is False
+        assert item.severity == "warning"     # advisory, NOT critical
+        assert item.severity != "critical"
+        assert item.score_impact < 0
+        assert item.tips
+        assert "ollama" in item.detail
+        # End-to-end: an advisory warning must never set the blocked flag.
+        undo = _install_stub_checks(
+            mod, real=("_check_backend_provenance_coverage",)
+        )
+        try:
+            result = mod.run_startup_checks(force=True)
+            assert result.blocked is False
+            assert "backend_provenance_coverage" in [
+                c.name for c in result.checks
+            ]
+        finally:
+            undo()
+    finally:
+        restore()
+
+
+def test_c8_bulbe_sharpens_message_but_stays_advisory():
+    mod, restore = _load_checklist_module(
+        seed=_coverage_seed("ollama", "bulbe")
+    )
+    try:
+        item = mod._check_backend_provenance_coverage()
+        assert item.severity == "warning"     # never critical, even in bulbe
+        assert "bulbe" in item.detail.lower()
+        undo = _install_stub_checks(
+            mod, real=("_check_backend_provenance_coverage",)
+        )
+        try:
+            assert mod.run_startup_checks(force=True).blocked is False
         finally:
             undo()
     finally:

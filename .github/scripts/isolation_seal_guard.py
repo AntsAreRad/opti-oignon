@@ -166,7 +166,6 @@ LEDGER = {
     "test_speculative_argv_materialisation_contracts.py": "8eb979f268a75594cf308aecd2097d149020d339a83d9f2658c155931d6b0835",
     "test_stage_manifest_routing_contracts.py": "0ec7a7cf38867187fa2508bedd1ffb01e27c8bcdceea4c0b6dccc1bcccbd2d8c",
     "test_startup_boot_guard_contracts.py": "6aefe404c2949e2ee8361ea8709e5349f8c7e1c48724a6ac09d9e8b400f6f38f",
-    "test_startup_checklist_contracts.py": "1f68287fbf4bda7a25582806076a12c3d9b9965118508963b348ff8b58e76f91",
     "test_startup_swap_no_false_positive_contracts.py": "b25ccbac9523bf4f85e4b7182b40f0c40c07d6675fa58d7682562bc1fe7f8e65",
     "test_syn01_blob_vault_contracts.py": "b97346e72b660d167757a82ac7f10226ae8ad6c8c9e2083071d690d5cd4fd2e1",
     "test_syn01_receive_contracts.py": "3362edf9f9eb75980fb2cb5a8afa73dca2327c0644c17d1d1a47c4905d24faf0",

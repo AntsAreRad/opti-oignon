@@ -150,6 +150,9 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
     # --- Check 7: Post-quantum signature primitive ---
     result.checks.append(_check_pqc_primitive())
 
+    # --- Check 8: active-backend provenance coverage (advisory) ---
+    result.checks.append(_check_backend_provenance_coverage())
+
     # --- Aggregate ---
     result.all_passed = all(c.passed for c in result.checks)
     result.total_score_impact = sum(c.score_impact for c in result.checks)
@@ -718,6 +721,85 @@ def _check_governor_ollama_limits() -> CheckItem:
             passed=True,
             severity="info",
             detail=f"Ollama limits advisory unavailable: {exc}",
+            score_impact=0,
+        )
+
+
+def _check_backend_provenance_coverage() -> CheckItem:
+    """Advisory: does the active inference backend enforce model provenance?
+
+    ADVISORY-ONLY in every mode, never blocking startup: like the LUKS
+    detector and the Ollama-limits advisory, this check NEVER returns
+    severity "critical", so it can never set the blocked flag.
+
+    The model-provenance gate (guard_model_load) is wired on the llama_cpp
+    backend only (model_provenance.PROVENANCE_GATED_BACKENDS). The Ollama
+    and llama-server backends load weights with no integrity check, so when
+    either is the active backend the "only a verified model loads" posture
+    is not in force for the weights actually loaded -- including under
+    bulbe, where that posture is otherwise strongest. Naming the gap here
+    keeps the checklist honest instead of implying a coverage the code does
+    not provide. Extending the gate to the Ollama blob store is tracked as
+    remaining work; this check only reports the state. Never raises.
+    """
+    try:
+        from opti_oignon.model_provenance import backend_enforces_provenance
+        from opti_oignon.security_mode import (
+            _default_backend,
+            get_current_mode,
+        )
+
+        backend = _default_backend()
+        if backend is None:
+            return CheckItem(
+                name="backend_provenance_coverage",
+                passed=True,
+                severity="info",
+                detail="Active inference backend could not be determined "
+                       "from backends.yaml; provenance coverage unknown",
+                score_impact=0,
+            )
+        if backend_enforces_provenance(backend):
+            return CheckItem(
+                name="backend_provenance_coverage",
+                passed=True,
+                severity="info",
+                detail=f"Active backend '{backend}' enforces model "
+                       "provenance at load",
+                score_impact=0,
+            )
+        # Active backend not gated: advisory warning, never blocking --
+        # documenting the gap, not closing it.
+        bulbe_note = (
+            " Under bulbe the enforced-mode posture does not cover this "
+            "backend's model loads."
+            if get_current_mode() == "bulbe" else ""
+        )
+        return CheckItem(
+            name="backend_provenance_coverage",
+            passed=False,
+            severity="warning",
+            detail=f"Active backend '{backend}' loads model weights without "
+                   "an integrity check: the provenance gate is wired on the "
+                   f"llama_cpp backend only.{bulbe_note}",
+            score_impact=-3,
+            tips=[
+                "Provenance enforcement currently covers the llama_cpp "
+                "backend only (model_provenance.PROVENANCE_GATED_BACKENDS).",
+                "To load only enrolled weights today, set default_backend "
+                "to llama_cpp in config/backends.yaml and enrol the models "
+                "(scripts/enroll_models.py).",
+                "Extending the gate to the Ollama blob store is tracked as "
+                "remaining work.",
+            ],
+        )
+    except Exception as exc:
+        logger.warning("Backend provenance coverage check failed: %s", exc)
+        return CheckItem(
+            name="backend_provenance_coverage",
+            passed=True,
+            severity="info",
+            detail=f"Backend provenance coverage check unavailable: {exc}",
             score_impact=0,
         )
 
