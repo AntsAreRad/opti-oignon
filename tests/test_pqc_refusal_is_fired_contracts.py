@@ -44,7 +44,13 @@ class _PQCUnavailable(RuntimeError):
     pass
 
 
-def _pqc_stand_in(*, available, mechanism=None, reason=None, required=True):
+def _pqc_stand_in(
+    *, available, mechanism=None, reason=None, required=True, key_ready=True
+):
+    # key_ready defaults to True so every contract below states a posture about
+    # the PRIMITIVE and nothing else, exactly as it was written. Whether the host
+    # holds a usable key is a separate question, and the suite that asks it says
+    # so out loud.
     module = types.ModuleType("opti_oignon.pqc_signatures")
     module.PQC_AVAILABLE = available
     module.PQC_MECHANISM = mechanism
@@ -53,6 +59,9 @@ def _pqc_stand_in(*, available, mechanism=None, reason=None, required=True):
     module.pqc_required = lambda: required
     module.pqc_requested = lambda: required
     module.is_pqc_enabled = lambda: bool(available and required)
+    module.signing_blockers = lambda: (
+        [] if key_ready else ["no signing keypair on disk (data/.pqc_keypair)"]
+    )
     module.pqc_keypair_exists = lambda path=None: False
     module.load_pqc_keypair = lambda path=None: (b"", b"")
     module.sign_backup = lambda *a, **k: b""

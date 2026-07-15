@@ -249,9 +249,21 @@ def _check_pqc_primitive() -> CheckItem:
     never a refusal. A broken tree is a machinery failure, not a security
     verdict, and no check may brick a machine on the strength of its own
     inability to run.
+
+    Whether the primitive RESOLVED is not the question. It resolves on a host
+    holding no key at all, and this check reported green on exactly that host --
+    the identical wrong question the seal used to ask, asked a second time in the
+    place built to catch it. The question is whether this host can SIGN.
+
+    And a host that cannot is a WARNING, never a critical. Critical aborts the
+    ASGI lifespan, and the lifespan carries the two endpoints that mint the key
+    and re-seal the manifest. A check must never take down the exit it is
+    telling you to take. The refusals that matter already fire where they can be
+    rendered: the backup export refuses, the load gate refuses, and the
+    escalation refuses to walk anyone onto this cliff in the first place.
     """
     try:
-        from opti_oignon.pqc_signatures import pqc_posture
+        from opti_oignon.pqc_signatures import pqc_posture, signing_blockers
     except Exception as exc:  # noqa: BLE001 - machinery failure is not a verdict
         return CheckItem(
             name="pqc_primitive",
@@ -262,14 +274,50 @@ def _check_pqc_primitive() -> CheckItem:
         )
 
     posture = pqc_posture()
+    remedy = [
+        "Mint a signing key: POST /api/security/pqc/generate-keys",
+        "Re-seal the model manifest: POST /api/security/pqc/reseal-manifest",
+    ]
 
     if posture["available"]:
+        blockers = signing_blockers()
+        if not blockers:
+            return CheckItem(
+                name="pqc_primitive",
+                passed=True,
+                severity="info",
+                detail=f"Signature primitive resolved: {posture['mechanism']}",
+                score_impact=0,
+            )
+
+        detail = (
+            f"Signature primitive resolved: {posture['mechanism']}, and this "
+            f"host cannot sign with it: {'; '.join(blockers)}"
+        )
+        if posture["required"]:
+            return CheckItem(
+                name="pqc_primitive",
+                passed=False,
+                severity="warning",
+                detail=(
+                    f"{detail}. The signature is REQUIRED here: backups refuse "
+                    f"to export, and every model is refused at load because the "
+                    f"provenance seal is a MAC, which enforcement reads as a "
+                    f"downgrade."
+                ),
+                score_impact=-25,
+                tips=remedy,
+            )
         return CheckItem(
             name="pqc_primitive",
             passed=True,
             severity="info",
-            detail=f"Signature primitive resolved: {posture['mechanism']}",
+            detail=(
+                f"{detail}. Not required in this mode -- but a fortress here "
+                f"would refuse every model it owns."
+            ),
             score_impact=0,
+            tips=remedy,
         )
 
     reason = posture["reason"] or "the signature primitive did not resolve"

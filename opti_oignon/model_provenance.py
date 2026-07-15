@@ -491,6 +491,28 @@ def _load_config() -> dict[str, Any]:
         return {}
 
 
+# The backends whose load seam actually calls the gate above. Measured, not
+# assumed: only LlamaCppBackend._get_or_load is wired to guard_model_load today.
+# The other backends load weights with no provenance check, so a host that
+# serves loads through them is not BRICKED by escalation -- it is a weaker
+# posture, documented as a gap, not an escalation refusal that would buy no
+# security. The escalation preflight keys off this set to tell a real brick from
+# that gap; when the gate is wired into another backend, its name MUST join this
+# set or the preflight stops protecting against the brick that wiring causes.
+PROVENANCE_GATED_BACKENDS = frozenset({"llama_cpp"})
+
+
+def backend_enforces_provenance(backend: str | None) -> bool:
+    """True when this backend's load seam calls the provenance gate.
+
+    The one place that answers "would a load through this backend be refused for
+    an unpinned model". The escalation preflight asks it so that it blocks the
+    brick a gated backend causes without false-bricking a host whose active
+    backend never consults the gate at all.
+    """
+    return bool(backend) and backend in PROVENANCE_GATED_BACKENDS
+
+
 def enforcement_mode(
     *,
     mode: str | None = None,
@@ -605,6 +627,155 @@ def record_model(
 
     logger.info("Model pinned: %s (sha256=%s)", resolved.name, digest[:16])
     return {"model": resolved.name, "sha256": digest, "scheme": seal_keys.scheme}
+
+
+def enroll_models(
+    model_paths: list[Path | str],
+    *,
+    manifest_path: Path | str | None = None,
+    keys: SealKeys | None = None,
+    signer: Callable[[bytes, bytes], bytes] | None = None,
+    chunk_size: int = _CHUNK,
+) -> dict[str, Any]:
+    """Pin several on-disk models under ONE seal.
+
+    ``record_model`` already enrols one model that is on disk -- it just happens
+    to be reached only from the download path, so a host that already holds its
+    weights had no way to pin them without fetching them again. This is that
+    handle, and it exists because the manifest seal is GLOBAL: sealing once over
+    the whole set is one operation, and sealing per model would be N-1 wasted
+    signatures over payloads that never ship.
+
+    Refuse rather than downgrade, exactly as sealing does everywhere else. If a
+    signature is required here and no key can produce one, this raises and writes
+    NOTHING. A partial manifest -- some pins, no seal, or a MAC where a signature
+    was required -- is worse than an absent one, because the escalation preflight
+    would then read a manifest that exists and believe the host was ready.
+
+    The digests are computed from the BYTES on disk. That is the difference
+    between this and re-sealing: enrolment is the act of deciding these bytes are
+    the right ones, so it hashes them; re-sealing renews a decision already made
+    and must never re-hash. Enrolling zero models writes nothing and says so.
+    """
+    resolved = [Path(p) for p in model_paths]
+    if not resolved:
+        return {"enrolled": [], "count": 0, "scheme": None}
+
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        raise ProvenanceError(
+            "No key material available to seal the model provenance manifest. "
+            "Refusing to write a manifest this host cannot sign -- a partial "
+            "one would be read as readiness the host does not have."
+        )
+
+    manifest = load_manifest(manifest_path) or {}
+    entries = dict(manifest.get("entries") or {})
+    enrolled: list[dict[str, Any]] = []
+    for path in resolved:
+        digest = compute_digest(path, chunk_size=chunk_size)
+        entries[path.name] = {
+            "sha256": digest,
+            "size": path.stat().st_size,
+            "recorded_at": time.time(),
+        }
+        enrolled.append({"model": path.name, "sha256": digest})
+
+    payload = {"version": MANIFEST_VERSION, "entries": entries}
+    sealed = dict(payload)
+    sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
+    save_manifest(sealed, manifest_path)
+
+    logger.info(
+        "Enrolled %d model(s) under %s", len(enrolled), seal_keys.scheme
+    )
+    return {
+        "enrolled": enrolled,
+        "count": len(enrolled),
+        "scheme": seal_keys.scheme,
+    }
+
+
+def manifest_seal_scheme(path: Path | str | None = None) -> str | None:
+    """The scheme the manifest on disk is sealed under, or None when there is none.
+
+    Reported, never judged. Whether an HMAC seal is right depends on the host
+    that reads it -- exactly right on a Daily machine, and a downgrade a fortress
+    refuses -- so the comparison belongs to the caller and not here.
+    """
+    manifest = load_manifest(path)
+    if not manifest:
+        return None
+    seal = manifest.get("seal")
+    if not isinstance(seal, dict):
+        return None
+    scheme = seal.get("scheme")
+    return str(scheme) if scheme else None
+
+
+def reseal_manifest(
+    *,
+    manifest_path: Path | str | None = None,
+    keys: SealKeys | None = None,
+    signer: Callable[[bytes, bytes], bytes] | None = None,
+) -> dict[str, Any]:
+    """Re-seal the manifest under the scheme this host is ALLOWED to perform.
+
+    The missing half of the requirement. A fortress requires a signature, and a
+    host whose manifest is sealed with a MAC refuses every model it owns -- and
+    until now nothing on this machine could turn that MAC into a signature. The
+    seal was only ever written as a SIDE EFFECT of enrolling a model, so the one
+    way to re-seal was to download every model again. A requirement with no way
+    to comply is a trap, not a policy.
+
+    NOTHING IS RE-PINNED. The entries are carried across verbatim: not re-hashed,
+    not re-stat'ed, not touched. A re-seal that re-read the files on disk would
+    bless whatever is sitting there now, which is precisely the substitution the
+    manifest exists to refuse. An entry means somebody looked at those bytes and
+    decided they were the right ones. Renewing that decision is not this
+    operation's to make; it changes the SCHEME, never the CLAIM.
+
+    The seal covers the whole payload, so this is one operation and not one per
+    entry. Refuses rather than writing a seal the caller did not ask for: with no
+    key material there is nothing to sign with, and a silent HMAC here would hand
+    back a manifest the fortress will reject while the operator believes the
+    migration happened.
+    """
+    manifest = load_manifest(manifest_path)
+    if not manifest:
+        raise ProvenanceError(
+            "There is no model provenance manifest to re-seal. A manifest is "
+            "written when a model is enrolled; enrol one first."
+        )
+
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        raise ProvenanceError(
+            "No key material available to seal the model provenance manifest"
+        )
+
+    payload = _payload_of(manifest)
+    previous = manifest.get("seal")
+    previous_scheme = (
+        previous.get("scheme") if isinstance(previous, dict) else None
+    )
+
+    sealed = dict(payload)
+    sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
+    save_manifest(sealed, manifest_path)
+
+    entries = payload.get("entries") or {}
+    logger.info(
+        "Model provenance manifest re-sealed: %d entries, %s -> %s",
+        len(entries),
+        previous_scheme or "unsealed",
+        seal_keys.scheme,
+    )
+    return {
+        "scheme": seal_keys.scheme,
+        "previous_scheme": previous_scheme,
+        "entries": len(entries),
+    }
 
 
 # ---------------------------------------------------------------------------

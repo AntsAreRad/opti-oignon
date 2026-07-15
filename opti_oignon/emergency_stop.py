@@ -337,7 +337,11 @@ def _step_drop_to_bulbe(user_id: str) -> dict[str, Any]:
     manager = _resolve_mode_manager()
     if manager is None:
         return {"skipped": "security mode manager unavailable"}
-    result = manager.escalate_to_bulbe(user_id or "emergency-stop")
+    # force: the escalation refuses a host that cannot sign, and rightly so --
+    # but this path RAISES on a refusal, and a panic button that can say no is
+    # not a panic button. A fortress that refuses its own models is still a
+    # better answer here than staying open while something is going wrong.
+    result = manager.escalate_to_bulbe(user_id or "emergency-stop", force=True)
     if isinstance(result, dict) and result.get("success") is False:
         raise RuntimeError(result.get("message", "escalation refused"))
     return result if isinstance(result, dict) else {"success": bool(result)}

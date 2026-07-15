@@ -216,6 +216,27 @@ def _extract_key_bytes(key) -> bytes:
     return key
 
 
+_BACKENDS_YAML = Path(__file__).resolve().parent / "config" / "backends.yaml"
+
+
+def _default_backend() -> str | None:
+    """The backend that would serve a model load, read from backends.yaml.
+
+    A broken or missing read yields None rather than a manufactured verdict: the
+    preflight that consults this must not pin a host in Daily on the strength of
+    its own inability to read a config file. That matches the stance the rest of
+    this surface takes -- a machinery failure is not a security decision.
+    """
+    try:
+        with open(_BACKENDS_YAML, encoding="utf-8") as handle:
+            cfg = yaml.safe_load(handle) or {}
+        backend = cfg.get("default_backend")
+        return str(backend) if backend else None
+    except Exception as exc:  # noqa: BLE001 - an unreadable config is not a verdict
+        logger.error("the default backend could not be read: %s", exc)
+        return None
+
+
 def _compute_lockfile_hmac(
     mode: str, timestamp: float, user_id: str, key
 ) -> str:
@@ -529,10 +550,109 @@ class SecurityModeManager:
 
     # -- Escalation (Daily -> Bulbe) ----------------------------------------
 
-    def escalate_to_bulbe(self, user_id: str) -> dict[str, Any]:
+    @staticmethod
+    def _fortress_blockers() -> list[str]:
+        """What Bulbe would refuse on, asked BEFORE the mode changes.
+
+        Both imports are deferred, and both failures are swallowed on purpose.
+        The signing module reads the mode back out of this one, and a module that
+        cannot be IMPORTED is a machinery failure, not a verdict. A broken tree
+        must not be able to manufacture a refusal here either: it would only pin
+        the host in Daily, which buys no security at all.
+        """
+        blockers: list[str] = []
+        try:
+            from opti_oignon.pqc_signatures import signing_blockers
+
+            blockers.extend(signing_blockers())
+        except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
+            logger.error("the signing readiness could not be determined: %s", exc)
+            return []
+
+        try:
+            from opti_oignon.model_provenance import (
+                SCHEME_PQC,
+                manifest_seal_scheme,
+            )
+
+            scheme = manifest_seal_scheme()
+        except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
+            logger.error("the manifest seal could not be read: %s", exc)
+            return blockers
+
+        if scheme is not None and scheme != SCHEME_PQC:
+            blockers.append(
+                f"the model provenance manifest is sealed with {scheme!r}, "
+                f"which a fortress reads as a downgrade and refuses. Every "
+                f"model on this host would be rejected."
+            )
+
+        blockers.extend(SecurityModeManager._provenance_blockers())
+        return blockers
+
+    @staticmethod
+    def _provenance_blockers() -> list[str]:
+        """The plainest brick of all: a gated backend and NO manifest.
+
+        The downgrade check above fires only when a manifest EXISTS with the
+        wrong scheme. It says nothing about the host that has no manifest at
+        all -- which is every fresh install. On a fortress the load seam
+        enforces, and a model with no pin is refused as unpinned, so a host
+        that escalates here loads nothing. This closes that half. The two are
+        disjoint by construction: one needs a manifest present, the other needs
+        it absent, and neither can hide a failure of the other.
+
+        Scoped to the brick on purpose. A backend whose load seam never calls
+        the gate (Ollama, llama-server today) is not bricked by escalation, so
+        it earns no blocker even though loading unverified weights in a fortress
+        is its own weakness. That weakness is documented as a gap; turning it
+        into an escalation refusal would buy no security and only pin the host
+        in Daily -- the exact anti-pattern the rest of this preflight avoids.
+        """
+        backend = _default_backend()
+        try:
+            from opti_oignon.model_provenance import (
+                backend_enforces_provenance,
+                load_manifest,
+            )
+        except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
+            logger.error("provenance readiness could not be determined: %s", exc)
+            return []
+
+        if not backend_enforces_provenance(backend):
+            return []
+
+        manifest = load_manifest()
+        if manifest and manifest.get("entries"):
+            return []
+
+        return [
+            f"the load backend {backend!r} verifies model provenance and this "
+            f"host has no provenance manifest. In Bulbe every model load is "
+            f"refused as unpinned. Enrol the models on disk first."
+        ]
+
+    def escalate_to_bulbe(
+        self, user_id: str, force: bool = False
+    ) -> dict[str, Any]:
         """Escalate from Daily to Bulbe mode. Immediate, no ceremony.
 
-        Adding security is always safe -- no ceremony needed.
+        Adding security is NOT always safe, and saying so was the bug. Bulbe
+        requires the post-quantum signature -- there it is a property of the
+        mode, like the socket bind -- so a host with no signing key becomes, the
+        instant it escalates, a host that refuses every model it owns and every
+        backup it exports. Nothing crashes; it simply stops working, and the
+        operator never asked for that.
+
+        The readiness is checked HERE because this is the one place where
+        refusing is free: staying in Daily is the status quo, not a brick. It is
+        deliberately NOT checked at the boot. A critical boot check would abort
+        the lifespan and take down the very endpoints that mint the key and
+        re-seal the manifest -- a check must never remove the exit it is telling
+        you to take.
+
+        ``force`` escalates regardless. The emergency stop passes it: a panic
+        button that can say no is not a panic button.
         """
         current = self.get_current_mode()
         if current == MODE_BULBE:
@@ -553,6 +673,32 @@ class SecurityModeManager:
                     "Run encryption setup first."
                 ),
             }
+
+        if not force:
+            blockers = self._fortress_blockers()
+            if blockers:
+                _audit_log(
+                    "security_mode_escalation_refused",
+                    severity="WARNING",
+                    user_id=user_id,
+                    blockers=blockers,
+                )
+                return {
+                    "success": False,
+                    "error": "fortress_not_ready",
+                    "message": (
+                        "Bulbe requires the post-quantum signature. This host "
+                        "cannot produce or verify one yet, so it would refuse "
+                        "every model it owns and every backup it exports."
+                    ),
+                    "blockers": blockers,
+                    "remedy": [
+                        "POST /api/security/pqc/generate-keys",
+                        "POST /api/security/pqc/enroll-models",
+                        "POST /api/security/pqc/reseal-manifest",
+                    ],
+                    "changed": False,
+                }
 
         # Write to both sources atomically
         _write_yaml_mode(MODE_BULBE)

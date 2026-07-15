@@ -786,6 +786,14 @@ except ImportError:
 class SecurityModeChangeRequest(BaseModel):
     """Request body for security mode escalation."""
     mode: str = Field(..., description="Target mode: 'daily' or 'bulbe'")
+    force: bool = Field(
+        False,
+        description=(
+            "Escalate even when this host cannot produce a post-quantum "
+            "signature. The fortress would then refuse every model it owns "
+            "and every backup it exports."
+        ),
+    )
 
 
 class DowngradeConfirmRequest(BaseModel):
@@ -843,9 +851,9 @@ async def set_security_mode(body: SecurityModeChangeRequest) -> dict[str, Any]:
     # In production, user_id comes from the authenticated session.
     # For now, use a placeholder that routes_auth will fill.
     user_id = "admin"
-    result = security_mode_manager.escalate_to_bulbe(user_id)
+    result = security_mode_manager.escalate_to_bulbe(user_id, force=body.force)
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result.get("message", ""))
+        raise HTTPException(status_code=400, detail=result)
     return result
 
 
@@ -1807,6 +1815,107 @@ async def remove_pqc_keys() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="PQC not available")
     deleted = delete_pqc_keypair()
     return {"success": True, "deleted": deleted, "status": get_pqc_status()}
+
+
+try:
+    from opti_oignon.model_provenance import (
+        ProvenanceError,
+        manifest_seal_scheme,
+        reseal_manifest,
+    )
+
+    PROVENANCE_SEAL_AVAILABLE = True
+except ImportError:
+    PROVENANCE_SEAL_AVAILABLE = False
+
+
+@router.post("/pqc/reseal-manifest")
+async def reseal_provenance_manifest() -> dict[str, Any]:
+    """Re-seal the model provenance manifest under the scheme this host requires.
+
+    The other half of entering fortress mode. Minting a key is not enough: a
+    manifest sealed with a MAC is a downgrade to a host that requires a
+    signature, and every model on it is refused at load. Until this existed the
+    only way to re-seal was to download every model again.
+
+    Nothing is re-pinned. The digests are carried across verbatim -- this changes
+    the SCHEME, never the CLAIM.
+    """
+    if not PROVENANCE_SEAL_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Model provenance is not available",
+        )
+
+    try:
+        result = reseal_manifest()
+    except ProvenanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Re-sealing failed: {exc}"
+        ) from exc
+
+    return {"success": True, "seal": manifest_seal_scheme(), **result}
+
+
+@router.post("/pqc/enroll-models")
+async def enroll_on_disk_models() -> dict[str, Any]:
+    """Pin the GGUF models already on disk in the provenance manifest.
+
+    The other missing half of entering the fortress. Under enforcement the load
+    seam refuses any model whose bytes are not pinned, and a fresh host has no
+    manifest, so the moment it escalates it refuses every model it owns. The pin
+    was only ever written as a side effect of downloading a model; a host that
+    already held its weights had no way to enrol them. This is that handle.
+
+    Discovery runs through the model manager, which already knows the configured
+    directories. The bytes on disk are hashed and pinned; nothing is fetched.
+    """
+    if not PROVENANCE_SEAL_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Model provenance is not available",
+        )
+
+    from opti_oignon.model_provenance import enroll_models
+
+    try:
+        from opti_oignon.model_manager import get_model_manager
+
+        manager = get_model_manager()
+        models: list = []
+        seen: set = set()
+        for d in manager.model_dirs:
+            if not d.is_dir():
+                continue
+            for gguf in sorted(d.glob("*.gguf")):
+                if gguf.name not in seen:
+                    seen.add(gguf.name)
+                    models.append(gguf)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Model discovery failed: {exc}"
+        ) from exc
+
+    if not models:
+        return {
+            "success": True,
+            "count": 0,
+            "enrolled": [],
+            "message": "No GGUF models found in the configured directories.",
+        }
+
+    try:
+        result = enroll_models(models)
+    except ProvenanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Enrolment failed: {exc}"
+        ) from exc
+
+    return {"success": True, "seal": manifest_seal_scheme(), **result}
 
 
 # =========================================================================

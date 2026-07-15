@@ -229,6 +229,43 @@ def assert_pqc_posture() -> None:
         )
 
 
+def signing_blockers() -> list[str]:
+    """Everything standing between this host and a signature it can produce.
+
+    Empty means the host can sign RIGHT NOW. Every question this estate has been
+    wrong about twice reduces to the difference between that and "the primitive
+    resolved". It resolves on a machine holding no key at all -- and a fortress
+    holding no key cannot export a backup and cannot load a single model,
+    because the provenance seal it has is a MAC and a fortress reads a MAC as a
+    downgrade. Nothing crashes. It simply refuses everything.
+
+    One site answers this, so no second site can quietly cover for the first.
+    ``resolve_seal_keys`` learned that the hard way: two refusal sites, and the
+    second concealed the failure of the first, so neither could be pinned.
+
+    Reported, never raised. Whether a blocker is fatal depends entirely on where
+    the question is asked -- at an escalation, refusing costs nothing; at a boot,
+    it would take down the endpoints that repair the condition.
+    """
+    if not PQC_AVAILABLE:
+        reason = PQC_UNAVAILABLE_REASON or "no usable mechanism resolved"
+        return [f"the signature primitive did not resolve: {reason}"]
+
+    try:
+        public, private = load_pqc_keypair()
+    except FileNotFoundError:
+        return [
+            f"no signing keypair on disk ({_DEFAULT_KEYPAIR_PATH}). The "
+            f"primitive resolved and there is nothing to sign with."
+        ]
+    except Exception as exc:  # noqa: BLE001 - the caller decides what it means
+        return [f"the signing keypair cannot be used: {exc}"]
+
+    if not public or not private:
+        return ["the keypair file yielded no key material"]
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------

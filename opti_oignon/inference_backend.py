@@ -1046,6 +1046,12 @@ class LlamaCppBackend(InferenceBackend):
             # directory. Nothing has yet proven the bytes are the bytes we
             # pinned, and they are about to be parsed by native code, so the
             # integrity gate runs here: after containment, before the load.
+            #
+            # This is the ONLY backend wired to the gate. model_provenance
+            # PROVENANCE_GATED_BACKENDS records that fact, and the escalation
+            # preflight keys off it. If the gate is added to another backend,
+            # that set must gain its name, or a fortress will escalate into a
+            # brick the preflight no longer sees.
             _provenance_guard(gguf_path)
 
             logger.info("Loading GGUF model: %s", gguf_path)
