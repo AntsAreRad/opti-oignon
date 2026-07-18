@@ -1,0 +1,23 @@
+# =============================================================================
+# TOKEN COUNTING CONFIGURATION
+# =============================================================================
+# Governs the exact-count path of opti_oignon/token_counter.py. The
+# heuristic estimator needs no configuration and is always available.
+#
+# enabled: when true, the counter asks a llama.cpp server's tokenize
+#   endpoint for real token counts, labelled "exact". When false (the
+#   default), no network round trip of any kind is attempted and every
+#   count is the family-calibrated estimate, labelled "estimated".
+#
+# endpoint: base URL of the llama.cpp server. Leave empty to reuse the
+#   llama_server.host entry of backends.yaml when present, falling back
+#   to the conventional local default (http://127.0.0.1:8080).
+#
+# timeout_s: ceiling for one tokenize round trip. Kept tight so a dead
+#   server costs milliseconds, not seconds; any failure falls back to the
+#   estimate, honestly labelled.
+# =============================================================================
+
+enabled: false
+endpoint: ""
+timeout_s: 0.5
