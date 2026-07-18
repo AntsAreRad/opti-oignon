@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Two-Factor Authentication for Opti-Oignon (S126).
+Two-Factor Authentication for Opti-Oignon.
 
 Supports three 2FA methods (in priority order):
 
@@ -86,7 +86,7 @@ _DATA_DIR = _PROJECT_ROOT / "data"
 _2FA_DB_PATH = _DATA_DIR / "auth_2fa.db"
 
 RECOVERY_CODE_COUNT = 10
-RECOVERY_CODE_LENGTH = 16  # S136: 16 hex chars = 64 bits (was 8 = 32 bits)
+RECOVERY_CODE_LENGTH = 16  # 16 hex chars = 64 bits (was 8 = 32 bits)
 APP_PASSWORD_LENGTH = 32
 
 # Rate limiting
@@ -162,7 +162,7 @@ class TwoFAStatus:
 def _get_2fa_conn() -> sqlite3.Connection:
     """Get a connection to the 2FA database.
 
-    S136 audit fix: routes through get_encrypted_connection() for
+    Audit fix: routes through get_encrypted_connection() for
     SQLCipher support when available.
     """
     _DATA_DIR.mkdir(parents=True, exist_ok=True)

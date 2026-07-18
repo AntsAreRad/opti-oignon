@@ -84,14 +84,14 @@ anchor = [
     "qrcode[pil]>=7.4",
 ]
 # SQLCipher encrypted database support.
-# S171: migrated to sqlcipher3-binary (prebuilt wheels, no manual build step).
+# Migrated to sqlcipher3-binary (prebuilt wheels, no manual build step).
 # The runtime in db_encryption.py imports the sqlcipher3 module, which this
 # package provides; a fallback to the older binding remains in db_encryption.py
 # only for hosts that already have it installed.
 sqlcipher = [
     "sqlcipher3-binary>=0.5.0",
 ]
-# Veilid peer-to-peer sync (S178+, Theme 4). The veilid Python bindings talk to
+# Veilid peer-to-peer sync. The veilid Python bindings talk to
 # a headless veilid-server (staged by scripts/fetch_veilid_server.py). Sync is a
 # Daily-mode capability: it is refused under Bulbe at the binding layer
 # (opti_oignon/veilid/guard.py), never auto-started, and uses private routing
@@ -102,7 +102,7 @@ sqlcipher = [
 veilid = [
     "veilid>=0.4.0",
 ]
-# Notes voice transcription (S250+, N.5). The whisper.cpp Python binding is used
+# Notes voice transcription. The whisper.cpp Python binding is used
 # ONLY by the opt-in, sandboxed transcription path (opti_oignon/notes/
 # transcription.py): the decrypted audio is copied into a disposable bubblewrap
 # sandbox (zero host filesystem, zero network) and whisper.cpp runs there; the
@@ -113,7 +113,7 @@ veilid = [
 transcribe = [
     "pywhispercpp>=1.2.0",
 ]
-# Notes picture caption / OCR (S251+, N.6). The vision/OCR Python binding is used
+# Notes picture caption / OCR. The vision/OCR Python binding is used
 # ONLY by the opt-in, sandboxed caption path (opti_oignon/notes/caption.py): the
 # decrypted image is copied into a disposable bubblewrap sandbox (zero host
 # filesystem, zero network) and the OCR/vision tool runs there; the caption / ocr
@@ -141,13 +141,13 @@ docs = [
 ]
 # Convenience meta-group: pure-Python extras that install cleanly via pip on a
 # stock machine (auth, dev, docs).
-# S171: llama and sqlcipher are deliberately EXCLUDED from [all]. Both require
+# llama and sqlcipher are deliberately EXCLUDED from [all]. Both require
 # platform-specific system libraries (libsqlcipher-dev for sqlcipher3-binary,
 # build tools / a backend runtime for llama-cpp-python), so pulling them into a
 # blanket [all] install breaks on machines without those prerequisites. Install
 # them explicitly: opti-oignon[llama] / opti-oignon[sqlcipher]. See
 # CONTRIBUTING.md for the apt / conda prerequisites.
-# S178: veilid is excluded from [all] for the same reason -- the bindings and the
+# veilid is excluded from [all] for the same reason -- the bindings and the
 # headless veilid-server are platform-specific and optional. Install explicitly:
 # opti-oignon[veilid]. Sync is Daily-only and refused under Bulbe.
 all = [

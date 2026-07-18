@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Authentication and user management for Opti-Oignon (S98).
+Authentication and user management for Opti-Oignon.
 
 Provides:
 - User CRUD with SQLite storage
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 AUTH_AVAILABLE = True
 
-# S129: SecureBytes for JWT key memory protection
+# SecureBytes for JWT key memory protection
 try:
     from opti_oignon.secure_bytes import SecureBytes as _SecureBytes
     _SECURE_BYTES_AVAILABLE = True
@@ -63,7 +63,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "auth.yaml"
 DEFAULT_DB_DIR = Path(__file__).parent.parent / "data"
 
 # JWT implementation (minimal, no external dependency required)
-# Uses HMAC-SHA512 for signing (S126 PQC upgrade from SHA256)
+# Uses HMAC-SHA512 for signing (PQC upgrade from SHA256)
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -128,7 +128,7 @@ class AuthToken:
 
 
 # ---------------------------------------------------------------------------
-# Minimal JWT implementation (S126: HMAC-SHA512 default, backward-compatible)
+# Minimal JWT implementation (HMAC-SHA512 default, backward-compatible)
 #
 # New tokens are signed with HS512 (256-bit post-quantum security).
 # Old HS256 tokens are still accepted during verification for backward
@@ -183,7 +183,7 @@ def jwt_encode(payload: dict[str, Any], secret: str, algorithm: str = "HS512") -
 def jwt_decode(token: str, secret: str, algorithm: str = "HS512") -> dict[str, Any] | None:
     """Decode and verify a JWT token. Returns None if invalid or expired.
 
-    S136 audit fix: the algorithm is ALWAYS determined server-side.
+    Audit fix: the algorithm is ALWAYS determined server-side.
     The JWT header's 'alg' field is validated but never trusted to
     downgrade security (prevents algorithm confusion attacks where
     an attacker sends alg:HS256 to reduce from 256-bit to 128-bit).
@@ -194,7 +194,7 @@ def jwt_decode(token: str, secret: str, algorithm: str = "HS512") -> dict[str, A
             return None
         header_b64, payload_b64, sig_b64 = parts
 
-        # S136 audit fix: validate header alg matches server expectation.
+        # Audit fix: validate header alg matches server expectation.
         # Never use attacker-supplied alg for verification.
         try:
             header = json.loads(_b64url_decode(header_b64))
@@ -284,7 +284,7 @@ class AuthManager:
         self.db_path = self._resolve_db_path(db_path)
         self._init_db()
         self._ensure_jwt_secret()
-        # S136 audit fix: pre-compute a dummy bcrypt hash for timing oracle
+        # Audit fix: pre-compute a dummy bcrypt hash for timing oracle
         # prevention in authenticate(). This ensures that failed lookups
         # take the same time as successful ones (bcrypt ~200ms).
         self._dummy_hash = hash_password("__timing_oracle_dummy__")
@@ -345,8 +345,8 @@ class AuthManager:
     def _ensure_jwt_secret(self):
         """Ensure a JWT secret key exists (generate if empty).
 
-        S129: Wraps the JWT secret in SecureBytes for memory protection.
-        S136 audit fix: the plaintext secret is removed from the config
+        Wraps the JWT secret in SecureBytes for memory protection.
+        Audit fix: the plaintext secret is removed from the config
         dict after being wrapped in SecureBytes, so only the mlock'd
         copy remains in memory.
         """
@@ -356,11 +356,11 @@ class AuthManager:
             self.config.setdefault("jwt", {})["secret_key"] = jwt_cfg["secret_key"]
             logger.info("Generated new JWT secret key")
 
-        # S129: Wrap in SecureBytes for memory protection
+        # Wrap in SecureBytes for memory protection
         secret_str = jwt_cfg.get("secret_key", "")
         if _SECURE_BYTES_AVAILABLE and secret_str:
             self._jwt_secure_key = _SecureBytes(secret_str.encode("utf-8"))
-            # S136 audit fix: remove plaintext from config dict.
+            # Audit fix: remove plaintext from config dict.
             # The secret is now only accessible via SecureBytes.
             jwt_cfg["secret_key"] = "[PROTECTED_BY_SECUREBYTES]"
             self.config.setdefault("jwt", {})["secret_key"] = "[PROTECTED_BY_SECUREBYTES]"
@@ -370,8 +370,8 @@ class AuthManager:
     def _get_jwt_secret(self) -> str:
         """Return the JWT signing secret as a string.
 
-        S129: Reads from SecureBytes if available.
-        S136 audit fix: config dict no longer holds the real secret
+        Reads from SecureBytes if available.
+        Audit fix: config dict no longer holds the real secret
         (replaced with sentinel), so the fallback only works when
         SecureBytes is not available (i.e. the secret was never wrapped).
         """
@@ -393,7 +393,7 @@ class AuthManager:
     def _get_conn(self) -> sqlite3.Connection:
         """Get a SQLite connection with WAL mode.
 
-        S136 audit fix: routes through get_encrypted_connection() for
+        Audit fix: routes through get_encrypted_connection() for
         SQLCipher support when available.
         """
         conn = safe_connect(str(self.db_path), timeout=10.0)
@@ -709,7 +709,7 @@ class AuthManager:
     def authenticate(self, username: str, password: str) -> User | None:
         """Verify username + password. Returns User on success, None on failure.
 
-        S136 audit fix: performs a dummy password verification even when
+        Audit fix: performs a dummy password verification even when
         the user does not exist, to prevent timing oracle attacks that
         could enumerate valid usernames (bcrypt takes ~200ms vs instant
         return for non-existent users).
@@ -726,7 +726,7 @@ class AuthManager:
     def create_tokens(self, user: User) -> AuthToken:
         """Create JWT access + refresh tokens for a user."""
         jwt_cfg = self.config.get("jwt", {})
-        secret = self._get_jwt_secret()  # S129: SecureBytes-backed
+        secret = self._get_jwt_secret()  # SecureBytes-backed
         algorithm = jwt_cfg.get("algorithm", "HS512")
         access_expiry_min = jwt_cfg.get("access_token_expiry_minutes", 60)
         refresh_expiry_days = jwt_cfg.get("refresh_token_expiry_days", 30)
@@ -763,7 +763,7 @@ class AuthManager:
     def validate_token(self, token: str) -> dict[str, Any] | None:
         """Validate a JWT access token. Returns payload or None."""
         jwt_cfg = self.config.get("jwt", {})
-        secret = self._get_jwt_secret()  # S129: SecureBytes-backed
+        secret = self._get_jwt_secret()  # SecureBytes-backed
         algorithm = jwt_cfg.get("algorithm", "HS512")
         payload = jwt_decode(token, secret, algorithm)
         if not payload:
@@ -1004,7 +1004,7 @@ class AuthManager:
     ):
         """Record an action in the audit log.
 
-        S130: Also forwards to the hash-chain signed audit log.
+        Also forwards to the hash-chain signed audit log.
         """
         conn = self._get_conn()
         try:
@@ -1020,7 +1020,7 @@ class AuthManager:
         finally:
             conn.close()
 
-        # S130: Forward to hash-chain signed audit log
+        # Forward to hash-chain signed audit log
         try:
             from opti_oignon.signed_audit_log import chain_log
             chain_log(
@@ -1174,7 +1174,7 @@ class AuthManager:
 
 
 # ---------------------------------------------------------------------------
-# S124: Login rate limiting
+# Login rate limiting
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -1187,7 +1187,7 @@ class _RateLimitEntry:
 
 
 class LoginRateLimiter:
-    """In-memory rate limiter for login endpoints (S124).
+    """In-memory rate limiter for login endpoints.
 
     Tracks failed attempts per IP address and per username with:
     - Sliding window: max N attempts per time window

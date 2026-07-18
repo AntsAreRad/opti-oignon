@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Authentication API routes (S98, updated S127).
+Authentication API routes.
 
 POST   /api/auth/register           -- Create account
 POST   /api/auth/login              -- Get JWT token (or 2FA challenge)
-POST   /api/auth/login/2fa          -- Complete 2FA challenge (S127)
+POST   /api/auth/login/2fa          -- Complete 2FA challenge
 POST   /api/auth/logout             -- Invalidate session
 POST   /api/auth/refresh            -- Refresh token pair
 GET    /api/auth/me                 -- Get current user profile
@@ -114,7 +114,7 @@ class TokenResponse(BaseModel):
 
 
 class TwoFALoginRequest(BaseModel):
-    """Request body for 2FA login step (S127)."""
+    """Request body for 2FA login step."""
     challenge_id: str = Field(description="Challenge ID from step-1 login")
     code: str = Field(default="", description="TOTP or recovery code")
     method: str = Field(default="auto", description="2FA method: auto, totp, recovery, webauthn")
@@ -124,7 +124,7 @@ class TwoFALoginRequest(BaseModel):
 
 
 # =============================================================================
-# 2FA CHALLENGE STORE (S127)
+# 2FA CHALLENGE STORE
 # =============================================================================
 
 class _ChallengeStore:
@@ -233,7 +233,7 @@ def _get_settings_store():
 
 
 def _get_2fa_manager():
-    """Get the 2FA manager singleton (S127).
+    """Get the 2FA manager singleton.
 
     Returns None if the auth_2fa module is not available,
     allowing graceful degradation (login works without 2FA).
@@ -246,7 +246,7 @@ def _get_2fa_manager():
 
 
 def _get_rate_limiter():
-    """Get the login rate limiter singleton (S124)."""
+    """Get the login rate limiter singleton."""
     try:
         from opti_oignon.auth import login_rate_limiter
         return login_rate_limiter
@@ -255,9 +255,9 @@ def _get_rate_limiter():
 
 
 def _extract_client_ip(request: Request) -> str:
-    """Extract client IP from request (S124, S136 audit fix).
+    """Extract client IP from request (audit-hardened).
 
-    S136 audit fix: X-Forwarded-For is NOT trusted by default because
+    Audit fix: X-Forwarded-For is NOT trusted by default because
     it is attacker-controlled.  An attacker can send a different value
     per request to bypass rate limiting entirely.
 
@@ -280,7 +280,7 @@ def _extract_client_ip(request: Request) -> str:
 
 
 def _get_security_jwt_config() -> dict:
-    """Load JWT cookie configuration from security.yaml (S125)."""
+    """Load JWT cookie configuration from security.yaml."""
     from pathlib import Path
 
     import yaml
@@ -296,16 +296,16 @@ def _get_security_jwt_config() -> dict:
 
 
 def _is_cookie_mode() -> bool:
-    """Check if httpOnly cookie mode is enabled (S125)."""
+    """Check if httpOnly cookie mode is enabled."""
     return _get_security_jwt_config().get("cookie_mode", True)
 
 
 def _is_csrf_enabled() -> bool:
-    """Check if CSRF protection is enabled (S125 hardening)."""
+    """Check if CSRF protection is enabled."""
     return _get_security_jwt_config().get("csrf_enabled", True)
 
 
-# S125: Cookie names for httpOnly JWT storage
+# Cookie names for httpOnly JWT storage
 _ACCESS_COOKIE = "oo_access_token"
 _REFRESH_COOKIE = "oo_refresh_token"
 _CSRF_COOKIE = "oo_csrf_token"
@@ -346,7 +346,7 @@ def _generate_csrf_token() -> str:
 
 
 def _is_remote_client(request: Request) -> bool:
-    """Check if the request comes from a non-localhost client (S133).
+    """Check if the request comes from a non-localhost client.
 
     Used to apply hardened cookie settings for remote sessions.
     """
@@ -365,12 +365,12 @@ def _set_auth_cookies(
     refresh_token: str,
     access_max_age: int = 3600,
 ) -> None:
-    """Set httpOnly JWT cookies on a response (S125, hardened).
+    """Set httpOnly JWT cookies on a response (hardened).
 
     Access token: short-lived (default 1h local, 5min remote).
     Refresh token: long-lived (30 days local, 1h remote).
     Both httpOnly (not accessible via JS).
-    SameSite: Lax local, Strict remote (S133).
+    SameSite: Lax local, Strict remote.
     Secure flag auto-detected from request context.
     CSRF token set as a non-httpOnly cookie (readable by JS for header).
     """
@@ -380,7 +380,7 @@ def _set_auth_cookies(
     domain = jwt_cfg.get("cookie_domain", "") or None
     path = jwt_cfg.get("cookie_path", "/")
 
-    # S133: Detect remote context and apply hardened settings
+    # Detect remote context and apply hardened settings
     is_remote = _is_remote_client(request)
     if is_remote:
         access_max_age = 300  # 5 minutes for remote sessions
@@ -411,7 +411,7 @@ def _set_auth_cookies(
         path=path,
     )
 
-    # S125 hardening: CSRF double-submit cookie
+    # Hardening: CSRF double-submit cookie
     if _is_csrf_enabled():
         csrf_token = _generate_csrf_token()
         response.set_cookie(
@@ -427,7 +427,7 @@ def _set_auth_cookies(
 
 
 def _clear_auth_cookies(response: Response) -> None:
-    """Remove httpOnly JWT cookies and CSRF cookie (S125)."""
+    """Remove httpOnly JWT cookies and CSRF cookie."""
     jwt_cfg = _get_security_jwt_config()
     domain = jwt_cfg.get("cookie_domain", "") or None
     path = jwt_cfg.get("cookie_path", "/")
@@ -437,7 +437,7 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 def _validate_csrf(request: Request) -> None:
-    """Validate CSRF double-submit cookie pattern (S125 hardening).
+    """Validate CSRF double-submit cookie pattern.
 
     For state-changing requests (POST, PUT, DELETE), verify that the
     X-CSRF-Token header matches the oo_csrf_token cookie value.
@@ -477,15 +477,15 @@ def _get_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
 ):
-    """Extract and validate the current user (S125: cookie-first, then header).
+    """Extract and validate the current user (cookie-first, then header).
 
     In single-user mode, returns a synthetic local user.
-    S136 audit fix: Bulbe mode overrides single_user_mode — authentication
+    Audit fix: Bulbe mode overrides single_user_mode — authentication
     is always required in Bulbe regardless of the single_user_mode setting.
     """
     mgr = _get_auth_manager()
 
-    # S136 audit fix: check Bulbe mode — never bypass auth in Bulbe
+    # Audit fix: check Bulbe mode — never bypass auth in Bulbe
     _bulbe_active = False
     try:
         from opti_oignon.security_mode import is_bulbe
@@ -502,7 +502,7 @@ def _get_current_user(
             "type": "access",
         }
 
-    # S125: Try cookie first if cookie_mode enabled
+    # Try cookie first if cookie_mode enabled
     token = None
     if _is_cookie_mode():
         token = request.cookies.get(_ACCESS_COOKIE)
@@ -540,13 +540,13 @@ def _require_admin(current_user: dict = Depends(_get_current_user)):
 
 
 async def authenticate_websocket(websocket) -> dict | None:
-    """Authenticate a WebSocket connection (S136 audit fix).
+    """Authenticate a WebSocket connection (audit-hardened).
 
     Extracts JWT from:
       1. Cookie (oo_access_token) — browser clients
       2. Query parameter (?token=xxx) — CLI/API clients
 
-    S136 audit fix: validates the Origin header to prevent Cross-Site
+    Audit fix: validates the Origin header to prevent Cross-Site
     WebSocket Hijacking (CSWSH).  A malicious website cannot connect
     to ws://localhost:8000 because the browser sends the attacker's
     Origin, which fails the check.
@@ -554,7 +554,7 @@ async def authenticate_websocket(websocket) -> dict | None:
     Returns the validated payload dict, or None if auth fails.
     In single-user mode (non-Bulbe), returns a synthetic local user.
     """
-    # S136 audit fix: validate Origin header (CSWSH prevention)
+    # Audit fix: validate Origin header (CSWSH prevention)
     origin = websocket.headers.get("origin", "")
     if origin:
         from urllib.parse import urlparse
@@ -637,7 +637,7 @@ class AuthModeRequest(BaseModel):
 def set_auth_mode(req: AuthModeRequest) -> dict:
     """Toggle single-user mode (enable/disable authentication).
 
-    S109: Allows users to switch auth on/off from the Settings UI.
+    Allows users to switch auth on/off from the Settings UI.
     Updates both the in-memory config and the YAML file on disk.
     """
     from pathlib import Path
@@ -677,7 +677,7 @@ def set_auth_mode(req: AuthModeRequest) -> dict:
 def register(req: RegisterRequest, request: Request, response: Response) -> dict:
     """Register a new user account and return tokens.
 
-    S125: Also sets httpOnly cookies when cookie_mode is enabled.
+    Also sets httpOnly cookies when cookie_mode is enabled.
     """
     mgr = _get_auth_manager()
 
@@ -704,7 +704,7 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
 
     tokens = mgr.create_tokens(user)
 
-    # S125: Set httpOnly cookies
+    # Set httpOnly cookies
     if _is_cookie_mode():
         _set_auth_cookies(
             request,
@@ -719,19 +719,19 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
 
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest, request: Request, response: Response) -> dict:
-    """Authenticate and get JWT tokens (S127: 2-step 2FA flow).
+    """Authenticate and get JWT tokens (2-step 2FA flow).
 
     Step 1: username + password.
       - If 2FA is NOT active: return JWT tokens immediately.
       - If 2FA IS active: return ``{requires_2fa: true, challenge_id, methods}``
         with NO tokens yet.  Client must call ``POST /login/2fa`` next.
 
-    S124: Rate-limited per IP and per username.
-    S125: Sets httpOnly cookies when cookie_mode is enabled.
+    Rate-limited per IP and per username.
+    Sets httpOnly cookies when cookie_mode is enabled.
     """
     mgr = _get_auth_manager()
 
-    # S124: Check rate limit BEFORE attempting authentication
+    # Check rate limit BEFORE attempting authentication
     rate_limiter = _get_rate_limiter()
     client_ip = _extract_client_ip(request)
 
@@ -752,7 +752,7 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
 
     user = mgr.authenticate(req.username, req.password)
     if not user:
-        # S124: Record failure
+        # Record failure
         if rate_limiter:
             rate_limiter.record_failure(client_ip, req.username)
         raise HTTPException(
@@ -760,11 +760,11 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
             detail="Invalid username or password.",
         )
 
-    # S124: Record success (resets username counters)
+    # Record success (resets username counters)
     if rate_limiter:
         rate_limiter.record_success(client_ip, req.username)
 
-    # S127: Check if 2FA is active for this user
+    # Check if 2FA is active for this user
     tfa_mgr = _get_2fa_manager()
     if tfa_mgr is not None:
         try:
@@ -803,7 +803,7 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
     mgr._log_audit(user.user_id, "login", "user", user.user_id)
     tokens = mgr.create_tokens(user)
 
-    # S125: Set httpOnly cookies
+    # Set httpOnly cookies
     if _is_cookie_mode():
         _set_auth_cookies(
             request,
@@ -818,7 +818,7 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
 
 @router.post("/login/2fa", response_model=TokenResponse)
 def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> dict:
-    """Complete 2FA login (S127 step 2).
+    """Complete 2FA login (step 2).
 
     Validates the 2FA code/response against the challenge issued in step 1.
     On success, returns JWT tokens.  On failure, returns 403.
@@ -903,7 +903,7 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
     )
     tokens = mgr.create_tokens(user)
 
-    # S125: Set httpOnly cookies
+    # Set httpOnly cookies
     if _is_cookie_mode():
         _set_auth_cookies(
             request,
@@ -924,11 +924,11 @@ def refresh_token(
 ) -> dict:
     """Exchange a refresh token for a new token pair.
 
-    S125: Accepts refresh token from httpOnly cookie or request body.
+    Accepts refresh token from httpOnly cookie or request body.
     """
     mgr = _get_auth_manager()
 
-    # S125: Get refresh token from cookie or body
+    # Get refresh token from cookie or body
     rt = None
     if req and req.refresh_token:
         rt = req.refresh_token
@@ -942,7 +942,7 @@ def refresh_token(
 
     tokens = mgr.refresh_tokens(rt)
     if not tokens:
-        # S125: Clear stale cookies on failure
+        # Clear stale cookies on failure
         if _is_cookie_mode():
             _clear_auth_cookies(response)
         raise HTTPException(
@@ -950,7 +950,7 @@ def refresh_token(
             detail="Invalid or expired refresh token. Please log in again.",
         )
 
-    # S125: Set new cookies
+    # Set new cookies
     if _is_cookie_mode():
         _set_auth_cookies(
             request,
@@ -965,14 +965,14 @@ def refresh_token(
 
 @router.post("/logout")
 def logout(request: Request, response: Response, req: LogoutRequest | None = None) -> dict:
-    """Invalidate a session and clear cookies (S125).
+    """Invalidate a session and clear cookies.
 
-    S125: Accepts refresh token from httpOnly cookie or request body.
+    Accepts refresh token from httpOnly cookie or request body.
     Clears httpOnly cookies on logout.
     """
     mgr = _get_auth_manager()
 
-    # S125: Get refresh token from body or cookie
+    # Get refresh token from body or cookie
     rt = None
     if req and req.refresh_token:
         rt = req.refresh_token
@@ -983,7 +983,7 @@ def logout(request: Request, response: Response, req: LogoutRequest | None = Non
     if rt:
         ok = mgr.logout(rt)
 
-    # S125: Always clear cookies on logout
+    # Always clear cookies on logout
     if _is_cookie_mode():
         _clear_auth_cookies(response)
 

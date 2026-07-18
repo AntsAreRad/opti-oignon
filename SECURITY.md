@@ -95,7 +95,7 @@ active backend's provenance coverage as an advisory warning.
 ### Layer 3 -- Isolation and sandboxing
 
 Sandbox Manager runs every LLM filesystem, shell, and code tool inside a
-disposable bubblewrap (bwrap) sandbox. Containment (S209): kernel namespaces
+disposable bubblewrap (bwrap) sandbox. Containment: kernel namespaces
 (unshare-net, unshare-pid, unshare-ipc/uts/cgroup), a seccomp-BPF syscall
 denylist on every launch (fail-secure: if the filter cannot build and
 seccomp is required, the launch is refused), resource caps via rlimits or a
@@ -104,7 +104,7 @@ core dumps), a tmpfs size cap, a cleared environment, and read-only system
 binds. If bwrap is unavailable, strict mode refuses execution rather than
 falling back to the host.
 
-The S73/S74 contract holds across the workspace cycle (S209-S213), clause
+The hard-sandbox contract holds across the workspace cycle, clause
 by clause: the sandbox stays a fully isolated, disposable environment (a
 workspace is destroyed on demand, on TTL, or on conversation close); host
 filesystem and network access stay zero by default; files enter only by
@@ -115,7 +115,7 @@ baseline are approved individually, deletions are confirmed separately, the
 apply writer is symlink-safe, and the applied set is hash-bound to the
 reviewed diff. Auto-apply does not exist.
 
-The optional sandbox network (S213) is default-off, per-workspace,
+The optional sandbox network is default-off, per-workspace,
 user-activated only (no configuration default, no tool surface, never
 model-triggerable), and Daily-only at a fail-secure binding-layer gate: an
 unset, unknown, or undeterminable mode is treated as Bulbe and refused. The
@@ -174,7 +174,7 @@ JSON for USB backup, and plain-text clipboard anchor. HMAC verification
 on imported anchors. Startup security checklist with scoring API runs
 on every backend start.
 
-The Resource Governor (S221-S227) is an availability control, not a
+The Resource Governor is an availability control, not a
 confidentiality or integrity boundary: it admits or refuses model loads
 against measured VRAM/RAM, applies runtime backpressure, and manages
 limits, failing open on missing measurement so it can never deny service
@@ -336,12 +336,11 @@ checksums only. The workflow:
 
 ## Security Audit History
 
-### S155-S156 audit cycle (v3.2.4-v3.2.5)
+### Tooling-assisted audit cycle
 
 Full codebase audit using pip-audit, npm audit, bandit, and a custom
 18-check static scanner. 38 findings across 4 severity levels. All
-critical and high findings remediated in S156. Detailed results in
-[docs/SECURITY_AUDIT_S155.md](docs/SECURITY_AUDIT_S155.md).
+critical and high findings remediated in the same cycle.
 
 Key remediations:
 
@@ -351,9 +350,9 @@ Key remediations:
 - Path traversal guards on user-supplied file paths
 - SSRF protections on user-controlled URL inputs
 
-### S136 manual audit (v3.0.0)
+### Manual audit
 
-4-round manual security audit during the S126-S136 hardening cycle.
+4-round manual security audit during the hardening cycle.
 22 findings, 20 fixed. Established the six-layer defense architecture.
 
 
@@ -368,7 +367,7 @@ report it responsibly:
 3. Allow reasonable time for a fix before public disclosure
 4. Security fixes are prioritized and released as patch versions
 
-The red team engine (S147-S148) continuously tests the defense layers.
+The red team engine continuously tests the defense layers.
 If you find a bypass that the red team does not detect, that is
 especially valuable to report.
 
@@ -386,4 +385,3 @@ especially valuable to report.
   rate limiting
 - [Red Team Guide](docs/redteam/running-audits.md) -- running LLM
   security audits
-- [Security Audit Report](docs/SECURITY_AUDIT_S155.md) -- S155 findings

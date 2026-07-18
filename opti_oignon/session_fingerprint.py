@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SESSION FINGERPRINT - OPTI-OIGNON v1.7.7 (S75)
+SESSION FINGERPRINT - OPTI-OIGNON
 ================================================
 
 Lightweight session fingerprinting for coding agent context injection.
@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

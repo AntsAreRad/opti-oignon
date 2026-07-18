@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Conversation Branching -- Opti-Oignon S97
+Conversation Branching -- Opti-Oignon
 ==========================================
 
 Fork conversations at any message, explore alternative paths,
@@ -54,8 +54,8 @@ from opti_oignon.db_utils import safe_connect
 
 logger = logging.getLogger(__name__)
 
-# S138: Allowed column names for dynamic UPDATE queries
-_BRANCH_UPDATE_COLS = frozenset({"name", "color", "metadata"})
+# Allowed column names for dynamic UPDATE queries
+_BRANCH_UPDATE_COLS = frozenset({"name", "color", "metadata", "updated_at"})
 
 # ---------------------------------------------------------------------------
 # Config loading
@@ -285,7 +285,7 @@ class ConversationBranchManager:
     def _get_connection(self) -> sqlite3.Connection:
         """Create a configured SQLite connection.
 
-        S136 audit fix: routes through get_encrypted_connection().
+        Audit fix: routes through get_encrypted_connection().
         """
         conn = safe_connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -597,7 +597,7 @@ class ConversationBranchManager:
                     params.append(json.dumps(existing_meta))
 
                 params.append(branch_id)
-                # S138: validate column names against allowlist
+                # validate column names against allowlist
                 for u in updates:
                     col = u.split("=")[0].strip()
                     assert col in _BRANCH_UPDATE_COLS, f"Invalid column: {col}"
