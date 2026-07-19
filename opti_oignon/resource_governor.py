@@ -516,6 +516,15 @@ class GovernorConfig:
     snapshot_ttl_s: float = 2.0
     # GiB of KV cache per 1024 tokens of requested num_ctx (DI-4).
     kv_coefficient: float = 0.5
+    # Dynamic context quantum: when enabled, the admitted num_ctx lands
+    # on the ctx_ladder (a between-steps request rounds UP so a growing
+    # conversation keeps one stable quantum), capped by a live ceiling
+    # derived from the VRAM left after weights through the KV
+    # coefficient. Unknown capacity caps the quantum to the conservative
+    # value below instead of passing the raw request through -- the
+    # admission itself stays fail-open; only the quantum is fail-secure.
+    dynamic_ctx_enabled: bool = False
+    dynamic_ctx_unknown_ceiling: int = 8192
     # S259 per-model KV overrides (resolution: exact model name >
     # longest matching family substring > the global coefficient above,
     # which stays the fail-secure answer for any model neither table
@@ -598,6 +607,15 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
     )
     cfg.snapshot_ttl_s = _as_float(raw.get("snapshot_ttl_s"), cfg.snapshot_ttl_s)
     cfg.kv_coefficient = _as_float(raw.get("kv_coefficient"), cfg.kv_coefficient)
+
+    dyn = raw.get("dynamic_ctx")
+    if isinstance(dyn, dict):
+        cfg.dynamic_ctx_enabled = _as_bool(
+            dyn.get("enabled"), cfg.dynamic_ctx_enabled
+        )
+        cfg.dynamic_ctx_unknown_ceiling = _as_int(
+            dyn.get("unknown_ctx_ceiling"), cfg.dynamic_ctx_unknown_ceiling
+        )
     overrides = raw.get("kv_overrides")
     if isinstance(overrides, dict):
         cfg.kv_override_models = _as_kv_override_map(overrides.get("models"))
@@ -2386,6 +2404,15 @@ class ResourceGovernor:
         effective_ctx = self._clamp_ctx(model, requested_ctx)
         known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
 
+        # The dynamic quantum runs AFTER the model-window clamp: the
+        # clamp answers what the model can hold, the stage answers what
+        # the machine should allocate. The pre-stage value keeps the
+        # clamp reason honest below.
+        _clamped_ctx = effective_ctx
+        effective_ctx, _dyn_applied = self._dynamic_ctx_stage(
+            effective_ctx, model, snapshot, known_weights
+        )
+
         def _cost(ctx: int | None) -> float:
             return known_weights + self.estimate_kv_cache_gb(ctx, model=model)
 
@@ -2411,7 +2438,11 @@ class ResourceGovernor:
                     model=model,
                     num_ctx=effective_ctx,
                     action="admit",
-                    reason="capacity_unknown_fail_open",
+                    reason=(
+                        "capacity_unknown_fail_open+ctx_capped"
+                        if _dyn_applied
+                        else "capacity_unknown_fail_open"
+                    ),
                     provenance=provenance,
                     ticket_id=ticket_id,
                     caller=caller,
@@ -2459,11 +2490,13 @@ class ResourceGovernor:
             if action == "downsize":
                 reason_parts.append("ctx_laddered_to_fit")
             elif (
-                effective_ctx is not None
+                _clamped_ctx is not None
                 and requested_ctx is not None
-                and effective_ctx < requested_ctx
+                and _clamped_ctx < requested_ctx
             ):
                 reason_parts.append("clamped_to_model_limit")
+            if _dyn_applied:
+                reason_parts.append("ctx_quantized")
             if conditional:
                 reason_parts.append("conditional_on_eviction")
             if not reason_parts:
@@ -2543,6 +2576,61 @@ class ResourceGovernor:
         if window > 0:
             return min(int(requested_ctx), window)
         return int(requested_ctx)
+
+    def _ladder_quantize_up(self, ctx: int) -> int:
+        """The smallest ladder step at or above ``ctx``; above the top,
+        the top itself -- the quantum never leaves the ladder."""
+        steps = sorted(int(s) for s in self._config.ctx_ladder if int(s) > 0)
+        if not steps:
+            return int(ctx)
+        for step in steps:
+            if ctx <= step:
+                return step
+        return steps[-1]
+
+    def _dynamic_ctx_stage(
+        self,
+        effective_ctx: int | None,
+        model: str | None,
+        snapshot: ResourceSnapshot,
+        known_weights_gb: float,
+    ) -> tuple[int | None, bool]:
+        """Ladder-quantized context under a live ceiling: (value, applied).
+
+        Off, or without a request, the input passes through untouched.
+        On, the request rounds UP to its ladder step so a growing
+        conversation keeps one stable quantum, capped by a ceiling: the
+        configured conservative value when capacity is unknown (the
+        admission itself stays deliberately fail-open; only the quantum
+        is capped), else the highest step whose KV estimate fits the
+        VRAM left after weights and margin. A ceiling below the lowest
+        step still answers the lowest step: refusing is the fit math's
+        job, never this stage's.
+        """
+        if not self._config.dynamic_ctx_enabled or not effective_ctx:
+            return effective_ctx, False
+        quantized = self._ladder_quantize_up(int(effective_ctx))
+        steps = sorted(int(s) for s in self._config.ctx_ladder if int(s) > 0)
+        if snapshot.capacity_gb is None:
+            ceiling = int(self._config.dynamic_ctx_unknown_ceiling)
+        else:
+            kv_budget_gb = (
+                snapshot.capacity_gb
+                - snapshot.vram_in_use_gb
+                - self._config.safety_margin_gb
+                - known_weights_gb
+            )
+            coeff = self.resolve_kv_coefficient(model)
+            tokens = 0
+            if coeff > 0 and kv_budget_gb > 0:
+                tokens = int((kv_budget_gb / coeff) * 1024.0)
+            fitting = [s for s in steps if s <= tokens]
+            if fitting:
+                ceiling = max(fitting)
+            else:
+                ceiling = steps[0] if steps else quantized
+        value = min(quantized, ceiling)
+        return value, value != int(effective_ctx)
 
     def _evictable_now_gb(self, snapshot: ResourceSnapshot) -> float:
         """Summed size_vram of loaded models idle past the threshold (4.2).

@@ -1222,26 +1222,27 @@ class Executor:
             logger.error(f"Error during summarization: {e}")
             return False
 
-    def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
-        """Append the memory block to the system prompt if available and enabled.
+    def _compose_memory_context(self, question: str | None = None) -> str:
+        """The wrapped working-memory block, or an empty string.
 
         Builds the unified working block: the salient durable facts (always
         present, ranked by use_count x recency) plus query-relevant facts,
         composed from the memory store in one token budget and deduplicated. The
         full uncompressed archive remains searchable for recovery. The block is
-        wrapped as untrusted context before it is appended: stored facts are
+        wrapped as untrusted context before it is handed back: stored facts are
         data, not instructions, and when the wrapper is unavailable the block
-        is dropped rather than injected bare.
+        is dropped rather than returned bare. Where the caller places the
+        wrapped block is the caller's choice; the envelope is not.
 
         Args:
-            system_prompt: the current system prompt
             question: the current question, used to rank the working block
 
         Returns:
-            system prompt with memory section appended, or unchanged
+            the wrapped block, or an empty string when there is nothing
+            safe to place
         """
         if not self._memory_enabled:
-            return system_prompt
+            return ""
 
         # M3: the memory store is now the single source of truth (the legacy
         # store has been migrated into it and the write paths are unified), so
@@ -1272,51 +1273,71 @@ class Executor:
                     "Untrusted-context wrapper unavailable; memory block "
                     "dropped rather than injected unwrapped."
                 )
-                return system_prompt
+                return ""
             wrapped = _wrap_untrusted(
                 memory_block, source=_UNTRUSTED_SOURCE_MEMORY
             )
             if wrapped:
-                return system_prompt + "\n\n" + wrapped
+                return wrapped
+        return ""
+
+    def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
+        """Append the memory block to the system prompt if available and enabled.
+
+        Delegates the composition and the untrusted envelope to
+        :meth:`_compose_memory_context`; this method only owns the
+        historical placement (appended to the head with a blank-line
+        separator) and is a byte-level no-op when there is nothing to add.
+
+        Args:
+            system_prompt: the current system prompt
+            question: the current question, used to rank the working block
+
+        Returns:
+            system prompt with memory section appended, or unchanged
+        """
+        wrapped = self._compose_memory_context(question)
+        if wrapped:
+            return system_prompt + "\n\n" + wrapped
         return system_prompt
 
-    def _inject_project_context(
+    def _compose_project_context(
         self,
-        system_prompt: str,
         question: str,
         conversation_id: str | None,
         on_status: Callable[[str], None] | None = None,
     ) -> str:
-        """Inject project context into the system prompt if applicable.
+        """The project context text for this turn, or an empty string.
 
         Checks if the conversation is linked to a project, runs trigger
-        detection, and if relevant, retrieves RAG context and appends it.
-        Always injects system_instructions for project conversations,
-        even if RAG retrieval is skipped.
+        detection, and if relevant, retrieves RAG context. Falls back to
+        system_instructions for project conversations even if RAG
+        retrieval is skipped. Where the caller places the text is the
+        caller's choice; the retrieval is not.
 
         Args:
-            system_prompt: The current system prompt.
             question: The user's question (for trigger detection + RAG query).
             conversation_id: The conversation ID (to find linked project).
             on_status: Optional status callback.
 
         Returns:
-            System prompt with project context appended, or unchanged.
+            the retrieved context text, or an empty string when there is
+            nothing to add
         """
         if not PROJECT_CONTEXT_AVAILABLE:
-            return system_prompt
+            return ""
 
         if not conversation_id or _project_store is None:
-            return system_prompt
+            return ""
 
         # Find linked project
         try:
             project_id = _project_store.get_project_for_conversation(conversation_id)
         except Exception:
-            return system_prompt
+            return ""
 
         if not project_id:
-            return system_prompt
+            return ""
 
         def _status(msg: str):
             if on_status:
@@ -1340,7 +1361,7 @@ class Executor:
 
         # Build context
         if _project_context_builder is None:
-            return system_prompt
+            return ""
 
         try:
             if use_rag and _project_context_builder.available:
@@ -1355,11 +1376,41 @@ class Executor:
                     f"[OK] Project context injected: "
                     f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate} tokens"
                 )
-                return system_prompt + "\n\n" + ctx.context_text
+                return ctx.context_text
 
         except Exception as e:
             logger.warning("Project context injection failed: %s", e)
 
+        return ""
+
+    def _inject_project_context(
+        self,
+        system_prompt: str,
+        question: str,
+        conversation_id: str | None,
+        on_status: Callable[[str], None] | None = None,
+    ) -> str:
+        """Inject project context into the system prompt if applicable.
+
+        Delegates retrieval to :meth:`_compose_project_context`; this
+        method only owns the historical placement (appended to the head
+        with a blank-line separator) and is a byte-level no-op when there
+        is nothing to add.
+
+        Args:
+            system_prompt: The current system prompt.
+            question: The user's question (for trigger detection + RAG query).
+            conversation_id: The conversation ID (to find linked project).
+            on_status: Optional status callback.
+
+        Returns:
+            System prompt with project context appended, or unchanged.
+        """
+        text = self._compose_project_context(
+            question, conversation_id, on_status=on_status
+        )
+        if text:
+            return system_prompt + "\n\n" + text
         return system_prompt
 
     def _build_conversation_messages(
@@ -1368,12 +1419,18 @@ class Executor:
         conversation_id: str,
         current_message: str,
         model: str,
+        volatile_block: str | None = None,
     ) -> tuple[list[dict[str, str]], int, dict[str, Any]]:
         """Build the full messages array with conversation history.
 
         Loads conversation history from the conversation backend,
         applies intelligent sliding window if context limits are approached,
         and returns an Ollama-ready messages list with window stats.
+        When ``volatile_block`` is a non-empty string, it rides one
+        trailing system message placed after the history and before the
+        user turn, and its cost counts toward the fixed token budget so
+        every trim threshold sees the same totals as the historical
+        head-appended layout.
 
         Trimming strategy (S17):
         1. Intelligent summary (context_summary) if the threshold is reached
@@ -1405,10 +1462,14 @@ class Executor:
 
         available_for_input = context_window - output_reserve
 
-        # Estimate the tokens of the fixed parts (system + current message)
+        # Estimate the tokens of the fixed parts (system + relocated
+        # tail + current message)
         system_tokens = self._estimate_tokens(system_prompt, model)
+        volatile_tokens = (
+            self._estimate_tokens(volatile_block, model) if volatile_block else 0
+        )
         current_tokens = self._estimate_tokens(current_message, model)
-        fixed_tokens = system_tokens + current_tokens
+        fixed_tokens = system_tokens + volatile_tokens + current_tokens
 
         # Retrieve conversation history
         history = []
@@ -1583,6 +1644,8 @@ class Executor:
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if history:
             messages.extend(history)
+        if volatile_block:
+            messages.append({"role": "system", "content": volatile_block})
         messages.append({"role": "user", "content": current_message})
 
         logger.info(
@@ -1890,8 +1953,30 @@ class Executor:
         if system_prompt_suffix:
             system_prompt = system_prompt + system_prompt_suffix
 
+        # Stable-prefix placement: when the context pipeline config asks
+        # for it, the per-turn blocks (memory, web results, archive
+        # snippets, project retrieval) leave the leading system message
+        # and ride one trailing context message instead, so the leading
+        # bytes -- and the KV cache a local engine computed over them --
+        # survive from turn to turn. The flag lives in the context
+        # pipeline config; unreadable means off, the historical layout.
+        _stable_prefix_active = False
+        if CONTEXT_OPTIMIZER_AVAILABLE and _get_context_optimizer is not None:
+            try:
+                _sp_raw = _get_context_optimizer().config.get("stable_prefix")
+                if isinstance(_sp_raw, dict):
+                    _stable_prefix_active = bool(_sp_raw.get("enabled", False))
+            except Exception:
+                _stable_prefix_active = False
+        _volatile_parts: list[str] = []
+
         # Step 2c: Inject memory facts (Session 11 -- F1; S174 dual-layer)
-        system_prompt = self._inject_memory(system_prompt, refined_question)
+        if _stable_prefix_active:
+            _mem_wrapped = self._compose_memory_context(refined_question)
+            if _mem_wrapped:
+                _volatile_parts.append("\n\n" + _mem_wrapped)
+        else:
+            system_prompt = self._inject_memory(system_prompt, refined_question)
 
         # S123: Check if context optimizer handles project injection
         _s123_optimizer_active = (
@@ -1904,9 +1989,16 @@ class Executor:
         # Step 2c-bis: Inject project context (S58)
         # Skipped when S123 optimizer is active (it handles RAG with budget passthrough)
         if not _s123_optimizer_active:
-            system_prompt = self._inject_project_context(
-                system_prompt, question, conversation_id, on_status=status,
-            )
+            if _stable_prefix_active:
+                _proj_text = self._compose_project_context(
+                    question, conversation_id, on_status=status,
+                )
+                if _proj_text:
+                    _volatile_parts.append("\n\n" + _proj_text)
+            else:
+                system_prompt = self._inject_project_context(
+                    system_prompt, question, conversation_id, on_status=status,
+                )
 
         # Step 2d: Web search injection (S42)
         # If web_search is enabled, run a search and inject results.
@@ -1949,7 +2041,10 @@ class Executor:
                             search_context += f"\n[{i}] {title}\n{snippet}\nSource: {url}\n"
                         search_context += "\n--- End of Search Results ---\n"
                         search_context += "\nUse the search results above to inform your response. Cite sources when relevant."
-                        system_prompt = system_prompt + search_context
+                        if _stable_prefix_active:
+                            _volatile_parts.append(search_context)
+                        else:
+                            system_prompt = system_prompt + search_context
                         status(f"[OK] {len(results)} search results injected")
                     else:
                         status("[!] Web search returned no results")
@@ -1999,7 +2094,10 @@ class Executor:
                     for res in archive_results:
                         archive_context += f"[{res.role}] {res.snippet}\n"
                     archive_context += "--- End of archive retrieval ---\n"
-                    system_prompt = system_prompt + archive_context
+                    if _stable_prefix_active:
+                        _volatile_parts.append(archive_context)
+                    else:
+                        system_prompt = system_prompt + archive_context
                     status(
                         f"[>] Archive retrieval: {len(archive_results)} relevant "
                         f"message(s) injected from history"
@@ -2018,6 +2116,15 @@ class Executor:
                     )
             except Exception as e:
                 logger.warning(f"S66 archive retrieval failed: {e}")
+
+        # The relocated per-turn tail: each block keeps the exact glue it
+        # carries in the historical layout, so head plus tail reproduces
+        # the composed prompt byte for byte -- the cache identity below
+        # depends on that equality. Whether the identity view has already
+        # been rebound (the optimizer reports it itself) is tracked so the
+        # fallback paths rebind exactly once.
+        _volatile_tail = "".join(_volatile_parts)
+        _identity_from_optimizer = False
 
         if use_conversation:
             # S123: Use context optimizer when active (replaces manual pipeline)
@@ -2045,11 +2152,15 @@ class Executor:
                         # The capability block is pinned above the
                         # compressed history when the caller supplies one.
                         manifest_block=capability_block,
+                        volatile_block=(
+                            _volatile_tail if _stable_prefix_active else None
+                        ),
                     )
                     messages = opt_result.messages
                     context_tokens = opt_result.total_tokens
                     self._last_optimization_report = opt_result.report
                     system_prompt = opt_result.system_prompt
+                    _identity_from_optimizer = True
 
                     # Build window_stats compatible with existing UI
                     rpt = opt_result.report
@@ -2081,6 +2192,9 @@ class Executor:
                         conversation_id=conversation_id,
                         current_message=user_content,
                         model=routing.model,
+                        volatile_block=(
+                            _volatile_tail if _stable_prefix_active else None
+                        ),
                     )
                     self._last_window_stats = window_stats
             else:
@@ -2089,6 +2203,9 @@ class Executor:
                     conversation_id=conversation_id,
                     current_message=user_content,
                     model=routing.model,
+                    volatile_block=(
+                        _volatile_tail if _stable_prefix_active else None
+                    ),
                 )
                 # Store the stats for external access (context bar UI)
                 self._last_window_stats = window_stats
@@ -2109,11 +2226,19 @@ class Executor:
                     )
         else:
             # Mode single-turn classique (backward compatible)
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+            if _stable_prefix_active and _volatile_tail:
+                messages.append({"role": "system", "content": _volatile_tail})
+            messages.append({"role": "user", "content": user_content})
             self._last_window_stats = {}
+
+        # From here on, ``system_prompt`` is the identity view again: the
+        # head plus the relocated tail, byte-equal to the historical
+        # composed prompt. Every cache fingerprint and ledger figure below
+        # reads THIS, so the placement flag can never move a cache key.
+        # The optimizer path already reports the identity view itself.
+        if _stable_prefix_active and not _identity_from_optimizer:
+            system_prompt = system_prompt + _volatile_tail
 
         # Ledger token figures: reuse what each build path already measured
         # (the optimizer report, the manual window stats, or a direct
@@ -2426,6 +2551,14 @@ class Executor:
 
                 if _use_backend:
                     backend = get_backend_registry().resolve_backend(routing.model)
+                    # Ask the llama-server engine to reuse its prompt KV
+                    # when the stable layout makes reuse worth having; the
+                    # seam forwards the switch, other engines never see it.
+                    if (
+                        _stable_prefix_active
+                        and getattr(backend, "name", "") == "llama_server"
+                    ):
+                        options["cache_prompt"] = True
                     stream_iter = backend.stream(
                         model=routing.model,
                         messages=messages,

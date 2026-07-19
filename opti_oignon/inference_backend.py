@@ -1244,6 +1244,20 @@ class LlamaServerBackend(InferenceBackend):
                 return info
         return None
 
+    def slots(self) -> list[dict]:
+        """The server's slot listing, read-only.
+
+        A plain GET on the slots endpoint parsed as JSON; an unreachable
+        server or a non-list body answers an empty list. Observability
+        may degrade to silence, never to an exception -- the generation
+        paths keep their own contract of raising instead.
+        """
+        try:
+            data = self._request("/slots")
+        except RuntimeError:
+            return []
+        return data if isinstance(data, list) else []
+
     def generate(
         self,
         model: str,
@@ -1268,7 +1282,9 @@ class LlamaServerBackend(InferenceBackend):
             "messages": msgs,
             "stream": False,
         }
-        for key in ("temperature", "top_p", "max_tokens"):
+        # ``cache_prompt`` is the server's prompt-KV reuse switch:
+        # forwarded verbatim when the caller sets it, never invented.
+        for key in ("temperature", "top_p", "max_tokens", "cache_prompt"):
             if options and key in options:
                 payload[key] = options[key]
         start = time.time()
@@ -1304,7 +1320,9 @@ class LlamaServerBackend(InferenceBackend):
             "messages": list(messages or []),
             "stream": True,
         }
-        for key in ("temperature", "top_p", "max_tokens"):
+        # Same forwarding contract as the non-streaming path: the
+        # prompt-KV switch rides only when the caller set it.
+        for key in ("temperature", "top_p", "max_tokens", "cache_prompt"):
             if options and key in options:
                 payload[key] = options[key]
         url = f"{self._host}/v1/chat/completions"

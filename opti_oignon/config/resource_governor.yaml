@@ -107,3 +107,14 @@ ollama_limits:
   max_queue: null
   spawn_applies: true
   external_advisory: true
+
+# Dynamic context quantum. When enabled, the admitted num_ctx lands on
+# the ctx_ladder above (a between-steps request rounds UP so a growing
+# conversation keeps one stable quantum across turns), capped by a live
+# ceiling derived from the VRAM left after weights through the KV
+# coefficient. Unknown capacity caps the quantum to unknown_ctx_ceiling
+# instead of passing the raw request through: the admission itself stays
+# fail-open, only the quantum is fail-secure. Rollback: enabled false.
+dynamic_ctx:
+  enabled: false
+  unknown_ctx_ceiling: 8192

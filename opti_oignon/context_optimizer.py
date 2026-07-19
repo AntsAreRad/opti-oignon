@@ -473,6 +473,7 @@ class ContextOptimizer:
         fingerprint_active: bool = False,
         context_window_override: int = 0,
         manifest_block: str | None = None,
+        volatile_block: str | None = None,
     ) -> OptimizedContext:
         """Run the full optimization pipeline.
 
@@ -497,6 +498,20 @@ class ContextOptimizer:
                 budget and it survives every trim, including emergency
                 truncation. None or an empty string is the exact
                 pre-pin behavior (no zone, no extra message).
+            volatile_block: Per-turn context (memory, web results,
+                archive snippets) relocated OUT of the leading system
+                message. None is the exact historical behavior: the
+                caller has already appended any such content to
+                ``system_prompt``. A string (even an empty one) switches
+                the placement: the leading system message stays byte-equal
+                to ``system_prompt``, project retrieval joins this block
+                instead of the head, and the combined block rides one
+                trailing system message placed after the history and
+                before the user turn -- so the leading bytes, and the KV
+                cache computed over them, survive from turn to turn. The
+                ``system_prompt`` reported on the result is always the
+                head-plus-block concatenation: cache identity never moves
+                with the placement.
 
         Returns:
             OptimizedContext with final messages and report.
@@ -536,15 +551,33 @@ class ContextOptimizer:
                 model=model,
             )
 
+        # Relocation mode: the caller asked for the per-turn split. The
+        # head stays byte-equal to ``system_prompt`` and project
+        # retrieval joins the volatile tail instead, with the same glue
+        # bytes it would have carried in the head.
+        relocate = volatile_block is not None
+        volatile_tail = volatile_block or ""
+
         # Augment system prompt with project context
         final_system = system_prompt
         if project_text:
-            final_system = system_prompt + "\n\n" + project_text
+            if relocate:
+                volatile_tail = volatile_tail + "\n\n" + project_text
+            else:
+                final_system = system_prompt + "\n\n" + project_text
 
         zones.append(project_zone)
 
+        # The identity view: the assembled context as one string. The
+        # response and semantic caches fingerprint THIS, so it must not
+        # move when the placement does -- head plus tail reproduces the
+        # historical composed prompt byte for byte.
+        identity_prompt = (
+            (final_system + volatile_tail) if relocate else final_system
+        )
+
         # -- System zone report --
-        system_actual = self._estimate_tokens(final_system, model)
+        system_actual = self._estimate_tokens(identity_prompt, model)
         zones.append(ZoneReport(
             zone="system",
             budgeted_tokens=budget.system_tokens,
@@ -644,11 +677,15 @@ class ContextOptimizer:
 
         # -- Build final messages --
         # Order: system prompt, then the pinned capability block (when
-        # present), then the compressed history, then the current turn.
+        # present), then the compressed history, then the relocated
+        # per-turn tail (when the caller asked for the split and the
+        # tail is non-empty), then the current turn.
         messages: list[dict[str, str]] = [{"role": "system", "content": final_system}]
         if manifest_block:
             messages.append({"role": "system", "content": manifest_block})
         messages.extend(history)
+        if relocate and volatile_tail:
+            messages.append({"role": "system", "content": volatile_tail})
         messages.append({"role": "user", "content": user_message})
 
         total_tokens = self._estimate_messages_tokens(messages, model)
@@ -674,7 +711,7 @@ class ContextOptimizer:
         self._reports.append(report)
 
         return OptimizedContext(
-            system_prompt=final_system,
+            system_prompt=identity_prompt,
             messages=messages,
             total_tokens=total_tokens,
             report=report,
