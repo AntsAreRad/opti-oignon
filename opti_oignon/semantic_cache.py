@@ -45,16 +45,23 @@ import yaml
 from .config import DATA_DIR
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+
+# All persistence goes through the project's hardened connection layer.
+# When that layer cannot be imported the cache stays honestly unavailable:
+# there is NO plaintext fallback connector, by design. A cache that quietly
+# writes queries and responses to an unencrypted file would be a data leak
+# wearing a cache's name. Callers see misses; nothing is written to disk.
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
+
+    _DB_LAYER_AVAILABLE = True
 except ImportError:
-    import sqlite3 as _sq3
-    logger.warning(
-        "db_utils unavailable: semantic_cache falling back to PLAINTEXT sqlite3. "
-        "Cached queries/responses and embeddings are NOT encrypted at rest."
+    _safe_connect = None
+    _DB_LAYER_AVAILABLE = False
+    logger.error(
+        "db_utils unavailable: semantic cache disabled (no plaintext "
+        "fallback). All lookups will miss and nothing is written to disk."
     )
-    _safe_connect = lambda p, **kw: _sq3.connect(str(p), **kw)
 
 
 # =============================================================================
@@ -337,7 +344,10 @@ class SemanticCache:
         # Embedding availability (None = not yet tested)
         self._embeddings_available: bool | None = None
 
-        # Initialize database
+        # One loud storage-failure warning per instance, then debug only.
+        self._layer_failure_logged = False
+
+        # Initialize database (degrades in place when the layer is not there)
         self._init_db()
 
         logger.info(
@@ -430,9 +440,20 @@ class SemanticCache:
     # -------------------------------------------------------------------------
 
     def _init_db(self) -> None:
-        """Create tables if they do not exist."""
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        """Create tables if they do not exist.
+
+        Degrades in place: when the storage layer is unavailable or refuses
+        the connection this returns without raising, leaving a usable
+        pass-through instance behind. Nothing on disk is touched on that path.
+        """
+        try:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._note_layer_failure(exc)
+            return
         conn = self._get_connection()
+        if conn is None:
+            return
         try:
             # S68: Unified cache entries table
             conn.execute("""
@@ -491,14 +512,48 @@ class SemanticCache:
                 ON semantic_embeddings(model)
             """)
             conn.commit()
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
         finally:
             conn.close()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Open a thread-safe SQLite connection."""
-        conn = _safe_connect(self._db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_connection(self) -> sqlite3.Connection | None:
+        """Open a connection through the hardened layer, or return ``None``.
+
+        ``None`` means the storage layer is unavailable or refused the
+        connection: the layer could not be imported, the enforced-encryption
+        posture has no working cipher, or the file cannot be opened under the
+        current key. Callers degrade to a cache miss; the database file is
+        never touched, moved, or deleted on this path.
+        """
+        if _safe_connect is None:
+            return None
+        try:
+            conn = _safe_connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return None
+
+    def _note_layer_failure(self, exc: BaseException) -> None:
+        """Log a storage-layer failure loudly once per instance, then quietly.
+
+        The cache keeps operating as a pass-through -- every lookup misses
+        and nothing is written -- so the operator needs one clear signal
+        without the log drowning in repeats.
+        """
+        if not getattr(self, "_layer_failure_logged", False):
+            self._layer_failure_logged = True
+            logger.warning(
+                "Semantic cache storage unavailable (%s: %s); operating as a "
+                "pass-through: lookups miss, nothing is written, and the "
+                "database file is left untouched.",
+                type(exc).__name__,
+                exc,
+            )
+        else:
+            logger.debug("Semantic cache storage still unavailable: %s", exc)
 
     # -------------------------------------------------------------------------
     # Embedding helpers
@@ -703,6 +758,8 @@ class SemanticCache:
                 logger.debug("Embedding generation skipped: %s", exc)
 
         conn = self._get_connection()
+        if conn is None:
+            return ""
         try:
             conn.execute(
                 """INSERT INTO cache_entries
@@ -726,6 +783,9 @@ class SemanticCache:
                 ),
             )
             conn.commit()
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return ""
         finally:
             conn.close()
 
@@ -750,6 +810,8 @@ class SemanticCache:
             Number of entries removed.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             if conversation_id is not None:
                 cursor = conn.execute(
@@ -771,6 +833,9 @@ class SemanticCache:
                 conversation_id or "all",
             )
             return count
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -782,16 +847,21 @@ class SemanticCache:
         """
         now = time.time()
         ttl = self._config["ttl_seconds"]
+        total_entries = 0
         conn = self._get_connection()
-        try:
-            # Count non-expired entries
-            row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM cache_entries WHERE (? - created_at) < ?",
-                (now, ttl),
-            ).fetchone()
-            total_entries = row["cnt"] if row else 0
-        finally:
-            conn.close()
+        if conn is not None:
+            try:
+                # Count non-expired entries
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM cache_entries"
+                    " WHERE (? - created_at) < ?",
+                    (now, ttl),
+                ).fetchone()
+                total_entries = row["cnt"] if row else 0
+            except (sqlite3.Error, RuntimeError, OSError) as exc:
+                self._note_layer_failure(exc)
+            finally:
+                conn.close()
 
         # DB file size
         size_bytes = 0
@@ -871,6 +941,8 @@ class SemanticCache:
             CacheEntry or None.
         """
         conn = self._get_connection()
+        if conn is None:
+            return None
         try:
             if model:
                 row = conn.execute(
@@ -932,6 +1004,9 @@ class SemanticCache:
                 hit_count=new_hits,
                 metadata=meta,
             )
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return None
         finally:
             conn.close()
 
@@ -968,6 +1043,8 @@ class SemanticCache:
         max_cands = self._config["max_candidates"]
 
         conn = self._get_connection()
+        if conn is None:
+            return None
         try:
             if model:
                 rows = conn.execute(
@@ -1053,6 +1130,9 @@ class SemanticCache:
                 hit_count=new_hits,
                 metadata=meta,
             )
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return None
         finally:
             conn.close()
 
@@ -1068,6 +1148,8 @@ class SemanticCache:
         """
         max_entries = self._config["max_entries"]
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             row = conn.execute(
                 "SELECT COUNT(*) as cnt FROM cache_entries"
@@ -1089,6 +1171,9 @@ class SemanticCache:
             conn.commit()
             logger.debug("LRU eviction: removed %d entries", excess)
             return excess
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1101,6 +1186,8 @@ class SemanticCache:
         now = time.time()
         ttl = self._config["ttl_seconds"]
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             cursor = conn.execute(
                 "DELETE FROM cache_entries WHERE (? - created_at) >= ?",
@@ -1111,6 +1198,9 @@ class SemanticCache:
             if count > 0:
                 logger.debug("TTL expiry: removed %d stale entries", count)
             return count
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1121,11 +1211,16 @@ class SemanticCache:
             Count.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             row = conn.execute(
                 "SELECT COUNT(*) as cnt FROM cache_entries"
             ).fetchone()
             return row["cnt"] if row else 0
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1232,6 +1327,8 @@ class SemanticCache:
         now = time.time()
 
         conn = self._get_connection()
+        if conn is None:
+            return False
         try:
             conn.execute(
                 """INSERT INTO semantic_embeddings
@@ -1250,6 +1347,9 @@ class SemanticCache:
             )
             conn.commit()
             return True
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return False
         except Exception as exc:
             logger.warning("Failed to store embedding: %s", exc)
             return False
@@ -1324,6 +1424,9 @@ class SemanticCache:
         # '' and are excluded by construction).
         fp_clause = " AND context_fingerprint = ?" if context_fingerprint else ""
         conn = self._get_connection()
+        if conn is None:
+            self._misses += 1
+            return None
         try:
             if exclude_key:
                 params: list = [model, exclude_key]
@@ -1349,6 +1452,10 @@ class SemanticCache:
                        ORDER BY created_at DESC LIMIT ?""",
                     params,
                 ).fetchall()
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            self._misses += 1
+            return None
         finally:
             conn.close()
 
@@ -1486,6 +1593,8 @@ class SemanticCache:
             True if removed.
         """
         conn = self._get_connection()
+        if conn is None:
+            return False
         try:
             cursor = conn.execute(
                 "DELETE FROM semantic_embeddings WHERE cache_key = ?",
@@ -1493,6 +1602,9 @@ class SemanticCache:
             )
             conn.commit()
             return cursor.rowcount > 0
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return False
         finally:
             conn.close()
 
@@ -1506,6 +1618,8 @@ class SemanticCache:
             Count of removed embeddings.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             cursor = conn.execute(
                 "DELETE FROM semantic_embeddings WHERE model = ?",
@@ -1513,6 +1627,9 @@ class SemanticCache:
             )
             conn.commit()
             return cursor.rowcount
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1523,6 +1640,8 @@ class SemanticCache:
             Total entries removed.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             c1 = conn.execute("DELETE FROM cache_entries").rowcount
             c2 = conn.execute("DELETE FROM semantic_embeddings").rowcount
@@ -1535,6 +1654,9 @@ class SemanticCache:
             self._similarity_sum = 0.0
             logger.info("SemanticCache CLEAR: %d entries removed", total)
             return total
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1548,6 +1670,8 @@ class SemanticCache:
             Number of orphans removed.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             rows = conn.execute(
                 "SELECT cache_key FROM semantic_embeddings"
@@ -1570,6 +1694,9 @@ class SemanticCache:
                 conn.commit()
 
             return len(orphans)
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 
@@ -1580,11 +1707,16 @@ class SemanticCache:
             Count.
         """
         conn = self._get_connection()
+        if conn is None:
+            return 0
         try:
             row = conn.execute(
                 "SELECT COUNT(*) as cnt FROM semantic_embeddings"
             ).fetchone()
             return row["cnt"] if row else 0
+        except (sqlite3.Error, RuntimeError, OSError) as exc:
+            self._note_layer_failure(exc)
+            return 0
         finally:
             conn.close()
 

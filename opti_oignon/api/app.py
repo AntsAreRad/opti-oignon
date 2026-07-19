@@ -423,6 +423,21 @@ try:
 except Exception as _csp_route_exc:
     logger.warning("Failed to register CSP report endpoint: %s", _csp_route_exc)
 
+# Context ledger read-only surface: recent / stats / entry. Guarded so a
+# constrained build cannot block app startup; the router only reads the
+# measurement rows the execution hub records, and never writes.
+try:
+    from opti_oignon.api.routes_context_ledger import (
+        router as _context_ledger_router,
+    )
+    if _context_ledger_router is not None:
+        app.include_router(_context_ledger_router)
+        logger.info("Context ledger routes registered")
+except Exception as _ledger_route_exc:
+    logger.warning(
+        "Failed to register context ledger routes: %s", _ledger_route_exc
+    )
+
 
 @app.get("/api/health", tags=["health"])
 def health_check():

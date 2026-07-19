@@ -29,6 +29,7 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from collections.abc import Callable, Generator
 from typing import Any, Optional
 
@@ -106,8 +107,8 @@ except ImportError:
 
 # S174 (Theme 3): the S66 dual-layer working block from the new MemoryStore-backed
 # retriever. The compressed block is injected into the prompt; the full archive
-# stays searchable for recovery. The block is unwrapped (the agent wraps it as
-# untrusted context, S175).
+# stays searchable for recovery. The block is wrapped as untrusted context at
+# the injection point below before it ever reaches the system prompt.
 try:
     from .memory.retrieval import build_memory_block as _build_memory_block
     from .memory.retrieval import working_memory_block as _working_memory_block
@@ -149,6 +150,20 @@ try:
 except ImportError:
     SEMANTIC_CACHE_AVAILABLE = False
     _semantic_cache = None
+
+# Untrusted-context envelope for memory injected into the system prompt.
+# When the wrapper cannot be imported the memory block is NOT appended at
+# all: unwrapped memory in the system prompt would let a poisoned stored
+# fact speak with the platform's own authority, so the fail-secure
+# direction is to drop the block, never to inject it bare.
+try:
+    from .agent.untrusted_context import SOURCE_MEMORY as _UNTRUSTED_SOURCE_MEMORY
+    from .agent.untrusted_context import wrap as _wrap_untrusted
+    UNTRUSTED_WRAP_AVAILABLE = True
+except ImportError:
+    UNTRUSTED_WRAP_AVAILABLE = False
+    _wrap_untrusted = None
+    _UNTRUSTED_SOURCE_MEMORY = "memory"
 
 # Model warm-up / keepalive (v1.4.0 -- S24 F2)
 try:
@@ -372,6 +387,40 @@ try:
 except ImportError:
     CONTEXT_OPTIMIZER_AVAILABLE = False
     _get_context_optimizer = None
+
+# Token counter (exact-count labelling for the context ledger)
+try:
+    from .token_counter import get_token_counter as _get_token_counter
+    TOKEN_COUNTER_AVAILABLE = True
+except ImportError:
+    TOKEN_COUNTER_AVAILABLE = False
+    _get_token_counter = None
+
+# Context ledger (per-request measurement sink)
+try:
+    from .context_ledger import get_context_ledger as _get_context_ledger
+    CONTEXT_LEDGER_AVAILABLE = True
+except ImportError:
+    CONTEXT_LEDGER_AVAILABLE = False
+    _get_context_ledger = None
+
+
+def _ledger_record(fields: dict) -> None:
+    """Best-effort write of one request record to the context ledger.
+
+    The ledger is an observability sink: its absence, a write fault or an
+    unexpected field must never touch the chat path, so every failure is
+    absorbed here and each call site stays a single call.
+    """
+    if not CONTEXT_LEDGER_AVAILABLE or _get_context_ledger is None:
+        return
+    try:
+        ledger = _get_context_ledger()
+        if ledger is not None:
+            ledger.record(**fields)
+    except Exception as exc:
+        logger.debug("Context ledger write skipped: %s", exc)
+
 
 logger = logging.getLogger(__name__)
 
@@ -1179,8 +1228,10 @@ class Executor:
         Builds the unified working block: the salient durable facts (always
         present, ranked by use_count x recency) plus query-relevant facts,
         composed from the memory store in one token budget and deduplicated. The
-        full uncompressed archive remains searchable for recovery; the block is
-        unwrapped (the agent wraps it as untrusted context, S175).
+        full uncompressed archive remains searchable for recovery. The block is
+        wrapped as untrusted context before it is appended: stored facts are
+        data, not instructions, and when the wrapper is unavailable the block
+        is dropped rather than injected bare.
 
         Args:
             system_prompt: the current system prompt
@@ -1216,7 +1267,17 @@ class Executor:
                 memory_block = ""
 
         if memory_block:
-            return system_prompt + "\n\n" + memory_block
+            if not UNTRUSTED_WRAP_AVAILABLE or _wrap_untrusted is None:
+                logger.warning(
+                    "Untrusted-context wrapper unavailable; memory block "
+                    "dropped rather than injected unwrapped."
+                )
+                return system_prompt
+            wrapped = _wrap_untrusted(
+                memory_block, source=_UNTRUSTED_SOURCE_MEMORY
+            )
+            if wrapped:
+                return system_prompt + "\n\n" + wrapped
         return system_prompt
 
     def _inject_project_context(
@@ -1613,6 +1674,22 @@ class Executor:
         self._last_offline_queued = False  # S71: reset per-call
         self._last_vision_meta: dict = {}  # S95: reset per-call
 
+        # Context ledger: one record per call, whichever exit is taken.
+        _ledger_t0 = time.time()
+        _ledger_base: dict = {
+            "request_id": uuid.uuid4().hex,
+            "conversation_id": conversation_id,
+            "model": routing.model,
+            "caller": "chat",
+        }
+
+        def _emit_ledger(outcome: str, **extra) -> None:
+            fields = dict(_ledger_base)
+            fields["outcome"] = outcome
+            fields["duration_ms"] = (time.time() - _ledger_t0) * 1000.0
+            fields.update(extra)
+            _ledger_record(fields)
+
         def status(msg: str) -> None:
             if on_status:
                 on_status(msg)
@@ -1640,6 +1717,15 @@ class Executor:
                     yield "\n- Enable auto-truncation"
                     yield "\n- Summarize the document first"
                     yield "\n- Use a model with larger context (e.g., nemotron-3-nano:30b)"
+                    _emit_ledger(
+                        "context_exceeded",
+                        tokens_total=context_check.total_tokens,
+                        tokens_system=context_check.system_tokens,
+                        tokens_user=(
+                            context_check.prompt_tokens
+                            + context_check.document_tokens
+                        ),
+                    )
                     return question, f"[Context exceeded: {context_check.total_tokens} > {context_check.available_for_input}]"
 
                 if context_warning:
@@ -1695,6 +1781,7 @@ class Executor:
                 _vmsg = f"[ERR] {_vision_refusal_msg}"
                 yield _vmsg
                 self._current_task = None
+                _emit_ledger("vision_refused", gov_action="refuse", gov_admitted=False)
                 return question, _vmsg
             try:
                 question, images, _vision_meta = _vision_pipeline.process(
@@ -1738,6 +1825,7 @@ class Executor:
 
         if self._cancel_event.is_set():
             yield "[Cancelled]"
+            _emit_ledger("cancelled")
             return refined_question, "[Cancelled]"
 
         # Step 2: Get system prompt
@@ -1882,6 +1970,10 @@ class Executor:
             and conversation_manager is not None
         )
 
+        # Ledger retrieval figures (count and best score of injected snippets)
+        _ledger_retrieval_count = 0
+        _ledger_retrieval_top: float | None = None
+
         # S66: Archive retrieval trigger -- if the user references past context
         # ("you said...", "we discussed..."), inject relevant archive snippets
         # into the system prompt so the LLM can answer accurately even after
@@ -1915,6 +2007,14 @@ class Executor:
                     logger.info(
                         f"S66 archive retrieval: {len(archive_results)} result(s) "
                         f"injected for conversation {conversation_id}"
+                    )
+                    _ledger_retrieval_count = len(archive_results)
+                    _ledger_retrieval_top = max(
+                        (
+                            float(getattr(res, "score", 0.0))
+                            for res in archive_results
+                        ),
+                        default=None,
                     )
             except Exception as e:
                 logger.warning(f"S66 archive retrieval failed: {e}")
@@ -2015,6 +2115,57 @@ class Executor:
             ]
             self._last_window_stats = {}
 
+        # Ledger token figures: reuse what each build path already measured
+        # (the optimizer report, the manual window stats, or a direct
+        # estimate for the single-turn shape). Estimates throughout; the
+        # token counter upgrades the total's label at completion when its
+        # exact path answers.
+        _ledger_tokens: dict = {"token_method": "estimated"}
+        try:
+            if use_conversation:
+                _ws = self._last_window_stats or {}
+                if (
+                    _ws.get("preset") is not None
+                    and self._last_optimization_report is not None
+                ):
+                    _rpt = self._last_optimization_report
+                    _by_zone = {z.zone: z.actual_tokens for z in _rpt.zones}
+                    _ledger_tokens.update(
+                        tokens_system=_by_zone.get("system"),
+                        tokens_history=_by_zone.get("history"),
+                        tokens_user=_by_zone.get("user"),
+                        tokens_project=_by_zone.get("project"),
+                        tokens_manifest=_by_zone.get("manifest"),
+                        tokens_total=context_tokens,
+                        zones=[z.as_dict() for z in _rpt.zones],
+                    )
+                else:
+                    _sys_t = _ws.get("system_tokens")
+                    _hist_t = _ws.get("history_tokens")
+                    _tot_t = _ws.get("total_tokens", context_tokens)
+                    _user_t = None
+                    if all(
+                        isinstance(v, int)
+                        for v in (_sys_t, _hist_t, _tot_t)
+                    ):
+                        _user_t = max(0, _tot_t - _sys_t - _hist_t)
+                    _ledger_tokens.update(
+                        tokens_system=_sys_t,
+                        tokens_history=_hist_t,
+                        tokens_user=_user_t,
+                        tokens_total=_tot_t,
+                    )
+            else:
+                _sys_t = self._estimate_tokens(system_prompt, routing.model)
+                _user_t = self._estimate_tokens(user_content, routing.model)
+                _ledger_tokens.update(
+                    tokens_system=_sys_t,
+                    tokens_user=_user_t,
+                    tokens_total=_sys_t + _user_t,
+                )
+        except Exception as _ledger_tok_err:
+            logger.debug("Ledger token gathering skipped: %s", _ledger_tok_err)
+
         # Step 3b: Cache lookup (S18 -- C3, S19 -- G3 multi-turn)
         # Cache s'applique en single-turn ET multi-turn (conversation hashing)
         self._last_cache_hit = False
@@ -2055,6 +2206,13 @@ class Executor:
                     )
                     yield s68_entry.response
                     self._current_task = None
+                    _emit_ledger(
+                        "cache_hit",
+                        **_ledger_tokens,
+                        cache_hit=True,
+                        cache_hit_type=str(s68_entry.match_type),
+                        cache_similarity=float(s68_entry.similarity),
+                    )
                     return refined_question, s68_entry.response
             except Exception as e:
                 logger.debug("S68 cache lookup error: %s", e)
@@ -2128,6 +2286,13 @@ class Executor:
                         logger.error(f"Conversation save error (cache hit): {e}")
 
                 self._current_task = None
+                _emit_ledger(
+                    "cache_hit",
+                    **_ledger_tokens,
+                    cache_hit=True,
+                    cache_hit_type="semantic" if semantic_hit else "exact",
+                    cache_similarity=float(sim) if semantic_hit else None,
+                )
                 return refined_question, cached.response
 
         # Step 4: Execute with streaming (with keepalive for Gradio)
@@ -2162,6 +2327,7 @@ class Executor:
             self._last_offline_queued = True
             yield offline_msg
             self._current_task = None
+            _emit_ledger("offline_queued", **_ledger_tokens)
             return refined_question, offline_msg
 
         # S65: Use template temperature override if available
@@ -2210,6 +2376,14 @@ class Executor:
             refusal_msg = f"[ERR] {_gov_msg}"
             yield refusal_msg
             self._current_task = None
+            _emit_ledger(
+                "governor_refused",
+                **_ledger_tokens,
+                gov_action=str(getattr(_gov_decision, "action", "refuse")),
+                gov_admitted=False,
+                gov_requested_ctx=_gov_requested_ctx,
+                gov_reason=str(getattr(_gov_decision, "reason", "")) or None,
+            )
             return refined_question, refusal_msg
 
         full_response = ""
@@ -2350,6 +2524,7 @@ class Executor:
         # Process chunks with keepalive
         last_yield_time = time.time()
         thinking_buffer = ""
+        _ledger_outcome = "completed"
         while True:
             try:
                 # Wait for chunk with timeout (keeps Gradio connection alive)
@@ -2369,10 +2544,12 @@ class Executor:
                 elif event_type == "cancel":
                     full_response += "\n\n[Generation cancelled]"
                     yield "\n\n[Generation cancelled]"
+                    _ledger_outcome = "cancelled"
                     break
                 elif event_type == "timeout":
                     full_response += "\n\n[Timeout reached]"
                     yield "\n\n[Timeout reached]"
+                    _ledger_outcome = "timeout"
                     break
 
             except queue.Empty:
@@ -2565,6 +2742,57 @@ class Executor:
                         )
             except Exception as e:
                 logger.warning(f"Code verification failed: {e}")
+
+        # Terminal ledger record: whichever way the loop ended, exactly one
+        # row leaves here. The token counter may upgrade the total's label
+        # to exact when its path answers; every other figure stays what the
+        # pipeline measured.
+        _ledger_final = dict(_ledger_tokens)
+        if TOKEN_COUNTER_AVAILABLE and _get_token_counter is not None:
+            try:
+                _counter = _get_token_counter()
+                if _counter is not None and _counter.exact_enabled:
+                    _exact = _counter.count_messages(messages, routing.model)
+                    if _exact.method == "exact":
+                        _ledger_final["tokens_total"] = _exact.tokens
+                        _ledger_final["token_method"] = "exact"
+            except Exception as _count_err:
+                logger.debug("Exact count at completion skipped: %s", _count_err)
+        _emit_ledger(
+            "error" if thread_result["error"] else _ledger_outcome,
+            **_ledger_final,
+            cache_stored=bool(
+                cache_key and full_response and not thread_result["error"]
+            ),
+            retrieval_count=_ledger_retrieval_count,
+            retrieval_top_score=_ledger_retrieval_top,
+            gov_action=(
+                str(getattr(_gov_decision, "action", "")) or None
+                if _gov_decision is not None
+                else None
+            ),
+            gov_admitted=(
+                bool(_gov_decision.admitted)
+                if _gov_decision is not None
+                else None
+            ),
+            gov_requested_ctx=_gov_requested_ctx,
+            gov_num_ctx=(
+                getattr(_gov_decision, "num_ctx", None)
+                if _gov_decision is not None
+                else None
+            ),
+            gov_conditional_eviction=(
+                bool(getattr(_gov_decision, "conditional_on_eviction", False))
+                if _gov_decision is not None
+                else None
+            ),
+            gov_keep_alive=(
+                getattr(_gov_decision, "keep_alive", None)
+                if _gov_decision is not None
+                else None
+            ),
+        )
 
         self._current_task = None
         return refined_question, full_response
