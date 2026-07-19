@@ -3,8 +3,9 @@
 # Controls the unified context window orchestrator.
 # When enabled, replaces the manual 5-step pipeline in executor.py.
 
-# Master toggle — opt-in (default: false)
-enabled: false
+# Master toggle (default: true). Setting this to false falls back to the
+# manual pipeline in the caller; this line is the whole rollback.
+enabled: true
 
 # Priority presets — predefined zone weight profiles
 # Each preset overrides allocation ratios from token_budget.yaml

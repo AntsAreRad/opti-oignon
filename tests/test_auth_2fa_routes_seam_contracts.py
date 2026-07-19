@@ -367,7 +367,14 @@ def _load(*, bulbe=False, single_user=False, with_second_factor=True):
             _TFA: source("auth_2fa.py"),
             _ROUTES: source("api", "routes_auth.py"),
         }
-        blocked = ("ollama", "fido2", "qrcode")
+        # The passkey library's submodules are named alongside the top
+        # package: a process that imported them earlier leaves them in the
+        # module cache, and a from-import resolves the cached child
+        # directly without ever consulting the neutralised parent. Naming
+        # the children keeps the absence pin deterministic on any machine.
+        blocked = (
+            "ollama", "fido2", "fido2.server", "fido2.webauthn", "qrcode",
+        )
         seeded["opti_oignon.db_utils"] = _db_utils_seed(seam)
         seeded["pyotp"] = _pyotp_seed(clock)
         seeded["opti_oignon.encryption"] = _encryption_seed()

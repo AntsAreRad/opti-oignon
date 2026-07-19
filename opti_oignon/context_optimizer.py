@@ -15,7 +15,7 @@ Pipeline steps (executed in order):
 5. Validate total fits in context window; emergency truncation if needed
 
 All existing modules are wrapped, never modified. When the optimizer
-is disabled (default), executor keeps its existing manual pipeline.
+is disabled (config key ``enabled``), executor keeps its manual pipeline.
 """
 
 from __future__ import annotations
@@ -726,49 +726,27 @@ class ContextOptimizer:
         # Resolve priority overrides
         overrides = self._resolve_priority_overrides(preset, custom_ratios)
 
-        # Temporarily patch ratios if overrides are provided
-        original_ratios: dict[str, float] | None = None
+        # The budget engine accepts per-call ratio overrides natively, so
+        # hand them over as the keyword it defines instead of rewriting its
+        # ratio attributes around the call. The keyword is only supplied
+        # when the overrides resolved to something: the plain call keeps
+        # its exact historical shape, and an injected engine that only
+        # implements that shape keeps working untouched.
         if overrides:
-            original_ratios = {
-                "system": self._budget_manager._system_ratio,
-                "project": self._budget_manager._project_ratio,
-                "history": self._budget_manager._history_ratio,
-                "user": self._budget_manager._user_ratio,
-                "reserve": self._budget_manager._reserve_ratio,
-            }
-            self._budget_manager._system_ratio = overrides.get(
-                "system_ratio", original_ratios["system"]
-            )
-            self._budget_manager._project_ratio = overrides.get(
-                "project_ratio", original_ratios["project"]
-            )
-            self._budget_manager._history_ratio = overrides.get(
-                "history_ratio", original_ratios["history"]
-            )
-            self._budget_manager._user_ratio = overrides.get(
-                "user_ratio", original_ratios["user"]
-            )
-            self._budget_manager._reserve_ratio = overrides.get(
-                "reserve_ratio", original_ratios["reserve"]
-            )
-
-        try:
-            budget = self._budget_manager.calculate_budget(
+            return self._budget_manager.calculate_budget(
                 model=model,
                 project_active=project_active,
                 context_window_override=context_window_override,
                 fingerprint_active=fingerprint_active,
+                priority_overrides=overrides,
             )
-        finally:
-            # Restore original ratios
-            if original_ratios is not None:
-                self._budget_manager._system_ratio = original_ratios["system"]
-                self._budget_manager._project_ratio = original_ratios["project"]
-                self._budget_manager._history_ratio = original_ratios["history"]
-                self._budget_manager._user_ratio = original_ratios["user"]
-                self._budget_manager._reserve_ratio = original_ratios["reserve"]
 
-        return budget
+        return self._budget_manager.calculate_budget(
+            model=model,
+            project_active=project_active,
+            context_window_override=context_window_override,
+            fingerprint_active=fingerprint_active,
+        )
 
     def _inject_project_context(
         self,
@@ -986,13 +964,66 @@ class ContextOptimizer:
 _optimizer: ContextOptimizer | None = None
 
 
-def get_optimizer() -> ContextOptimizer | None:
-    """Get the module-level optimizer singleton.
+def _build_default_collaborators() -> dict[str, Any]:
+    """Resolve the live collaborator singletons for the lazy build.
+
+    Each collaborator sits behind its own guarded import: one that is
+    unreachable degrades that seam to None and the orchestrator's own
+    per-seam fallbacks take over, instead of the whole accessor failing.
 
     Returns:
-        ContextOptimizer instance or None if not initialized.
+        Keyword arguments for the ContextOptimizer constructor.
     """
+    collaborators: dict[str, Any] = {}
+    try:
+        from opti_oignon.prompt_optimization import prompt_budget_manager
+        collaborators["budget_manager"] = prompt_budget_manager
+    except ImportError:
+        collaborators["budget_manager"] = None
+    try:
+        from opti_oignon.project_context import project_context_builder
+        collaborators["project_context_builder"] = project_context_builder
+    except ImportError:
+        collaborators["project_context_builder"] = None
+    try:
+        from opti_oignon.conversation_compressor import conversation_compressor
+        collaborators["conversation_compressor"] = conversation_compressor
+    except ImportError:
+        collaborators["conversation_compressor"] = None
+    try:
+        from opti_oignon.context_window import sliding_window_manager
+        collaborators["sliding_window_manager"] = sliding_window_manager
+    except ImportError:
+        collaborators["sliding_window_manager"] = None
+    try:
+        from opti_oignon.context_manager import get_context_manager
+        collaborators["context_manager"] = get_context_manager()
+    except ImportError:
+        collaborators["context_manager"] = None
+    return collaborators
+
+
+def get_optimizer() -> ContextOptimizer:
+    """Get the module-level optimizer, building it on first use.
+
+    The first call constructs the orchestrator from the shipped
+    configuration and wires the live collaborators; later calls return
+    the same instance. An instance installed through init_optimizer
+    keeps priority: the lazy build only fills an empty slot.
+
+    Returns:
+        The module-level ContextOptimizer.
+    """
+    global _optimizer
+    if _optimizer is None:
+        _optimizer = ContextOptimizer(**_build_default_collaborators())
     return _optimizer
+
+
+def reset_optimizer() -> None:
+    """Drop the module-level optimizer so the next access rebuilds it."""
+    global _optimizer
+    _optimizer = None
 
 
 def init_optimizer(**kwargs: Any) -> ContextOptimizer:
