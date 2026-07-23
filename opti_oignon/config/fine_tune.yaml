@@ -1,4 +1,4 @@
-# Fine-tuning data export and variant tracking configuration (S96)
+# Fine-tuning data export and variant tracking configuration
 # Controls export formats, quality scoring, and A/B comparison settings.
 
 export:

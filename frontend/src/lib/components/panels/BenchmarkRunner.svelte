@@ -1,5 +1,5 @@
 <!--
-  BenchmarkRunner.svelte (S60)
+  BenchmarkRunner.svelte
   Configure and execute LLM benchmarks with live progress tracking.
   Shows: model/suite selector, progress bar, live results table.
 -->

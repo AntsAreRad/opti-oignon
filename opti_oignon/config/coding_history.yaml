@@ -1,4 +1,4 @@
-# Coding History configuration -- S76
+# Coding History configuration
 # SQLite-backed task history and checkpoint/resume for the coding agent.
 
 enabled: true

@@ -1,8 +1,10 @@
 """Canonical memory store for Opti-Oignon (S173, Theme 3 / Odysseus Core).
 
 The source of truth for personal memory facts. SQLite in WAL mode, parameterized
-queries only, frozenset allowlists for any dynamic column or table name (no
-f-string SQL, per the project SQL-hygiene standard). Per-user isolation via
+queries only: every caller value travels as a "?" placeholder and never reaches
+the SQL text. The two statements that need a dynamic column name assemble it
+from a frozenset allowlist, so the interpolated fragments are drawn from a
+closed set rather than from input. Per-user isolation via
 ``user_isolation.py``; encrypted at rest via ``db_encryption.py`` (SQLCipher)
 when available, plain SQLite otherwise (Daily mode).
 
@@ -91,9 +93,11 @@ DEFAULT_CATEGORY = "fact"
 TABLE_NAME = "memory_facts"
 
 # Allowlists for the only places a column identifier is ever assembled into a
-# statement (the dynamic UPDATE SET clause and ORDER BY). Used with str.format()
-# under these frozensets so no caller-controlled string is interpolated into
-# SQL. This is the sanctioned alternative to f-string SQL.
+# statement (the dynamic UPDATE SET clause and ORDER BY). Membership is checked
+# against these frozensets before the name reaches the query, so the only
+# strings interpolated into SQL come from this closed set; every caller value
+# travels as a "?" placeholder. What makes those two statements safe is the
+# allowlist, not the formatting mechanism -- see the comment at each site.
 _UPDATABLE_COLUMNS: frozenset[str] = frozenset(
     {"text", "category", "source", "active", "use_count", "updated_at"}
 )

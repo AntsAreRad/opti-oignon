@@ -1,5 +1,5 @@
 /**
- * RAG Dashboard API client (S100).
+ * RAG Dashboard API client.
  *
  * Stats, usage over time, source reliability, collection health,
  * auto-refresh, external connector status.

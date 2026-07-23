@@ -1,5 +1,5 @@
 <!--
-  BatchUpload.svelte -- S120 RAG Batch File Upload.
+  BatchUpload.svelte -- RAG Batch File Upload.
 
   Drag-and-drop zone for multiple files with:
   - File type validation (PDF, TXT, MD, HTML, DOCX, CSV, XLSX, etc.)

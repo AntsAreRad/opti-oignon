@@ -5,14 +5,14 @@
  * API_BASE is configurable via VITE_API_URL env variable.
  * In dev mode, Vite proxy handles /api -> localhost:8001.
  *
- * S87: Actionable error messages distinguishing network errors
+ * Actionable error messages distinguishing network errors
  * (backend down, timeout) from API errors (400/404/500).
  */
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 /**
- * S98: Module-level access token for Authorization header injection.
+ * Module-level access token for Authorization header injection.
  * Set by the auth store on login/refresh, cleared on logout.
  */
 let _accessToken: string | null = null;
@@ -36,7 +36,7 @@ function authHeaders(): Record<string, string> {
 }
 
 /**
- * S125 hardening: Read CSRF token from cookie and return as header.
+ * Hardening: Read CSRF token from cookie and return as header.
  * The oo_csrf_token cookie is set by the backend (non-httpOnly)
  * and must be echoed back as X-CSRF-Token for state-changing requests.
  */
@@ -68,7 +68,7 @@ export class ApiError extends Error {
 }
 
 /**
- * S87: Build a user-friendly, actionable error message from an HTTP status code.
+ * Build a user-friendly, actionable error message from an HTTP status code.
  */
 function actionableMessage(status: number, serverDetail: string, path: string): string {
 	const resource = path.split('/').filter(Boolean).slice(1, 3).join('/') || 'resource';
@@ -103,7 +103,7 @@ function actionableMessage(status: number, serverDetail: string, path: string): 
 }
 
 /**
- * S87: Build a user-friendly message for network-level failures (no HTTP response).
+ * Build a user-friendly message for network-level failures (no HTTP response).
  */
 function networkErrorMessage(err: unknown): string {
 	if (err instanceof TypeError) {
@@ -289,7 +289,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
 }
 
 /**
- * S211: multipart upload helper.
+ * Multipart upload helper.
  *
  * Sends a FormData body (drag-and-drop file uploads). Content-Type is
  * deliberately NOT set so the browser writes the multipart boundary itself;
@@ -310,7 +310,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
 }
 
 /**
- * S171: Formalized `fetchApi` shim.
+ * Formalized `fetchApi` shim.
  *
  * Several security API modules (securityMode, toolCallApproval,
  * pluginAllowlist, searchKillSwitch) call a `fetchApi(path, options?)` helper
@@ -363,7 +363,7 @@ export function wsUrl(path: string): string {
 }
 
 /**
- * S171: WebSocket client with automatic reconnect and exponential backoff.
+ * WebSocket client with automatic reconnect and exponential backoff.
  *
  * Wraps the native WebSocket for long-lived status/progress streams. On an
  * unexpected close it reconnects with exponentially increasing delay starting

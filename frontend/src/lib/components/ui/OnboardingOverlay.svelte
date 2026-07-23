@@ -1,9 +1,9 @@
 <!--
-  OnboardingOverlay.svelte (S84, S166)
+  OnboardingOverlay.svelte
   Full-screen overlay shown on first run (user_initialized === false).
   Detects installed Ollama models, recommends a system preset,
   and allows one-click apply. Dismissible after apply or skip.
-  S166: migrated to the shared <Modal> primitive (native dialog focus
+  Migrated to the shared <Modal> primitive (native dialog focus
   trap + Escape). Backdrop click is disabled; Escape maps to Skip.
 -->
 <script lang="ts">
@@ -44,7 +44,7 @@
 				await loadData();
 				return;
 			} catch {
-				// BUG-10 S108: Backend may not be ready yet (404 / connection error).
+			// BUG-10: Backend may not be ready yet (404 / connection error).
 				// Retry with delay before giving up.
 				if (attempt < MAX_RETRIES - 1) {
 					await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));

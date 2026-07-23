@@ -1,5 +1,5 @@
 <!--
-  Projects route layout (S169).
+  Projects route layout.
   Wraps /projects and /projects/[id] in AppShell so the shared sidebar
   (with the Projects section context) and header cluster apply. The header
   label reflects the active project name on the detail route, "Projects"

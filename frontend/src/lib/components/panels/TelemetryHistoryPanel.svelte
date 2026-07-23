@@ -1,5 +1,5 @@
 <!--
-  TelemetryHistoryPanel.svelte -- S115 Telemetry History Dashboard.
+  TelemetryHistoryPanel.svelte -- Telemetry History Dashboard.
 
   Browsing and visualization of SQLite-backed telemetry event history.
   Features:
@@ -74,7 +74,7 @@
 	let purgeConfirmOpen = false;
 	let purgeDays = 7;
 
-	// Retention settings (S115)
+	// Retention settings
 	let retentionDays = 7;
 	let autoPurgeEnabled = false;
 	let savingSettings = false;
@@ -163,7 +163,7 @@
 	}
 
 	// -------------------------------------------------------------------------
-	// Retention settings (S115)
+	// Retention settings
 	// -------------------------------------------------------------------------
 
 	async function saveSettings() {
@@ -523,7 +523,7 @@
 		{/if}
 	</div>
 
-	<!-- Retention & Configuration (S115) -->
+	<!-- Retention & Configuration -->
 	<div class="section config-section">
 		<h3>Retention & Configuration</h3>
 
@@ -994,7 +994,7 @@
 		text-align: center;
 	}
 
-	/* Config section (S115) */
+	/* Config section */
 	.config-section {
 		border-color: var(--oo-accent-primary);
 	}

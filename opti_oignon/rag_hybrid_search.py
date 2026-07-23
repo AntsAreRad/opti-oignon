@@ -579,8 +579,13 @@ class HybridSearchEngine:
 
         Deduplicates by chunk_id, keeping the merged entry.
         """
-        # Collect all unique chunk keys
-        all_keys = set(vector_results.keys()) | set(keyword_results.keys())
+        # Collect all unique chunk keys. Sorted, because the iteration order
+        # of a set of keys differs from one process to the next: chunks
+        # carrying equal scores would be handed back in a different order on
+        # every host, and any threshold measured on this engine would drift
+        # with it. The sort below is stable, so the score still decides and
+        # the chunk id only breaks ties.
+        all_keys = sorted(set(vector_results.keys()) | set(keyword_results.keys()))
         fused: list[HybridResult] = []
 
         for key in all_keys:

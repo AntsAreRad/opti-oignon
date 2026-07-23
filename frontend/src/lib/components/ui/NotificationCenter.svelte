@@ -1,5 +1,5 @@
 <!--
-  NotificationCenter.svelte (S107)
+  NotificationCenter.svelte
   Bell icon with unread count badge in the navbar.
   Dropdown panel showing notification history with timestamps.
   Mark as read, mark all read, clear history actions.

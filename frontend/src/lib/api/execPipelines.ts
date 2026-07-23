@@ -1,5 +1,5 @@
 /**
- * API client for execution pipeline management (S53).
+ * API client for execution pipeline management.
  */
 
 import { apiGet, apiPost, apiPut, apiDelete } from './client';

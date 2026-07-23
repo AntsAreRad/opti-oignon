@@ -1,4 +1,4 @@
-# Context Optimizer Configuration — Opti-Oignon S123
+# Context Optimizer Configuration — Opti-Oignon
 # ===================================================
 # Controls the unified context window orchestrator.
 # When enabled, replaces the manual 5-step pipeline in executor.py.
@@ -41,7 +41,7 @@ emergency:
   # Maximum chars for emergency-truncated text blocks
   max_block_chars: 2000
 
-# Compression settings (delegates to ConversationCompressor S66)
+# Compression settings (delegates to ConversationCompressor)
 compression:
   # Strategy override ("auto" = use compressor default)
   strategy: "auto"
@@ -60,4 +60,17 @@ report:
 # fallback alike; cache identity (head plus tail) never moves with the
 # placement. Rollback: enabled false.
 stable_prefix:
+  enabled: false
+
+# Per-conversation slot affinity on the external llama-server. That server
+# keeps one prompt-KV cache per slot and picks the slot itself unless told
+# otherwise, so two conversations share one routinely -- the second either
+# evicts the first's cached prefix or is decoded on attention state computed
+# over the first's content. When enabled, each conversation is pinned to its
+# own slot, keyed on the conversation identity, the invariant head and the
+# trust-envelope state; callers with no conversation identity request no slot
+# rather than take one. Independent of stable_prefix: this decides WHICH
+# cache is reused, that one decides whether there is anything worth reusing.
+# Ignored by every other backend. Rollback: enabled false.
+slot_affinity:
   enabled: false

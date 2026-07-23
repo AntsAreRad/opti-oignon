@@ -1,8 +1,8 @@
 # ============================================================================
-# CONVERSATION COMPRESSOR — OPTI-OIGNON S66
+# CONVERSATION COMPRESSOR — OPTI-OIGNON
 # ============================================================================
 # Configuration for conversation history compression and archive retrieval.
-# The compressor reduces prompt history to fit the S65 token budget while
+# The compressor reduces prompt history to fit the token budget while
 # keeping the full conversation archive always searchable in SQLite.
 
 # -- Core compression settings --

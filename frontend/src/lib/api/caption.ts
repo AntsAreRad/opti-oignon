@@ -1,7 +1,7 @@
 /**
- * Typed API client for the opt-in image caption / OCR trigger (N.6, S253).
+ * Typed API client for the opt-in image caption / OCR trigger (N.6).
  *
- * One per-user endpoint, POST /api/notes/caption/{attachment_id} (the S251
+ * One per-user endpoint, POST /api/notes/caption/{attachment_id} (the
  * route). The run is opt-in and sandboxed server-side (the disposable
  * bubblewrap floor); `approve` gates the durable write-back and its default
  * is the safe one (false: preview, no persist). Every outcome -- ok, a

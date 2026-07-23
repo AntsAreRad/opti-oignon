@@ -1,5 +1,5 @@
 /**
- * Cascading Inference API client -- S69
+ * Cascading Inference API client
  *
  * Typed API for cascading inference status, config, and test endpoints.
  */

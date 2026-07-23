@@ -1,5 +1,5 @@
 <!--
-  Login page (S98, refactored onto ds primitives in S168).
+  Login page (refactored onto ds primitives).
   Shown when multi-user mode is active and the user is not authenticated.
   Redirects to /chat after a successful login.
 
@@ -35,7 +35,7 @@
 			goto('/chat');
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : 'Login failed';
-			// S125: Detect rate limiting from 429 responses
+			// Detect rate limiting from 429 responses
 			if (msg.includes('429') || msg.toLowerCase().includes('too many')) {
 				errorMsg = 'Too many login attempts. Please wait a moment and try again.';
 			} else if (msg.includes('401')) {

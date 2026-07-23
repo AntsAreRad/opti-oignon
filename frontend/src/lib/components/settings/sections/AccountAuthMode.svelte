@@ -1,5 +1,5 @@
 <!--
-  AccountAuthMode.svelte (S168)
+  AccountAuthMode.svelte
   Account & Security > Authentication mode group of the /settings hub.
 
   Surfaces the single-user / multi-user choice that was previously made once

@@ -1,9 +1,9 @@
 <!--
-  BenchmarkRunSection.svelte (S169)
+  BenchmarkRunSection.svelte
   The "Run" section extracted from BenchmarkV2Panel: profile + model
   selection, LLM-as-Judge toggle, run execution with live progress, the
   results table + radar comparison + export, and the auto-trigger controls
-  (S90/S91). Self-contained; markup and API calls are unchanged.
+  as well. Self-contained; markup and API calls are unchanged.
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
@@ -47,7 +47,7 @@
 	let progress: BenchmarkV2Progress | null = null;
 	let results: BenchmarkV2Results | null = null;
 
-	// Auto-Trigger (S90/S91)
+	// Auto-Trigger
 	let autoTriggerStatus: BenchmarkV2AutoTriggerStatus | null = null;
 	let autoTriggerToggling = false;
 	let autoTriggerEvents: BenchmarkV2AutoTriggerEvent[] = [];
@@ -283,7 +283,7 @@
 				</div>
 			</div>
 
-			<!-- Judge toggle (S89) -->
+			<!-- Judge toggle -->
 			<div class="bv2-field bv2-judge-field">
 				<label class="bv2-toggle-row">
 					<input type="checkbox" bind:checked={useJudge} />
@@ -302,7 +302,7 @@
 				{/if}
 			</div>
 
-			<!-- Auto-Trigger toggle (S90 + S91 polish) -->
+			<!-- Auto-Trigger toggle -->
 			{#if autoTriggerStatus !== null}
 				<div class="bv2-field bv2-autotrigger-field">
 					<label class="bv2-toggle-row">
@@ -326,7 +326,7 @@
 							{/if}
 						</div>
 
-						<!-- Profile selector for auto-triggered runs (S91) -->
+						<!-- Profile selector for auto-triggered runs -->
 						<div class="bv2-autotrigger-profile-row">
 							<label class="bv2-label-sm" for="at-profile-select">Profile for auto-runs:</label>
 							<select
@@ -344,7 +344,7 @@
 							</select>
 						</div>
 
-						<!-- Cooldown countdown (S91) -->
+						<!-- Cooldown countdown -->
 						{#if cooldownDisplay > 0}
 							<div class="bv2-cooldown-bar">
 								<span class="bv2-cooldown-icon">&#9716;</span>
@@ -352,7 +352,7 @@
 							</div>
 						{/if}
 
-						<!-- Resource guard indicator (S91) -->
+						<!-- Resource guard indicator -->
 						{#if autoTriggerStatus.resource_guard_active}
 							<div class="bv2-resource-guard">
 								<span class="bv2-badge bv2-badge-guard">Resource Guard</span>
@@ -361,7 +361,7 @@
 						{/if}
 					{/if}
 
-					<!-- Test Connection button (S91) -->
+					<!-- Test Connection button -->
 					<div class="bv2-autotrigger-actions">
 						<button
 							class="bv2-btn-sm"
@@ -381,7 +381,7 @@
 						{/if}
 					</div>
 
-					<!-- Test poll result (S91) -->
+					<!-- Test poll result -->
 					{#if testPollResult}
 						<div class="bv2-test-poll-result" class:bv2-ok={testPollResult.ok} class:bv2-err={!testPollResult.ok}>
 							{#if testPollResult.ok}
@@ -399,7 +399,7 @@
 						</div>
 					{/if}
 
-					<!-- Event log (S91) -->
+					<!-- Event log -->
 					{#if eventLogOpen}
 						<div class="bv2-event-log">
 							<div class="bv2-event-log-header">
@@ -510,7 +510,7 @@
 						</table>
 					</div>
 
-					<!-- Judge summary (S89) -->
+					<!-- Judge summary -->
 					{#if results.judge_scores && results.judge_scores.length > 0}
 						<h3 class="bv2-subtitle">Judge Evaluation ({results.judge_scores.length} scores)</h3>
 						<div class="bv2-judge-summary">

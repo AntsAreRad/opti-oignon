@@ -1,4 +1,4 @@
-# Humanizer configuration -- S86
+# Humanizer configuration
 # Post-processing to reduce "statistically perfect" LLM output.
 
 # Master toggle (opt-in)

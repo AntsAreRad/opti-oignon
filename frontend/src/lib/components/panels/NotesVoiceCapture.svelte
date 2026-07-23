@@ -1,9 +1,9 @@
 <!--
-  NotesVoiceCapture.svelte (S253, Notes feature N.5 UI half)
+  NotesVoiceCapture.svelte (Notes feature N.5 UI half)
   In-browser voice capture for the active note: MediaRecorder records the
   microphone, the recording uploads as an encrypted audio attachment over the
-  S249 route (sealed server-side under a per-attachment subkey; nothing
-  plaintext touches disk), and each voice note offers the opt-in S250
+  upload route (sealed server-side under a per-attachment subkey; nothing
+  plaintext touches disk), and each voice note offers the opt-in
   transcription as preview-then-approve: the first run returns the transcript
   for review without persisting, the explicit approval writes it back. A
   structured refusal (the fail-secure sandbox gate, the absent opt-in

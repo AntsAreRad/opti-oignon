@@ -1,5 +1,5 @@
 <!--
-  ThemeCustomizer.svelte (S152)
+  ThemeCustomizer.svelte
   Full theme customization panel.
 
   Features:
@@ -128,7 +128,7 @@
 	}
 
 	/**
-	 * Live --oo-bg-surface of the CURRENT palette (S197, DS-02): the
+	 * Live --oo-bg-surface of the CURRENT palette (DS-02): the
 	 * contrast badge and the wheel cutout follow whichever of the five
 	 * palettes is active instead of assuming a hardcoded pair. Falls back
 	 * to FALLBACK_BG_SURFACE when computed styles are unavailable or the

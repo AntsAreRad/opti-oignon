@@ -1,6 +1,6 @@
 <!--
   ScrollToBottomFab.svelte
-  S132: Floating action button that appears when scrolled up from bottom.
+  Floating action button that appears when scrolled up from bottom.
   Smooth-scrolls to the latest message on click.
   48x48px touch target with tobacco accent color.
 -->

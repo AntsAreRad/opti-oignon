@@ -110,7 +110,7 @@ def test_validate_rejects_invalid_permission():
         _manifest(permissions=["root_access"])
 
 
-# --- resource_limits (S143) ---
+# --- resource_limits ---
 
 def test_validate_rejects_unknown_resource_limit_key():
     with pytest.raises(PluginManifestError):

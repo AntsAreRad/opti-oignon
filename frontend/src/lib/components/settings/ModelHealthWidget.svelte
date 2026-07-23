@@ -1,6 +1,6 @@
 <!--
   ModelHealthWidget.svelte
-  S63: Compact model health status grid showing each model's health
+  Compact model health status grid showing each model's health
   (green/yellow/red dots), latency bar, last check timestamp,
   and a "Check All" button for manual refresh.
 -->

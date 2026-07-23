@@ -1,5 +1,5 @@
 /**
- * Conversation branching API client (S97).
+ * Conversation branching API client.
  *
  * Manages branch creation, navigation, comparison, and merging
  * for conversation exploration workflows.

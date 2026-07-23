@@ -1,5 +1,5 @@
 /**
- * Plugin Allowlist API client for Opti-Oignon (S128).
+ * Plugin Allowlist API client for Opti-Oignon.
  *
  * Provides typed access to all /api/security/plugin-allowlist/* endpoints.
  * Supports: status, batch prepare/approve, per-plugin/batch revoke, verify.

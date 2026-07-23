@@ -1,4 +1,4 @@
-# Configuration du module de consensus multi-modele (S50)
+# Configuration du module de consensus multi-modele
 # Parametres pour les strategies de consensus entre modeles.
 
 consensus:

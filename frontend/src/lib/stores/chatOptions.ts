@@ -24,34 +24,34 @@ export const temperature = writable<number | null>(null);
 /** Activer la detection automatique de preset. */
 export const usePresets = writable<boolean>(true);
 
-/** Activer le mode thinking/raisonnement (S42). */
+/** Activer le mode thinking/raisonnement. */
 export const thinkingEnabled = writable<boolean>(false);
 
-/** Activer la recherche web (S42). */
+/** Activer la recherche web. */
 export const webSearchEnabled = writable<boolean>(false);
 
-/** S68: Semantic cache toggle. */
+/** Semantic cache toggle. */
 export const cacheEnabled = writable<boolean>(false);
 
-/** S69: Cascading inference toggle. */
+/** Cascading inference toggle. */
 export const cascadingEnabled = writable<boolean>(false);
 
-/** S70: Speculative generation toggle. */
+/** Speculative generation toggle. */
 export const speculativeEnabled = writable<boolean>(false);
 
-/** S84: Prompt enhancement/optimization toggle. */
+/** Prompt enhancement/optimization toggle. */
 export const promptEnhanceEnabled = writable<boolean>(false);
 
-/** S86: Humanizer post-processing toggle. */
+/** Humanizer post-processing toggle. */
 export const humanizeEnabled = writable<boolean>(false);
 
-/** S117: Quick sandbox mode toggle. */
+/** Quick sandbox mode toggle. */
 export const quickSandboxEnabled = writable<boolean>(false);
 
-/** S118: Chat coding agent toggle. */
+/** Chat coding agent toggle. */
 export const chatCodingEnabled = writable<boolean>(false);
 
-/** Selected execution pipeline (S53). null = auto. */
+/** Selected execution pipeline. null = auto. */
 export const selectedExecPipeline = writable<string | null>(null);
 
 // -- Caches --

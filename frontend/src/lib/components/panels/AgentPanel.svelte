@@ -1,6 +1,6 @@
 <!--
-  AgentPanel.svelte (S176, Theme 3 / Odysseus Core)
-  The agent panel for the sandboxed agent loop, built on the S166 lib/ds
+  AgentPanel.svelte (Theme 3 / Odysseus Core)
+  The agent panel for the sandboxed agent loop, built on the lib/ds
   primitives (Card, Button, Icon, EmptyState, InlineError). It shows the live
   tool-call stream (consuming the loop's AgentEvents over $lib/api/agent), a
   round / step display, a cancel control, and the Bulbe approval prompts

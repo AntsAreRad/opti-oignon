@@ -21,59 +21,55 @@ enforcement seam:
   * Contract 6 -- a passing boot populates the checklist cache, so the
     API endpoint serves the boot-time result without re-running.
 
+The roster the stub installers iterate is derived from the module
+rather than listed beside it. A check missing from that roster is never
+stubbed, so it runs for real inside a test that believes it does not:
+the aggregate verdict then answers on the state of the host, and a
+contract that asserts an all-pass run fails for a reason that has
+nothing to do with what it pins. The roster is a seam, not a list.
+
 Local-only (the public distribution ships no tests). Runs under pytest
-or the __main__ runner. Contracts 1-3 load the checklist module in
-isolation under a stub package; contracts 4-6 drive the real
-application lifespan with the individual checks replaced by cheap
-deterministic stubs and the heavy startup actions replaced by spies.
+or the __main__ runner. Contracts 1-3 load the checklist module on the
+shared isolation window; contracts 4-6 drive the real application
+lifespan with the individual checks replaced by cheap deterministic
+stubs and the heavy startup actions replaced by spies.
 """
 
 import asyncio
-import importlib.util
 import sys
 import traceback
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+from _isolation import isolate, source  # noqa: E402
 
-_CHECK_NAMES = (
-    "_check_code_signing_scripts",
-    "_check_ollama_bind",
-    "_check_luks",
-    "_check_security_mode",
-    "_check_encrypted_swap",
-    "_check_governor_ollama_limits",
-    "_check_pqc_primitive",
-)
+_REPO = Path(__file__).resolve().parent.parent
+
+_CHECK_PREFIX = "_check_"
+
+
+def _roster(mod):
+    """Every individual check the module carries, derived not listed.
+
+    A roster written down beside the module is a roster that goes stale:
+    a check added to the aggregator is absent from it, is therefore
+    never replaced, and runs for real inside a test that believes every
+    check is stubbed. The verdict then answers on the state of the host.
+    Deriving it from the module means a ninth check is covered the day
+    it is written. That this set is exactly what the runner calls is
+    pinned by the boot-check stub-coverage contracts, not assumed here.
+    """
+    return sorted(
+        name for name in dir(mod)
+        if name.startswith(_CHECK_PREFIX) and callable(getattr(mod, name))
+    )
 
 
 def _load_checklist_module():
-    """Load startup_checks.py in isolation under a stub package."""
-    keys = ("opti_oignon", "opti_oignon.startup_checks")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.startup_checks", _OO / "startup_checks.py",
+    """Load startup_checks.py on the shared isolation window."""
+    loaded, restore = isolate(
+        targets={"opti_oignon.startup_checks": source("startup_checks.py")},
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.startup_checks"] = mod
-    spec.loader.exec_module(mod)
-    pkg.startup_checks = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    return loaded["opti_oignon.startup_checks"], restore
 
 
 def _purge_stub_package():
@@ -98,13 +94,15 @@ def _critical_item(mod, name):
 
 
 def _install_stub_checks(mod, failing=None):
-    """Replace the six individual checks with deterministic stubs.
+    """Replace every individual check with a deterministic stub.
 
     Returns a restore callable. ``failing`` names one check to fail
-    critically; every other check passes.
+    critically; every other check passes. Every name in the roster is
+    replaced, so no check is left running against the host.
     """
-    saved = {n: getattr(mod, n) for n in _CHECK_NAMES}
-    for n in _CHECK_NAMES:
+    names = _roster(mod)
+    saved = {n: getattr(mod, n) for n in names}
+    for n in names:
         if n == failing:
             setattr(mod, n, lambda _n=n: _critical_item(mod, _n))
         else:
@@ -193,8 +191,8 @@ def _real_app_harness():
 
     Returns (app module namespace dict, restore callable). The plugin
     loader and sync arming are replaced by recording spies; the memory
-    migration is replaced by a no-op. The six checklist checks are left
-    to the caller.
+    migration is replaced by a no-op. The individual checklist checks
+    are left to the caller.
     """
     if str(_REPO) not in sys.path:
         sys.path.insert(0, str(_REPO))
@@ -246,8 +244,9 @@ def _real_app_harness():
 
 
 def _install_real_stub_checks(sc, failing=None):
-    saved = {n: getattr(sc, n) for n in _CHECK_NAMES}
-    for n in _CHECK_NAMES:
+    names = _roster(sc)
+    saved = {n: getattr(sc, n) for n in names}
+    for n in names:
         if n == failing:
             setattr(sc, n, lambda _n=n: _critical_item(sc, _n))
         else:

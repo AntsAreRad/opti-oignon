@@ -1,5 +1,5 @@
 <!--
-  ProxySettingsPanel.svelte -- S82 Anonymous Web Search / Tor Proxy settings.
+  ProxySettingsPanel.svelte -- Anonymous Web Search / Tor Proxy settings.
 
   Sections:
   1. Proxy mode selector (Off / Tor / Custom SOCKS5)
@@ -52,7 +52,7 @@
 	// Stats
 	let searchConfig: SearchConfigResponse | null = null;
 
-	// S87: Track ddgs availability
+	// Track ddgs availability
 	$: ddgsAvailable = searchConfig?.ddgs_available ?? true;
 
 	// -------------------------------------------------------------------------
@@ -165,7 +165,7 @@
 		<h3 style="margin: 0; color: var(--oo-fg-primary); font-size: 1rem; font-weight: 600;">
 			Web Search &amp; Privacy
 		</h3>
-		<!-- S87: Compact proxy status badge -->
+		<!-- Compact proxy status badge -->
 		{#if !loading && !error}
 			<span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.5rem;
 				border-radius: 9999px; font-size: 0.7rem; font-weight: 500;
@@ -194,7 +194,7 @@
 		{/if}
 	</div>
 
-	<!-- S87: Warning when duckduckgo-search is not installed -->
+	<!-- Warning when duckduckgo-search is not installed -->
 	{#if !loading && !ddgsAvailable}
 		<div style="margin-bottom: 1rem; padding: 0.6rem 0.75rem; border-radius: var(--oo-radius-md);
 			background-color: var(--oo-warning-bg); border: 1px solid var(--oo-warning-bd);">

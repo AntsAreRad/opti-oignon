@@ -1,5 +1,5 @@
 <!--
-  BenchmarkHistorySection.svelte (S169)
+  BenchmarkHistorySection.svelte
   The "History" section extracted from BenchmarkV2Panel: list of past runs.
   Self-contained; behaviour unchanged.
 -->

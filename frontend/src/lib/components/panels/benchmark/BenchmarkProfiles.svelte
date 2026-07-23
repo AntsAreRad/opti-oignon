@@ -1,5 +1,5 @@
 <!--
-  BenchmarkProfiles.svelte (S169)
+  BenchmarkProfiles.svelte
   The "Profiles" section extracted from BenchmarkV2Panel: list, create, edit
   and delete custom evaluation profiles with a question preview. Self-contained;
   behaviour unchanged.

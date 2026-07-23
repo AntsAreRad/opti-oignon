@@ -1,5 +1,5 @@
 <!--
-  SandboxSettingsStrip.svelte (S213, Sandbox Workspace cycle, Bloc 4)
+  SandboxSettingsStrip.svelte (Sandbox Workspace cycle, Bloc 4)
   The per-workspace settings strip (spec sections 8 and 10): the
   per-sandbox command timeout and the configured resource caps shown
   read-only, and the NETWORK toggle -- the cycle's one new capability and

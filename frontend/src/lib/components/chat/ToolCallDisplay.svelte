@@ -3,8 +3,8 @@
   Displays tool calls inline in assistant messages.
   Shows tool name, arguments, result (collapsible),
   execution time, and a colored status indicator.
-  S44: Tool Calling Framework
-  S62: Multi-turn tool call history timeline
+  Tool Calling Framework
+  Multi-turn tool call history timeline
 -->
 <script lang="ts">
 	import type { ToolCallInfo } from '$lib/types';
@@ -17,7 +17,7 @@
 	let expandedIndex: number | null = null;
 	let historyExpanded = false;
 
-	// S169: A tool call may carry optional plugin metadata (plugin_name +
+	// A tool call may carry optional plugin metadata (plugin_name +
 	// permissions) when it was invoked through a plugin; surface it inline.
 	function pluginPerms(call: ToolCallInfo): string[] {
 		const p = (call as Record<string, unknown>).permissions;
@@ -44,7 +44,7 @@
 	}
 </script>
 
-<!-- S62: Prior tool history timeline -->
+<!-- Prior tool history timeline -->
 {#if toolHistory.length > 0}
 	<div class="mb-2">
 		<button
@@ -128,7 +128,7 @@
 						{call.tool_name}
 					</span>
 
-					<!-- S169: plugin permission badge (only when plugin metadata present) -->
+					<!-- Plugin permission badge (only when plugin metadata present) -->
 					{#if pluginPerms(call).length > 0}
 						<PluginPermissionBadge pluginName={pluginName(call)} permissions={pluginPerms(call)} />
 					{/if}

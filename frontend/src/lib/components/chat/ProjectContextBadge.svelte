@@ -1,5 +1,5 @@
 <!--
-  ProjectContextBadge.svelte (refactored S167)
+  ProjectContextBadge.svelte
   Compact badge shown when a conversation is linked to a project. Shows the
   project name; click navigates to the project. A tooltip gives the full
   context, and a pulse indicator marks active context injection. Uses the

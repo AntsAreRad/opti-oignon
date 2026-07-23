@@ -1,11 +1,11 @@
 <!--
-  Header.svelte (S167)
+  Header.svelte
   Consolidated header status cluster, mounted inside the AppShell
   <header> landmark (spec 8.4): backend status, theme control,
   notifications and user menu, right-aligned. Phase 2 extracts the
   cluster from AppShell as-is; Phase 3 swaps the binary toggle for the
   ThemeSwitcher and merges NetworkIndicator into BackendStatus.
-  S215 prepends the EmergencyStopControl (panic control + resume),
+  Prepends the EmergencyStopControl (panic control + resume),
   visible app-wide because this cluster renders on every route.
 -->
 <script lang="ts">

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Public-clean guard: reject internal session nomenclature in added lines.
 
-The published source and test trees must never carry internal session
-nomenclature. This guard scans the ADDED lines of a diff over those trees
-and fails when a line introduces:
+No published tree may carry internal session nomenclature -- not the Python
+ones alone, but the frontend, the operator scripts and the mobile tree as
+well, so that each of them is born clean rather than cleaned later. This
+guard scans the ADDED lines of a diff over those trees and fails when a line
+introduces:
 
   * a session code -- the letter S followed by two-to-four digits as a
     standalone token; or
@@ -63,7 +65,16 @@ _PROCESS_WORDS = tuple(
 )
 
 # Trees the guard scans. Nothing outside these is considered.
-_SCAN_PATHS = ("opti_oignon/", "tests/")
+#
+# Every tree that ships is here, not the Python ones alone. The detector is a
+# regex over added lines and knows nothing about syntax, so a tree of
+# TypeScript, shell or Kotlin is guarded on exactly the same terms as a tree
+# of Python: leaving a shipped tree out would be a choice, never a technical
+# limit. Diff-only, so the standing debt in these trees is not charged --
+# what is charged is any new instance arriving on an added line.
+_SCAN_PATHS = (
+    "opti_oignon/", "tests/", "frontend/", "scripts/", "android/",
+)
 
 _DEFAULT_BASE_REF = "origin/main"
 

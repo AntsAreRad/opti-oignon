@@ -1,6 +1,6 @@
-# Speculative Generation Configuration -- S70
+# Speculative Generation Configuration
 # Draft-verify pattern: fast model generates a draft, larger model verifies.
-# Mutually exclusive with cascading inference (S69).
+# Mutually exclusive with cascading inference.
 
 enabled: false
 

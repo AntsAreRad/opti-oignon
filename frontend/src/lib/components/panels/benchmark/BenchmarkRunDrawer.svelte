@@ -1,5 +1,5 @@
 <!--
-  BenchmarkRunDrawer.svelte (S169)
+  BenchmarkRunDrawer.svelte
   Per-run detail surface (spec 9.5): a drawer-right that shows a single run's
   summary and per-model scores. Sourced from the existing benchmark history
   (getHistory) so no new endpoint is introduced.

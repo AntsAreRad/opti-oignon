@@ -1,5 +1,5 @@
 /**
- * API client for Backup / Restore endpoints -- S121.
+ * API client for Backup / Restore endpoints --.
  *
  * Covers:
  *   GET  /api/backup/sections  -- list available sections

@@ -1,5 +1,5 @@
 # =============================================================================
-# Red Team Audit Configuration — Opti-Oignon S147
+# Red Team Audit Configuration — Opti-Oignon
 # =============================================================================
 # LLM-powered adversarial testing of defense layers.
 # All generation is 100% local via Ollama.
@@ -55,7 +55,7 @@ targets:
   - search_sanitizer
   - pii_sanitizer
   - sandbox
-  # - chat  # End-to-end testing (full in S148)
+  # - chat  # End-to-end testing (not yet enabled)
 
 # --- Scoring Thresholds ---
 bypass_threshold: 0.7   # Attack considered successful above this
@@ -78,7 +78,7 @@ category_toggles:
   off_topic: true
   encoding_bypass: true
 
-# --- S158: Automated Security Scheduling ---
+# --- Automated Security Scheduling ---
 scheduler:
   enabled: true
   interval: weekly          # daily | weekly | on-deploy

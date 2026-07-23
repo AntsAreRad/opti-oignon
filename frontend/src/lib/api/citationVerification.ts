@@ -1,12 +1,12 @@
 /**
- * Typed API client for the citation-verify surface (S275 UI half).
+ * Typed API client for the citation-verify surface (UI half).
  *
- * One per-user endpoint, POST /api/claims/verify-citations (the S274 route,
- * the join of the S273 citation extractor and the S271 per-answer
+ * One per-user endpoint, POST /api/claims/verify-citations (the route,
+ * the join of the citation extractor and the per-answer
  * aggregation). The caller submits a produced answer carrying inline numeric
  * citation markers [n] (1-based) plus the ordered sources those markers index;
  * the route extracts the (claim, source) pairs server-side (fail-closed by
- * omission), runs each pair through the S267 verification role wrapped as
+ * omission), runs each pair through the verification role wrapped as
  * untrusted data, and aggregates the per-pair verdicts fail-secure into a
  * single per-answer verdict. The result carries the aggregate, the per-pair
  * results, and the extracted (claim, source) pairs, the pairs positionally
@@ -21,7 +21,7 @@
 
 import { apiPost } from './client';
 
-/** The fail-secure verdict taxonomy (mirrors the S267 role). */
+/** The fail-secure verdict taxonomy (mirrors the role). */
 export type ClaimVerdict = 'supported' | 'unsupported' | 'uncertain';
 
 /**

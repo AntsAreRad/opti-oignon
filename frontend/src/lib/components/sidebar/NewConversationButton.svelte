@@ -1,5 +1,5 @@
 <!--
-  NewConversationButton.svelte (refactored S167)
+  NewConversationButton.svelte
   Creates a new conversation. Built on the ds Button primitive.
 -->
 <script lang="ts">

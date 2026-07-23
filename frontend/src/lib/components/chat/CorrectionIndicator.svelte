@@ -1,6 +1,6 @@
 <!--
   CorrectionIndicator.svelte
-  S51: Lightweight indicator showing whether self-correction was applied.
+  Lightweight indicator showing whether self-correction was applied.
   
   Shows a discreet badge with the number of iterations,
   le score de conformite avant/apres, et l'amelioration de qualite.

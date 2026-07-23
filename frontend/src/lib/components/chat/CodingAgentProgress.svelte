@@ -1,5 +1,5 @@
 <!--
-  CodingAgentProgress.svelte (S118)
+  CodingAgentProgress.svelte
   Live progress display during coding agent execution.
   Shows plan steps, implementation progress, test results, fix attempts
   as they stream in real-time via WebSocket coding events.

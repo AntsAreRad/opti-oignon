@@ -97,6 +97,12 @@ except ImportError:
     CONTEXT_SUMMARY_AVAILABLE = False
     context_summarizer = None
 
+# Cross-source deduplication of retrieved snippets before injection. Imported
+# plainly, not behind a guard: it is first-party and standard-library only, so
+# there is no absence for a guard to describe, and a guard here would only turn
+# a broken tree into a silently degraded prompt.
+from . import context_dedup as _context_dedup
+
 # Cross-conversation memory import (v1.4.0 -- F1, Session 11)
 try:
     from .memory import memory_manager as _memory_manager
@@ -158,12 +164,27 @@ except ImportError:
 # direction is to drop the block, never to inject it bare.
 try:
     from .agent.untrusted_context import SOURCE_MEMORY as _UNTRUSTED_SOURCE_MEMORY
+    from .agent.untrusted_context import sources_present as _untrusted_sources
     from .agent.untrusted_context import wrap as _wrap_untrusted
     UNTRUSTED_WRAP_AVAILABLE = True
 except ImportError:
     UNTRUSTED_WRAP_AVAILABLE = False
     _wrap_untrusted = None
+    _untrusted_sources = None
     _UNTRUSTED_SOURCE_MEMORY = "memory"
+
+# Per-conversation slot affinity for the external llama-server. Unavailable
+# means no slot is ever named and the server keeps choosing, which is the
+# behaviour that predates this module -- degrading here costs reuse, never
+# correctness.
+try:
+    from .slot_affinity import ENVELOPE_NONE as _SLOT_ENVELOPE_NONE
+    from .slot_affinity import get_slot_affinity as _get_slot_affinity
+    SLOT_AFFINITY_AVAILABLE = True
+except ImportError:
+    SLOT_AFFINITY_AVAILABLE = False
+    _get_slot_affinity = None
+    _SLOT_ENVELOPE_NONE = "none"
 
 # Model warm-up / keepalive (v1.4.0 -- S24 F2)
 try:
@@ -1961,6 +1982,11 @@ class Executor:
         # survive from turn to turn. The flag lives in the context
         # pipeline config; unreadable means off, the historical layout.
         _stable_prefix_active = False
+        # Slot affinity is read from the same config but is its OWN switch:
+        # this one decides which prompt-KV cache a turn reuses, the one above
+        # decides whether there is anything in it worth reusing. Tying them
+        # would ship one of the two unreachable.
+        _slot_affinity_active = False
         if CONTEXT_OPTIMIZER_AVAILABLE and _get_context_optimizer is not None:
             try:
                 _sp_raw = _get_context_optimizer().config.get("stable_prefix")
@@ -1968,6 +1994,12 @@ class Executor:
                     _stable_prefix_active = bool(_sp_raw.get("enabled", False))
             except Exception:
                 _stable_prefix_active = False
+            try:
+                _sa_raw = _get_context_optimizer().config.get("slot_affinity")
+                if isinstance(_sa_raw, dict):
+                    _slot_affinity_active = bool(_sa_raw.get("enabled", False))
+            except Exception:
+                _slot_affinity_active = False
         _volatile_parts: list[str] = []
 
         # Step 2c: Inject memory facts (Session 11 -- F1; S174 dual-layer)
@@ -2089,6 +2121,27 @@ class Executor:
                 archive_results = _conversation_compressor.retrieve_from_archive(
                     conversation_id, refined_question
                 )
+                # Cross-source dedup, before injection. Memory, project context
+                # and web results have already been composed for this turn, and
+                # the archive draws on the very conversation the compressed
+                # history summarises, so its snippets are the ones most likely
+                # to repeat what the prompt already says. A snippet that is
+                # already there buys nothing and costs budget twice.
+                if archive_results:
+                    _already_injected = _context_dedup.compose_already_injected(
+                        system_prompt, _volatile_parts
+                    )
+                    archive_results, _archive_dropped = _context_dedup.drop_duplicates(
+                        archive_results,
+                        _already_injected,
+                        key=lambda res: getattr(res, "snippet", "") or "",
+                    )
+                    if _archive_dropped:
+                        logger.info(
+                            "Archive retrieval: %d snippet(s) dropped, already "
+                            "present in the composed prompt",
+                            len(_archive_dropped),
+                        )
                 if archive_results:
                     archive_context = "\n\n--- Retrieved from conversation archive ---\n"
                     for res in archive_results:
@@ -2559,6 +2612,45 @@ class Executor:
                         and getattr(backend, "name", "") == "llama_server"
                     ):
                         options["cache_prompt"] = True
+                    # Name the slot this conversation decodes on, so the
+                    # cache being reused is its own and no other's. The
+                    # listing is read through the seam and degrades to an
+                    # empty list; an empty list, or a turn with no
+                    # conversation to key on, names no slot at all.
+                    if (
+                        _slot_affinity_active
+                        and SLOT_AFFINITY_AVAILABLE
+                        and _get_slot_affinity is not None
+                        and getattr(backend, "name", "") == "llama_server"
+                    ):
+                        try:
+                            _head = ""
+                            if messages and isinstance(messages[0], dict):
+                                _head = str(messages[0].get("content") or "")
+                            _envelope = _SLOT_ENVELOPE_NONE
+                            if _untrusted_sources is not None:
+                                _seen: set[str] = set()
+                                for _m in messages or []:
+                                    if isinstance(_m, dict):
+                                        _seen |= _untrusted_sources(
+                                            str(_m.get("content") or "")
+                                        )
+                                if _seen:
+                                    _envelope = "+".join(sorted(_seen))
+                            _slot = _get_slot_affinity().choose(
+                                conversation_id=conversation_id,
+                                prefix_fingerprint=hashlib.sha256(
+                                    _head.encode("utf-8")
+                                ).hexdigest(),
+                                envelope=_envelope,
+                                slots=backend.slots(),
+                            )
+                            if _slot is not None:
+                                options["id_slot"] = int(_slot)
+                        except Exception as _slot_exc:
+                            logger.debug(
+                                f"slot affinity unavailable this turn: {_slot_exc}"
+                            )
                     stream_iter = backend.stream(
                         model=routing.model,
                         messages=messages,

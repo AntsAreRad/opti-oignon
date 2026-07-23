@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.9.0 — BENCHMARK PROFILES (S88)
+# OPTI-OIGNON v1.9.0 — BENCHMARK PROFILES
 # =============================================================================
 # Defines benchmark profiles that combine question categories with scoring
 # weights. Each profile selects which question categories to include and

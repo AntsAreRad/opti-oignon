@@ -1,5 +1,5 @@
 <!--
-  SandboxDiffReview.svelte (S212, Sandbox Workspace cycle, Bloc 3)
+  SandboxDiffReview.svelte (Sandbox Workspace cycle, Bloc 3)
   The diff review + apply flow (spec sections 6 and 10): load the live
   workspace diff against the recorded baseline (added/modified/deleted,
   hash-driven), preview files, approve changes per file, confirm deletions
@@ -10,7 +10,7 @@
   workspaces (no cloned root) require an explicit target directory under
   the host share-root allowlist. Cap and refusal errors are surfaced
   honestly, per file. An EXPLICIT user action: the model can trigger
-  neither the review nor the apply (S73/S74). Design-system tokens only
+  neither the review nor the apply. Design-system tokens only
   (--oo-*); lucide icons through Icon. Registered in
   FRONTEND_REDESIGN_SPEC.md.
 -->

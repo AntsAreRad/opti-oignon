@@ -1,5 +1,5 @@
 /**
- * Model Lifecycle API client -- S112
+ * Model Lifecycle API client
  *
  * Typed API for model pull/delete/update operations,
  * alias management, and stale model detection.

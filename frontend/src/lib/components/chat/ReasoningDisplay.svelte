@@ -1,5 +1,5 @@
 <!--
-  ReasoningDisplay.svelte (S49)
+  ReasoningDisplay.svelte
   Shows multi-step reasoning (CoT, ToT, Self-Consistency).
   Collapsible block with progress and final synthesis.
 -->

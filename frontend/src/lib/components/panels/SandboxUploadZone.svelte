@@ -1,8 +1,8 @@
 <!--
-  SandboxUploadZone.svelte (S211, Sandbox Workspace cycle, Bloc 2)
+  SandboxUploadZone.svelte (Sandbox Workspace cycle, Bloc 2)
   Drag-and-drop / file-picker upload zone (spec 5.1): an EXPLICIT user
   action targeting the selected workspace -- the model can trigger no
-  upload (S73/S74), and no host path is ever read by the server on this
+  upload, and no host path is ever read by the server on this
   path (the browser supplies the bytes as multipart). Caps are surfaced
   honestly: an exceeded cap (file count, per-file bytes, workspace quota)
   refuses the whole request with 413; invalid names and destination

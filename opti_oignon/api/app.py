@@ -470,6 +470,7 @@ def health_check():
         FINGERPRINT_AVAILABLE,
         HUMANIZER_AVAILABLE,
         HYBRID_SEARCH_AVAILABLE,
+        HYBRID_SEARCH_ROUTED,
         INFERENCE_BACKEND_AVAILABLE,
         INFERENCE_PROFILER_AVAILABLE,
         LEARNED_ROUTER_AVAILABLE,
@@ -566,7 +567,9 @@ def health_check():
             "user_settings": USER_SETTINGS_AVAILABLE,
             "rag_store": RAG_STORE_AVAILABLE,
             "rag_chunker": RAG_CHUNKER_AVAILABLE,
-            "hybrid_search": HYBRID_SEARCH_AVAILABLE,
+            # Presence is not reach: the engine imports, but the
+            # capability is only real where a query can reach it.
+            "hybrid_search": HYBRID_SEARCH_AVAILABLE and HYBRID_SEARCH_ROUTED,
             "external_stores": EXTERNAL_STORES_AVAILABLE,
             "rag_dashboard": RAG_DASHBOARD_AVAILABLE,
             "plugin_registry": PLUGIN_REGISTRY_AVAILABLE,

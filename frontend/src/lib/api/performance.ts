@@ -1,5 +1,5 @@
 /**
- * Performance Dashboard API client -- S72 Real-Time Performance Dashboard.
+ * Performance Dashboard API client -- Real-Time Performance Dashboard.
  *
  * Typed functions for throughput, latency, drift detection,
  * recommendations, utilization, and metric history.

@@ -1,5 +1,5 @@
 <!--
-  RemoteAccessPanel.svelte (S133)
+  RemoteAccessPanel.svelte
   Remote access configuration panel for settings/security.
 
   Features:

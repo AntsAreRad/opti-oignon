@@ -1,11 +1,11 @@
 /*
- * theme.css -- Opti-Oignon design-system orchestrator (S166).
+ * theme.css -- Opti-Oignon design-system orchestrator.
  *
  * Imports the split token files, then declares the default-mode
  * foundation (Anthracite for dark, Parchment for light) inline together
  * with the retained legacy component tokens and the backward-compat alias
  * layer. The five preset palettes live in theme-<name>.css; the alias
- * layer (spec 4.2) is transitional and removed in S171 once consumers
+ * layer (spec 4.2) is transitional and will be removed once consumers
  * migrate off the legacy names.
  *
  * Convention: --oo-{category}-{variant}  (bg / fg / bd / acc).
@@ -333,8 +333,8 @@ html:not(.dark) .oo-logo-adaptive {
 }
 
 /* ------------------------------------------------------------------ */
-/*  LEGACY ALIAS LAYER (S166) -- resolves the 30 undeclared-but-used   */
-/*  variables from spec 4.2. Transitional; removed in S171.            */
+/*  LEGACY ALIAS LAYER -- resolves the 30 undeclared-but-used          */
+/*  variables from spec 4.2. Transitional; removed later.              */
 /* ------------------------------------------------------------------ */
 :root {
 	/* Radius re-declared for orchestrator self-sufficiency; canonical

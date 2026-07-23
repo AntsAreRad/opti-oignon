@@ -289,6 +289,9 @@ def _load_executor(*, flag_on, backend_name):
     }
     targets = {
         _OPTIMIZER: source("context_optimizer.py"),
+        # The deduplicator rides along as a real target: the hub imports
+        # it plainly, and it is pure and standard-library only.
+        "opti_oignon.context_dedup": source("context_dedup.py"),
         _EXECUTOR: source("executor.py"),
     }
     had = "ollama" in sys.modules

@@ -1,5 +1,5 @@
 <!--
-  AnalyticsDashboard.svelte (S55)
+  AnalyticsDashboard.svelte
   Analytics overview panel displaying:
   - Summary stats (requests, success rate, avg response time, tokens/s)
   - Feedback stats (thumbs up/down, average score)

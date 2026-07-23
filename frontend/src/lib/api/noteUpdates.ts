@@ -1,8 +1,8 @@
 /**
  * Typed API client for the Notes update log (N.8 editor seam).
  *
- * Operates over the per-note update legs (/api/notes/{id}/updates) the S265
- * sibling route exposes on top of the S263 append-only update store: append
+ * Operates over the per-note update legs (/api/notes/{id}/updates) the
+ * sibling route exposes on top of the append-only update store: append
  * one opaque Yjs update, and replay the surviving tail from a seq. Mirrors the
  * api/notes.ts shape: a thin typed wrapper over the base client, one async
  * function per endpoint, no Svelte state here.

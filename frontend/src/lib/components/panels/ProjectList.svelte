@@ -1,5 +1,5 @@
 <!--
-  ProjectList.svelte (redesigned S169)
+  ProjectList.svelte
   Project index on the ds primitives. Sort (last updated / name / created),
   list/cards view toggle, and a per-project secondary action menu (Open,
   Settings, Star, Duplicate, Archive, Delete). Starred/archived are stored in

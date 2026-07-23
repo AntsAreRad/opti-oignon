@@ -1,5 +1,5 @@
 <!--
-  FineTunePanel.svelte -- S96 Fine-Tuning Data Export & Variant Management.
+  FineTunePanel.svelte -- Fine-Tuning Data Export & Variant Management.
 
   Three sub-tabs:
   1. Export: format selector, filters, preview, download
@@ -222,7 +222,7 @@
 	<!-- EXPORT TAB -->
 	{#if activeSubTab === 'export'}
 		<div class="space-y-3">
-			<!-- FT-05 (S194): unencrypted-export warning recommended by FT-01 -->
+			<!-- FT-05: unencrypted-export warning recommended by FT-01 -->
 			<p
 				class="rounded-md px-3 py-2 text-xs"
 				style="background-color: var(--oo-warning-bg); color: var(--oo-warning); border: 1px solid var(--oo-warning-bd);"

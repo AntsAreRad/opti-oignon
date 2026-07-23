@@ -1,5 +1,5 @@
 /**
- * Speculative Decoding API client -- S110
+ * Speculative Decoding API client
  *
  * Typed API for speculative decoding status, config update,
  * compatible draft model listing, and VRAM budget checks.

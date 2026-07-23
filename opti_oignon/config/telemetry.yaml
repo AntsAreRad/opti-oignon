@@ -1,4 +1,4 @@
-# Inference Telemetry Pipeline — Opti-Oignon S112
+# Inference Telemetry Pipeline — Opti-Oignon
 # Central event bus for inference events, feeding live_metrics,
 # performance_monitor, and speculative_decoding from a single point.
 

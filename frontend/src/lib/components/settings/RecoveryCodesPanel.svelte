@@ -1,5 +1,5 @@
 <!--
-  RecoveryCodesPanel.svelte (S127)
+  RecoveryCodesPanel.svelte
   Recovery codes management in the security settings.
 
   Features:

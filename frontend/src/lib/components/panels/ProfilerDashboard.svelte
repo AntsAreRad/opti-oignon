@@ -1,5 +1,5 @@
 <!--
-  ProfilerDashboard.svelte -- S114 Inference Profiler Dashboard.
+  ProfilerDashboard.svelte -- Inference Profiler Dashboard.
 
   Shows:
   1. Per-model summary cards (avg/p50/p95/p99 latency, avg tok/s)

@@ -1,5 +1,5 @@
 <!--
-  SearchKillSwitchPanel.svelte (S128)
+  SearchKillSwitchPanel.svelte
   Web search kill switch management panel.
 
   Features:

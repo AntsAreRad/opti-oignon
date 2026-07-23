@@ -1,21 +1,21 @@
 <!--
-  SandboxPanel.svelte (S210, Sandbox Workspace cycle, Bloc 1)
+  SandboxPanel.svelte (Sandbox Workspace cycle, Bloc 1)
   The workspace manager panel (spec sections 4.2 and 10), built on the lib/ds
   primitives, mounted in the chat-side right panel next to AgentPanel
   (FRD-03's runtime home). It surfaces the sandbox system status (backend,
   bwrap, sessions x/max), a create form (optional label, per-sandbox timeout),
   and the workspace list (SandboxWorkspaceList) with stop / delete / select.
-  Select binds the workspace to the ACTIVE conversation over the S210 binding
+  Select binds the workspace to the ACTIVE conversation over the binding
   routes: an explicit user action -- a conversation has no workspace until one
   is created or attached, at most one active conversation per workspace, and
   the agent run then reaches the sandboxed tools through that binding
-  (ATL-02). The network field is live since S213 (Bloc 4): the settings
+  (ATL-02). The network field is live since Bloc 4: the settings
   strip owns the Daily-only, user-activated toggle. Updates
   announce through an aria-live region. Design-system tokens only (--oo-*);
   lucide icons through Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
-  S212 (Bloc 3): hosts the diff review + apply card (SandboxDiffReview) on
+  (Bloc 3): hosts the diff review + apply card (SandboxDiffReview) on
   the same explicit target Select; review and apply are user actions only.
-  S213 (Bloc 4): hosts the per-workspace settings strip
+  (Bloc 4): hosts the per-workspace settings strip
   (SandboxSettingsStrip) on the same explicit target Select -- timeout and
   caps read-only, the network toggle disabled under Bulbe with the refusal
   stated honestly, the exfiltration warning when on, and the provision row.
@@ -53,7 +53,7 @@
 	let creating = false;
 	let busyId: string | null = null;
 
-	// S211 (Bloc 2): the copy-in target. Defaults to the workspace bound to
+	// (Bloc 2): the copy-in target. Defaults to the workspace bound to
 	// the active conversation, else the first workspace; the Select makes
 	// the choice explicit. Upload and clone are user actions only.
 	let copyTargetId = '';
@@ -212,7 +212,7 @@
 		void load();
 	}
 
-	// S213 (Bloc 4): the settings strip targets the same explicit Select.
+	// (Bloc 4): the settings strip targets the same explicit Select.
 	$: copyTargetSession =
 		sessions.find((s) => s.session_id === copyTargetId) ?? null;
 

@@ -1,9 +1,9 @@
 <!--
-  ConversationList.svelte (refactored S167)
+  ConversationList.svelte
   Conversation list with search, date grouping (Today / Yesterday /
   Previous 7 days / Older), empty-state guidance and robust delete
   handling. Uses the ds Icon primitive for the search affordance.
-  S87: empty-state guidance card, redirect to /chat after deleting the
+  Empty-state guidance card, redirect to /chat after deleting the
   last conversation.
 -->
 <script lang="ts">
@@ -72,7 +72,7 @@
 	async function handleDelete(e: CustomEvent<{ id: string }>) {
 		const wasActive = $activeConversationId === e.detail.id;
 		await deleteConv(e.detail.id);
-		// S87: After deleting, redirect if it was the active conversation
+		// After deleting, redirect if it was the active conversation
 		// or if no conversations remain.
 		if (wasActive || $conversations.length === 0) {
 			window.location.href = '/chat';
@@ -126,7 +126,7 @@
 				</button>
 			</div>
 		{:else if filteredConversations.length === 0}
-			<!-- S87: Empty state guidance card -->
+			<!-- Empty state guidance card -->
 			{#if searchQuery}
 				<div class="px-3 py-8 text-center text-sm" style="color: var(--oo-fg-muted);">
 					No matching conversations

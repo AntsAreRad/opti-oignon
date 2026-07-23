@@ -1,7 +1,7 @@
 <!--
-  NotesPanel.svelte (S248, Notes feature N.2 core UI)
+  NotesPanel.svelte (Notes feature N.2 core UI)
   The Notes page: a master-detail surface over the per-user /api/notes store,
-  built on the S166 lib/ds primitives (Card, Button, Input, Icon, EmptyState,
+  built on the lib/ds primitives (Card, Button, Input, Icon, EmptyState,
   InlineError, Modal). The left pane lists notes with search and tag chips; the
   right pane edits the selected note (title, body, tags, pinned) and persists
   whole note state through the store. The body is plain text / markdown for now,
@@ -41,7 +41,7 @@
 	let editTags = '';
 	let editPinned = false;
 	let saving = false;
-	// N.9 (S260): the phone-sync opt-in is NOT part of the dirty/save form.
+	// N.9: the phone-sync opt-in is NOT part of the dirty/save form.
 	// It is an immediate trust control in CONFIRMED posture: the click only
 	// REQUESTS the flip (the checkbox never self-toggles), the rendered
 	// state comes from the server-returned record alone (the store replaces
@@ -185,7 +185,7 @@
 		}
 	}
 
-	// N.8 (S265): the collaborative-edit confirmed-posture seam
+	// N.8: the collaborative-edit confirmed-posture seam
 	// (NOTES_CRDT_SPEC.md section 5). An incremental Yjs update renders in the
 	// editor ONLY after the local backend acknowledges its append -- there is
 	// no optimistic ghost state the store has not seen. When the append cannot

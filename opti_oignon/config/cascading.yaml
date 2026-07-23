@@ -1,4 +1,4 @@
-# Cascading Inference Configuration — S69
+# Cascading Inference Configuration
 # 3-tier model cascade with automatic quality-based escalation.
 
 enabled: false

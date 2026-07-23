@@ -136,7 +136,12 @@ def _load(*, ledger=_ABSENT, extra_seeded=None, extra_blocked=()):
     sys.modules["ollama"] = ollama_stub
 
     loaded, win_restore = isolate(
-        targets={_TARGET: source("executor.py")},
+        targets={
+        # The deduplicator rides along as a real target: the hub imports
+        # it plainly, and it is pure and standard-library only.
+            "opti_oignon.context_dedup": source("context_dedup.py"),
+            _TARGET: source("executor.py"),
+        },
         blocked=blocked,
         seeded=seeded,
     )

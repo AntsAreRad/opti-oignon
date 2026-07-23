@@ -1,5 +1,5 @@
 <!--
-  ConversationDefaults.svelte (S168)
+  ConversationDefaults.svelte
   Conversation & Chat > Defaults group of the consolidated /settings hub.
 
   This is where the legacy "Quick" tab content now lives (spec 5.5: the

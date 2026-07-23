@@ -1,5 +1,5 @@
 <!--
-  ProjectDetail.svelte (redesigned S169)
+  ProjectDetail.svelte
   Full project detail on the ds primitives, promoted into the /projects/[id]
   route. Editable name/description/system_instructions, a settings group
   (default model, context budget, auto-index), a stats bar, and a tabbed

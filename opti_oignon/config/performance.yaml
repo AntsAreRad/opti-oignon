@@ -1,4 +1,4 @@
-# Performance Monitor configuration (S72)
+# Performance Monitor configuration
 # Real-time metrics collection and drift detection
 
 enabled: true

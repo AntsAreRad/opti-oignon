@@ -1,10 +1,10 @@
 /**
- * Authentication store (S98, S125).
+ * Authentication store.
  *
  * Manages current user state, token persistence, automatic token refresh,
  * and login/logout flows.
  *
- * S125: When cookie_mode is enabled (default), JWT tokens are stored in
+ * When cookie_mode is enabled (default), JWT tokens are stored in
  * httpOnly cookies set by the backend. localStorage is no longer used
  * for token storage, eliminating XSS token theft. The Authorization
  * header is still set as a fallback for backward compatibility.
@@ -41,10 +41,10 @@ export const isAuthenticated = derived(currentUser, ($u) => $u !== null);
 export const isSingleUserMode = derived(authStatus, ($s) => $s?.single_user_mode ?? true);
 
 // ---------------------------------------------------------------------------
-// S125: Cookie mode flag
+// Cookie mode flag
 // ---------------------------------------------------------------------------
 
-/** Whether the backend uses httpOnly cookie auth (S125). */
+/** Whether the backend uses httpOnly cookie auth. */
 let _cookieMode = true;
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ const STORAGE_ACCESS_TOKEN = 'oo-access-token';
 const STORAGE_REFRESH_TOKEN = 'oo-refresh-token';
 
 function storeTokens(tokens: AuthTokens): void {
-	// S125: In cookie mode the backend sets httpOnly cookies and the
+	// In cookie mode the backend sets httpOnly cookies and the
 	// Authorization Bearer header is NOT used. Bulbe mode enforces cookie-only
 	// auth and rejects any Bearer header with 403, so keeping an in-memory
 	// access token would break every request under Bulbe. Only retain the token
@@ -103,7 +103,7 @@ function getStoredRefreshToken(): string | null {
 }
 
 /**
- * S125: Remove legacy localStorage tokens when migrating to cookie mode.
+ * Remove legacy localStorage tokens when migrating to cookie mode.
  * Called once on init if cookie_mode is detected and old tokens exist.
  */
 function _migrateLegacyTokens(): void {
@@ -154,17 +154,17 @@ export async function initAuth(): Promise<void> {
 		const status = await authApi.getAuthStatus();
 		authStatus.set(status);
 
-		// S125: Detect cookie mode from backend status
+		// Detect cookie mode from backend status
 		_cookieMode = status.cookie_mode ?? true;
 
-		// S125: Clean up legacy localStorage tokens when switching to cookie mode
+		// Clean up legacy localStorage tokens when switching to cookie mode
 		if (_cookieMode) {
 			_migrateLegacyTokens();
 		}
 
 		if (status.single_user_mode) {
 			// Single-user mode normally bypasses authentication. Bulbe mode is
-			// the exception (S136): it enforces auth even for a single-user
+			// the exception: it enforces auth even for a single-user
 			// install. Probe a protected endpoint to tell the two apart — in
 			// Daily the backend accepts the request (synthetic local user),
 			// under Bulbe it rejects with 401. Installing a synthetic user when
@@ -199,7 +199,7 @@ export async function initAuth(): Promise<void> {
 
 		// Multi-user mode: try to restore session
 		if (_cookieMode) {
-			// S125: In cookie mode, just call /me — the httpOnly cookie
+			// In cookie mode, just call /me — the httpOnly cookie
 			// is sent automatically via credentials: 'include'
 			try {
 				const user = await authApi.getMe();
@@ -287,7 +287,7 @@ export async function doLogin(username: string, password: string): Promise<AuthU
 async function doRefreshToken(): Promise<boolean> {
 	try {
 		if (_cookieMode) {
-			// S125: In cookie mode, refresh token is in httpOnly cookie.
+			// In cookie mode, refresh token is in httpOnly cookie.
 			// Send empty string — backend reads cookie automatically.
 			const tokens = await authApi.refreshToken('');
 			storeTokens(tokens);
@@ -315,7 +315,7 @@ export async function doLogout(): Promise<void> {
 	cancelRefresh();
 
 	if (_cookieMode) {
-		// S125: In cookie mode, backend reads refresh cookie and clears both.
+		// In cookie mode, backend reads refresh cookie and clears both.
 		try {
 			await authApi.logout('');
 		} catch {

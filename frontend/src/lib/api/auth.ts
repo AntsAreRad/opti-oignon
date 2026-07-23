@@ -1,5 +1,5 @@
 /**
- * Authentication API client (S98).
+ * Authentication API client.
  *
  * Handles register, login, logout, token refresh, profile,
  * user settings, shared projects, and admin operations.

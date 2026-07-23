@@ -1,5 +1,5 @@
 /**
- * API client for the Coding Agent (S74).
+ * API client for the Coding Agent.
  *
  * Provides typed functions for all coding agent endpoints:
  * start, plan, step, status, diff, approve, abort.

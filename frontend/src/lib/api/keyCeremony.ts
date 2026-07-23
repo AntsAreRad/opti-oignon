@@ -1,5 +1,5 @@
 /**
- * API client for Encryption Key Ceremony and PQC status -- S129.
+ * API client for Encryption Key Ceremony and PQC status --.
  *
  * Covers:
  *   GET  /api/security/encryption       -- encryption status

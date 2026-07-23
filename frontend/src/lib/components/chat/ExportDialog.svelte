@@ -2,7 +2,7 @@
   ExportDialog.svelte
   Modal dialog for exporting a conversation (Markdown, JSON, HTML).
   Actions: preview, copy to clipboard, download.
-  S166: migrated to the shared <Modal> primitive, which provides the
+  Migrated to the shared <Modal> primitive, which provides the
   native <dialog> focus trap plus Escape and backdrop handling.
 -->
 <script lang="ts">

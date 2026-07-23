@@ -1,10 +1,10 @@
 <!--
-  SecurityPanel.svelte (S125, S128, S129, S130, S131)
+  SecurityPanel.svelte
   Security status panel for settings page.
   Shows: security grade, individual checks, encryption status,
   JWT cookie mode, security mode, kill switch, plugin allowlist,
   encryption key ceremony, PQC signatures, 2FA, recent audit events,
-  hash-chain audit log (S130), system hardening (S131).
+  hash-chain audit log, system hardening.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -54,7 +54,7 @@
 	let loading = true;
 	let error = '';
 
-	// S128: Active security subsection
+	// Active security subsection
 	let activeSection: 'overview' | 'mode' | 'killswitch' | 'plugins' | 'encryption' | 'auditlog' | 'hardening' | 'remote' = 'overview';
 
 	onMount(async () => {
@@ -127,7 +127,7 @@
 </script>
 
 <div class="space-y-6">
-	<!-- S128: Section Navigation -->
+	<!-- Section Navigation -->
 	<div class="flex gap-1 rounded-lg p-1" style="background-color: var(--oo-bg-subtle);">
 		{#each [
 			{ id: 'overview', label: 'Overview' },
@@ -153,31 +153,31 @@
 		{/each}
 	</div>
 
-	<!-- S128: Security Mode Section -->
+	<!-- Security Mode Section -->
 	{#if activeSection === 'mode'}
 		<SecurityModePanel />
 
-	<!-- S128: Kill Switch Section -->
+	<!-- Kill Switch Section -->
 	{:else if activeSection === 'killswitch'}
 		<SearchKillSwitchPanel />
 
-	<!-- S128: Plugin Allowlist Section -->
+	<!-- Plugin Allowlist Section -->
 	{:else if activeSection === 'plugins'}
 		<PluginAllowlistPanel />
 
-	<!-- S129: Encryption Key Ceremony Section -->
+	<!-- Encryption Key Ceremony Section -->
 	{:else if activeSection === 'encryption'}
 		<KeyCeremonyPanel />
 
-	<!-- S130: Audit Chain Log Section -->
+	<!-- Audit Chain Log Section -->
 	{:else if activeSection === 'auditlog'}
 		<AuditChainPanel />
 
-	<!-- S131: Hardening Section -->
+	<!-- Hardening Section -->
 	{:else if activeSection === 'hardening'}
 		<HardeningPanel />
 
-	<!-- S133: Remote Access Section -->
+	<!-- Remote Access Section -->
 	{:else if activeSection === 'remote'}
 		<RemoteAccessPanel />
 
@@ -265,7 +265,7 @@
 		</div>
 	</div>
 
-	<!-- Two-Factor Authentication (S127) -->
+	<!-- Two-Factor Authentication -->
 	<div class="rounded-lg p-4 space-y-5" style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);">
 		<h3 class="text-base font-semibold" style="color: var(--oo-fg-primary);">Two-Factor Authentication</h3>
 		<WebAuthnSetup />

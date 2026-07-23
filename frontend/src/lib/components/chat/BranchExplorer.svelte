@@ -1,9 +1,9 @@
 <!--
-  BranchExplorer.svelte (S97, refactored S154)
+  BranchExplorer.svelte
   Branch management panel for conversation exploration.
   Shows visual branch tree (collapsible, recursive), switcher, fork controls,
   comparison view, and merge.
-  S154: Replaced flat list with recursive BranchTreeNodeItem component.
+  Replaced flat list with recursive BranchTreeNodeItem component.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount } from 'svelte';
@@ -855,7 +855,7 @@
 		border-color: var(--oo-accent);
 	}
 
-	/* S154: Tree container */
+	/* Tree container */
 	.tree-container {
 		padding: 0.125rem 0;
 	}

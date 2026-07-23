@@ -68,6 +68,26 @@ UNTRUSTED_POLICY = (
 _DELIM_RE = re.compile(r"</?\s*untrusted_data\b[^>]*>?", re.IGNORECASE)
 _SOURCE_RE = re.compile(r"[^a-z0-9_\-]")
 
+# Reads back the source label of a genuine open marker. Only markers this
+# module wrote can match: any marker the content itself carried was defanged
+# by _neutralize before the block was assembled.
+_OPEN_SOURCE_RE = re.compile(
+    r'<untrusted_data source="([a-z0-9_\-]+)" trusted="false">'
+)
+
+
+def sources_present(text: Any) -> frozenset[str]:
+    """The set of untrusted-source labels wrapped into one assembled context.
+
+    Read-only, and deliberately a SET: a caller comparing two contexts wants
+    to know whether the same kinds of untrusted content are in play, not how
+    many blocks there were or in what order. Anything unreadable answers the
+    empty set.
+    """
+    if not text or not isinstance(text, str):
+        return frozenset()
+    return frozenset(_OPEN_SOURCE_RE.findall(text))
+
 
 def _safe_source(source: Any) -> str:
     """Sanitise a source label so it cannot inject attributes into the tag."""

@@ -1,7 +1,7 @@
 <!--
-  ClaimVerifier.svelte (S269, the claim-vs-source verification role's UI half)
-  The standalone surface the user drives over the S268 route
-  (POST /api/claims/verify, the S267 verification role). The user pastes a
+  ClaimVerifier.svelte (the claim-vs-source verification role's UI half)
+  The standalone surface the user drives over the route
+  (POST /api/claims/verify, the verification role). The user pastes a
   model-generated claim and its cited source and picks a model; the role wraps
   both as untrusted context server-side (this component interprets neither) and
   returns a fail-secure verdict -- supported / unsupported / uncertain -- with

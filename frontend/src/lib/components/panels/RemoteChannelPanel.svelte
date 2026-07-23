@@ -1,7 +1,7 @@
 <!--
-  RemoteChannelPanel.svelte (cas 7 Lot 2, S235, REMOTE_INFERENCE_SPEC section 11)
+  RemoteChannelPanel.svelte (cas 7 Lot 2, REMOTE_INFERENCE_SPEC section 11)
   The desktop control surface for the remote-inference channel, a child of the
-  SyncPanel family (Settings > Network & Privacy), built on the S166 lib/ds
+  SyncPanel family (Settings > Network & Privacy), built on the lib/ds
   primitives (Card, Button, Icon, EmptyState, InlineError).
 
   It lets a paired device borrow this desktop's models over the private Veilid

@@ -1,5 +1,5 @@
 <!--
-  EmptyState.svelte (lib/ds) -- S170.
+  EmptyState.svelte (lib/ds).
   The single empty-state surface for lists and panels (spec 12.5, Goal 2).
   Centred icon + title + optional description + an optional actions slot.
   Token-only; the icon is decorative (aria-hidden). Sizes: sm (inline panel)

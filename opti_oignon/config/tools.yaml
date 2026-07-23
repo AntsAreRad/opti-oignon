@@ -1,7 +1,7 @@
-# Tool configuration for Opti-Oignon (S73)
+# Tool configuration for Opti-Oignon
 # Defines available tool categories and their settings.
 
-# Sandbox tools (S73): filesystem and shell tools running in isolation
+# Sandbox tools: filesystem and shell tools running in isolation
 sandbox_tools:
   enabled: true
   # Register simplified (session-bound) tools in tool_registry
@@ -12,7 +12,7 @@ sandbox_tools:
   # Useful for API-level access and multi-session scenarios.
   register_raw: true
 
-# Built-in tools (S44): always registered
+# Built-in tools: always registered
 builtin_tools:
   web_search:
     enabled: true

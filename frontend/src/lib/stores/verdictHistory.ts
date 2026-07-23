@@ -1,8 +1,8 @@
 /**
- * Verdict-history store (S279, the verdict-history affordance).
+ * Verdict-history store (the verdict-history affordance).
  *
  * A session-local, in-memory history of the most recent verification verdicts
- * the user has run. It is fed by a verifier surface (the S277 AnswerVerifier on
+ * the user has run. It is fed by a verifier surface (the AnswerVerifier on
  * /verify-answer this lot; other verifiers may feed it later) and read by the
  * VerdictHistory sub-component. The history is capped to the most recent
  * MAX_VERDICT_HISTORY entries and is never persisted: it lives only for the

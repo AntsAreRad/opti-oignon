@@ -1,5 +1,5 @@
 <!--
-  PluginsPanel.svelte -- S101/S102 Plugin Management UI.
+  PluginsPanel.svelte -- Plugin Management UI.
 
   Shows installed plugins with enable/disable toggles, plugin details
   (version, author, hooks, permissions), install from directory,
@@ -48,7 +48,7 @@
 	type SubTab = 'installed' | 'marketplace';
 	let subTab: SubTab = 'installed';
 
-	// S109: Known slash commands per plugin
+	// Known slash commands per plugin
 	const SLASH_COMMANDS: Record<string, string[]> = {
 		'scratchpad': ['/note <text>', '/notes', '/note delete <id>', '/note search <query>'],
 		'task-extractor': ['/tasks', '/tasks done <id>', '/tasks clear'],
@@ -398,7 +398,7 @@
 								</div>
 							{/if}
 
-							<!-- S109: How to use -->
+							<!-- How to use -->
 							{#if usageHint(plugin)}
 								{@const hint = usageHint(plugin)}
 								<div class="rounded-lg px-3 py-2"

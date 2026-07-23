@@ -1,5 +1,5 @@
 <!--
-  TOTPSetup.svelte (S127)
+  TOTPSetup.svelte
   TOTP setup and management in the settings panel.
 
   Features:

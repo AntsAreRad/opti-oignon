@@ -1,10 +1,10 @@
 <!--
-  NotesMediaGallery.svelte (S253, Notes feature N.6 UI half)
+  NotesMediaGallery.svelte (Notes feature N.6 UI half)
   The encrypted image gallery for the active note: a picker uploads images as
-  encrypted attachments over the S249 route (sealed server-side under a
+  encrypted attachments over the route (sealed server-side under a
   per-attachment subkey; nothing plaintext touches disk), thumbnails decrypt
   in memory through short-lived object URLs (revoked on removal and destroy),
-  and each image offers the opt-in S251 caption / OCR as preview-then-approve:
+  and each image offers the opt-in caption / OCR as preview-then-approve:
   the first run returns the text for review without persisting, the explicit
   approval writes it back. A structured refusal (the fail-secure sandbox
   gate, the absent opt-in vision extra) is shown with its reason, never

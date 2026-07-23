@@ -1,15 +1,15 @@
 <!--
-  SyncPanel.svelte (S182, Theme 4 / Veilid Sync)
+  SyncPanel.svelte (Theme 4 / Veilid Sync)
   The sharing-control panel for optional peer-to-peer sync over Veilid, built on
-  the S166 lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). It
+  the lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). It
   pairs a user's own devices (generate this device's pairing code, scan or paste a
   peer's), lists and labels and removes paired peers, watches sync status (running,
   last sync, per-peer outcome over /api/sync/status and /api/sync/peers), and runs a
   pull round. A pairing payload carries only public material (an identity, a public
-  routing key, since S205 the signing public key) plus an integrity check over it
+  routing key, since the signing public key) plus an integrity check over it
   -- no secret (Kerckhoffs).
 
-  PAIR-02 (S206): pairing is completed by a mutual confirmation. Accepting a
+  PAIR-02: pairing is completed by a mutual confirmation. Accepting a
   payload registers the peer PENDING -- it gates nothing (no round, no serving,
   no trusted key) -- and an "Awaiting confirmation" section shows the short
   comparison code derived from both devices' public material, identical on both
@@ -18,7 +18,7 @@
   this device's own generated payload as its other half, so the panel hints to
   show the pairing code first when it is missing.
 
-  SYN-05 (S207): a second, deliberately distinct waiting list. "Awaiting
+  SYN-05: a second, deliberately distinct waiting list. "Awaiting
   confirmation" is DEVICE trust (a pairing); "Pending record approvals" is
   CONTENT approval -- sensitive records (skills) a round quarantined to the
   deferred ledger instead of applying. Each entry shows provenance only (kind,
@@ -88,7 +88,7 @@
 	let selfReady = false;
 	let busyPending: string | null = null;
 
-	// SYN-05 (S207): pending content approvals -- sensitive records a round
+	// SYN-05: pending content approvals -- sensitive records a round
 	// quarantined to the deferred ledger instead of applying. Distinct from
 	// the device-trust list above; provenance only, never the record body.
 	let deferredRecords: DeferredRecord[] = [];
@@ -204,7 +204,7 @@
 		}
 	}
 
-	// The one-time VL-01 fleet-order step (S208): re-sign this device's own
+	// The one-time VL-01 fleet-order step: re-sign this device's own
 	// records so peers adopt the signed bytes. Local-disk, any mode; a count
 	// of 0 is honest idempotence (nothing unsigned remained).
 	async function republishNow() {
@@ -301,7 +301,7 @@
 		}
 	}
 
-	// N.9 (S260): the human-confirmed class setter the S258 accept seam
+	// N.9: the human-confirmed class setter the accept seam
 	// deferred to. CONFIRMED posture: the row is reloaded from the registry
 	// after the audited write; nothing is shown that the backend has not
 	// recorded. Only the two allowlisted values ever leave this panel.

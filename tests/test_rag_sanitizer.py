@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the RAG prompt-injection sanitizer (rag_sanitizer.RAGSanitizer, S144).
+"""Tests for the RAG prompt-injection sanitizer (rag_sanitizer.RAGSanitizer).
 
 This is the defense that neutralizes adversarial instructions hidden in
 retrieved RAG content before it reaches the model. The pipeline is pure text

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the plugin hook system (plugin_hooks.HookManager + S124 redaction).
+"""Tests for the plugin hook system (plugin_hooks.HookManager + redaction).
 
 The hook manager is what makes plugin effects apply during inference, so its
 contracts are load-bearing AND security-sensitive:
@@ -299,7 +299,7 @@ def test_unregister_and_unregister_plugin_counts():
 
 
 # ----------------------------------------------------------------------------
-# S124 redaction helper
+# Redaction helper
 # ----------------------------------------------------------------------------
 
 def test_redact_hook_data_force_redacts_sensitive_fields():

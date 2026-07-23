@@ -1,5 +1,5 @@
 <!--
-  ModelAssignment.svelte (S60)
+  ModelAssignment.svelte
   Visual editor for model-to-role routing configuration.
   Displays roles (task types) with primary/fast/quality dropdowns
   populated from installed Ollama models.

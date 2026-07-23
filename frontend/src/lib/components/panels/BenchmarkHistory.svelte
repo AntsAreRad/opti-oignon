@@ -1,5 +1,5 @@
 <!--
-  BenchmarkHistory.svelte (S60)
+  BenchmarkHistory.svelte
   Browse past benchmark runs, view detailed results, and compare.
   Shows: run list, detail panel with results table + ranking, delete.
 -->

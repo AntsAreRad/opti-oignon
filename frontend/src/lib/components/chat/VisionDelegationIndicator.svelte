@@ -1,6 +1,6 @@
 <!--
   VisionDelegationIndicator.svelte
-  S95: Shown during vision delegation when the pipeline is analyzing
+  Shown during vision delegation when the pipeline is analyzing
   an image with the vision model before passing context to the text model.
   Displays the OnionLoader with an "Analyzing image..." label.
 -->

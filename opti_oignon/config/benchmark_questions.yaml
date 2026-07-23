@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.9.0 — BENCHMARK QUESTIONS (S88)
+# OPTI-OIGNON v1.9.0 — BENCHMARK QUESTIONS
 # =============================================================================
 # Ground-truth question sets for autonomous quality evaluation.
 # Each question has: id, category, prompt, expected answers, scoring method,

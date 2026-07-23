@@ -1,7 +1,7 @@
 /**
  * Keyboard shortcuts API client for Opti-Oignon.
  *
- * S153: Endpoints for loading/saving custom keyboard shortcut bindings.
+ * Endpoints for loading/saving custom keyboard shortcut bindings.
  */
 
 import { apiGet, apiPut } from './client';

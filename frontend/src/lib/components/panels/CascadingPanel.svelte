@@ -1,5 +1,5 @@
 <!--
-  CascadingPanel.svelte -- S69 Cascading Inference settings panel.
+  CascadingPanel.svelte -- Cascading Inference settings panel.
 
   Sections:
   1. Enable/disable toggle

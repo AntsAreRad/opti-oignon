@@ -1,5 +1,5 @@
 /**
- * svgDrawing.ts (S254, Notes feature N.7) -- the drawing model.
+ * svgDrawing.ts (Notes feature N.7) -- the drawing model.
  *
  * A minimal stroke/shape model for the NotesDrawingCanvas component,
  * serialized to a STANDALONE SVG document (vector, editable, sync-friendly)
@@ -8,7 +8,7 @@
  * data-oo-tool, and the parser refuses (returns null) any SVG that does not
  * carry the marker -- a foreign SVG is never guessed at, it is simply not an
  * editable drawing. The saved document is a plain attachment of kind
- * "drawing": the S249 route seals it under a per-attachment subkey like any
+ * "drawing": the route seals it under a per-attachment subkey like any
  * other blob, and this module never touches storage or the network.
  *
  * Colours are NAMED CSS colours only (the palette below), guarded by
@@ -263,7 +263,7 @@ export function parseDrawing(svgText: string): DrawingModel | null {
 	return { width, height, strokes };
 }
 
-/** Wrap a serialized drawing in a Blob ready for the S253 upload client. */
+/** Wrap a serialized drawing in a Blob ready for the upload client. */
 export function drawingToBlob(model: DrawingModel): Blob {
 	return new Blob([serializeDrawing(model)], { type: DRAWING_MIME });
 }

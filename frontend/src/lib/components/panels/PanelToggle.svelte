@@ -2,7 +2,7 @@
   PanelToggle.svelte
   Boutons de toggle pour les panneaux lateraux (artifacts, code, memory).
   Affiche dans le header, avec indicateur d'etat actif.
-  S52: Warm accent active states.
+  Warm accent active states.
 -->
 <script lang="ts">
 	import { activePanel, togglePanel } from '$lib/stores/panels';
@@ -94,7 +94,7 @@
 		</svg>
 	</button>
 
-	<!-- Exec Pipeline panel toggle (S53) -->
+	<!-- Exec Pipeline panel toggle -->
 	<button
 		on:click={() => togglePanel('exec-pipelines')}
 		class="p-1.5 rounded-md transition-colors"
@@ -109,7 +109,7 @@
 		</svg>
 	</button>
 
-	<!-- Plugins panel toggle (S108) -->
+	<!-- Plugins panel toggle -->
 	<button
 		on:click={() => togglePanel('plugins')}
 		class="p-1.5 rounded-md transition-colors"
@@ -126,7 +126,7 @@
 		</svg>
 	</button>
 
-	<!-- Agent panel toggle (S210, FRD-03: chat-side runtime home) -->
+	<!-- Agent panel toggle (FRD-03: chat-side runtime home) -->
 	<button
 		on:click={() => togglePanel('agent')}
 		class="p-1.5 rounded-md transition-colors"
@@ -143,7 +143,7 @@
 		</svg>
 	</button>
 
-	<!-- Sandbox workspace panel toggle (S210, Sandbox Workspace cycle Bloc 1) -->
+	<!-- Sandbox workspace panel toggle (Sandbox Workspace cycle Bloc 1) -->
 	<button
 		on:click={() => togglePanel('sandbox')}
 		class="p-1.5 rounded-md transition-colors"

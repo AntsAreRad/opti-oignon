@@ -1,5 +1,5 @@
 <!--
-  ContextOptimizerPanel.svelte — S123 Context Window Optimizer settings panel.
+  ContextOptimizerPanel.svelte — Context Window Optimizer settings panel.
 
   Sections:
   1. Enable/disable toggle

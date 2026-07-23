@@ -2,7 +2,7 @@
   FileUpload.svelte
   Drag-and-drop file upload with attached file badges.
   Integrates above ChatInput.
-  S154: Full-window drop zone overlay, per-file progress, batch upload,
+  Full-window drop zone overlay, per-file progress, batch upload,
   configurable max file size, file type icons, rejection feedback.
 -->
 <script lang="ts">
@@ -13,9 +13,9 @@
 
 	export let attachedFiles: AttachedFile[] = [];
 	export let disabled: boolean = false;
-	// S154: Configurable max file size (bytes), defaults to value from files.ts
+	// Configurable max file size (bytes), defaults to value from files.ts
 	export let maxFileSize: number = MAX_FILE_SIZE;
-	// S154: Max batch size
+	// Max batch size
 	export let maxBatchSize: number = 10;
 
 	const dispatch = createEventDispatcher<{
@@ -25,7 +25,7 @@
 
 	let isDragOver = false;
 	let fileInput: HTMLInputElement;
-	// S154: Per-file upload progress tracking
+	// Per-file upload progress tracking
 	interface UploadProgress {
 		filename: string;
 		status: 'uploading' | 'done' | 'error';
@@ -33,7 +33,7 @@
 	}
 	let uploadQueue: UploadProgress[] = [];
 	$: isUploading = uploadQueue.some(q => q.status === 'uploading');
-	// S154: Track drag enter/leave depth for full-window overlay
+	// Track drag enter/leave depth for full-window overlay
 	let dragDepth = 0;
 
 	async function handleFiles(files: FileList | null) {
@@ -41,7 +41,7 @@
 
 		const fileArray = Array.from(files);
 
-		// S154: Batch size validation
+		// Batch size validation
 		if (fileArray.length > maxBatchSize) {
 			toastError(`Too many files: ${fileArray.length} (max ${maxBatchSize})`);
 			return;
@@ -58,7 +58,7 @@
 			const file = fileArray[i];
 			const queueIndex = uploadQueue.length - fileArray.length + i;
 
-			// S154: Use configurable max size for validation
+			// Use configurable max size for validation
 			const error = validateFileWithSize(file);
 			if (error) {
 				toastError(`${file.name}: ${error}`);
@@ -98,7 +98,7 @@
 		if (fileInput) fileInput.value = '';
 	}
 
-	// S154: Validate with configurable max size
+	// Validate with configurable max size
 	function validateFileWithSize(file: File): string | null {
 		// First run standard validation (extension check)
 		const baseError = validateFile(file);
@@ -120,7 +120,7 @@
 		return null;
 	}
 
-	// S154: Full-window drag handlers (depth tracking avoids flicker on child elements)
+	// Full-window drag handlers (depth tracking avoids flicker on child elements)
 	function handleWindowDragEnter(event: DragEvent) {
 		event.preventDefault();
 		if (disabled) return;
@@ -184,7 +184,7 @@
 		return colors[ext] || 'bg-surface-700 text-surface-300';
 	}
 
-	// S154: Register/unregister window-level drag listeners
+	// Register/unregister window-level drag listeners
 	onMount(() => {
 		window.addEventListener('dragenter', handleWindowDragEnter);
 		window.addEventListener('dragover', handleWindowDragOver);
@@ -210,7 +210,7 @@
 	{disabled}
 />
 
-<!-- S154: Full-window drop overlay -->
+<!-- Full-window drop overlay -->
 {#if isDragOver}
 	<div class="drop-overlay" aria-hidden="true">
 		<div class="drop-overlay-content">
@@ -227,7 +227,7 @@
 
 <!-- Main wrapper -->
 <div class="relative">
-	<!-- S154: Upload progress indicators -->
+	<!-- Upload progress indicators -->
 	{#if uploadQueue.length > 0}
 		<div class="upload-progress-list">
 			{#each uploadQueue as item}
@@ -315,7 +315,7 @@
 </div>
 
 <style>
-	/* S154: Full-window drop overlay */
+	/* Full-window drop overlay */
 	.drop-overlay {
 		position: fixed;
 		inset: 0;
@@ -356,7 +356,7 @@
 		color: var(--oo-text-tertiary);
 	}
 
-	/* S154: Upload progress list */
+	/* Upload progress list */
 	.upload-progress-list {
 		display: flex;
 		flex-direction: column;

@@ -14,7 +14,7 @@ export default defineConfig({
 		}
 	},
 	build: {
-		// S134: Code splitting for heavy feature modules
+		// Code splitting for heavy feature modules
 		rollupOptions: {
 			output: {
 				manualChunks(id) {

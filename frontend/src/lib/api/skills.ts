@@ -1,5 +1,5 @@
 /**
- * API client for the SKILL.md registry (S177, Theme 3 / Odysseus Core).
+ * API client for the SKILL.md registry (Theme 3 / Odysseus Core).
  *
  * Defines the contract the skills-manager panel (SkillsPanel.svelte) consumes to
  * browse and manage the evolving-skills registry: list published skills and the

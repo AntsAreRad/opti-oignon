@@ -1,5 +1,5 @@
 /**
- * Shared formatting and chart helpers for the benchmark sections (S169).
+ * Shared formatting and chart helpers for the benchmark sections.
  * Extracted verbatim from BenchmarkV2Panel during its decomposition so the
  * per-section components share one implementation. Pure functions only; no
  * state, no side effects. Behaviour is unchanged.
@@ -55,7 +55,7 @@ export function radarLabelPos(index: number, radius: number): { x: number; y: nu
 	return { x: radius + r * Math.cos(angle), y: radius + r * Math.sin(angle) };
 }
 
-// Trend sparkline SVG helper (S89)
+// Trend sparkline SVG helper
 export function trendPath(points: BenchmarkV2TrendPoint[], w: number, h: number): string {
 	if (points.length < 2) return '';
 	const vals = points.map((p) => p.composite);

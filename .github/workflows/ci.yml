@@ -1,18 +1,21 @@
 # Opti-Oignon CI Pipeline
-# S162 -- GitHub Actions CI
 #
-# Jobs:
-#   lint       - ruff check on Python codebase
-#   typecheck  - mypy on key modules (baseline gate)
-#   test       - pytest with coverage gate
-#   frontend   - svelte-check (TypeScript) + eslint (S171)
-#   e2e        - Playwright E2E tests (frontend)
-#   install    - build + install the distribution in a fresh venv, CLI smoke (S171)
-#   security   - bandit, pip-audit, npm audit
-#   badge      - coverage badge generation
+# Jobs, in declaration order:
+#   lint          - ruff check on the Python codebase
+#   public-clean  - the nomenclature, language and comment-only guards,
+#                   over the diff
+#   isolation     - the test windows, under both install layouts
+#   typecheck     - mypy on key modules (baseline gate)
+#   frontend      - svelte-check (TypeScript, baseline) + eslint
+#   install       - build the distribution, install it in a fresh venv, smoke
+#   security      - bandit, pip-audit, npm audit
 #
-# Fail-fast: lint and typecheck block test/e2e.
-# Security scan runs independently (informational).
+# Only frontend and install are chained; both wait on lint. Every other job
+# starts on its own, so one red job never hides another. Security runs
+# informational (continue-on-error).
+#
+# This list is a contract with the reader: a job added or removed below is a
+# line changed here in the same edit.
 
 name: CI
 
@@ -87,9 +90,15 @@ jobs:
       - name: Run public-clean guard (added lines only)
         run: python .github/scripts/public_clean_guard.py "${{ steps.base.outputs.ref }}"
 
-  # -------------------------------------------------------------------
-  # Typecheck -- mypy with baseline gate
-  # -------------------------------------------------------------------
+      - name: Run public-language guard (added lines, plus the standing debt)
+        run: python .github/scripts/public_language_guard.py "${{ steps.base.outputs.ref }}"
+
+      # The two guards above look at what a diff ADDS. This one looks at what
+      # a diff REMOVES: a file may shed internal nomenclature only if nothing
+      # that executes leaves with it. Silent on every other kind of change.
+      - name: Run comment-only guard (files that shed nomenclature)
+        run: python .github/scripts/comment_only_guard.py "${{ steps.base.outputs.ref }}"
+
   # -------------------------------------------------------------------
   # Isolation -- the test windows, under BOTH install layouts
   #
@@ -141,6 +150,9 @@ jobs:
             tests/test_bind_guard_mode_failsecure_contracts.py \
             tests/test_security_mode_yaml_failsecure_contracts.py
 
+  # -------------------------------------------------------------------
+  # Typecheck -- mypy with baseline gate
+  # -------------------------------------------------------------------
   typecheck:
     name: Typecheck (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -165,7 +177,7 @@ jobs:
           bash scripts/run_typecheck.sh --ci
 
   # -------------------------------------------------------------------
-  # Frontend -- svelte-check (TypeScript) + eslint (S171)
+  # Frontend -- svelte-check (TypeScript, baseline) + eslint
   # -------------------------------------------------------------------
   frontend:
     name: Frontend Checks
@@ -208,7 +220,7 @@ jobs:
 
   # -------------------------------------------------------------------
   # Install smoke -- build the distribution, install it in a fresh
-  # virtualenv, and verify the CLI entry point responds (S171).
+  # virtualenv, and verify the CLI entry point responds.
   # -------------------------------------------------------------------
   install:
     name: Install Smoke Test

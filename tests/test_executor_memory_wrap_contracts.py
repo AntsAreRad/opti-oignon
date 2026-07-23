@@ -121,6 +121,9 @@ def _load(*, block=_BLOCK, wrapper_absent=False):
         blocked.append(_WRAPPER)
     else:
         targets[_WRAPPER] = source("agent", "untrusted_context.py")
+    # The deduplicator rides along as a real target: the hub imports it
+    # plainly, and it is pure and standard-library only.
+    targets["opti_oignon.context_dedup"] = source("context_dedup.py")
     targets[_EXECUTOR] = source("executor.py")
 
     had_ollama = "ollama" in sys.modules

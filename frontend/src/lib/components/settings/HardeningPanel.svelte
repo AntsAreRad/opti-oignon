@@ -1,5 +1,5 @@
 <!--
-  HardeningPanel.svelte (S131)
+  HardeningPanel.svelte
   System hardening status and controls.
 
   Sections:

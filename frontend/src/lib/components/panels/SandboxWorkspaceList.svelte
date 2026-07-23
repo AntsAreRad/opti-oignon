@@ -1,5 +1,5 @@
 <!--
-  SandboxWorkspaceList.svelte (S210, Sandbox Workspace cycle, Bloc 1)
+  SandboxWorkspaceList.svelte (Sandbox Workspace cycle, Bloc 1)
   The decomposed workspace list of the sandbox manager (spec section 4.2),
   built on the lib/ds primitives. Each row surfaces the manager fields: id,
   optional label, bound conversation, age, approximate disk use, running/idle,

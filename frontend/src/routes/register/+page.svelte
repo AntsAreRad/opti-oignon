@@ -1,5 +1,5 @@
 <!--
-  Register page (S98, refactored onto ds primitives in S168).
+  Register page (refactored onto ds primitives).
   Shown when multi-user mode is active and registration is enabled.
   Redirects to /chat after a successful registration.
 

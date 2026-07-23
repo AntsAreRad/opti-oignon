@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.5.8 -- SMART ROUTING CONFIG (S54)
+# OPTI-OIGNON v1.5.8 -- SMART ROUTING CONFIG
 # =============================================================================
 # Configuration for the Smart Router that selects the optimal
 # model per pipeline step type based on model capability profiles.

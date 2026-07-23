@@ -1,5 +1,5 @@
 <!--
-  PerformanceDashboard.svelte -- S72 Real-Time Performance Dashboard.
+  PerformanceDashboard.svelte -- Real-Time Performance Dashboard.
 
   Sections:
   1. Throughput overview (tokens/sec, request count)

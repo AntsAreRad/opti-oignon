@@ -1,5 +1,5 @@
 <!--
-  LiveMetricsOverlay.svelte -- S111
+  LiveMetricsOverlay.svelte
   Floating mini-dashboard showing real-time performance metrics
   during active inference: tok/s, latency, GPU %, memory usage.
   Auto-hides when no inference is active. Compact bar chart shows

@@ -3,7 +3,7 @@
  *
  * Gere les connexions WebSocket ephemeres (une par message),
  * l'annulation, et le retry.
- * S94: Auto-reconnection with exponential backoff on connection loss.
+ * Auto-reconnection with exponential backoff on connection loss.
  */
 
 import { wsUrl } from './client';
@@ -22,7 +22,7 @@ export interface ChatConnection {
 	socket: WebSocket;
 }
 
-// S94: Reconnection config
+// Reconnection config
 const WS_MAX_RETRIES = 3;
 const WS_BASE_DELAY_MS = 500;
 const WS_MAX_DELAY_MS = 4000;
@@ -37,7 +37,7 @@ function backoffDelay(attempt: number): number {
 /**
  * Ouvre un WebSocket vers /api/chat/stream, envoie la requete,
  * et dispatch les tokens via les callbacks.
- * S94: Auto-reconnects on unexpected connection loss (up to WS_MAX_RETRIES).
+ * Auto-reconnects on unexpected connection loss (up to WS_MAX_RETRIES).
  */
 export function streamChat(
 	request: ChatRequest,
@@ -89,12 +89,12 @@ export function streamChat(
 							model: (data.metadata?.model as string) ?? '',
 							tokens: (data.metadata?.tokens as number) ?? 0,
 							duration_ms: (data.metadata?.duration_ms as number) ?? 0,
-							// S117: Quick sandbox metadata
+							// Quick sandbox metadata
 							sandbox_active: (data.metadata?.sandbox_active as boolean) ?? false,
 							sandbox_session_id: (data.metadata?.sandbox_session_id as string) ?? undefined,
 							sandbox_files: (data.metadata?.sandbox_files as unknown[]) ?? undefined,
 							sandbox_files_created: (data.metadata?.sandbox_files_created as string[]) ?? undefined,
-							// S118: Chat coding agent metadata
+							// Chat coding agent metadata
 							chat_coding: (data.metadata?.chat_coding as boolean) ?? false,
 							coding_result: (data.metadata?.coding_result as Record<string, unknown>) ?? undefined,
 							turn_count: (data.metadata?.turn_count as number) ?? undefined,
@@ -124,10 +124,10 @@ export function streamChat(
 						callbacks.onVisionDelegation?.(data.metadata ?? {});
 						break;
 					case 'status':
-						// S109: Intermediate status feedback
+						// Intermediate status feedback
 						callbacks.onStatus?.((data.metadata?.message as string) ?? '');
 						break;
-					// S118: Coding agent events
+					// Coding agent events
 					case 'coding_plan':
 					case 'coding_step':
 					case 'coding_test':
@@ -149,7 +149,7 @@ export function streamChat(
 
 		socket.onerror = () => {
 			if (closed) return;
-			// S94: Attempt reconnect if we haven't received data yet
+			// Attempt reconnect if we haven't received data yet
 			if (!hasReceivedData && retryCount < WS_MAX_RETRIES) {
 				retryCount++;
 				const delay = backoffDelay(retryCount);
@@ -170,7 +170,7 @@ export function streamChat(
 				closed = true;
 				return;
 			}
-			// S94: Attempt reconnect on unexpected close before data received
+			// Attempt reconnect on unexpected close before data received
 			if (!hasReceivedData && retryCount < WS_MAX_RETRIES) {
 				retryCount++;
 				const delay = backoffDelay(retryCount);
@@ -199,7 +199,7 @@ export function streamChat(
 
 /**
  * Ouvre un WebSocket vers /api/chat/retry pour regenerer la derniere reponse.
- * S94: Auto-reconnects on unexpected connection loss.
+ * Auto-reconnects on unexpected connection loss.
  */
 export function retryChat(
 	conversationId: string,
@@ -252,7 +252,7 @@ export function retryChat(
 							model: (data.metadata?.model as string) ?? '',
 							tokens: (data.metadata?.tokens as number) ?? 0,
 							duration_ms: (data.metadata?.duration_ms as number) ?? 0,
-							// S117: Quick sandbox metadata
+							// Quick sandbox metadata
 							sandbox_active: (data.metadata?.sandbox_active as boolean) ?? false,
 							sandbox_session_id: (data.metadata?.sandbox_session_id as string) ?? undefined,
 							sandbox_files: (data.metadata?.sandbox_files as unknown[]) ?? undefined,
@@ -283,7 +283,7 @@ export function retryChat(
 						callbacks.onVisionDelegation?.(data.metadata ?? {});
 						break;
 					case 'status':
-						// S109: Intermediate status feedback
+						// Intermediate status feedback
 						callbacks.onStatus?.((data.metadata?.message as string) ?? '');
 						break;
 				}
@@ -348,7 +348,7 @@ export async function cancelGeneration(conversationId: string): Promise<void> {
 }
 
 
-// -- Consensus (S50) --
+// -- Consensus --
 
 import type { ConsensusResult, ConsensusConfig } from '$lib/types';
 import { apiGet } from './client';

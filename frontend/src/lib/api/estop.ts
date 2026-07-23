@@ -1,5 +1,5 @@
 /**
- * Emergency stop API (S215).
+ * Emergency stop API.
  *
  *   GET  /api/security/estop         -- status (flag + last stop/resume)
  *   POST /api/security/estop         -- engage (optional drop_to_bulbe)

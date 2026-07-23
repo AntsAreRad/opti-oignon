@@ -1,5 +1,5 @@
 <!--
-  PluginPermissionBadge.svelte (S125)
+  PluginPermissionBadge.svelte
   Displays plugin permission badges inline.
   Shows a warning icon when a plugin has inference_content permission
   (can read/modify conversation content during inference).

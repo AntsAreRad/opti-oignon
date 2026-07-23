@@ -1,7 +1,7 @@
-# Agent configuration (S176, Theme 3 / Odysseus Core).
+# Agent configuration (Theme 3 / Odysseus Core).
 #
 # Maximum-security, local-first. The top-level values are the defaults the
-# agent runs with; they match the S175 reference values (round cap 20, verifier
+# agent runs with; they match the reference values (round cap 20, verifier
 # cap 2). Presets under "presets" represent named variants; the laptop-lite
 # preset is the compact profile for small local hardware. The loader
 # (config_loader.py) is guarded: when this file or PyYAML is unavailable, the
@@ -32,7 +32,7 @@ teacher:
 
 tools:
   # Per-mode tool exposure. Daily exposes everything; Bulbe exposes the
-  # sandboxed subset plus the session-state todo and the bounded task (S228).
+  # sandboxed subset plus the session-state todo and the bounded task.
   # This mirrors the allowlists, which remain the enforced gate; this list
   # documents intent (ATL-01: non-enforcing, the frozensets are the floor).
   daily:
@@ -61,7 +61,7 @@ tools:
     - task
 
 diagnostics:
-  # Diagnostics-after-write (S228, AGT_SPEC 5.2). After create_file or
+  # Diagnostics-after-write (AGT_SPEC 5.2). After create_file or
   # str_replace succeeds on a matching file, a linter runs on the sandbox
   # copy INSIDE the disposable bwrap sandbox (never the host) and findings
   # are appended to the tool output. A clean write returns byte-identical
@@ -81,7 +81,7 @@ diagnostics:
   max_findings: 25
 
 hardening:
-  # Loop hardening (S229, AGT_SPEC Section 6). Per-observation transcript
+  # Loop hardening (AGT_SPEC Section 6). Per-observation transcript
   # caps (6.1), applied before untrusted wrapping; the hard floors of 4096
   # bytes / 64 lines are enforced at load time and cannot be configured
   # below. Full pre-truncation text spills to .agent/spill/ inside the

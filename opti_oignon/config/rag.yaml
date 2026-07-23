@@ -1,5 +1,5 @@
 # =============================================================================
-# RAG v2 Configuration -- Opti-Oignon S99/S100
+# RAG v2 Configuration -- Opti-Oignon
 # =============================================================================
 # Knowledge base settings: chunking, embedding, retrieval, web ingestion,
 # hybrid search, external stores, auto-refresh, dashboard.
@@ -90,7 +90,7 @@ storage:
   # SQLite database filename for document/citation tracking
   db_filename: "rag_documents.db"
 
-# -- Hybrid Search (S100) ---------------------------------------------------
+# -- Hybrid Search ----------------------------------------------------------
 hybrid_search:
   # Vector weight (0.0 = pure keyword, 1.0 = pure vector)
   alpha: 0.7
@@ -105,7 +105,7 @@ hybrid_search:
   # Multiplier for keyword search fetch size vs n_results
   keyword_fetch_multiplier: 5
 
-# -- External Vector Stores (S100) ------------------------------------------
+# -- External Vector Stores -------------------------------------------------
 external_stores:
   # Enable external connector auto-configuration
   enabled: false
@@ -131,7 +131,7 @@ external_stores:
   #   environment: "us-east1-gcp"
   #   namespace: ""
 
-# -- Auto-Refresh (S100) ----------------------------------------------------
+# -- Auto-Refresh -----------------------------------------------------------
 auto_refresh:
   # Enable automatic source re-indexing
   enabled: false
@@ -142,14 +142,14 @@ auto_refresh:
   # Maximum file size to auto-refresh (MB)
   max_file_size_mb: 50
 
-# -- Dashboard (S100) -------------------------------------------------------
+# -- Dashboard --------------------------------------------------------------
 dashboard:
   # Default number of days for usage charts
   default_days: 30
   # Maximum sources shown in reliability ranking
   max_sources: 50
 
-# -- Injection Defense (S144) -----------------------------------------------
+# -- Injection Defense ------------------------------------------------------
 # Protects RAG-augmented prompts against indirect prompt injection attacks.
 # Retrieved chunks are sanitized, scored, and wrapped with clear separation
 # markers before being injected into the LLM prompt.
@@ -186,7 +186,7 @@ injection_defense:
     strip_base64: true
     # Remove hidden CSS patterns (display:none, opacity:0, etc.)
     strip_hidden_css: true
-    # Detect and neutralize injection patterns (reuses S125 pattern set)
+    # Detect and neutralize injection patterns (reuses the shared pattern set)
     detect_injections: true
     # Maximum chunk length in characters (truncate longer chunks)
     max_chunk_length: 2000

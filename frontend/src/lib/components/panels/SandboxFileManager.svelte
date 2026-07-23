@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * SandboxFileManager - S116 Sandbox File Copy-Out + Human Approval UI.
+	 * SandboxFileManager - Sandbox File Copy-Out + Human Approval UI.
 	 *
 	 * Displays files inside an active sandbox session, allows preview,
 	 * checkbox selection, approve & download, and reject all.

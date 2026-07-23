@@ -1,5 +1,5 @@
 /**
- * Search Kill Switch API client for Opti-Oignon (S128).
+ * Search Kill Switch API client for Opti-Oignon.
  *
  * Provides typed access to all /api/security/search-killswitch/* endpoints.
  * Supports: status, engage, re-enable ceremony, domain allowlist management.

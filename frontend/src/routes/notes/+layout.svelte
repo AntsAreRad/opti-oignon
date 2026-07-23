@@ -1,5 +1,5 @@
 <!--
-  Notes route layout (S248).
+  Notes route layout.
   Wraps /notes in AppShell so the shared sidebar and header cluster apply,
   mirroring the Settings and Projects route layouts. Selecting a conversation or
   creating one routes to chat, consistent with the other non-chat sections.

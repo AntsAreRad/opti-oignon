@@ -50,17 +50,17 @@ export interface MessageItem {
 	timestamp: string | null;
 	model: string | null;
 	token_estimate: number;
-	thinking?: string;  // S42: Contenu de reflexion (chain-of-thought)
-	verification?: VerificationInfo[];  // S43: Resultats de verification de code
-	tool_calls?: ToolCallInfo[];  // S44: Appels d'outils
-	reasoning_steps?: ReasoningStepInfo[];  // S49: Etapes de raisonnement
-	reasoning_meta?: ReasoningMetaInfo;  // S49: Metadonnees de raisonnement
-	correction?: CorrectionInfo;  // S51: Info d'auto-correction
-	vision_delegation?: VisionDelegationInfo;  // S95: Vision delegation info
-	sandbox_meta?: SandboxMeta;  // S117: Quick sandbox metadata
+	thinking?: string;  // Contenu de reflexion (chain-of-thought)
+	verification?: VerificationInfo[];  // Resultats de verification de code
+	tool_calls?: ToolCallInfo[];  // Appels d'outils
+	reasoning_steps?: ReasoningStepInfo[];  // Etapes de raisonnement
+	reasoning_meta?: ReasoningMetaInfo;  // Metadonnees de raisonnement
+	correction?: CorrectionInfo;  // Info d'auto-correction
+	vision_delegation?: VisionDelegationInfo;  // Vision delegation info
+	sandbox_meta?: SandboxMeta;  // Quick sandbox metadata
 }
 
-// S117: Quick sandbox metadata attached to assistant messages
+// Quick sandbox metadata attached to assistant messages
 export interface SandboxMeta {
 	sandbox_active: boolean;
 	sandbox_session_id: string;
@@ -68,7 +68,7 @@ export interface SandboxMeta {
 	sandbox_files_created: string[];
 }
 
-// S43: Information de verification de code
+// Information de verification de code
 export interface VerificationInfo {
 	status: 'passed' | 'fixed' | 'failed';
 	iterations: number;
@@ -78,7 +78,7 @@ export interface VerificationInfo {
 	execution_output?: string;
 }
 
-// S44: Information d'appel d'outil
+// Information d'appel d'outil
 export interface ToolCallInfo {
 	tool_name: string;
 	arguments: Record<string, unknown>;
@@ -87,10 +87,10 @@ export interface ToolCallInfo {
 	execution_time?: number;
 	success: boolean;
 	reasoning?: string;
-	turn?: number;  // S62: Turn number for multi-turn tool history
+	turn?: number;  // Turn number for multi-turn tool history
 }
 
-// S49: Information d'etape de raisonnement
+// Information d'etape de raisonnement
 export interface ReasoningStepInfo {
 	step_number: number;
 	title: string;
@@ -98,7 +98,7 @@ export interface ReasoningStepInfo {
 	duration_ms: number;
 }
 
-// S49: Metadonnees de raisonnement
+// Metadonnees de raisonnement
 export interface ReasoningMetaInfo {
 	strategy: string;
 	steps_count: number;
@@ -128,7 +128,7 @@ export interface EffectiveModelResponse {
 	source: string;
 }
 
-// S46: Model profiles and routing transparency
+// Model profiles and routing transparency
 export interface ModelProfileInfo {
 	name: string;
 	display_name: string;
@@ -140,7 +140,7 @@ export interface ModelProfileInfo {
 	quality_tier: 'high' | 'medium' | 'low';
 	recommended_for: string[];
 	not_recommended_for: string[];
-	// S54: Numeric task scores for smart routing
+	// Numeric task scores for smart routing
 	task_scores?: Record<string, number>;
 	parameter_count?: string;
 	quantization?: string;
@@ -164,7 +164,7 @@ export interface ModelProfilesResponse {
 	count: number;
 }
 
-// S54: Smart routing types
+// Smart routing types
 export interface SmartRoutingResult {
 	model: string;
 	score: number;
@@ -175,9 +175,9 @@ export interface SmartRoutingResult {
 	alternatives: { model: string; display_name: string; score: number }[];
 	profile_used: boolean;
 	fallback: boolean;
-	feedback_adjusted: boolean; // S62
-	failover: boolean; // S63
-	original_model: string; // S63
+	feedback_adjusted: boolean; //
+	failover: boolean; //
+	original_model: string; //
 }
 
 export interface SmartRouterConfig {
@@ -199,10 +199,10 @@ export interface ChatRequest {
 	preset?: string;
 	temperature?: number;
 	use_presets?: boolean;
-	think?: boolean;        // S42: Mode reflexion
-	web_search?: boolean;   // S42: Recherche web
-	images?: string[];      // S48: Images base64 pour vision
-	prompt_enhance?: boolean; // S84: Prompt optimization/enhancement
+	think?: boolean;        // Mode reflexion
+	web_search?: boolean;   // Recherche web
+	images?: string[];      // Images base64 pour vision
+	prompt_enhance?: boolean; // Prompt optimization/enhancement
 }
 
 export interface ChatToken {
@@ -218,12 +218,12 @@ export interface ChatResponse {
 	model: string;
 	tokens: number;
 	duration_ms: number;
-	// S117: Quick sandbox metadata (present when sandbox was used)
+	// Quick sandbox metadata (present when sandbox was used)
 	sandbox_active?: boolean;
 	sandbox_session_id?: string;
 	sandbox_files?: unknown[];
 	sandbox_files_created?: string[];
-	// S118: Chat coding agent metadata (present when coding agent was used)
+	// Chat coding agent metadata (present when coding agent was used)
 	chat_coding?: boolean;
 	coding_result?: Record<string, unknown>;
 	turn_count?: number;
@@ -239,14 +239,14 @@ export interface ChatCancelRequest {
 
 export interface ChatStreamCallbacks {
 	onToken: (content: string) => void;
-	onThinking?: (content: string) => void;  // S42: Tokens de reflexion
-	onVerification?: (info: VerificationInfo) => void;  // S43: Verification de code
-	onToolCall?: (info: ToolCallInfo) => void;  // S44: Appels d'outils
-	onReasoningStep?: (info: ReasoningStepInfo) => void;  // S49: Etapes de raisonnement
-	onReasoningDone?: (info: ReasoningMetaInfo) => void;  // S49: Fin du raisonnement
-	onVisionDelegation?: (info: Record<string, unknown>) => void;  // S95: Vision delegation
-	onStatus?: (message: string) => void;  // S109: Intermediate status feedback
-	onCodingEvent?: (eventType: string, data: Record<string, unknown>) => void;  // S118: Coding agent events
+	onThinking?: (content: string) => void;  // Tokens de reflexion
+	onVerification?: (info: VerificationInfo) => void;  // Verification de code
+	onToolCall?: (info: ToolCallInfo) => void;  // Appels d'outils
+	onReasoningStep?: (info: ReasoningStepInfo) => void;  // Etapes de raisonnement
+	onReasoningDone?: (info: ReasoningMetaInfo) => void;  // Fin du raisonnement
+	onVisionDelegation?: (info: Record<string, unknown>) => void;  // Vision delegation
+	onStatus?: (message: string) => void;  // Intermediate status feedback
+	onCodingEvent?: (eventType: string, data: Record<string, unknown>) => void;  // Coding agent events
 	onDone: (response: ChatResponse) => void;
 	onError: (error: string) => void;
 	onMetadata?: (metadata: Record<string, unknown>) => void;
@@ -346,7 +346,7 @@ export interface CacheClearResponse {
 	source: string;
 }
 
-// -- S68: Semantic Cache (enhanced) --
+// --: Semantic Cache (enhanced) --
 
 export interface S68CacheStats {
 	total_entries: number;
@@ -384,7 +384,7 @@ export interface S68CacheConfigUpdate {
 	semantic_match_enabled?: boolean;
 }
 
-// -- S69: Cascading Inference --
+// --: Cascading Inference --
 
 export interface CascadeTier {
 	name: string;
@@ -436,7 +436,7 @@ export interface CascadeTestResult {
 	config: Record<string, unknown>;
 }
 
-// -- Speculative Generation (S70) --
+// -- Speculative Generation --
 
 export interface SpeculativeResult {
 	final_response: string;
@@ -549,7 +549,7 @@ export interface AttachedFile {
 	extension: string;
 }
 
-// S48: Image upload types
+// Image upload types
 export interface ImageUploadResponse {
 	filename: string;
 	size_bytes: number;
@@ -621,7 +621,7 @@ export interface SearchHistoryEntry {
 	result_count: number;
 }
 
-// -- Proxy & PII Sanitization (S82) --
+// -- Proxy & PII Sanitization --
 
 export interface ProxyStatusResponse {
 	configured: boolean;
@@ -737,7 +737,7 @@ export interface PipelineExportData {
 }
 
 
-// -- Execution Pipelines (S53) --
+// -- Execution Pipelines --
 
 export interface ExecStepInfo {
 	step_type: string;
@@ -801,7 +801,7 @@ export interface KeyboardShortcut {
 
 export type PanelType = 'none' | 'artifacts' | 'code' | 'memory' | 'pipelines' | 'context' | 'exec-pipelines' | 'plugins' | 'agent' | 'sandbox';
 
-// -- S55: Feedback & Analytics types --
+// --: Feedback & Analytics types --
 
 export interface FeedbackSubmitRequest {
 	conversation_id?: string;
@@ -878,7 +878,7 @@ export interface RoutingAccuracyInfo {
 	unrouted: Record<string, any>;
 }
 
-// -- Context Health (S47) --
+// -- Context Health --
 
 export interface ContextConversationInfo {
 	conversation_id: string | null;
@@ -929,7 +929,7 @@ export interface ApiErrorDetail {
 	detail: string;
 }
 
-// -- Consensus (S50) --
+// -- Consensus --
 
 export interface ConsensusModelResponse {
 	model: string;
@@ -967,7 +967,7 @@ export interface ConsensusConfig {
 	available: boolean;
 }
 
-// -- Self-Correction (S51) --
+// -- Self-Correction --
 
 export interface CorrectionInfo {
 	was_corrected: boolean;
@@ -987,7 +987,7 @@ export interface CorrectionStepInfo {
 	duration_ms: number;
 }
 
-// S95: Vision delegation info
+// Vision delegation info
 export interface VisionDelegationInfo {
 	vision_model: string;
 	description_length: number;
@@ -1005,7 +1005,7 @@ export interface CorrectionConfig {
 	available: boolean;
 }
 
-// -- Projects (S57 + S58 + S59) --
+// -- Projects --
 
 export interface ProjectInfo {
 	id: string;
@@ -1085,7 +1085,7 @@ export interface ProjectFileSummary {
 	chunk_count: number;
 }
 
-// -- Benchmark Dashboard (S60) --
+// -- Benchmark Dashboard --
 
 export interface BenchmarkSuiteInfo {
 	id: string;
@@ -1211,7 +1211,7 @@ export interface ModelRoleInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Network Manager / Offline-First Intelligence (S71)
+// Network Manager / Offline-First Intelligence
 // ---------------------------------------------------------------------------
 
 export interface NetworkStatusInfo {
@@ -1255,7 +1255,7 @@ export interface PreCacheInfo {
 	errors: string[];
 }
 
-// -- Performance Monitor (S72) --
+// -- Performance Monitor --
 
 export interface PerformanceSummary {
 	available: boolean;
@@ -1349,7 +1349,7 @@ export interface PerformanceUtilization {
 	models: Record<string, number>;
 }
 
-// -- Sandbox (S73) --
+// -- Sandbox --
 
 export interface SandboxStatusResponse {
 	available: boolean;
@@ -1360,7 +1360,7 @@ export interface SandboxStatusResponse {
 	degraded_confirmed: boolean;
 	active_sessions: number;
 	max_sessions: number;
-	/** S213 (Bloc 4): live egress-gate answer (true only in Daily; the
+	/** (Bloc 4): live egress-gate answer (true only in Daily; the
 	 * SyncPanel bulbe_disabled precedent, fail-secure false) plus the
 	 * configured caps, read-only, for the settings strip. */
 	network_allowed?: boolean;
@@ -1374,7 +1374,7 @@ export interface SandboxStatusResponse {
 export interface SandboxCreateRequest {
 	session_id?: string;
 	allow_degraded?: boolean;
-	/** S210 (Bloc 1): optional human label and per-sandbox command timeout. */
+	/** (Bloc 1): optional human label and per-sandbox command timeout. */
 	label?: string;
 	timeout?: number | null;
 }
@@ -1443,9 +1443,9 @@ export interface SandboxSessionInfo {
 	approval_state: string;
 	approved_paths: string[];
 	approved_at: number | null;
-	/** S210 (Bloc 1): the workspace-manager view. network_enabled is the
-	 * per-workspace flag (S213, Bloc 4: user-set only, Daily-only, default
-	 * false); disk_use_bytes is approximate. has_cloned_baseline (S213) is
+	/** (Bloc 1): the workspace-manager view. network_enabled is the
+	 * per-workspace flag (Bloc 4: user-set only, Daily-only, default
+	 * false); disk_use_bytes is approximate. has_cloned_baseline is
 	 * true when a host clone recorded a baseline root -- the settings strip
 	 * sharpens the exfiltration warning with it. */
 	label: string;
@@ -1460,33 +1460,33 @@ export interface SandboxSessionInfo {
 	has_cloned_baseline?: boolean;
 }
 
-/** S210 (Bloc 1): stop-path response. stopped=false means nothing was
+/** (Bloc 1): stop-path response. stopped=false means nothing was
  * running (honest no-op); the workspace persists either way. */
 export interface SandboxStopResponse {
 	session_id: string;
 	stopped: boolean;
 }
 
-/** S210 (Bloc 1): bind a conversation to a workspace. */
+/** (Bloc 1): bind a conversation to a workspace. */
 export interface SandboxBindRequest {
 	conversation_id: string;
 	session_id: string;
 }
 
-/** S210 (Bloc 1): the current binding of a conversation. */
+/** (Bloc 1): the current binding of a conversation. */
 export interface SandboxBindingResponse {
 	conversation_id: string;
 	session_id: string | null;
 	bound: boolean;
 }
 
-/** Per-file upload refusal: invalid name or destination collision (S211). */
+/** Per-file upload refusal: invalid name or destination collision. */
 export interface SandboxUploadRefused {
 	name: string;
 	reason: string;
 }
 
-/** Result of a multipart drag-and-drop upload (S211, Bloc 2). */
+/** Result of a multipart drag-and-drop upload (Bloc 2). */
 export interface SandboxUploadResponse {
 	session_id: string;
 	uploaded_paths: string[];
@@ -1495,7 +1495,7 @@ export interface SandboxUploadResponse {
 	manifest_files: number;
 }
 
-/** One immediate entry of an allowlisted host directory (S211). */
+/** One immediate entry of an allowlisted host directory. */
 export interface HostBrowseEntry {
 	name: string;
 	type: 'dir' | 'file' | 'symlink' | 'special';
@@ -1503,20 +1503,20 @@ export interface HostBrowseEntry {
 	hidden: boolean;
 }
 
-/** Allowlisted host directory listing (S211, Bloc 2). */
+/** Allowlisted host directory listing (Bloc 2). */
 export interface HostBrowseResponse {
 	path: string;
 	roots: string[];
 	entries: HostBrowseEntry[];
 }
 
-/** Request to clone an allowlisted host directory (S211, Bloc 2). */
+/** Request to clone an allowlisted host directory (Bloc 2). */
 export interface SandboxCloneRequest {
 	src_path: string;
 	dest_subdir?: string;
 }
 
-/** Result of a symlink-safe host clone (S211, Bloc 2). */
+/** Result of a symlink-safe host clone (Bloc 2). */
 export interface SandboxCloneResponse {
 	session_id: string;
 	dest: string;
@@ -1528,7 +1528,7 @@ export interface SandboxCloneResponse {
 	manifest_files: number;
 }
 
-/** One classified change against the baseline manifest (S212, Bloc 3). */
+/** One classified change against the baseline manifest (Bloc 3). */
 export interface SandboxDiffEntry {
 	path: string;
 	kind: 'added' | 'modified' | 'deleted';
@@ -1537,7 +1537,7 @@ export interface SandboxDiffEntry {
 	current_hash: string;
 }
 
-/** The workspace diff against the recorded baseline (S212, Bloc 3).
+/** The workspace diff against the recorded baseline (Bloc 3).
  * diff_hash is the review-integrity digest the apply request must echo;
  * baseline_present false means no baseline (everything "added", no
  * implicit write-back target). */
@@ -1555,45 +1555,45 @@ export interface SandboxDiffResponse {
 	confirmed_deletions: string[];
 }
 
-/** Explicit deletion confirmation for apply (S212): never bundled into a
+/** Explicit deletion confirmation for apply: never bundled into a
  * blanket approve-all. */
 export interface SandboxConfirmDeletionsRequest {
 	paths: string[];
 }
 
-/** A per-path deletion-confirmation refusal (S212). */
+/** A per-path deletion-confirmation refusal. */
 export interface SandboxConfirmDeletionsRefused {
 	path: string;
 	reason: string;
 }
 
-/** Result of a deletion-confirmation request (S212). */
+/** Result of a deletion-confirmation request. */
 export interface SandboxConfirmDeletionsResponse {
 	session_id: string;
 	confirmed: string[];
 	refused: SandboxConfirmDeletionsRefused[];
 }
 
-/** Apply approved changes back to the host (S212, Bloc 3). */
+/** Apply approved changes back to the host (Bloc 3). */
 export interface SandboxApplyRequest {
 	diff_hash: string;
 	target_dir?: string;
 }
 
-/** One applied change (S212). */
+/** One applied change. */
 export interface SandboxApplyEntry {
 	path: string;
 	action: 'created' | 'modified' | 'deleted' | 'already_absent';
 	bytes: number;
 }
 
-/** One refused apply path with its honest reason (S212). */
+/** One refused apply path with its honest reason. */
 export interface SandboxApplyRefusedEntry {
 	path: string;
 	error: string;
 }
 
-/** Result of an apply-to-host run (S212, Bloc 3). */
+/** Result of an apply-to-host run (Bloc 3). */
 export interface SandboxApplyResponse {
 	session_id: string;
 	target: string;
@@ -1605,7 +1605,7 @@ export interface SandboxApplyResponse {
 	diff_hash: string;
 }
 
-/** S213 (Bloc 4): the per-workspace network toggle. Enabling is Daily-only
+/** (Bloc 4): the per-workspace network toggle. Enabling is Daily-only
  * (403 under Bulbe at the binding-layer gate; an unset or unknown mode is
  * treated as Bulbe); disabling works in any mode. User action only. */
 export interface SandboxNetworkToggleRequest {
@@ -1617,7 +1617,7 @@ export interface SandboxNetworkToggleResponse {
 	network_enabled: boolean;
 }
 
-/** S213 (Bloc 4): the provision run -- the one scoped egress. The
+/** (Bloc 4): the provision run -- the one scoped egress. The
  * requirements set must be exact name==version pins carrying
  * --hash=sha256: hashes; option lines are refused per line and nothing
  * installs on a partial validation. */
@@ -1669,7 +1669,7 @@ export interface SandboxConfirmDegradedResponse {
 	warning: string;
 }
 
-// -- Sandbox Copy-Out (S116) --
+// -- Sandbox Copy-Out --
 
 export interface SandboxPreviewResponse {
 	session_id: string;
@@ -1733,7 +1733,7 @@ export interface SandboxApprovalAuditResponse {
 	count: number;
 }
 
-// -- Coding Agent (S74) --
+// -- Coding Agent --
 
 export interface CodingTaskRequest {
 	task: string;
@@ -1833,7 +1833,7 @@ export interface CodingStatusResponse {
 	cascading: CodingCascadingStatus | null;
 }
 
-// -- Cascading Status (S81) --
+// -- Cascading Status --
 
 export interface CodingCascadingStatus {
 	enabled: boolean;
@@ -1844,7 +1844,7 @@ export interface CodingCascadingStatus {
 	per_step_routing: boolean;
 }
 
-// -- Working Memory (S80) --
+// -- Working Memory --
 
 export interface WorkingMemoryResponse {
 	task_id: string;
@@ -1860,7 +1860,7 @@ export interface WorkingMemoryCompactResponse {
 	compact: string;
 }
 
-// -- Coding History (S76) --
+// -- Coding History --
 
 export interface CodingTaskSummaryResponse {
 	task_id: string;
@@ -1919,7 +1919,7 @@ export interface CodingResumeResponse {
 	originals_hash: string;
 }
 
-// -- Coding Analytics (S78 SQ-08) --
+// -- Coding Analytics (SQ-08) --
 
 export interface CodingModelSuccessRate {
 	model: string;
@@ -1990,7 +1990,7 @@ export interface CodingExecuteAllStatus {
 	task_id: string;
 }
 
-// -- Export & Batch Delete (S79) --
+// -- Export & Batch Delete --
 
 export interface CodingBatchDeleteRequest {
 	task_ids?: string[];
@@ -2014,7 +2014,7 @@ export interface CodingExportRow {
 	duration_seconds: number | null;
 }
 
-// Session Fingerprint (S75)
+// Session Fingerprint
 
 export interface FingerprintDimensionResponse {
 	name: string;
@@ -2041,7 +2041,7 @@ export interface FingerprintFullResponse {
 	config: Record<string, unknown>;
 }
 
-// System Presets & Onboarding (S84)
+// System Presets & Onboarding
 
 export interface SystemPresetModelInfo {
 	name: string;
@@ -2092,7 +2092,7 @@ export interface OnboardingStateResponse {
 	applied_at: string | null;
 }
 
-// -- Humanizer (S86) --
+// -- Humanizer --
 
 export interface HumanizerRewriteRequest {
 	text: string;
@@ -2165,7 +2165,7 @@ export interface HumanizerStatsResponse {
 	by_intensity: Record<string, HumanizerStrategyStats>;
 }
 
-// -- Benchmark V2 (S88) --
+// -- Benchmark V2 --
 
 export interface BenchmarkV2Profile {
 	id: string;
@@ -2271,7 +2271,7 @@ export interface BenchmarkV2HistoryResponse {
 	total: number;
 }
 
-// S89 — LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
+// — LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
 
 export interface BenchmarkV2JudgeScore {
 	question_id: string;
@@ -2371,7 +2371,7 @@ export interface BenchmarkV2ApplyResponse {
 	error: string;
 }
 
-// S90 — Custom Profiles
+// — Custom Profiles
 
 export interface BenchmarkV2CustomProfile {
 	profile_id: string;
@@ -2419,7 +2419,7 @@ export interface BenchmarkV2QuestionPreview {
 	total: number;
 }
 
-// S90 — Auto-Trigger
+// — Auto-Trigger
 
 export interface BenchmarkV2AutoTriggerStatus {
 	enabled: boolean;
@@ -2486,7 +2486,7 @@ export interface BenchmarkV2AutoTriggerTestPollResponse {
 	} | null;
 }
 
-// -- Fine-Tune (S96) --
+// -- Fine-Tune --
 
 export interface FineTuneExportRequest {
 	format: string;
@@ -2598,7 +2598,7 @@ export interface FineTuneComparePrompt {
 	winner: string;
 }
 
-// -- Conversation Branches (S97) --
+// -- Conversation Branches --
 
 export interface BranchStats {
 	message_count: number;
@@ -2693,7 +2693,7 @@ export interface BranchMessagesResponse {
 	count: number;
 }
 
-// -- Auth (S98) --
+// -- Auth --
 
 export interface AuthUser {
 	user_id: string;
@@ -2718,7 +2718,7 @@ export interface AuthStatus {
 	single_user_mode: boolean;
 	registration_enabled: boolean;
 	user_count: number;
-	/** S125: Whether httpOnly cookie mode is enabled for JWT storage. */
+	/** Whether httpOnly cookie mode is enabled for JWT storage. */
 	cookie_mode?: boolean;
 }
 
@@ -2790,7 +2790,7 @@ export interface AuditLogEntry {
 	timestamp: number;
 }
 // =========================================================================
-// RAG v2 -- Knowledge Base (S99)
+// RAG v2 -- Knowledge Base
 // =========================================================================
 
 export interface RAGCollection {
@@ -2897,7 +2897,7 @@ export interface RAGQueryResponse {
 	total_results: number;
 }
 
-// RAG Dashboard -- S100
+// RAG Dashboard
 
 export interface RAGDashboardStats {
 	total_collections: number;
@@ -2982,7 +2982,7 @@ export interface RAGBackendsResponse {
 }
 
 // =========================================================================
-// Plugins (S101)
+// Plugins
 // =========================================================================
 
 export interface PluginInfo {
@@ -3049,7 +3049,7 @@ export interface PluginUpdateConfigResponse {
 }
 
 // =========================================================================
-// Plugin Marketplace (S102)
+// Plugin Marketplace
 // =========================================================================
 
 export interface MarketplaceEntry {
@@ -3098,7 +3098,7 @@ export interface PluginReview {
 	text: string;
 	author: string;
 	created_at: number;
-	// REV-2 (S219): authenticated owner identity; null on legacy rows.
+	// REV-2: authenticated owner identity; null on legacy rows.
 	user_id?: string | null;
 }
 
@@ -3141,7 +3141,7 @@ export interface TemplateResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Speculative Decoding (S110)
+// Speculative Decoding
 // ---------------------------------------------------------------------------
 
 export interface SpeculativeDecodingConfig {
@@ -3196,7 +3196,7 @@ export interface VRAMBudgetResult {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-Tuner (S110)
+// Auto-Tuner
 // ---------------------------------------------------------------------------
 
 export interface TunerConfig {
@@ -3255,7 +3255,7 @@ export interface TunerResultsResponse {
 	count: number;
 }
 
-// -- Tuner Recommendations (S112) --
+// -- Tuner Recommendations --
 
 export interface TunerRecommendation {
 	title: string;
@@ -3275,7 +3275,7 @@ export interface TunerRecommendationsResponse {
 	count: number;
 }
 
-// -- Model Lifecycle (S112) --
+// -- Model Lifecycle --
 
 export interface PullProgress {
 	status: string;
@@ -3324,7 +3324,7 @@ export interface ModelEntry {
 }
 
 // =========================================================================
-// RAG Batch Ingestion (S120)
+// RAG Batch Ingestion
 // =========================================================================
 
 export interface RAGIngestFileStatus {
@@ -3376,7 +3376,7 @@ export interface RAGFolderScanRequest {
 	recursive: boolean;
 }
 
-// ---- S121: Backup / Restore ----
+// ----: Backup / Restore ----
 
 export interface BackupSectionInfo {
 	name: string;

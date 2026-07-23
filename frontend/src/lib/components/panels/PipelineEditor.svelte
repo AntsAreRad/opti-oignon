@@ -1,5 +1,5 @@
 <!--
-  PipelineEditor.svelte (S53)
+  PipelineEditor.svelte
   Editeur visuel de pipelines d'execution.
   Permet de creer, modifier, reordonner les etapes d'un pipeline
   base sur les types de l'agentic executor.

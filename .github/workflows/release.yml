@@ -1,5 +1,5 @@
 # Opti-Oignon Release Pipeline
-# S163 -- Release Automation
+# Release Automation
 #
 # Triggered on tag push matching v* (e.g., v3.2.11).
 # Jobs:

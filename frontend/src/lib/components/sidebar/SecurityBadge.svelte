@@ -1,5 +1,5 @@
 <!--
-  SecurityBadge.svelte (S125, refactored S167)
+  SecurityBadge.svelte
   Compact security status badge in the sidebar footer. Shows the letter
   grade (A+ to F) with color coding; a tooltip surfaces the numeric score.
   Clicking opens the security section of settings. Uses the ds Tooltip and

@@ -1,5 +1,5 @@
 <!--
-  SpeculativeDecodingPanel.svelte -- S110 + S111 Speculative Decoding settings panel.
+  SpeculativeDecodingPanel.svelte -- Speculative Decoding settings panel.
 
   Collapsible panel for configuring llama.cpp native speculative decoding.
   Sections:
@@ -7,7 +7,7 @@
   2. Draft model selector (filtered to compatible models)
   3. Draft parameter controls (draft_max, draft_min, GPU layers)
   4. VRAM budget indicator
-  5. Acceptance rate display with per-request mini-chart (S111)
+  5. Acceptance rate display with per-request mini-chart
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
@@ -44,7 +44,7 @@
 	let localAutoSelect = true;
 	let saving = false;
 
-	// S111: Acceptance rate history for mini-chart
+	// Acceptance rate history for mini-chart
 	interface AcceptanceRecord {
 		timestamp: number;
 		draft_tokens: number;
@@ -87,7 +87,7 @@
 			localDraftGpuLayers = status.config.draft_gpu_layers;
 			localAutoSelect = status.config.auto_select_draft;
 
-			// S111: Fetch acceptance history if enabled
+			// Fetch acceptance history if enabled
 			if (localEnabled && stats && stats.total_runs > 0) {
 				await fetchAcceptanceHistory();
 				startHistoryPolling();
@@ -100,7 +100,7 @@
 	}
 
 	// -------------------------------------------------------------------------
-	// S111: Acceptance history
+	// Acceptance history
 	// -------------------------------------------------------------------------
 
 	async function fetchAcceptanceHistory() {
@@ -361,7 +361,7 @@
 									</div>
 								{/if}
 
-							<!-- S111: Acceptance rate mini-chart -->
+							<!-- Acceptance rate mini-chart -->
 							{#if acceptanceHistory.length > 1}
 								<div class="mt-3">
 									<div class="text-[10px] font-medium mb-1" style="color: var(--oo-fg-muted);">

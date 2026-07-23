@@ -1,5 +1,5 @@
 <!--
-  CacheManager.svelte (redesigned S169)
+  CacheManager.svelte
   Response + semantic cache statistics and management, lifted into System
   Status. Presentation moves to the ds primitives and --oo-* tokens; the cache
   API and all behaviour (refresh, clear all, clear by model) are unchanged.

@@ -1,5 +1,5 @@
 <!--
-  FeatureUnavailable.svelte (S135)
+  FeatureUnavailable.svelte
   Displayed when an optional backend module is not available.
   Warm, non-alarming design with icon, message, and optional learn-more link.
   CSS variables only.

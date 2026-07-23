@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v2.0 — BACKENDS CONFIGURATION (S105)
+# OPTI-OIGNON v2.0 — BACKENDS CONFIGURATION
 # =============================================================================
 # Configure inference backends: Ollama, llama.cpp, or both.
 #

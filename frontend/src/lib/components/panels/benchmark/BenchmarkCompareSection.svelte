@@ -1,5 +1,5 @@
 <!--
-  BenchmarkCompareSection.svelte (S169)
+  BenchmarkCompareSection.svelte
   The "Compare" section extracted from BenchmarkV2Panel: aggregated
   multi-model comparison table. Self-contained; behaviour unchanged.
 -->

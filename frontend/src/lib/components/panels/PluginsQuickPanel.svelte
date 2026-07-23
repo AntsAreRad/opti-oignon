@@ -1,5 +1,5 @@
 <!--
-  PluginsQuickPanel.svelte (S108)
+  PluginsQuickPanel.svelte
   Lightweight panel for the right sidebar: lists installed plugins,
   toggle enable/disable, and link to full Settings > Plugins page.
 -->
@@ -15,7 +15,7 @@
 	let loading = true;
 	let toggling: Record<string, boolean> = {};
 
-	// S109: Known slash commands per plugin
+	// Known slash commands per plugin
 	const SLASH_COMMANDS: Record<string, string> = {
 		'scratchpad': '/note, /notes, /note search',
 		'task-extractor': '/tasks, /tasks done <id>',

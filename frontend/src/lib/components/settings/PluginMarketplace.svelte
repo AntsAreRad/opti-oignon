@@ -1,5 +1,5 @@
 <!--
-  PluginMarketplace.svelte -- S102 Plugin Marketplace UI.
+  PluginMarketplace.svelte -- Plugin Marketplace UI.
 
   Browse available plugins from the index, search by keyword/tag/author/hook,
   one-click install from URL, view and submit reviews.

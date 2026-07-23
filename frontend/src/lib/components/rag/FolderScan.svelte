@@ -1,5 +1,5 @@
 <!--
-  FolderScan.svelte -- S120 RAG Folder Scan & Ingest UI.
+  FolderScan.svelte -- RAG Folder Scan & Ingest UI.
 
   Text input for local directory path, recursive toggle,
   collection selector, scan+ingest button.

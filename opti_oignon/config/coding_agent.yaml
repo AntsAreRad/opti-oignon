@@ -1,4 +1,4 @@
-# Coding Agent configuration -- S74/S79/S80
+# Coding Agent configuration
 # Multi-step autonomous coding loop with sandbox isolation.
 
 enabled: true
@@ -9,11 +9,11 @@ max_iterations: 10
 # Maximum LLM fix attempts per test failure
 max_fix_retries: 3
 
-# Maximum plan generation retries on JSON parse failure (S80)
+# Maximum plan generation retries on JSON parse failure
 # After exhausting retries, falls back to numbered list parsing
 max_plan_retries: 3
 
-# Auto-retry on transient sandbox errors (S79)
+# Auto-retry on transient sandbox errors
 # Transient errors: timeout, bwrap startup failure, sandbox I/O errors
 max_auto_retries: 2
 retry_backoff_seconds: [1, 2]
@@ -36,19 +36,19 @@ checkpoint_before_apply: true
 # Token budget reserve for tool responses within context window
 context_window_reserve: 2048
 
-# Cascading model escalation in fix loop (S81)
+# Cascading model escalation in fix loop
 # When enabled, after escalate_after_failures consecutive fix failures
-# on the current model, auto-escalate to the next cascade tier (S69).
+# on the current model, auto-escalate to the next cascade tier.
 enable_cascading: true
 escalate_after_failures: 2
 
-# Per-step routing (S81, experimental, opt-in)
+# Per-step routing (experimental, opt-in)
 # When enabled, simple steps (bash, view) are routed to fast tier,
 # complex steps (create_file with logic, fix) to standard/power tier.
-# Requires SmartRouter with learned confidence (S67).
+# Requires SmartRouter with learned confidence.
 per_step_routing: false
 
-# ---- Chat Coding Agent (S118) ----
+# ---- Chat Coding Agent ----
 # Conversational coding agent that lives in the chat.
 # Combines multi-step coding intelligence with natural conversation flow.
 # Provides persistent sandbox across turns, adaptive pipeline,

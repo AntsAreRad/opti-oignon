@@ -1,5 +1,5 @@
 <!--
-  ExecPipelinePanel.svelte (S53)
+  ExecPipelinePanel.svelte
   Panneau de gestion des pipelines d execution.
 -->
 <script lang="ts">

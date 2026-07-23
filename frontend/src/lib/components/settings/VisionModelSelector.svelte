@@ -1,5 +1,5 @@
 <!--
-  VisionModelSelector.svelte -- S94 Vision Model settings panel.
+  VisionModelSelector.svelte -- Vision Model settings panel.
 
   Sections:
   1. Selected vision model dropdown (auto or explicit)

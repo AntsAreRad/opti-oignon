@@ -1,4 +1,4 @@
-# Learned Router Configuration (S67)
+# Learned Router Configuration
 # ====================================
 # ML-based routing classifier trained on actual query history.
 # Falls back to YAML heuristic router when below confidence threshold.

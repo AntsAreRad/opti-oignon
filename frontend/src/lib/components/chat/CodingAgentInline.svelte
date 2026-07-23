@@ -1,5 +1,5 @@
 <!--
-  CodingAgentInline.svelte (S118)
+  CodingAgentInline.svelte
   Displays inline when a chat message was produced by the coding agent.
   Shows: plan steps with progress, test results, fix attempts,
   and embedded SandboxFileManager for preview/download.
@@ -90,7 +90,7 @@
 			</span>
 		{/if}
 
-		<!-- S125: Sandbox isolation indicator -->
+		<!-- Sandbox isolation indicator -->
 		<SandboxIsolationBadge />
 
 		<div class="flex-1" />

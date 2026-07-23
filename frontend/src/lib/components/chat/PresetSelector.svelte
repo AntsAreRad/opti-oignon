@@ -1,5 +1,5 @@
 <!--
-  PresetSelector.svelte (refactored S167)
+  PresetSelector.svelte
   Preset picker rendered as horizontal chips with a toggle for automatic
   preset detection. Uses the ds Icon primitive for the auto toggle.
 -->

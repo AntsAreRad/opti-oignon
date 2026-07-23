@@ -1,5 +1,5 @@
 /**
- * Benchmark V2 API client -- S88 + S89 + S90 + S91
+ * Benchmark V2 API client.
  *
  * Typed API for autonomous quality evaluation: profiles, runs, progress,
  * results, comparison, history, LLM-as-Judge, leaderboard, head-to-head,
@@ -125,7 +125,7 @@ export async function pollUntilDone(
 	}
 }
 
-// -- S89 endpoints --
+// -- endpoints --
 
 /** Get ranked model leaderboard. */
 export async function getLeaderboard(
@@ -212,7 +212,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 	URL.revokeObjectURL(url);
 }
 
-// -- S90 — Custom Profile endpoints --
+// -- — Custom Profile endpoints --
 
 /** List all custom profiles. */
 export async function getCustomProfiles(): Promise<BenchmarkV2CustomProfilesListResponse> {
@@ -272,7 +272,7 @@ export async function previewProfileQuestions(
 	return resp.json();
 }
 
-// -- S90 — Auto-Trigger endpoints --
+// -- — Auto-Trigger endpoints --
 
 /** Get auto-trigger status. */
 export async function getAutoTriggerStatus(): Promise<BenchmarkV2AutoTriggerStatus> {
@@ -329,7 +329,7 @@ export async function resetAutoTriggerSnapshot(): Promise<{ reset: boolean }> {
 	return resp.json();
 }
 
-// -- S91 — Test Poll --
+// -- — Test Poll --
 
 /** Run a single poll without triggering (test connection). */
 export async function testPollAutoTrigger(): Promise<BenchmarkV2AutoTriggerTestPollResponse> {

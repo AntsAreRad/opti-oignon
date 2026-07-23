@@ -1,5 +1,5 @@
 /**
- * errorHandler.ts — Standardized API error display (S135).
+ * errorHandler.ts — Standardized API error display.
  *
  * Parses errors from the API client layer (ApiError) and maps them
  * to user-friendly toast messages. Detects specific conditions like

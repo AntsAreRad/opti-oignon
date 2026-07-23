@@ -1,10 +1,10 @@
 # =============================================================================
-# OPTI-OIGNON v1.5.9 -- PROJECTS CONFIG (S57)
+# OPTI-OIGNON v1.5.9 -- PROJECTS CONFIG
 # =============================================================================
 # Configuration for the Project system: file storage, limits, and defaults.
 #
 # Projects group conversations and files together, enabling
-# RAG-based context injection in S58.
+# RAG-based context injection.
 # =============================================================================
 
 projects:
@@ -61,7 +61,7 @@ projects:
     - ".jpeg"
     - ".gif"
     - ".svg"
-    # Archives (for S57 upload+extract)
+    # Archives (for upload+extract)
     - ".zip"
     - ".tar.gz"
     - ".tgz"
@@ -72,9 +72,9 @@ projects:
     default_model: ""
     # Default pipeline for project conversations
     default_pipeline: "direct"
-    # Context budget in tokens for RAG injection (S58)
+    # Context budget in tokens for RAG injection
     context_budget_tokens: 4096
-    # Auto-index uploaded files for RAG (S58)
+    # Auto-index uploaded files for RAG
     auto_index: true
 
   # File type detection mapping (extension -> category)
@@ -120,7 +120,7 @@ projects:
       - ".tgz"
 
   # ==========================================================================
-  # S58: Trigger detection configuration
+  # Trigger detection configuration
   # ==========================================================================
   triggers:
     # Enable/disable each detection level independently
@@ -141,7 +141,7 @@ projects:
     level3_ollama_url: "http://localhost:11434"
 
   # ==========================================================================
-  # S58: Project context / RAG configuration
+  # Project context / RAG configuration
   # ==========================================================================
   context:
     # Base path for per-project ChromaDB collections (relative to data/)

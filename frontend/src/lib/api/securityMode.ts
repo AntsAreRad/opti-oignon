@@ -1,5 +1,5 @@
 /**
- * Security Mode API client for Opti-Oignon (S126).
+ * Security Mode API client for Opti-Oignon.
  *
  * Provides typed access to the Daily/Bulbe dual-mode security system.
  */

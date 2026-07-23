@@ -1,5 +1,5 @@
 /**
- * API client for Hash-Chain Signed Audit Log -- S130.
+ * API client for Hash-Chain Signed Audit Log --.
  *
  * Covers:
  *   GET  /api/security/audit-chain/status  -- chain length, integrity

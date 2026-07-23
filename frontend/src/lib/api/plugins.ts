@@ -1,5 +1,5 @@
 /**
- * Plugins API client (S101).
+ * Plugins API client.
  *
  * List, install, enable, disable, uninstall plugins.
  * Get/update plugin configuration.

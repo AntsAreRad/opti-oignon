@@ -1,13 +1,13 @@
 <!--
-  SpeculativeSettings.svelte (S168)
+  SpeculativeSettings.svelte
   Merge host for the two speculative-execution panels (spec 11.6 MERGE).
 
   Opti-Oignon has two distinct speculative mechanisms that were previously two
   separate settings entries:
-    - Generation (S70): a draft model proposes tokens that a verify model
+    - Generation: a draft model proposes tokens that a verify model
       accepts or rejects, with a convergence threshold. Backend-agnostic.
       Mutually exclusive with cascading. -> SpeculativePanel.
-    - Decoding (S110/S111): llama.cpp native speculative decoding with a draft
+    - Decoding: llama.cpp native speculative decoding with a draft
       model, draft_max/draft_min and GPU layer controls, gated on the
       llama.cpp backend. -> SpeculativeDecodingPanel.
 

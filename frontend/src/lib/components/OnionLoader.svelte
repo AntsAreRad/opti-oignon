@@ -2,8 +2,8 @@
   OnionLoader.svelte
   Animated onion loading indicator. The onion spins on its Y-axis with
   occasional bumps causing a subtle vertical bounce with squash-on-landing.
-  S76: Replaces dot-spinner in streaming, benchmark, and coding agent.
-  S94: Default color changed to tobacco. Removed road line for cleaner look.
+  Replaces dot-spinner in streaming, benchmark, and coding agent.
+  Default color changed to tobacco. Removed road line for cleaner look.
   CSS keyframes only, no JS animation loop.
 -->
 <script lang="ts">

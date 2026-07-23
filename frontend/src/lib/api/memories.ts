@@ -1,5 +1,5 @@
 /**
- * Typed API client for the two-tier memory store (S174).
+ * Typed API client for the two-tier memory store.
  *
  * Distinct from the legacy api/memory.ts: these endpoints operate over the
  * coordinated MemoryStore (/api/memories) and expose list, edit, soft delete,

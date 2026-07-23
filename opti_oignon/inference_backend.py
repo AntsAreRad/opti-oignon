@@ -1282,9 +1282,17 @@ class LlamaServerBackend(InferenceBackend):
             "messages": msgs,
             "stream": False,
         }
-        # ``cache_prompt`` is the server's prompt-KV reuse switch:
-        # forwarded verbatim when the caller sets it, never invented.
-        for key in ("temperature", "top_p", "max_tokens", "cache_prompt"):
+        # ``cache_prompt`` is the server's prompt-KV reuse switch and
+        # ``id_slot`` names the slot whose cache is reused: both are
+        # forwarded verbatim when the caller sets them, never invented.
+        # Choosing the slot is a policy the caller owns, not this seam.
+        for key in (
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "cache_prompt",
+            "id_slot",
+        ):
             if options and key in options:
                 payload[key] = options[key]
         start = time.time()
@@ -1321,8 +1329,15 @@ class LlamaServerBackend(InferenceBackend):
             "stream": True,
         }
         # Same forwarding contract as the non-streaming path: the
-        # prompt-KV switch rides only when the caller set it.
-        for key in ("temperature", "top_p", "max_tokens", "cache_prompt"):
+        # prompt-KV switch and the slot number ride only when the caller
+        # set them.
+        for key in (
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "cache_prompt",
+            "id_slot",
+        ):
             if options and key in options:
                 payload[key] = options[key]
         url = f"{self._host}/v1/chat/completions"

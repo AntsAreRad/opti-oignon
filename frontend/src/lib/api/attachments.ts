@@ -1,7 +1,7 @@
 /**
- * Typed API client for the note attachments surface (N.5 / N.6, S253).
+ * Typed API client for the note attachments surface (N.5 / N.6).
  *
- * Operates over the per-user S249 attachments route
+ * Operates over the per-user attachments route
  * (/api/notes/attachments): multipart upload (the bytes sealed server-side
  * under a per-attachment subkey), list per note, manifest read, decrypted
  * blob fetch, and delete (blob first, then manifest). Mirrors the

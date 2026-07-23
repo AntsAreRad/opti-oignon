@@ -27,7 +27,7 @@
 
 	$: key = /^[A-Z]/.test(name) ? name : toPascal(name);
 	$: Cmp = icons ? (icons as Record<string, unknown>)[key] : undefined;
-	// DS-05 (S217): an unresolved name used to render nothing silently, so a
+	// DS-05: an unresolved name used to render nothing silently, so a
 	// typo yielded an invisible icon. Warn in dev; production stays silent
 	// and the render contract (no element on unresolved) is unchanged.
 	$: if (import.meta.env.DEV && name && !Cmp) {

@@ -1,5 +1,5 @@
 <!--
-  CompressionSettings — S66 Conversation Compressor settings panel.
+  CompressionSettings — Conversation Compressor settings panel.
 
   Displays:
   - Enable/disable toggle with strategy selector

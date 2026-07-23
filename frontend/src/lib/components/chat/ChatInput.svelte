@@ -1,10 +1,10 @@
 <!--
   ChatInput.svelte
   Text input with auto-resize, send, cancel, retry, and image upload.
-  Integrates ChatControlBar above the input area (S42).
-  S48: Image upload button with thumbnails.
-  S107: Ctrl+Enter global send shortcut support.
-  S132: Mobile responsive — full-width, 44px touch targets, enterkeyhint, safe-area.
+  Integrates ChatControlBar above the input area.
+  Image upload button with thumbnails.
+  Ctrl+Enter global send shortcut support.
+  Mobile responsive — full-width, 44px touch targets, enterkeyhint, safe-area.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
@@ -29,11 +29,11 @@
 	let textarea: HTMLTextAreaElement;
 	let imageInput: HTMLInputElement;
 
-	// S118: Detect /code slash command for visual feedback
+	// Detect /code slash command for visual feedback
 	$: isCodeCommand = inputText.trimStart().startsWith('/code ')
 		|| inputText.trimStart() === '/code';
 
-	// S48: Attached images
+	// Attached images
 	let attachedImages: AttachedImage[] = [];
 
 	const MIN_ROWS = 1;
@@ -69,7 +69,7 @@
 			handleSend();
 			return;
 		}
-		// S135: Up arrow with empty input: edit last user message
+		// Up arrow with empty input: edit last user message
 		if (event.key === 'ArrowUp' && inputText.trim() === '' && attachedImages.length === 0) {
 			event.preventDefault();
 			dispatch('editLast');
@@ -95,7 +95,7 @@
 		dispatch('retry');
 	}
 
-	// S48: Image handling
+	// Image handling
 	function handleImageClick() {
 		if (!disabled && !isStreaming && imageInput) {
 			imageInput.click();
@@ -141,7 +141,7 @@
 				toastError(`Failed to process "${file.name}": ${msg}. Try a different image format.`);
 			}
 		}
-		// S94: Inform user about skipped non-image files
+		// Inform user about skipped non-image files
 		if (skippedNonImage.length > 0) {
 			const names = skippedNonImage.length <= 3
 				? skippedNonImage.join(', ')
@@ -267,10 +267,10 @@
 		</div>
 	{/if}
 
-	<!-- S42: Control bar -->
+	<!-- Control bar -->
 	<ChatControlBar />
 
-	<!-- S48/S94: Image preview thumbnails (improved size and quality) -->
+	<!-- Image preview thumbnails (improved size and quality) -->
 	{#if attachedImages.length > 0}
 		<div class="flex flex-wrap gap-2 px-1">
 			{#each attachedImages as img, i}
@@ -302,7 +302,7 @@
 	{/if}
 
 	<div class="flex items-end gap-1 sm:gap-2">
-		<!-- S48: Image upload button — S132: touch-friendly -->
+		<!-- Image upload button — touch-friendly -->
 		<button
 			on:click={handleImageClick}
 			disabled={disabled || isStreaming}
@@ -315,9 +315,9 @@
 			<Icon name="image" size="sm" />
 		</button>
 
-		<!-- Textarea — S132: full-width mobile, enterkeyhint for mobile keyboard -->
+		<!-- Textarea — full-width mobile, enterkeyhint for mobile keyboard -->
 		<div class="flex-1 relative">
-			<!-- S118: /code slash command indicator -->
+			<!-- /code slash command indicator -->
 			{#if isCodeCommand}
 				<div class="absolute -top-5 left-1 flex items-center gap-1 text-xs px-1.5 py-0.5 rounded z-10"
 					style="background-color: var(--oo-sage-bg); color: var(--oo-sage); border: 1px solid var(--oo-sage-bd);">
@@ -347,7 +347,7 @@
 			/>
 		</div>
 
-		<!-- S132: Send/stop button — 44x44px touch target -->
+		<!-- Send/stop button — 44x44px touch target -->
 		{#if isStreaming}
 			<button
 				on:click={handleCancel}

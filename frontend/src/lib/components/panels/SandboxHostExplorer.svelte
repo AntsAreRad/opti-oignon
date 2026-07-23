@@ -1,5 +1,5 @@
 <!--
-  SandboxHostExplorer.svelte (S211, Sandbox Workspace cycle, Bloc 2)
+  SandboxHostExplorer.svelte (Sandbox Workspace cycle, Bloc 2)
   The host explorer + clone flow (spec 5.2): browse the allowlisted share
   roots (the server confines every request -- outside the roots it answers
   403 before any existence check), pick a directory, and clone it into the
@@ -10,7 +10,7 @@
   Cap errors and skip counts are surfaced honestly. Cloning records the
   section 6.1 baseline manifest server-side (Bloc 3's diff consumes it).
   An EXPLICIT user action: the model can trigger neither a browse nor a
-  clone (S73/S74). Hidden entries are shown dimmed rather than hidden --
+  clone. Hidden entries are shown dimmed rather than hidden --
   a clone copies them, so hiding them would lie about what is shared.
   Design-system tokens only (--oo-*); lucide icons through Icon.
   Registered in FRONTEND_REDESIGN_SPEC.md.

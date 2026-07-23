@@ -1,4 +1,4 @@
-// Opti-Oignon design-system primitives (lib/ds) -- S166.
+// Opti-Oignon design-system primitives (lib/ds) --.
 // Import as: import { Button, Modal } from '$lib/ds';
 
 export { default as Button } from './Button.svelte';

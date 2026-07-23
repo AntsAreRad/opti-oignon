@@ -1,9 +1,9 @@
 <!--
-  BackendStatus.svelte (S106, merged S167)
+  BackendStatus.svelte
   Single consolidated health indicator for the header status cluster.
   Shows one colored dot + label; the popover combines backend health
   (status, version, modules) with Ollama connectivity (online / latency /
-  queue), folding in the former inline NetworkIndicator (S167 merge).
+  queue), folding in the former inline NetworkIndicator.
   Uses --oo-* CSS variables exclusively.
 -->
 <script lang="ts">
@@ -22,7 +22,7 @@
 	let moduleCount = 0;
 	let moduleTotal = 0;
 
-	// Ollama network status (merged from NetworkIndicator, S167).
+	// Ollama network status (merged from NetworkIndicator).
 	let netAvailable = false;
 	let netOnline = false;
 	let netLatencyMs = 0;

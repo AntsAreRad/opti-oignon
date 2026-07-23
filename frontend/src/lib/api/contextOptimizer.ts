@@ -1,5 +1,5 @@
 /**
- * Typed API functions for the Context Optimizer (S123).
+ * Typed API functions for the Context Optimizer.
  *
  * Provides optimizer configuration, priority presets, budget calculation
  * with preset support, and optimization report retrieval.

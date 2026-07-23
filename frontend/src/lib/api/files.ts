@@ -22,7 +22,7 @@ export const ALLOWED_EXTENSIONS = new Set([
 	'.toml', '.ini', '.cfg', '.conf', '.log', '.tex', '.bib', '.nf',
 ]);
 
-/** S48: Extensions d'image autorisees. */
+/** Extensions d'image autorisees. */
 export const ALLOWED_IMAGE_EXTENSIONS = new Set([
 	'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
 ]);
@@ -30,7 +30,7 @@ export const ALLOWED_IMAGE_EXTENSIONS = new Set([
 /** Taille maximale en octets (500 KB). */
 export const MAX_FILE_SIZE = 500_000;
 
-/** S48: Taille maximale image en octets (10 MB). */
+/** Taille maximale image en octets (10 MB). */
 export const MAX_IMAGE_SIZE = 10_000_000;
 
 /**
@@ -84,13 +84,13 @@ export async function uploadFile(file: File): Promise<FileUploadResponse> {
 
 
 // ---------------------------------------------------------------------------
-// S48: Image upload
+// Image upload
 // ---------------------------------------------------------------------------
 
 /**
  * Validate an image file before upload.
  * Returns null if OK, a descriptive error message otherwise.
- * S94: Improved error messages with actionable guidance.
+ * Improved error messages with actionable guidance.
  */
 export function validateImageFile(file: File): string | null {
 	if (!file.name || file.size === 0) {

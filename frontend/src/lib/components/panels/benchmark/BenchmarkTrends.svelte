@@ -1,5 +1,5 @@
 <!--
-  BenchmarkTrends.svelte (S169)
+  BenchmarkTrends.svelte
   The "Trends" section extracted from BenchmarkV2Panel: composite score trend
   over time for a selected model. Self-contained; behaviour unchanged.
 -->

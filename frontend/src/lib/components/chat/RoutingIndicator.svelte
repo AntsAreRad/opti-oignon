@@ -1,6 +1,6 @@
 <!--
   RoutingIndicator.svelte
-  S46: Non-intrusive indicator showing why a model was selected.
+  Non-intrusive indicator showing why a model was selected.
   
   Display the model name, reason for selection, and pipeline used.
   Click to expand the details (alternatives, score, profile).
@@ -40,9 +40,9 @@
 		: '';
 	// Profile indicator
 	$: profileBadge = routingReason?.profile_used ?? false;
-	// S62: Feedback-adjusted indicator
+	// Feedback-adjusted indicator
 	$: feedbackBadge = routingReason?.feedback_adjusted ?? false;
-	// S63: Failover indicator
+	// Failover indicator
 	$: failoverBadge = routingReason?.failover ?? false;
 	$: originalModel = routingReason?.original_model ?? '';
 	// Displayed pipeline

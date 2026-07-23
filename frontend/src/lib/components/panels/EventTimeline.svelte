@@ -1,5 +1,5 @@
 <!--
-  EventTimeline.svelte -- S115 Event Timeline Visualization.
+  EventTimeline.svelte -- Event Timeline Visualization.
 
   Interactive horizontal timeline showing inference events over time.
   Features:

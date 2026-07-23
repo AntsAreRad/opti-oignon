@@ -1,5 +1,5 @@
 <!--
-  PluginAllowlistPanel.svelte (S128)
+  PluginAllowlistPanel.svelte
   Plugin batch approval and allowlist management panel.
 
   Features:

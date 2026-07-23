@@ -1,5 +1,5 @@
 /**
- * Network Manager API client -- S71 Offline-First Intelligence.
+ * Network Manager API client -- Offline-First Intelligence.
  *
  * Typed functions for connectivity status, queue management,
  * and pre-cache warming.

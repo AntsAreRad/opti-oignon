@@ -1,5 +1,5 @@
 <!--
-  BenchmarkHeadToHead.svelte (S169)
+  BenchmarkHeadToHead.svelte
   The "Head-to-Head" section extracted from BenchmarkV2Panel: pick two models
   and compare them directly. Self-contained; behaviour unchanged.
 -->

@@ -1,5 +1,5 @@
 /**
- * Backend health polling store (S106).
+ * Backend health polling store.
  *
  * Polls /api/health at a configurable interval and exposes:
  * - backendStatus: 'connected' | 'degraded' | 'disconnected'

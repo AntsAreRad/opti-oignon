@@ -1,5 +1,5 @@
 /**
- * RAG v2 Knowledge Base API client (S99).
+ * RAG v2 Knowledge Base API client.
  *
  * Collection management, document ingestion (file + URL),
  * query with retrieval and citation tracking.
@@ -60,7 +60,7 @@ export async function ingestFile(
 	formData.append('file', file);
 	formData.append('collection', collection || 'default');
 
-	// BUG-11 S108: Include auth headers (raw fetch was missing them)
+	// BUG-11: Include auth headers (raw fetch was missing them)
 	const headers: Record<string, string> = {
 		'Accept': 'application/json',
 	};
@@ -140,7 +140,7 @@ export async function deleteDocument(
 }
 
 // =========================================================================
-// BATCH INGESTION (S120)
+// BATCH INGESTION
 // =========================================================================
 
 /** Upload multiple files for batch ingestion. Returns a job (202). */

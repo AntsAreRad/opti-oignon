@@ -1,9 +1,9 @@
 <!--
-  KeyboardShortcuts.svelte (S107, refactored S153, S166)
+  KeyboardShortcuts.svelte
   Global keyboard shortcut handler + help overlay.
   Mounted in root layout to cover the entire application.
   Supports custom bindings loaded from backend.
-  S166: the help overlay now uses the shared <Modal> primitive (native
+  The help overlay now uses the shared <Modal> primitive (native
   dialog focus trap, Escape and backdrop handling).
 -->
 <script lang="ts">
@@ -95,7 +95,7 @@
 	}
 
 	function matchesShortcut(e: KeyboardEvent, s: KeyboardShortcut): boolean {
-		// KS-02 (S197): '?' is produced WITH Shift on most layouts, so match
+		// KS-02: '?' is produced WITH Shift on most layouts, so match
 		// it shift-agnostically and before the modifier gate.
 		if (s.key === '?') {
 			return e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -109,7 +109,7 @@
 		if (shift !== e.shiftKey) return false;
 		if (alt !== e.altKey) return false;
 
-		// KS-03 (S197): custom overrides arrive lowercased (ShortcutSettings
+		// KS-03: custom overrides arrive lowercased (ShortcutSettings
 		// and the backend both canonicalize), so compare case-insensitively
 		// for every key length; this also covers Enter/Escape.
 		return e.key.toLowerCase() === s.key.toLowerCase();
@@ -126,7 +126,7 @@
 			// For non-modifier shortcuts (? and Escape), skip if in input field
 			if (!s.ctrl && !s.shift && !s.alt && isInput) continue;
 
-			// KS-01 (S197): preventDefault ONLY on paths that actually handle
+			// KS-01: preventDefault ONLY on paths that actually handle
 			// the key. An unhandled Escape must keep its default action --
 			// that default is what fires the native <dialog> cancel event the
 			// ds Modal relies on to close.

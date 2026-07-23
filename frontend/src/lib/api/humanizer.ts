@@ -1,5 +1,5 @@
 /**
- * API client for Humanizer endpoints -- S86.
+ * API client for Humanizer endpoints --.
  *
  * Provides typed access to humanizer rewrite, config, feedback, and stats.
  */

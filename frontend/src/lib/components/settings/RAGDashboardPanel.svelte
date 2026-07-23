@@ -1,5 +1,5 @@
 <!--
-  RAGDashboardPanel.svelte -- S100 Knowledge Base Dashboard.
+  RAGDashboardPanel.svelte -- Knowledge Base Dashboard.
 
   Sub-sections:
   1. Overview: key metrics cards

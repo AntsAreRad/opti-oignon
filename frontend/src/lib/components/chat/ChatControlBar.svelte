@@ -3,10 +3,10 @@
   Horizontal control bar above the input area.
   Provides model/preset selectors and feature toggles with responsive labels.
   Labels collapse to icon-only on screens < 640px (sm breakpoint).
-  All active toggles use a borderless tobacco tint (S93 v4e palette).
-  S87: responsive labels, unified style, ddgs availability check,
+  All active toggles use a borderless tobacco tint (v4e palette).
+  Responsive labels, unified style, ddgs availability check,
        model family grouping with parameter badges.
-  S132: Mobile responsive — horizontal scroll overflow, touch-friendly min-height.
+  Mobile responsive — horizontal scroll overflow, touch-friendly min-height.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -31,20 +31,20 @@
 
 	let loaded = false;
 
-	// S87: Track whether duckduckgo-search is installed
+	// Track whether duckduckgo-search is installed
 	let ddgsAvailable = true;
 
-	// S117: Track whether quick sandbox is available
+	// Track whether quick sandbox is available
 	let qsAvailable = false;
 
-	// S118: Track whether chat coding agent is available
+	// Track whether chat coding agent is available
 	let ccAvailable = false;
 
-	// S131: Conversation wipe
+	// Conversation wipe
 	let wipeAvailable = false;
 	let wipeBusy = false;
 
-	// S87: Group models by family for the dropdown
+	// Group models by family for the dropdown
 	interface ModelGroup {
 		family: string;
 		models: { name: string; paramBadge: string; mtpCapable: boolean }[];
@@ -91,7 +91,7 @@
 		return match ? match[1] + 'B' : '';
 	}
 
-	// Unified active toggle style (borderless, tobacco tint, S93 v4e palette)
+	// Unified active toggle style (borderless, tobacco tint, v4e palette)
 	const activeStyle = 'background-color: var(--oo-tobacco-bg); color: var(--oo-tobacco); border: 1px solid var(--oo-tobacco-bg);';
 	const inactiveStyle = 'background-color: var(--oo-bg-surface); color: var(--oo-fg-muted); border: 1px solid var(--oo-bg-surface);';
 	const disabledStyle = 'background-color: var(--oo-bg-surface); color: var(--oo-fg-muted); border: 1px solid var(--oo-bg-surface); opacity: 0.5; cursor: not-allowed;';
@@ -100,7 +100,7 @@
 		if ($availableModels.length === 0) {
 			await loadOptions();
 		}
-		// S68: Load initial cache status
+		// Load initial cache status
 		try {
 			const resp = await fetch('/api/cache/s68/status');
 			if (resp.ok) {
@@ -108,7 +108,7 @@
 				cacheEnabled.set(data.enabled || false);
 			}
 		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// S69: Load initial cascading status
+		// Load initial cascading status
 		try {
 			const resp = await fetch('/api/cascading/status');
 			if (resp.ok) {
@@ -116,7 +116,7 @@
 				cascadingEnabled.set(data.enabled || false);
 			}
 		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// S86: Load initial humanizer status
+		// Load initial humanizer status
 		try {
 			const resp = await fetch('/api/humanizer/config');
 			if (resp.ok) {
@@ -124,7 +124,7 @@
 				humanizeEnabled.set(data.enabled || false);
 			}
 		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// S87: Check if duckduckgo-search is available
+		// Check if duckduckgo-search is available
 		try {
 			const resp = await fetch('/api/search/config');
 			if (resp.ok) {
@@ -134,7 +134,7 @@
 		} catch {
 			// If search config endpoint unreachable, assume available
 		}
-		// S117: Load quick sandbox status
+		// Load quick sandbox status
 		try {
 			const resp = await fetch('/api/sandbox/quick/status');
 			if (resp.ok) {
@@ -145,7 +145,7 @@
 		} catch {
 			qsAvailable = false;
 		}
-		// S118: Load chat coding agent status
+		// Load chat coding agent status
 		try {
 			const resp = await fetch('/api/chat/coding/status');
 			if (resp.ok) {
@@ -156,7 +156,7 @@
 		} catch {
 			ccAvailable = false;
 		}
-		// S131: Check conversation wipe availability
+		// Check conversation wipe availability
 		try {
 			const resp = await fetch('/api/security/hardening/status', { credentials: 'include' });
 			if (resp.ok) {
@@ -236,7 +236,7 @@
 
 	async function toggleQuickSandbox() {
 		if (!qsAvailable) return;
-		// S118: Mutual exclusion — disable Code Agent when toggling Sandbox on
+		// Mutual exclusion — disable Code Agent when toggling Sandbox on
 		if (!$quickSandboxEnabled && $chatCodingEnabled) {
 			chatCodingEnabled.set(false);
 		}
@@ -260,7 +260,7 @@
 
 	async function toggleChatCoding() {
 		if (!ccAvailable) return;
-		// S118: Mutual exclusion — when Code Agent is ON, Sandbox is implicitly ON
+		// Mutual exclusion — when Code Agent is ON, Sandbox is implicitly ON
 		// When toggling Code Agent on, disable standalone Sandbox toggle
 		const newVal = !$chatCodingEnabled;
 		if (newVal && $quickSandboxEnabled) {
@@ -283,7 +283,7 @@
 		}
 	}
 
-	// S87: Compute search toggle tooltip
+	// Compute search toggle tooltip
 	$: searchTooltip = ddgsAvailable
 		? 'Toggle web search (DuckDuckGo)'
 		: 'Install duckduckgo-search to enable (pip install duckduckgo-search)';
@@ -297,7 +297,7 @@
 		getConversationBinding
 	);
 
-	// S131: Wipe current conversation
+	// Wipe current conversation
 	async function handleWipeConversation() {
 		const convId = $activeConversationId;
 		if (!convId || wipeBusy) return;
@@ -312,10 +312,10 @@
 	}
 </script>
 
-<!-- S132: Horizontal scroll on mobile, no-wrap to prevent overflow stacking -->
+<!-- Horizontal scroll on mobile, no-wrap to prevent overflow stacking -->
 <div class="flex items-center gap-2 px-1 py-1.5 overflow-x-auto touch-scroll-x mobile-hide-scrollbar"
 	style="min-height: 36px; -ms-overflow-style: none; scrollbar-width: none;">
-	<!-- Model selector with family grouping and param badges (S87) -->
+	<!-- Model selector with family grouping and param badges -->
 	<div class="flex items-center gap-1 shrink-0">
 		<select
 			bind:value={$selectedModel}
@@ -401,7 +401,7 @@
 		<span class="hidden sm:inline">Search</span>
 	</button>
 
-	<!-- S68: Toggle Cache -->
+	<!-- Toggle Cache -->
 	<button
 		on:click={toggleCache}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -419,7 +419,7 @@
 		<span class="hidden sm:inline">Cache</span>
 	</button>
 
-	<!-- S69: Toggle Cascading -->
+	<!-- Toggle Cascading -->
 	<button
 		on:click={toggleCascading}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -437,7 +437,7 @@
 		<span class="hidden sm:inline">Cascade</span>
 	</button>
 
-	<!-- S84: Toggle Prompt Enhancement (Onion button) -->
+	<!-- Toggle Prompt Enhancement (Onion button) -->
 	<button
 		on:click={togglePromptEnhance}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -458,7 +458,7 @@
 		<span class="hidden sm:inline">Opti</span>
 	</button>
 
-	<!-- S86: Toggle Humanize -->
+	<!-- Toggle Humanize -->
 	<button
 		on:click={toggleHumanize}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -475,7 +475,7 @@
 		<span class="hidden sm:inline">Human</span>
 	</button>
 
-	<!-- S117: Toggle Quick Sandbox -->
+	<!-- Toggle Quick Sandbox -->
 	<button
 		on:click={toggleQuickSandbox}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -497,7 +497,7 @@
 		<span class="hidden sm:inline">Sandbox</span>
 	</button>
 
-	<!-- S118: Toggle Chat Coding Agent (sage accent to distinguish) -->
+	<!-- Toggle Chat Coding Agent (sage accent to distinguish) -->
 	<button
 		on:click={toggleChatCoding}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
@@ -537,7 +537,7 @@
 		</span>
 	{/if}
 
-	<!-- S131: Wipe Conversation (visible only when available + in a conversation) -->
+	<!-- Wipe Conversation (visible only when available + in a conversation) -->
 	{#if wipeAvailable && $activeConversationId}
 		<div class="w-px h-4 hidden sm:block" style="background-color: var(--oo-bd-default);" />
 		<button

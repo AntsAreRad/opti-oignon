@@ -1,5 +1,5 @@
 <!--
-  SkeletonLoader.svelte (S134)
+  SkeletonLoader.svelte
   Reusable skeleton placeholder shown during component/data loading.
   Variants: card, list, text, inline.
   CSS-only shimmer animation, themed via --oo-* variables.

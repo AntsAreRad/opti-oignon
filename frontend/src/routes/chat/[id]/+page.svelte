@@ -2,7 +2,7 @@
   Chat view: messages + streaming + input.
   Handles WebSocket streaming, cancellation and retry.
   Passes chat options (model, preset, temperature) via chatOptions.
-  S132: Mobile responsive — scroll FAB, tighter padding, safe-area.
+  Mobile responsive — scroll FAB, tighter padding, safe-area.
 -->
 <script lang="ts">
 	import { page } from '$app/stores';
@@ -97,11 +97,11 @@
 		const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
 		// Auto-scroll if close to bottom (100px tolerance)
 		shouldAutoScroll = scrollHeight - scrollTop - clientHeight < 100;
-		// S132: Show scroll-to-bottom FAB when scrolled up beyond 300px
+		// Show scroll-to-bottom FAB when scrolled up beyond 300px
 		showScrollFab = scrollHeight - scrollTop - clientHeight > 300;
 	}
 
-	// S132: FAB click handler — smooth scroll to bottom
+	// FAB click handler — smooth scroll to bottom
 	function handleScrollFabClick() {
 		shouldAutoScroll = true;
 		showScrollFab = false;
@@ -190,7 +190,7 @@
 		</div>
 	{/if}
 
-	<!-- Zone de messages — S132: reduced padding on mobile -->
+	<!-- Zone de messages — reduced padding on mobile -->
 	<div
 		bind:this={messagesContainer}
 		on:scroll={handleScroll}
@@ -266,10 +266,10 @@
 		<div bind:this={bottomSentinel} />
 	</div>
 
-	<!-- S132: Scroll-to-bottom floating action button -->
+	<!-- Scroll-to-bottom floating action button -->
 	<ScrollToBottomFab visible={showScrollFab} onClick={handleScrollFabClick} />
 
-	<!-- Zone de saisie — S132: safe-area bottom, tighter mobile padding -->
+	<!-- Zone de saisie — safe-area bottom, tighter mobile padding -->
 	<div class="shrink-0 px-2 sm:px-4 py-2 sm:py-3 safe-area-bottom" style="border-top: 1px solid var(--oo-bd-subtle);">
 		<div class="max-w-2xl mx-auto">
 			<FileUpload
@@ -290,7 +290,7 @@
 	</div>
 </div>
 
-<!-- S111: Live performance metrics overlay (auto-shows during inference) -->
+<!-- Live performance metrics overlay (auto-shows during inference) -->
 <LiveMetricsOverlay />
 
 <style>

@@ -1,4 +1,4 @@
-# Conversation branching configuration (S97)
+# Conversation branching configuration
 # Controls branch creation, naming, colors, and merge behavior.
 
 branches:

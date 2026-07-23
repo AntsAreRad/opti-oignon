@@ -1,5 +1,5 @@
 <!--
-  BenchmarkV2Panel.svelte (decomposed S169)
+  BenchmarkV2Panel.svelte
   Thin orchestrator for the Quality Evaluation engine. The 2101-line monolith
   was split into self-contained per-section components under ./benchmark
   (Run, Leaderboard, Head-to-Head, Trends, Compare, History, Profiles); the

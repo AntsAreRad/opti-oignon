@@ -1,5 +1,5 @@
 <!--
-  EmergencyStopControl.svelte (S215)
+  EmergencyStopControl.svelte
   Emergency-stop panic control in the header status cluster: makes the
   machine quiet immediately (cancel generations and runs, unload models,
   destroy sandboxes, stop the Veilid node) and offers resume in place.

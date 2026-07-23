@@ -1,6 +1,6 @@
 /**
  * Svelte stores for UI state (sidebar, theme).
- * S93: System theme detection, smooth transition on toggle,
+ * System theme detection, smooth transition on toggle,
  *      prefers-reduced-motion awareness.
  */
 

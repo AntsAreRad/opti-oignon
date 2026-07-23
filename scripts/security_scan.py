@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-security_scan.py -- Static Security Analysis for Opti-Oignon (S130, extended S155).
+security_scan.py -- Static Security Analysis for Opti-Oignon.
 
 Pure static analysis: scans source files for common security anti-patterns
 WITHOUT importing any opti_oignon modules.
@@ -11,19 +11,19 @@ Checks:
   3. No hardcoded secrets (passwords, API keys, tokens)
   4. No pickle.loads() on untrusted data
   5. All SQL parameterized -- no f-string in .execute()
-  5b. No f-string SQL literals (S138)
+  5b. No f-string SQL literals
   6. No shell=True in subprocess calls
   7. CSRF protection present on state-changing routes
   8. No hardcoded hex colors in Svelte (extends audit_colors.py)
   9. checkpoint_before_apply = True always hardcoded
   10. No French in code comments or UI text
-  11. No unsafe yaml.load() without SafeLoader (S155)
-  12. Path traversal risk detection (S155)
-  13. SSRF vector detection (S155)
-  14. Rate limiting on sensitive endpoints (S155)
-  15. Cookie security flags (httponly, secure, samesite) (S155)
-  16. Insecure random in security contexts (S155)
-  17. Frontend hardcoded secrets in JS/TS/Svelte (S155)
+  11. No unsafe yaml.load() without SafeLoader
+  12. Path traversal risk detection
+  13. SSRF vector detection
+  14. Rate limiting on sensitive endpoints
+  15. Cookie security flags (httponly, secure, samesite)
+  16. Insecure random in security contexts
+  17. Frontend hardcoded secrets in JS/TS/Svelte
 
 Usage:
     python scripts/security_scan.py [--json] [--verbose]
@@ -120,7 +120,7 @@ class CheckResult:
 
 _SQLITE_CONNECT_RE = re.compile(r"\bsqlite3\.connect\s*\(")
 
-# S138: Only db_utils.py (the safe_connect wrapper) and db_encryption.py
+# Only db_utils.py (the safe_connect wrapper) and db_encryption.py
 # (the encryption layer itself) may call sqlite3.connect directly.
 # Plugin entry_points are excluded because they run in sandboxes.
 _SQLITE_ALLOWED = {
@@ -132,7 +132,7 @@ _SQLITE_ALLOWED = {
 def check_no_raw_sqlite(files: list[Path]) -> CheckResult:
     """Ensure no direct sqlite3.connect() outside allowed modules.
 
-    S138 hardening: after migrating all core modules to safe_connect(),
+    Hardening: after migrating all core modules to safe_connect(),
     only the connection infrastructure (db_utils, db_encryption) may
     call sqlite3.connect directly.  Plugin entry_points under plugins/
     are excluded (sandboxed, no host DB access).
@@ -328,7 +328,7 @@ def check_sql_parameterized(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 5b: No f-string SQL literals (S138)
+# Check 5b: No f-string SQL literals
 # ---------------------------------------------------------------------------
 
 # Catches f"SELECT ...FROM" / f"INSERT INTO" / f"UPDATE ...SET" /
@@ -355,7 +355,7 @@ _FSTRING_SQL_ALLOWED_PREFIXES = ("test_", "security_scan")
 def check_no_fstring_sql(files: list[Path]) -> CheckResult:
     """No f-string literals containing SQL keywords in production code.
 
-    S138 hardening: SQL queries must use str.format() or concatenation
+    Hardening: SQL queries must use str.format() or concatenation
     with validated identifiers, never f-strings, to make injection
     patterns visually obvious during review.
     """
@@ -423,7 +423,7 @@ _STATE_CHANGE_RE = re.compile(
 def check_csrf_protection(files: list[Path]) -> CheckResult:
     """State-changing routes should have CSRF protection.
 
-    S136 audit fix: checks for CSRFMiddleware (not SecurityModeMiddleware,
+    Audit fix: checks for CSRFMiddleware (not SecurityModeMiddleware,
     which does mode enforcement but NOT CSRF validation).
     """
     result = CheckResult(
@@ -623,7 +623,7 @@ def check_no_french(py_files: list[Path], svelte_files: list[Path]) -> CheckResu
 
 
 # ---------------------------------------------------------------------------
-# Check 11: Unsafe YAML deserialization (S155)
+# Check 11: Unsafe YAML deserialization
 # ---------------------------------------------------------------------------
 
 _YAML_LOAD_RE = re.compile(r"\byaml\.load\s*\(")
@@ -657,7 +657,7 @@ def check_no_unsafe_yaml(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 12: Path traversal risks (S155)
+# Check 12: Path traversal risks
 # ---------------------------------------------------------------------------
 
 # Patterns that suggest user input flowing into path operations
@@ -704,7 +704,7 @@ def check_path_traversal(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 13: SSRF vectors (S155)
+# Check 13: SSRF vectors
 # ---------------------------------------------------------------------------
 
 # Patterns where user-controlled URLs are passed to HTTP libraries
@@ -752,7 +752,7 @@ def check_ssrf_vectors(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 14: Missing rate limiting on sensitive endpoints (S155)
+# Check 14: Missing rate limiting on sensitive endpoints
 # ---------------------------------------------------------------------------
 
 # Route files that handle sensitive operations
@@ -794,7 +794,7 @@ def check_rate_limiting(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 15: Cookie security flags (S155)
+# Check 15: Cookie security flags
 # ---------------------------------------------------------------------------
 
 _SET_COOKIE_RE = re.compile(r"set_cookie\s*\(|\.set_cookie\s*\(")
@@ -844,7 +844,7 @@ def check_cookie_security(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 16: Insecure random usage (S155)
+# Check 16: Insecure random usage
 # ---------------------------------------------------------------------------
 
 _INSECURE_RANDOM_RE = re.compile(
@@ -891,7 +891,7 @@ def check_insecure_random(files: list[Path]) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# Check 17: Frontend secrets in JS/TS/Svelte (S155)
+# Check 17: Frontend secrets in JS/TS/Svelte
 # ---------------------------------------------------------------------------
 
 _FRONTEND_SECRET_PATTERNS = [
@@ -957,7 +957,7 @@ def run_all_checks(verbose: bool = False) -> dict[str, Any]:
         check_no_hardcoded_colors(svelte_files),
         check_checkpoint_hardcoded(py_files),
         check_no_french(py_files, svelte_files),
-        # S155 additions
+        # Later additions
         check_no_unsafe_yaml(py_files),
         check_path_traversal(py_files),
         check_ssrf_vectors(py_files),

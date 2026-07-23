@@ -1,5 +1,5 @@
 <!--
-  WebAuthnSetup.svelte (S127)
+  WebAuthnSetup.svelte
   Manage WebAuthn/FIDO2 security keys in the settings panel.
 
   Features:

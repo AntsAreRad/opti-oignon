@@ -1,5 +1,5 @@
 <!--
-  ThemeSwitcher.svelte (S167)
+  ThemeSwitcher.svelte
   Header palette quick-switcher (spec 8.4). One click to move between the
   5 curated palettes without opening Settings, plus the 3 density modes.
   Wired to the preferences store, which sets `data-oo-theme` +

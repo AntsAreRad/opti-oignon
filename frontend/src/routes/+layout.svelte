@@ -36,7 +36,7 @@
 	$: pathname = $page.url.pathname;
 	$: isPublicRoute = PUBLIC_ROUTES.some((r) => pathname.startsWith(r));
 
-	// S153: Announce route changes for screen readers
+	// Announce route changes for screen readers
 	$: if (typeof document !== 'undefined' && pathname) {
 		const announcer = document.getElementById('oo-route-announcer');
 		if (announcer) {
@@ -94,7 +94,7 @@
 	}
 </script>
 
-<!-- S167: global skip link (spec 8.9); targets the AppShell main landmark -->
+<!-- Global skip link (spec 8.9); targets the AppShell main landmark -->
 <a href="#main-content" class="oo-skip-link">Skip to main content</a>
 
 <OnboardingOverlay />

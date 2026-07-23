@@ -1,5 +1,5 @@
 /**
- * API client for the sandboxed agent loop (S176, Theme 3 / Odysseus Core).
+ * API client for the sandboxed agent loop (Theme 3 / Odysseus Core).
  *
  * Mirrors the backend AgentEvent contract emitted by opti_oignon/agent/loop.py
  * (round_start / model_output / tool_result / done / error / verifier_output)
@@ -9,7 +9,7 @@
  * polls and resolves Bulbe approvals through it rather than a duplicate route.
  *
  * The live event-stream endpoint and the run-control endpoints are wired to the
- * backend during the S177 end-to-end integration; this client defines the
+ * backend during the end-to-end integration; this client defines the
  * contract the agent panel consumes.
  */
 

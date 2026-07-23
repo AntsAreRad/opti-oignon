@@ -1,5 +1,5 @@
 // Shared types for the Opti-Oignon design-system primitives (lib/ds).
-// S166.
+// Type declarations only; no runtime code.
 
 /** A lucide-svelte icon name in kebab-case or PascalCase (e.g. 'plus', 'Settings'). */
 export type IconName = string;

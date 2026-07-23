@@ -1,5 +1,5 @@
 <!--
-  ConversationItem.svelte (refactored S167)
+  ConversationItem.svelte
   Renders one conversation in the sidebar. Click to select, double-click
   to rename, hover for export / rename / delete actions. Uses the ds
   Tooltip (full title) and Icon primitives.

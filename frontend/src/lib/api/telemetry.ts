@@ -1,5 +1,5 @@
 /**
- * Telemetry Dashboard API -- S113.
+ * Telemetry Dashboard API --.
  *
  * Client functions for the telemetry dashboard endpoints.
  */
@@ -31,7 +31,7 @@ export interface TelemetryFlushResponse {
 	flushed_events: number;
 }
 
-// S114: History types
+// History types
 export interface HistoryEvent {
 	id: number;
 	request_id: string;
@@ -105,7 +105,7 @@ export async function flushTelemetry(): Promise<TelemetryFlushResponse> {
 	return apiPost<TelemetryFlushResponse>('/api/telemetry/flush');
 }
 
-// S114: History endpoints
+// History endpoints
 
 /** Get paginated telemetry event history. */
 export async function getTelemetryHistory(
@@ -148,7 +148,7 @@ export async function purgeHistory(olderThanDays: number = 0): Promise<Telemetry
 	);
 }
 
-// S115: Settings & Export
+// Settings & Export
 
 export interface HistorySettingsRequest {
 	retention_days?: number;

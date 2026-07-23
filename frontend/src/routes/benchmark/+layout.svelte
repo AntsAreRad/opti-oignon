@@ -1,5 +1,5 @@
 <!--
-  Benchmark route layout (S169).
+  Benchmark route layout.
   Wraps /benchmark in AppShell so the shared sidebar (with the Benchmark runs
   context list) and header cluster apply, matching the other top-level routes.
 -->

@@ -1,9 +1,9 @@
 /**
- * Svelte stores for note-attachment state management (N.5 / N.6, S253).
+ * Svelte stores for note-attachment state management (N.5 / N.6).
  *
  * Reactive stores and action functions over the per-user media surfaces:
- * the S249 attachments route via $lib/api/attachments, the S250 transcription
- * trigger via $lib/api/transcription, and the S251 caption / OCR trigger via
+ * the attachments route via $lib/api/attachments, the transcription
+ * trigger via $lib/api/transcription, and the caption / OCR trigger via
  * $lib/api/caption. Mirrors stores/notes.ts: writable stores, derived views,
  * async actions that call the clients and update state.
  *
@@ -47,7 +47,7 @@ export const imageAttachments = derived(attachments, ($attachments) =>
 	$attachments.filter((a) => a.kind === 'image')
 );
 
-/** The drawing attachments (the canvas list, Notes feature N.7, S254). */
+/** The drawing attachments (the canvas list, Notes feature N.7). */
 export const drawingAttachments = derived(attachments, ($attachments) =>
 	$attachments.filter((a) => a.kind === 'drawing')
 );

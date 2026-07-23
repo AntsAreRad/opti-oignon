@@ -1,5 +1,5 @@
 <!--
-  DocumentManager.svelte -- S120 RAG Document Manager Panel.
+  DocumentManager.svelte -- RAG Document Manager Panel.
 
   Provides search/filter/browse for ingested documents:
   - Search bar filtering by filename (server-side via search query param)

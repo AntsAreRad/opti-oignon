@@ -1,5 +1,5 @@
 <!--
-  ErrorBoundary.svelte (S134 update)
+  ErrorBoundary.svelte
   Wraps child content and captures render errors.
   Displays a friendly error message with retry button and optional report link.
   Usage: <ErrorBoundary><slot /></ErrorBoundary>

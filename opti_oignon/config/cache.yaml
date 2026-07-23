@@ -1,4 +1,4 @@
-# Semantic Cache Configuration — S68
+# Semantic Cache Configuration
 # Persistent dual-threshold cache: exact hash + embedding similarity
 
 # Master toggle (off by default — enable when ready)

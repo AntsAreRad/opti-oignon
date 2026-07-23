@@ -1,5 +1,5 @@
 <!--
-  FeedbackWidget.svelte (S55, refactored S167)
+  FeedbackWidget.svelte
   Inline thumbs up/down feedback for chat messages. Appears alongside the
   copy/retry actions; thumbs-down expands a short text field. Uses the ds
   Icon and Button primitives.

@@ -1,9 +1,9 @@
 /**
- * API client for Sandbox management (S73/S116).
+ * API client for Sandbox management.
  *
  * Provides typed functions for all sandbox endpoints:
  * create, inject, list files, execute, destroy, audit,
- * preview, download, approve, copy-out, reject (S116).
+ * preview, download, approve, copy-out, reject.
  */
 
 import { apiGet, apiPost, apiDelete, apiUpload } from './client';
@@ -101,7 +101,7 @@ export async function getAuditLog(
 	return apiGet(`/api/sandbox/audit${query ? '?' + query : ''}`);
 }
 
-// -- S116: Copy-out + human approval endpoints --
+// --: Copy-out + human approval endpoints --
 
 /** Preview a file from the sandbox (text capped at 64KB, binary hex preview). */
 export async function previewSandboxFile(
@@ -153,7 +153,7 @@ export async function getApprovalAudit(
 	return apiGet(`/api/sandbox/${sessionId}/approval-audit`);
 }
 
-// -- S210 (Bloc 1): workspace lifecycle + conversation binding --
+// -- (Bloc 1): workspace lifecycle + conversation binding --
 
 /** SIGKILL the workspace's running command; the workspace persists.
  * stopped=false means nothing was running (honest no-op). */
@@ -183,9 +183,9 @@ export async function getConversationBinding(
 	return apiGet(`/api/sandbox/bind/${conversationId}`);
 }
 
-// -- S211 (Bloc 2): copy-in (drag-and-drop, host browse, host clone) --
+// -- (Bloc 2): copy-in (drag-and-drop, host browse, host clone) --
 // All three are EXPLICIT user actions through the manager UI; the model can
-// trigger none of them (S73/S74). The agent only ever sees /workspace.
+// trigger none of them. The agent only ever sees /workspace.
 
 /** Upload files into a workspace via multipart (spec 5.1). The request is
  * refused whole with 413 over any cap (count, per-file bytes, the workspace
@@ -221,9 +221,9 @@ export async function cloneDirectory(
 	return apiPost(`/api/sandbox/${sessionId}/clone`, request);
 }
 
-// ---- S212 (Bloc 3): diff-gated write-back -------------------------------
+// ---- (Bloc 3): diff-gated write-back ------------------------------------
 // Review and apply are EXPLICIT user actions through the manager UI; the
-// model can trigger neither the diff-approve chain nor the apply (S73/S74).
+// model can trigger neither the diff-approve chain nor the apply.
 
 /** The live workspace classified against the baseline manifest (spec 6.1):
  * hash-driven added/modified/deleted; no baseline means everything is
@@ -257,7 +257,7 @@ export async function applyChanges(
 	return apiPost(`/api/sandbox/${sessionId}/apply`, request);
 }
 
-/** S213 (Bloc 4): flip the per-workspace network flag -- an explicit user
+/** (Bloc 4): flip the per-workspace network flag -- an explicit user
  * action. Enabling answers 403 under Bulbe (the binding-layer gate; an
  * unset or unknown mode is treated as Bulbe); disabling works in any mode.
  * Both directions are audited. */
@@ -268,7 +268,7 @@ export async function setNetwork(
 	return apiPost(`/api/sandbox/${sessionId}/network`, { enabled });
 }
 
-/** S213 (Bloc 4): run the provision phase -- the one scoped egress: a
+/** (Bloc 4): run the provision phase -- the one scoped egress: a
  * hash-pinned requirements set installed with --require-hashes
  * --only-binary=:all: into a workspace venv. 403 under Bulbe, 409 when the
  * workspace network flag is off, 400 on a set that is not exact-and-pinned

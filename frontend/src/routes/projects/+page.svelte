@@ -1,5 +1,5 @@
 <!--
-  Projects list page (S169).
+  Projects list page.
   Renders ProjectList inside the shared AppShell (from +layout). ProjectList
   navigates to the promoted /projects/[id] detail route via real links. The
   ?new=1 query (used by the sidebar "New project" affordance) opens the create

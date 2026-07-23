@@ -1,12 +1,12 @@
 <!--
-  AnswerVerifier.svelte (S277, the answer-verification UI half)
-  The standalone surface the user drives over the S272 route
-  (POST /api/claims/verify-answer, the S271 per-answer aggregation). The user
+  AnswerVerifier.svelte (the answer-verification UI half)
+  The standalone surface the user drives over the route
+  (POST /api/claims/verify-answer, the per-answer aggregation). The user
   builds a batch of (claim, source) pairs -- each a cited claim and the source
-  it is checked against -- and picks a model. Unlike the S275 citation surface,
+  it is checked against -- and picks a model. Unlike the citation surface,
   this route performs no extraction: the pairs are submitted directly, so the
   per-pair results come back positionally aligned with the submitted pairs and
-  the result carries no echoed pairs. The route runs each pair through the S267
+  the result carries no echoed pairs. The route runs each pair through the
   verification role wrapped as untrusted context (this component interprets
   neither the claims nor the sources) and returns the structured aggregate --
   supported / unsupported / uncertain -- with uncertain the safe default. The

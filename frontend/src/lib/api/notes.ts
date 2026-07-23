@@ -26,7 +26,7 @@ export interface NoteRecord {
 	tags: string[];
 	pinned: boolean;
 	/**
-	 * N.9 / S256: the per-item phone-sync opt-in (false by default, the secure
+	 * N.9 / the per-item phone-sync opt-in (false by default, the secure
 	 * default). Rides the existing PATCH leg; the backend flips it only
 	 * through the store's dedicated setter (decision N9-D3).
 	 */
@@ -52,7 +52,7 @@ export interface NoteUpdate {
 	tags?: string[];
 	pinned?: boolean;
 	/**
-	 * N.9 / S260: the phone-sync opt-in, riding the existing PATCH (omitted
+	 * N.9 / the phone-sync opt-in, riding the existing PATCH (omitted
 	 * means unchanged). A human trust decision made at the desktop; the route
 	 * flips it through the dedicated setter only, never the generic path.
 	 */

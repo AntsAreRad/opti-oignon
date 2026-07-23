@@ -3,7 +3,7 @@
   Main layout: collapsible sidebar + content area + right panel.
   Mobile: sidebar as overlay with swipe-to-close, panel as overlay.
   Desktop: sidebar fixed, panel on the right.
-  S132: Enhanced mobile responsive — swipe gesture, touch targets, dvh, safe-area.
+  Enhanced mobile responsive — swipe gesture, touch targets, dvh, safe-area.
   Slots: header, subheader, panel-toggle, default (main area), panel (right panel).
 -->
 <script lang="ts">
@@ -23,7 +23,7 @@
 	let startX = 0;
 	let startWidth = 0;
 
-	// S132: Swipe-to-close state for sidebar
+	// Swipe-to-close state for sidebar
 	let sidebarEl: HTMLDivElement;
 	let swipeTouchStartX = 0;
 	let swipeTouchCurrentX = 0;
@@ -33,13 +33,13 @@
 	function checkMobile() {
 		const wasMobile = isMobile;
 		isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-		// S132: Close sidebar when switching to mobile if open
+		// Close sidebar when switching to mobile if open
 		if (!wasMobile && isMobile && $sidebarOpen) {
 			sidebarOpen.set(false);
 		}
 	}
 
-	// S132: Swipe-to-close touch handlers for sidebar overlay
+	// Swipe-to-close touch handlers for sidebar overlay
 	function handleSidebarTouchStart(event: TouchEvent) {
 		if (!isMobile || !$sidebarOpen) return;
 		const touch = event.touches[0];
@@ -99,7 +99,7 @@
 
 	onMount(() => {
 		checkMobile();
-		// S132: Start with sidebar closed on mobile
+		// Start with sidebar closed on mobile
 		if (isMobile) {
 			sidebarOpen.set(false);
 		}
@@ -120,13 +120,13 @@
 </script>
 
 <div class="h-viewport flex overflow-hidden" style="background-color: var(--oo-bg-base);">
-	<!-- S153: Skip to content link for keyboard/screen reader users -->
+	<!-- Skip to content link for keyboard/screen reader users -->
 	<a href="#main-content" class="skip-to-content">Skip to content</a>
 
-	<!-- S153: Route change announcements for screen readers -->
+	<!-- Route change announcements for screen readers -->
 	<div class="sr-only" aria-live="polite" aria-atomic="true" id="oo-route-announcer"></div>
 
-	<!-- S132: Overlay backdrop (sidebar, mobile only) with fade transition -->
+	<!-- Overlay backdrop (sidebar, mobile only) with fade transition -->
 	{#if $sidebarOpen && isMobile}
 		<button
 			class="fixed inset-0 z-20 md:hidden sidebar-mobile-backdrop"
@@ -145,7 +145,7 @@
 		/>
 	{/if}
 
-	<!-- S132: Sidebar with swipe-to-close on mobile -->
+	<!-- Sidebar with swipe-to-close on mobile -->
 	<nav
 		aria-label="Sidebar navigation"
 		bind:this={sidebarEl}
@@ -169,7 +169,7 @@
 		<header class="flex items-center gap-3 px-3 sm:px-4 h-12 shrink-0 safe-area-pad"
 			style="border-bottom: 1px solid var(--oo-bd-subtle); background-color: var(--oo-header-bg);"
 		>
-			<!-- S132: Touch-friendly hamburger button (44px target on mobile) -->
+			<!-- Touch-friendly hamburger button (44px target on mobile) -->
 			<button
 				on:click={toggleSidebar}
 				class="p-1.5 rounded-md shrink-0
@@ -189,7 +189,7 @@
 			</button>
 			<slot name="header" />
 
-			<!-- Consolidated header status cluster (S167) -->
+			<!-- Consolidated header status cluster -->
 			<div class="ml-auto shrink-0 flex items-center gap-2">
 				<Header />
 				<slot name="panel-toggle" />
@@ -235,7 +235,7 @@
 			{/if}
 		</div>
 
-		<!-- Optional thin status footer (S167, spec 8.5) -->
+		<!-- Optional thin status footer (spec 8.5) -->
 		<StatusFooter />
 	</div>
 </div>

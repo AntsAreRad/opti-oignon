@@ -1,5 +1,5 @@
 /**
- * Typed API functions for Project endpoints (S57 + S58 + S59).
+ * Typed API functions for Project endpoints.
  *
  * Covers project CRUD, file management, output management,
  * conversation linking, and project context (indexation, triggers, RAG).
@@ -178,7 +178,7 @@ export async function listProjectConversations(
 }
 
 // =========================================================================
-// S58: CONTEXT (INDEXATION + TRIGGERS + RAG)
+// CONTEXT (INDEXATION + TRIGGERS + RAG)
 // =========================================================================
 
 /** Index a single file into ChromaDB. */

@@ -1,5 +1,5 @@
 <!--
-  PerformanceTunerPanel.svelte -- S110 Inference Auto-Tuner panel.
+  PerformanceTunerPanel.svelte -- Inference Auto-Tuner panel.
 
   Collapsible panel in Settings > Performance tab.
   Sections:
@@ -45,7 +45,7 @@
 	// Selected result to view
 	let selectedModel = '';
 
-	// S112: Recommendations per model
+	// Recommendations per model
 	let recommendations: Record<string, TunerRecommendation[]> = {};
 	let loadingRecs = '';
 
@@ -150,7 +150,7 @@
 		}
 	}
 
-	// S112: Load recommendations for a model
+	// Load recommendations for a model
 	async function loadRecommendations(model: string) {
 		if (recommendations[model]) return; // Already loaded
 		loadingRecs = model;
@@ -426,7 +426,7 @@
 													Hardware: {profile.hardware_fingerprint} &middot; {formatDate(profile.timestamp)}
 												</div>
 
-												<!-- S112: Recommendation cards -->
+												<!-- Recommendation cards -->
 												{#if loadingRecs === model}
 													<div class="text-xs py-2" style="color: var(--oo-fg-muted);">
 														Loading recommendations...

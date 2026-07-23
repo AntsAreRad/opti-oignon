@@ -1,5 +1,5 @@
 /**
- * API client for Veilid sync (S182, Theme 4 / Veilid Sync).
+ * API client for Veilid sync (Theme 4 / Veilid Sync).
  *
  * Defines the contract the sharing-control panel (SyncPanel.svelte) consumes to
  * pair a user's own devices and watch sync over the backend route
@@ -37,10 +37,10 @@ export interface SyncPeer {
 	/** PAIR-02: true when pending because a re-pair carried a different signing key. */
 	key_changed?: boolean;
 	/**
-	 * N.9 / S258: the recorded device class ("phone" | "desktop"), or null for
+	 * N.9 / the recorded device class ("phone" | "desktop"), or null for
 	 * the grandfathered class-less row. Phone-class peers are served a note
 	 * only when its per-item mobile-allowed flag affirmatively permits it
-	 * (filter-at-serve); set or cleared only through the S260 control surface.
+	 * (filter-at-serve); set or cleared only through the control surface.
 	 */
 	device_class?: string | null;
 	/** Timestamp of the last successful round; empty when none or the last failed. */
@@ -107,7 +107,7 @@ export interface RoundResult {
 }
 
 /**
- * One pending content approval (S207, SYN-05), mirroring
+ * One pending content approval (SYN-05), mirroring
  * routes_sync.deferred_entry_to_dict: a sensitive record the round quarantined
  * instead of applying. Provenance only -- the record body never reaches the
  * panel; on approval it enters the local set through the engine's
@@ -227,7 +227,7 @@ export async function relabelPeer(peerId: string, label: string): Promise<SyncPe
 }
 
 /**
- * Set or clear a paired peer's device class; the human-confirmed path (S260).
+ * Set or clear a paired peer's device class; the human-confirmed path.
  * Only 'phone' | 'desktop' | null leave this client; the route refuses free
  * text with a 400 before the store is touched, 404 for an unpaired peer, and
  * the write goes through the engine's audited setter. The returned peer is
@@ -259,7 +259,7 @@ export async function runSync(peerId: string): Promise<RoundResult> {
 }
 
 /**
- * The one-time VL-01 fleet-order step (S208): re-sign and re-journal this
+ * The one-time VL-01 fleet-order step: re-sign and re-journal this
  * device's own unsigned records at the same clocks, so peers adopt the signed
  * bytes on their next pull. Local-disk signing, available in any mode; the
  * server answers 503 honestly when this device cannot sign.

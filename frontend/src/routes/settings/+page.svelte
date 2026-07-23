@@ -1,20 +1,20 @@
 <!--
-  Settings hub (S168 -- consolidation).
+  Settings hub (consolidation).
 
   The 12-tab settings page is replaced by a single search-driven hub with 9
   functional sections (spec 5.5 / 9.2): Appearance, Account & Security,
   Conversation & Chat, Models & Inference, Knowledge (RAG), Plugins &
   Extensions, Performance & Telemetry, Network & Privacy, Backup & Data.
 
-  - Deep links: `?section=<id>` (and `?tab=<id>` for the S167 sidebar /
+  - Deep links: `?section=<id>` (and `?tab=<id>` for the sidebar /
     legacy compatibility), `?q=<query>` to land on a search, `&g=<groupId>`
     to scroll to one group. Legacy tab ids redirect to their new section.
   - Search indexes every group's label + description + synonyms and returns
     the matching groups in place; opening a result deep-links to its section.
-  - Section content is lazy-loaded panel-by-panel (S134 pattern preserved:
+  - Section content is lazy-loaded panel-by-panel (pattern preserved:
     dynamic import(), a resolved-constructor _cache, loadComponent, and
     SkeletonLoader while a panel resolves). Feature availability gates panels
-    via the /api/health featureMap (S135).
+    via the /api/health featureMap.
   - The in-page section nav is a WAI-ARIA tablist with arrow-key navigation
     (handleTabKeydown); the sidebar SectionContextList mirrors the same links.
 
@@ -39,7 +39,7 @@
 	import AccountAuthMode from '$lib/components/settings/sections/AccountAuthMode.svelte';
 	import { getFeatureMap } from '$lib/api/featureCheck';
 
-	// -- Lazy panel loaders (S134 dynamic-import pattern). ---------------------
+	// -- Lazy panel loaders (dynamic-import pattern). --------------------------
 	// Each panel loads only when its section is first viewed; resolved
 	// constructors are cached so re-visiting a section is instant.
 	const loaders: Record<string, () => Promise<{ default: typeof SvelteComponent }>> = {
@@ -314,7 +314,7 @@
 		return SECTIONS[0].id;
 	}
 
-	// -- URL-driven state (S167 deferred in-page ?tab sync to S168). -----------
+	// -- URL-driven state (deferred in-page ?tab sync). ------------------------
 	$: rawTab = $page.url.searchParams.get('section') ?? $page.url.searchParams.get('tab');
 	$: activeSection = resolveSection(rawTab);
 	$: activeSectionDef = SECTIONS.find((s) => s.id === activeSection) ?? SECTIONS[0];
@@ -339,7 +339,7 @@
 		? searchIndex.filter((h) => trimmedQuery.split(/\s+/).every((tok) => h.haystack.includes(tok)))
 		: [];
 
-	// featureMap availability (S135). Whole-section gates plus a per-group gate.
+	// featureMap availability. Whole-section gates plus a per-group gate.
 	let featureMap: Record<string, boolean> = {};
 	$: ragAvailable = featureMap['rag'] !== false;
 	$: pluginsAvailable = featureMap['plugins'] !== false;

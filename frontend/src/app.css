@@ -1,4 +1,4 @@
-/* Opti-Oignon -- Global styles S93: Palette v4e + theme transitions */
+/* Opti-Oignon -- Global styles: Palette v4e + theme transitions */
 
 @import './styles/theme.css';
 @import './styles/responsive.css';
@@ -37,7 +37,7 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
-/*  HEADING SCALE (S166, spec 7.1)                                     */
+/*  HEADING SCALE (spec 7.1)                                           */
 /*  Semantic h1-h6 mapped to the type tokens. Declared after          */
 /*  @tailwind base so it overrides Preflight's heading reset.          */
 /* ------------------------------------------------------------------ */
@@ -310,7 +310,7 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 }
 
 /* ------------------------------------------------------------------ */
-/*  ANIMATIONS S38+                                                    */
+/*  ANIMATIONS+                                                        */
 /* ------------------------------------------------------------------ */
 
 /* Fade + slide-up for new messages */
@@ -446,7 +446,7 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 }
 
 /* ------------------------------------------------------------------ */
-/*  S166: Global accessibility utilities                               */
+/*  Global accessibility utilities                                     */
 /* ------------------------------------------------------------------ */
 
 /* Visually-hidden but screen-reader-available (resolves A8; used by
@@ -464,7 +464,7 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 }
 
 /* Spec 8.9 -- skip-to-content link (resolves A6). Hidden until focused;
-   the link itself is added to the layout in S167. */
+   the link itself is added to the layout separately. */
 .oo-skip-link {
 	position: absolute;
 	top: -100px;

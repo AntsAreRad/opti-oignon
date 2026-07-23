@@ -1,6 +1,6 @@
 <!--
-  GovernorPanel.svelte (S227, Resource Governor cycle Bloc 4)
-  The status card for the Resource Governor, built on the S166 lib/ds primitives
+  GovernorPanel.svelte (Resource Governor cycle Bloc 4)
+  The status card for the Resource Governor, built on the lib/ds primitives
   (Card, Button, Icon, EmptyState, InlineError). It surfaces what the governor
   already measures over /api/governor: capacity and in-use VRAM with honest
   provenance (which read paths contributed), the learned ceiling, the pressure

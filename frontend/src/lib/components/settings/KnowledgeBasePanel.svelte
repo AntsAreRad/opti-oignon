@@ -1,6 +1,6 @@
 <!--
-  KnowledgeBasePanel.svelte -- S99 RAG v2 Knowledge Base Management.
-  Updated S120: Batch upload, document manager, folder scan integration.
+  KnowledgeBasePanel.svelte -- RAG v2 Knowledge Base Management.
+  Updated: Batch upload, document manager, folder scan integration.
 
   Sub-sections:
   1. Collections: create/delete, stats overview
@@ -41,13 +41,13 @@
 	let newCollDesc = '';
 	let creating = false;
 
-	// -- Batch upload job tracking (S120) --
+	// -- Batch upload job tracking --
 	let activeJobs: RAGIngestJob[] = [];
 
-	// -- Document manager ref (S120) --
+	// -- Document manager ref --
 	let docManagerRef: DocumentManager;
 
-	// -- URL ingestion (kept from S99, shown in batch-upload tab) --
+		// -- URL ingestion (shown in batch-upload tab) --
 	let urlInput = '';
 	let urlIngesting = false;
 	let selectedCollection = 'default';
@@ -103,11 +103,11 @@
 	}
 
 	// ---------------------------------------------------------------
-	// DOCUMENTS (S120: now handled by DocumentManager component)
+	// DOCUMENTS (now handled by DocumentManager component)
 	// ---------------------------------------------------------------
 
 	// ---------------------------------------------------------------
-	// BATCH UPLOAD JOB TRACKING (S120)
+	// BATCH UPLOAD JOB TRACKING
 	// ---------------------------------------------------------------
 
 	function handleBatchJobStarted(event: CustomEvent<RAGIngestJob>) {
@@ -125,7 +125,7 @@
 	}
 
 	// ---------------------------------------------------------------
-	// URL INGESTION (kept from S99, available in batch-upload tab)
+		// URL INGESTION (available in batch-upload tab)
 	// ---------------------------------------------------------------
 
 	async function handleURLIngest() {
@@ -271,13 +271,13 @@
 	</div>
 {/if}
 
-<!-- ==================== BATCH UPLOAD (S120) ==================== -->
+<!-- ======================== BATCH UPLOAD ======================== -->
 {#if activeSubTab === 'batch-upload'}
 	<div class="space-y-6">
 		<!-- Batch file upload component -->
 		<BatchUpload on:jobStarted={handleBatchJobStarted} />
 
-		<!-- URL ingestion (kept from S99) -->
+			<!-- URL ingestion -->
 		<div class="rounded-lg p-4" style="background-color: var(--oo-bg-elevated); border: 1px solid var(--oo-bd-subtle);">
 			<h4 class="text-sm font-medium mb-3" style="color: var(--oo-fg-secondary);">Ingest from URL</h4>
 			<div class="flex gap-2">
@@ -329,12 +329,12 @@
 	</div>
 {/if}
 
-<!-- ==================== DOCUMENTS (S120) ==================== -->
+<!-- ======================== DOCUMENTS ======================== -->
 {#if activeSubTab === 'documents'}
 	<DocumentManager bind:this={docManagerRef} />
 {/if}
 
-<!-- ==================== FOLDER SCAN (S120) ==================== -->
+<!-- ======================== FOLDER SCAN ======================== -->
 {#if activeSubTab === 'folder-scan'}
 	<FolderScan on:jobStarted={handleBatchJobStarted} />
 {/if}

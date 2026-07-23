@@ -1,5 +1,5 @@
 /**
- * Typed API functions for smart routing endpoints (S54).
+ * Typed API functions for smart routing endpoints.
  *
  * Provides access to model profile CRUD, smart model selection,
  * and router configuration.
@@ -123,7 +123,7 @@ export async function saveRouterConfig(): Promise<{ status: string; config: Smar
 }
 
 // -------------------------------------------------------------------------
-// Model Health (S63)
+// Model Health
 // -------------------------------------------------------------------------
 
 /** Health record for a single model. */

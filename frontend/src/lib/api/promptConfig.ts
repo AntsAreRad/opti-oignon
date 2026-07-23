@@ -1,5 +1,5 @@
 /**
- * API client for Prompt Optimization (S65).
+ * API client for Prompt Optimization.
  *
  * Provides typed access to token budget, template, and config endpoints.
  */

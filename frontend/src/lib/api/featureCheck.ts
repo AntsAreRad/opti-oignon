@@ -1,5 +1,5 @@
 /**
- * Feature availability checker (S135).
+ * Feature availability checker.
  *
  * Queries /api/health and caches the modules map for 30 seconds.
  * Used by settings sub-panels to show a graceful "feature unavailable"

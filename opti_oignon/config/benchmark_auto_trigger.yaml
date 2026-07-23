@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.9.2 — BENCHMARK AUTO-TRIGGER CONFIG (S90)
+# OPTI-OIGNON v1.9.2 — BENCHMARK AUTO-TRIGGER CONFIG
 # =============================================================================
 # Automatic benchmark triggering when new models are pulled or updated.
 # STRICTLY OPT-IN: disabled by default. User must explicitly enable via

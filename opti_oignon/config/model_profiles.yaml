@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.5.8 -- MODEL PROFILES (S54)
+# OPTI-OIGNON v1.5.8 -- MODEL PROFILES
 # =============================================================================
 # Capability profiles for each Ollama model.
 # Used by the Smart Router for automatic per-step model selection.

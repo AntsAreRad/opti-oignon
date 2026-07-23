@@ -1,5 +1,5 @@
 <!--
-  BackupRestorePanel.svelte -- S121 Backup/Restore UI.
+  BackupRestorePanel.svelte -- Backup/Restore UI.
 
   Export section: checkboxes per section, "Export All" button, download trigger.
   Import section: file upload zone, preview display, merge/replace strategy toggle.

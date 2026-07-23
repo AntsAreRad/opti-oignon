@@ -1,5 +1,5 @@
 <!--
-  BenchmarkLeaderboard.svelte (S169)
+  BenchmarkLeaderboard.svelte
   The "Leaderboard" section extracted from BenchmarkV2Panel: ranked model
   scores plus role recommendations. Self-contained; behaviour unchanged.
 -->
@@ -99,7 +99,7 @@
 					</table>
 				</div>
 
-				<!-- Recommendations (S89) -->
+				<!-- Recommendations -->
 				{#if recommendations.length > 0}
 					<h3 class="bv2-subtitle" style="margin-top: 1.5rem;">Recommendations</h3>
 					<div class="bv2-rec-grid">

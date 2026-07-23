@@ -1,4 +1,4 @@
-# Token Budget Configuration — Opti-Oignon S65
+# Token Budget Configuration — Opti-Oignon
 # ==============================================
 # Controls how the context window is divided for prompt assembly.
 # Each ratio is a fraction of the total context window.
@@ -11,7 +11,7 @@ allocation:
   history_ratio: 0.40      # Conversation history
   user_ratio: 0.10         # Current user message + document
   reserve_ratio: 0.15      # Generation headroom
-  fingerprint_ratio: 0.025 # Session fingerprint (S75, ~200 tokens on 8K)
+  fingerprint_ratio: 0.025 # Session fingerprint (~200 tokens on 8K)
 
 # Context window cache settings
 cache:

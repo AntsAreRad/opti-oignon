@@ -1,5 +1,5 @@
 /**
- * API client for Learned Router (S67).
+ * API client for Learned Router.
  *
  * Provides typed access to training, config, classification,
  * and A/B metrics endpoints.

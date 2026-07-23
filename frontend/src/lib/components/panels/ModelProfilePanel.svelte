@@ -1,5 +1,5 @@
 <!--
-  ModelProfilePanel.svelte (S54)
+  ModelProfilePanel.svelte
   View and edit model capability profiles for smart routing.
   Shows task scores as horizontal bars, router config,
   and per-step model selection preview.
@@ -240,7 +240,7 @@
 		return String(tokens);
 	}
 
-	// S110: MTP detection by model name/family pattern matching.
+	// MTP detection by model name/family pattern matching.
 	const _MTP_PATTERNS = ['deepseek-v3', 'deepseek-r1', 'deepseek-v2.5', 'qwen3', 'glm-4', 'glm4'];
 	function _isMtpCapable(name: string, family?: string): boolean {
 		const n = (name || '').toLowerCase();

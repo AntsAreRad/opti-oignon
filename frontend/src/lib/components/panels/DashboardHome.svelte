@@ -1,5 +1,5 @@
 <!--
-  DashboardHome.svelte (S107)
+  DashboardHome.svelte
   Landing screen when no conversation is selected.
   Shows: system health, available models, recent conversations, quick actions.
   Uses existing API endpoints: /api/health, /api/models, /api/conversations.

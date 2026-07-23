@@ -1,5 +1,5 @@
 /**
- * Plugin Marketplace API client (S102).
+ * Plugin Marketplace API client.
  *
  * Browse, search, install from URL, reviews, template generation.
  */
@@ -80,7 +80,7 @@ export async function getPluginReviews(
 /**
  * Add a review for a plugin.
  *
- * REV-2 (S219): the author is bound server-side to the authenticated
+ * REV-2: the author is bound server-side to the authenticated
  * identity; the client no longer sends an author field.
  */
 export async function addPluginReview(

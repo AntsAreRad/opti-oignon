@@ -1,11 +1,11 @@
 /**
- * Toast notification store + persistent notification history (S107).
+ * Toast notification store + persistent notification history.
  *
  * Manages a notification stack with configurable auto-dismiss,
  * plus a persistent history of the last N notifications accessible
  * via the NotificationCenter panel.
  *
- * S135: Max visible toasts (oldest auto-dismissed), error duration 8s,
+ * Max visible toasts (oldest auto-dismissed), error duration 8s,
  * dismissing state for exit animations, programmatic dismissById.
  */
 
@@ -13,7 +13,7 @@ import { writable, derived, get } from 'svelte/store';
 
 export type ToastType = 'info' | 'success' | 'error' | 'warning';
 
-/** S166: optional retry/undo action rendered inside a toast. */
+/** Optional retry/undo action rendered inside a toast. */
 export interface ToastAction {
 	label: string;
 	run: () => Promise<void>;
@@ -24,13 +24,13 @@ export interface ToastItem {
 	type: ToastType;
 	message: string;
 	duration: number;
-	/** S135: true when the toast is animating out. */
+	/** True when the toast is animating out. */
 	dismissing?: boolean;
-	/** S166: optional bold first line. */
+	/** Optional bold first line. */
 	title?: string;
-	/** S166: optional action button (e.g. retry); dismisses on success. */
+	/** Optional action button (e.g. retry); dismisses on success. */
 	action?: ToastAction;
-	/** S166: whether the toast can be dismissed by the user (default true). */
+	/** Whether the toast can be dismissed by the user (default true). */
 	dismissible?: boolean;
 }
 
@@ -51,10 +51,10 @@ export const notificationHistory = writable<NotificationItem[]>([]);
 /** Maximum number of notifications to keep in history. */
 const MAX_HISTORY = 50;
 
-/** S135: Maximum number of visible toasts; oldest auto-dismissed when exceeded. */
+/** Maximum number of visible toasts; oldest auto-dismissed when exceeded. */
 const MAX_VISIBLE_TOASTS = 3;
 
-/** S135: Exit animation duration in ms (must match CSS). */
+/** Exit animation duration in ms (must match CSS). */
 const EXIT_ANIMATION_MS = 200;
 
 let counter = 0;
@@ -62,7 +62,7 @@ let counter = 0;
 /** Track active auto-dismiss timers for programmatic cancellation. */
 const _timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
-/** S166: extra options for richer toasts (title, retry action, dismissible). */
+/** Extra options for richer toasts (title, retry action, dismissible). */
 export interface ToastOptions {
 	title?: string;
 	action?: ToastAction;
@@ -90,7 +90,7 @@ export function addToast(
 
 	toasts.update((list) => {
 		const updated = [...list, toast];
-		// S135: Evict oldest non-dismissing toasts if we exceed the limit
+		// Evict oldest non-dismissing toasts if we exceed the limit
 		while (updated.filter((t) => !t.dismissing).length > MAX_VISIBLE_TOASTS) {
 			const oldest = updated.find((t) => !t.dismissing);
 			if (oldest) {
@@ -132,7 +132,7 @@ export function addToast(
 }
 
 /**
- * S135: Dismiss a toast with exit animation.
+ * Dismiss a toast with exit animation.
  * Sets dismissing=true, then removes after animation completes.
  */
 export function dismissToast(id: string): void {

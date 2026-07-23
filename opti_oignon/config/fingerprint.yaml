@@ -1,4 +1,4 @@
-# Session Fingerprint Configuration — Opti-Oignon S75
+# Session Fingerprint Configuration — Opti-Oignon
 # ====================================================
 # Controls how the 10-dimension session fingerprint is computed
 # and serialized for context injection.

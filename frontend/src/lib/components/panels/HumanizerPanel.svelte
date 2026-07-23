@@ -1,5 +1,5 @@
 <!--
-  HumanizerPanel.svelte -- S86 Humanizer settings panel.
+  HumanizerPanel.svelte -- Humanizer settings panel.
 
   Sections:
   1. Enable/disable toggle

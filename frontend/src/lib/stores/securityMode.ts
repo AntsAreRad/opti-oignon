@@ -1,5 +1,5 @@
 /**
- * Security mode store for Opti-Oignon (S126).
+ * Security mode store for Opti-Oignon.
  *
  * Reactive store managing the Daily/Bulbe security mode state,
  * including pending downgrade ceremony tracking.

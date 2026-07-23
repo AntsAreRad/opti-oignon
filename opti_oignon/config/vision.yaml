@@ -1,4 +1,4 @@
-# Vision model configuration (S94)
+# Vision model configuration
 # Selects which model handles image analysis tasks.
 
 # Selected vision model. "auto" means auto-detect from available models.
@@ -28,10 +28,10 @@ known_vision_models: []
 #   - "qwen3.5:32b"
 #   - "my-custom-model:latest"
 
-# Default prompt template for image description (used by S95 vision pipeline).
+# Default prompt template for image description (used by vision pipeline).
 describe_prompt: "Describe this image in detail, focusing on its content, structure, and any relevant text or data visible."
 
-# --- S95: Vision delegation pipeline settings ---
+# --- Vision delegation pipeline settings ---
 
 # Enable transparent delegation: when user sends an image to a non-vision model,
 # automatically call the vision model for a description and inject it back.

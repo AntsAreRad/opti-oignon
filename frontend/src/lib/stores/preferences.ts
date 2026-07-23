@@ -1,10 +1,10 @@
 /**
- * Preferences store (S167) -- palette + density + status footer.
+ * Preferences store -- palette + density + status footer.
  *
  * Source of truth for the 5 curated palettes (spec 7.3) and the 3
  * density modes (spec 7.2). Applies `data-oo-theme` and a single
  * `html.oo-density-*` class to the document root, and keeps the legacy
- * `.dark` class and the `darkMode` store in sync so every pre-S167
+ * `.dark` class and the `darkMode` store in sync so every pre
  * consumer stays correct. Persisted to localStorage.
  *
  * The 5 theme files raise their `:root[data-oo-theme="..."]` selectors to
@@ -105,7 +105,7 @@ const DENSITY_KEY = 'oo-density';
 const FOOTER_KEY = 'oo-status-footer';
 const TYPE_SCALE_KEY = 'oo-type-scale';
 const MOTION_KEY = 'oo-motion';
-/** Legacy binary-theme key, kept coherent for any pre-S167 reader. */
+/** Legacy binary-theme key, kept coherent for any pre-reader. */
 const LEGACY_THEME_KEY = 'oo-theme';
 
 function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
@@ -122,7 +122,7 @@ export function isDarkPalette(p: ThemePalette): boolean {
 function initialPalette(): ThemePalette {
 	const stored = readStored<ThemePalette>(PALETTE_KEY, PALETTES);
 	if (stored) return stored;
-	// Continuity with the pre-S167 binary preference.
+	// Continuity with the pre-binary preference.
 	if (typeof localStorage !== 'undefined') {
 		const legacy = localStorage.getItem(LEGACY_THEME_KEY);
 		if (legacy === 'light') return 'parchment';

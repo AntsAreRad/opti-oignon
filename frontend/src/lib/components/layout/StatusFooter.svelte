@@ -1,11 +1,11 @@
 <!--
-  StatusFooter.svelte (S167)
+  StatusFooter.svelte
   Optional thin status bar at the bottom of the shell (spec 8.5). Shows
   the active mode, resolved model, context window and token usage for the
   current chat. Toggleable via Appearance (statusFooterVisible) and
   auto-hidden off /chat or when no conversation is active. Resolves N1
   (system status visibility). Latency is surfaced once a metric source is
-  wired (S169 LiveMetrics work).
+  wired (LiveMetrics work).
 -->
 <script lang="ts">
 	import { page } from '$app/stores';

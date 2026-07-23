@@ -1,5 +1,5 @@
 <!--
-  PromptConfigPanel — S65 Prompt Intelligence settings.
+  PromptConfigPanel — Prompt Intelligence settings.
 
   Displays:
   - Current model context window + budget allocation bar

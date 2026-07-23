@@ -1,5 +1,5 @@
 <!--
-  SandboxIsolationBadge.svelte (S125, refactored S167)
+  SandboxIsolationBadge.svelte
   Shows the active sandbox isolation backend (bwrap / tempdir / none) as a
   small inline badge. Green for bwrap, amber for tempdir, red for none.
   Uses the ds Icon primitive and --oo-* tokens (no raw hex).

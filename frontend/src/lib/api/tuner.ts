@@ -1,5 +1,5 @@
 /**
- * Auto-Tuner API client -- S110
+ * Auto-Tuner API client
  *
  * Typed API for inference parameter tuning: start/cancel sessions,
  * retrieve results, apply optimal parameters.
@@ -82,7 +82,7 @@ export async function getTunerJob(modelName: string): Promise<TunerJob> {
 	return resp.json();
 }
 
-/** Get optimization recommendations for a tuned model (S112). */
+/** Get optimization recommendations for a tuned model. */
 export async function getTunerRecommendations(modelName: string): Promise<TunerRecommendationsResponse> {
 	const resp = await fetch(`${BASE}/recommendations/${encodeURIComponent(modelName)}`);
 	if (!resp.ok) throw new Error(`Failed to get recommendations: ${resp.status}`);

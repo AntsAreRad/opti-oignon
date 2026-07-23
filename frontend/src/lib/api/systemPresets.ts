@@ -1,5 +1,5 @@
 /**
- * Typed API functions for system preset endpoints (S84).
+ * Typed API functions for system preset endpoints.
  *
  * Infrastructure-level presets (Minimal/Balanced/Power) that
  * configure multiple YAML config files at once.

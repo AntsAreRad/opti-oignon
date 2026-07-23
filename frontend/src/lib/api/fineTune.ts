@@ -1,5 +1,5 @@
 /**
- * Fine-tuning data export and variant tracking API client (S96).
+ * Fine-tuning data export and variant tracking API client.
  *
  * Manages training data export, quality scoring, variant registration,
  * and A/B comparison between base and fine-tuned models.

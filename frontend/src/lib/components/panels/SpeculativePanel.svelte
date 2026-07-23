@@ -1,5 +1,5 @@
 <!--
-  SpeculativePanel.svelte -- S70 Speculative Generation settings panel.
+  SpeculativePanel.svelte -- Speculative Generation settings panel.
 
   Sections:
   1. Enable/disable toggle (mutual exclusion with cascading)

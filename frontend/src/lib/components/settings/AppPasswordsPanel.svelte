@@ -1,5 +1,5 @@
 <!--
-  AppPasswordsPanel.svelte (S127)
+  AppPasswordsPanel.svelte
   App-specific password management in security settings.
 
   Features:

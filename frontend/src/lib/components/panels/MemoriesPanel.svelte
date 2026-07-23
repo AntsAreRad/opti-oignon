@@ -1,6 +1,6 @@
 <!--
-  MemoriesPanel.svelte (S174, Theme 3 / Odysseus Core)
-  The memories panel for the two-tier MemoryStore, built on the S166 lib/ds
+  MemoriesPanel.svelte (Theme 3 / Odysseus Core)
+  The memories panel for the two-tier MemoryStore, built on the lib/ds
   primitives (Card, Tabs, Modal, Select, Icon). Lists memories grouped by
   category under an Active / Archived tab, with soft-delete, restore, and edit
   actions wired to the /api/memories surface. Distinct from the legacy

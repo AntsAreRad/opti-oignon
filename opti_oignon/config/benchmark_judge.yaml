@@ -1,7 +1,7 @@
-# Benchmark Judge Configuration — S89
+# Benchmark Judge Configuration
 # LLM-as-Judge evaluation layer for autonomous benchmarks.
 
-# Weight balance between autonomous metrics (S88) and judge scores.
+# Weight balance between autonomous metrics and judge scores.
 # Both must sum to 1.0.
 autonomous_weight: 0.5
 judge_weight: 0.5

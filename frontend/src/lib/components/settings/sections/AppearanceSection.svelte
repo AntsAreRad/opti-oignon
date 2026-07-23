@@ -1,9 +1,9 @@
 <!--
-  AppearanceSection.svelte (S168)
+  AppearanceSection.svelte
   The Appearance section of the consolidated /settings hub (spec 5.5, 9.2).
 
   Appearance is the one new section: it did not exist among the 12 legacy
-  tabs. It owns the visual preferences in the S167 `preferences` store -- the
+  tabs. It owns the visual preferences in the `preferences` store -- the
   5 curated palettes, 3 density modes, the global typography scale, and the
   motion preference -- and applies each immediately with a toast (spec 5.9
   immediate-apply). Each group offers a reset-to-default (spec 5.9).

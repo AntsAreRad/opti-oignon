@@ -1,9 +1,9 @@
 <!--
-  Sidebar.svelte (refactored S167)
+  Sidebar.svelte
   Two-part sidebar (spec 8.3): App Nav at the top (primary sections) and a
   route-dependent Section Context below (via SectionContextList). Footer
   keeps the build tag, security badge and a quick light/dark toggle.
-  S132: touch-friendly nav links (min-height 44px), touch-scroll body,
+  Touch-friendly nav links (min-height 44px), touch-scroll body,
   safe-area footer padding, touch-target controls.
 -->
 <script lang="ts">
@@ -21,7 +21,7 @@
 
 	$: currentPath = $page.url?.pathname ?? '/chat';
 
-	// S87: Dynamic version from health endpoint.
+	// Dynamic version from health endpoint.
 	let appVersion = '';
 
 	onMount(async () => {
@@ -75,7 +75,7 @@
 		{/if}
 	</div>
 
-	<!-- App Nav: S132 touch-friendly min-height -->
+	<!-- App Nav: touch-friendly min-height -->
 	<nav class="px-2 pt-2 pb-1 space-y-0.5">
 		{#each navLinks as link}
 			<a
@@ -95,12 +95,12 @@
 
 	<hr class="mx-3" style="border-color: var(--oo-bd-subtle);" />
 
-	<!-- Section Context: route-dependent body, S132 touch-scroll -->
+	<!-- Section Context: route-dependent body, touch-scroll -->
 	<div class="flex-1 min-h-0 pt-2 flex flex-col touch-scroll">
 		<SectionContextList {onSelect} {onCreate} {onExport} />
 	</div>
 
-	<!-- S132: Footer with safe-area bottom padding for notched phones -->
+	<!-- Footer with safe-area bottom padding for notched phones -->
 	<div
 		class="px-4 py-2 flex items-center justify-between safe-area-bottom"
 		style="border-top: 1px solid var(--oo-bd-subtle);"

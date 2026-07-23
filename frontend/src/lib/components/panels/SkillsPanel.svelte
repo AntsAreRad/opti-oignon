@@ -1,7 +1,7 @@
 <!--
-  SkillsPanel.svelte (S177, Theme 3 / Odysseus Core)
+  SkillsPanel.svelte (Theme 3 / Odysseus Core)
   The skills-manager panel for the evolving-skills SKILL.md registry, built on
-  the S166 lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). It
+  the lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). It
   browses the registry over $lib/api/skills -- published skills and the drafts
   the agent proposes -- lets you expand a skill to read its procedure, and
   surfaces the approval-gated write actions: publishing a draft (the human

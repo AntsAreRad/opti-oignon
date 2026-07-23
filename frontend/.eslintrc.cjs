@@ -1,5 +1,5 @@
 /*
- * ESLint configuration (S171 -- frontend lint in CI).
+ * ESLint configuration (-- frontend lint in CI).
  *
  * Targets SvelteKit 2 + Svelte 4 + TypeScript. Uses the eslintrc format for
  * compatibility with the pinned ESLint 8 toolchain. Linting is syntactic only

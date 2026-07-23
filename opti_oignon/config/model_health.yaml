@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.6.2 -- MODEL HEALTH MONITOR CONFIG (S63)
+# OPTI-OIGNON v1.6.2 -- MODEL HEALTH MONITOR CONFIG
 # =============================================================================
 # Configuration for the Model Health Monitor that tracks Ollama model
 # availability and performance in real-time with automatic failover.

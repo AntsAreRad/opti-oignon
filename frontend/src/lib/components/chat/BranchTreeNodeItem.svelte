@@ -1,5 +1,5 @@
 <!--
-  BranchTreeNodeItem.svelte (S154)
+  BranchTreeNodeItem.svelte
   Recursive tree node component for branch visualization.
   Renders a single node with collapse toggle, metadata, and children.
 -->

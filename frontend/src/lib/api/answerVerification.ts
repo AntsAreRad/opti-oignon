@@ -1,12 +1,12 @@
 /**
- * Typed API client for the per-answer verification surface (S277 UI half).
+ * Typed API client for the per-answer verification surface (UI half).
  *
- * One per-user endpoint, POST /api/claims/verify-answer (the S272 route over
- * the S271 per-answer aggregation). The caller submits a batch of
- * (claim, source) pairs directly; the route runs each pair through the S267
+ * One per-user endpoint, POST /api/claims/verify-answer (the route over
+ * the per-answer aggregation). The caller submits a batch of
+ * (claim, source) pairs directly; the route runs each pair through the
  * verification role wrapped as untrusted data server-side under one policy
  * header, and aggregates the per-pair verdicts fail-secure into a single
- * per-answer verdict. Unlike the S274 citation-verify route, this route
+ * per-answer verdict. Unlike the citation-verify route, this route
  * performs no extraction: the caller already holds the pairs, so the result
  * carries the aggregate plus the per-pair results but no echoed pairs (the
  * caller aligns the per-pair results with the pairs it submitted). The model is
@@ -20,7 +20,7 @@
 
 import { apiPost } from './client';
 
-/** The fail-secure verdict taxonomy (mirrors the S267 role). */
+/** The fail-secure verdict taxonomy (mirrors the role). */
 export type ClaimVerdict = 'supported' | 'unsupported' | 'uncertain';
 
 /**

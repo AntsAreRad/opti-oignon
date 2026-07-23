@@ -1,5 +1,5 @@
 <!--
-  IngestProgress.svelte -- S120 RAG Batch Ingestion Progress Tracker.
+  IngestProgress.svelte -- RAG Batch Ingestion Progress Tracker.
 
   Polls GET /api/rag/ingest/jobs/{job_id} every 2s while running.
   Shows per-file status indicators, overall progress bar, cancel button.

@@ -1,5 +1,5 @@
 <!--
-  Project detail route (S169).
+  Project detail route.
   Promotes the ProjectDetail panel into a real /projects/[id] route. Loads the
   project on mount and whenever the :id param changes; the back action returns
   to /projects. ProjectDetail keeps all of its behaviour (edit, settings,

@@ -1,5 +1,5 @@
 <!--
-  Benchmark page (S169).
+  Benchmark page.
   Renders the benchmark dashboard inside the shared AppShell (from +layout).
   A ?run=<id> query (set by the sidebar runs list) opens the per-run detail
   drawer (spec 9.5: per-run detail in a drawer-right).

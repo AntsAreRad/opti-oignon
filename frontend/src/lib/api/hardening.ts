@@ -1,5 +1,5 @@
 /**
- * API client for Hardening endpoints -- S131.
+ * API client for Hardening endpoints --.
  *
  * Covers:
  *   POST /api/security/conversation-wipe/all           -- wipe all conversations

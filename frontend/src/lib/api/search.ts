@@ -44,7 +44,7 @@ export async function searchHistory(): Promise<SearchHistoryEntry[]> {
 	return apiGet<SearchHistoryEntry[]>('/api/search/history');
 }
 
-// -- Proxy & PII (S82) --
+// -- Proxy & PII --
 
 /**
  * Check proxy health and connectivity.

@@ -1,4 +1,4 @@
-# Plugin system configuration (S101)
+# Plugin system configuration
 # Controls plugin discovery, loading, sandbox, and lifecycle.
 
 # Enable/disable the entire plugin system
@@ -79,7 +79,7 @@ limits:
   # Maximum plugin directory size in MB
   max_plugin_size_mb: 50
 
-# S143: Subprocess isolation settings
+  # Subprocess isolation settings
 subprocess:
   # Execution mode: "auto" (try subprocess, fallback in-process),
   # "subprocess" (force subprocess only), "inprocess" (legacy)

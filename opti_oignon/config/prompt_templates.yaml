@@ -1,4 +1,4 @@
-# Prompt Templates — Opti-Oignon S65
+# Prompt Templates — Opti-Oignon
 # ====================================
 # Task-specific system prompt templates with variable interpolation.
 # Resolution order: project-specific override -> task-type template -> general fallback.

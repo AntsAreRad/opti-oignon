@@ -1,5 +1,5 @@
 <!--
-  SecurityModePanel.svelte (S126)
+  SecurityModePanel.svelte
   Daily/Bulbe dual-mode security toggle with ceremony-gated degradation.
 
   Features:

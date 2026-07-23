@@ -1,5 +1,5 @@
 /**
- * focusTrap.ts — Reusable Svelte action for modal focus management (S135).
+ * focusTrap.ts — Reusable Svelte action for modal focus management.
  *
  * Usage in a Svelte component:
  *   import { focusTrap } from '$lib/actions/focusTrap';

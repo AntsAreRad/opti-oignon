@@ -1,5 +1,5 @@
 /**
- * Vision configuration API client (S94).
+ * Vision configuration API client.
  *
  * Manages vision model selection, auto-detection, and config persistence.
  */

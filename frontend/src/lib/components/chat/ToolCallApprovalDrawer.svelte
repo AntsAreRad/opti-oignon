@@ -1,5 +1,5 @@
 <!--
-  ToolCallApprovalDrawer.svelte (S169)
+  ToolCallApprovalDrawer.svelte
   Standalone, self-contained approvals surface extracted from the inline
   ToolCallApproval card. Polls for pending tool-call approvals and presents
   them in a ds Modal drawer-right with per-request Allow / Deny actions and a

@@ -1,10 +1,10 @@
 <!--
   StreamingIndicator.svelte
   Animated indicator during LLM response generation.
-  S76: Replaced bouncing dots with OnionLoader spinning onion.
-  S94: Removed model name display during streaming (shown in message header after completion).
+  Replaced bouncing dots with OnionLoader spinning onion.
+  Removed model name display during streaming (shown in message header after completion).
        OnionLoader uses tobacco accent for warm organic feel.
-  S109: Shows intermediate status messages (Searching..., Thinking..., etc.)
+  Shows intermediate status messages (Searching..., Thinking..., etc.)
 -->
 <script lang="ts">
 	import OnionLoader from '$lib/components/OnionLoader.svelte';

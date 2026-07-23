@@ -1,5 +1,5 @@
 <!--
-  KeyCeremonyPanel.svelte (S129)
+  KeyCeremonyPanel.svelte
   Encryption key ceremony UI for first-time setup.
 
   Features:

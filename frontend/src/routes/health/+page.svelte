@@ -1,5 +1,5 @@
 <!--
-  System Status page (S169, route stays /health for compatibility).
+  System Status page (route stays /health for compatibility).
   Composes the system status content (overview, module groups, warmup,
   benchmarks, alerts) with the cache management section, on the ds primitives
   and --oo-* tokens.

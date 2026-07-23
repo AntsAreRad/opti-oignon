@@ -19,7 +19,7 @@ export async function getEffectiveModel(params?: {
 	return apiGet<EffectiveModelResponse>('/api/models/effective', queryParams);
 }
 
-// S46: Model profiles
+// Model profiles
 export async function listModelProfiles(): Promise<ModelProfilesResponse> {
 	return apiGet<ModelProfilesResponse>('/api/models/profiles');
 }

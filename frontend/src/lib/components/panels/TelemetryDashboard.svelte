@@ -1,5 +1,5 @@
 <!--
-  TelemetryDashboard.svelte -- S113 Inference Telemetry Dashboard.
+  TelemetryDashboard.svelte -- Inference Telemetry Dashboard.
 
   Shows:
   1. Event counters (total events, requests, tokens)

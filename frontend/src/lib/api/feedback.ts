@@ -1,5 +1,5 @@
 /**
- * Typed API functions for Feedback & Analytics endpoints (S55).
+ * Typed API functions for Feedback & Analytics endpoints.
  *
  * Provides access to feedback submission, stats, and analytics
  * overview / trends data for the dashboard.

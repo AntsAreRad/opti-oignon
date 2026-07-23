@@ -1,5 +1,5 @@
 <!--
-  BenchmarkPage.svelte (S60)
+  BenchmarkPage.svelte
   Main benchmark dashboard with three tabs:
   - Run: Configure and execute benchmarks with live progress
   - History: Browse past runs, view details, compare

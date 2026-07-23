@@ -1,8 +1,8 @@
 /**
- * Typed API client for the opt-in voice transcription trigger (N.5, S253).
+ * Typed API client for the opt-in voice transcription trigger (N.5).
  *
  * One per-user endpoint, POST /api/notes/transcription/{attachment_id} (the
- * S250 route). The run is opt-in and sandboxed server-side (the disposable
+ * Route). The run is opt-in and sandboxed server-side (the disposable
  * bubblewrap floor); `approve` gates the durable write-back and its default
  * is the safe one (false: preview, no persist). Every outcome -- ok, a
  * structured refusal (the fail-secure sandbox gate, the absent opt-in

@@ -1,5 +1,5 @@
 <!--
-  ObservabilityPanel.svelte -- S114 Combined Observability View.
+  ObservabilityPanel.svelte -- Combined Observability View.
 
   Unified panel linking Telemetry, Profiler, and Performance dashboards.
   Features:

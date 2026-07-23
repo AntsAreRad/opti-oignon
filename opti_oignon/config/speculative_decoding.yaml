@@ -1,4 +1,4 @@
-# Speculative Decoding Configuration -- S110
+# Speculative Decoding Configuration
 # Pairs a small draft model with the main model for 2-5x token generation
 # speedup via llama.cpp speculative decoding. Zero quality loss.
 # Only available when using the llama.cpp backend (not Ollama).

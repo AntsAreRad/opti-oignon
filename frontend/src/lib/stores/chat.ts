@@ -20,7 +20,7 @@ export const isStreaming = writable<boolean>(false);
 /** Contenu accumule du streaming en cours. */
 export const streamingContent = writable<string>('');
 
-/** Contenu thinking accumule du streaming en cours (S42). */
+/** Contenu thinking accumule du streaming en cours. */
 export const streamingThinking = writable<string>('');
 
 /** Modele utilise pour la generation en cours. */
@@ -35,13 +35,13 @@ export const lastSearchMetadata = writable<Record<string, unknown> | null>(null)
 /** Map de search metadata par message ID pour l'historique. */
 export const searchMetadataMap = writable<Map<string, Record<string, unknown>>>(new Map());
 
-/** S95: Vision delegation state during streaming. */
+/** Vision delegation state during streaming. */
 export const streamingVisionDelegation = writable<Record<string, unknown> | null>(null);
 
-/** S109: Intermediate status message during streaming (e.g. "Searching...", "Thinking..."). */
+/** Intermediate status message during streaming (e.g. "Searching...", "Thinking..."). */
 export const streamingStatus = writable<string | null>(null);
 
-/** S117: Sandbox metadata from the last done message (session_id, files). */
+/** Sandbox metadata from the last done message (session_id, files). */
 export const lastSandboxMeta = writable<{
 	sandbox_active: boolean;
 	sandbox_session_id: string;
@@ -49,7 +49,7 @@ export const lastSandboxMeta = writable<{
 	sandbox_files_created: string[];
 } | null>(null);
 
-/** S118: Coding agent metadata from the last done message. */
+/** Coding agent metadata from the last done message. */
 export const lastCodingMeta = writable<{
 	chat_coding: boolean;
 	coding_result: Record<string, unknown>;
@@ -59,7 +59,7 @@ export const lastCodingMeta = writable<{
 	turn_count: number;
 } | null>(null);
 
-/** S118: Live coding agent events accumulated during streaming. */
+/** Live coding agent events accumulated during streaming. */
 export interface CodingEventEntry {
 	eventType: string;
 	content: string;
@@ -68,7 +68,7 @@ export interface CodingEventEntry {
 }
 export const streamingCodingEvents = writable<CodingEventEntry[]>([]);
 
-/** S118: Whether the current streaming is a coding agent turn. */
+/** Whether the current streaming is a coding agent turn. */
 export const isCodingStream = writable<boolean>(false);
 
 // -- Etat interne --
@@ -136,7 +136,7 @@ export async function sendMessage(
 		web_search: options?.web_search,
 		quick_sandbox: options?.quick_sandbox,
 		chat_coding: options?.chat_coding,
-		// S216 (PIP-06): the field existed in getChatOptions since S53 but
+		// (PIP-06): the field existed in getChatOptions since but
 		// was dropped here; the backend ChatRequest now carries it.
 		exec_pipeline: options?.exec_pipeline,
 	};
@@ -149,14 +149,14 @@ export async function sendMessage(
 			streamingContent.update((prev) => prev + content);
 		},
 		onThinking: (content: string) => {
-			// S42: Accumuler le contenu de reflexion separement
+			// Accumuler le contenu de reflexion separement
 			streamingThinking.update((prev) => prev + content);
 		},
 		onDone: (response) => {
 			// Ajouter le message assistant final au store
-			// S42: Inclure le thinking content si present
+			// Inclure le thinking content si present
 			const thinkingText = get(streamingThinking);
-			// S95: Include vision delegation info if present
+			// Include vision delegation info if present
 			const visionDel = get(streamingVisionDelegation);
 			const assistantMsg: Record<string, unknown> = {
 				id: response.message_id,
@@ -170,7 +170,7 @@ export async function sendMessage(
 			if (visionDel?.vision_model) {
 				assistantMsg.vision_delegation = visionDel;
 			}
-			// S117: Attach sandbox metadata to the message if sandbox was used
+			// Attach sandbox metadata to the message if sandbox was used
 			const resp = response as Record<string, unknown>;
 			if (resp.sandbox_active) {
 				const sMeta = {
@@ -182,7 +182,7 @@ export async function sendMessage(
 				assistantMsg.sandbox_meta = sMeta;
 				lastSandboxMeta.set(sMeta);
 			}
-			// S118: Attach coding agent metadata if coding agent was used
+			// Attach coding agent metadata if coding agent was used
 			if (resp.chat_coding) {
 				const cMeta = {
 					chat_coding: true,
@@ -250,24 +250,24 @@ export async function sendMessage(
 			if (metadata.search_results || metadata.search) {
 				lastSearchMetadata.set(metadata);
 			}
-			// S95: Capture vision delegation from done metadata
+			// Capture vision delegation from done metadata
 			if (metadata.vision_delegation) {
 				streamingVisionDelegation.set(metadata.vision_delegation as Record<string, unknown>);
 			}
-			// S118: Detect coding agent mode from initial metadata
+			// Detect coding agent mode from initial metadata
 			if (metadata.chat_coding) {
 				isCodingStream.set(true);
 			}
 		},
-		// S95: Vision delegation status updates
+		// Vision delegation status updates
 		onVisionDelegation: (info) => {
 			streamingVisionDelegation.set(info);
 		},
-		// S109: Intermediate status for StreamingIndicator
+		// Intermediate status for StreamingIndicator
 		onStatus: (message) => {
 			streamingStatus.set(message || null);
 		},
-		// S118: Live coding agent events during streaming
+		// Live coding agent events during streaming
 		onCodingEvent: (eventType, data) => {
 			streamingCodingEvents.update((events) => [
 				...events,
@@ -362,7 +362,7 @@ export async function retryLastMessage(conversationId: string): Promise<void> {
 				streamingModel.set(metadata.model as string);
 			}
 		},
-		// S109: Intermediate status for StreamingIndicator
+		// Intermediate status for StreamingIndicator
 		onStatus: (message) => {
 			streamingStatus.set(message || null);
 		},

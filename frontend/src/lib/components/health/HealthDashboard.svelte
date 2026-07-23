@@ -1,5 +1,5 @@
 <!--
-  HealthDashboard.svelte (redesigned S169)
+  HealthDashboard.svelte
   System Status content: an overview row, the six module groups (Backend,
   Inference & models, RAG & memory, Plugins & tools, Network, Security) built
   from the /api/health/dashboard module map, a live network line from

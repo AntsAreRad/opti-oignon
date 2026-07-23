@@ -1,5 +1,5 @@
 /**
- * Speculative Generation API client -- S70
+ * Speculative Generation API client
  *
  * Typed API for speculative generation status, config, and test endpoints.
  */

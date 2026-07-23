@@ -1,7 +1,7 @@
 /**
  * Theme API client for Opti-Oignon.
  *
- * S152: Endpoints for loading/saving user theme configuration,
+ * Endpoints for loading/saving user theme configuration,
  * listing presets (built-in + custom), CRUD custom presets,
  * and import/export.
  */

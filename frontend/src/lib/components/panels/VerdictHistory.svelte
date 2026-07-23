@@ -1,5 +1,5 @@
 <!--
-  VerdictHistory.svelte (S279, the verdict-history affordance)
+  VerdictHistory.svelte (the verdict-history affordance)
   A session-local list of the most recent verification verdicts, read from the
   verdictHistory store. It is a read-only display: the verdicts come only from
   results the server returned (a verifier surface records them), and the only

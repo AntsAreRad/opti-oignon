@@ -1,6 +1,6 @@
 /**
  * Playwright E2E test configuration for Opti-Oignon frontend.
- * S149 — Frontend E2E Tests
+ * — Frontend E2E Tests
  *
  * Usage:
  *   npx playwright test              # run all E2E tests

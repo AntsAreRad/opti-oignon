@@ -1,5 +1,5 @@
 <!--
-  InlineError.svelte (lib/ds) -- S170 (spec 6.9, Goal 2).
+  InlineError.svelte (lib/ds, spec 6.9, Goal 2).
   Inline-first error surface anchored next to the failing control. Pairs with
   errorHandler.ts: pass a ParsedApiError's message, and (when retriable) wire
   onRetry to re-run the action. Global/async failures still go through

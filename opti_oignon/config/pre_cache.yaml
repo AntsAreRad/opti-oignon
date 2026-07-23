@@ -1,4 +1,4 @@
-# Pre-Cache Configuration -- S71 Offline-First Intelligence
+# Pre-Cache Configuration -- Offline-First Intelligence
 #
 # Defines common queries to pre-generate and cache proactively
 # so they are available during offline mode.

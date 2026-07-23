@@ -1,5 +1,5 @@
 <!--
-  ShortcutSettings.svelte (S153)
+  ShortcutSettings.svelte
   Settings panel for keyboard shortcut customization.
   Displays current bindings in a table, supports click-to-rebind,
   individual and global reset to defaults.

@@ -1,10 +1,10 @@
 <!--
-  NotesDrawingCanvas.svelte (S254, Notes feature N.7)
+  NotesDrawingCanvas.svelte (Notes feature N.7)
   SVG drawing canvas for the active note: a minimal stroke/shape model
   (pen / line / rect / ellipse over a named-colour palette, so the no-raw-hex
   discipline holds by construction) edited with pointer events on an 800x600
   viewBox, serialized by lib/drawing/svgDrawing.ts to a standalone SVG
-  document and uploaded through the S253 client as an encrypted attachment of
+  document and uploaded through the client as an encrypted attachment of
   kind "drawing" (sealed server-side under a per-attachment subkey; nothing
   plaintext touches disk). Thumbnails decrypt in memory through short-lived
   object URLs, revoked on removal and destroy. Re-edit fetches the blob and

@@ -1,5 +1,5 @@
 /**
- * API client for Conversation Compressor (S66).
+ * API client for Conversation Compressor.
  *
  * Provides typed access to compression config, stats,
  * and full-archive search endpoints.

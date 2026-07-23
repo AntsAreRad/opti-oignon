@@ -1,6 +1,6 @@
 # Resource Governor configuration (RESOURCE_GOVERNOR_SPEC.md Section 10).
 #
-# Bloc 0 (S223) consumes the measurement subset: enabled, total_vram_gb,
+# Bloc 0 consumes the measurement subset: enabled, total_vram_gb,
 # safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
 # decisions_ring_size. The remaining keys are carried here so the file is
 # written once; the later blocs (admission, backpressure, limits) only
@@ -26,11 +26,11 @@ safety_margin_gb: 1.5
 snapshot_ttl_s: 2.0
 
 # KV-cache estimate: GiB of KV per 1024 tokens of the requested num_ctx
-# (read-gate decision DI-4: layers folded into one conservative,
+# (design decision DI-4: layers folded into one conservative,
 # deliberately high-side coefficient; refined by measure-and-adapt).
 kv_coefficient: 0.5
 
-# S259 per-model KV-cache overrides consumed by the admission cost math.
+# Per-model KV-cache overrides consumed by the admission cost math.
 # Resolution order: exact model name > longest matching family substring
 # > the global kv_coefficient above, which stays the fail-secure answer
 # for any model neither table names. Matching is case-insensitive.
@@ -43,7 +43,7 @@ kv_overrides:
   models: {}
   families: {}
 
-# S261 per-model weights-residency overrides in GiB. The MoE gap: a
+# Per-model weights-residency overrides in GiB. The MoE gap: a
 # Mixture-of-Experts model's resident weights can differ from its file
 # size (active-params vs total-params). Resolution: exact model name
 # > longest matching family substring > the estimator chain unchanged,

@@ -1,5 +1,5 @@
 /**
- * API functions for the Benchmark Dashboard (S60).
+ * API functions for the Benchmark Dashboard.
  *
  * Covers suite listing, benchmark execution, history management,
  * model config CRUD, and WebSocket progress connection.

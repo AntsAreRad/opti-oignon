@@ -1,4 +1,4 @@
-# Sandbox configuration for filesystem & shell tools (S73)
+# Sandbox configuration for filesystem & shell tools
 # All LLM filesystem operations execute inside isolated sandboxes.
 #
 # ISOLATION BACKENDS:
@@ -44,7 +44,7 @@ max_concurrent_sessions: 5
 # Audit log (separate SQLite DB per feature domain)
 audit_db_path: sandbox_audit.db
 
-# ---- Resource caps (S209, Bloc 0) ----
+# ---- Resource caps (Bloc 0) ----
 # Per-sandbox limits applied to the bwrap process tree. Out-of-range values
 # are clamped into the documented ranges, never disabled.
 #   limits_enabled    gate the caps on/off (off = no caps applied)
@@ -64,7 +64,7 @@ limit_fsize_bytes: 1073741824
 limit_cpu_seconds: 300
 tmpfs_size_bytes: 268435456
 
-# ---- Seccomp denylist (S209, Bloc 0) ----
+# ---- Seccomp denylist (Bloc 0) ----
 # A moderate seccomp BPF denylist (x86_64) is built and passed on every bwrap
 # launch. It reduces kernel syscall surface but is NOT the boundary -- the
 # namespaces are. seccomp_required makes a build or fd failure REFUSE the
@@ -72,7 +72,7 @@ tmpfs_size_bytes: 268435456
 seccomp_enabled: true
 seccomp_required: true
 
-# ---- Workspace lifecycle (S210, Bloc 1) ----
+# ---- Workspace lifecycle (Bloc 1) ----
 # Workspaces default ephemeral under workspace_base (volatile under /tmp:
 # they do NOT survive a reboot). reconcile_on_start reaps orphaned
 # sandbox-* directories left by a previous process at startup (directories
@@ -92,9 +92,9 @@ reconcile_on_start: true
 idle_ttl_seconds: 3600
 disk_soft_limit_bytes: 536870912
 
-# ---- Copy-in (S211, Bloc 2) ----
+# ---- Copy-in (Bloc 2) ----
 # All copy-in is EXPLICIT and user-initiated through the manager UI; the
-# model can trigger neither an upload nor a browse nor a clone (S73/S74).
+# model can trigger neither an upload nor a browse nor a clone.
 # host_share_roots confines the host explorer and the clone source: each
 # entry is expanduser'd and realpath'd at load, the filesystem root "/" is
 # refused, and entries that are not existing directories are dropped. An
@@ -118,9 +118,9 @@ upload_max_file_bytes: 134217728
 clone_max_bytes: 536870912
 clone_max_files: 20000
 
-# ---- Diff-gated write-back (S212, Bloc 3) ----
+# ---- Diff-gated write-back (Bloc 3) ----
 # The review and the apply are EXPLICIT and user-initiated through the
-# manager UI; the model can trigger neither (S73/S74). The diff classifies
+# manager UI; the model can trigger neither. The diff classifies
 # the live workspace against the in-memory 6.1 baseline (hash-driven:
 # added/modified/deleted; symlinks and specials skipped and counted, never
 # followed). diff_max_entries bounds the review (clamped 1..1000000):
@@ -134,7 +134,7 @@ clone_max_files: 20000
 # hardcoded, not configuration.
 diff_max_entries: 50000
 
-# ---- Optional Daily network: provision phase (S213, Bloc 4) ----
+# ---- Optional Daily network: provision phase (Bloc 4) ----
 # There is deliberately NO key here that turns the sandbox network on:
 # the network flag is per workspace, default off, and set only by an
 # explicit user action through the manager (spec 8.3 -- never a config
@@ -258,7 +258,7 @@ blocked_patterns:
   # find with -exec on root (can bypass other restrictions)
   - "find\\s+/\\s.*-exec"
 
-# ---- Quick Sandbox (S117) ----
+# ---- Quick Sandbox ----
 # Chat-integrated sandboxed code execution.
 # When enabled, execute_code/write_file/read_file tool calls in regular
 # chat are transparently redirected to an isolated sandbox session.

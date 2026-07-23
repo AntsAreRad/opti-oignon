@@ -170,7 +170,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 8: System presets list (S84)
+# Test 8: System presets list
 # -------------------------------------------------
 step "GET /api/system-presets/list"
 RESP=$(curl -sf "${BASE}/api/system-presets/list" 2>&1)
@@ -186,7 +186,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 9: System presets detect (S84)
+# Test 9: System presets detect
 # -------------------------------------------------
 step "GET /api/system-presets/detect"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/system-presets/detect" 2>&1)
@@ -197,7 +197,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 10: Onboarding state (S84)
+# Test 10: Onboarding state
 # -------------------------------------------------
 step "GET /api/system-presets/onboarding"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/system-presets/onboarding" 2>&1)
@@ -230,7 +230,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 13: Model health (S63)
+# Test 13: Model health
 # -------------------------------------------------
 step "GET /api/smart-routing/model-health"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/smart-routing/model-health" 2>&1)
@@ -296,7 +296,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 19: Search proxy status (S82)
+# Test 19: Search proxy status
 # -------------------------------------------------
 step "GET /api/search/proxy-status"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/search/proxy-status" 2>&1)
@@ -307,7 +307,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 20: Coding agent status (S74)
+# Test 20: Coding agent status
 # -------------------------------------------------
 step "GET /api/coding/status"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/coding/status" 2>&1)
@@ -318,7 +318,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 21: Sandbox status (S73)
+# Test 21: Sandbox status
 # -------------------------------------------------
 step "GET /api/sandbox"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/sandbox" 2>&1)
@@ -329,7 +329,7 @@ else
 fi
 
 # -------------------------------------------------
-# Test 22: Performance summary (S72)
+# Test 22: Performance summary
 # -------------------------------------------------
 step "GET /api/performance/summary"
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/performance/summary" 2>&1)

@@ -1,5 +1,5 @@
 <!--
-  SectionContextList.svelte (S167)
+  SectionContextList.svelte
   Drives the lower "Section Context" half of the sidebar (spec 8.3),
   switching its contents by route: chat shows the new-conversation action
   and the conversation list; settings shows the settings sections; the
@@ -30,7 +30,7 @@
 					? 'health'
 					: 'chat';
 
-	// Legacy ?tab= ids fold into the S168 nine-section model so an old sidebar
+	// Legacy ?tab= ids fold into the nine-section model so an old sidebar
 	// link still highlights the right section.
 	const LEGACY_TAB_TO_SECTION: Record<string, string> = {
 		quick: 'conversation',
@@ -47,7 +47,7 @@
 		advanced: 'performance'
 	};
 
-	// The nine consolidated settings sections (S168, spec 5.5).
+	// The nine consolidated settings sections (spec 5.5).
 	const settingsSections: { id: string; label: string; icon: string }[] = [
 		{ id: 'appearance', label: 'Appearance', icon: 'palette' },
 		{ id: 'account', label: 'Account & Security', icon: 'shield-check' },
@@ -67,7 +67,7 @@
 			: (LEGACY_TAB_TO_SECTION[rawSection] ?? 'appearance')
 		: 'appearance';
 
-	// --- Projects section context (S169): search + Starred/All/Archived ---
+	// --- Projects section context: search + Starred/All/Archived ---
 	let projectsLoaded = false;
 	let projectQuery = '';
 
@@ -93,7 +93,7 @@
 	$: activeProjects = projectMatches.filter((p) => !isStarred(p) && !isArchived(p));
 	$: archivedProjects = projectMatches.filter((p) => isArchived(p));
 
-	// --- Benchmark section context (S169): search + runs grouped by recency ---
+	// --- Benchmark section context: search + runs grouped by recency ---
 	let benchmarkRunsLoaded = false;
 	let benchmarkRuns: BenchmarkV2HistoryEntry[] = [];
 	let runQuery = '';

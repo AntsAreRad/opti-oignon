@@ -1,5 +1,5 @@
 /**
- * API client for Remote Access endpoints -- S133.
+ * API client for Remote Access endpoints --.
  *
  * Covers:
  *   GET  /api/security/remote-access/status              -- status

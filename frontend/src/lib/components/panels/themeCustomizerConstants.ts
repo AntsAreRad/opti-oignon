@@ -1,7 +1,7 @@
 /**
- * ThemeCustomizer constants (S197, DS-02) -- the only hex literals the
+ * ThemeCustomizer constants (DS-02) -- the only hex literals the
  * customizer needs, kept in a TS module so the .svelte source stays free
- * of raw hex (the S83 design-system invariant; same convention as
+ * of raw hex (the design-system invariant; same convention as
  * PALETTE_SWATCH in stores/preferences.ts).
  */
 

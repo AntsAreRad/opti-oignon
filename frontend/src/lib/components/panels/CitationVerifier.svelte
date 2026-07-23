@@ -1,13 +1,13 @@
 <!--
-  CitationVerifier.svelte (S275, the citation-verify UI half)
-  The standalone surface the user drives over the S274 route
-  (POST /api/claims/verify-citations, the join of the S273 citation extractor
-  and the S271 per-answer aggregation). The user pastes a produced answer that
+  CitationVerifier.svelte (the citation-verify UI half)
+  The standalone surface the user drives over the route
+  (POST /api/claims/verify-citations, the join of the citation extractor
+  and the per-answer aggregation). The user pastes a produced answer that
   carries inline numeric citation markers [n] (1-based) plus the ordered
   sources those markers index, one source per line, and picks a model. The
   route extracts the (claim, source) pairs server-side (this component
   interprets neither the answer nor the sources), runs each pair through the
-  S267 verification role wrapped as untrusted context, and returns the
+  Verification role wrapped as untrusted context, and returns the
   structured aggregate -- supported / unsupported / uncertain -- with uncertain
   the safe default. The result is shown as the aggregate verdict, then, for
   each extracted pair, the cited claim and its source alongside the per-pair

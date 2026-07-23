@@ -1,4 +1,4 @@
-# Auto-Tuner Configuration -- S110
+# Auto-Tuner Configuration
 # Automatically finds optimal inference parameters for the user's hardware.
 # Runs on demand only (never automatically). Persists best config per model.
 # Inspired by llama-optimus.

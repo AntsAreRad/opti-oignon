@@ -1,5 +1,5 @@
 /**
- * Tool Call Approval API client for Opti-Oignon (S128).
+ * Tool Call Approval API client for Opti-Oignon.
  *
  * Provides typed access to all /api/security/tool-approval/* endpoints.
  * Used by ToolCallApproval.svelte to poll for pending approvals and

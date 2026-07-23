@@ -1,4 +1,4 @@
-# Model Lifecycle Management — Opti-Oignon S112
+# Model Lifecycle Management — Opti-Oignon
 # Pull, delete, update models via Ollama API with progress tracking.
 
 enabled: true

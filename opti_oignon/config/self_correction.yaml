@@ -1,4 +1,4 @@
-# Configuration du moteur d'auto-correction (S51)
+# Configuration du moteur d'auto-correction
 # Parametres pour la verification et correction des sorties non-code.
 
 self_correction:

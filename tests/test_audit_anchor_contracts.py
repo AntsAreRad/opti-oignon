@@ -17,6 +17,10 @@ anchor must actually guarantee:
   * One export operation renders the SAME anchor in all three formats
     (JSON file, QR content, clipboard text): same canonical digest.
   * The whole export + verification path performs no network access.
+  * QR rendering is optional. When it is absent the refusal NAMES the extra
+    that would satisfy it, so a stock install is never mistaken for a broken
+    anchor path; when it is installed, the bytes come from it and not from
+    the stand-in this suite renders with elsewhere.
 
 Local-only (the public distribution ships no tests). Runs under pytest or
 directly via the __main__ runner. Loading follows the sibling harness
@@ -33,6 +37,7 @@ import sqlite3
 import sys
 import tempfile
 import traceback
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,7 +48,81 @@ _ROOT = Path(__file__).resolve().parents[1]
 _OO = _ROOT / "opti_oignon"
 
 
-def _load_modules():
+class _Skipped(BaseException):
+    """A clause that cannot run here, carrying what would make it run."""
+
+
+def _skip(reason):
+    """Refuse to run the calling clause, naming what would make it run.
+
+    A clause that cannot execute must be COUNTED as not having executed. The
+    one thing it must never do is return quietly, which a reader cannot tell
+    apart from a pass. Routed through pytest when pytest is the one driving --
+    consulted through the cache rather than imported, so the direct runner
+    does not acquire a dependency it never had.
+    """
+    driver = sys.modules.get("pytest")
+    if driver is not None:
+        driver.skip(reason)
+    raise _Skipped(reason)
+
+
+# ---------------------------------------------------------------------------
+# The optional renderer
+#
+# QR rendering is optional and is declared as the ``anchor`` extra. Two of the
+# clauses below need a bundle to exist but assert nothing at all about the
+# rendered bytes -- the offline guarantee in particular has nothing to do with
+# drawing an image, and a guarantee that stops being checked on every stock
+# install is not a guarantee. They stand the renderer in.
+#
+# The stand-in deliberately emits something that is NOT a PNG. Any clause that
+# means to speak about real rendered output therefore fails loudly against it
+# instead of passing on the stand-in's own bytes.
+# ---------------------------------------------------------------------------
+
+_STAND_IN_PREFIX = b"not-a-png:stand-in-renderer:"
+
+
+def _renderer_stand_in():
+    """Minimal stand-in for the qrcode package: enough to build, never to draw."""
+    module = types.ModuleType("qrcode")
+
+    class _Image:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def save(self, buf, format=None):  # noqa: A002 - mirrors the real API
+            buf.write(_STAND_IN_PREFIX + self._payload)
+
+    class _QRCode:
+        def __init__(self, **_kwargs):
+            self._data = b""
+
+        def add_data(self, data):
+            self._data = data.encode("utf-8") if isinstance(data, str) else data
+
+        def make(self, fit=True):
+            return None
+
+        def make_image(self, **_kwargs):
+            return _Image(self._data)
+
+    module.QRCode = _QRCode
+    module.constants = types.SimpleNamespace(ERROR_CORRECT_M=0)
+    return module
+
+
+def _renderer_installed():
+    """True when the real renderer is importable in this environment."""
+    try:
+        import qrcode  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _load_modules(*, renderer="stand-in"):
     """Load the chain modules through the shared isolation window.
 
     The window is what makes this suite safe to run beside any other. The
@@ -55,6 +134,13 @@ def _load_modules():
     and the test interrogates the other. The window neutralises rather than
     deletes, names every lateral it needs, and restores ``sys.modules`` and
     ``sys.meta_path`` exactly on the way out.
+
+    ``renderer`` selects the posture of the optional QR renderer:
+    ``"stand-in"`` seeds the stand-in above, ``"absent"`` declares the name
+    unreachable and has the window PROVE it before any target runs, and
+    ``"real"`` leaves resolution alone so the installed package answers. The
+    window's guard fences project names only, so the real package resolves
+    through it untouched.
 
     Returns ``(signed_audit_log, audit_anchor_export, restore)``.
     """
@@ -72,6 +158,12 @@ def _load_modules():
     # signed_audit_log._anchor_mac at its top. The three laterals below are
     # reached LAZILY, inside functions, and are loaded from their real sources
     # so this suite exercises exactly the code paths it exercised before.
+    window = {}
+    if renderer == "stand-in":
+        window["seeded"] = {"qrcode": _renderer_stand_in()}
+    elif renderer == "absent":
+        window["blocked"] = ("qrcode",)
+
     loaded, restore = isolate(
         targets={
             "opti_oignon.db_utils": source("db_utils.py"),
@@ -81,6 +173,7 @@ def _load_modules():
             "opti_oignon.signed_audit_log": source("signed_audit_log.py"),
             "opti_oignon.audit_anchor_export": source("audit_anchor_export.py"),
         },
+        **window,
     )
 
     if not had_db and default_db.exists():
@@ -96,9 +189,9 @@ def _load_modules():
 
 
 @contextlib.contextmanager
-def _loaded_modules():
+def _loaded_modules(**kwargs):
     """Context-manager form; closes the window on every exit path."""
-    sal, aae, restore = _load_modules()
+    sal, aae, restore = _load_modules(**kwargs)
     try:
         yield sal, aae
     finally:
@@ -276,7 +369,6 @@ def test_c4_bundle_renders_the_same_anchor_in_all_three_formats():
 
         from_qr = json.loads(bundle["qr_content"])
         assert _canonical_digest(from_qr) == ref, "QR content diverges"
-        assert bundle["qr_png"][:4] == b"\x89PNG", "QR PNG missing/invalid"
 
         from_text = aae.parse_anchor_text(bundle["text"])
         assert _canonical_digest(from_text) == ref, "clipboard text diverges"
@@ -342,32 +434,84 @@ def test_c6_bit_flipped_signature_is_rejected_outright():
 
 
 # ---------------------------------------------------------------------------
+# Clause 7 -- an absent optional capability says which capability it is
+# ---------------------------------------------------------------------------
+
+
+def test_c7_absent_renderer_refuses_under_the_name_that_would_satisfy_it():
+    with _loaded_modules(renderer="absent") as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
+        chain, _ = _fresh_chain(sal, tmp)
+        _keyed(chain)
+
+        try:
+            aae.export_anchor_bundle(chain, "test-version")
+        except ImportError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError(
+                "the bundle rendered with the renderer proven unreachable"
+            )
+
+        assert "opti-oignon[anchor]" in message, (
+            "the refusal does not name what would satisfy it, so an install "
+            "that simply lacks the extra is indistinguishable from a broken "
+            "anchor path: " + message
+        )
+
+
+# ---------------------------------------------------------------------------
+# Clause 8 -- installed, the renderer emits real image bytes
+# ---------------------------------------------------------------------------
+
+
+def test_c8_installed_renderer_emits_image_bytes_not_a_stand_in():
+    if not _renderer_installed():
+        _skip(
+            "the QR renderer is not installed here; "
+            "pip install 'opti-oignon[anchor]' makes this clause run"
+        )
+
+    with _loaded_modules(renderer="real") as (sal, aae), \
+            tempfile.TemporaryDirectory() as tmp:
+        chain, _ = _fresh_chain(sal, tmp)
+        _keyed(chain)
+
+        png = aae.export_anchor_bundle(chain, "test-version")["qr_png"]
+        assert not png.startswith(_STAND_IN_PREFIX), (
+            "the stand-in answered where the installed renderer was required"
+        )
+        assert png[:4] == b"\x89PNG", "QR PNG missing/invalid"
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
-_CLAUSES = [
-    "test_c1_keyed_anchor_round_trips_authenticated_on_intact_chain",
-    "test_c2_post_anchor_alteration_is_detected_and_localized",
-    "test_c3_anchor_forged_from_public_source_is_never_authenticated",
-    "test_c4_bundle_renders_the_same_anchor_in_all_three_formats",
-    "test_c5_export_and_verification_touch_no_network",
-    "test_c6_bit_flipped_signature_is_rejected_outright",
-]
+# Derived from the module, not listed beside it. A roster written out by hand
+# is stale the moment a clause is added and nobody notices, which is the same
+# silence a clause that never runs produces.
+_CLAUSES = sorted(name for name in dict(globals()) if name.startswith("test_c"))
 
 
 def _main() -> int:
     passed = 0
+    skipped = 0
     for name in _CLAUSES:
         try:
             globals()[name]()
+        except _Skipped as reason:
+            print(f"SKIP {name}: {reason}")
+            skipped += 1
         except Exception:
             print(f"FAIL {name}:")
             traceback.print_exc()
         else:
             print(f"PASS {name}")
             passed += 1
-    print(f"{passed}/{len(_CLAUSES)} passed")
-    return 0 if passed == len(_CLAUSES) else 1
+    total = len(_CLAUSES)
+    print(f"{passed}/{total} passed, {skipped} skipped")
+    return 0 if passed + skipped == total else 1
 
 
 if __name__ == "__main__":

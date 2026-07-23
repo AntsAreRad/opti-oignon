@@ -1,5 +1,5 @@
 <!--
-  AuditChainPanel.svelte (S130)
+  AuditChainPanel.svelte
   Hash-chain signed audit log viewer.
 
   Features:

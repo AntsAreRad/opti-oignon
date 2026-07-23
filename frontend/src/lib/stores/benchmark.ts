@@ -1,5 +1,5 @@
 /**
- * Benchmark Dashboard store (S60).
+ * Benchmark Dashboard store.
  *
  * Manages benchmark run state, history, WebSocket progress,
  * model config, and suite/task metadata.

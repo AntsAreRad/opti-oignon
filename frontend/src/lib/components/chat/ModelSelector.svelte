@@ -1,5 +1,5 @@
 <!--
-  ModelSelector.svelte (refactored S167)
+  ModelSelector.svelte
   Dropdown to pick an Ollama model. Shows the resolved effective model
   under "Auto", groups models by family, and surfaces an approximate
   memory footprint per model (E1 RAM hint, from the on-disk size). Uses

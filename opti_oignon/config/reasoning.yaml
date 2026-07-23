@@ -1,4 +1,4 @@
-# Configuration du moteur de raisonnement (S49)
+# Configuration du moteur de raisonnement
 # Parametres pour les strategies CoT, Tree-of-Thought, et Self-Consistency.
 
 reasoning:
@@ -19,7 +19,7 @@ reasoning:
 
   # Strategy used by the live reasoning pipeline when the caller does not
   # force one: "decompose", "tree_of_thought" or "self_consistency"
-  # (RSN-04, S192)
+  # (RSN-04)
   default_strategy: "decompose"
 
   # Modeles specifiques (null = utiliser le modele du routeur)

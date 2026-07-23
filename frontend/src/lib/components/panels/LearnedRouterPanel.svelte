@@ -1,5 +1,5 @@
 <!--
-  LearnedRouterPanel — S67 ML-based routing panel.
+  LearnedRouterPanel — ML-based routing panel.
 
   Sections:
   1. Status card — training state, sample count, last accuracy

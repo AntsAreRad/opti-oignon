@@ -1,5 +1,5 @@
 <!--
-  NoteActionPanel.svelte (S248, Notes feature N.3 selection-action UI)
+  NoteActionPanel.svelte (Notes feature N.3 selection-action UI)
   The selection-action surface for the Notes editor. Given a text selection from
   the note body, it runs one local action -- fact-check, develop, summarize,
   rewrite, make-checklist -- or the Daily-only fact-check-with-web, over

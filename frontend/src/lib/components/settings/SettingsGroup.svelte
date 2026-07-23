@@ -1,5 +1,5 @@
 <!--
-  SettingsGroup.svelte (S168)
+  SettingsGroup.svelte
   Standard wrapper for one settings group inside a /settings section.
 
   Wraps a labelled block (title + optional description) on the ds Card

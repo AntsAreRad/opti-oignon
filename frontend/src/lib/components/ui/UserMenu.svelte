@@ -1,5 +1,5 @@
 <!--
-  UserMenu.svelte (S98)
+  UserMenu.svelte
   Displays current user avatar/initial and username in the header.
   Dropdown menu with profile, settings, and logout options.
   Hidden in single-user mode.

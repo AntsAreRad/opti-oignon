@@ -1,8 +1,8 @@
 /**
- * Typed API client for the claim-vs-source verification role (S269 UI half).
+ * Typed API client for the claim-vs-source verification role (UI half).
  *
- * One per-user endpoint, POST /api/claims/verify (the S268 route over the
- * S267 verification role). The caller submits a model-generated claim and its
+ * One per-user endpoint, POST /api/claims/verify (the route over the
+ * Verification role). The caller submits a model-generated claim and its
  * cited source; the role wraps both as untrusted data server-side under one
  * policy header and returns a fail-secure verdict (supported / unsupported /
  * uncertain, defaulting to uncertain on an ambiguous reply, never to supported).
@@ -14,7 +14,7 @@
 
 import { apiPost } from './client';
 
-/** The fail-secure verdict taxonomy (mirrors the S267 role). */
+/** The fail-secure verdict taxonomy (mirrors the role). */
 export type ClaimVerdict = 'supported' | 'unsupported' | 'uncertain';
 
 /**

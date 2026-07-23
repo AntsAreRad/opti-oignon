@@ -508,6 +508,13 @@ RAG_CHUNKER_AVAILABLE = _module_exists("opti_oignon.rag_chunker")
 # -- RAG Hybrid Search (S100 / lazy S134) --
 HYBRID_SEARCH_AVAILABLE = _module_exists("opti_oignon.rag_hybrid_search")
 get_hybrid_engine = _LazyAttr("opti_oignon.rag_hybrid_search", "get_hybrid_engine") if HYBRID_SEARCH_AVAILABLE else None
+# Presence is not reach. The flag above only says the module resolves; it says
+# nothing about whether any product surface routes a query through the engine.
+# Reporting presence as a capability would advertise a retrieval path an
+# install cannot take, so capability reporting consults this statement
+# instead. It is checked against the tree by contract: wiring a caller
+# without flipping it fails, and flipping it without a caller fails too.
+HYBRID_SEARCH_ROUTED = False
 
 # -- RAG External Stores (S100 / lazy S134) --
 EXTERNAL_STORES_AVAILABLE = _module_exists("opti_oignon.rag_external")

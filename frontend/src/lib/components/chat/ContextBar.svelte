@@ -2,7 +2,7 @@
   ContextBar.svelte
   Compact bar showing tokens, active model and routing info.
   Always visible below presets when a conversation is active.
-  BUG-08 S108: Synced with context health API (same source as ContextPanel).
+  BUG-08: Synced with context health API (same source as ContextPanel).
 -->
 <script lang="ts">
 	import { activeConversation, activeConversationId } from '$lib/stores/conversations';
@@ -119,7 +119,7 @@
 			</span>
 		{/if}
 
-		<!-- Project context badge + linker (S59) -->
+		<!-- Project context badge + linker -->
 		<div class="w-px h-3 shrink-0 hidden sm:block" style="background-color: var(--oo-bd-subtle);" />
 		<ProjectContextBadge on:openProject />
 		<ProjectLinker />

@@ -3,13 +3,13 @@
   Displays a user or assistant message.
   Supports streaming content (isStreaming + streamContent).
   Displays inline search results if present in metadata.
-  Displays reasoning (thinking) in a collapsible block (S42).
-  Displays code verification badges (S43).
-  Displays inline tool calls (S44).
-  Displays feedback widget (thumbs up/down) on assistant messages (S55).
+  Displays reasoning (thinking) in a collapsible block.
+  Displays code verification badges.
+  Displays inline tool calls.
+  Displays feedback widget (thumbs up/down) on assistant messages.
   Retry button on last assistant message.
-  S132: Mobile responsive — reduced padding, code block scroll, responsive images.
-  S154: Quick-branch fork button, collapsible long messages, code block copy buttons.
+  Mobile responsive — reduced padding, code block scroll, responsive images.
+  Quick-branch fork button, collapsible long messages, code block copy buttons.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
@@ -36,15 +36,15 @@
 	} | null = null;
 	export let isLast: boolean = false;
 	export let isRetrying: boolean = false;
-	// S43: Verification results received during streaming
+	// Verification results received during streaming
 	export let verificationResults: VerificationInfo[] = [];
-	// S44: Tool calls received during streaming
+	// Tool calls received during streaming
 	export let toolCallResults: ToolCallInfo[] = [];
-	// S49: Reasoning steps received during streaming
+	// Reasoning steps received during streaming
 	export let reasoningSteps: ReasoningStepInfo[] = [];
-	// S49: Reasoning metadata
+	// Reasoning metadata
 	export let reasoningMeta: ReasoningMetaInfo | null = null;
-	// S169: Optional routing reason (provided during streaming); falls back to
+	// Optional routing reason (provided during streaming); falls back to
 	// an untyped routing_reason field on the message when present.
 	type RoutingReasonFull = {
 		model: string;
@@ -60,9 +60,9 @@
 		original_model: string;
 	};
 	export let routingReason: RoutingReasonFull | null = null;
-	// S154: Conversation ID for quick fork
+	// Conversation ID for quick fork
 	export let conversationId: string = '';
-	// S154: Collapsible long messages threshold (lines)
+	// Collapsible long messages threshold (lines)
 	export let collapseThreshold: number = 500;
 
 	const dispatch = createEventDispatcher<{
@@ -73,43 +73,43 @@
 	let copied = false;
 	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 	let thinkingOpen = false;
-	// S154: Collapsible state
+	// Collapsible state
 	let isCollapsed = true;
-	// S154: Code block copy feedback
+	// Code block copy feedback
 	let codeBlockCopied: Record<number, boolean> = {};
 	let contentEl: HTMLDivElement;
 
 	$: isUser = message.role === 'user';
 	$: displayContent = isStreaming ? streamContent : message.content;
 	$: showRetry = !isUser && isLast && !isStreaming && !isRetrying;
-	// S42: Thinking content (streaming or history)
+	// Thinking content (streaming or history)
 	$: thinkingContent = isStreaming ? streamThinking : (message.thinking || '');
 	$: hasThinking = thinkingContent.length > 0;
-	// S43: Verification (streaming or history)
+	// Verification (streaming or history)
 	$: verifications = verificationResults.length > 0 ? verificationResults : (message.verification || []);
 	$: hasVerification = verifications.length > 0;
-	// S44: Tool calls (streaming or history)
+	// Tool calls (streaming or history)
 	$: toolCalls = toolCallResults.length > 0 ? toolCallResults : (message.tool_calls || []);
 	$: hasToolCalls = toolCalls.length > 0;
-	// S49: Reasoning steps (streaming or history)
+	// Reasoning steps (streaming or history)
 	$: rSteps = reasoningSteps.length > 0 ? reasoningSteps : (message.reasoning_steps || []);
 	$: rMeta = reasoningMeta || message.reasoning_meta || null;
 	$: hasReasoning = rSteps.length > 0;
-	// S169: Self-correction info (S51) reintegrated onto the message
+	// Self-correction info reintegrated onto the message
 	$: correction = message.correction ?? null;
 	$: hasCorrection = !isUser && !!correction?.was_corrected;
-	// S169: Routing reason (S46) reintegrated; prop wins, else untyped field
+	// Routing reason reintegrated; prop wins, else untyped field
 	$: effectiveRouting =
 		routingReason ??
 		(((message as Record<string, unknown>).routing_reason as RoutingReasonFull | null) ?? null);
 	$: hasRouting = !isUser && !!effectiveRouting;
-	// S117: Sandbox metadata (present when quick sandbox was used)
+	// Sandbox metadata (present when quick sandbox was used)
 	$: sandboxMeta = (message as Record<string, unknown>).sandbox_meta as { sandbox_session_id: string; sandbox_files: unknown[]; sandbox_files_created: string[] } | undefined;
 	$: hasSandbox = !isStreaming && !!sandboxMeta?.sandbox_session_id;
 	// Snapshot from the done metadata: the file manager shows it at once
 	// and before any fetch of its own.
 	$: sandboxInitialFiles = (sandboxMeta?.sandbox_files ?? []) as SandboxFileEntry[];
-	// S118: Chat coding agent metadata (present when coding agent was used)
+	// Chat coding agent metadata (present when coding agent was used)
 	$: codingMeta = (message as Record<string, unknown>).coding_meta as {
 		chat_coding: boolean;
 		coding_result: Record<string, unknown>;
@@ -120,14 +120,14 @@
 	} | undefined;
 	$: hasCoding = !isStreaming && !!codingMeta?.chat_coding;
 
-	// S154: Collapsible long messages
+	// Collapsible long messages
 	$: lineCount = displayContent ? displayContent.split('\n').length : 0;
 	$: shouldCollapse = collapseThreshold > 0 && lineCount > collapseThreshold && !isStreaming;
 	$: visibleContent = shouldCollapse && isCollapsed
 		? displayContent.split('\n').slice(0, Math.min(20, Math.floor(collapseThreshold / 10))).join('\n')
 		: displayContent;
 	$: hiddenLineCount = shouldCollapse ? lineCount - Math.min(20, Math.floor(collapseThreshold / 10)) : 0;
-	// S154: Show fork button (not during streaming, message must have an id)
+	// Show fork button (not during streaming, message must have an id)
 	$: showForkButton = !isStreaming && message.id != null && conversationId;
 
 	function copyContent() {
@@ -142,14 +142,14 @@
 		dispatch('retry');
 	}
 
-	// S154: Quick fork from this message
+	// Quick fork from this message
 	function handleFork() {
 		if (message.id != null) {
 			dispatch('fork', { messageId: message.id });
 		}
 	}
 
-	// S154: Copy a code block by index
+	// Copy a code block by index
 	function copyCodeBlock(text: string, index: number) {
 		navigator.clipboard.writeText(text).then(() => {
 			codeBlockCopied = { ...codeBlockCopied, [index]: true };
@@ -159,7 +159,7 @@
 		});
 	}
 
-	// S154: Extract code blocks (triple backtick fenced) from content
+	// Extract code blocks (triple backtick fenced) from content
 	function extractCodeBlocks(content: string): { start: number; end: number; code: string; lang: string }[] {
 		const blocks: { start: number; end: number; code: string; lang: string }[] = [];
 		const regex = /```(\w*)\n([\s\S]*?)```/g;
@@ -178,7 +178,7 @@
 	$: codeBlocks = displayContent ? extractCodeBlocks(displayContent) : [];
 	$: hasCodeBlocks = codeBlocks.length > 0;
 
-	// S154: Toggle collapse
+	// Toggle collapse
 	function toggleCollapse() {
 		isCollapsed = !isCollapsed;
 	}
@@ -195,12 +195,12 @@
 			? 'background-color: var(--oo-msg-user-bg); border: 1px solid var(--oo-msg-user-bd); color: var(--oo-msg-user-fg);'
 			: 'background-color: var(--oo-msg-bot-bg); border: 1px solid var(--oo-msg-bot-bd); color: var(--oo-msg-bot-fg);'}"
 	>
-		<!-- Model (assistant only, hidden during streaming — S94) -->
+		<!-- Model (assistant only, hidden during streaming) -->
 		{#if !isUser && message.model && !isStreaming}
 			<div class="text-xs font-mono mb-1" style="color: var(--oo-fg-muted);">{message.model}</div>
 		{/if}
 
-		<!-- S95: Vision delegation badge (assistant only, after completion) -->
+		<!-- Vision delegation badge (assistant only, after completion) -->
 		{#if !isUser && !isStreaming && message.vision_delegation?.vision_model}
 			<div class="inline-flex items-center gap-1 mb-1.5 px-2 py-0.5 rounded-md text-xs"
 				style="background-color: var(--oo-bg-base); border: 1px solid var(--oo-bd-subtle); color: var(--oo-fg-muted);">
@@ -212,7 +212,7 @@
 			</div>
 		{/if}
 
-		<!-- S42: Bloc de reflexion retractable (assistant uniquement) -->
+		<!-- Bloc de reflexion retractable (assistant uniquement) -->
 		{#if !isUser && hasThinking}
 			<details
 				class="mb-2 rounded-lg"
@@ -234,17 +234,17 @@
 			</details>
 		{/if}
 
-		<!-- S44: Inline tool calls (assistant only) -->
+		<!-- Inline tool calls (assistant only) -->
 		{#if !isUser && hasToolCalls}
 			<ToolCallDisplay toolCalls={toolCalls} />
 		{/if}
 
-		<!-- S49: Reasoning steps (assistant only) -->
+		<!-- Reasoning steps (assistant only) -->
 		{#if !isUser && hasReasoning}
 			<ReasoningDisplay steps={rSteps} meta={rMeta} {isStreaming} />
 		{/if}
 
-		<!-- S169: Routing reason + self-correction indicators (assistant only) -->
+		<!-- Routing reason + self-correction indicators (assistant only) -->
 		{#if hasRouting}
 			<RoutingIndicator routingReason={effectiveRouting} model={message.model ?? ''} />
 		{/if}
@@ -252,7 +252,7 @@
 			<CorrectionIndicator {correction} />
 		{/if}
 
-		<!-- Content — S132: mobile code scroll, responsive images — S154: collapsible -->
+		<!-- Content — mobile code scroll, responsive images — collapsible -->
 		<div
 			class="whitespace-pre-wrap break-words msg-content"
 			bind:this={contentEl}
@@ -262,7 +262,7 @@
 			{visibleContent}{#if isStreaming}<span class="inline-block w-1.5 h-4 ml-0.5 align-text-bottom animate-cursor-blink" style="background-color: var(--oo-acc-400);" />{/if}
 		</div>
 
-		<!-- S154: Show more / Show less toggle for long messages -->
+		<!-- Show more / Show less toggle for long messages -->
 		{#if shouldCollapse}
 			<button
 				class="collapse-toggle-btn"
@@ -276,7 +276,7 @@
 			</button>
 		{/if}
 
-		<!-- S154: Code block copy buttons (displayed below content for detected fenced blocks) -->
+		<!-- Code block copy buttons (displayed below content for detected fenced blocks) -->
 		{#if hasCodeBlocks && !isStreaming}
 			<div class="code-blocks-actions">
 				{#each codeBlocks as block, i}
@@ -303,7 +303,7 @@
 			</div>
 		{/if}
 
-		<!-- S43: Badges de verification de code -->
+		<!-- Badges de verification de code -->
 		{#if !isUser && !isStreaming && hasVerification}
 			<div class="flex flex-wrap gap-1.5 mt-1.5">
 				{#each verifications as v}
@@ -334,7 +334,7 @@
 			</div>
 		{/if}
 
-		<!-- Feedback widget (always visible on assistant messages, not streaming) — BUG-05 S108 -->
+		<!-- Feedback widget (always visible on assistant messages, not streaming) — BUG-05 -->
 		{#if !isUser && !isStreaming}
 			<div class="flex items-center justify-between mt-1">
 				<div class="text-xs" style="color: var(--oo-fg-faint);">
@@ -364,7 +364,7 @@
 			/>
 		{/if}
 
-		<!-- S118: Inline chat coding agent display (when coding agent was used) -->
+		<!-- Inline chat coding agent display (when coding agent was used) -->
 		{#if !isUser && hasCoding && codingMeta}
 			<CodingAgentInline
 				codingResult={codingMeta.coding_result || {}}
@@ -374,7 +374,7 @@
 			/>
 		{/if}
 
-		<!-- S117: Inline sandbox file manager (when quick sandbox was used, not coding agent) -->
+		<!-- Inline sandbox file manager (when quick sandbox was used, not coding agent) -->
 		{#if !isUser && hasSandbox && sandboxMeta && !hasCoding}
 			<div class="mt-2 rounded-lg overflow-hidden" style="border: 1px solid var(--oo-bd-default);">
 				<SandboxFileManager
@@ -384,7 +384,7 @@
 			</div>
 		{/if}
 
-		<!-- Boutons hover: copie + retry + fork (S154) -->
+		<!-- Boutons hover: copie + retry + fork -->
 		{#if displayContent && !isStreaming}
 			<div class="absolute -top-2 -right-2 flex items-center gap-0.5
 				opacity-0 group-hover:opacity-100 transition-opacity">
@@ -414,7 +414,7 @@
 						<Icon name="copy" size="sm" />
 					{/if}
 				</button>
-				<!-- S154: Fork from this message -->
+				<!-- Fork from this message -->
 				{#if showForkButton}
 					<button
 						on:click={handleFork}
@@ -432,7 +432,7 @@
 </div>
 
 <style>
-	/* S132: Mobile-friendly code blocks with touch scroll */
+	/* Mobile-friendly code blocks with touch scroll */
 	.msg-content :global(pre),
 	.msg-content :global(code) {
 		max-width: 100%;
@@ -440,13 +440,13 @@
 		-webkit-overflow-scrolling: touch;
 	}
 
-	/* S132: Responsive images inside messages */
+	/* Responsive images inside messages */
 	.msg-content :global(img) {
 		max-width: 100%;
 		height: auto;
 	}
 
-	/* S154: Collapse toggle for long messages */
+	/* Collapse toggle for long messages */
 	.collapse-toggle-btn {
 		display: block;
 		width: 100%;
@@ -467,7 +467,7 @@
 		color: var(--oo-accent);
 	}
 
-	/* S154: Code block copy buttons row */
+	/* Code block copy buttons row */
 	.code-blocks-actions {
 		display: flex;
 		flex-wrap: wrap;

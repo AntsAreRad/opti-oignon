@@ -1,5 +1,5 @@
 /**
- * Svelte stores for project state management (S59).
+ * Svelte stores for project state management.
  *
  * Provides reactive stores and action functions for project CRUD,
  * file management, conversation linking, and context operations.

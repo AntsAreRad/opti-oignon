@@ -1,5 +1,5 @@
 <!--
-  CacheStatsPanel — S68 Semantic Cache settings panel.
+  CacheStatsPanel — Semantic Cache settings panel.
 
   Sections:
   1. Enable/disable toggle + embeddings availability

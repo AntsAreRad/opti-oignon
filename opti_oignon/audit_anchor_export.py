@@ -203,7 +203,17 @@ def _qr_png_from_signed(signed: SignedAnchor) -> bytes:
 
     content = signed.to_json()
 
-    import qrcode  # type: ignore[import-untyped]
+    try:
+        import qrcode  # type: ignore[import-untyped]
+    except ImportError as exc:
+        # An optional capability that is merely absent has to say so in those
+        # words. Left bare, the error escaping here reads to an operator --
+        # and to a test report -- exactly like a defect on the anchor path,
+        # which is the one thing this module must never be ambiguous about.
+        raise ImportError(
+            "QR rendering requires qrcode, which is not installed. "
+            "Install with: pip install 'opti-oignon[anchor]'"
+        ) from exc
 
     qr = qrcode.QRCode(
         version=None,  # auto-size

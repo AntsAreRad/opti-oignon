@@ -1,4 +1,4 @@
-# Live Performance Metrics -- S111
+# Live Performance Metrics
 # Real-time inference metrics sampling configuration.
 
 live_metrics:
