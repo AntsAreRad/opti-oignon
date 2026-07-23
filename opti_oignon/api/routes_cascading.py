@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Cascading Inference -- S69.
+API routes for Cascading Inference.
 
 Provides endpoints for status, config update, and test cascade execution.
 """

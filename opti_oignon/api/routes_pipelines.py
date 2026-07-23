@@ -189,7 +189,7 @@ def create_pipeline(request: PipelineCreate) -> dict:
         is_builtin=False,
     )
 
-    # PIP-05 (S192): validate before persisting (id format, name, steps,
+    # PIP-05: validate before persisting (id format, name, steps,
     # agent/template existence). Mirrors the execution-pipeline routes.
     errors = pipeline_manager.validate_for_write(pipeline)
     if errors:
@@ -247,7 +247,7 @@ def update_pipeline(pipeline_id: str, request: PipelineUpdate) -> dict:
         is_builtin=False,
     )
 
-    # PIP-05 (S192): validate before persisting, same as create.
+    # PIP-05: validate before persisting, same as create.
     errors = pipeline_manager.validate_for_write(updated)
     if errors:
         raise HTTPException(status_code=422, detail="; ".join(errors))

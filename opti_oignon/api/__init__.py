@@ -3,8 +3,8 @@
 Opti-Oignon REST API (FastAPI)
 ==============================
 
-Couche API REST pour exposer les fonctionnalites d'Opti-Oignon
+REST API layer exposing the Opti-Oignon capabilities
 via FastAPI, en complement de l'interface Gradio existante.
 
-Version: 1.4.0 (S26)
+Version: 1.4.0
 """

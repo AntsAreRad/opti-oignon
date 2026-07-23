@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Feedback & Analytics (S55).
+API routes for Feedback & Analytics.
 
 Provides endpoints for submitting feedback, querying feedback stats,
 viewing analytics overviews, and time-series performance trends.

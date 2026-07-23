@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""FastAPI per-answer verification route (the S271 aggregation module's wiring
+"""FastAPI per-answer verification route (the aggregation module's wiring
 lot): expose the per-answer claim aggregation over HTTP.
 
-The answer-aggregation module landed at S271
+The answer-aggregation module
 (``opti_oignon.agent.claim_aggregation``): a standalone, caller-driven surface
-that takes a list of (claim, source) pairs, runs each through the S267
+that takes a list of (claim, source) pairs, runs each through the
 verification role, and aggregates the per-pair verdicts fail-secure into a single
 per-answer verdict. The route / UI exposure was deferred there. This module is
 that wire: a single per-user ``POST`` that runs one ``verify_answer`` over a
 submitted batch of (claim, source) pairs and returns the structured aggregate for
 the caller to show and act on. Registered on the app exactly like
-``claim_verification_router``, the S268 precedent.
+``claim_verification_router``, the precedent.
 
-It mirrors the S268 single-pair route precisely; the only differences are the
+It mirrors the single-pair route precisely; the only differences are the
 payload (a batch of pairs, not one pair) and the result (the aggregate plus the
-per-pair list). The router is a DISTINCT object from the S268
+per-pair list). The router is a DISTINCT object from the
 ``claim_verification_router`` and shares the ``/api/claims`` prefix with a new
 path, so the single-pair route's surface is untouched.
 
 Design notes:
 
-- Not a model-reachable tool. Like the S268 route and the N.3 note-actions route,
+- Not a model-reachable tool. Like the single-pair route and the N.3 note-actions route,
   this surface is caller-driven (a UI, a citation-extraction step, or a later
   agent step submits a batch of pairs), not tool-called; it defines no tool
   schema and registers nothing in the agent tool registry. It is a thin wrapper:
@@ -42,7 +42,7 @@ Design notes:
 - No mode gate (CV-D4). The verification surface reaches no network and has no
   mode gate: it runs identically in Daily and Bulbe. So this route carries no
   mode dependency seam and builds the verifier with no mode provider, exactly as
-  the S268 route. The user's own caller-driven surface, with no egress, is not
+the single-pair route. The user's own caller-driven surface, with no egress, is not
   route-mode-gated.
 - The aggregation never raises; its structured ``AnswerVerificationResult``
   crosses the wire as ``AnswerVerificationResultSchema`` (the aggregate verdict,

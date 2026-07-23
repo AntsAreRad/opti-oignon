@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-API routes for Speculative Generation -- S70.
+API routes for Speculative Generation.
 
 Provides endpoints for status, config update, and test speculative generation.
-Mutually exclusive with cascading inference (S69): enabling one disables the other.
+Mutually exclusive with cascading inference: enabling one disables the other.
 """
 
 import logging

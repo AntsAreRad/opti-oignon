@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin marketplace API routes (S102).
+Plugin marketplace API routes.
 
 GET    /api/plugins/marketplace           -- Browse available plugins from index
 GET    /api/plugins/marketplace/search    -- Search by keyword/tag/author/hook
@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# MKT-01: defense-in-depth parity with routes_plugins (S136). The global
+# MKT-01: defense-in-depth parity with routes_plugins. The global
 # AuthMiddleware already enforces auth on these non-public paths; this
 # per-router dependency mirrors routes_plugins so the two /api/plugins
 # routers are consistent.
@@ -29,7 +29,7 @@ except Exception:
     def _get_current_user() -> dict:  # type: ignore[misc]
         """Fallback identity when the auth router is unavailable.
 
-        REV-2 (S219): mirrors the routes_users fallback so the review
+        REV-2: mirrors the routes_users fallback so the review
         author binding below always has an identity to bind to.
         """
         return {
@@ -97,7 +97,7 @@ class ReviewResponse(BaseModel):
     text: str = ""
     author: str = "anonymous"
     created_at: float = 0.0
-    # REV-2 (S219): authenticated owner identity; None on legacy rows.
+    # REV-2: authenticated owner identity; None on legacy rows.
     user_id: str | None = None
 
 
@@ -109,7 +109,7 @@ class ReviewListResponse(BaseModel):
 
 
 class AddReviewRequest(BaseModel):
-    # REV-2 (S219): no client-supplied author field. The author is
+    # REV-2: no client-supplied author field. The author is
     # derived server-side from the authenticated identity; an author
     # key sent by an older client is ignored by the model.
     rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Model Lifecycle Management -- S112.
+API routes for Model Lifecycle Management.
 
 Provides endpoints for pulling, deleting, updating models through
 the Ollama API, managing model aliases, and detecting stale models.

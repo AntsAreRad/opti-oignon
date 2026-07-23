@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Network Manager / Offline-First Intelligence -- S71.
+API routes for Network Manager / Offline-First Intelligence.
 
 Provides endpoints for connectivity status, queue management,
 and manual queue processing.

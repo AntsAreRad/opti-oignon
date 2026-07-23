@@ -6,7 +6,6 @@ SEARCH ROUTES - Opti-Oignon API
 Endpoints for web search proxy management, PII sanitization preview,
 and search configuration.
 
-Session: S82 (Anonymous Web Search / Tor Proxy)
 """
 
 import logging

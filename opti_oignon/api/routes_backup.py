@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-API routes for configuration backup and restore -- Opti-Oignon S121, S125.
+API routes for configuration backup and restore -- Opti-Oignon.
 
 Endpoints:
   GET  /api/backup/sections           -- List available sections with item counts
   GET  /api/backup/export             -- Export full or partial backup JSON
   POST /api/backup/import             -- Import backup with merge/replace strategy
   POST /api/backup/preview            -- Preview import diff without applying
-  POST /api/backup/export/encrypted   -- Export encrypted backup (S125)
-  POST /api/backup/import/encrypted   -- Import encrypted backup (S125)
+  POST /api/backup/export/encrypted   -- Export encrypted backup
+  POST /api/backup/import/encrypted   -- Import encrypted backup
 """
 
 import base64
@@ -30,7 +30,7 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -182,7 +182,7 @@ def import_backup(request: BackupImportRequest) -> JSONResponse:
 
 
 # -----------------------------------------------------------------
-# S125: Encrypted backup endpoints
+# Encrypted backup endpoints
 # -----------------------------------------------------------------
 
 class EncryptedExportRequest(BaseModel):
@@ -199,7 +199,7 @@ class EncryptedImportRequest(BaseModel):
     password: str = Field(description="Password used to encrypt the backup")
     encrypted_data: str = Field(description="Base64-encoded encrypted backup data")
     strategy: str = Field(default="merge", description="Import strategy: merge or replace")
-    # BK-03 (S194): explicit user override for the BK-01 signature policy.
+    # BK-03: explicit user override for the BK-01 signature policy.
     allow_unsigned: bool = Field(
         default=False,
         description="Explicitly allow restoring an unsigned/unverifiable backup",

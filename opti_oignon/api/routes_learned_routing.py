@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Learned Router — Opti-Oignon S67.
+API routes for Learned Router — Opti-Oignon.
 
 Endpoints for training status inspection, manual retraining,
 config management, live query classification, and A/B metrics.

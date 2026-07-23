@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Smart Routing and Profile Management (S54).
+API routes for Smart Routing and Profile Management.
 
 Provides endpoints for smart model selection, profile CRUD,
 auto-detection, and router configuration.
@@ -17,7 +17,7 @@ from .deps import (
     profile_manager,
 )
 
-# Conditional import of model health monitor (S63)
+# Conditional import of model health monitor
 try:
     from opti_oignon.model_health import ModelHealthRecord, ModelStatus, model_health_monitor
     MODEL_HEALTH_AVAILABLE = True
@@ -38,7 +38,7 @@ except ImportError:
     smart_router = None
     SmartRoutingResult = None
 
-# Conditional import of adaptive routing (S62)
+# Conditional import of adaptive routing
 try:
     from opti_oignon.adaptive_routing import feedback_routing_adapter
     ADAPTIVE_ROUTING_AVAILABLE = True
@@ -64,9 +64,9 @@ class SmartRoutingResponse(BaseModel):
     alternatives: list[dict[str, Any]] = Field(default_factory=list)
     profile_used: bool = False
     fallback: bool = False
-    feedback_adjusted: bool = False  # S62
-    failover: bool = False  # S63
-    original_model: str = ""  # S63
+    feedback_adjusted: bool = False
+    failover: bool = False
+    original_model: str = ""
 
 
 class PipelineRoutingResponse(BaseModel):
@@ -287,7 +287,7 @@ def save_profiles() -> dict:
 
 
 # =============================================================================
-# FEEDBACK ADJUSTMENTS (S62)
+# FEEDBACK ADJUSTMENTS
 # =============================================================================
 
 @router.get("/feedback-adjustments")
@@ -331,7 +331,7 @@ def invalidate_feedback_cache() -> dict:
 
 
 # =============================================================================
-# MODEL HEALTH ENDPOINTS (S63)
+# MODEL HEALTH ENDPOINTS
 # =============================================================================
 
 class ModelHealthResponse(BaseModel):

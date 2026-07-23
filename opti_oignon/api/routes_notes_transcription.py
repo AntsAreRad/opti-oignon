@@ -5,7 +5,7 @@ opt-in, sandboxed whisper.cpp transcription orchestration.
 Design notes:
 
 - A SEPARATE router (``notes_transcription_router`` at ``/api/notes/transcription``),
-  NOT folded into the S249 ``notes_attachments_router`` -- so that router's
+  NOT folded into the ``notes_attachments_router`` -- so that router's
   ``test_five_routes_exact`` pin stays green (the ``routes_note_actions`` /
   ``routes_notes_attachments`` precedent) and this is a pure chain addition. The
   attachment surface moves blobs (CRUD); this surface triggers compute (post

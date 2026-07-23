@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-API routes for Sandbox management -- S73/S116.
+API routes for Sandbox management.
 
 Provides endpoints for creating, managing, and executing tools
 within sandboxed environments. All filesystem operations executed
 through these endpoints run in isolation (bwrap or tempdir fallback).
 
-S116: Copy-out + human approval workflow endpoints:
+Copy-out + human approval workflow endpoints:
 - preview: read file content from sandbox for display
 - download: download a single approved file as binary
 - approve: approve specific files for copy-out
@@ -30,7 +30,6 @@ from .schemas import (
     HostBrowseEntry,
     HostBrowseResponse,
     QuickSandboxSessionInfo,
-    # S117
     QuickSandboxStatusResponse,
     QuickSandboxToggleRequest,
     QuickSandboxTTLRequest,
@@ -58,7 +57,7 @@ from .schemas import (
     SandboxCreateRequest,
     SandboxCreateResponse,
     SandboxDestroyResponse,
-    # S212 (Bloc 3)
+    # Bloc 3
     SandboxDiffEntry,
     SandboxDiffResponse,
     SandboxExecuteRequest,
@@ -67,10 +66,9 @@ from .schemas import (
     SandboxFilesResponse,
     SandboxInjectRequest,
     SandboxInjectResponse,
-    # S213 (Bloc 4)
+    # Bloc 4
     SandboxNetworkToggleRequest,
     SandboxNetworkToggleResponse,
-    # S116
     SandboxPreviewResponse,
     SandboxProvisionRefusedLine,
     SandboxProvisionRequest,
@@ -78,14 +76,14 @@ from .schemas import (
     SandboxRejectResponse,
     SandboxSessionInfo,
     SandboxStatusResponse,
-    # S210 (Bloc 1)
+    # Bloc 1
     SandboxStopResponse,
-    # S211 (Bloc 2)
+    # Bloc 2
     SandboxUploadRefused,
     SandboxUploadResponse,
 )
 
-# S210 (Bloc 1): the conversation <-> workspace binding store; guarded so the
+# Bloc 1: the conversation <-> workspace binding store; guarded so the
 # router still loads if the module is absent in a partial build.
 try:
     from opti_oignon import sandbox_workspace as _ws
@@ -94,7 +92,7 @@ except ImportError:
     _ws = None
     WORKSPACE_BINDING_AVAILABLE = False
 
-# S213 (Bloc 4): the binding-layer egress gate; guarded the same way. The
+# Bloc 4: the binding-layer egress gate; guarded the same way. The
 # fail-secure direction is REFUSAL: with the module absent, network_allowed
 # surfaces False on /status and the network/provision routes answer 503 --
 # an unavailable gate never permits.
@@ -105,13 +103,13 @@ except ImportError:
     _eg = None
     EGRESS_AVAILABLE = False
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:
     _emergency_stop = None
 
-# S210: the disk soft-quota refusal raised by the inject paths.
+# The disk soft-quota refusal raised by the inject paths.
 try:
     from opti_oignon.sandbox_manager import (
         WorkspaceQuotaExceeded as _QuotaError,
@@ -120,7 +118,7 @@ except ImportError:
     class _QuotaError(Exception):  # type: ignore[no-redef]
         """Placeholder when the manager module is absent."""
 
-# S210: effective_user_id isolation pattern for workspace ownership; the
+# effective_user_id isolation pattern for workspace ownership; the
 # fallback keeps the single-user posture when the module is absent.
 try:
     from opti_oignon.user_isolation import effective_user_id as _effective_user_id
@@ -128,7 +126,7 @@ except ImportError:
     def _effective_user_id(user_id, single_user_mode: bool = True) -> str:  # type: ignore[misc]
         return user_id or "local"
 
-# S117: Quick sandbox imports
+# Quick sandbox imports
 try:
     from opti_oignon.quick_sandbox import (
         QUICK_SANDBOX_AVAILABLE,
@@ -142,7 +140,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -154,7 +152,7 @@ except ImportError:
 
 
 def _current_uid(user: dict) -> str:
-    """The effective owner id of the calling user (S210)."""
+    """The effective owner id of the calling user."""
     return _effective_user_id((user or {}).get("sub"))
 
 router = APIRouter(prefix="/api/sandbox", tags=["sandbox"], dependencies=_auth_dep)
@@ -162,7 +160,7 @@ router = APIRouter(prefix="/api/sandbox", tags=["sandbox"], dependencies=_auth_d
 # Default export directory for copy-out
 _DEFAULT_EXPORT_DIR = os.path.join("data", "sandbox_exports")
 
-# S136 audit fix: restrict copy-out destination to the data directory.
+# Audit fix: restrict copy-out destination to the data directory.
 # Without this, an API caller could write to arbitrary host paths
 # (e.g. /etc/cron.d/, ~/.ssh/) which breaks the sandbox security model.
 _ALLOWED_EXPORT_ROOT = os.path.realpath(
@@ -212,7 +210,7 @@ def get_sandbox_status() -> dict:
     if not SANDBOX_AVAILABLE or sandbox_manager is None:
         return SandboxStatusResponse(available=False)
 
-    # S213: the live egress-gate answer (fail-secure False when the gate is
+    # The live egress-gate answer (fail-secure False when the gate is
     # absent or errors) plus the configured caps for the settings strip.
     network_allowed = False
     if EGRESS_AVAILABLE and _eg is not None:
@@ -262,7 +260,7 @@ def create_sandbox(
 ) -> dict:
     """Create a new sandbox session (workspace)."""
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     _require_sandbox()
 
     try:
@@ -297,7 +295,7 @@ def inject_files(request: SandboxInjectRequest) -> dict:
             request.session_id, request.file_paths
         )
     except _QuotaError as exc:
-        # S210: the disk soft quota refuses the copy-in (413), never kills
+        # The disk soft quota refuses the copy-in (413), never kills
         # the workspace.
         raise HTTPException(status_code=413, detail=str(exc))
     except ValueError as exc:
@@ -318,7 +316,7 @@ def execute_sandbox_tool(request: SandboxExecuteRequest) -> dict:
     Arguments vary per tool -- see tool definitions.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     _require_sandbox()
     if not FILE_TOOLS_AVAILABLE:
         raise HTTPException(
@@ -506,7 +504,7 @@ def list_sandbox_files(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S116: Preview endpoint
+# Preview endpoint
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -536,7 +534,7 @@ def preview_sandbox_file(session_id: str, path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S116: Download endpoint (binary, requires approval)
+# Download endpoint (binary, requires approval)
 # ---------------------------------------------------------------------------
 
 @router.get("/download/{session_id}/{path:path}")
@@ -577,7 +575,7 @@ def download_sandbox_file(session_id: str, path: str) -> FileResponse:
 
 
 # ---------------------------------------------------------------------------
-# S116: Approve endpoint
+# Approve endpoint
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -608,7 +606,7 @@ def approve_sandbox_files(session_id: str, request: SandboxApproveRequest) -> di
 
 
 # ---------------------------------------------------------------------------
-# S116: Copy-out endpoint (batch copy approved files to host)
+# Copy-out endpoint (batch copy approved files to host)
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -651,7 +649,7 @@ def copy_out_sandbox_files(session_id: str, request: SandboxApproveRequest) -> d
 
 
 # ---------------------------------------------------------------------------
-# S116: Reject endpoint
+# Reject endpoint
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -675,7 +673,7 @@ def reject_sandbox_files(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S116: Approval info endpoint
+# Approval info endpoint
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -697,7 +695,7 @@ def get_approval_info(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S116: Approval audit endpoint
+# Approval audit endpoint
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -729,7 +727,7 @@ def get_approval_audit(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S117: Quick Sandbox endpoints
+# Quick Sandbox endpoints
 # ---------------------------------------------------------------------------
 
 @router.get("/quick/status", response_model=QuickSandboxStatusResponse)
@@ -868,7 +866,7 @@ def stop_sandbox_command(
 
 
 # ---------------------------------------------------------------------------
-# Conversation binding (S210, Bloc 1)
+# Conversation binding (Bloc 1)
 # ---------------------------------------------------------------------------
 
 def _require_bindings():
@@ -957,16 +955,16 @@ def get_conversation_binding(conversation_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Copy-in (S211, Bloc 2): drag-and-drop upload, allowlisted host browse,
+# Copy-in (Bloc 2): drag-and-drop upload, allowlisted host browse,
 # symlink-safe host clone. All three are EXPLICIT user actions through the
-# manager UI -- the model can trigger none of them (S73/S74). The baseline
+# manager UI -- the model can trigger none of them. The baseline
 # manifest (spec section 6.1, the seam Bloc 3's diff consumes) is recorded
 # here after a successful manager operation; the manager computes the hashes
 # on the fly and never imports the manifest store (no cycle).
 # ---------------------------------------------------------------------------
 
 def _require_owned_session(session_id: str, current_user: dict):
-    """404 on an unknown session, 403 on a foreign owner (the S210 codes)."""
+    """404 on an unknown session, 403 on a foreign owner (the codes)."""
     session = sandbox_manager.get_session(session_id)
     if session is None:
         raise HTTPException(
@@ -1169,13 +1167,13 @@ def clone_host_directory(
 
 
 # ---------------------------------------------------------------------------
-# S212 (Bloc 3): diff-gated write-back -- diff, deletion confirmation, apply
+# Bloc 3: diff-gated write-back -- diff, deletion confirmation, apply
 # ---------------------------------------------------------------------------
 
 def _require_workspace_module() -> None:
     """503 when the workspace module is absent (partial build).
 
-    The diff and the apply ARE the feature here; unlike the S211 manifest
+    The diff and the apply ARE the feature here; unlike the manifest
     recording (an honest no-op), they cannot degrade.
     """
     if not WORKSPACE_BINDING_AVAILABLE or _ws is None:
@@ -1346,7 +1344,7 @@ def apply_workspace_changes(
     )
 
 
-# -- S213 (Bloc 4): the per-workspace network gate and the provision run --
+# -- (Bloc 4): the per-workspace network gate and the provision run --
 
 
 def _require_egress() -> None:
@@ -1421,7 +1419,7 @@ def provision_workspace(
     audited -- surfaced honestly in the 200 body, the execute posture.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     _require_sandbox()
     _require_egress()
     session = _require_owned_session(session_id, current_user)
@@ -1582,7 +1580,7 @@ def destroy_sandbox(
             detail=f"Session not found: {session_id}",
         )
 
-    # S211: forget the baseline manifest so a reused session id never
+    # Forget the baseline manifest so a reused session id never
     # inherits a stale baseline (guarded; absence must not break destroy).
     if WORKSPACE_BINDING_AVAILABLE and _ws is not None:
         try:

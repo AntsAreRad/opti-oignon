@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Humanizer -- S86.
+API routes for Humanizer.
 
 Provides endpoints for text humanization, config management,
 A/B feedback submission, and feedback analytics.

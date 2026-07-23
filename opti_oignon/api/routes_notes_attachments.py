@@ -3,7 +3,7 @@
 expose the N.1 ``attachment`` manifest and the two-layer ``NotesBlobStore`` over
 HTTP.
 
-The Notes data layer landed at S243 (``opti_oignon/notes/``) and already carries
+The Notes data layer (``opti_oignon/notes/``) already carries
 the full media data layer for all three kinds: the ``attachment`` manifest table
 (with ``transcript_text`` / ``caption_text`` / ``ocr_text``), the
 ``{audio, image, drawing}`` kind allowlist, and the per-attachment AES-256-GCM
@@ -16,9 +16,9 @@ the manifest rows; this module is that surface, the client the capture / gallery
 Design notes:
 
 - A SEPARATE router. The attachment endpoints live on ``notes_attachments_router``
-  (prefix ``/api/notes/attachments``), NOT on the S245 ``notes_router`` -- the
+  (prefix ``/api/notes/attachments``), NOT on the ``notes_router`` -- the
   ``routes_note_actions`` precedent. Folding them into ``notes_router`` would grow
-  its route set and break the S245 five-routes pin; keeping them separate makes
+  its route set and break the five-routes pin; keeping them separate makes
   this a pure chain addition. Registered on the app exactly like ``notes_router``.
 - Per-user isolation is the store's (``effective_user_id``). The route resolves
   the active user through the auth dependency exactly as ``routes_notes`` does and

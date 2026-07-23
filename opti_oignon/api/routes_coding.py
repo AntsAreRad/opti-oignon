@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-API routes for the Coding Agent -- S74/S77/S78/S79.
+API routes for the Coding Agent.
 
 Provides endpoints for the multi-step autonomous coding loop:
 start task, generate/approve plan, execute steps, review diffs, apply changes.
 
-S77: Background execution via _RunState singleton (SQ-07).
+Background execution via _RunState singleton (SQ-07).
 POST /api/coding/execute-all returns immediately, runs in background thread.
 POST /api/coding/stop signals graceful stop.
 
-S78: Coding History Analytics (SQ-08).
+Coding History Analytics (SQ-08).
 GET /api/coding/history/analytics returns full analytics payload.
 
-S79: Export (JSON/CSV) and batch delete operations.
+Export (JSON/CSV) and batch delete operations.
 GET /api/coding/history/export?format=json|csv
 POST /api/coding/history/batch-delete
 
@@ -69,7 +69,7 @@ from .schemas import (
     CodingTimeTrend,
 )
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:  # pragma: no cover - constrained environments only
@@ -157,7 +157,7 @@ _broadcaster = _ProgressBroadcaster()
 class _RunState:
     """Singleton tracking background execute-all thread state.
 
-    Pattern from S60 BenchmarkRunner: a single background thread
+    Pattern from BenchmarkRunner: a single background thread
     runs execute_all_steps while the REST endpoint returns immediately.
     """
 
@@ -278,7 +278,7 @@ def start_coding_task(request: CodingTaskRequest) -> dict:
     and returns initial status.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     agent = _ensure_agent_with_callback()
 
     try:
@@ -367,7 +367,7 @@ def execute_next_step() -> dict:
     Returns the step result. Returns 404 when all steps are done.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     agent = _ensure_agent_with_callback()
 
     if agent.plan is None:
@@ -402,7 +402,7 @@ def execute_all_steps_background() -> dict:
     Returns 409 if already running or no plan available.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     agent = _ensure_agent_with_callback()
 
     if agent.plan is None:
@@ -528,7 +528,7 @@ async def websocket_coding_live(ws: WebSocket) -> None:
     """
     await ws.accept()
 
-    # S136 audit fix: authenticate WebSocket connection
+    # Audit fix: authenticate WebSocket connection
     try:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(ws)
@@ -591,7 +591,7 @@ async def websocket_coding_live(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task History endpoints (S76)
+# Task History endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -669,7 +669,7 @@ def get_history_analytics() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Export & Batch Delete (S79)
+# Export & Batch Delete
 # ---------------------------------------------------------------------------
 
 
@@ -810,7 +810,7 @@ def resume_task(task_id: str, request: CodingResumeRequest | None = None) -> dic
     via the normal start_coding_task flow with restored state.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     if not CODING_HISTORY_AVAILABLE or coding_history_store is None:
         raise HTTPException(
             status_code=503, detail="Coding history not available"

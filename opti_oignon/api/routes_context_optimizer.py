@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for the Context Optimizer (S123).
+API routes for the Context Optimizer.
 
 Provides endpoints for optimizer configuration, priority presets,
 optimization reports, and enhanced budget calculation with preset support.

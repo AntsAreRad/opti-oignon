@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Conversation Compressor — Opti-Oignon S66.
+API routes for Conversation Compressor — Opti-Oignon.
 
 Endpoints for compression config inspection, runtime updates,
 per-conversation stats, and full-archive search.

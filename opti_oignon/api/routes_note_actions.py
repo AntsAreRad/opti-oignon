@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""FastAPI note-actions route (N.3 backend half): expose the S246 selection-action
+"""FastAPI note-actions route (N.3 backend half): expose the selection-action
 runner over HTTP.
 
-The agent-side selection-action surface landed at S246
+The agent-side selection-action surface
 (``opti_oignon.agent.note_actions``): from a note selection the user asks one of
 five local actions -- fact-check, develop, summarize, rewrite, make-checklist --
 or the Daily-only fact-check-with-web. This module is the HTTP surface the

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent eval API routes -- S230 (AGT_SPEC Section 7.4).
+Agent eval API routes (AGT_SPEC Section 7.4).
 
 The cycle's ONLY new router. Five endpoints under /api/agent-eval, the
 benchmark idiom throughout: POST /run answers 409 when a run is already in

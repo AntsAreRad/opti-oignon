@@ -267,7 +267,7 @@ def context_stats(
         except Exception as e:
             logger.debug(f"Impossible de recuperer les stats: {e}")
 
-        # S123: Include optimization report when available
+        # Include optimization report when available
         try:
             opt_report = executor.last_optimization_report
             if opt_report is not None:

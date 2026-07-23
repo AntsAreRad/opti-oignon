@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Performance Dashboard -- S72 Step 2.
+API routes for Performance Dashboard -- Step 2.
 
 Provides endpoints for real-time performance metrics, latency stats,
 drift detection, optimization recommendations, and metric history.

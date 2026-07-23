@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Security headers middleware for Opti-Oignon (S124).
+Security headers middleware for Opti-Oignon.
 
 Adds standard security headers to every HTTP response:
 - X-Content-Type-Options
@@ -154,7 +154,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 f"max-age={max_age}; includeSubDomains"
             )
 
-        # S133: Apply hardened headers for remote (non-localhost) requests
+        # Apply hardened headers for remote (non-localhost) requests
         self._apply_remote_headers(request, response)
 
         return response

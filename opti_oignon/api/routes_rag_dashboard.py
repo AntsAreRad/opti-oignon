@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG DASHBOARD API routes (S100).
+RAG DASHBOARD API routes.
 
 GET    /api/rag/dashboard/stats       -- Overall dashboard statistics
 GET    /api/rag/dashboard/usage       -- Query usage over time

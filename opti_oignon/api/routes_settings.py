@@ -92,7 +92,7 @@ def get_settings() -> dict:
     )
 
 
-# -- Theme endpoints (S152) --
+# -- Theme endpoints --
 # These MUST be defined before the /{key} catch-all route.
 
 THEME_PREF_KEY = "theme_config"
@@ -221,7 +221,7 @@ def save_theme(request: ThemeConfigRequest) -> ThemeConfigResponse:
     return _theme_response(config_dict, variables)
 
 
-# -- Custom preset management (S152) --
+# -- Custom preset management --
 
 @router.post("/theme/presets/custom", response_model=ThemePresetResponse)
 def create_custom_preset(request: CustomPresetCreateRequest) -> ThemePresetResponse:
@@ -316,7 +316,7 @@ def import_custom_presets(request: CustomPresetImportRequest) -> ThemePresetsLis
     return ThemePresetsListResponse(presets=presets)
 
 
-# -- S153: Keyboard shortcuts endpoints --
+# -- Keyboard shortcuts endpoints --
 # These MUST be defined before the /{key} catch-all route.
 
 @router.get("/keyboard_shortcuts", response_model=KeyboardShortcutsResponse)

@@ -5,7 +5,7 @@ Main FastAPI application for Opti-Oignon.
 Provides a REST API for the local LLM optimization suite,
 served via uvicorn (default port 8001).
 
-S134: Heavy module imports are deferred via lazy_loader in deps.py.
+Heavy module imports are deferred via lazy_loader in deps.py.
 Route modules are thin wrappers and load eagerly so all endpoints are
 available immediately. The actual heavy dependencies (chromadb, etc.)
 only import on first access to the relevant API endpoint.
@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
         logger.warning("boot: startup security checks unavailable", exc_info=True)
     if _boot_guard is not None:
         _boot_guard()
-    # Startup: singletons initialize on import; heavy deps lazy-loaded (S134)
+    # Startup: singletons initialize on import; heavy deps lazy-loaded
     logger.info("Opti-Oignon API started")
     # Veilid sync auto-driver: armed only when explicitly opted in
     # (OPTI_SYNC_AUTORUN); a no-op otherwise, and never breaks startup. The
@@ -156,7 +156,7 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Security headers middleware (S124 Phase 4)
+# Security headers middleware (Phase 4)
 #
 # Registered BEFORE CORS so that security headers are added to every
 # response without overwriting CORS headers.
@@ -169,7 +169,7 @@ except Exception as _sec_exc:
     logger.warning("Failed to register security headers middleware: %s", _sec_exc)
 
 # ---------------------------------------------------------------------------
-# Content Security Policy middleware (S155)
+# Content Security Policy middleware
 #
 # Nonce-based strict CSP with report-only mode (default).
 # Generates a unique nonce per request, restricts connect-src to localhost.
@@ -183,7 +183,7 @@ except Exception as _csp_exc:
     logger.warning("Failed to register CSP middleware: %s", _csp_exc)
 
 # ---------------------------------------------------------------------------
-# Security mode middleware (S127)
+# Security mode middleware
 #
 # Enforces Daily/Bulbe mode restrictions: blocks search when kill switch
 # is engaged, rejects Bearer tokens in Bulbe, enforces plugin allowlist,
@@ -198,7 +198,7 @@ except Exception as _mode_exc:
     logger.warning("Failed to register security mode middleware: %s", _mode_exc)
 
 # ---------------------------------------------------------------------------
-# CSRF middleware (S136 audit fix)
+# CSRF middleware (audit fix)
 #
 # Validates double-submit cookie on all POST/PUT/DELETE/PATCH requests.
 # Previously _validate_csrf() was defined but never called -- this
@@ -212,7 +212,7 @@ except Exception as _csrf_exc:
     logger.warning("Failed to register CSRF middleware: %s", _csrf_exc)
 
 # ---------------------------------------------------------------------------
-# Global auth middleware (S136 audit fix)
+# Global auth middleware (audit fix)
 #
 # Deny-by-default: all endpoints require authentication except an
 # explicit allowlist (login, register, health, OpenAPI).  This replaces
@@ -227,7 +227,7 @@ except Exception as _auth_mw_exc:
     logger.warning("Failed to register auth middleware: %s", _auth_mw_exc)
 
 # ---------------------------------------------------------------------------
-# CORS configuration (S124 — hardened)
+# CORS configuration (hardened)
 #
 # Default: localhost-only origins. Credentials are allowed ONLY when origins
 # are explicitly listed (never with wildcard).  The env var
@@ -389,23 +389,23 @@ app.include_router(telemetry_router)
 app.include_router(profiler_router)
 app.include_router(backup_router)
 app.include_router(context_optimizer_router)
-# Sandboxed agent loop: status / cancel / run / WebSocket event stream (S177,
+# Sandboxed agent loop: status / cancel / run / WebSocket event stream (
 # Theme 3 / Odysseus Core). Guarded so a partial agent build cannot block app
 # startup; Bulbe approvals reuse /api/security/tool-approval/*.
 if agent_router is not None:
     app.include_router(agent_router)
-# Veilid sync: list / status / watermark / run a pull round (S180, Theme 4 /
+# Veilid sync: list / status / watermark / run a pull round (Theme 4 /
 # Veilid Sync). Guarded so a partial veilid build cannot block app startup; the
 # run surface is Daily-only and refuses under Bulbe via the binding-layer gate,
 # and a sensitive apply reuses /api/security/tool-approval/* through the engine.
 if sync_router is not None:
     app.include_router(sync_router)
-# Resource governor: status / admissions / evict / config (S227, Resource
+# Resource governor: status / admissions / evict / config (Resource
 # Governor cycle Bloc 4). Guarded so a constrained build cannot block app
 # startup; mode-free (it behaves identically in Daily and Bulbe).
 if governor_router is not None:
     app.include_router(governor_router)
-# Agent eval harness: run / status / results / history / cancel (S230, AGT
+# Agent eval harness: run / status / results / history / cancel (AGT
 # cycle Lot 3). Guarded so a partial agent_eval build cannot block app
 # startup; the runner consumes the Lot 1/2 agent surface read-only and the
 # admission contract rides the resource governor when present.
@@ -414,7 +414,7 @@ if agent_eval_router is not None:
 app.include_router(security_router)
 app.include_router(users_router)
 
-# CSP violation report endpoint (S155)
+# CSP violation report endpoint
 try:
     from opti_oignon.middleware.csp import csp_router as _csp_router
     if _csp_router is not None:
@@ -585,13 +585,13 @@ def health_check():
             "inference_profiler": INFERENCE_PROFILER_AVAILABLE,
             "context_optimizer": CONTEXT_OPTIMIZER_AVAILABLE,
         },
-        # S124: Security and sandbox isolation status
+        # Security and sandbox isolation status
         "security": _get_health_security_info(),
     }
 
 
 def _get_health_security_info() -> dict:
-    """Build security section for /api/health response (S124)."""
+    """Build security section for /api/health response."""
     info: dict = {}
 
     # Sandbox isolation status
@@ -626,7 +626,7 @@ def _get_health_security_info() -> dict:
     except Exception:
         info["rate_limiting_enabled"] = False
 
-    # S157: Red team resistance summary
+    # Red team resistance summary
     try:
         from .routes_security import _redteam_report_store
         if _redteam_report_store:
@@ -648,7 +648,7 @@ def _get_health_security_info() -> dict:
     except Exception:
         info["redteam"] = {"available": False}
 
-    # S158: Security scheduler summary
+    # Security scheduler summary
     try:
         from opti_oignon.security_scheduler import get_scheduler
         scheduler = get_scheduler()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API Routes for Inference Backend Management — S105
+API Routes for Inference Backend Management
 ===================================================
 
 Endpoints for listing backends, switching active backend,

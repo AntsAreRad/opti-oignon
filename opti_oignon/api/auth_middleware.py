@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Global Authentication Middleware for Opti-Oignon (S136 audit fix).
+Global Authentication Middleware for Opti-Oignon (audit fix).
 
 Enforces authentication on ALL API endpoints by default.  Only explicitly
 listed public endpoints are exempt.  This replaces the per-router

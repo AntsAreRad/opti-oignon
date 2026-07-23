@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vision configuration API routes (S94).
+Vision configuration API routes.
 
 GET  /api/vision/config          -- Current vision config + effective model
 PUT  /api/vision/config          -- Update vision model selection

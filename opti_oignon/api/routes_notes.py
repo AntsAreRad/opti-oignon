@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """FastAPI notes route (N.2 backend half): bind the N.1 ``NotesStore`` to HTTP.
 
-The Notes data layer landed at S243 (``opti_oignon/notes/``) and the
-LLM-from-chat write surface at S244 (the gated ``manage_notes`` tool). This
+The Notes data layer (``opti_oignon/notes/``) and the
+LLM-from-chat write surface (the gated ``manage_notes`` tool) came first. This
 module is the HTTP surface the SvelteKit notes client (N.2 proper) rides: list /
 get / create / update / delete over the per-user :class:`NotesStore`, registered
 on the app exactly like the per-user ``memories_router``.
@@ -57,7 +57,7 @@ except Exception:  # pragma: no cover - constrained environments
     get_notes_store = None  # type: ignore[assignment]
 
 try:
-    # N.8 (S265): the section-4 compaction watermark is recorded through the
+    # N.8: the section-4 compaction watermark is recorded through the
     # same append-only update store the update legs (routes_note_updates) use.
     from opti_oignon.notes.note_updates_store import get_note_updates_store
 
@@ -166,7 +166,7 @@ def _record_to_schema(record: Any) -> NoteSchema:
         created_at=record.created_at,
         updated_at=record.updated_at,
         deleted=bool(record.deleted),
-        # N.9 (S256): getattr-defensive so a pre-N.9 record shape still maps
+        # N.9: getattr-defensive so a pre-N.9 record shape still maps
         # (fail-secure: absent reads False).
         mobile_allowed=bool(getattr(record, "mobile_allowed", False)),
     )
@@ -253,7 +253,7 @@ def update_note(
     existing = store.get_note(note_id, user_id=user_id)
     if existing is None or existing.deleted:
         raise HTTPException(status_code=404, detail="Note not found")
-    # N.9 (S256): the per-item phone-sync opt-in rides this existing PATCH
+    # N.9: the per-item phone-sync opt-in rides this existing PATCH
     # leg (no new route) and ONLY through the dedicated setter -- the flag
     # is deliberately not an updatable column, so the generic path below and
     # the gated manage_notes tool can never flip it (decision N9-D3). A
@@ -265,10 +265,10 @@ def update_note(
     record = store.update_note(note_id, user_id=user_id, **fields)
     if record is None:  # pragma: no cover - race
         raise HTTPException(status_code=404, detail="Note not found")
-    # N.8 (S265): the section-4 compaction trigger. When the client folds the
+    # N.8: the section-4 compaction trigger. When the client folds the
     # update log into this whole-blob PATCH it carries the highest local seq
     # folded -- the checkpoint watermark. Record it through the update store
-    # AFTER the body commit (the S257 placement precedent), then prune the
+    # AFTER the body commit (the placement precedent), then prune the
     # folded tail lazily (prune_below_watermark never over-prunes: rows above
     # the watermark survive, and serving never depends on pruned history).
     # Omitted records nothing (fail-secure); a missing update store is a

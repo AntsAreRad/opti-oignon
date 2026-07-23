@@ -202,7 +202,7 @@ def memory_health() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S174: MemoryStore-backed surface (the two-tier memory store).
+# MemoryStore-backed surface (the two-tier memory store).
 #
 # Mounted under a distinct prefix /api/memories so the legacy /api/memory
 # surface above stays intact. Exposes list, soft delete, restore, and edit over

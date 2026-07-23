@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Security Mode Middleware for Opti-Oignon (S127).
+Security Mode Middleware for Opti-Oignon.
 
 Enforces mode-specific restrictions on every HTTP request based on
 the current Daily/Bulbe mode.  Sits in the middleware stack alongside
-the S124 SecurityHeadersMiddleware.
+the SecurityHeadersMiddleware.
 
 In **Bulbe** mode:
   - Block search endpoints if kill switch is engaged
@@ -191,7 +191,7 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
 
         # --- Bulbe mode: strict enforcement ---
 
-        # 0. S133 Defense layer 3: Reject non-localhost requests in Bulbe.
+        # 0. Defense layer 3: Reject non-localhost requests in Bulbe.
         #    Even if binding somehow leaked to a non-local interface,
         #    this middleware blocks any request not from 127.0.0.1 or ::1.
         client_host = request.client.host if request.client else None

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""FastAPI notes-update legs (N.8 editor seam): bind the S263 update store.
+"""FastAPI notes-update legs (N.8 editor seam): bind the update store.
 
-The Notes body collaboration model (NOTES_CRDT_SPEC.md, decided at S262) keeps
+The Notes body collaboration model (NOTES_CRDT_SPEC.md) keeps
 the CRDT in the client and moves opaque Yjs update blobs through the platform.
-The at-rest append-only ``note_update`` store landed at S243's sibling at S263,
-and the transport (the ``note_update`` record kind on the S256 seam, the S264
+The at-rest append-only ``note_update`` store landed first,
+and the transport (the ``note_update`` record kind on the seam, the
 serve floor) followed. This module is the HTTP surface the SvelteKit editor
 rides for the update log, alongside the five whole-note routes in
 ``routes_notes``:

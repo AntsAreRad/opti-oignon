@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin management API routes (S101).
+Plugin management API routes.
 
 GET    /api/plugins                — List installed plugins
 POST   /api/plugins/install       — Install from directory/archive
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -233,7 +233,7 @@ def install_plugin(req: InstallRequest) -> dict:
         )
 
 
-# S114: Debug endpoint for tracing hook registration and execution
+# Debug endpoint for tracing hook registration and execution
 @router.get("/debug")
 def plugin_debug() -> dict:
     """Diagnostic endpoint: shows registered hooks and execution stats.

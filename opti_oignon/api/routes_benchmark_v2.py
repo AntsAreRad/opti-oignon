@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Benchmark V2 — S88 + S89 + S90 + S91.
+API routes for Benchmark V2.
 
 Provides endpoints for listing profiles, starting benchmark runs,
 polling progress, retrieving results, comparing models, viewing
@@ -123,7 +123,7 @@ def start_run(request: BenchmarkV2RunRequest) -> dict:
             detail="judge_model is required when use_judge is true",
         )
 
-    # S193 BMK-04: timing-based speed scores are only valid when a single
+    # BMK-04: timing-based speed scores are only valid when a single
     # benchmark owns the Ollama backend; mirror the v1 single-run guard.
     if getattr(benchmark_runner, "is_busy", False):
         raise HTTPException(
@@ -397,7 +397,7 @@ def get_history(
     )
 
 
-# ---- Leaderboard (S89) ----
+# ---- Leaderboard ----
 
 @router.get("/leaderboard", response_model=BenchmarkV2LeaderboardResponse)
 def get_leaderboard(
@@ -438,7 +438,7 @@ def get_leaderboard(
     )
 
 
-# ---- Head-to-Head (S89) ----
+# ---- Head-to-Head ----
 
 @router.get("/head-to-head", response_model=BenchmarkV2HeadToHeadResponse)
 def head_to_head(
@@ -517,7 +517,7 @@ def head_to_head(
     )
 
 
-# ---- Trends (S89) ----
+# ---- Trends ----
 
 @router.get("/trends", response_model=BenchmarkV2TrendResponse)
 def get_trends(
@@ -575,7 +575,7 @@ def get_trends(
     )
 
 
-# ---- Recommendations (S89) ----
+# ---- Recommendations ----
 
 @router.get("/recommendations", response_model=BenchmarkV2RecommendationsResponse)
 def get_recommendations() -> dict:
@@ -641,7 +641,7 @@ def apply_recommendations() -> dict:
     )
 
 
-# ---- Export (S89) ----
+# ---- Export ----
 
 @router.get("/export/{run_id}")
 def export_results(
@@ -740,7 +740,7 @@ def _export_csv(run_id: str, data: dict) -> StreamingResponse:
 
 
 # =========================================================================
-# S90 — Custom Profile CRUD
+# Custom Profile CRUD
 # =========================================================================
 
 @router.get(
@@ -920,7 +920,7 @@ def preview_profile_questions(categories: list[str]) -> dict:
 
 
 # =========================================================================
-# S90 — Auto-Trigger Management
+# Auto-Trigger Management
 # =========================================================================
 
 @router.get(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Prompt Optimization — Opti-Oignon S65.
+API routes for Prompt Optimization — Opti-Oignon.
 
 Endpoints for token budget inspection, template listing,
 template retrieval, runtime overrides, and full config.

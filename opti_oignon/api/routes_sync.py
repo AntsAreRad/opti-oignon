@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Live API route for Veilid sync (S180 Goal 3, Theme 4 / Veilid Sync).
+"""Live API route for Veilid sync (Goal 3, Theme 4 / Veilid Sync).
 
 Wires the sync engine behind a thin, guarded FastAPI surface, the same shape as
 the agent route: a web-free core that takes resolved dependencies and returns
 plain payloads, and a thin FastAPI wrapper over it that maps faults to HTTP
-codes. The contract the eventual sync panel consumes (S182):
+codes. The contract the eventual sync panel consumes:
 
 - ``GET  /api/sync/peers``                       -> ``{peers: [...]}``
 - ``GET  /api/sync/peers/{peer_id}``             -> one peer's status
@@ -19,7 +19,7 @@ codes. The contract the eventual sync panel consumes (S182):
 
 The list, status, and watermark surfaces read the per-peer store and work now.
 The run surface drives a full pull round through the engine; the live Veilid
-transport that supplies the peer over a private route lands in S181, so the
+transport that supplies the peer over a private route comes later, so the
 handler resolves no live peer yet and reports that the transport is unavailable.
 The web-free ``run_sync_payload`` takes an injected peer, so the round contract is
 exercised in isolation with a fake peer without the framework or a live node.
@@ -32,7 +32,7 @@ handler policy. Approval: a sensitive apply over sync (a skill record) goes thro
 the same human gate as the agent's ``manage_skills`` and ``manage_memory`` writes,
 reused verbatim -- the run handler passes no override, so the engine consults the
 existing manager-backed ``allowlists.request_approval``. Pairing peers (add /
-remove) is the S182 panel; S180 exposes the read and run surfaces.
+remove) belong to the panel; this module exposes the read and run surfaces.
 
 The web-free helpers are defined at module level, outside the FastAPI block, so the
 contract is importable and testable where fastapi is absent (the sandbox). The
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:  # pragma: no cover - constrained environments only
@@ -114,11 +114,11 @@ except Exception:  # pragma: no cover - constrained environments only
 def _peer_to_dict(rec: Any) -> dict[str, Any]:
     """Serialise a stored peer for the wire (the public routing key included).
 
-    PAIR-02 (S206): ``pending`` flags an entry awaiting the mutual
+    PAIR-02: ``pending`` flags an entry awaiting the mutual
     confirmation (it gates nothing until confirmed) and ``key_changed``
     distinguishes the demotion case -- a re-pair carried a different signing
     key -- from a fresh pairing, so the panel can say why a confirmation is
-    being asked again. S258 (PAIR-03): ``device_class`` rides too (``None``
+    being asked again. PAIR-03: ``device_class`` rides too (``None``
     for the grandfathered NULL), so the pending panel shows the RECORDED
     class next to the confirmation code -- the human-visible compensating
     control for the code's deliberate class exclusion -- and the later UI
@@ -151,7 +151,7 @@ def peer_status_payload(
     When a status store is supplied, the payload is enriched with the peer's
     last-sync time (the timestamp of its last successful round, empty when none or
     when the last attempt failed) and the full outcome of its last round. With no
-    status store the payload is exactly the stored peer record, so the S180
+    status store the payload is exactly the stored peer record, so the
     contract is unchanged.
     """
     rec = store.get_peer(peer_id)
@@ -232,9 +232,9 @@ def peer_watermark_payload(store: Any, peer_id: str) -> dict[str, Any]:
 def round_result_to_dict(result: Any) -> dict[str, Any]:
     """Shape a RoundResult into a JSON-safe payload. Pure.
 
-    S205 (VL-01): ``refused`` (signature-seam refusals) and ``unverified``
+    VL-01: ``refused`` (signature-seam refusals) and ``unverified``
     (records accepted without verification -- the verify-incapable posture;
-    the historical unkeyed-origin grace closed at S208) join the payload
+    the historical unkeyed-origin grace closed) join the payload
     additively, the
     PRT-03 reject-surfacing idiom extended, so SyncPanel can show them; read
     defensively so a pre-VL-01 result still shapes.
@@ -364,13 +364,13 @@ def self_pairing_payload(
 
     Pure: it delegates to the pairing module's pure builder, which computes the
     integrity check over the public material, and returns both the structured
-    payload and its compact JSON form (what a QR encodes). S206: the device's
-    signing PUBLIC key (S205, VL-01) is folded in when given -- closing the
+    payload and its compact JSON form (what a QR encodes). The device's
+    signing PUBLIC key (VL-01) is folded in when given -- closing the
     gap where the module-level extension existed but the production surface
     never threaded it, leaving every real pairing unkeyed -- and ``None``
     keeps the honest pre-VL-01 payload (a device that cannot sign still
-    pairs). S258 (PAIR-03): the device class is threaded the same way, in
-    the SAME session as the module half (the S206 lesson applied forward);
+    pairs). PAIR-03: the device class is threaded the same way, in
+    the SAME session as the module half (the lesson applied forward);
     ``None`` keeps the class-less payload and its historical digest. Raises
     ``ValueError`` on an empty identity or key or an out-of-vocabulary class
     (a programmer error), never on untrusted input.
@@ -445,11 +445,11 @@ def accept_pairing(
 
     Parses the payload defensively and, on a valid one, registers the peer via the
     engine's ``register_peer`` (the upsert that preserves the watermark on a re-pair
-    and audits the registration). PAIR-02 (S206): the ceremony registers the
+    and audits the registration). PAIR-02: the ceremony registers the
     peer PENDING; the returned dict carries the ``pending`` flag and, when a
     ``store`` is supplied, the ``confirmation_code`` both humans must compare
     (``None`` when this device's own payload was never generated -- the panel
-    hints at the missing half). S258 (PAIR-03): the resolved ``store`` is
+    hints at the missing half). PAIR-03: the resolved ``store`` is
     threaded into the seam so it can read the PRIOR row state and record the
     payload's declared device class under the monotone rule -- best-effort,
     never voiding the registration. Raises :class:`InvalidPairing` on anything
@@ -485,7 +485,7 @@ def relabel_peer_payload(store: Any, engine: Any, peer_id: str, label: str) -> d
 def _normalise_device_class(value: Any) -> str | None:
     """Normalise a control-surface device-class value to the allowlist.
 
-    The strict pure half of the S260 setter leg: ``None`` and a blank
+    The strict pure half of the setter leg: ``None`` and a blank
     string are an explicit CLEAR (the store's documented ``None``, the
     grandfathered desktop class); ``"phone"`` / ``"desktop"`` pass
     case-insensitively after stripping; anything else -- free text, an
@@ -513,7 +513,7 @@ def set_device_class_payload(
 ) -> dict[str, Any]:
     """Set or clear a paired peer's device class through the audited seam.
 
-    The S260 control-surface half the S258 design anticipated (the
+    The control-surface half the design anticipated (the
     engine docstring's "the control surface"; phone -> desktop stays
     human-only, and this is that human path). Lookup BEFORE write: an
     unknown peer raises :class:`PeerNotFound` (mapped to a 404) without
@@ -538,7 +538,7 @@ def set_device_class_payload(
     return _peer_to_dict(fresh if fresh is not None else rec)
 
 
-# The deferred-ledger surface (S207, SYN-05; web-free, thin handlers wrap these)
+# The deferred-ledger surface (SYN-05; web-free, thin handlers wrap these)
 #
 # Pending content approvals: sensitive records the round quarantined instead of
 # applying. The payload carries PROVENANCE only (kind, id, origin device, the
@@ -595,7 +595,7 @@ def refuse_deferred_payload(engine: Any, kind: str, record_id: str) -> dict[str,
 
 
 def republish_payload(engine: Any) -> dict[str, Any]:
-    """Re-sign and re-journal this device's own unsigned records (S208).
+    """Re-sign and re-journal this device's own unsigned records.
 
     The operator surface for the one-time VL-01 fleet-order step (spec
     section 8): every record this device ORIGINATED that carries no signature
@@ -653,7 +653,7 @@ def resolve_self_routing_key_for_route(engine: Any) -> str | None:
         return None
 
 
-# cas 7 Lot 2 (S235): the remote-channel control surface helpers. Web-free, so
+# cas 7 Lot 2: the remote-channel control surface helpers. Web-free, so
 # the grant/revoke/telemetry contract is exercised without the web stack. The
 # durable grant lives on the peer store; the live-session kill is the streaming
 # module's buffer drop -- no new revocation primitive. A missing peer raises
@@ -734,7 +734,7 @@ def remote_chat_telemetry_payload() -> dict[str, Any]:
 try:
     from fastapi import APIRouter, Body, Depends, HTTPException
 
-    # S136 parity (SYN-06): require authentication on every endpoint, the same
+    # Parity (SYN-06): require authentication on every endpoint, the same
     # defense-in-depth per-router dependency routes_plugins carries. The global
     # deny-by-default AuthMiddleware already covers /api/sync (it is not on the
     # public allowlist), so this is parity, not a gap closure.
@@ -844,7 +844,7 @@ try:
         manager-backed approval gate.
         """
         if _emergency_stop is not None:
-            _emergency_stop.guard_http()  # S215: refused, not hung
+            _emergency_stop.guard_http()  # Refused, not hung
         store = _resolve_store()
         if not store.has_peer(peer_id):
             raise HTTPException(status_code=404, detail="Peer not paired")
@@ -876,7 +876,7 @@ try:
         except PeerNotFound:
             raise HTTPException(status_code=404, detail="Peer not paired")
         except PeerNotConfirmed:
-            # PAIR-02 (S206): the pairing exists but awaits the mutual
+            # PAIR-02: the pairing exists but awaits the mutual
             # confirmation; 409 with an explicit detail so the panel can say
             # what to do rather than show an opaque failure.
             raise HTTPException(
@@ -937,7 +937,7 @@ try:
             except Exception:  # pragma: no cover - accessor is defensive
                 signing_pub = None
         try:
-            # S258 (PAIR-03): this codebase IS the desktop node, so its
+            # PAIR-03: this codebase IS the desktop node, so its
             # payload declares the desktop class (the Android client declares
             # phone). Guarded: a degraded import leaves the constant None and
             # the payload honestly class-less (the legacy digest).
@@ -1073,7 +1073,7 @@ try:
             raise HTTPException(status_code=500, detail="Failed to unpair")
         if not removed:
             raise HTTPException(status_code=404, detail="Peer not paired")
-        # cas 7 Lot 2 (S235): the detach-in-one-gesture also drops the device's
+        # cas 7 Lot 2: the detach-in-one-gesture also drops the device's
         # in-flight remote-inference streaming sessions -- the emergency-stop
         # detach kills live work, reusing the streaming buffer drop, not a new
         # revocation primitive.

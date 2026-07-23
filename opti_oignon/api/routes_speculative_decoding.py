@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-API routes for Speculative Decoding -- S110 + S111.
+API routes for Speculative Decoding.
 
 Provides endpoints for status, config update, compatible draft model
-listing, VRAM budget estimation, and acceptance rate history (S111).
+listing, VRAM budget estimation, and acceptance rate history.
 Speculative decoding is only available with the llama.cpp backend.
 """
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fine-tuning data export and variant tracking API routes (S96).
+Fine-tuning data export and variant tracking API routes.
 
 POST   /api/fine-tune/export          -- Export conversations as training data
 GET    /api/fine-tune/export/preview   -- Preview export with filters

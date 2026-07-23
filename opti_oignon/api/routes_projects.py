@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Projects (S57 + S58).
+API routes for Projects.
 
 Provides endpoints for project CRUD, file upload/management,
 output management, conversation linking, and project context
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -35,7 +35,7 @@ except ImportError:
     PROJECTS_AVAILABLE = False
     project_store = None
 
-# S58: Project context (indexation + retrieval)
+# Project context (indexation + retrieval)
 try:
     from opti_oignon.project_context import (
         ProjectContextBuilder,  # noqa: F401
@@ -49,7 +49,7 @@ except ImportError:
     project_indexer = None
     project_context_builder = None
 
-# S58: Project trigger detection
+# Project trigger detection
 try:
     from opti_oignon.project_triggers import (
         ProjectTriggerDetector,  # noqa: F401
@@ -435,7 +435,7 @@ async def list_project_conversations(project_id: str) -> dict:
 
 
 # =============================================================================
-# S58: INDEXATION + CONTEXT
+# INDEXATION + CONTEXT
 # =============================================================================
 
 @router.post("/projects/{project_id}/files/{file_id}/index")

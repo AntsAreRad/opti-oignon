@@ -21,7 +21,7 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:
@@ -43,7 +43,7 @@ def _check_available():
 def execute_code(request: CodeExecuteRequest) -> dict:
     """Execute un bloc de code dans un sous-processus sandboxe."""
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     _check_available()
 
     if not request.code.strip():

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-API routes for Inference Auto-Tuner -- S110 + S111.
+API routes for Inference Auto-Tuner.
 
 Provides endpoints to start/cancel tuning sessions, retrieve results,
 apply tuned parameters, and check tuner status. Tuning runs on demand
 only (user-initiated), never automatically.
 
-S111: POST /api/tuner/run now detects the active inference backend
+POST /api/tuner/run now detects the active inference backend
 (Ollama or llama.cpp) and creates a real benchmark function that
 measures actual token generation speed. Falls back to mock if no
 backend is available (testing/CI).
@@ -249,7 +249,7 @@ def get_tuner_job(
 
 
 # ---------------------------------------------------------------------------
-# Recommendations (S112)
+# Recommendations
 # ---------------------------------------------------------------------------
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for the Inference Profiler -- S113.
+API routes for the Inference Profiler.
 
 Provides per-request profiling summary and recent profile
 listing.  Degrades gracefully when the profiler module is

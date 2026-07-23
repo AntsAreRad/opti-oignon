@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resource Governor API surface (S227, Resource Governor cycle Bloc 4).
+"""Resource Governor API surface (Resource Governor cycle Bloc 4).
 
 Wraps the governor's already-assembled status seat behind a thin, guarded
 FastAPI surface, the same shape as routes_sync: web-free payload helpers at
@@ -24,7 +24,7 @@ no state mutation on user content, so there is no Bulbe gate here.
 
 The status surface assembles one governor call per field with no re-derivation.
 Reading the pressure state also evaluates and applies the sustained-pressure
-keep_alive policy (the S225 design property), so a status read is not entirely
+keep_alive policy (the design property), so a status read is not entirely
 free of effect; that is intentional and documented at the engine.
 
 POST /config write semantics (the one new design question this bloc answered).
@@ -177,7 +177,7 @@ READ_ONLY_KEYS: dict[str, str] = {
 def status_payload(governor: Any) -> dict[str, Any]:
     """The /status body: one governor call per field, no re-derivation.
 
-    Reading ``pressure_state`` applies the S225 sustained-pressure
+    Reading ``pressure_state`` applies the sustained-pressure
     keep_alive policy by design; the snapshot already folds the learned
     ceiling into ``capacity_gb`` when lower, so the separate
     ``learned_ceiling_gb`` is the raw learned value for transparency.
@@ -220,7 +220,7 @@ def evict_payload(governor: Any, model: str) -> dict[str, Any]:
     A False return is not an error: the model was not loaded, no backend
     exposed the unload primitive, or the unload failed -- Ollama's own LRU
     carries the pressure (spec Section 12). The eviction is audit-chained
-    by evict_model itself (the S225 async append) with trigger "api".
+    by evict_model itself (the async append) with trigger "api".
     """
     evicted = bool(governor.evict_model(model, trigger="api"))
     note = (

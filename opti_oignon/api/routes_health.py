@@ -101,7 +101,7 @@ def health_dashboard() -> dict:
         except Exception as e:
             logger.debug(f"Could not get warmup status: {e}")
 
-    # Context health (S47)
+    # Context health
     context_health_info = {"available": CONTEXT_WINDOW_AVAILABLE}
     if EXECUTOR_AVAILABLE and executor is not None:
         try:

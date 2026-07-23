@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Live API route for the sandboxed agent loop (S177, Theme 3 / Odysseus Core).
+"""Live API route for the sandboxed agent loop (Theme 3 / Odysseus Core).
 
 Wires the agent half of Odysseus into a running agent: the streaming loop
 (``agent.loop``), the per-mode tool set (``agent.tools``), the approval-gated
 SKILL.md registry and its ``manage_skills`` tool (``agent.skills``), the
-teacher-draft publish path, and the S66 working-memory block. It exposes the
+teacher-draft publish path, and the working-memory block. It exposes the
 contract the agent panel consumes (frontend api/agent.ts):
 
 - ``GET  /api/agent/status``  -> ``{running, rounds, stop_reason}``
@@ -13,7 +13,7 @@ contract the agent panel consumes (frontend api/agent.ts):
 - ``WS   /api/agent/stream``  -> a live AgentEvent JSON stream
 
 It also mounts the SKILL.md registry surface that the skills-manager panel
-consumes (frontend api/skills.ts, S178 Goal 0, closing the S177 carry-over):
+consumes (frontend api/skills.ts, Goal 0, closing the carry-over):
 
 - ``GET    /api/agent/skills``                       -> ``{skills: [...]}``
 - ``GET    /api/agent/skills/{category}/{name}``     -> one skill, with its body
@@ -60,7 +60,7 @@ except Exception:  # pragma: no cover - constrained environments only
     agent_tools = None  # type: ignore[assignment]
     _AGENT_OK = False
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:  # pragma: no cover - constrained environments only
@@ -125,7 +125,7 @@ class AgentRunManager:
         self._rounds = 0
         self._stop_reason = ""
         self._subscribers: set[Callable[[str], None]] = set()
-        # S210 (ATL-02): the conversation-bound SandboxToolSession this run
+        # ATL-02: the conversation-bound SandboxToolSession this run
         # attached, if any. One run at a time, so a single slot suffices;
         # detached (never destroyed) when the run ends.
         self._owned_sandbox: Any = None
@@ -233,7 +233,7 @@ class AgentRunManager:
         try:
             tool_set = agent_tools.build_tool_set(mode)
             handlers = dict(tool_set.tool_handlers)
-            # S210 (ATL-02): when the conversation is bound to a workspace,
+            # ATL-02: when the conversation is bound to a workspace,
             # attach that workspace's SandboxToolSession and inject it into
             # the run (and so into dispatch.dispatch_tool_call) instead of
             # the per-run create/destroy. Explicit binding only: no bound
@@ -334,7 +334,7 @@ class AgentRunManager:
                 self._running = False
 
     def _detach_owned_sandbox(self) -> None:
-        """Release the conversation-bound session, never destroying it (S210).
+        """Release the conversation-bound session, never destroying it.
 
         detach() re-enables the tools the set_sandbox_mode lockout disabled
         and leaves the workspace and its files intact: the binding owns the
@@ -557,7 +557,7 @@ def _model_capability_refusal(model: str) -> str | None:
 
 
 def _resolve_memory_provider() -> Callable[..., str] | None:
-    """The S66 working-memory block provider, guarded."""
+    """The working-memory block provider, guarded."""
     try:
         from opti_oignon.memory import working_memory_block
 
@@ -671,7 +671,7 @@ try:
     def agent_run(request: AgentRunRequest) -> dict[str, Any]:
         """Start a run: the wiring entry point for the agent panel."""
         if _emergency_stop is not None:
-            _emergency_stop.guard_http()  # S215: refused, not hung
+            _emergency_stop.guard_http()  # Refused, not hung
         _require_agent()
         if not request.task.strip():
             raise HTTPException(status_code=422, detail="task cannot be empty")
@@ -718,7 +718,7 @@ try:
         finally:
             manager.unsubscribe(_push)
 
-    # Skills registry surface (S178 Goal 0: closes the S177 carry-over).
+    # Skills registry surface (Goal 0: closes the carry-over).
     #
     # Thin wrappers over the module-level skills logic below. Each resolves the
     # registry (503 when the agent package is absent), then delegates; a missing

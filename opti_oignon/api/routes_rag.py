@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-RAG v2 API routes (S99, S119, S144, S159).
+RAG v2 API routes.
 
 POST   /api/rag/ingest             -- Upload and ingest document
 POST   /api/rag/ingest/url         -- Ingest from URL
-POST   /api/rag/ingest/batch       -- Batch ingest multiple files (S119)
-POST   /api/rag/ingest/folder      -- Scan folder and ingest (S119)
-GET    /api/rag/ingest/jobs        -- List ingestion jobs (S119)
-GET    /api/rag/ingest/jobs/{id}   -- Single job status (S119)
-DELETE /api/rag/ingest/jobs/{id}   -- Cancel/delete a job (S119)
+POST   /api/rag/ingest/batch       -- Batch ingest multiple files
+POST   /api/rag/ingest/folder      -- Scan folder and ingest
+GET    /api/rag/ingest/jobs        -- List ingestion jobs
+GET    /api/rag/ingest/jobs/{id}   -- Single job status
+DELETE /api/rag/ingest/jobs/{id}   -- Cancel/delete a job
 GET    /api/rag/collections        -- List collections
 POST   /api/rag/collections        -- Create collection
 DELETE /api/rag/collections/{name} -- Delete collection
 POST   /api/rag/query              -- Query with retrieval + citations
-POST   /api/rag/query/stream       -- Query with chunked transfer encoding (S159)
-GET    /api/rag/documents          -- List ingested documents (enhanced S119)
+POST   /api/rag/query/stream       -- Query with chunked transfer encoding
+GET    /api/rag/documents          -- List ingested documents (enhanced)
 DELETE /api/rag/documents/{doc_id} -- Remove document + chunks
-POST   /api/rag/injection-defense/sanitize-preview  -- Preview sanitized chunks (S144)
-POST   /api/rag/injection-defense/approve           -- Approve/reject chunks (S144)
-GET    /api/rag/injection-defense/audit              -- Query audit log (S144)
-DELETE /api/rag/injection-defense/audit              -- Clear audit log (S144)
-GET    /api/rag/injection-defense/config             -- Get defense config (S144)
+POST   /api/rag/injection-defense/sanitize-preview  -- Preview sanitized chunks
+POST   /api/rag/injection-defense/approve           -- Approve/reject chunks
+GET    /api/rag/injection-defense/audit              -- Query audit log
+DELETE /api/rag/injection-defense/audit              -- Clear audit log
+GET    /api/rag/injection-defense/config             -- Get defense config
 """
 
 import logging
@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# S159: Chunked transfer for large RAG responses
+# Chunked transfer for large RAG responses
 try:
     from opti_oignon.chunked_response import DEFAULT_CHUNK_SIZE, chunked_json_generator
     CHUNKED_RESPONSE_AVAILABLE = True
@@ -43,7 +43,7 @@ except ImportError:
     chunked_json_generator = None  # type: ignore[assignment]
     DEFAULT_CHUNK_SIZE = 4096
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -124,7 +124,7 @@ class IngestURLRequest(BaseModel):
     metadata: dict[str, Any] = {}
 
 
-# -- Batch Ingestion (S119) --
+# -- Batch Ingestion --
 
 class IngestFolderRequest(BaseModel):
     directory: str = Field(..., min_length=1, description="Absolute path to the folder to scan")
@@ -186,7 +186,7 @@ class QueryRequest(BaseModel):
     file_type_filter: str | None = None
     rerank: bool = True
     track_citations: bool = True
-    # S159: Optional chunk size for streamed responses
+    # Optional chunk size for streamed responses
     chunk_size: int = Field(DEFAULT_CHUNK_SIZE, ge=64, le=65536)
 
 
@@ -451,7 +451,7 @@ def ingest_url(request: IngestURLRequest) -> dict:
 
 
 # =========================================================================
-# BATCH INGESTION ENDPOINTS (S119)
+# BATCH INGESTION ENDPOINTS
 # =========================================================================
 
 @router.post("/ingest/batch", response_model=IngestJobResponse, status_code=202)
@@ -519,7 +519,7 @@ def ingest_folder(request: IngestFolderRequest) -> dict:
     """
     from pathlib import Path
 
-    # S156: validate directory path against traversal (SA-155-042)
+    # Validate directory path against traversal (SA-155-042)
     raw_dir = request.directory
     if ".." in raw_dir.replace("\\", "/").split("/"):
         raise HTTPException(
@@ -674,7 +674,7 @@ def query_knowledge_base(request: QueryRequest) -> dict:
 
 
 # =========================================================================
-# STREAMING QUERY ENDPOINT (S159)
+# STREAMING QUERY ENDPOINT
 # =========================================================================
 
 @router.post("/query/stream")
@@ -821,7 +821,7 @@ def delete_document(doc_id: str) -> dict:
 
 
 # =========================================================================
-# RAG INJECTION DEFENSE ENDPOINTS (S144)
+# RAG INJECTION DEFENSE ENDPOINTS
 # =========================================================================
 
 def _get_sanitizer():

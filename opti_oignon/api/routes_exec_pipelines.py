@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Routes API pour les pipelines d'execution (S53).
+API routes for the execution pipelines.
 
-Endpoints CRUD pour les ExecutionPipeline: lister, creer,
-modifier, supprimer, dupliquer, types de step disponibles.
-Separe des routes_pipelines.py existantes qui gerent les
-pipelines multi-agents de l'orchestrateur.
+CRUD endpoints for the ExecutionPipeline objects: list, create,
+update, delete, duplicate, and the available step types.
+Separate from the existing routes_pipelines.py, which serves the
+orchestrator's multi-agent pipelines.
 """
 
 import logging
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/execution-pipelines", tags=["execution-pipelines"])
 
-# Conditional import of pipelines module (S53)
+# Conditional import of pipelines module
 try:
     from opti_oignon.pipelines import (
         STEP_TYPE_DESCRIPTIONS,  # noqa: F401

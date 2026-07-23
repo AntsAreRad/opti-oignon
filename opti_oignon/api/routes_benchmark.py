@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Benchmark Dashboard (S60).
+API routes for Benchmark Dashboard.
 
 Provides endpoints for:
 - LLM benchmark execution with live WebSocket progress
@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:
@@ -57,7 +57,7 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
-# S193 BMK-02: per-timeout cached Ollama clients so the request timeout is
+# BMK-02: per-timeout cached Ollama clients so the request timeout is
 # enforced at the transport level (it previously only classified errors
 # after an unbounded blocking call).
 _V1_CLIENTS: dict[int, Any] = {}
@@ -81,7 +81,7 @@ MODELS_CONFIG_PATH = CONFIG_DIR / "models.yaml"
 
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
 
-# S171: RFC 6455 WebSocket close codes for graceful server-side shutdown.
+# RFC 6455 WebSocket close codes for graceful server-side shutdown.
 WS_CLOSE_INTERNAL_ERROR = 1011
 
 
@@ -275,7 +275,7 @@ class _RunState:
         queue: asyncio.Queue,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
-        # S193 BMK-06: keep the client's event loop alongside its queue so
+        # BMK-06: keep the client's event loop alongside its queue so
         # the worker thread can schedule puts on the right loop.
         with self.ws_lock:
             self.ws_clients.append((queue, loop))
@@ -289,7 +289,7 @@ class _RunState:
     def broadcast(self, event: dict[str, Any]) -> None:
         """Send event to all connected WebSocket clients.
 
-        S193 BMK-06: broadcast is called from the benchmark worker thread;
+        BMK-06: broadcast is called from the benchmark worker thread;
         asyncio queues are not thread-safe, so hand each put over to the
         client's event loop instead of mutating the queue cross-thread
         (the previous direct put_nowait could race and silently drop
@@ -733,7 +733,7 @@ async def start_llm_benchmark(request: BenchmarkRunRequest) -> dict:
     for tracking via WebSocket or polling.
     """
     if _emergency_stop is not None:
-        _emergency_stop.guard_http()  # S215: refused, not hung
+        _emergency_stop.guard_http()  # Refused, not hung
     if _state.is_running():
         raise HTTPException(
             status_code=409,
@@ -876,7 +876,7 @@ async def benchmark_progress_ws(websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    # S136 audit fix: authenticate WebSocket connection
+    # Audit fix: authenticate WebSocket connection
     try:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)
@@ -890,7 +890,7 @@ async def benchmark_progress_ws(websocket: WebSocket) -> None:
         return
 
     queue: asyncio.Queue = asyncio.Queue()
-    # S193 BMK-06: capture this connection's loop so the worker thread
+    # BMK-06: capture this connection's loop so the worker thread
     # can schedule queue puts thread-safely.
     _state.add_ws_client(queue, asyncio.get_running_loop())
 

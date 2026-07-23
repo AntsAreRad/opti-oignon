@@ -2,8 +2,8 @@
 """
 API routes for cache management.
 
-Provides endpoints for the response cache (S18) and semantic cache (S23/S68).
-S68 adds: status, config update, clear by conversation, toggle.
+Provides endpoints for the response cache and semantic cache.
+Adds: status, config update, clear by conversation, toggle.
 """
 
 import logging
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/api/cache", tags=["cache"])
 
 
 # =========================================================================
-# Existing endpoints (S18/S23)
+# Existing endpoints
 # =========================================================================
 
 
@@ -115,7 +115,7 @@ def clear_cache_model(model: str) -> dict:
 
 
 # =========================================================================
-# S68 endpoints: Semantic Cache (enhanced)
+# Endpoints: Semantic Cache (enhanced)
 # =========================================================================
 
 

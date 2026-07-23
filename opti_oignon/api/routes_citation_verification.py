@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
-"""FastAPI citation-verify route (composing the S273 citation extractor with the
-S271 per-answer aggregation): expose the whole producer -> aggregation pipeline
+"""FastAPI citation-verify route (composing the citation extractor with the
+per-answer aggregation): expose the whole producer -> aggregation pipeline
 over HTTP.
 
-The producer half landed at S273 (``opti_oignon.agent.citation_extraction``): a
+The producer half (``opti_oignon.agent.citation_extraction``): a
 pure-stdlib parser whose ``extract_pairs(answer, sources)`` turns a produced
 answer carrying inline numeric citation markers, plus the ordered sources those
 markers index, into the (claim, source) pairs the aggregation consumes. The
-aggregator landed at S271 (``opti_oignon.agent.claim_aggregation``): its
+aggregator (``opti_oignon.agent.claim_aggregation``): its
 ``make_answer_verifier`` builds a ``verify_answer(pairs)`` that runs each pair
-through the S267 verification role and aggregates the per-pair verdicts
-fail-secure into a single per-answer verdict. The S272 route
+through the verification role and aggregates the per-pair verdicts
+fail-secure into a single per-answer verdict. The route
 (``routes_answer_verification``) exposed the aggregation over HTTP, but it takes
 a pre-built batch of (claim, source) pairs: a caller still had to construct the
 pairs by hand. This module is the join: a single per-user ``POST`` that runs
 ``extract_pairs`` over a submitted answer plus its ordered sources and hands the
 result to ``verify_answer``, so a caller submits a raw answer and gets the
 verdict directly. Registered on the app exactly like
-``answer_verification_router``, the S272 precedent.
+``answer_verification_router``, the precedent.
 
-It mirrors the S268 / S272 route idiom precisely; the differences are the payload
+It mirrors the route idiom precisely; the differences are the payload
 (a raw answer plus its ordered sources, not a pre-built batch) and the result
 (the aggregate, the per-pair list, and the extracted (claim, source) pairs for
 transparency, the extracted pairs positionally aligned with the per-pair
-results). The router is a DISTINCT object from the S268 ``claim_verification_router``
-and the S272 ``answer_verification_router`` and shares the ``/api/claims`` prefix
+results). The router is a DISTINCT object from the ``claim_verification_router``
+and the ``answer_verification_router`` and shares the ``/api/claims`` prefix
 with a new path, so neither of those routes' surfaces is touched.
 
 Design notes:
 
-- Not a model-reachable tool. Like the S268 / S272 routes and the N.3
+- Not a model-reachable tool. Like the claim and answer routes and the N.3
   note-actions route, this surface is caller-driven (a UI, a producing path, or a
   later agent step submits a raw answer and its sources), not tool-called; it
   defines no tool schema and registers nothing in the agent tool registry. It is
@@ -53,7 +53,7 @@ Design notes:
 - No mode gate (CV-D4). The verification surface reaches no network and has no
   mode gate: it runs identically in Daily and Bulbe. So this route carries no
   mode dependency seam and builds the verifier with no mode provider, exactly as
-  the S268 / S272 routes.
+the claim and answer routes.
 - Fail-closed end to end. The extractor never raises and omits any pair it cannot
   resolve (out-of-range, ``[0]``, malformed, or empty-source citations); the
   aggregation never raises and defaults to uncertain on an empty pair list. So an

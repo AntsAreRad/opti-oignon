@@ -5,7 +5,7 @@ the opt-in, sandboxed vision caption / OCR orchestration.
 Design notes:
 
 - A SEPARATE router (``notes_caption_router`` at ``/api/notes/caption``), NOT
-  folded into the S250 ``notes_transcription_router`` -- so that router's
+  folded into the ``notes_transcription_router`` -- so that router's
   ``test_one_route_exact`` pin stays green (the ``routes_note_actions`` /
   ``routes_notes_attachments`` / ``routes_notes_transcription`` precedent) and
   this is a pure chain addition. The transcription surface triggers AUDIO compute;

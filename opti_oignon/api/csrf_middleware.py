@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CSRF Validation Middleware for Opti-Oignon (S136 audit fix).
+CSRF Validation Middleware for Opti-Oignon (audit fix).
 
 Enforces the double-submit cookie pattern on ALL state-changing HTTP
 requests (POST, PUT, DELETE, PATCH).  Previously, ``_validate_csrf()``
@@ -67,7 +67,7 @@ def _is_bulbe() -> bool:
 def _is_single_user_unauthenticated() -> bool:
     """Return True when the app runs in single-user mode outside Bulbe.
 
-    S171: in single-user mode (non-Bulbe) the auth middleware bypasses
+    in single-user mode (non-Bulbe) the auth middleware bypasses
     authentication entirely, so there is no session cookie and no
     cross-site request to forge. CSRF double-submit validation would only
     reject legitimate same-origin POSTs, so it is skipped here -- exactly as
@@ -122,7 +122,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         """Validate CSRF token before processing state-changing requests."""
-        # S171: skip in single-user mode (non-Bulbe) -- no auth session exists,
+        # Skip in single-user mode (non-Bulbe) -- no auth session exists,
         # so there is nothing for CSRF to protect (parity with auth_middleware).
         if _is_single_user_unauthenticated():
             return await call_next(request)

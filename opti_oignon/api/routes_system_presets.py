@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Routes API for system presets (S84).
+Routes API for system presets.
 
 Infrastructure-level presets (Minimal/Balanced/Power) that configure
 multiple YAML config files at once. Includes model detection,

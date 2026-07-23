@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""FastAPI claim-verification route (the S267 verification role's wiring lot):
+"""FastAPI claim-verification route (the verification role's wiring lot):
 expose the claim-vs-source verification role over HTTP.
 
-The verification role landed at S267 (``opti_oignon.agent.claim_verification``):
+The verification role (``opti_oignon.agent.claim_verification``):
 a caller-driven surface that wraps a model-generated claim and its cited source
 as untrusted data under one policy header and returns a fail-secure verdict
 (supported / unsupported / uncertain, defaulting to uncertain). The route / UI
 wiring was deferred there. This module is that wire: a single per-user ``POST``
 that runs one verification over a submitted (claim, source) pair and returns the
 structured result for the caller to show and act on. Registered on the app
-exactly like ``note_actions_router``, the S247 precedent.
+exactly like ``note_actions_router``, the precedent.
 
 Design notes:
 

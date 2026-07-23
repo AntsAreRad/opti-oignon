@@ -52,7 +52,7 @@ def _format_size(size_bytes) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# MTP Detection (S110) — Multi-Token Prediction capability check
+# MTP Detection — Multi-Token Prediction capability check
 # ---------------------------------------------------------------------------
 
 # Known MTP-capable model families/names. This list will grow as more
@@ -187,7 +187,7 @@ def get_effective_model(
     return EffectiveModelResponse(model="", source="none")
 
 
-# S46: Model profiles endpoint
+# Model profiles endpoint
 @router.get("/profiles", response_model=ModelProfilesResponse)
 def list_model_profiles() -> dict:
     """List model profiles loaded from YAML configuration."""

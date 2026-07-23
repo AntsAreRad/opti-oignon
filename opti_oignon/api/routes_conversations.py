@@ -21,7 +21,7 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# S136 audit fix: require authentication for all endpoints
+# Audit fix: require authentication for all endpoints
 try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
@@ -173,7 +173,7 @@ def get_messages(conv_id: str) -> list:
 
 
 # =============================================================================
-# TOOL HISTORY (S62)
+# TOOL HISTORY
 # =============================================================================
 
 # Conditional import of agentic executor for tool history

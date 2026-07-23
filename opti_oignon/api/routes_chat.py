@@ -39,7 +39,7 @@ from .schemas import (
     ConsensusRequest,
 )
 
-# S44: Import conditionnel du tool executor
+# Import conditionnel du tool executor
 try:
     from opti_oignon.tool_executor import tool_executor as _tool_executor
     TOOL_EXECUTOR_AVAILABLE = True
@@ -47,15 +47,15 @@ except ImportError:
     TOOL_EXECUTOR_AVAILABLE = False
     _tool_executor = None
 
-# S215: emergency-stop admission guard (a stopped system refuses honestly)
+# Emergency-stop admission guard (a stopped system refuses honestly)
 try:
     from opti_oignon import emergency_stop as _emergency_stop
 except Exception:
     _emergency_stop = None
 
-# S216 (PIP-06): conditional import of the execution-pipeline system.
+# PIP-06: conditional import of the execution-pipeline system.
 # The PipelineRunner rides the agentic executor; CRUD lives in
-# routes_exec_pipelines; this is the execution seam (S53, finished here).
+# routes_exec_pipelines; this is the execution seam (finished here).
 try:
     from opti_oignon.pipelines import (
         get_pipeline_runner,
@@ -67,7 +67,7 @@ except ImportError:
     get_pipeline_runner = None
     get_pipeline_store = None
 
-# S45: Import conditionnel de l'executeur agentique
+# Import conditionnel de l'executeur agentique
 try:
     from opti_oignon.agentic_executor import (
         PIPELINE_CONSENSUS,  # noqa: F401
@@ -85,7 +85,7 @@ except ImportError:
     AGENTIC_EXECUTOR_AVAILABLE = False
     _agentic_executor = None
 
-# S50: Import conditionnel du consensus engine
+# Import conditionnel du consensus engine
 try:
     from opti_oignon.consensus import (
         ConsensusEngine,
@@ -102,7 +102,7 @@ except ImportError:
     CONSENSUS_ENGINE_AVAILABLE = False
     _consensus_engine = None
 
-# S114: Import conditionnel du plugin hook system
+# Import conditionnel du plugin hook system
 try:
     from opti_oignon.plugin_hooks import hook_manager as _hook_manager
     PLUGIN_HOOKS_AVAILABLE = True
@@ -110,7 +110,7 @@ except ImportError:
     PLUGIN_HOOKS_AVAILABLE = False
     _hook_manager = None
 
-# S117: Import conditionnel du quick sandbox
+# Import conditionnel du quick sandbox
 try:
     from opti_oignon.quick_sandbox import (
         QUICK_SANDBOX_AVAILABLE,
@@ -134,7 +134,7 @@ try:
 except ImportError:
     _get_workspace_bindings = None
 
-# S128: Import conditionnel du tool call approval (Bulbe mode)
+# Import conditionnel du tool call approval (Bulbe mode)
 try:
     from opti_oignon.tool_call_approval import ApprovalStatus as _ApprovalStatus
     from opti_oignon.tool_call_approval import tool_call_approval as _tool_call_approval
@@ -144,7 +144,7 @@ except ImportError:
     _tool_call_approval = None
     _ApprovalStatus = None
 
-# S128: Import security mode for policy check
+# Import security mode for policy check
 try:
     from opti_oignon.security_mode import get_policy as _get_security_policy
     SECURITY_POLICY_AVAILABLE = True
@@ -152,7 +152,7 @@ except ImportError:
     SECURITY_POLICY_AVAILABLE = False
     _get_security_policy = None
 
-# S159: Import backpressure buffer for slow client detection
+# Import backpressure buffer for slow client detection
 try:
     from opti_oignon.sse_backpressure import BackpressureBuffer
     BACKPRESSURE_AVAILABLE = True
@@ -160,7 +160,7 @@ except ImportError:
     BACKPRESSURE_AVAILABLE = False
     BackpressureBuffer = None  # type: ignore[assignment,misc]
 
-# S159: Configurable backpressure defaults
+# Configurable backpressure defaults
 _BP_MAX_SIZE = 100
 _BP_SLOW_THRESHOLD = 0.8
 # Idle disconnect: stop a stream the client has stopped consuming. Raised from
@@ -170,13 +170,13 @@ _BP_SLOW_THRESHOLD = 0.8
 # total duration, so it still catches a genuinely dead client.
 _BP_IDLE_TIMEOUT = float(os.environ.get("OPTI_IDLE_TIMEOUT_S", "600"))
 
-# S171: RFC 6455 WebSocket close codes for graceful server-side shutdown.
+# RFC 6455 WebSocket close codes for graceful server-side shutdown.
 # 1011 = internal error (server hit an unexpected condition); 1003 = the
 # client sent data the server cannot accept (malformed / invalid request).
 WS_CLOSE_INTERNAL_ERROR = 1011
 WS_CLOSE_INVALID_DATA = 1003
 
-# S118: Import conditionnel du chat coding agent
+# Import conditionnel du chat coding agent
 try:
     from opti_oignon.chat_coding_agent import (
         CHAT_CODING_AVAILABLE,
@@ -228,7 +228,7 @@ def _resolve_model_and_route(message: str, request: ChatRequest):
     """Resolve the model and perform routing.
 
     Priorite: force_model > preset > auto-routing.
-    S48: Passe les images pour detection de vision auto-routing.
+    Passe les images pour detection de vision auto-routing.
 
     Returns:
         Tuple of (routing_result, error_message). error_message is None on success.
@@ -265,7 +265,7 @@ def _resolve_model_and_route(message: str, request: ChatRequest):
 
     try:
         analysis = analyzer.analyze(message)
-        # S48: Passer les images et le message pour la detection vision
+        # Pass the images and the message through for vision detection
         routing = model_router.route(
             analysis,
             force_model=force_model if force_model else None,
@@ -275,7 +275,7 @@ def _resolve_model_and_route(message: str, request: ChatRequest):
         # Appliquer temperature forcee si specifiee
         if request.temperature is not None:
             routing.temperature = request.temperature
-        # S48: S'assurer que les images sont dans le routing
+        # Make sure the images are part of the routing input
         if request.images and not routing.images:
             routing.images = request.images
         return routing, None
@@ -305,7 +305,7 @@ async def _stream_response(
     """Generate and stream the LLM response via WebSocket.
 
     Orchestre le routage, l'appel a l'executor, et l'envoi
-    des tokens au client. Gere les modes think et web_search (S42).
+    des tokens au client. Gere les modes think et web_search.
     """
     start_time = time.time()
     _last_send_time = start_time  # Track last WS send for keepalive
@@ -328,7 +328,7 @@ async def _stream_response(
     # Resetr l'executor
     executor.reset()
 
-    # S117: Activate quick sandbox mode if requested
+    # Activate quick sandbox mode if requested
     _qs_session = None
     _qs_active = False
     if (
@@ -370,7 +370,7 @@ async def _stream_response(
                 logger.warning("Quick sandbox activation failed: %s", exc)
                 _qs_session = None
 
-    # S118: Detect chat coding agent activation
+    # Detect chat coding agent activation
     _cc_active = False
     _cc_message = message  # possibly stripped of /code prefix
     if (
@@ -407,18 +407,18 @@ async def _stream_response(
         "prompt_variant": routing.prompt_variant,
         "think": request.think or False,
         "web_search": request.web_search or False,
-        # S46: Raison de routage transparente
+        # Raison de routage transparente
         "routing_reason": routing.routing_reason,
-        # S48: Vision routing
+        # Vision routing
         "vision_routed": getattr(routing, "vision_routed", False),
         "has_images": bool(getattr(routing, "images", None)),
-        # S117: Quick sandbox status
+        # Quick sandbox status
         "quick_sandbox": _qs_active,
-        # S118: Chat coding agent status
+        # Chat coding agent status
         "chat_coding": _cc_active,
     })
 
-    # S118: Chat Coding Agent execution path
+    # Chat Coding Agent execution path
     # When active, replaces the normal generation flow entirely.
     # The coding agent runs plan -> implement -> test -> fix in the sandbox,
     # streaming CodingEvents via WebSocket, with full pipeline capabilities
@@ -441,19 +441,19 @@ async def _stream_response(
     error_occurred = False
     generation_done = threading.Event()
     chunks = []
-    # S159: Backpressure tracking for slow client detection
+    # Backpressure tracking for slow client detection
     _bp_dropped = 0
     _bp_slow_logged = 0
     _bp_last_consumer_time = time.time()
 
-    # S45: Determiner si on utilise l'AgenticExecutor
+    # Determiner si on utilise l'AgenticExecutor
     use_agentic = (
         AGENTIC_EXECUTOR_AVAILABLE
         and _agentic_executor is not None
         and _agentic_executor.available
     )
 
-    # S216 (PIP-06): resolve the requested execution pipeline up front so an
+    # PIP-06: resolve the requested execution pipeline up front so an
     # unknown id or a missing prerequisite refuses honestly instead of
     # silently falling through to the plain chat path. The chat-coding branch
     # above takes precedence by construction (it returns before this point).
@@ -480,10 +480,10 @@ async def _stream_response(
             return
 
     def _on_tool_call_callback(tool_call_result):
-        """S45: Callback pour emettre les tool_call en temps reel."""
+        """Callback emitting tool calls in real time."""
         chunks.append(("tool_call", tool_call_result))
-        # S114: Fire tool_call hooks so plugins can react
-        # S124: redact_sensitive=True applies per-plugin data redaction
+        # Fire tool_call hooks so plugins can react
+        # redact_sensitive=True applies per-plugin data redaction
         if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("tool_call"):
             try:
                 _hook_manager.execute(
@@ -502,14 +502,14 @@ async def _stream_response(
                 logger.debug("tool_call hook dispatch failed: %s", exc)
 
     def _on_reasoning_step_callback(reasoning_step):
-        """S49: Callback pour emettre les etapes de raisonnement."""
+        """Callback emitting the reasoning steps."""
         chunks.append(("reasoning_step", reasoning_step))
 
     def _on_consensus_model_callback(model_response):
-        """S50: Callback to emit individual consensus responses."""
+        """Callback to emit individual consensus responses."""
         chunks.append(("consensus_model_done", model_response))
 
-    # S185 (EX-02): per-request tool-approval gate. Bound to this request and
+    # EX-02: per-request tool-approval gate. Bound to this request and
     # passed into the executor call rather than mutated onto a shared singleton,
     # so overlapping Bulbe sessions cannot clobber or drop each other's gate.
     # Assigned in the Bulbe branch below; None means no gate (Daily / no policy).
@@ -525,11 +525,11 @@ async def _stream_response(
         if _qs_active and _qs_session is not None:
             _qs_session.begin_turn()
         try:
-            # S48: Retrieve the images from routing
+            # Retrieve the images from routing
             _images = getattr(routing, "images", None) or (request.images if request else None)
 
-            # S95: Status callback to capture vision delegation events
-            # S109: Also emit general status messages for intermediate feedback
+            # Status callback to capture vision delegation events
+            # Also emit general status messages for intermediate feedback
             def _on_status(msg):
                 # Always emit as generic status for StreamingIndicator
                 chunks.append(("status", {"message": msg}))
@@ -541,10 +541,10 @@ async def _stream_response(
                     }))
 
             if _exec_pipeline_obj is not None:
-                # S216 (PIP-06): execution-pipeline run via the executor-backed
-                # PipelineRunner (the S53 seam, finished). The runner resets
+                # PIP-06: execution-pipeline run via the executor-backed
+                # PipelineRunner (the seam, finished). The runner resets
                 # and drives the agentic executor per step; the approval gate
-                # (S185 EX-02) is forwarded so Bulbe semantics hold per step.
+                # (EX-02) is forwarded so Bulbe semantics hold per step.
                 _agentic_executor.reset()
                 gen = get_pipeline_runner().execute(
                     pipeline=_exec_pipeline_obj,
@@ -558,7 +558,7 @@ async def _stream_response(
                     approval_fn=_approval_fn,
                 )
             elif use_agentic:
-                # S45: Execution via AgenticExecutor
+                # Execution via AgenticExecutor
                 _agentic_executor.reset()
                 gen = _agentic_executor.execute(
                     message=message,
@@ -566,20 +566,20 @@ async def _stream_response(
                     conversation_id=conversation_id if conversation_id else None,
                     think=request.think if request.think is not None else None,
                     web_search=request.web_search if request.web_search is not None else None,
-                    # S50: Consensus multi-model
+                    # Consensus multi-model
                     consensus=request.consensus if request.consensus is not None else None,
                     consensus_models=request.consensus_models,
                     consensus_strategy=request.consensus_strategy,
-                    # S51: Auto-correction
+                    # Auto-correction
                     self_correct=request.self_correct if hasattr(request, 'self_correct') and request.self_correct is not None else None,
                     # Lot 5: opt-in tool-model optimization
                     optimize=getattr(request, 'optimize', None),
                     on_tool_call=_on_tool_call_callback,
                     on_reasoning_step=_on_reasoning_step_callback,
                     on_consensus_model=_on_consensus_model_callback,
-                    # S109: Pipe status for intermediate feedback
+                    # Pipe status for intermediate feedback
                     on_status=_on_status,
-                    # S185 (EX-02): per-request tool-approval gate
+                    # EX-02: per-request tool-approval gate
                     approval_fn=_approval_fn,
                 )
             else:
@@ -604,7 +604,7 @@ async def _stream_response(
                     chunks.append(("cancel", None))
                     break
                 if chunk:
-                    # S216 (PIP-06): pipeline step-boundary tuples from the
+                    # PIP-06: pipeline step-boundary tuples from the
                     # PipelineRunner; relayed as light status, never
                     # concatenated into the response text.
                     if isinstance(chunk, tuple) and len(chunk) == 3:
@@ -616,28 +616,28 @@ async def _stream_response(
                         # pipeline_step_start: on_status already emitted
                         # "Step i/N: label" from the runner.
                         continue
-                    # S42: Distinguish thinking chunks from regular chunks
+                    # Distinguish thinking chunks from regular chunks
                     if isinstance(chunk, tuple) and len(chunk) == 2:
                         chunk_type, chunk_content = chunk
                         if chunk_type == "thinking":
                             chunks.append(("thinking", chunk_content))
                         elif chunk_type == "reasoning_step":
-                            # S49: Etape de raisonnement
+                            # Etape de raisonnement
                             chunks.append(("reasoning_step", chunk_content))
                         elif chunk_type == "reasoning_done":
-                            # S49: Fin du raisonnement
+                            # Fin du raisonnement
                             chunks.append(("reasoning_done", chunk_content))
                         elif chunk_type == "consensus_model_done":
-                            # S50: Reponse individuelle de consensus
+                            # Reponse individuelle de consensus
                             chunks.append(("consensus_model_done", chunk_content))
                         elif chunk_type == "consensus_done":
-                            # S50: Fin du consensus
+                            # Fin du consensus
                             chunks.append(("consensus_done", chunk_content))
                         elif chunk_type == "correction_step":
-                            # S51: Etape d'auto-correction
+                            # Etape d'auto-correction
                             chunks.append(("correction_step", chunk_content))
                         elif chunk_type == "correction_done":
-                            # S51: Fin de l'auto-correction
+                            # Fin de l'auto-correction
                             chunks.append(("correction_done", chunk_content))
                         else:
                             full_response += chunk_content
@@ -646,7 +646,7 @@ async def _stream_response(
                         full_response += chunk
                         chunks.append(("chunk", chunk))
 
-            # S95: Emit vision delegation completion if it occurred
+            # Emit vision delegation completion if it occurred
             _vm = getattr(executor, 'last_vision_meta', {})
             if _vm.get("delegated"):
                 chunks.append(("vision_delegation", {
@@ -665,8 +665,8 @@ async def _stream_response(
                 _qs_session.end_turn()
             generation_done.set()
 
-    # S114: Fire pre_inference hooks before starting generation
-    # S124: redact_sensitive=True applies per-plugin data redaction
+    # Fire pre_inference hooks before starting generation
+    # redact_sensitive=True applies per-plugin data redaction
     if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("pre_inference"):
         try:
             pre_report = _hook_manager.execute(
@@ -685,9 +685,9 @@ async def _stream_response(
 
     gen_thread = threading.Thread(target=_generate, daemon=True)
 
-    # S128: In Bulbe mode, arm a pre-execution approval gate so every tool
+    # In Bulbe mode, arm a pre-execution approval gate so every tool
     # call blocks until human approval.
-    # S185 (EX-02): the gate is bound to this request (assigned to _approval_fn
+    # EX-02: the gate is bound to this request (assigned to _approval_fn
     # and passed into the executor call above) instead of mutated onto the
     # shared ToolExecutor singleton, so overlapping Bulbe sessions cannot
     # clobber or drop each other's gate.
@@ -734,7 +734,7 @@ async def _stream_response(
                     }))
                     return approved
 
-                # S185 (EX-02): bind the gate to this request instead of
+                # EX-02: bind the gate to this request instead of
                 # mutating the shared singleton. _approval_fn is forwarded to
                 # the executor call, which threads it down to _execute_tool.
                 _approval_fn = _approval_hook
@@ -745,13 +745,13 @@ async def _stream_response(
     gen_thread.start()
 
     # Streaming loop: sends chunks progressively
-    # S159: Critical event types that must never be dropped by backpressure
+    # Critical event types that must never be dropped by backpressure
     _BP_CRITICAL_EVENTS = frozenset({
         "error", "cancel", "tool_call_pending", "tool_call_resolved",
     })
     sent_index = 0
     while not generation_done.is_set() or sent_index < len(chunks):
-        # S159: Backpressure -- detect slow client and drop oldest
+        # Backpressure -- detect slow client and drop oldest
         # non-critical events when the pending queue exceeds the limit.
         pending = len(chunks) - sent_index
         if pending > _BP_MAX_SIZE:
@@ -781,7 +781,7 @@ async def _stream_response(
                         len(chunks) - sent_index, _BP_MAX_SIZE,
                     )
 
-        # S159: Idle timeout -- disconnect if consumer has not
+        # Idle timeout -- disconnect if consumer has not
         # progressed for longer than the configured timeout.
         if (
             not generation_done.is_set()
@@ -821,7 +821,7 @@ async def _stream_response(
                     _cleanup_cancel_event(conversation_id)
                     return
             elif event_type == "thinking":
-                # S42: Send le contenu de reflexion via WebSocket
+                # Send the thinking content over the WebSocket
                 thinking_content += content
                 alive = await _send_token(websocket, "thinking", content)
                 if not alive:
@@ -836,7 +836,7 @@ async def _stream_response(
                 await _send_token(websocket, "token", "\n\n[Generation cancelled]")
                 break
             elif event_type == "tool_call":
-                # S45: Emettre les appels d'outils en temps reel
+                # Emettre les appels d'outils en temps reel
                 tc = content  # content est un ToolCallResult ici
                 if tc is not None:
                     await _send_token(websocket, "tool_call", "", metadata={
@@ -849,7 +849,7 @@ async def _stream_response(
                         "reasoning": tc.reasoning if hasattr(tc, 'reasoning') else "",
                     })
             elif event_type == "reasoning_step":
-                # S49: Emettre les etapes de raisonnement
+                # Emettre les etapes de raisonnement
                 step = content
                 if step is not None:
                     await _send_token(websocket, "reasoning_step", "", metadata={
@@ -859,7 +859,7 @@ async def _stream_response(
                         "duration_ms": step.duration_ms if hasattr(step, 'duration_ms') else 0,
                     })
             elif event_type == "reasoning_done":
-                # S49: Emettre la fin du raisonnement
+                # Emit the end of the reasoning
                 reasoning_result = content
                 if reasoning_result is not None:
                     await _send_token(websocket, "reasoning_done", "", metadata={
@@ -869,7 +869,7 @@ async def _stream_response(
                         "total_duration_ms": reasoning_result.total_duration_ms if hasattr(reasoning_result, 'total_duration_ms') else 0,
                     })
             elif event_type == "consensus_model_done":
-                # S50: Emit an individual model response
+                # Emit an individual model response
                 model_resp = content
                 if model_resp is not None:
                     await _send_token(websocket, "consensus_model_done", "", metadata={
@@ -881,7 +881,7 @@ async def _stream_response(
                         "quality_tier": model_resp.quality_tier if hasattr(model_resp, 'quality_tier') else "medium",
                     })
             elif event_type == "consensus_done":
-                # S50: Emettre le result final du consensus
+                # Emit the final consensus result
                 consensus_result = content
                 if consensus_result is not None:
                     await _send_token(websocket, "consensus_done", "", metadata={
@@ -893,12 +893,12 @@ async def _stream_response(
                         "models_count": len(consensus_result.individual_responses) if hasattr(consensus_result, 'individual_responses') else 0,
                     })
             elif event_type == "correction_step":
-                # S51: Emettre une etape d'auto-correction
+                # Emettre une etape d'auto-correction
                 step_info = content
                 if step_info is not None:
                     await _send_token(websocket, "correction_step", "", metadata=step_info)
             elif event_type == "correction_done":
-                # S51: Emettre le result final d'auto-correction
+                # Emettre le result final d'auto-correction
                 correction_result = content
                 if correction_result is not None:
                     await _send_token(websocket, "correction_done", "", metadata={
@@ -911,19 +911,19 @@ async def _stream_response(
                         "total_duration_ms": correction_result.total_duration_ms if hasattr(correction_result, 'total_duration_ms') else 0,
                     })
             elif event_type == "status":
-                # S109: Emit intermediate status for StreamingIndicator
+                # Emit intermediate status for StreamingIndicator
                 if isinstance(content, dict):
                     await _send_token(websocket, "status", "", metadata=content)
             elif event_type == "vision_delegation":
-                # S95: Emit vision delegation status (analyzing / done)
+                # Emit vision delegation status (analyzing / done)
                 if isinstance(content, dict):
                     await _send_token(websocket, "vision_delegation", "", metadata=content)
             elif event_type == "tool_call_pending":
-                # S128: Tool call awaiting human approval (Bulbe mode)
+                # Tool call awaiting human approval (Bulbe mode)
                 if isinstance(content, dict):
                     await _send_token(websocket, "tool_call_pending", "", metadata=content)
             elif event_type == "tool_call_resolved":
-                # S128: Tool call approval resolved (approved/denied/timeout)
+                # Tool call approval resolved (approved/denied/timeout)
                 if isinstance(content, dict):
                     await _send_token(websocket, "tool_call_resolved", "", metadata=content)
             elif event_type == "error":
@@ -934,7 +934,7 @@ async def _stream_response(
                 return
 
         # Wait briefly before rechecking.
-        # S188 SSE-05: poll without blocking the asyncio event loop. The
+        # SSE-05: poll without blocking the asyncio event loop. The
         # generation runs on a daemon thread and signals via generation_done;
         # awaiting asyncio.sleep yields to the loop instead of blocking it on a
         # threading.Event (the sibling _stream_chat_coding loop already does this).
@@ -949,7 +949,7 @@ async def _stream_response(
                 try:
                     await websocket.send_json({"type": "ping", "timestamp": time.time()})
                     _last_send_time = time.time()
-                    # S188 SSE-04: a successful keepalive ping proves the client
+                    # SSE-04: a successful keepalive ping proves the client
                     # socket is still draining, so refresh the consumer timer too.
                     # Without this, the idle-timeout below would mistake a slow
                     # producer (long tool/search/think phase, no events) for a
@@ -966,8 +966,8 @@ async def _stream_response(
     # Calculer la duration
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # S43: Emit code verification results
-    # S45: Retrieve from AgenticExecutor if used, otherwise from Executor
+    # Emit code verification results
+    # Retrieve from AgenticExecutor if used, otherwise from Executor
     _verification_results = []
     if use_agentic and _agentic_executor is not None:
         _verification_results = _agentic_executor.last_verification_results or []
@@ -988,7 +988,7 @@ async def _stream_response(
             "execution_output": vr.execution_output[:500] if vr.execution_output else "",
         })
 
-    # S44/S45: Emit tool call results (those not already emitted in real-time)
+    # Emit tool call results (those not already emitted in real-time)
     # Les appels emis via callback sont already envoyes; ici on emet ceux de l'executor legacy
     if (
         not use_agentic
@@ -1008,8 +1008,8 @@ async def _stream_response(
                 "reasoning": tc.reasoning,
             })
 
-    # S114: Fire post_inference hooks — plugins can annotate/modify the response
-    # S124: redact_sensitive=True applies per-plugin data redaction
+    # Fire post_inference hooks — plugins can annotate/modify the response
+    # redact_sensitive=True applies per-plugin data redaction
     plugin_annotations: list[dict] = []
     if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("post_inference"):
         try:
@@ -1052,16 +1052,16 @@ async def _stream_response(
         "model": routing.model,
         "duration_ms": duration_ms,
         "cancelled": cancel_event.is_set(),
-        # S46: Raison de routage dans le done also
+        # Routing reason in the done payload as well
         "routing_reason": routing.routing_reason,
     }
-    # S159: Include backpressure stats if any events were dropped
+    # Include backpressure stats if any events were dropped
     if _bp_dropped > 0:
         done_metadata["backpressure"] = {
             "events_dropped": _bp_dropped,
             "slow_warnings": _bp_slow_logged,
         }
-    # S95: Include vision delegation info in done metadata
+    # Include vision delegation info in done metadata
     _final_vision_meta = getattr(executor, 'last_vision_meta', {})
     if _final_vision_meta.get("delegated"):
         done_metadata["vision_delegation"] = {
@@ -1071,15 +1071,15 @@ async def _stream_response(
         }
     if thinking_content:
         done_metadata["thinking"] = thinking_content
-    # S216 (PIP-06): record which execution pipeline ran, if any
+    # PIP-06: record which execution pipeline ran, if any
     if _exec_pipeline_obj is not None:
         done_metadata["exec_pipeline"] = _exec_pipeline_obj.id
-    # S45: Ajouter les infos agentiques
+    # Add the agentic information
     if use_agentic and _agentic_executor is not None:
         done_metadata["pipeline"] = _agentic_executor.last_pipeline
         done_metadata["tool_calls_count"] = len(_agentic_executor.last_tool_calls)
         done_metadata["verifications_count"] = len(_agentic_executor.last_verification_results)
-        # S49: Ajouter les infos de raisonnement
+        # Add the reasoning information
         if _agentic_executor.last_reasoning_result is not None:
             rr = _agentic_executor.last_reasoning_result
             done_metadata["reasoning"] = {
@@ -1088,7 +1088,7 @@ async def _stream_response(
                 "confidence": rr.confidence,
                 "total_duration_ms": rr.total_duration_ms,
             }
-        # S51: Ajouter les infos d'auto-correction
+        # Add the self-correction information
         if _agentic_executor.last_correction_result is not None:
             cr = _agentic_executor.last_correction_result
             done_metadata["correction"] = {
@@ -1100,10 +1100,10 @@ async def _stream_response(
                 "quality_after": cr.quality_after,
                 "total_duration_ms": cr.total_duration_ms,
             }
-    # S114: Include plugin annotations if any
+    # Include plugin annotations if any
     if plugin_annotations:
         done_metadata["plugin_annotations"] = plugin_annotations
-    # S117: Include quick sandbox metadata if sandbox was used
+    # Include quick sandbox metadata if sandbox was used
     if _qs_active and _qs_session is not None:
         sandbox_files = _qs_session.get_sandbox_files()
         done_metadata["sandbox_active"] = True
@@ -1116,19 +1116,19 @@ async def _stream_response(
     await _send_token(websocket, "done", full_response, metadata=done_metadata)
 
     # Nettoyage
-    # S117: Deactivate quick sandbox mode (restore original tool handlers)
+    # Deactivate quick sandbox mode (restore original tool handlers)
     if _qs_active and _tool_registry is not None:
         try:
             _tool_registry.set_quick_sandbox_mode(False)
         except Exception as exc:
             logger.warning("Quick sandbox deactivation failed: %s", exc)
-    # S128/S185 (EX-02): the approval gate was request-scoped (passed into the
+    # EX-02: the approval gate was request-scoped (passed into the
     # executor call), so there is no shared singleton attribute to reset here.
     _cleanup_cancel_event(conversation_id)
 
 
 # ---------------------------------------------------------------------------
-# S118: Chat Coding Agent — rich LLM callback + streaming
+# Chat Coding Agent — rich LLM callback + streaming
 # ---------------------------------------------------------------------------
 
 def _build_rich_llm_callback(
@@ -1138,10 +1138,10 @@ def _build_rich_llm_callback(
     """Build a rich LLM callback that wraps the full chat pipeline.
 
     The returned callback gives the coding agent access to:
-    - Vision delegation (S95): images analyzed by vision-capable model
-    - Web search (S42): search and inject documentation
-    - Tool calls (S44/S45): all registered tools via agentic executor
-    - Plugin hooks (S114): pre/post inference
+    - Vision delegation: images analyzed by vision-capable model
+    - Web search: search and inject documentation
+    - Tool calls: all registered tools via agentic executor
+    - Plugin hooks: pre/post inference
     - Full conversation context (already in the messages array)
 
     Signature: (messages, model, LLMCallContext) -> LLMCallResult
@@ -1158,7 +1158,7 @@ def _build_rich_llm_callback(
         result = LLMCallResult()
         _images = context.images if context else None
 
-        # 1. Vision delegation (S95): process images before LLM call
+        # 1. Vision delegation: process images before LLM call
         user_msg = messages[-1]["content"] if messages else ""
         try:
             from opti_oignon.vision_pipeline import (
@@ -1181,14 +1181,14 @@ def _build_rich_llm_callback(
         except Exception as exc:
             logger.debug("Vision in coding agent: %s", exc)
 
-        # SR-02 (S185): the coding-agent path had a dead web-search block here
+        # SR-02: the coding-agent path had a dead web-search block here
         # that imported and called a search-augmentation helper defined nowhere
         # in the codebase (and a flag that is not exported), so the import always
         # raised ImportError and the block never ran. Removed. The live
         # web_search path is in executor.py (web_search_engine), used by the
         # standard chat pipeline.
 
-        # 3. Plugin pre_inference hooks (S114)
+        # 3. Plugin pre_inference hooks
         plugin_annotations: list[dict] = []
         if PLUGIN_HOOKS_AVAILABLE and _hook_manager:
             try:
@@ -1240,8 +1240,8 @@ def _build_rich_llm_callback(
         result.text = full_text
         result.tool_calls = tool_calls_meta
 
-        # 5. Plugin post_inference hooks (S114)
-        # S124: redact_sensitive=True applies per-plugin data redaction
+        # 5. Plugin post_inference hooks
+        # redact_sensitive=True applies per-plugin data redaction
         if PLUGIN_HOOKS_AVAILABLE and _hook_manager:
             try:
                 if _hook_manager.has_hooks("post_inference"):
@@ -1445,7 +1445,7 @@ async def chat_stream(websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    # S136 audit fix: authenticate WebSocket connection
+    # Audit fix: authenticate WebSocket connection
     try:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)
@@ -1458,7 +1458,7 @@ async def chat_stream(websocket: WebSocket) -> None:
         await websocket.close(code=4001)
         return
 
-    # S215: emergency-stop admission guard -- refused, not hung
+    # Emergency-stop admission guard -- refused, not hung
     if _emergency_stop is not None and _emergency_stop.is_stopped():
         await _send_token(
             websocket, "error", _emergency_stop.refusal_payload()["message"]
@@ -1541,7 +1541,7 @@ async def chat_retry(websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    # S136 audit fix: authenticate WebSocket connection
+    # Audit fix: authenticate WebSocket connection
     try:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)
@@ -1554,7 +1554,7 @@ async def chat_retry(websocket: WebSocket) -> None:
         await websocket.close(code=4001)
         return
 
-    # S215: emergency-stop admission guard -- refused, not hung
+    # Emergency-stop admission guard -- refused, not hung
     if _emergency_stop is not None and _emergency_stop.is_stopped():
         await _send_token(
             websocket, "error", _emergency_stop.refusal_payload()["message"]
@@ -1681,7 +1681,7 @@ async def cancel_generation(body: ChatCancelRequest) -> dict:
     # Annuler also cote executor (pour interrompre ollama.chat)
     if EXECUTOR_AVAILABLE and executor is not None:
         executor.cancel()
-    # S45: Annuler also l'executeur agentique
+    # Annuler also l'executeur agentique
     if AGENTIC_EXECUTOR_AVAILABLE and _agentic_executor is not None:
         _agentic_executor.cancel()
 
@@ -1690,7 +1690,7 @@ async def cancel_generation(body: ChatCancelRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# POST: /api/chat/consensus (S50)
+# POST: /api/chat/consensus
 # ---------------------------------------------------------------------------
 
 @router.post("/consensus")
@@ -1727,7 +1727,7 @@ async def run_consensus(body: ConsensusRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GET: /api/chat/consensus/config (S50)
+# GET: /api/chat/consensus/config
 # ---------------------------------------------------------------------------
 
 @router.get("/consensus/config")
@@ -1747,7 +1747,7 @@ async def get_consensus_config() -> dict:
     ).model_dump()
 
 # ---------------------------------------------------------------------------
-# S118: Chat Coding Agent endpoints
+# Chat Coding Agent endpoints
 # ---------------------------------------------------------------------------
 
 @router.get("/coding/status")

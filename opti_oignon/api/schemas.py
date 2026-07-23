@@ -103,25 +103,25 @@ class ChatRequest(BaseModel):
     preset: str | None = None
     temperature: float | None = None
     use_presets: bool = True
-    # S42: Controles de chat
+    # Controles de chat
     think: bool | None = None        # None = auto, True = force, False = disable
     web_search: bool | None = None   # None = auto, True = force, False = disable
-    # S48: Images pour vision multimodale
+    # Images pour vision multimodale
     images: list[str] | None = None  # Liste de base64 (sans prefixe data:...)
-    # S50: Consensus multi-model
+    # Consensus multi-model
     consensus: bool | None = None             # None = auto, True = force
     consensus_models: list[str] | None = None  # Models specifiques
     consensus_strategy: str | None = None      # best_of_n, weighted_vote, llm_merge
-    # S51: Auto-correction
+    # Auto-correction
     self_correct: bool | None = None          # None = auto, True = force
     # Lot 5: opt-in optimization -- route tool-bound work to the fast tool model
     optimize: bool | None = None              # None/False = keep selected model
-    # S117: Quick sandbox mode for chat code execution
+    # Quick sandbox mode for chat code execution
     quick_sandbox: bool | None = None         # None = use config, True = force on
-    # S118: Chat coding agent mode (conversational coding with persistent sandbox)
+    # Chat coding agent mode (conversational coding with persistent sandbox)
     chat_coding: bool | None = None           # None = use config, True = force on
-    # S216 (PIP-06): execution pipeline selection. The frontend has sent this
-    # field since S53; the model never carried it, so it was silently dropped.
+    # PIP-06: execution pipeline selection. The frontend has sent this
+    # field; the model never carried it, so it was silently dropped.
     exec_pipeline: str | None = None          # None = plain chat, id = run that pipeline
 
 class ChatToken(BaseModel):
@@ -219,7 +219,7 @@ class CodeBlockInfo(BaseModel):
     end_pos: int
 
 class CodeBlocksResponse(BaseModel):
-    """Response wrapper for extracted code blocks (BUG-07 S108)."""
+    """Response wrapper for extracted code blocks (BUG-07)."""
     blocks: list[CodeBlockInfo]
 
 
@@ -249,10 +249,10 @@ class MemoryExtractResponse(BaseModel):
     facts_added: int = 0
 
 
-# -- Memory store (S174, two-tier MemoryStore) --
+# -- Memory store (two-tier MemoryStore) --
 
 class MemoryRecordSchema(BaseModel):
-    """A fact in the two-tier memory store (S174)."""
+    """A fact in the two-tier memory store."""
     id: str
     text: str
     category: str
@@ -263,7 +263,7 @@ class MemoryRecordSchema(BaseModel):
     use_count: int = 0
 
 class MemoryEditRequest(BaseModel):
-    """Edit a stored memory fact (S174). Omitted fields are left unchanged."""
+    """Edit a stored memory fact. Omitted fields are left unchanged."""
     text: str | None = None
     category: str | None = None
 
@@ -284,7 +284,7 @@ class NoteSchema(BaseModel):
     created_at: str = ""
     updated_at: str = ""
     deleted: bool = False
-    # N.9 (S256): the per-item phone-sync opt-in (MOBILE_THREAT_MODEL.md
+    # N.9: the per-item phone-sync opt-in (MOBILE_THREAT_MODEL.md
     # section 3). False is the secure default; the PATCH leg flips it
     # through the store's dedicated setter only.
     mobile_allowed: bool = False
@@ -303,12 +303,12 @@ class NoteUpdateRequest(BaseModel):
     body_crdt_b64: str | None = None
     tags: list[str] | None = None
     pinned: bool | None = None
-    # N.9 (S256): the per-item phone-sync opt-in rides the existing PATCH
+    # N.9: the per-item phone-sync opt-in rides the existing PATCH
     # leg (no new route). Omitted means unchanged; the route flips it
     # through the store's dedicated setter only (decision N9-D3), never the
     # generic update path.
     mobile_allowed: bool | None = None
-    # N.8 (S265): the section-4 compaction watermark -- the highest local seq
+    # N.8: the section-4 compaction watermark -- the highest local seq
     # the client folded into this whole-blob PATCH. When present the route
     # records it through the update store and prunes the folded tail lazily;
     # omitted records nothing (fail-secure). It never decreases: the store
@@ -514,7 +514,7 @@ class FileUploadResponse(BaseModel):
 
 
 class ImageUploadResponse(BaseModel):
-    """Result d'upload d'image (S48)."""
+    """Result d'upload d'image."""
     filename: str
     size_bytes: int
     base64_data: str  # Base64 sans prefixe data:...
@@ -532,7 +532,7 @@ class ExportResponse(BaseModel):
     content: str
 
 
-# -- Presets (S29) --
+# -- Presets --
 
 class PresetInfo(BaseModel):
     """Informations sur un preset."""
@@ -594,7 +594,7 @@ class PresetDuplicateRequest(BaseModel):
     new_name: str
 
 
-# -- Pipelines (S29) --
+# -- Pipelines --
 
 class PipelineStepSchema(BaseModel):
     """Schema of ae etape de pipeline."""
@@ -666,7 +666,7 @@ class PipelineExportRequest(BaseModel):
     custom_only: bool = False
 
 
-# -- Model Profiles (S46) --
+# -- Model Profiles --
 
 class ModelProfileInfo(BaseModel):
     """Informations sur le profil of a model."""
@@ -700,7 +700,7 @@ class RoutingReasonInfo(BaseModel):
     profile_used: bool = False
 
 
-# -- Settings (S29) --
+# -- Settings --
 
 class SettingsResponse(BaseModel):
     """Configuration globale."""
@@ -720,7 +720,7 @@ class SettingSetRequest(BaseModel):
     value: Any
 
 
-# -- Theme (S152) --
+# -- Theme --
 
 class ThemeConfigRequest(BaseModel):
     """Request body for saving a user theme configuration."""
@@ -798,7 +798,7 @@ class CustomPresetsExportResponse(BaseModel):
     presets_json: str = Field(description="JSON string of custom presets")
 
 
-# -- Consensus (S50) --
+# -- Consensus --
 
 class ConsensusRequest(BaseModel):
     """Request de consensus multi-model."""
@@ -850,7 +850,7 @@ class ConsensusConfigResponse(BaseModel):
     available: bool = False
 
 
-# -- Self-Correction (S51) --
+# -- Self-Correction --
 
 class CorrectionIterationSchema(BaseModel):
     """Une iteration de correction."""
@@ -885,10 +885,10 @@ class CorrectionConfigResponse(BaseModel):
     available: bool = False
 
 
-# -- S68: Semantic Cache (enhanced) --
+# -- Semantic Cache (enhanced) --
 
 class S68CacheStatsSchema(BaseModel):
-    """S68 enhanced semantic cache statistics."""
+    """Enhanced semantic cache statistics."""
     total_entries: int = 0
     exact_hits: int = 0
     semantic_hits: int = 0
@@ -908,7 +908,7 @@ class S68CacheStatsSchema(BaseModel):
 
 
 class S68CacheStatusResponse(BaseModel):
-    """S68 cache status for ChatControlBar and panels."""
+    """Cache status for ChatControlBar and panels."""
     enabled: bool = False
     available: bool = False
     stats: S68CacheStatsSchema | None = None
@@ -916,7 +916,7 @@ class S68CacheStatusResponse(BaseModel):
 
 
 class S68CacheConfigUpdate(BaseModel):
-    """S68 cache configuration update request."""
+    """Cache configuration update request."""
     enabled: bool | None = None
     similarity_threshold: float | None = None
     ttl_seconds: int | None = None
@@ -927,11 +927,11 @@ class S68CacheConfigUpdate(BaseModel):
 
 
 class S68CacheClearRequest(BaseModel):
-    """S68 cache clear request."""
+    """Cache clear request."""
     conversation_id: str | None = None
 
 
-# -- S69: Cascading Inference --
+# -- Cascading Inference --
 
 class CascadeTierSchema(BaseModel):
     """Schema for a single cascade tier configuration."""
@@ -996,7 +996,7 @@ class CascadeTestResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Speculative Generation (S70)
+# Speculative Generation
 # ---------------------------------------------------------------------------
 
 
@@ -1053,7 +1053,7 @@ class SpeculativeTestResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Network Manager / Offline-First Intelligence (S71)
+# Network Manager / Offline-First Intelligence
 # ---------------------------------------------------------------------------
 
 
@@ -1108,7 +1108,7 @@ class PreCacheResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-# -- Performance Monitor (S72) --
+# -- Performance Monitor --
 
 class PerformanceSummaryResponse(BaseModel):
     """Full performance summary."""
@@ -1189,13 +1189,13 @@ class UtilizationResponse(BaseModel):
     models: dict[str, float] = Field(default_factory=dict)
 
 
-# -- Sandbox (S73) --
+# -- Sandbox --
 
 class SandboxCreateRequest(BaseModel):
     """Request to create a new sandbox session."""
     session_id: str | None = None
     allow_degraded: bool = False
-    # S210 (Bloc 1): optional human label and per-sandbox command timeout.
+    # Bloc 1: optional human label and per-sandbox command timeout.
     label: str = ""
     timeout: int | None = None
 
@@ -1266,7 +1266,7 @@ class SandboxStatusResponse(BaseModel):
     degraded_confirmed: bool = False
     active_sessions: int = 0
     max_sessions: int = 5
-    # S213 (Bloc 4): the live egress-gate answer (True only in Daily;
+    # Bloc 4: the live egress-gate answer (True only in Daily;
     # fail-secure False when the gate is unavailable) -- the SyncPanel
     # bulbe_disabled precedent -- plus the configured caps, read-only, for
     # the per-workspace settings strip. All additive with safe defaults.
@@ -1290,10 +1290,10 @@ class SandboxSessionInfo(BaseModel):
     approval_state: str = "pending"
     approved_paths: list[str] = Field(default_factory=list)
     approved_at: float | None = None
-    # S210 (Bloc 1): the workspace-manager view. network_enabled is the
-    # per-workspace flag (S213, Bloc 4: user-set only, Daily-only, default
+    # Bloc 1: the workspace-manager view. network_enabled is the
+    # per-workspace flag (Bloc 4: user-set only, Daily-only, default
     # False); disk_use_bytes is approximate (bounded walk); running reflects
-    # the per-session process registry. has_cloned_baseline (S213) is True
+    # the per-session process registry. has_cloned_baseline is True
     # when a host clone recorded a baseline root -- the settings strip
     # sharpens the exfiltration warning with it.
     label: str = ""
@@ -1336,7 +1336,7 @@ class SandboxDestroyResponse(BaseModel):
 
 
 class SandboxStopResponse(BaseModel):
-    """Response after the stop path (S210).
+    """Response after the stop path.
 
     stopped is False when nothing was running (honest no-op, not an error);
     the workspace itself persists either way.
@@ -1346,26 +1346,26 @@ class SandboxStopResponse(BaseModel):
 
 
 class SandboxBindRequest(BaseModel):
-    """Bind a conversation to a workspace (S210)."""
+    """Bind a conversation to a workspace."""
     conversation_id: str
     session_id: str
 
 
 class SandboxBindingResponse(BaseModel):
-    """Current binding of a conversation (S210)."""
+    """Current binding of a conversation."""
     conversation_id: str
     session_id: str | None = None
     bound: bool = False
 
 
 class SandboxUploadRefused(BaseModel):
-    """A per-file upload refusal (S211): invalid name or collision."""
+    """A per-file upload refusal: invalid name or collision."""
     name: str
     reason: str
 
 
 class SandboxUploadResponse(BaseModel):
-    """Result of a multipart drag-and-drop upload (S211, Bloc 2)."""
+    """Result of a multipart drag-and-drop upload (Bloc 2)."""
     session_id: str
     uploaded_paths: list[str] = Field(default_factory=list)
     refused: list[SandboxUploadRefused] = Field(default_factory=list)
@@ -1374,7 +1374,7 @@ class SandboxUploadResponse(BaseModel):
 
 
 class HostBrowseEntry(BaseModel):
-    """One immediate entry of an allowlisted host directory (S211)."""
+    """One immediate entry of an allowlisted host directory."""
     name: str
     type: str  # "dir" | "file" | "symlink" | "special"
     size: int = 0
@@ -1382,20 +1382,20 @@ class HostBrowseEntry(BaseModel):
 
 
 class HostBrowseResponse(BaseModel):
-    """Allowlisted host directory listing (S211, Bloc 2)."""
+    """Allowlisted host directory listing (Bloc 2)."""
     path: str
     roots: list[str] = Field(default_factory=list)
     entries: list[HostBrowseEntry] = Field(default_factory=list)
 
 
 class SandboxCloneRequest(BaseModel):
-    """Request to clone an allowlisted host directory (S211, Bloc 2)."""
+    """Request to clone an allowlisted host directory (Bloc 2)."""
     src_path: str
     dest_subdir: str = ""
 
 
 class SandboxCloneResponse(BaseModel):
-    """Result of a symlink-safe host clone (S211, Bloc 2)."""
+    """Result of a symlink-safe host clone (Bloc 2)."""
     session_id: str
     dest: str
     cloned_root: str
@@ -1406,10 +1406,10 @@ class SandboxCloneResponse(BaseModel):
     manifest_files: int = 0
 
 
-# -- Sandbox diff-gated write-back (S212, Bloc 3) --
+# -- Sandbox diff-gated write-back (Bloc 3) --
 
 class SandboxDiffEntry(BaseModel):
-    """One classified change against the baseline manifest (S212)."""
+    """One classified change against the baseline manifest."""
     path: str
     kind: str  # "added" | "modified" | "deleted"
     size: int = 0
@@ -1418,7 +1418,7 @@ class SandboxDiffEntry(BaseModel):
 
 
 class SandboxDiffResponse(BaseModel):
-    """The workspace diff against the recorded baseline (S212).
+    """The workspace diff against the recorded baseline.
 
     diff_hash is the review-integrity digest the apply request must echo;
     baseline_present is False when no baseline exists (everything is
@@ -1438,7 +1438,7 @@ class SandboxDiffResponse(BaseModel):
 
 
 class SandboxConfirmDeletionsRequest(BaseModel):
-    """Explicit confirmation of deletions for apply (S212).
+    """Explicit confirmation of deletions for apply.
 
     Distinct from approval by design: removing a host file is never
     bundled into a blanket approve-all.
@@ -1447,20 +1447,20 @@ class SandboxConfirmDeletionsRequest(BaseModel):
 
 
 class SandboxConfirmDeletionsRefused(BaseModel):
-    """A per-path deletion-confirmation refusal (S212)."""
+    """A per-path deletion-confirmation refusal."""
     path: str
     reason: str
 
 
 class SandboxConfirmDeletionsResponse(BaseModel):
-    """Result of a deletion-confirmation request (S212)."""
+    """Result of a deletion-confirmation request."""
     session_id: str
     confirmed: list[str] = []
     refused: list[SandboxConfirmDeletionsRefused] = []
 
 
 class SandboxApplyRequest(BaseModel):
-    """Apply approved changes back to the host (S212).
+    """Apply approved changes back to the host.
 
     diff_hash MUST be the digest received with the reviewed diff; apply
     recomputes the live diff and refuses (409) on any drift. target_dir
@@ -1472,20 +1472,20 @@ class SandboxApplyRequest(BaseModel):
 
 
 class SandboxApplyEntry(BaseModel):
-    """One applied change (S212)."""
+    """One applied change."""
     path: str
     action: str  # "created" | "modified" | "deleted" | "already_absent"
     bytes: int = 0
 
 
 class SandboxApplyRefusedEntry(BaseModel):
-    """One refused apply path with its honest reason (S212)."""
+    """One refused apply path with its honest reason."""
     path: str
     error: str
 
 
 class SandboxApplyResponse(BaseModel):
-    """Result of an apply-to-host run (S212)."""
+    """Result of an apply-to-host run."""
     session_id: str
     target: str
     applied: list[SandboxApplyEntry] = []
@@ -1496,7 +1496,7 @@ class SandboxApplyResponse(BaseModel):
     diff_hash: str = ""
 
 
-# -- Sandbox network gate + provision phase (S213, Bloc 4) --
+# -- Sandbox network gate + provision phase (Bloc 4) --
 
 class SandboxNetworkToggleRequest(BaseModel):
     """Flip the per-workspace network flag (user action only)."""
@@ -1542,7 +1542,7 @@ class SandboxConfirmDegradedResponse(BaseModel):
     warning: str = ""
 
 
-# -- Sandbox Copy-Out (S116) --
+# -- Sandbox Copy-Out --
 
 class SandboxPreviewResponse(BaseModel):
     """Response with file content preview from a sandbox."""
@@ -1618,7 +1618,7 @@ class SandboxApprovalAuditResponse(BaseModel):
     count: int = 0
 
 
-# -- Quick Sandbox (S117) --
+# -- Quick Sandbox --
 
 class QuickSandboxStatusResponse(BaseModel):
     """Status of the quick sandbox system."""
@@ -1650,7 +1650,7 @@ class QuickSandboxTTLRequest(BaseModel):
     auto_destroy_minutes: int = Field(gt=0, le=1440)
 
 
-# -- Chat Coding Agent (S118) --
+# -- Chat Coding Agent --
 
 class ChatCodingStatusResponse(BaseModel):
     """Status of the chat coding agent system."""
@@ -1682,7 +1682,7 @@ class ChatCodingSessionInfo(BaseModel):
     compression_active: bool = False
 
 
-# -- Coding Agent (S74) --
+# -- Coding Agent --
 
 class CodingTaskRequest(BaseModel):
     """Request to start a coding task."""
@@ -1807,7 +1807,7 @@ class CodingStatusResponse(BaseModel):
 
 
 # ============================================================================
-# Coding History schemas (S76)
+# Coding History schemas
 # ============================================================================
 
 
@@ -1857,7 +1857,7 @@ class CodingHistoryStatsResponse(BaseModel):
     total_checkpoints: int = 0
 
 
-# -- Coding Analytics (S78 SQ-08) --
+# -- Coding Analytics (SQ-08) --
 
 class CodingModelSuccessRate(BaseModel):
     """Success rate entry for a single model."""
@@ -1915,7 +1915,7 @@ class CodingStepsDistribution(BaseModel):
 
 
 class CodingAnalyticsResponse(BaseModel):
-    """Full analytics payload for coding history (S78 SQ-08)."""
+    """Full analytics payload for coding history (SQ-08)."""
     total_tasks: int = 0
     completed_tasks: int = 0
     overall_success_rate: float = 0.0
@@ -1945,7 +1945,7 @@ class CodingResumeRequest(BaseModel):
     model: str | None = None
 
 
-# -- Export & Batch Delete (S79) --
+# -- Export & Batch Delete --
 
 class CodingBatchDeleteRequest(BaseModel):
     """Request to batch delete coding tasks.
@@ -1976,7 +1976,7 @@ class CodingExportRow(BaseModel):
     duration_seconds: float | None = None
 
 
-# -- Working Memory (S80) --
+# -- Working Memory --
 
 class WorkingMemoryResponse(BaseModel):
     """Working memory state for a coding agent task."""
@@ -1995,7 +1995,7 @@ class WorkingMemoryCompactResponse(BaseModel):
 
 
 # ============================================================================
-# Session Fingerprint schemas (S75)
+# Session Fingerprint schemas
 # ============================================================================
 
 
@@ -2028,7 +2028,7 @@ class FingerprintFullResponse(BaseModel):
 
 
 # ============================================================================
-# Web Search / Proxy schemas (S82)
+# Web Search / Proxy schemas
 # ============================================================================
 
 
@@ -2095,7 +2095,7 @@ class SearchConfigResponse(BaseModel):
     proxy_searches: int = 0
 
 
-# -- System Presets (S84) --
+# -- System Presets --
 
 class SystemPresetModelInfo(BaseModel):
     """Detected Ollama model information."""
@@ -2153,7 +2153,7 @@ class OnboardingStateResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Humanizer (S86)
+# Humanizer
 # ---------------------------------------------------------------------------
 
 class HumanizerRewriteRequest(BaseModel):
@@ -2235,7 +2235,7 @@ class HumanizerStatsResponse(BaseModel):
     by_intensity: dict[str, HumanizerStrategyStats] = Field(default_factory=dict)
 
 
-# -- Benchmark V2 (S88) --
+# -- Benchmark V2 --
 
 class BenchmarkV2ProfileSchema(BaseModel):
     """Description of a benchmark profile."""
@@ -2353,7 +2353,7 @@ class BenchmarkV2HistoryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# S89 — LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
+# LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
 # ---------------------------------------------------------------------------
 
 class BenchmarkV2JudgeScore(BaseModel):
@@ -2481,7 +2481,7 @@ class BenchmarkV2ExportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# S90 — Custom Profiles
+# Custom Profiles
 # ---------------------------------------------------------------------------
 
 class BenchmarkV2CustomProfileCreate(BaseModel):
@@ -2536,7 +2536,7 @@ class BenchmarkV2QuestionPreviewResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# S90 — Auto-Trigger
+# Auto-Trigger
 # ---------------------------------------------------------------------------
 
 class BenchmarkV2AutoTriggerStatusResponse(BaseModel):
@@ -2606,7 +2606,7 @@ class BenchmarkV2AutoTriggerTestPollResponse(BaseModel):
 
 
 # =========================================================================
-# S105 — Inference backends
+# Inference backends
 # =========================================================================
 
 class BackendStatusResponse(BaseModel):
@@ -2701,7 +2701,7 @@ class BackendModelsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Speculative Decoding (S110) — llama.cpp native speculative decoding
+# Speculative Decoding — llama.cpp native speculative decoding
 # ---------------------------------------------------------------------------
 
 class SpeculativeDecodingConfigSchema(BaseModel):
@@ -2778,7 +2778,7 @@ class VRAMBudgetResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auto-Tuner (S110) — inference parameter optimization
+# Auto-Tuner — inference parameter optimization
 # ---------------------------------------------------------------------------
 
 class TunerConfigSchema(BaseModel):
@@ -2849,7 +2849,7 @@ class TunerResultsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tuner Recommendations (S112)
+# Tuner Recommendations
 # ---------------------------------------------------------------------------
 
 class TunerRecommendationSchema(BaseModel):
@@ -2872,7 +2872,7 @@ class TunerRecommendationsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Live Metrics (S111)
+# Live Metrics
 # ---------------------------------------------------------------------------
 
 class LiveMetricsSampleSchema(BaseModel):
@@ -2921,7 +2921,7 @@ class LiveMetricsHistoryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Model Lifecycle (S112)
+# Model Lifecycle
 # ---------------------------------------------------------------------------
 
 class ModelPullRequest(BaseModel):
@@ -2992,7 +2992,7 @@ class StaleModelsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Telemetry Dashboard (S113)
+# Telemetry Dashboard
 # ---------------------------------------------------------------------------
 
 
@@ -3026,7 +3026,7 @@ class TelemetryFlushResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Inference Profiler (S113)
+# Inference Profiler
 # ---------------------------------------------------------------------------
 
 
@@ -3071,7 +3071,7 @@ class ProfilerRecentResponse(BaseModel):
 
 
 # =========================================================================
-# S114 — Telemetry History
+# Telemetry History
 # =========================================================================
 
 
@@ -3141,19 +3141,19 @@ class TelemetryHistoryStatsResponse(BaseModel):
 
 
 class TelemetryHistorySettingsRequest(BaseModel):
-    """Request body for updating history retention settings (S115)."""
+    """Request body for updating history retention settings."""
     retention_days: int | None = None
     auto_purge_enabled: bool | None = None
 
 
 class TelemetryHistorySettingsResponse(BaseModel):
-    """Response after updating history settings (S115)."""
+    """Response after updating history settings."""
     retention_days: int = 7
     auto_purge_enabled: bool = False
 
 
 # =========================================================================
-# S121 -- Backup / Restore
+# Backup / Restore
 # =========================================================================
 
 
@@ -3174,7 +3174,7 @@ class BackupImportRequest(BaseModel):
     """Request body for backup import."""
     backup: dict = {}
     strategy: str = "merge"
-    # BK-03 (S194): explicit user override for the BK-01 signature policy.
+    # BK-03: explicit user override for the BK-01 signature policy.
     # Never relaxes a FAILED verification (manager-level invariant).
     allow_unsigned: bool = False
 
@@ -3213,7 +3213,7 @@ class BackupImportResponse(BaseModel):
     rolled_back: bool = False
 
 
-# -- S153: Keyboard Shortcuts --
+# -- Keyboard Shortcuts --
 
 class ShortcutBindingSchema(BaseModel):
     """A single keyboard shortcut binding."""

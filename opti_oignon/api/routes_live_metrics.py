@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for Live Performance Metrics -- S111.
+API routes for Live Performance Metrics.
 
 Provides real-time inference metrics: current snapshot, recent history,
 collector status, and a WebSocket stream for live frontend updates.
@@ -30,7 +30,7 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# S171: RFC 6455 WebSocket close code for graceful server-side shutdown.
+# RFC 6455 WebSocket close code for graceful server-side shutdown.
 WS_CLOSE_INTERNAL_ERROR = 1011
 
 router = APIRouter(
@@ -112,7 +112,7 @@ async def metrics_stream_ws(websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    # S136 audit fix: authenticate WebSocket connection
+    # Audit fix: authenticate WebSocket connection
     try:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)

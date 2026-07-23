@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting (S156 -- SA-155-050)
+# Rate limiting (SA-155-050)
 # ---------------------------------------------------------------------------
 
 def _get_client_ip(request: Request) -> str:
@@ -61,7 +61,7 @@ ALLOWED_EXTENSIONS = {
     ".toml", ".ini", ".cfg", ".conf", ".log", ".tex", ".bib", ".nf",
 }
 
-# S48: Allowed image extensions
+# Allowed image extensions
 ALLOWED_IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
 }
@@ -79,7 +79,7 @@ _IMAGE_MIME_TYPES = {
 # Maximum file size (500 KB)
 MAX_FILE_SIZE = 500_000
 
-# S48: Maximum image size (10 MB)
+# Maximum image size (10 MB)
 MAX_IMAGE_SIZE = 10_000_000
 
 
@@ -141,7 +141,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# S48: Image Upload
+# Image Upload
 # ---------------------------------------------------------------------------
 
 @router.post("/upload/image", response_model=ImageUploadResponse)

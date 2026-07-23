@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Conversation branching API routes (S97).
+Conversation branching API routes.
 
 POST   /api/branches/fork                      -- Fork conversation at message
 GET    /api/branches/{conversation_id}          -- List branches for conversation

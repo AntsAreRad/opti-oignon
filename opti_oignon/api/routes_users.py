@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for multi-user data isolation (S142).
+API routes for multi-user data isolation.
 
 Endpoints:
   GET    /api/users/{user_id}/export    — Export all user data (GDPR)
@@ -28,7 +28,7 @@ router = APIRouter(tags=["users"])
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting (S156 -- SA-155-051)
+# Rate limiting (SA-155-051)
 # ---------------------------------------------------------------------------
 
 def _get_client_ip(request: Request) -> str:
@@ -87,12 +87,12 @@ class DeleteDataResponse(BaseModel):
     plugin_configs: int = 0
     settings: bool = False
     encryption_keys: bool = False
-    # REV-2 (S219): identity-bound plugin reviews join the cascade.
+    # REV-2: identity-bound plugin reviews join the cascade.
     plugin_reviews: int = 0
-    # UD-03 (S194): stores the per-user wipe cannot cover today
+    # UD-03: stores the per-user wipe cannot cover today
     # (single-user / unscoped); never empty until the scoping cycle.
     not_covered: list[str] = []
-    # UD-04 (S219): stores deliberately retained on wipe (audit trails);
+    # UD-04: stores deliberately retained on wipe (audit trails);
     # surfaced so a wipe never silently implies their erasure.
     retained_by_design: list[str] = []
 

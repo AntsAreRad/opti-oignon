@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API routes for the Telemetry Dashboard -- S113.
+API routes for the Telemetry Dashboard.
 
 Exposes collector statistics, consumer health, and manual flush
 via a lightweight REST interface. All endpoints degrade gracefully
@@ -120,7 +120,7 @@ def flush_telemetry_buffer() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# History (S114)
+# History
 # ---------------------------------------------------------------------------
 
 
@@ -235,7 +235,7 @@ def purge_event_history(
 
 
 # ---------------------------------------------------------------------------
-# Settings & Export (S115)
+# Settings & Export
 # ---------------------------------------------------------------------------
 
 
