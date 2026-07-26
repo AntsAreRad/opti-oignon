@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The on-disk SKILL.md registry (S177, Theme 3 / Odysseus Core).
+"""The on-disk SKILL.md registry.
 
 The evolving-skills half of the agent (ODYSSEUS_SPEC.md Section 6). Skills are
 plain SKILL.md files on disk, each with YAML-style frontmatter and a structured
@@ -19,7 +19,7 @@ here:
   the network.
 
 - The approval-gated ``manage_skills`` tool and the teacher-draft publish path
-  (added on top of this registry in S177's later phases) gate every write
+  (added on top of this registry in later phases) gate every write
   behind explicit human approval.
 
 Filesystem hygiene: every path segment for a category or a name is sanitised to
@@ -27,7 +27,7 @@ a strict ``[a-z0-9_-]`` slug and the resolved path is verified to stay under the
 root, so a traversal payload (``..`` / ``/`` / an absolute path) can never
 escape the registry. No f-string SQL is involved -- this is a file store.
 
-Veilid sync (SYN-01, S201, Bloc 0 lot 3): the registry's write seams publish
+Veilid sync: the registry's write seams publish
 to the change feed AFTER the domain commit -- for this file store the commit
 is the completed file write -- through ``_sync_publish_skill``. Every
 published-tree write (``_write`` with ``draft=False``) journals the new full
@@ -290,7 +290,7 @@ def _audit(action: str, **details: Any) -> None:
         logger.debug("skill audit log unavailable", exc_info=True)
 
 
-# Veilid sync publish hook (SYN-01, S201, Bloc 0 lot 3)
+# Veilid sync publish hook
 
 # The lot-3 adaptation of the lot-1/2 lock-order convention: SkillRegistry is
 # a file store and holds no lock of its own, so this module-level RLock is
@@ -610,7 +610,7 @@ class SkillRegistry:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(skill.to_markdown(), encoding="utf-8")
         if not draft:
-            # SYN-01 (S201): the completed file write IS the domain commit
+            # The completed file write IS the domain commit
             # for this file store; publish the new full state after it. The
             # payload closes over the skill already in hand (zero extra
             # reads) and is built inside the hook's guard. Draft writes are
@@ -781,7 +781,7 @@ class SkillRegistry:
             return False
         _audit("delete", name=nm, category=cat, draft=draft)
         if not draft:
-            # SYN-01 (S201): a published deletion is the converged tombstone.
+            # A published deletion is the converged tombstone.
             # A draft deletion -- including publish()'s internal cleanup of
             # the promoted draft -- is device-local and journals nothing.
             _sync_publish_skill(
@@ -927,7 +927,7 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-# Verification sandbox-testing (the S73/S74 seam; refuse when bwrap is absent)
+# Verification sandbox-testing (the seam; refuse when bwrap is absent)
 
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
@@ -1067,7 +1067,7 @@ def make_manage_skills_handler(
     Read actions (list / view / view_ref / search) run freely; every write
     (add / edit / patch / publish / delete) passes the fail-secure human gate,
     and any body that carries verification steps is sandbox-tested through the
-    S73/S74 seam (refused when bwrap is unavailable). The handler returns an
+    seam (refused when bwrap is unavailable). The handler returns an
     observation string and never raises. ``registry``, ``approval_fn``,
     ``sandbox``, ``conversation_id`` and ``manager`` are injectable; with
     ``approval_fn`` None the default manager-backed ``allowlists.request_approval``

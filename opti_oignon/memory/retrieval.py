@@ -1,10 +1,10 @@
-"""Hybrid retrieval for Opti-Oignon personal memory (S173, Theme 3).
+"""Hybrid retrieval for Opti-Oignon personal memory.
 
 Retrieval combines three signals: vector similarity from the oo_memories layer,
 keyword coverage of the query terms by a fact, and a category match driven by a
 lightweight query-type detection step. The selected memories are then formatted
 under the token budget from ``context_window.py`` and returned as a plain block,
-ready for the untrusted-context wrapping the agent applies in S175 (this module
+ready for the untrusted-context wrapping the agent applies (this module
 does not wrap; it only selects and formats).
 
 Per-user isolation is enforced: both the vector query and the canonical scan are
@@ -123,13 +123,13 @@ class ScoredMemory:
 
 @dataclass
 class DualLayerMemory:
-    """The S66 dual-layer view of personal memory for prompt assembly.
+    """The dual-layer view of personal memory for prompt assembly.
 
     block is the compressed working layer injected into the prompt (the budgeted
     selection); selected_ids names the facts it carries; total_active is the size
     of the full active archive, always >= the selection, so anything dropped from
     the working block stays recoverable through ``recover``. The block is
-    unwrapped -- the agent applies the untrusted-context wrapping (S175).
+    unwrapped -- the agent applies the untrusted-context wrapping.
     """
 
     block: str
@@ -265,7 +265,7 @@ class MemoryRetriever:
         """Format selected memories as a plain block under the token budget.
 
         The result is unwrapped; the agent applies the untrusted-context wrapping
-        in S175. Returns an empty string when nothing fits.
+        downstream. Returns an empty string when nothing fits.
         """
         included = self.fit_to_budget(memories, max_tokens=max_tokens, header=header)
         if not included:
@@ -277,11 +277,11 @@ class MemoryRetriever:
     def _format_line(memory: ScoredMemory) -> str:
         return "- [" + memory.category + "] " + memory.text
 
-    # S66 dual-layer (S174). The working block is the compressed layer that goes
+    # The dual-layer design. The working block is the compressed layer that goes
     # into the prompt; the full uncompressed archive stays searchable through the
     # canonical store and the vector layer, so a detail dropped from the working
     # block is always recoverable. The block stays unwrapped here; the agent
-    # applies the untrusted-context wrapping in S175.
+    # applies the untrusted-context wrapping.
 
     def recent_memories(
         self, *, user_id: str | None = None, top_n: int = DEFAULT_TOP_N
@@ -289,7 +289,7 @@ class MemoryRetriever:
         """The most-used then most-recently-updated active facts.
 
         Used as the working layer when there is no query to rank against (the
-        "recent memories" half of the S66 working set).
+        "recent memories" half of the working set).
         """
         uid = self._canonical.resolve_user(user_id)
         records = self._canonical.list(active_only=True, user_id=uid)
@@ -325,7 +325,7 @@ class MemoryRetriever:
 
         Query-relevant memories when a query is given, otherwise recent memories,
         formatted under the token budget. Unwrapped (the agent wraps it as
-        untrusted context in S175). Returns an empty string when nothing fits.
+        untrusted context). Returns an empty string when nothing fits.
         """
         if query and query.strip():
             selected = self.retrieve(
@@ -470,7 +470,7 @@ def working_memory_block(
     top_n: int = DEFAULT_TOP_N,
     mark_used: bool = False,
 ) -> str:
-    """Module-level convenience: the S66 working block over the singleton retriever.
+    """Module-level convenience: the working block over the singleton retriever.
 
     This is the seam the prompt-assembly path uses to inject the compressed
     memory layer; the full archive stays searchable via ``recover_memories``.

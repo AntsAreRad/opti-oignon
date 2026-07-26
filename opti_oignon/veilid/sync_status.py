@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""In-memory last-sync / status store for Veilid sync (S181 Goal 3, Theme 4).
+"""In-memory last-sync / status store for Veilid sync.
 
 Sync status is runtime telemetry, not durable state: how the last round went, when
 a peer last synced, whether a round succeeded or failed. The durable fact -- how far
@@ -58,12 +58,12 @@ class RoundOutcome:
         deferred: How many sensitive records were held for approval.
         conflicts: How many concurrent divergences were retained.
         rejected: How many wire records were dropped on decode.
-        refused: How many records were refused at the signature seam (S205,
-            VL-01): unsigned or invalid against the origin device's
+        refused: How many records were refused at the signature seam:
+            unsigned or invalid against the origin device's
             registered key. Counted so SyncPanel can show them.
         unverified: How many records were accepted without verification:
             no verification backend on this device (pre-VL-01 posture), or
-            the historical S205..S207 unkeyed-origin grace (closed at S208;
+            the historical unkeyed-origin grace (now closed;
             tests may re-open it by monkeypatch).
         previous_watermark: The peer's watermark before the round.
         new_watermark: The peer's watermark after the round.

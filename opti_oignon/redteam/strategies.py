@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Attack Strategies — Opti-Oignon Red Team S147
+Attack Strategies — Opti-Oignon Red Team
 ===============================================
 
 Each strategy is a pure function ``(str) → str`` that transforms an attack

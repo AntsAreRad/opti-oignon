@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI configuration loader -- Opti-Oignon S122.
+CLI configuration loader -- Opti-Oignon.
 
 Reads and writes CLI settings from ``~/.config/opti-oignon/cli.yaml``.
 

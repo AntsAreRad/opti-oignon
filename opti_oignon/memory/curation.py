@@ -1,4 +1,4 @@
-"""Conservative memory curation for Opti-Oignon (S174, Theme 3 / Odysseus Core).
+"""Conservative memory curation for Opti-Oignon.
 
 A periodic, deliberately conservative pass that consolidates near-duplicate
 facts and retires clearly obsolete ones, governed by three rules:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Veilid node lifecycle (S178 Goal 1, Theme 4 / Veilid Sync).
+"""Veilid node lifecycle.
 
 The state machine for a single Veilid node: start (bring the node up and connect
 to the running veilid-server), attach (join the network), detach (leave it), and
@@ -7,7 +7,7 @@ stop (bring the node down). The node surfaces its state and never leaves a
 misleading ``attached`` after a failed transition.
 
 The node drives an injected connector -- the async client wrapper
-(opti_oignon/veilid/client.py, S178 Goal 3) in production, a fake in tests -- so
+(opti_oignon/veilid/client.py) in production, a fake in tests -- so
 the lifecycle is exercised in isolation without the veilid framework or a live
 server. The connector exposes ``connect`` / ``attach`` / ``detach`` /
 ``shutdown`` and, optionally, ``attachment_state``. The heavy ``veilid`` import
@@ -96,7 +96,7 @@ def _default_connector() -> Any | None:
 
     Returns None when the veilid framework or the client wrapper is unavailable,
     so start() refuses cleanly with VeilidUnavailable rather than raising at
-    import. The client lands in S178 Goal 3; until then this resolves to None.
+    import. When the client wrapper is absent this resolves to None.
     """
     if not veilid_available():
         return None

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Output formatting utilities -- Opti-Oignon CLI S122.
+Output formatting utilities -- Opti-Oignon CLI.
 
 Provides coloured terminal output, spinner animations, and
 human-friendly formatters for model lists, status dashboards,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EMBEDDINGS - Ollama embedding interface (S109)
+EMBEDDINGS - Ollama embedding interface
 ===============================================
 Generate vector embeddings via Ollama.
 
@@ -427,7 +427,7 @@ class CachedEmbeddings:
 
 
 # =============================================================================
-# BATCH EMBEDDING MANAGER (S160)
+# BATCH EMBEDDING MANAGER
 # =============================================================================
 
 # Hardcoded, never overridable

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guarded loader for the agent configuration (S176, Theme 3 / Odysseus Core).
+"""Guarded loader for the agent configuration.
 
 Reads ``opti_oignon/agent/config.yaml`` and exposes the agent's configurable
 parameters (ODYSSEUS_SPEC.md Section 5): the loop round cap, the verifier cap,
@@ -9,7 +9,7 @@ lite preset is represented and selectable.
 The loader is guarded so it is importlib-isolatable and behaviour never depends
 on the file being present: ``yaml`` is imported lazily inside a try/except, and
 if PyYAML or the file is unavailable the built-in ``CONFIG_DEFAULTS`` are used.
-Those defaults match the S175 reference values (round cap 20, verifier cap 2)
+Those defaults match the reference values (round cap 20, verifier cap 2)
 and the teacher reference thresholds, so a missing config degrades to the same
 secure behaviour rather than to something weaker.
 
@@ -33,7 +33,7 @@ FEATURE_AVAILABLE = True
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
-# Reference defaults, mirroring the S175 loop reference and the teacher
+# Reference defaults, mirroring the loop reference and the teacher
 # reference thresholds. Used verbatim when the file or PyYAML is unavailable.
 CONFIG_DEFAULTS: dict[str, Any] = {
     "loop": {

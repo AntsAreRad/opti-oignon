@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Per-answer claim aggregation over the claim-vs-source verification role.
 
-The higher-value continuation of the verification arc (the role S267, the route
-S268, the UI S269, the nav S270): a standalone module that gates a whole
+The higher-value continuation of the verification arc (the role, the route,
+the UI, the nav): a standalone module that gates a whole
 answer's cited claims through the verification role. It takes a list of
 (claim, source) pairs -- the kind a citation-extraction step would hand it --
-runs each one through the S267 role's injected one-shot seam, and aggregates the
+runs each one through the role's injected one-shot seam, and aggregates the
 per-pair verdicts fail-secure into a single per-answer verdict. It is local,
 deterministic in its plumbing, and routes inference only through the role's
 injected seam, so it is 100% local / Python / Ollama with no backend coupling at
@@ -13,12 +13,12 @@ module load.
 
 Design notes:
 
-- Composition, not reimplementation. This module builds on the S267 role
+- Composition, not reimplementation. This module builds on the role
   (``opti_oignon.agent.claim_verification``) rather than duplicating the verdict
   taxonomy, the anti-injection wrapping, or the fail-secure mapping. Each
   (claim, source) pair is verified by the role's ``verify``, so the claim and
   the cited source are each wrapped as untrusted data under one policy header by
-  the role (the S175 / Odysseus core); this module places no untrusted text in a
+  the role; this module places no untrusted text in a
   trusted message and interprets nothing.
 - Not a model-reachable tool. Like the role and the N.3 note-actions surface,
   this is a caller-driven surface: a citation-extraction step (or a UI) hands in
@@ -49,7 +49,7 @@ Design notes:
   caller. An un-injected verifier reports a clean per-pair failure rather than
   guessing a model, so the aggregate degrades cleanly. Nothing imports the
   backend at module load, so the surface is exercised directly by pytest with no
-  fastapi / ollama chain (the S243 lesson).
+  fastapi / ollama chain.
 
 ``checkpoint_before_apply`` is hardcoded True and never overridable;
 ``FEATURE_AVAILABLE`` gates graceful degradation.
@@ -155,7 +155,7 @@ def make_answer_verifier(
 ) -> Callable[[Sequence[Any]], AnswerVerificationResult]:
     """Build a per-answer verifier, injecting the role's one-shot inference seam.
 
-    ``model_client`` is the same seam the S267 role takes (a callable over the
+    ``model_client`` is the same seam the role takes (a callable over the
     built messages, or an object with ``stream``); when None the role's default
     resolver is used (which yields a clean per-pair failure unless wired). There
     is deliberately no mode provider: the aggregation reaches no network and runs

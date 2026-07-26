@@ -16,7 +16,7 @@ Design notes:
 - Anti-injection. Both the claim (model-generated, untrusted) and the cited
   source (external, untrusted) are wrapped as untrusted data under one policy
   header via :func:`opti_oignon.agent.untrusted_context.untrusted_message_many`
-  (the S175 / Odysseus core). The verification instruction is the only trusted
+  (the core anti-injection idiom). The verification instruction is the only trusted
   message; both pieces ride the user role inside untrusted-data markers, so
   injection-looking text in either piece cannot steer the model.
 - Fail-secure verdict. The taxonomy is supported / unsupported / uncertain. The
@@ -36,7 +36,7 @@ Design notes:
   client from the user's selected model.
 - The inference seam is injectable for tests; nothing here imports the backend
   at module load, so the surface is exercised directly by pytest with no
-  fastapi / ollama chain (the S243 lesson).
+  fastapi / ollama chain.
 
 ``checkpoint_before_apply`` is hardcoded True and never overridable;
 ``FEATURE_AVAILABLE`` gates graceful degradation.

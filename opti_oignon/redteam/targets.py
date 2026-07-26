@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Target Adapters — Opti-Oignon Red Team S147
+Target Adapters — Opti-Oignon Red Team
 =============================================
 
 Each adapter wraps a defense module behind a uniform interface so the
@@ -12,7 +12,7 @@ Adapters:
 - SearchSanitizerTarget — wraps attack in SearchResult, calls sanitizer
 - PIISanitizerTarget    — embeds PII patterns, calls PIISanitizer.sanitize()
 - SandboxTarget         — generates code escape attempts, checks bwrap rules
-- ChatTarget            — stub for end-to-end testing (full in S148)
+- ChatTarget            — stub for end-to-end testing
 """
 
 __all__ = [
@@ -491,7 +491,7 @@ class SandboxTarget(TargetAdapter):
 
 
 # ---------------------------------------------------------------------------
-# ChatTarget (full implementation — S148)
+# ChatTarget
 # ---------------------------------------------------------------------------
 
 # Safety system prompt used for the chat target

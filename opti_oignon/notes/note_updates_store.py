@@ -1,12 +1,12 @@
 """Notes update log (N.8 first lot): the append-only ``note_update`` store.
 
-The at-rest half of the collaboration model NOTES_CRDT_SPEC.md decided at
-S262; sections 2, 4 and 5 of that document are this module's binding
+The at-rest half of the notes collaboration model; sections 2, 4 and 5 of
+its design document are this module's binding
 contract. The Yjs update log lives here: an append-only ``note_update``
 table (one opaque client-produced update blob per row, never interpreted by
 the platform), plus the ``note_checkpoint`` sibling table carrying the
 section-4 checkpoint watermark the PATCH leg records. The transport half --
-the ``note_update`` record kind on the S256 seam, journaled in the S257
+the ``note_update`` record kind on the seam, journaled in the
 idiom -- is the NEXT lot; this module edits no existing source and is wired
 to nothing yet.
 
@@ -50,7 +50,7 @@ canonical_store.py / notes_store.py), so the runtime tests can load it
 without the fastapi / ollama / sqlcipher chain. ``checkpoint_before_apply``
 is hardcoded True and never overridable; ``FEATURE_AVAILABLE`` gates
 graceful degradation; the module-level singleton has a
-``reset_note_updates_store`` hook for test isolation (the S171 lesson).
+``reset_note_updates_store`` hook for test isolation.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
 
-# Guarded backend integration (the S136 change-feed pattern, mirrored from
+# Guarded backend integration (the change-feed pattern, mirrored from
 # notes_store.py). In the full backend these resolve to the real modules.
 # Loaded in isolation, the relative imports fall back to a plain SQLite path
 # (with a warning naming the PLAINTEXT degradation) so the runtime tests
@@ -148,7 +148,7 @@ def _default_root() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Veilid sync glue (S264): the update publisher, best-effort (the S257 idiom)
+# Veilid sync glue: the update publisher, best-effort
 # ---------------------------------------------------------------------------
 
 # Serialises clock mint + journal append per process (the notes_store / skills
@@ -163,15 +163,15 @@ def _sync_publish_note_update(
     update_blob: bytes,
     author_device: str | None,
 ) -> None:
-    """Journal an appended update for Veilid sync, best-effort (S264).
+    """Journal an appended update for Veilid sync, best-effort.
 
-    Called by ``append_update`` AFTER the domain commit, the S257 idiom
-    (NOTES_CRDT_SPEC.md section 3: journaled at the append seam exactly as
-    S257 journals the note mutations). Sitting at the store layer, the glue
+    Called by ``append_update`` AFTER the domain commit, the idiom
+    (journaled at the append seam exactly as
+    the notes store journals the note mutations). Sitting at the store layer, the glue
     covers every writer of the seam; the ONE writer that suppresses it is
     the engine's remote-apply landing (``sync_publish=False``), whose record
     is already journalled verbatim with the author's signature -- publishing
-    it again would re-sign it as ours. The contract (the S257 precedents):
+    it again would re-sign it as ours. The contract:
 
     - A payload or journalling failure must never break the append: any
       error is logged and swallowed.
@@ -183,7 +183,7 @@ def _sync_publish_note_update(
       permitted in ANY mode; only the wire is Daily-gated downstream.
     - The payload is opaque coordinates plus the base64 blob; the
       ``mobile_allowed`` flag and the user identity never ride it (N9-D3
-      and the S257 scoping precedent: the journal is the single user's own
+      and the scoping precedent: the journal is the single user's own
       device mesh, and the applier scopes).
 
     Clock discipline: each update is its own immutable record key
@@ -400,8 +400,8 @@ class NoteUpdatesStore:
         parent liveness refuses; a missing blob cannot be persisted and
         refuses (NOTES_CRDT_SPEC.md section 5).
 
-        ``sync_publish`` (S264): a successful append journals itself for
-        Veilid sync through the best-effort glue, the S257 idiom covering
+        ``sync_publish``: a successful append journals itself for
+        Veilid sync through the best-effort glue, the idiom covering
         every writer of this seam. The engine's remote-apply landing passes
         ``False`` -- the received record is already journalled verbatim with
         the author's signature, and re-publishing would re-sign it.
@@ -620,7 +620,7 @@ class NoteUpdatesStore:
         return pruned
 
 
-# Module-level singleton with a reset for test isolation (the S171 lesson:
+# Module-level singleton with a reset for test isolation (the lesson:
 # never leak shared state across pytest invocations).
 _store: NoteUpdatesStore | None = None
 

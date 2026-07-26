@@ -12,7 +12,7 @@ Modules:
 - indexer: Document indexing into ChromaDB
 - retriever: Semantic search
 - augmenter: Augmented prompt generation
-- batch_ingest: Batch ingestion engine with background processing (S119)
+- batch_ingest: Batch ingestion engine with background processing
 
 Quick usage:
     from opti_oignon.rag import ContexteurRAGIntegration
@@ -117,7 +117,7 @@ __all__ = [
     "DocumentIndexer",
     "quick_index",
 
-    # Batch Ingestion (S119)
+    # Batch Ingestion
     "BatchIngestEngine",
     "get_batch_ingest_engine",
     "scan_folder",

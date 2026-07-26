@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-record deferred ledger for sensitive sync records (S207, SYN-05).
+"""Per-record deferred ledger for sensitive sync records.
 
 Before this module, a sensitive record (a skill) denied at the approval gate
 held the peer's watermark: the round stopped at the boundary before the
@@ -71,8 +71,8 @@ from typing import Any
 from opti_oignon.veilid.reconcile import choose_winner
 from opti_oignon.veilid.records import SyncRecord, decode_record, encode_record
 
-# S242 (RS-01 / CHF-04): encrypted DB connections, the same pattern as the
-# veilid change feed (S136) and sync_queue. The deferred ledger quarantines
+# Encrypted DB connections, the same pattern as the
+# veilid change feed and sync_queue. The deferred ledger quarantines
 # sensitive synced record payloads awaiting human approval, so the quarantine
 # joins safe_connect and is encrypted at rest rather than stored in a plain
 # sqlite3 file. The in-container plaintext fallback below is the documented

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Pairing key exchange for Veilid sync (S182 Goal 1, Theme 4 / Veilid Sync).
+"""Pairing key exchange for Veilid sync.
 
 The ceremony that introduces two of a user's own devices to each other. The
 per-peer store (``peers.py``) holds, for each paired peer, a stable identity and
 the peer's public routing key; the live transport (``transport.py``) reaches a
-peer over a private route to that key. S178-S181 built the store, the engine, the
+peer over a private route to that key. Earlier modules built the store, the engine, the
 route, and the live transport that consume a paired peer; this module builds what
 populates the store: a device generates a pairing payload that carries its public
 material, and a peer accepts that payload to register the device so the transport
@@ -12,8 +12,8 @@ can reach it.
 
 A pairing payload carries the device's public material: its stable identity
 within the user's set, its public Veilid routing key (how a private route to it
-is opened), since S205 (VL-01) optionally its signing PUBLIC key (the trust
-root record verification resolves against), since S258 (PAIR-03) optionally
+is opened), optionally its signing PUBLIC key (the trust
+root record verification resolves against), optionally
 its device CLASS (``phone`` / ``desktop``: the joining device declares itself
 so the accepting desktop records it at the accept seam, under a MONOTONE rule
 that can never escalate a stored class), and an integrity check over those
@@ -25,7 +25,7 @@ truncated transcription) before the routing key is trusted, while the actual
 authenticity of a peer is anchored in the cryptographic routing key itself, which
 the user holds. There is no secret in the payload and none in this code.
 
-Since S206 (PAIR-02) the ceremony is completed by a mutual confirmation: a short
+The ceremony is completed by a mutual confirmation: a short
 comparison code derived from BOTH devices' public material (this device's payload
 and the peer's), displayed on both screens, compared by the humans, and confirmed
 on both sides before the registry entry activates. The derivation
@@ -51,7 +51,7 @@ of state-scale parallelism, and stated rather than hand-waved. What the
 confirmation does NOT defend: a compromised device that displays a matching
 code and lies; a human who confirms without comparing; peers registered before
 PAIR-02, which are grandfathered as confirmed without a ceremony; the
-device-class field of a FRESH pairing (S258, PAIR-03), which an active
+device-class field of a FRESH pairing, which an active
 in-channel substitution can flip without moving the code -- the code material
 deliberately EXCLUDES the class so both devices recompute it identically
 against a legacy peer and against a registry whose post-policy class may
@@ -110,7 +110,7 @@ PAIRING_FORMAT_VERSION = 1
 # The payload type tag; a payload that does not carry exactly this type is rejected.
 PAIRING_TYPE = "veilid_pairing"
 
-# S258 (PAIR-03): the wire-format device-class vocabulary -- the values a v1
+# The wire-format device-class vocabulary -- the values a v1
 # payload may DECLARE. The registry-side allowlist is ``peers.DEVICE_CLASSES``;
 # the two are the same two words, pinned EQUAL by test (anti-drift) rather
 # than by a runtime import, so this module keeps its stdlib-only,
@@ -125,7 +125,7 @@ PAIRING_DEVICE_CLASSES: frozenset[str] = frozenset(
     {PAIRING_DEVICE_CLASS_PHONE, PAIRING_DEVICE_CLASS_DESKTOP}
 )
 
-# PAIR-02 (S206): the mutual-confirmation code derivation, ONE documented
+# The mutual-confirmation code derivation, ONE documented
 # construction. The two devices' canonical public materials are sorted
 # (order normalization), length-prefix framed, and fed to scrypt under a fixed
 # domain-separation salt with public, deterministic parameters (Kerckhoffs: the
@@ -152,10 +152,10 @@ class ParsedPairing:
         routing_key: That device's public Veilid routing key; how a private route
             to it is opened. Public by design (Kerckhoffs).
         signing_pub: That device's ML-DSA-65 signing PUBLIC key, base64url
-            (S205, VL-01), or ``None`` for a pre-VL-01 payload that carries
+            or ``None`` for a legacy payload that carries
             none. Public material, like the routing key; the integrity check
             covers it when present.
-        device_class: The device class the payload DECLARED (S258, PAIR-03),
+        device_class: The device class the payload DECLARED,
             or ``None`` for a payload that carries none. Carried AS PARSED
             (any non-empty string: the wire vocabulary is the apply seam's
             concern, never the parser's); the integrity check covers it when
@@ -177,8 +177,8 @@ def pairing_canonical_material(
     """The canonical JSON of a payload's public fields (no integrity field).
 
     The single serialisation the integrity check is computed over: the format
-    version, the type tag, the identity, the routing key, when present (S205,
-    VL-01) the signing public key, and when present (S258, PAIR-03) the
+    version, the type tag, the identity, the routing key, when present
+    the signing public key, and when present the
     device class, as compact JSON with sorted keys, so it is independent of
     key order and stable across a JSON round-trip. The PAIR-02 confirmation
     code is computed over the SAME serialisation WITHOUT the class (callers
@@ -227,8 +227,8 @@ def pairing_integrity(
     """The integrity check for a pairing payload: SHA-256 over the public fields.
 
     Covers the format version, the type tag, the identity, the routing key,
-    when the payload carries one (S205, VL-01) the signing public key, and
-    when the payload carries one (S258, PAIR-03) the device class:
+    when the payload carries one, the signing public key, and
+    when the payload carries one, the device class:
     the canonical PRESENT public fields, nothing secret. Computed over the one
     canonical serialisation (:func:`pairing_canonical_material`), so it is
     independent of key order and stable across a JSON round-trip. This is the
@@ -238,7 +238,7 @@ def pairing_integrity(
     The present-fields recipe is what the compat matrix rests on: a pre-VL-01
     payload (no signing key) keeps the historical four-field digest, so a new
     reader accepts old payloads unchanged; a payload that DOES carry a key --
-    or, since S258, a device class -- folds it into the digest, so a tampered
+    or a device class -- folds it into the digest, so a tampered
     or stripped-in-transit field no longer matches -- at the deliberate cost
     that an OLD reader (recomputing its fixed fields) rejects a new payload.
     That failure is closed and visible during a rare human ceremony (upgrade,
@@ -267,7 +267,7 @@ def confirmation_code(material_a: str, material_b: str) -> str:
     digits ("1234 5678"; the modulo bias over a 64-bit value is below 10**-11,
     negligible against the stated bounds).
 
-    S258 (PAIR-03): the code material deliberately EXCLUDES the device class
+    The code material deliberately EXCLUDES the device class
     -- callers pass class-less canonical material on both sides. The code
     must recompute identically on both devices from material both can derive:
     a legacy joiner pins class-less material, and the accepting registry's
@@ -328,10 +328,10 @@ def build_pairing_payload(
     is :func:`parse_pairing_payload`, which never raises. Pure: it reaches into
     no store and opens no socket. The label a peer assigns is local to the
     accepting device, so it is not part of the payload or the integrity check.
-    The signing public key (S205, VL-01) is included -- and folded into the
+    The signing public key is included -- and folded into the
     integrity -- only when given, so a device without a signing keypair (no
     master key, no liboqs) still pairs as a pre-VL-01 peer. The device class
-    (S258, PAIR-03) follows the same recipe: included and folded only when
+    follows the same recipe: included and folded only when
     given, so a class-less payload keeps the historical digest byte for byte.
     """
     if not isinstance(peer_id, str) or not peer_id:
@@ -384,7 +384,7 @@ def parse_pairing_payload(obj: Any) -> ParsedPairing | None:
         routing_key = obj.get("routing_key")
         if not isinstance(routing_key, str) or not routing_key:
             return None
-        # S205 (VL-01): the signing public key is read defensively. Present
+        # The signing public key is read defensively. Present
         # and a non-empty string, it joins the integrity recomputation;
         # absent, the historical four-field digest applies (a pre-VL-01
         # payload). Present but mistyped, it is treated as absent for the
@@ -395,7 +395,7 @@ def parse_pairing_payload(obj: Any) -> ParsedPairing | None:
         signing_pub = (
             signing_raw if isinstance(signing_raw, str) and signing_raw else None
         )
-        # S258 (PAIR-03): the device class is read defensively, the S205
+        # The device class is read defensively, the
         # signing-key idiom exactly. Present and a non-empty string, it joins
         # the integrity recomputation -- ANY word: the vocabulary is the
         # apply seam's concern, so a future class never fails parse. Absent,
@@ -471,7 +471,7 @@ def resolve_pairing_device_class(
     prior_exists: bool | None,
     prior_class: str | None,
 ) -> tuple[bool, str | None]:
-    """Decide the class the accept seam records: the MONOTONE rule (S258).
+    """Decide the class the accept seam records: the MONOTONE rule.
 
     Pure and stdlib-only, so the whole policy is testable in isolation.
     ``declared`` is the payload's class as parsed (any string, or ``None``
@@ -539,7 +539,7 @@ def _apply_pairing_device_class(
     Runs AFTER a successful registration and never voids it: a missing
     setter, a refused write, or a raising engine warns and returns -- the
     trust material landed, and the class stays the operator's to set, exactly
-    the pre-S258 world. The value passed to the setter is always the
+    the prior world. The value passed to the setter is always the
     decision function's output, which only ever emits vocabulary words, so
     the store's allowlist ``ValueError`` (free text, a programming error)
     cannot fire from here.
@@ -616,7 +616,7 @@ def accept_pairing_payload(
     with a fake engine in isolation. Registration is local-disk and permitted in any
     mode; only moving records over the wire is Daily-only.
 
-    S258 (PAIR-03): when the payload declares a device class, it is recorded
+    When the payload declares a device class, it is recorded
     AFTER a successful registration through the engine's audited
     ``set_device_class``, under the monotone rule
     (:func:`resolve_pairing_device_class`) -- a declaration may keep or
@@ -641,7 +641,7 @@ def accept_pairing_payload(
         return None
     if not isinstance(label, str):
         label = ""
-    # S258 (PAIR-03): the prior row state is read BEFORE the upsert -- after
+    # The prior row state is read BEFORE the upsert -- after
     # it, a fresh row and a grandfathered re-pair are indistinguishable.
     # Guarded and fail-secure: a missing or raising lookup leaves the prior
     # INDETERMINABLE, under which the decision function only ever writes a
@@ -668,17 +668,17 @@ def accept_pairing_payload(
                     if prior is not None
                     else None
                 )
-    # S206 (PAIR-02): the ceremony registers the peer PENDING -- the entry
+    # The ceremony registers the peer PENDING -- the entry
     # gates nothing (no round, no serving, no trusted key lookup) until both
     # humans have compared the confirmation code and confirmed on both
-    # devices. S205 (VL-01): a payload carrying a signing key registers it
-    # with the peer. The kwarg cascade mirrors the S205 threading: each
+    # devices. A payload carrying a signing key registers it
+    # with the peer. The kwarg cascade mirrors the threading: each
     # TypeError falls back to the next-older engine signature, so a
     # pre-PAIR-02 engine (or an old fake in a test) still registers the peer
     # -- as an immediately-active, pre-ceremony entry -- and a pre-VL-01
     # engine registers it unkeyed, rather than failing the ceremony. Every
-    # SUCCESSFUL path then applies the declared device class (S258,
-    # best-effort, monotone) before returning.
+    # SUCCESSFUL path then applies the declared device class
+    # (best-effort, monotone) before returning.
     attempts: list[dict[str, Any]] = []
     newest: dict[str, Any] = {"label": label, "pending": True}
     if parsed.signing_pub is not None:

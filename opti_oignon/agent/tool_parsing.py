@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tool-block parsing for the agent loop (S175, Theme 3 / Odysseus Core).
+"""Tool-block parsing for the agent loop.
 
 Local Ollama models do not reliably emit native function calls, so the agent
 must recognise the textual tool-call conventions they actually produce. This

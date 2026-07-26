@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-opti_oignon.middleware.csp -- Content Security Policy middleware (S155).
+opti_oignon.middleware.csp -- Content Security Policy middleware.
 
 Provides a strict, nonce-based CSP that:
 - Generates a unique nonce per request for inline script authorization

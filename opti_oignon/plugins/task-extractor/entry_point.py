@@ -13,7 +13,7 @@ import logging
 import re
 import sqlite3
 
-# S136 audit fix
+# Audit fix
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

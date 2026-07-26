@@ -27,6 +27,15 @@ behaviour is verified independently of git:
   * C8 -- a file whose shape cannot be established is REFUSED, never waved
     through. A prover that stays silent on what it failed to understand
     proves nothing.
+  * C11 -- the docstring of a model class the schema carries is NOT free
+    either. The framework publishes it as the schema description, exactly as
+    it publishes a handler docstring as the endpoint description.
+  * C12 -- a model class the schema does NOT carry keeps its free docstring.
+    Holding every class published would refuse honest work on the internal
+    models, so the published set is read, never assumed.
+  * C13 -- when the published set is unknown, every class docstring is held
+    published. A prover that cannot establish what ships does not get to
+    assume that nothing does.
 
 Every input carrying nomenclature is assembled from fragments at runtime, so
 the literal form never appears in this file's source and neither guard trips
@@ -305,6 +314,64 @@ def test_c10_line_start_and_spaced_hash_still_comment():
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
+def _model_file(note):
+    """A model class and an ordinary class, each carrying a docstring."""
+    return (
+        'from pydantic import BaseModel\n'
+        '\n'
+        '\n'
+        'class Widget(BaseModel):\n'
+        f'    """{note}"""\n'
+        '    size: int\n'
+        '\n'
+        '\n'
+        'class Helper:\n'
+        '    """An internal helper."""\n'
+        '    pass\n'
+    )
+
+
+def test_c11_published_model_description_is_not_free():
+    guard, restore = _load()
+    try:
+        before = _model_file("A widget as the client sees it.")
+        after = _model_file("A widget as the client sees it today.")
+        published = {"Widget"}
+        assert (guard.python_shape(before, published_models=published)
+                != guard.python_shape(after, published_models=published)), \
+            "a published schema description moved without moving the shape"
+        # The very same edit on a class the schema does not carry is free.
+        assert (guard.python_shape(before, published_models=set())
+                == guard.python_shape(after, published_models=set()))
+    finally:
+        restore()
+
+
+def test_c12_unpublished_model_keeps_a_free_docstring():
+    guard, restore = _load()
+    try:
+        # No published set given: the guard reads the recorded digest, which
+        # cannot name a class invented here.
+        before = _model_file("An internal note.")
+        after = _model_file("An internal note, reworded.")
+        assert guard.python_shape(before) == guard.python_shape(after), \
+            "an unpublished model docstring was held published"
+    finally:
+        restore()
+
+
+def test_c13_unknown_published_set_holds_every_class():
+    guard, restore = _load()
+    try:
+        before = _model_file("A widget as the client sees it.")
+        after = _model_file("A widget as the client sees it today.")
+        assert (guard.python_shape(before, published_models=None)
+                != guard.python_shape(after, published_models=None)), \
+            "an unknown published set was read as an empty one"
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",

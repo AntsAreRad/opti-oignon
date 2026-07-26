@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-RAG connection pool integration (S160).
+RAG connection pool integration.
 
-Wires the ``ConnectionPool`` from S159 into RAG SQLite databases,
+Wires the ``ConnectionPool`` into RAG SQLite databases,
 providing pooled connections for the ingestion job tracker and any
 future RAG-side SQLite stores.
 
@@ -72,7 +72,7 @@ def get_rag_pool(
 ) -> Any:
     """Return a pooled connection manager for a RAG database.
 
-    If ``ConnectionPool`` from S159 is available, returns a pool
+    If ``ConnectionPool`` is available, returns a pool
     instance.  Otherwise returns a ``FallbackPool`` that creates a
     fresh connection each time.
 

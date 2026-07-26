@@ -62,7 +62,7 @@ FEATURE_AVAILABLE = True
 # Guarded backend integration. In the full backend these resolve to the real
 # modules. Loaded in isolation, the relative imports fall back to a plain SQLite
 # path (with a warning naming the PLAINTEXT degradation) so the runtime tests
-# collect without fastapi / ollama / sqlcipher. The S136 change-feed pattern.
+# collect without fastapi / ollama / sqlcipher. The change-feed pattern.
 try:
     from ..db_utils import safe_connect as _safe_connect
 
@@ -140,7 +140,7 @@ def _default_root() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Veilid sync glue (S257): the notes publisher, best-effort (SYN-01)
+# Veilid sync glue: the notes publisher, best-effort
 # ---------------------------------------------------------------------------
 
 # Serialises clock mint + journal append per process, the skills adaptation
@@ -286,7 +286,7 @@ def _sync_publish_note(
 class NoteRecord:
     """A single note's metadata and opaque CRDT body.
 
-    ``mobile_allowed`` (N.9, S256) is the per-item phone-sync opt-in
+    ``mobile_allowed`` is the per-item phone-sync opt-in
     (MOBILE_THREAT_MODEL.md section 3): ``False`` is the secure default and
     the only creation-time value; flipping it is a deliberate second gesture
     through the dedicated setter, never the generic update path.
@@ -450,7 +450,7 @@ class NotesStore:
                     ON attachment(note_id);
                 """
             )
-            # N.9 (S256): the per-item mobile-allowed flag for phone-class
+            # The per-item mobile-allowed flag for phone-class
             # sync. SQLite has no ADD COLUMN IF NOT EXISTS, so guard with
             # table_info (the AU-06 idiom, the peers-registry shape). NOT
             # NULL DEFAULT 0 is the secure default: nothing crosses to a
@@ -546,7 +546,7 @@ class NotesStore:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
                 (rid, uid, title, body_crdt, tags_value, int(pinned), ts, ts),
             )
-        # S257: journal the creation, best-effort, after the commit.
+        # Journal the creation, best-effort, after the commit.
         _sync_publish_note(
             rid, lambda: _note_sync_payload(record, []), updated_at=ts
         )
@@ -641,7 +641,7 @@ class NotesStore:
         with self._lock, self._conn() as conn:
             conn.execute(sql, params)
         record = self.get_note(note_id, user_id=uid)
-        # S257: journal the fresh state (with the current attachment manifest),
+        # Journal the fresh state (with the current attachment manifest),
         # best-effort, only when the row exists.
         self._republish_note_full_state(note_id, record, user_id=uid)
         return record
@@ -657,7 +657,7 @@ class NotesStore:
                 (ts, note_id, uid),
             )
             changed = int(cur.rowcount)
-        # S257: journal the tombstone, best-effort, only when a live row
+        # Journal the tombstone, best-effort, only when a live row
         # actually flipped (tombstone-wins downstream; a repeat is a no-op).
         if changed > 0:
             _sync_publish_note(note_id, None, deleted=True, updated_at=ts)
@@ -873,7 +873,7 @@ class NotesStore:
             updated_at=record.updated_at,
         )
 
-    # Notes -- the per-item mobile-allowed flag (N.9, S256)
+    # Notes -- the per-item mobile-allowed flag
 
     def set_mobile_allowed(
         self, note_id: str, allowed: bool, *, user_id: str | None = None
@@ -895,7 +895,7 @@ class NotesStore:
                 (1 if allowed else 0, ts, note_id, uid),
             )
             changed = int(cur.rowcount)
-        # S257: the republish delivery contract (NOTES_MOBILE_SYNC_N9_S256.md):
+        # The republish delivery contract:
         # an effective flip journals a fresh full-state record, best-effort,
         # in BOTH directions -- the phone past its watermark sees a newly
         # allowed note; security stays with the serve filter's live lookup.
@@ -1106,7 +1106,7 @@ class NotesStore:
             return cur.rowcount > 0
 
 
-# Module-level singleton with a reset for test isolation (the S171 lesson: never
+# Module-level singleton with a reset for test isolation (the lesson: never
 # leak shared state across pytest invocations).
 _store: NotesStore | None = None
 

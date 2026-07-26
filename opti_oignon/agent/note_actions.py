@@ -4,7 +4,7 @@
 From a note selection the user asks one of five local actions -- fact-check,
 develop, summarize, rewrite, make-checklist -- or the Daily-only
 fact-check-with-web. The selected text is wrapped as untrusted data via
-:mod:`opti_oignon.agent.untrusted_context` (the S175 / Odysseus anti-injection
+:mod:`opti_oignon.agent.untrusted_context` (the anti-injection
 core), so injection-looking note text cannot steer the model: the action's
 instruction is the only trusted message, the selection rides the user role inside
 the untrusted-data markers, and the policy header forbids the model from treating
@@ -34,7 +34,7 @@ Design notes:
   failure rather than guessing a model.
 - The mode provider is injectable for tests; the inference seam is injectable for
   tests; nothing here imports the backend at module load, so the surface is
-  exercised directly by pytest with no fastapi / ollama chain (the S243 lesson).
+  exercised directly by pytest with no fastapi / ollama chain.
 
 ``checkpoint_before_apply`` is hardcoded True and never overridable;
 ``FEATURE_AVAILABLE`` gates graceful degradation.

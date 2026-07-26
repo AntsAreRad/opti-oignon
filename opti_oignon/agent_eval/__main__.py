@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent eval CLI -- S230 (AGT_SPEC Section 7.4).
+Agent eval CLI.
 
 Usage:
     python -m opti_oignon.agent_eval --models qwen3:4b,qwen3:14b --suite micro

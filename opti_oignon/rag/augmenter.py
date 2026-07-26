@@ -19,7 +19,7 @@ from .retriever import DocumentRetriever, SearchResult
 
 logger = logging.getLogger(__name__)
 
-# S144: Optional import of RAG sanitizer for injection defense
+# Optional import of RAG sanitizer for injection defense
 try:
     from opti_oignon.rag_sanitizer import (
         RAGSanitizer,
@@ -232,7 +232,7 @@ Contexte disponible :
         collection: str = "",
         sanitizer: "RAGSanitizer | None" = None,
     ) -> tuple["AugmentedPrompt", "SanitizationResult | None"]:
-        """Augment a query with RAG context and injection defense (S144).
+        """Augment a query with RAG context and injection defense.
 
         Retrieves chunks, sanitizes them through the injection defense
         pipeline, and wraps the prompt with separation markers.

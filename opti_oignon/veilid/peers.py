@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Per-peer registry and watermark store for Veilid sync (S180 Goal 1, Theme 4).
+"""Per-peer registry and watermark store for Veilid sync.
 
 A user's devices sync against each other as explicit, key-addressed peers. This
 module is the local record of which peers a device is paired with and how far it
 has consumed each one's change feed. It holds two things per peer: the pairing
 identity (a stable peer id and the peer's public routing key, plus an optional
 human label) and a monotonic watermark (the last peer-feed sequence this device
-has applied). The pairing key exchange itself is S182; S180 stores what pairing
-will populate, and the sync engine (S180 Goal 2) reads the watermark before a
+has applied). The pairing key exchange itself lives in ``pairing``; this stores what pairing
+will populate, and the sync engine reads the watermark before a
 round and advances it after.
 
 The watermark is monotonic by construction: ``advance_watermark`` writes
@@ -16,7 +16,7 @@ never move a peer's watermark backwards. A peer that is not registered has no
 watermark to advance; advancing an unknown peer is a no-op that returns zero,
 and the engine refuses to run a round against an unpaired peer.
 
-Each peer also carries the last-seen epoch of its change feed (S204, CHF-05).
+Each peer also carries the last-seen epoch of its change feed.
 The asker stores the epoch a peer's batches advertise and, when a later round
 sees a different one (the peer's journal was recreated, sequences restarted),
 resets that peer's watermark to 0 for a single full resync. The reset and the
@@ -35,7 +35,7 @@ upsert that refreshes the routing key and label while preserving the watermark
 and the original pairing time, so a re-pair (a rotated route) never resets how
 far a device has synced.
 
-Since S206 (PAIR-02) a peer also carries a pending state. The pairing ceremony
+A peer also carries a pending state. The pairing ceremony
 registers a peer PENDING; the entry gates nothing -- the engine refuses to run
 a round against it or serve it, and record verification never trusts its
 registered key -- until both humans have compared the mutual confirmation code
@@ -78,8 +78,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-# S242 (RS-01 / PEER-01): encrypted DB connections, the same pattern as the
-# veilid change feed (S136) and sync_queue. RS1-D1: the open-registry rationale
+# Encrypted DB connections, the same pattern as the
+# veilid change feed and sync_queue. The open-registry rationale
 # does not stand for the registry's privacy-relevant metadata -- the human labels
 # (device names), the device topology, the watermarks, and the SYN-02 local
 # device identity -- so the peer registry joins safe_connect and is encrypted at
@@ -132,7 +132,7 @@ _CREATE_TABLE = (
     "last_epoch TEXT, "
     "signing_pub TEXT, "
     "pending INTEGER, "
-    # cas 7 Lot 2 (S235): per-device remote-inference grants. NULL/1 means
+    # Per-device remote-inference grants. NULL/1 means
     # remote chat ENABLED (the grandfathered tier-1 default; a fresh insert
     # omits the column, so it is NULL = enabled); 0 means DISABLED. The RAG
     # read-only sub-grant is NULL/0 = off (the conservative default) and 1 = on.
@@ -140,7 +140,7 @@ _CREATE_TABLE = (
     # re-pair (a local trust decision, like the watermark).
     "remote_chat_grant INTEGER, "
     "rag_subgrant INTEGER, "
-    # N.9 (S256): the per-device class marker for phone-class sync
+    # The per-device class marker for phone-class sync
     # filtering. Nullable and additive (the SYN-02 / PAIR-02 / cas 7
     # migration shape): NULL is the grandfathered DESKTOP class -- every
     # pre-N.9 row is a desktop by construction -- and only an explicit
@@ -150,7 +150,7 @@ _CREATE_TABLE = (
     ")"
 )
 
-# N.9 (S256): the device-class allowlist -- the only values the setter ever
+# The device-class allowlist -- the only values the setter ever
 # accepts (NULL clears back to the grandfathered desktop class). The sync
 # responder filters NOTE records toward a phone-class peer behind the
 # per-item mobile-allowed flag (MOBILE_THREAT_MODEL.md section 3,
@@ -163,14 +163,14 @@ DEVICE_CLASSES: frozenset[str] = frozenset(
 
 # Upsert: insert a fresh peer at watermark 0, or refresh the routing key and label
 # of an existing one. The DO UPDATE clause deliberately omits watermark, added_at,
-# and last_epoch (S204), so a re-pair preserves how far the device has synced, when
+# and last_epoch, so a re-pair preserves how far the device has synced, when
 # it first paired, and the peer's last-seen feed epoch; only the routing key, the
-# label, and updated_at change unconditionally. The signing public key (S205,
-# VL-01) refreshes WITH the route when the new pairing carries one, and is
+# label, and updated_at change unconditionally. The signing public key
+# refreshes WITH the route when the new pairing carries one, and is
 # PRESERVED (COALESCE keeps the stored value over an absent excluded NULL) when
 # it does not -- a re-pair via a pre-VL-01 payload can never strip a peer's
 # registered key, which would silently downgrade it into the unsigned grace
-# path. PAIR-02 (S206): the pending state can only be RAISED here, never
+# path. The pending state can only be RAISED here, never
 # lowered -- a re-pair never confirms (only ``confirm_peer`` does) and never
 # un-demotes; and a re-pair whose payload carries a signing key DIFFERENT from
 # the stored one (or a first key over a previously unkeyed row) demotes the
@@ -219,7 +219,7 @@ _ADVANCE = (
     "WHERE peer_id = ?"
 )
 
-# S204 (CHF-05): the per-peer last-seen feed epoch. Read it; store it on first
+# The per-peer last-seen feed epoch. Read it; store it on first
 # contact (no reset); and the epoch reset -- the watermark back to 0 and the new
 # epoch stored in ONE statement, so the pair is atomic by construction and a
 # crash can never persist the new epoch while keeping the old watermark (which
@@ -242,7 +242,7 @@ _DELETE_ONE = f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE peer_id = ?"
 _SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
 _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
-# S206 (PAIR-02): activate a pending peer. The ONLY statement that lowers the
+# Activate a pending peer. The ONLY statement that lowers the
 # pending state -- the upsert above can only raise it -- so an entry becomes
 # trusted exclusively through the explicit human confirmation. Idempotent on an
 # already-confirmed peer.
@@ -250,7 +250,7 @@ _CONFIRM = (
     f"UPDATE {_safe_table(TABLE_NAME)} SET pending = NULL, updated_at = ? WHERE peer_id = ?"
 )
 
-# cas 7 Lot 2 (S235): the per-device remote-inference grants. Set the remote-chat
+# The per-device remote-inference grants. Set the remote-chat
 # enable bit (1 enabled, 0 disabled) or the RAG read-only sub-grant (1 on, 0 off).
 # Neither column appears in the re-pair upsert's DO UPDATE clause, so a grant
 # survives a route rotation; only these explicit setters and the control surface
@@ -264,7 +264,7 @@ _SET_RAG_SUBGRANT = (
     f"UPDATE {_safe_table(TABLE_NAME)} SET rag_subgrant = ?, updated_at = ? WHERE peer_id = ?"
 )
 
-# N.9 (S256): the device-class marker write (NULL clears it).
+# The device-class marker write (NULL clears it).
 _SET_DEVICE_CLASS = (
     f"UPDATE {_safe_table(TABLE_NAME)} SET device_class = ?, updated_at = ? WHERE peer_id = ?"
 )
@@ -288,7 +288,7 @@ _INSERT_DEVICE_ID = (
     f"INSERT OR IGNORE INTO {_safe_table(META_TABLE_NAME)} (id, device_id, created_at) VALUES (1, ?, ?)"
 )
 
-# S206 (PAIR-02): this device's own last-generated pairing material, pinned in
+# This device's own last-generated pairing material, pinned in
 # the one-row meta table when the self payload is built. The confirmation code
 # is derived from BOTH devices' public material; pinning this side's half at
 # generation time keeps the code recomputable from local disk in any mode --
@@ -318,20 +318,20 @@ class PeerRecord:
             monotonically after a sync round, never regressing.
         added_at: ISO-8601 timestamp of the first pairing; preserved on re-pair.
         updated_at: ISO-8601 timestamp of the last registry write for this peer.
-        last_epoch: The last-seen epoch of this peer's change feed (S204,
-            CHF-05), or ``None`` for a pre-epoch or freshly-paired peer. Stored
+        last_epoch: The last-seen epoch of this peer's change feed,
+            or ``None`` for a pre-epoch or freshly-paired peer. Stored
             on first contact; replaced -- atomically with a watermark reset --
             when the peer's journal was recreated. Preserved on re-pair, like
             the watermark.
-        signing_pub: The peer's ML-DSA-65 signing PUBLIC key, base64url (S205,
-            VL-01), or ``None`` for a pre-VL-01 peer whose pairing carried no
+        signing_pub: The peer's ML-DSA-65 signing PUBLIC key, base64url,
+            or ``None`` for a legacy peer whose pairing carried no
             key. Public material, so the registry is an acceptable home per
             Kerckhoffs (unlike the PRIVATE key, which never lands here --
             PEER-01's at-rest posture is the RS-01 lot's, not this one's).
             Refreshed with the route on a re-pair that carries a key;
             preserved when it does not.
         pending: ``True`` while the pairing awaits the PAIR-02 mutual
-            confirmation (S206). A pending peer gates nothing: the engine
+            confirmation. A pending peer gates nothing: the engine
             refuses to run a round against it or to serve it, and record
             verification never trusts its registered key. ``False`` for a
             confirmed peer -- including every pre-PAIR-02 row, grandfathered
@@ -342,16 +342,16 @@ class PeerRecord:
             distinctly from a fresh pairing so the human knows the trust root
             changed. Always ``False`` for a confirmed peer.
         remote_chat_enabled: Whether this device's remote-inference (remote
-            chat) grant is enabled (cas 7 Lot 2, S235). ``True`` by default --
+            chat) grant is enabled. ``True`` by default --
             the grandfathered tier-1 stance, and the value a row whose
             ``remote_chat_grant`` is NULL reads; ``False`` only when the user
             explicitly disabled it at the desktop control surface (column 0).
             The remote surface refuses a disabled device.
-        rag_subgrant: Whether this device's RAG read-only sub-grant is on (cas
-            7 Lot 2, S235). ``False`` by default (the conservative default; a
+        rag_subgrant: Whether this device's RAG read-only sub-grant is on.
+            ``False`` by default (the conservative default; a
             device can have remote chat without remote RAG). Gates the ``rag``
             scope on a remote request; off means the scope is refused.
-        device_class: The peer's device class marker (N.9, S256), or ``None``
+        device_class: The peer's device class marker, or ``None``
             for the grandfathered desktop class (every pre-N.9 row, and any
             value outside the allowlist, reads ``None``). ``"phone"`` makes
             the sync responder serve this peer a NOTE record only when the
@@ -430,7 +430,7 @@ class PeerStore:
             # WAL is set outside any transaction, right after connect.
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(_CREATE_TABLE)
-            # S204 (CHF-05) / S205 (VL-01) / S206 (PAIR-02): add the
+            # Add the
             # last-seen-epoch, signing-public-key, and pending columns to
             # registries that predate them. SQLite has no ADD COLUMN IF NOT
             # EXISTS, so guard with table_info (the AU-06 idiom). Nullable on
@@ -457,7 +457,7 @@ class PeerStore:
                 conn.execute(
                     f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN pending INTEGER"
                 )
-            # cas 7 Lot 2 (S235): the per-device remote-inference grant columns,
+            # The per-device remote-inference grant columns,
             # the same additive guarded idiom. Nullable on purpose: NULL means a
             # grandfathered peer -- remote chat ENABLED (the tier-1 default) and
             # the RAG read-only sub-grant OFF (the conservative default).
@@ -469,7 +469,7 @@ class PeerStore:
                 conn.execute(
                     f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN rag_subgrant INTEGER"
                 )
-            # N.9 (S256): the per-device class marker, the same additive
+            # The per-device class marker, the same additive
             # guarded idiom. Nullable on purpose: NULL is the grandfathered
             # desktop class (every pre-N.9 row is a desktop by construction);
             # only an explicit ceremony or the control surface writes
@@ -479,7 +479,7 @@ class PeerStore:
                     f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN device_class TEXT"
                 )
             conn.execute(_CREATE_META)
-            # S206 (PAIR-02): the pinned self pairing material on the meta
+            # The pinned self pairing material on the meta
             # table, same additive guarded idiom.
             meta_cols = {
                 row[1]
@@ -552,7 +552,7 @@ class PeerStore:
         # (signing key changed on re-pair). Read defensively: anything that is
         # not a positive integer is confirmed (the grandfathered shape).
         pending_value = pending_raw if isinstance(pending_raw, int) else 0
-        # cas 7 Lot 2 (S235) grant encoding, read defensively: remote chat is
+        # The grant encoding, read defensively: remote chat is
         # ENABLED unless the column is explicitly 0 (NULL = grandfathered =
         # enabled); the RAG sub-grant is ON only when the column is explicitly 1
         # (NULL/0 = off).
@@ -582,7 +582,7 @@ class PeerStore:
             key_changed=pending_value == 2,
             remote_chat_enabled=remote_chat_enabled,
             rag_subgrant=rag_subgrant_on,
-            # N.9 (S256) class encoding, read defensively: only an
+            # The class encoding, read defensively: only an
             # allowlisted string is a class; NULL and anything else read None
             # (the grandfathered desktop class).
             device_class=(
@@ -608,9 +608,9 @@ class PeerStore:
         re-pair with a rotated route) updates the routing key and label but
         preserves the watermark and the original pairing time, so the device
         never loses track of how far it has synced. The signing public key
-        (S205, VL-01) refreshes with the route when ``signing_pub`` is given
+        refreshes with the route when ``signing_pub`` is given
         and is preserved when it is ``None`` (a pre-VL-01 payload can never
-        strip a registered key). PAIR-02 (S206): ``pending=True`` registers a
+        strip a registered key). ``pending=True`` registers a
         fresh peer awaiting the mutual confirmation -- the pairing ceremony's
         path; the default ``False`` is the programmatic-registration trust
         decision (and the grandfathered shape). On a re-pair the caller's flag
@@ -736,7 +736,7 @@ class PeerStore:
     def set_device_class(
         self, peer_id: str, device_class: str | None
     ) -> bool:
-        """Mark or clear a peer's device class (N.9, S256).
+        """Mark or clear a peer's device class.
 
         ``"phone"`` marks the peer phone-class: the sync responder then
         serves it a NOTE record only when the note's per-item mobile-allowed

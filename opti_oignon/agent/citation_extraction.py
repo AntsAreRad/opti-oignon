@@ -2,9 +2,9 @@
 """Citation extraction: turn a produced answer plus its sources into the
 (claim, source) pairs the per-answer verification consumes.
 
-The producer half of the claim-vs-source verification arc (the role S267, the
-aggregation S271, the route S272). Every layer downstream consumes a list of
-(claim, source) pairs that it is simply handed; the S271 aggregation names them
+The producer half of the claim-vs-source verification arc (the role, the
+aggregation, the route). Every layer downstream consumes a list of
+(claim, source) pairs that it is simply handed; the aggregation names them
 "the kind a citation-extraction step would hand it" and defers extracting them
 from a produced answer to a later lot. This module is that parser: given an
 answer carrying inline numeric citation markers and the ordered sources those
@@ -17,7 +17,7 @@ Design notes:
 - Pure and local. This module imports only the standard library; it reaches no
   network, opens no database, and pulls in no backend at load, so it is 100%
   local / Python and is exercised directly by pytest with no fastapi / ollama
-  chain (the S243 isolation lesson). It is deterministic: the same answer and
+  chain (the isolation lesson). It is deterministic: the same answer and
   sources always yield the same pairs.
 - Not a model-reachable tool. Like the role and the aggregation, this is a
   caller-driven surface: a producing path (or a UI, or a later agent step) hands

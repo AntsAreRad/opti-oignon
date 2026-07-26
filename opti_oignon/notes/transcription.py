@@ -2,7 +2,7 @@
 """Notes media post-processing (N.5 voice): the opt-in, sandboxed whisper.cpp
 transcription orchestration.
 
-N.1 (S243) built the media data layer for all three kinds and S249 landed the
+An earlier bloc built the media data layer for all three kinds and landed the
 shared notes-attachment route over it; the ``attachment`` manifest carries a
 ``transcript_text`` column that stays NULL until a post-processing bloc fills it.
 This module is that bloc for audio: it turns an encrypted audio attachment into a
@@ -10,7 +10,7 @@ transcript and writes it back through ``NotesStore.update_attachment``, but only
 after the human approves, and only ever inside a fully isolated, disposable
 bubblewrap sandbox.
 
-The disposable-bubblewrap floor (S73 / S74) is non-negotiable here, because
+The disposable-bubblewrap floor is non-negotiable here, because
 transcription is file-touching post-processing of user content:
 
 - FAIL-SECURE. If a real bubblewrap is not available (``sandbox.bwrap_available``
@@ -29,7 +29,7 @@ transcription is file-touching post-processing of user content:
   the live run is host-assured and never simulated here.
 - HUMAN APPROVAL BEFORE THE DURABLE WRITE-BACK. The transcript is written to the
   manifest only when the caller passes ``approve=True``. Without approval the
-  transcript is returned for review (a preview) but NOT persisted; the S116
+  transcript is returned for review (a preview) but NOT persisted; the
   copy-out / approval discipline governs the durable result.
 - DISPOSABLE TEARDOWN. The sandbox (and the plaintext audio inside it) is
   destroyed in a ``finally``, on every path after creation.
@@ -239,7 +239,7 @@ def build_live_transcriber(
     HOST-ASSURED. whisper.cpp is absent in-container, so this returns None here;
     the live transcriber runs the binary INSIDE the disposable sandbox (zero host
     filesystem, zero network) over the injected audio, then reads the transcript
-    out under the S116 approve / copy-out discipline. The exact whisper.cpp
+    out under the approve / copy-out discipline. The exact whisper.cpp
     invocation is settled on the host (NOTES_TRANSCRIPTION_E2E_S250.md); it is
     never simulated in the container.
     """

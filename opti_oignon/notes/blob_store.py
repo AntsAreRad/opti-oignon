@@ -381,7 +381,7 @@ class NotesBlobStore:
         return False
 
 
-# Module-level singleton with a reset for test isolation (the S171 lesson).
+# Module-level singleton with a reset for test isolation.
 _blob_store: NotesBlobStore | None = None
 
 

@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""The concrete agent tool set (S176, Theme 3 / Odysseus Core).
+"""The concrete agent tool set.
 
 This module fills the agent's hands. It defines the tools the agent may call
 (ODYSSEUS_SPEC.md Section 5.3 and Section 6 surfaces that are not skills) and
-wires them into the S175 dispatch seam without inventing a second execution
+wires them into the dispatch seam without inventing a second execution
 path:
 
 - The sandboxed filesystem / shell / code tools -- ``bash``, ``view``,
-  ``create_file``, ``str_replace``, and since S228 the read-only ``grep``,
+  ``create_file``, ``str_replace``, and the read-only ``grep``,
   ``glob`` and ``ls`` -- carry a schema only. They already execute exclusively
-  through the S73/S74 disposable bwrap sandbox seam via
+  through the disposable bwrap sandbox seam via
   ``dispatch._SANDBOX_DISPATCH`` (the session object); this module never runs
   them itself. Their argument names match that seam exactly.
 - The non-sandbox tools the agent exposes -- ``web_search`` (network),
-  ``manage_memory`` / ``manage_skills`` (persistent state) and the S228
+  ``manage_memory`` / ``manage_skills`` (persistent state) and the
   session-state ``todo`` -- are registered as ``tool_handlers`` for
   ``dispatch``'s injected non-sandbox path. Each handler returns an
-  observation string and never raises. ``task`` (S228) carries a schema but
+  observation string and never raises. ``task`` carries a schema but
   no handler: the loop runs the bounded child itself (AGT_SPEC 5.4).
 
 Every tool carries a schema usable both for native function-calling
 (``to_native``) and for the system-prompt description (``to_prompt``). A
 ``ToolRegistry`` assembles the tool set and the schemas for a given security
-mode, filtered through the S175 ``allowlists`` so what the registry exposes is
+mode, filtered through the ``allowlists`` so what the registry exposes is
 always a subset of the active mode's allowlist: Daily exposes everything;
 Bulbe exposes the sandboxed subset plus the session-state ``todo`` and the
 bounded ``task`` (the network and state-mutation tools are not reachable
@@ -61,7 +61,7 @@ TOOL_WEB_SEARCH = "web_search"
 TOOL_MANAGE_MEMORY = "manage_memory"
 TOOL_MANAGE_SKILLS = "manage_skills"
 TOOL_MANAGE_NOTES = "manage_notes"
-# S228 (AGT Lot 1): the three sandboxed read-only tools, the session-state
+# The three sandboxed read-only tools, the session-state
 # todo tool and the loop-managed bounded subagent. The read-only three mirror
 # allowlists.SANDBOX_TOOL_NAMES and dispatch._SANDBOX_DISPATCH; ls is named
 # ls (not list) to avoid colliding with the legacy list_files registry tool
@@ -77,7 +77,7 @@ _DEFAULT_BASH_TIMEOUT = 30
 _DEFAULT_WEB_RESULTS = 3
 _DEFAULT_MEMORY_LIST_LIMIT = 20
 _DEFAULT_NOTES_LIST_LIMIT = 20
-# S228 read-only tool defaults (hard caps live in sandbox_tools).
+# Read-only tool defaults (hard caps live in sandbox_tools).
 _DEFAULT_GREP_RESULTS = 100
 _DEFAULT_GLOB_RESULTS = 200
 _DEFAULT_LS_ENTRIES = 200
@@ -481,7 +481,7 @@ TASK_SCHEMA = ToolSchema(
 )
 
 # The full set of tool schemas, in a stable order: the sandboxed seven, the
-# handler-backed four, then the S228 session-state and subagent tools.
+# handler-backed four, then the session-state and subagent tools.
 ALL_SCHEMAS: tuple[ToolSchema, ...] = (
     BASH_SCHEMA,
     VIEW_SCHEMA,
@@ -499,9 +499,9 @@ ALL_SCHEMAS: tuple[ToolSchema, ...] = (
 )
 
 # Names the registry exposes as non-sandbox handlers (the others are sandboxed
-# or, for task, loop-managed). manage_notes joins at S244 as a Daily-only
+# or, for task, loop-managed). manage_notes joins as a Daily-only
 # state-mutation handler over the N.1 notes data layer, alongside manage_memory
-# and manage_skills. todo joins at S228: it is handler-backed, but its closure
+# and manage_skills. todo joins: it is handler-backed, but its closure
 # is attached fresh per build (per-run session state), never held on the
 # process-level registry. task deliberately stays out: the loop, not a handler,
 # runs the bounded child (AGT_SPEC 5.4/5.5).
@@ -876,7 +876,7 @@ def _default_manage_skills_handler() -> Callable[[dict[str, Any]], str] | None:
         return None
 
 
-# todo handler (pure per-run session state; S228, AGT_SPEC 5.3)
+# todo handler (pure per-run session state)
 
 _TODO_STATUSES = ("pending", "in_progress", "completed", "cancelled")
 _TODO_PRIORITIES = ("high", "medium", "low")
@@ -1070,7 +1070,7 @@ class ToolRegistry:
             for s in schemas:
                 if not s.sandboxed and s.name in self._handlers:
                     handlers[s.name] = self._handlers[s.name]
-            # S228 (AGT_SPEC 5.3): todo holds pure per-run session state, so
+            # ``todo`` holds pure per-run session state, so
             # it never lives in the process-level handler map; a FRESH closure
             # is attached per build (the run manager builds once per run), and
             # the loop entry points bind its on_update to the event stream.

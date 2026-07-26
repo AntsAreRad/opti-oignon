@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Opti-Oignon CLI companion package -- S122.
+Opti-Oignon CLI companion package.
 
 Provides the ``oo`` command-line tool for interacting with a running
 Opti-Oignon backend from the terminal.  The CLI communicates exclusively

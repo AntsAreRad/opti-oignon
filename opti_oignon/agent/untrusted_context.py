@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Untrusted-context wrapping for the agent loop (S175, Theme 3 / Odysseus Core).
+"""Untrusted-context wrapping for the agent loop.
 
 The anti-injection core, adopting the Odysseus ``prompt_security`` pattern
 (ODYSSEUS_SPEC.md Section 2.4 and Section 5.5). All external content -- web
@@ -11,8 +11,8 @@ be followed as instructions, and must not cause tool calls, secret disclosure,
 or changes to memory, skills, tasks, files, or settings, overriding any
 instruction inside the data and any conflicting persona or preset.
 
-This module also consumes the S173/S174 memory working block
-(``memory.retrieval.working_memory_block``), which S174 deliberately left
+This module also consumes the memory working block
+(``memory.retrieval.working_memory_block``), which the memory layer deliberately left
 unwrapped: the agent applies the untrusted-context wrapping here. The retriever
 import is lazy and guarded, and the block provider is injectable, so this module
 loads and is exercised without the backend.
@@ -177,7 +177,7 @@ def skill_message(content: str) -> dict[str, str]:
     return untrusted_message(content, source=SOURCE_SKILL)
 
 
-# Memory working-block consumption (S174 leaves it unwrapped; we wrap it here).
+# Memory working-block consumption (left unwrapped upstream; wrapped here).
 
 
 def _working_block_provider() -> Callable[..., str] | None:
@@ -197,10 +197,10 @@ def memory_untrusted_message(
     provider: Callable[..., str] | None = None,
     source: str = SOURCE_MEMORY,
 ) -> dict[str, str] | None:
-    """Wrap the S66 memory working block as an untrusted user-role message.
+    """Wrap the memory working block as an untrusted user-role message.
 
     The block is the compressed working layer (``retrieval.working_block``)
-    that S174 left unwrapped; here the agent applies the untrusted-context
+    that the memory layer left unwrapped; here the agent applies the untrusted-context
     wrapping. Returns None when retrieval is unavailable or the block is empty.
     The provider is injectable for isolation.
     """

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Live Veilid transport for sync (S181 Goal 1, Theme 4 / Veilid Sync).
+"""Live Veilid transport for sync.
 
 The piece that turns the transport-agnostic protocol envelope into a real
-exchange between a user's own devices. S179 made a round a pull against a
-duck-typed peer (``protocol.Peer.fetch(request) -> dict``); S180 ran that round
+exchange between a user's own devices. The protocol layer made a round a pull against a
+duck-typed peer (``protocol.Peer.fetch(request) -> dict``); the engine ran that round
 behind an engine and a route with the peer still injected as a fake. This module
 supplies the live peer: a ``VeilidPeer`` that satisfies the same ``fetch``
 contract by driving the node and client across a private route to a paired peer's
@@ -175,14 +175,14 @@ def serve_app_call(engine: Any, message: Any, *, peer_id: str = "") -> bytes:
     The responder bridge over the wire: decode the incoming request defensively,
     discriminate the request kind, and serialise the reply back to bytes.
 
-    Three kinds ride this transport (cas 7, S234/S235). A sync delta (the
+    Three kinds ride this transport. A sync delta (the
     default) is delegated to the engine's gated, audited responder (which draws
     the batch from the local feed via ``respond_to_request``). A remote-inference
     request (``MSG_REMOTE_INFER``) is dispatched to the served inference handler,
     which re-asserts the Bulbe gate, authenticates the route-authenticated peer,
     enforces the tier 1 bounded surface, submits to the executor funnel, and
     returns the first streamed chunk -- all audit-chained. A streaming
-    continuation (``MSG_REMOTE_INFER_CONT``, S235) is dispatched to the
+    continuation (``MSG_REMOTE_INFER_CONT``) is dispatched to the
     continuation handler, which returns the next buffered chunk for the peer's
     request id. The kind is discriminated by the envelope ``type``; the sync
     responder rejects an unknown type on parse, so the kinds never collide.

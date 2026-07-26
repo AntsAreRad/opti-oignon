@@ -41,7 +41,7 @@ from ..config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-# S125: Data-at-rest encryption
+# Data-at-rest encryption
 try:
     from ..encryption import decrypt_field as _decrypt
     from ..encryption import encrypt_field as _encrypt
@@ -133,7 +133,7 @@ def _reply_text(response: Any) -> str:
     Handles the dict shape and the object shape returned by newer ollama-python
     (a ChatResponse is not subscriptable), so an object-form response no longer
     raises a TypeError that the extraction would swallow into an empty result.
-    Mirrors the helper in memory/extraction.py (the S189 dict-vs-object class).
+    Mirrors the helper in memory/extraction.py (the dict-vs-object class).
     """
     if response is None:
         return ""
@@ -240,7 +240,7 @@ class MemoryManager:
     def _get_connection(self) -> sqlite3.Connection:
         """Create a configured SQLite connection.
 
-        S136 audit fix: routes through get_encrypted_connection() for
+        Audit fix: routes through get_encrypted_connection() for
         SQLCipher support when available.
         """
         conn = safe_connect(str(self._db_path), check_same_thread=False)
@@ -281,7 +281,7 @@ class MemoryManager:
         """Convert a SQLite row to a MemoryFact."""
         return MemoryFact(
             id=row["id"],
-            fact=_decrypt(row["fact"]),  # S125: transparent decryption
+            fact=_decrypt(row["fact"]),  # transparent decryption
             category=row["category"],
             source_conversation_id=row["source_conversation_id"],
             created_at=row["created_at"],
@@ -349,7 +349,7 @@ class MemoryManager:
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         memory_fact.id,
-                        _encrypt(memory_fact.fact),  # S125: encrypt at rest
+                        _encrypt(memory_fact.fact),  # encrypt at rest
                         memory_fact.category,
                         memory_fact.source_conversation_id,
                         memory_fact.created_at,

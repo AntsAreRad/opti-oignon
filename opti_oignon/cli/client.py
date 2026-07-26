@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HTTP / WebSocket client wrapper -- Opti-Oignon CLI S122.
+HTTP / WebSocket client wrapper -- Opti-Oignon CLI.
 
 Provides a thin layer around ``httpx`` (sync HTTP) and ``websockets``
 (async WS) that every CLI command uses to talk to the backend.

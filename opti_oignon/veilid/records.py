@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Versioned record encoding for Veilid sync (S179 Goal 1, Theme 4).
+"""Versioned record encoding for Veilid sync.
 
 The transport-ready encoding for the syncable record types: conversations, the
 two-tier memory (a canonical tier and an archive tier, carried as two kinds), and
@@ -99,7 +99,7 @@ class SyncRecord:
         deleted: True for a tombstone (a converged deletion).
         updated_at: Informational ISO-8601 timestamp; not used for ordering.
         signature: Base64url ML-DSA-65 signature over the record's canonical
-            bytes (S205, VL-01), or "" for an unsigned (pre-VL-01) record. The
+            bytes, or "" for an unsigned (legacy) record. The
             authenticity layer above the content hash: it binds kind, id,
             clock, device, hash, payload, deleted, and updated_at to the
             origin device's signing key, so re-clocking or re-attributing a
@@ -221,7 +221,7 @@ def verify_record_hash(record: SyncRecord) -> bool:
 
     This is an integrity check, not authenticity: the content hash detects
     corruption, but any peer can compute the correct SHA-256 for a forged
-    payload. The authenticity layer is the per-record signature (S205, VL-01):
+    payload. The authenticity layer is the per-record signature:
     :func:`canonical_record_bytes` defines what it covers, ``veilid/signing.py``
     holds the keys, and the sync engine verifies on receive against the origin
     device's registered key. The content hash keeps its role unchanged
@@ -237,7 +237,7 @@ def verify_record_hash(record: SyncRecord) -> bool:
 
 
 def canonical_record_bytes(record: SyncRecord) -> bytes:
-    """The canonical bytes a record signature covers (S205, VL-01).
+    """The canonical bytes a record signature covers.
 
     THE one signing recipe, documented here and used by signer and verifier
     alike: the sorted-key compact JSON (UTF-8) of the encoded wire record
@@ -260,7 +260,7 @@ def canonical_record_bytes(record: SyncRecord) -> bytes:
 def encode_record(record: SyncRecord) -> dict[str, Any]:
     """Encode a record to its self-describing wire object (a plain dict).
 
-    The ``signature`` field is emitted only when non-empty (S205, the epoch
+    The ``signature`` field is emitted only when non-empty (the epoch
     omit idiom): an unsigned record's wire shape is byte-identical to the
     pre-VL-01 shape, so old readers see exactly what they always saw and a
     pre-VL-01 sender is indistinguishable by construction.
@@ -321,7 +321,7 @@ def decode_record(obj: Any) -> SyncRecord | None:
         updated_at = obj.get("updated_at", "")
         if not isinstance(updated_at, str):
             return None
-        # S205 (VL-01): the signature is read defensively. A missing or
+        # The signature is read defensively. A missing or
         # mistyped field means an unsigned record ("") -- NEVER a parse
         # reject. Parsing stays the ungated integrity gate it always was;
         # whether an unsigned or invalid signature is acceptable depends on

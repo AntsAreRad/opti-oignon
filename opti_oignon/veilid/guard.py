@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bulbe binding-layer gate and shared error types for Veilid sync (S178, Theme 4).
+"""Bulbe binding-layer gate and shared error types for Veilid sync.
 
 Sync is a Daily-mode capability. Under Bulbe the Veilid node refuses to bind or
 connect at all: a physical refusal at the layer where a connection would be

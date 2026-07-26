@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The agent loop (S175, Theme 3 / Odysseus Core).
+"""The agent loop.
 
 A multi-turn streaming loop (ODYSSEUS_SPEC.md Section 5.1) with a configurable
 round cap whose default is the Odysseus reference value of 20. Each round
@@ -18,7 +18,7 @@ is either an object with ``stream(messages, tools=None)`` or a callable with the
 same signature, yielding Ollama-shaped chunks (``{"message": {"content": ...,
 "tool_calls": ...}}``); a single response dict is also accepted.
 
-The S173/S174 memory working block (``retrieval.working_block``), which S174
+The memory working block (``retrieval.working_block``), which the memory layer
 leaves unwrapped, is consumed here through ``untrusted_context`` and injected as
 an untrusted user-role message before the task.
 """
@@ -35,7 +35,7 @@ from typing import Any, Callable
 from opti_oignon.agent import allowlists, dispatch, untrusted_context
 from opti_oignon.agent import tools as agent_tools
 
-# Guarded PyYAML import for the S229 local hardening loader (the S228
+# Guarded PyYAML import for the local hardening loader (the
 # load_diagnostics_config precedent: config_loader.py is deliberately not
 # edited; a missing dependency falls back to the in-module defaults).
 try:
@@ -64,7 +64,7 @@ MAX_AGENT_ROUNDS = 20
 _HARD_ROUND_CEILING = 1000
 _VERIFIER_MAX_ROUNDS = 2
 
-# Bounded subagent cap (S228, AGT_SPEC 5.4). The effective child cap is
+# Bounded subagent cap. The effective child cap is
 # min(requested, TASK_CHILD_CAP, parent_rounds_remaining - 1), and the rounds
 # a child uses are DEBITED from the parent budget, so a run's total work stays
 # under the round cap regardless of task usage.
@@ -75,11 +75,11 @@ STOP_DONE = "done"
 STOP_MAX_ROUNDS = "max_rounds"
 STOP_ERROR = "error"
 STOP_CANCELLED = "cancelled"
-# S229 (AGT_SPEC 6.3): structured doom-loop abort.
+# Structured doom-loop abort.
 STOP_DOOM_LOOP = "doom_loop"
 
 # ---------------------------------------------------------------------------
-# S229 (AGT_SPEC Section 6): loop-hardening constants.
+# Loop-hardening constants.
 #
 # The static values below are the spec defaults and the FLOORS of the
 # governor-fed form (6.6): a fed derivation can only raise them. The
@@ -126,7 +126,7 @@ HARDENING_DEFAULTS: dict[str, Any] = {
 def load_hardening_config() -> dict[str, Any]:
     """The ``hardening:`` block of agent/config.yaml, defaults applied.
 
-    A tiny guarded reader local to this module, on the S228
+    A tiny guarded reader local to this module, on the
     ``load_diagnostics_config`` precedent (config_loader.py deliberately not
     edited): a missing file, missing PyYAML, a malformed file, or a missing
     block all yield ``HARDENING_DEFAULTS``. The 6.1 hard floors are enforced
@@ -391,7 +391,7 @@ def _observations_message(results: list[dispatch.DispatchResult]) -> dict[str, A
 
 
 # ---------------------------------------------------------------------------
-# S229 (AGT_SPEC Section 6) helpers: output caps and spill (6.1), the
+# Loop-hardening helpers: output caps and spill (6.1), the
 # deterministic prune stage and the flag-gated summarize stage (6.2), and the
 # doom-loop window (6.3). The verifier deliberately keeps the uncapped
 # ``_observations_message`` path: ``_run_verifier`` is unchanged.
@@ -759,7 +759,7 @@ def _doom_update(
     return False
 
 
-# S228 (AGT Lot 1) helpers: the todo binding and the bounded task subagent.
+# Helpers: the todo binding and the bounded task subagent.
 
 
 def _native_tool_names(tools: Any) -> set[str]:
@@ -799,7 +799,7 @@ def _bind_todo_handler(
 
     Gated on the run actually exposing todo (its schema in the advertised
     tools, or a caller-injected handler), so runs without todo keep the
-    pre-S228 behaviour byte for byte. A caller-injected handler is kept; its
+    prior behaviour byte for byte. A caller-injected handler is kept; its
     ``on_update`` is bound only when unset.
     """
     if (
@@ -855,7 +855,7 @@ def _run_task_child(
     The child shares the parent's SandboxToolSession, mode and approval_fn
     (every child sandbox call rides the same Bulbe per-call approval), and
     its events are re-emitted with a ``task`` marker so the panel can nest
-    them. S229: the child's observations ride the same 6.1 caps and spill
+    them. The child's observations ride the same 6.1 caps and spill
     (the spill counter is shared with the parent, so paths never collide);
     the doom-loop window and the prune stage stay PARENT-ONLY by design --
     the child is already bounded by ``child_cap`` and debited from the
@@ -1143,7 +1143,7 @@ def run(
     when the model returns a final answer (no tool calls) or the round cap is
     reached. Never raises: failures become observations or a terminal result.
 
-    S229 (AGT_SPEC Section 6): every observation is capped and spilled per
+    Every observation is capped and spilled per
     6.1 before entering the transcript, the deterministic prune stage runs
     when the chars estimate crosses the trigger (6.2), a doom-loop window
     watches executed calls (6.3), and one trusted reminder lands when two
@@ -1160,14 +1160,14 @@ def run(
     final_text = ""
     stop_reason = STOP_DONE
 
-    # S228: the per-run handler map. The todo closure (pure session state) is
+    # The per-run handler map. The todo closure (pure session state) is
     # created or bound here, gated on the run actually exposing todo, so the
-    # pre-S228 paths stay byte-identical (AGT_SPEC 5.3).
+    # prior paths stay byte-identical.
     effective_handlers: dict[str, Callable[[dict[str, Any]], Any]] = dict(tool_handlers or {})
     round_ref: dict[str, int] = {"round": 0}
     _bind_todo_handler(effective_handlers, _native_tool_names(tools), on_event, round_ref)
 
-    # S229 (AGT_SPEC Section 6): per-run hardening state. Budgets are static
+    # Per-run hardening state. Budgets are static
     # or governor-fed (6.6); the spill counter is run-global and shared with
     # task children so spill paths never collide; the prunable registry holds
     # the indices of the observation messages this loop appends (everything
@@ -1200,7 +1200,7 @@ def run(
             break
         rounds += 1
         round_ref["round"] = rounds
-        # S229 (AGT_SPEC 6.5): one trusted reminder when, counting this
+        # One trusted reminder when, counting this
         # round, exactly two rounds remain (the cap is mutable under task
         # debits, so the condition re-evaluates each round; sent once).
         if not reminder_sent and (cap - rounds + 1) == 2:
@@ -1223,12 +1223,12 @@ def run(
 
         response = {"message": {"content": content, "tool_calls": native_calls}}
         try:
-            # S228 (AGT_SPEC 5.4): the loop intercepts task calls before
+            # The loop intercepts task calls before
             # dispatch_round -- the bounded child needs the model client and
             # the round budget that dispatch does not hold. A round without a
-            # task call takes the pre-S228 path unchanged.
+            # task call takes the prior path unchanged.
             pre_calls, _pre_path = dispatch.resolve_tool_calls(response)
-            # S229 (AGT_SPEC 6.3): after the one corrective observation, a
+            # After the one corrective observation, a
             # further identical call aborts BEFORE execution.
             doom_tool = _doom_should_abort(doom_state, doom_threshold, pre_calls)
             if doom_tool is not None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transport-agnostic protocol envelope for Veilid sync (S179 Goal 4, Theme 4).
+"""Transport-agnostic protocol envelope for Veilid sync.
 
 The protocol over the encoding, the reconciliation, and the change feed, with no
 live transport. A sync exchange is a pull: one device asks a peer "what have you
@@ -16,8 +16,8 @@ defensive parsers and a couple of compositions:
   new watermark, and how much was applied or rejected.
 
 There is no socket here. The peer is injected, so a full round is exercised with a
-fake peer that answers from its own local feed; S180-S181 supply the live route and
-its status surface, and S182 the pairing and sharing-control panel. The envelope is
+fake peer that answers from its own local feed; sibling modules supply the live route and
+its status surface, and the pairing and sharing-control panel. The envelope is
 the seam between the pure data layer and the eventual transport.
 
 The Bulbe boundary lives here, at that seam. Every function that would act on
@@ -61,12 +61,12 @@ FEATURE_AVAILABLE = True
 PROTOCOL_VERSION = 1
 MSG_DELTA_REQUEST = "delta_request"
 MSG_RECORD_BATCH = "record_batch"
-# cas 7 (S234): the remote-inference request kind. It rides the same app_call
+# The remote-inference request kind. It rides the same app_call
 # transport as the sync delta and is discriminated by this type at
 # ``serve_app_call``; the sync responder rejects it on parse (an unknown type to
 # ``parse_delta_request``), so the two kinds never collide.
 MSG_REMOTE_INFER = "remote_infer"
-# cas 7 Lot 2 (S235): the streaming continuation kind (Option A, pull). The
+# The streaming continuation kind (Option A, pull). The
 # initial ``remote_infer`` request opens a server-side chunk buffer keyed by the
 # (route-authenticated peer, request id) pair; the phone then pulls successive
 # chunks with ``remote_infer_cont`` requests, each carrying the request id and a
@@ -75,7 +75,7 @@ MSG_REMOTE_INFER = "remote_infer"
 # parse (an unknown type to ``parse_delta_request``), so the three never collide.
 MSG_REMOTE_INFER_CONT = "remote_infer_cont"
 
-# S203 (PRT-04): batch bounds. The sender bounds each answer to one chunk; the
+# Batch bounds. The sender bounds each answer to one chunk; the
 # asker walks the journal chunk by chunk by threading each chunk's high-water into
 # its next request (the existing monotonic advance, no new token). The receiver
 # caps an incoming envelope defensively and REJECTS past the cap (never truncates).
@@ -95,7 +95,7 @@ RECEIVER_MAX_BYTES = 8_388_608  # 8 MiB
 class Peer(Protocol):
     """The minimal contract a peer must satisfy: answer a request with a batch.
 
-    A live peer (S180-S181) reaches the remote device over a Veilid private route; a
+    A live peer reaches the remote device over a Veilid private route; a
     fake peer answers from a local feed. The protocol never assumes anything beyond
     this single method, which is what keeps it transport-agnostic.
     """
@@ -122,7 +122,7 @@ class RecordBatch:
             advances its watermark to this once the batch is applied.
         records: The decoded record versions (latest per key from the peer).
         rejected: How many wire records failed to decode and were dropped.
-        epoch: The responder feed's epoch (S204, CHF-05), or ``None`` for a
+        epoch: The responder feed's epoch, or ``None`` for a
             pre-epoch peer (the field missing or malformed on the wire). The
             asker compares it to the peer's stored last-seen epoch and resets
             its watermark on a change; ``None`` never resets anything and falls
@@ -172,7 +172,7 @@ def _check_watermark(watermark: Any) -> None:
 
 
 def _feed_epoch_of(feed: Any) -> str | None:
-    """The feed's epoch read defensively (S204, CHF-05), or ``None``.
+    """The feed's epoch read defensively, or ``None``.
 
     Duck-typed like ``since_page``: a feed that predates ``feed_epoch`` simply
     has no epoch, so the batch omits the field (a pre-epoch sender). A failing
@@ -216,7 +216,7 @@ def build_record_batch(
 ) -> dict[str, Any]:
     """Build one bounded batch answer from the local feed. Refuses under Bulbe.
 
-    S203 (PRT-04): the answer is a single chunk, not the whole delta. It reads a
+    The answer is a single chunk, not the whole delta. It reads a
     bounded page via the feed's ``since_page`` (at most ``max_count`` rows, a
     ``max_bytes`` wire budget) and advertises the CHUNK's max sequence as
     ``high_water`` -- not the feed's overall maximum -- so the asker's watermark
@@ -226,7 +226,7 @@ def build_record_batch(
     forward-compatible. The CHF-01 backstop is unchanged in kind: an impossible
     watermark still serves the full current set, now in bounded chunks.
 
-    S204 (CHF-05): the batch carries the feed's epoch -- a property of the feed,
+    The batch carries the feed's epoch -- a property of the feed,
     independent of the delta, so the asker learns it even on a caught-up (empty)
     round. Old readers ignore the field; a pre-epoch feed omits it.
     """
@@ -270,7 +270,7 @@ def respond_to_request(
     a no-op under the peer store's monotonic max() advance. A valid request is
     answered with one bounded chunk (PRT-04); the asker loops for the rest.
 
-    S204 (CHF-05): the benign batch carries the feed's epoch too -- it is the
+    The benign batch carries the feed's epoch too -- it is the
     responder's true feed identity, and a benign answer can never advance the
     asker (high-water 0 stays a no-op under the monotonic advance), so an epoch
     learned from it is as good as one from a real chunk.
@@ -327,7 +327,7 @@ def apply_local_batch(
     *,
     local_records: list[SyncRecord] | None = None,
 ) -> ApplyResult:
-    """Apply a batch of ALREADY-LOCALLY-HELD records; ungated by design (S207).
+    """Apply a batch of ALREADY-LOCALLY-HELD records; ungated by design.
 
     The same merge core as :func:`apply_record_batch`, without the Bulbe gate.
     The Bulbe boundary gates the WIRE; this function moves nothing over any
@@ -433,7 +433,7 @@ def parse_record_batch(
     by the record decoder, which drops and counts any that fail, so a batch with a
     few bad records still yields the good ones.
 
-    S203 (PRT-04): a defensive envelope cap. An envelope carrying more than
+    A defensive envelope cap. An envelope carrying more than
     ``max_count`` wire records, or whose serialised records exceed ``max_bytes``,
     is REJECTED (returns ``None``) -- never truncated, so a too-large envelope
     cannot silently drop records or exhaust memory on decode. A rejected batch
@@ -480,7 +480,7 @@ def parse_record_batch(
             )
             return None
         decoded = decode_records(raw_records)
-        # S204 (CHF-05): the epoch is read defensively. A missing, non-string,
+        # The epoch is read defensively. A missing, non-string,
         # or empty epoch means a pre-epoch peer (None) -- never a reject; the
         # asker leaves its stored epoch untouched and the CHF-01 backstop
         # remains the floor, exactly as today.

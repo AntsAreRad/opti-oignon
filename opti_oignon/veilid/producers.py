@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Real producers for Veilid sync (S181 Goal 2, Theme 4 / Veilid Sync).
+"""Real producers for Veilid sync.
 
 The encode side of sync: the functions that turn a domain object -- a
 conversation, a canonical memory fact, an archive memory entry, or a skill --
-into a ``SyncRecord`` ready for the change feed. S180 carried a single minimal
+into a ``SyncRecord`` ready for the change feed. The first cut carried a single minimal
 producer (``sync_engine.record_from_payload`` over an opaque payload); this
 module gives each syncable domain its own producer, so a round moves real data
 rather than a hand-built record. The engine's ``publish_*`` convenience methods

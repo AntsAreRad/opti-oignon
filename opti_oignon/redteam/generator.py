@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Attack Generator — Opti-Oignon Red Team S147
+Attack Generator — Opti-Oignon Red Team
 ==============================================
 
 Generates adversarial attack payloads per category using local Ollama models.

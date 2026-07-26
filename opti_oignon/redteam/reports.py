@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Red Team Report Generation — Opti-Oignon S148
+Red Team Report Generation — Opti-Oignon
 ================================================
 
 Generates human-readable and machine-readable reports from campaign scores.

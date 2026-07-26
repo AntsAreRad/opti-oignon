@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Server-side streaming channel state for cas 7 Lot 2 (S235).
+"""Server-side streaming channel state.
 
 The desktop-side state behind the chunked-app_call streaming shape
 (REMOTE_INFERENCE_SPEC section 5, Option A) and the channel abuse control
@@ -45,7 +45,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# S73/S74: every new module hardcodes the checkpoint sentinel; never overridable.
+# Every new module hardcodes the checkpoint sentinel; never overridable.
 checkpoint_before_apply = True
 
 FEATURE_AVAILABLE = True

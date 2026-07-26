@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Async client wrapper bridging Veilid's async API to the app (S178 Goal 3).
+"""Async client wrapper bridging Veilid's async API to the app.
 
 Veilid's Python API is asyncio-native; most of Opti-Oignon's surface (the node
 lifecycle, the sync route handlers) is not. This wrapper owns a single asyncio

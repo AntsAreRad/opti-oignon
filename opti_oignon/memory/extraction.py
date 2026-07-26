@@ -1,4 +1,4 @@
-"""Background fact extraction for Opti-Oignon personal memory (S174, Theme 3).
+"""Background fact extraction for Opti-Oignon personal memory.
 
 After a finished conversation a background task extracts at most a couple of
 durable facts and writes each through the coordinated ``MemoryStore`` so the

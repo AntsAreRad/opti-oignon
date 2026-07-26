@@ -1,4 +1,4 @@
-"""Deduplication and coordinated CRUD for Opti-Oignon memory (S173, Theme 3).
+"""Deduplication and coordinated CRUD for Opti-Oignon memory.
 
 Two responsibilities:
 

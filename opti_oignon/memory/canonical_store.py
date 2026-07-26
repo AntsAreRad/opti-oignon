@@ -1,4 +1,4 @@
-"""Canonical memory store for Opti-Oignon (S173, Theme 3 / Odysseus Core).
+"""Canonical memory store for Opti-Oignon.
 
 The source of truth for personal memory facts. SQLite in WAL mode, parameterized
 queries only: every caller value travels as a "?" placeholder and never reaches
@@ -9,14 +9,14 @@ closed set rather than from input. Per-user isolation via
 when available, plain SQLite otherwise (Daily mode).
 
 The legacy ``MemoryManager`` / ``MemoryFact`` (formerly ``opti_oignon/memory.py``)
-were folded into this package in S173 and now live in
+were folded into this package and now live in
 ``opti_oignon/memory/legacy.py``; the package ``__init__`` re-exports them for
 backward compatibility. This module is intentionally importable in isolation
 (``spec_from_file_location`` + ``sys.modules`` stubs) without ollama or fastapi:
 the ``db_encryption`` / ``user_isolation`` imports are guarded with a plain
 SQLite fallback so the runtime tests collect without the backend.
 
-S200 (sync cycle Bloc 0 lot 2 / SYN-01): the write methods publish to the
+The write methods publish to the
 Veilid change feed after their commit via :func:`_sync_publish_memory_fact` --
 full state for add/update and for the soft-delete/restore flag, a tombstone
 for ``hard_delete``, per-fact tombstones for ``clear``. Touches are local
@@ -175,7 +175,7 @@ def _row_to_record(row: sqlite3.Row) -> MemoryRecord:
     )
 
 
-# Veilid sync producer (SYN-01, S200 / sync cycle Bloc 0 lot 2). Mirrors the
+# Veilid sync producer. Mirrors the
 # lot-1 conversation template: domain commit first, payload built inside the
 # hook's guard, a failure never breaks the write, mode-free (only the wire is
 # Daily-gated downstream). Touches are deliberately NOT published: the
@@ -392,7 +392,7 @@ class CanonicalMemoryStore:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)",
                     (rid, text, category, source, uid, ts, ts),
                 )
-            # S200 SYN-01: domain commit first (the inner ``with`` commits on
+            # Domain commit first (the inner ``with`` commits on
             # exit), then the sync publish under the store lock. The payload
             # closes over the just-built record -- zero extra reads.
             _sync_publish_memory_fact(
@@ -496,7 +496,7 @@ class CanonicalMemoryStore:
             if changed == 0:
                 return None
             record = self.get(fact_id, user_id=user_id)
-            # S200 SYN-01: publish the post-update state; the payload closes
+            # Publish the post-update state; the payload closes
             # over the record just fetched for the return value -- zero extra
             # reads. ``get`` re-enters the RLock from the same thread.
             if record is not None:
@@ -541,7 +541,7 @@ class CanonicalMemoryStore:
                 )
                 changed = cur.rowcount > 0
             if changed:
-                # S200 SYN-01: a soft delete is STATE, not a tombstone -- the
+                # A soft delete is STATE, not a tombstone -- the
                 # active flag rides the payload so restore round-trips. The
                 # re-read runs inside the hook's guard, paid only when sync
                 # is available.
@@ -564,7 +564,7 @@ class CanonicalMemoryStore:
                 )
                 changed = cur.rowcount > 0
             if changed:
-                # S200 SYN-01: the restore leg of the soft-delete round-trip,
+                # The restore leg of the soft-delete round-trip,
                 # published as state (active back to True).
                 _sync_publish_memory_fact(
                     fact_id,
@@ -583,7 +583,7 @@ class CanonicalMemoryStore:
                 )
                 deleted = cur.rowcount > 0
             if deleted:
-                # S200 SYN-01: only a hard delete is the converged deletion --
+                # Only a hard delete is the converged deletion --
                 # a tombstone (empty payload, deleted=True).
                 _sync_publish_memory_fact(
                     fact_id, deleted=True, updated_at=_now()
@@ -593,7 +593,7 @@ class CanonicalMemoryStore:
     def clear(self, *, user_id: str | None = None) -> int:
         """Remove all of the user's rows (tests, resets, the UD-03 user wipe).
 
-        S200 SYN-01: the wipe propagates as per-fact tombstones so peers
+        The wipe propagates as per-fact tombstones so peers
         converge on the deletion. The doomed ids must be read BEFORE the
         DELETE, so the availability probe runs first (``_sync_wanted``) and
         the absent-sync cost stays at zero extra reads. Bounded by the user's
@@ -703,7 +703,7 @@ class CanonicalMemoryStore:
             return False
 
 
-# Module-level singleton with a reset for test isolation (S171 lesson: never
+# Module-level singleton with a reset for test isolation (lesson: never
 # leak shared state across pytest invocations).
 _store: CanonicalMemoryStore | None = None
 

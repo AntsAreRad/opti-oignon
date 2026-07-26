@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Opti-Oignon agent eval harness -- S230 (AGT_SPEC Section 7).
+Opti-Oignon agent eval harness.
 
 The micro-task eval harness for the agent surface: TaskSpec suites scored
 by in-sandbox checks (7.1), an EvalRunner on the BenchmarkRunner idiom

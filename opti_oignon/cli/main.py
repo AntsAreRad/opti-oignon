@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI entry point -- Opti-Oignon S122.
+CLI entry point -- Opti-Oignon.
 
 Click-based command-line interface that talks to a running Opti-Oignon
 backend.  Installed as the ``oo`` console script.

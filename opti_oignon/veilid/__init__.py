@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Veilid sync sub-package (S178+, Theme 4 / Veilid Sync).
+"""Veilid sync sub-package.
 
 Optional peer-to-peer sync over Veilid (https://veilid.com): a privacy-first,
 end-to-end encrypted overlay that lets a user carry conversations, memory, and
 skills across their own devices without a server in the middle.
 
 Sync is a Daily-mode capability. Under Bulbe the node refuses to bind at the
-binding layer (see ``guard``). S178 builds the foundation -- the node lifecycle
+binding layer (see ``guard``). This package builds the foundation -- the node lifecycle
 and the binding-layer gate; the async client wrapper, the veilid-server
 packaging script, the optional ``[veilid]`` dependency group, and the sync
-protocol and UI land across S179-S182.
+protocol and UI land in the sibling modules.
 
 The heavy ``veilid`` import is lazy and guarded throughout, so this package
 collects without the framework installed.

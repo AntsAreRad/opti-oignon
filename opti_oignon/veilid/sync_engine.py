@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Web-free sync engine for Veilid sync (S180 Goal 2, Theme 4).
+"""Web-free sync engine for Veilid sync.
 
 The engine is the thing that runs a sync round. It sits between the per-device
 change feed (the local journal of what this device has changed), the per-peer
@@ -8,7 +8,7 @@ transport-agnostic protocol envelope (which turns a watermark into a request, a
 request into a batch, and a batch into a reconciled local set). It owns no socket
 and no web stack, so the whole round is exercised in isolation with an injected
 fake peer; the live Veilid transport that drives the round over the node and
-client across a private route lands in S181, with the peer still injectable here.
+client across a private route lands in the transport layer, with the peer still injectable here.
 
 A round is a pull. The engine resolves the peer's watermark from the store, asks
 the peer for the delta since that watermark, reconciles the answer into the local
@@ -29,7 +29,7 @@ sensitive action, so it follows the same approval-aware path as the agent's
 ``manage_skills`` and ``manage_memory`` writes. Each sensitive record in an
 incoming batch passes the fail-secure human gate (an injected ``approval_fn``, or
 the default manager-backed ``allowlists.request_approval``); a record that is not
-approved is deferred rather than applied. Since S207 (SYN-05) a deferred record
+approved is deferred rather than applied. A deferred record
 is PERSISTED to the per-record deferred ledger (``deferred_ledger.py``) -- the
 full wire envelope, so it re-offers without a re-fetch -- and the watermark
 ADVANCES past it: a permanently-unapproved record no longer pins the peer's
@@ -49,7 +49,7 @@ best-effort and lazily imported so the engine stays isolatable. The producers th
 turn a conversation, a memory entry, or a skill into a record are minimal here
 (``record_from_payload`` over an opaque payload); the domain-specific producers
 fill in as the syncable stores are wired through, and the panel to pair devices
-and control what is shared lands in S182.
+and control what is shared lands in the pairing layer.
 
 Kerckhoffs: the engine is open. Peers are addressed by public routing keys the
 user holds; nothing about a round depends on the secrecy of the mechanism.
@@ -114,10 +114,10 @@ FEATURE_AVAILABLE = True
 # data and apply without a gate.
 SENSITIVE_KINDS: frozenset[str] = frozenset({RecordKind.SKILL.value})
 
-# S203 (PRT-04): the per-round leg bound. A round loops internally, consuming one
+# The per-round leg bound. A round loops internally, consuming one
 # bounded chunk per leg and threading each chunk's high-water into the next
 # request, until the watermark stops advancing (caught up), the peer's answer
-# fails to parse, or this many legs have run. (Since S207 a deferral no longer
+# fails to parse, or this many legs have run. (A deferral no longer
 # ends the loop: the deferred record is persisted to the ledger and the round
 # keeps consuming.) The bound is a guard against a misbehaving peer that never
 # reports caught-up; a real first sync of a personal-scale dataset converges in
@@ -132,7 +132,7 @@ class PeerNotFound(Exception):
 class DeferredNotFound(Exception):
     """A ledger action referenced a (kind, record_id) with no pending entry.
 
-    S207 (SYN-05): approving or refusing from the pending-approval list names
+    Approving or refusing from the pending-approval list names
     an entry by its key; an unknown key raises this (the route maps it to a
     404). Listing never raises.
     """
@@ -141,7 +141,7 @@ class DeferredNotFound(Exception):
 class PeerNotConfirmed(Exception):
     """A wire action referenced a peer whose pairing awaits confirmation.
 
-    PAIR-02 (S206): the pairing ceremony registers a peer PENDING; until both
+    The pairing ceremony registers a peer PENDING; until both
     humans have compared the mutual confirmation code and confirmed on both
     devices, the entry gates nothing -- a round against it and serving it
     refuse with this exception (the route maps it to a 409 with an explicit
@@ -149,7 +149,7 @@ class PeerNotConfirmed(Exception):
     """
 
 
-# PAIR-02 (S206): the sentinel _verify_records caches for an origin whose
+# The sentinel _verify_records caches for an origin whose
 # registry entry is PENDING. Distinct from None (no key at all, the migration
 # grace case) on purpose: a pending origin's records are REFUSED outright --
 # its registered material is not yet human-confirmed, so it must neither
@@ -169,7 +169,7 @@ class RoundResult:
             re-run applies 0.
         deferred: How many sensitive records were newly quarantined to the
             deferred ledger this round (inserted, or replacing a stored older
-            version) rather than applied (S207, SYN-05). A still-pending
+            version) rather than applied. A still-pending
             record arriving again is the silent dedup -- refreshed, not
             counted, not re-prompted. Deferred means NOT applied; the human
             decides from the pending-approval list.
@@ -179,7 +179,7 @@ class RoundResult:
         previous_watermark: The peer's watermark before the round.
         new_watermark: The peer's watermark after the round.
         advanced: Whether the watermark moved forward this round. False when
-            nothing new arrived. Since S207 (SYN-05) a deferral no longer
+            nothing new arrived. A deferral no longer
             holds the watermark: the deferred record is persisted to the
             ledger and every consumed chunk advances, so ``advanced`` reports
             persisted movement regardless of deferrals. False when the
@@ -196,12 +196,12 @@ class RoundResult:
             round (the common case and every pre-PRT-04 round); more when a delta
             spanned several bounded chunks.
         epoch_reset: True when the peer's feed epoch changed this round (its
-            journal was recreated; S204, CHF-05) and the watermark was reset to
+            journal was recreated) and the watermark was reset to
             0 -- atomically with the new epoch -- for a full resync over the
             normal leg loop. An internal diagnostic like ``legs``; the API round
             payload is unchanged.
-        refused: How many records were refused at the signature seam (S205,
-            VL-01): unsigned or invalid-signature records whose ORIGIN device
+        refused: How many records were refused at the signature seam:
+            unsigned or invalid-signature records whose ORIGIN device
             has a registered signing key, including a record signed by some
             OTHER device's key (the lookup by origin IS the
             device<->key binding). Refused-and-counted, never applied, never
@@ -209,12 +209,12 @@ class RoundResult:
             forged record must not be able to pin convergence -- the
             ``rejected`` decode-drop semantics, not the fail-secure
             ``deferred`` quarantine). Refused records do NOT enter the
-            deferred ledger (S207 decision): a forgery must never sit one
+            deferred ledger: a forgery must never sit one
             click from application, and even a visibility-only row would put
             attacker-controlled content in the panel; the counters here, the
             per-peer status surface, and the audit log are the visibility.
         unverified: How many records were accepted WITHOUT verification.
-            Since S208 (the grace flip; 3.7.0) the open-window case is gone --
+            After the grace flip (3.7.0) the open-window case is gone --
             an unkeyed-origin record refuses -- so a non-zero count here means
             either this device cannot verify at all (no PQC backend, the
             pre-VL-01 posture, warned) or a test re-opened
@@ -311,7 +311,7 @@ def _audit(action: str, **details: Any) -> None:
 def _default_note_gate() -> Any | None:
     """The process-default note gate: the ALREADY-initialised notes store.
 
-    N.9 (S256). Read-only and side-effect free by design: it never
+    Read-only and side-effect free by design: it never
     constructs a store (serving a peer must not seed a database), it only
     consults the module singleton when the application has already opened
     it, through the store's fail-secure ``is_mobile_allowed``. Anything else
@@ -333,8 +333,8 @@ def _default_note_gate() -> Any | None:
 def _update_sink_for(store_like: Any) -> Any:
     """The canonical note_update apply sink over an update-store-like object.
 
-    S264 (NOTES_CRDT_SPEC.md sections 3 and 5): the ONE recipe that lands a
-    received ``note_update`` record through the S263 store's append seam, used
+    The ONE recipe that lands a
+    received ``note_update`` record through the store's append seam, used
     by the lazy process default and injectable over any object exposing
     ``append_update`` (tests wire a real store at a tmp root). Returns a
     callable ``record -> bool``: True means landed (the record may proceed to
@@ -397,7 +397,7 @@ def _update_sink_for(store_like: Any) -> Any:
 def _default_update_sink() -> Any | None:
     """The process-default note_update apply sink, or ``None``.
 
-    The ``_default_note_gate`` idiom (S256): read-only and side-effect free,
+    The ``_default_note_gate`` idiom: read-only and side-effect free,
     it never constructs a store (applying a round must not seed a database),
     it only consults the ALREADY-initialised update-store singleton. Anything
     else resolves to ``None``, and a ``None`` sink is fail-secure at the
@@ -418,7 +418,7 @@ def _default_update_sink() -> Any | None:
 def _default_conversation_sink() -> Any | None:
     """The process-default CONVERSATION apply sink, or ``None``.
 
-    The ``_default_update_sink`` idiom (S199, SYN-01): read-only and
+    The ``_default_update_sink`` idiom: read-only and
     side-effect free. It does NOT import (and thereby construct) the
     conversation manager -- applying a round must not seed a database -- it
     only consults the manager when the application has ALREADY opened the
@@ -459,7 +459,7 @@ def _default_conversation_sink() -> Any | None:
 def _default_note_sink() -> Any | None:
     """The process-default NOTE apply sink, or ``None``.
 
-    The ``_default_note_gate`` idiom (S199, SYN-01): read-only, no seed -- it
+    The ``_default_note_gate`` idiom: read-only, no seed -- it
     only consults the already-initialised notes store singleton (importing the
     module is cheap; the ``_store`` singleton is None until the application
     opens it). Anything else resolves to ``None``, fail-secure at the landing
@@ -584,7 +584,7 @@ def _default_skill_sink() -> Any | None:
 def _default_update_watermark_gate() -> Any | None:
     """The process-default checkpoint-watermark reader, or ``None``.
 
-    S264 (the spec's section 3 republish contract): the phone-class serve
+    The republish contract: the phone-class serve
     filter serves a note's update tail only from the checkpoint watermark
     forward. The reader is the ALREADY-initialised update-store singleton's
     ``get_checkpoint_watermark`` (0 when unset -- no checkpoint means the
@@ -634,20 +634,20 @@ class SyncEngine:
         self._device = device
         self._feed = feed
         self._store = store
-        # S205 (VL-01): the injectable record signer (the RecordSigner
+        # The injectable record signer (the RecordSigner
         # protocol). None resolves to the process default lazily; tests
         # inject a deterministic fake (liboqs is absent in the container).
         self._signer = signer
-        # S207 (SYN-05): the injectable deferred ledger. None resolves to the
+        # The injectable deferred ledger. None resolves to the
         # process default lazily, like the feed and the store.
         self._ledger = ledger
-        # N.9 (S256): the injectable note gate -- a callable
+        # The injectable note gate -- a callable
         # ``note_id -> bool`` the phone-class serve filter consults LIVE
         # (filter-at-serve, decision N9-D1). None resolves lazily to the
         # already-initialised notes store singleton, or to no gate at all,
         # which is fail-secure at the filter (decision N9-D2: excluded).
         self._note_gate = note_gate
-        # S264 (NOTES_CRDT_SPEC.md section 3): the injectable note_update
+        # The injectable note_update
         # apply sink (``record -> bool``) and the injectable checkpoint
         # watermark reader (``note_id -> int``). None resolves lazily to the
         # already-initialised update-store singleton (the note_gate idiom);
@@ -655,12 +655,12 @@ class SyncEngine:
         # unresolvable watermark reader means no checkpoint state (0), and a
         # reader that raises at serve time drops fail-secure.
         self._update_sink = update_sink
-        # S199 (SYN-01): the injectable CONVERSATION apply sink
+        # The injectable CONVERSATION apply sink
         # (``record -> bool``). None resolves lazily to the already-loaded
         # conversation manager (the note_gate/update_sink idiom); an
         # unresolvable sink DROPS the record fail-secure at the landing seam.
         self._conversation_sink = conversation_sink
-        # S199 (SYN-01): the injectable NOTE apply sink. None resolves lazily
+        # The injectable NOTE apply sink. None resolves lazily
         # to the already-initialised notes store singleton (the note_gate
         # idiom); an unresolvable sink DROPS the record fail-secure.
         self._note_sink = note_sink
@@ -690,7 +690,7 @@ class SyncEngine:
         return self._store if self._store is not None else get_peer_store()
 
     def _resolve_note_gate(self) -> Any | None:
-        # N.9 (S256): the injected gate wins; otherwise the lazy process
+        # The injected gate wins; otherwise the lazy process
         # default (the initialised notes store singleton, or no gate at all
         # -- fail-secure at the filter).
         if self._note_gate is not None:
@@ -698,7 +698,7 @@ class SyncEngine:
         return _default_note_gate()
 
     def _resolve_update_sink(self) -> Any | None:
-        # S264: the injected sink wins; otherwise the lazy process default
+        # The injected sink wins; otherwise the lazy process default
         # (the initialised update-store singleton, or no sink at all --
         # fail-secure at the landing seam: the record refuses).
         if self._update_sink is not None:
@@ -706,7 +706,7 @@ class SyncEngine:
         return _default_update_sink()
 
     def _resolve_conversation_sink(self) -> Any | None:
-        # S199: the injected sink wins; otherwise the lazy process default
+        # The injected sink wins; otherwise the lazy process default
         # (the already-loaded conversation manager, or no sink at all --
         # fail-secure at the landing seam: the record drops).
         if self._conversation_sink is not None:
@@ -714,7 +714,7 @@ class SyncEngine:
         return _default_conversation_sink()
 
     def _resolve_note_sink(self) -> Any | None:
-        # S199: the injected sink wins; otherwise the lazy process default
+        # The injected sink wins; otherwise the lazy process default
         # (the already-initialised notes store singleton, or no sink at all --
         # fail-secure at the landing seam: the record drops).
         if self._note_sink is not None:
@@ -740,7 +740,7 @@ class SyncEngine:
         return _default_skill_sink()
 
     def _resolve_update_watermark_gate(self) -> Any | None:
-        # S264: the injected reader wins; otherwise the lazy process default
+        # The injected reader wins; otherwise the lazy process default
         # (the initialised update-store singleton's checkpoint reader, or
         # None -- no checkpoint state exists, the watermark is 0).
         if self._update_watermark_gate is not None:
@@ -778,7 +778,7 @@ class SyncEngine:
         Local-disk only, like any local edit, so it is permitted in any mode and
         is not gated by Bulbe; only moving the change over the wire is Daily-only.
 
-        S205 (VL-01, sign-at-publish): a record produced by THIS device is
+        A record produced by THIS device is
         signed here, once per local edit, over its canonical bytes -- so the
         journal holds the signature, ``since_page``'s wire budget bounds the
         signed size automatically, and the serve path never re-signs. A record
@@ -816,7 +816,7 @@ class SyncEngine:
     def current_clock(self, kind: RecordKind | str, record_id: str) -> int:
         """The highest clock this device has journalled for a key (0 if unseen).
 
-        S199 (SYN-01, clock discipline): delegates to the resolved change feed,
+        Delegates to the resolved change feed,
         so a domain hook computing ``current_clock(kind, key) + 1`` reads the
         same journal the engine's ``publish_*`` writes -- including an injected
         test feed. Local-disk read; permitted in any mode, not gated.
@@ -888,7 +888,7 @@ class SyncEngine:
     ) -> int:
         """Journal one opaque note update for peers to pull; returns its sequence.
 
-        The note sibling on the S256 seam (NOTES_CRDT_SPEC.md section 3):
+        The note sibling on the seam:
         builds the record through the note_update producer (identity
         ``note_id:seq``, the author's append order preserved) and journals
         it. The update blob rides as opaque payload content this engine never
@@ -978,7 +978,7 @@ class SyncEngine:
         )
 
     def republish_signed(self) -> int:
-        """Re-journal this device's unsigned records WITH signatures (S205).
+        """Re-journal this device's unsigned records WITH signatures.
 
         The one-time migration the VL-01 rollout prefers over a permanent
         accept-unsigned mode: every record in the current latest-per-key
@@ -1030,10 +1030,10 @@ class SyncEngine:
 
         Managing the paired set is a local operation, permitted in any mode; what
         is Daily-only is running a round against a peer. The pairing key exchange
-        ceremony is S182; this stores the result. S205 (VL-01): a pairing that
+        ceremony lives in ``pairing``; this stores the result. A pairing that
         carries the peer's signing PUBLIC key registers it (the store refreshes
         it with the route, preserves it when absent, and warns on a change);
-        the key is what record verification resolves against. S206 (PAIR-02):
+        the key is what record verification resolves against. Further,
         ``pending=True`` registers the peer awaiting the mutual confirmation
         (the ceremony's path; the entry gates nothing until confirmed); on a
         re-pair the store can only RAISE the pending state -- a key change
@@ -1076,7 +1076,7 @@ class SyncEngine:
     ) -> bool:
         """Mark or clear a paired peer's device class; audited. Not gated by Bulbe.
 
-        N.9 / PAIR-03 (S258): the engine-level mirror of the peer store's
+        The engine-level mirror of the peer store's
         setter, what the pairing accept seam and the control surface call so
         a class flip lands in the hash-chain audit log like every other
         trust-state change. The store validates against ``DEVICE_CLASSES``
@@ -1104,7 +1104,7 @@ class SyncEngine:
     def self_signing_pub(self) -> str | None:
         """This device's signing PUBLIC key, base64url, or ``None``.
 
-        What the pairing payload carries (S205) and half of what the PAIR-02
+        What the pairing payload carries and half of what the mutual
         confirmation code covers. Defensive: a missing backend, a refused mint
         (no master key), or any custody failure degrades to ``None`` -- the
         device pairs as an honest pre-VL-01 peer -- never an exception into
@@ -1125,7 +1125,7 @@ class SyncEngine:
     def unregister_peer(self, peer_id: str) -> bool:
         """Unpair a peer; audited. Returns True when a peer was removed.
 
-        S207 (SYN-05): unpairing cascades the peer's deferred-ledger entries
+        Unpairing cascades the peer's deferred-ledger entries
         away, fail-secure -- a quarantined record from a removed peer must not
         remain one click from application. (A record whose ORIGIN device was
         unpaired but that was deferred from a still-paired serving peer is
@@ -1172,7 +1172,7 @@ class SyncEngine:
         is enforced, not a handler policy). An unparseable request yields a benign
         empty batch -- high-water 0 and no records, so it can never advance the
         asker (PRT-01) -- via the protocol's defensive responder, never an
-        over-send or a crash. PAIR-02 (S206): when the caller supplies the
+        over-send or a crash. When the caller supplies the
         asking peer's identity and that peer's registry entry is PENDING, the
         request is refused (:class:`PeerNotConfirmed`) -- an unconfirmed
         pairing gates nothing, serving included. Stated honestly: with an
@@ -1182,7 +1182,7 @@ class SyncEngine:
         an identity is actually supplied. The served answer is
         recorded in the hash-chain audit log. The batch is a JSON-safe wire dict.
 
-        N.9 (S256), filter-at-serve (decision N9-D1): toward a PHONE-CLASS
+        Filter-at-serve: toward a PHONE-CLASS
         asker, NOTE records are dropped from the served batch unless the
         note's per-item mobile-allowed flag affirmatively permits them, via
         a LIVE lookup through the note gate (a journal-time snapshot would
@@ -1235,7 +1235,7 @@ class SyncEngine:
         LIVE lookup through the note gate, and fail-secure throughout
         (N9-D2) -- no resolvable gate, a malformed wire object, a missing or
         non-string id, an unknown note, a raised error, anything not
-        affirmatively true EXCLUDES the record. S264 extends the same floor
+        affirmatively true EXCLUDES the record. The same floor extends
         to the update kind, keyed on the parent ``note_id`` riding the wire
         payload, plus the republish contract's watermark-forward rule (only
         ``seq`` above the checkpoint watermark is served). The batch's
@@ -1256,7 +1256,7 @@ class SyncEngine:
         for wire in records:
             kind = wire.get("kind") if isinstance(wire, dict) else None
             if kind == RecordKind.NOTE_UPDATE.value:
-                # S264 (NOTES_CRDT_SPEC.md section 3): the S258 device-class
+                # The device-class
                 # gate is a FLOOR for updates too. The parent note's flag is
                 # consulted through the SAME live gate (anything not
                 # affirmatively true excludes, N9-D2), keyed on the wire
@@ -1333,7 +1333,7 @@ class SyncEngine:
     def _verify_records(
         self, records_in: list[SyncRecord]
     ) -> tuple[list[SyncRecord], int, int]:
-        """Partition incoming records by signature verification (S205, VL-01).
+        """Partition incoming records by signature verification.
 
         Returns ``(appliable, refused, unverified)``. The key a record is
         checked against is resolved by its ORIGIN (``record.device``): this
@@ -1350,11 +1350,11 @@ class SyncEngine:
 
         An origin with NO registered key was the migration case: under the
         bounded grace (``ACCEPT_UNSIGNED_FROM_UNKEYED_ORIGINS``, open
-        S205..S207) its records were accepted-and-counted as ``unverified``;
-        the window CLOSED at S208 (the Bloc 4 release flip, 3.7.0) and such a
+        for a while) its records were accepted-and-counted as ``unverified``;
+        the window CLOSED at the 3.7.0 release and such a
         record now refuses like the rest -- the constant is read at call time,
-        so tests re-open the historical behaviour by monkeypatch. PAIR-02
-        (S206): an origin whose registry entry is PENDING refuses outright,
+        so tests re-open the historical behaviour by monkeypatch.
+        An origin whose registry entry is PENDING refuses outright,
         signature or not -- its registered material awaits the human
         confirmation, so it is neither trusted nor admitted to any grace. A
         device that cannot verify at all (no PQC backend) accepts everything
@@ -1412,7 +1412,7 @@ class SyncEngine:
             else:
                 peer = store.get_peer(origin)
                 if peer is not None and getattr(peer, "pending", False):
-                    # PAIR-02 (S206): a PENDING origin refuses outright,
+                    # A PENDING origin refuses outright,
                     # regardless of signature validity -- its registered
                     # material is not yet human-confirmed, so it must neither
                     # verify as trusted nor degrade into the unsigned grace
@@ -1460,7 +1460,7 @@ class SyncEngine:
 
         A non-sensitive record applies. A sensitive record (a skill) passes the
         fail-secure human gate; if not approved it is deferred: counted, not
-        applied, and PERSISTED to the deferred ledger (S207, SYN-05) with its
+        applied, and PERSISTED to the deferred ledger with its
         full wire envelope so the human can decide later from the panel and
         the watermark can advance past it. Returns the appliable records and
         the deferred count (newly quarantined this round: ledger inserts and
@@ -1478,7 +1478,7 @@ class SyncEngine:
         superseded). An equal clock is NOT skipped: it may be the concurrent
         divergence the human should see.
 
-        ``ledger_reentry`` is the approval path's flag (S207): a record
+        ``ledger_reentry`` is the approval path's flag: a record
         re-entering this gate FROM the ledger must not dedup against its own
         entry or be re-persisted -- the panel approval already answered the
         gate -- so the ledger machinery is skipped and only the approval seam
@@ -1584,7 +1584,7 @@ class SyncEngine:
     ) -> list[SyncRecord]:
         """Materialise verified CONVERSATION records into the conversation store.
 
-        The full-state analogue of :meth:`_land_note_updates` (S199, SYN-01):
+        The full-state analogue of :meth:`_land_note_updates`:
         sits AFTER the signature seam and the gate, BEFORE the feed journal. A
         winning CONVERSATION record is written into the conversation store so it
         surfaces in this device's app, then KEPT so it still enters the feed and
@@ -1640,7 +1640,7 @@ class SyncEngine:
         """Materialise verified NOTE records into the notes store.
 
         The full-state analogue of :meth:`_land_conversations` for NOTE
-        (S199, SYN-01): existence + metadata land into the notes store (the
+        Existence + metadata land into the notes store (the
         text body converges separately through NOTE_UPDATE, so a stale snapshot
         never regresses it, and ``mobile_allowed`` is never written from the
         wire). The record is KEPT for the feed/relay; a refused or unappliable
@@ -1793,7 +1793,7 @@ class SyncEngine:
     ) -> list[SyncRecord]:
         """Land verified NOTE_UPDATE records through the store's append seam.
 
-        S264 (NOTES_CRDT_SPEC.md sections 3 and 5): sits AFTER the signature
+        Sits AFTER the signature
         seam and the gate, BEFORE the feed journal, so a refused update is
         not appended, not served onward (only the feed is served), and not
         rendered -- refused means refused everywhere, loggable, never silent.
@@ -1891,11 +1891,11 @@ class SyncEngine:
 
         Refuses under Bulbe at the binding-layer gate. Raises :class:`PeerNotFound`
         when the peer is not paired and :class:`PeerNotConfirmed` when its
-        pairing awaits the PAIR-02 mutual confirmation (S206) -- an
+        pairing awaits the mutual confirmation -- an
         unconfirmed entry gates nothing. Resolves the peer's watermark, asks the peer
         for the delta, gates any sensitive records, reconciles the appliable ones
         into the local set, and advances the watermark monotonically past every
-        consumed chunk. S207 (SYN-05): a deferral no longer holds the watermark
+        consumed chunk. A deferral no longer holds the watermark
         -- the deferred record is persisted to the per-record ledger (full wire
         envelope, so no re-fetch is ever needed) and the round keeps consuming;
         a still-pending record arriving again dedups into its entry silently
@@ -1904,7 +1904,7 @@ class SyncEngine:
         the CURRENT trust state. Records the round in the audit log and returns
         a structured summary.
 
-        S204 (CHF-05): the peer's batches carry its feed epoch. The first epoch a
+        The peer's batches carry its feed epoch. The first epoch a
         peer advertises is stored (no reset); when a later round sees a different
         one (the peer's journal was recreated, sequences restarted), the watermark
         is reset to 0 atomically with the new epoch and the full set resyncs this
@@ -1912,19 +1912,19 @@ class SyncEngine:
         pre-epoch peer (no epoch on the wire) leaves the stored epoch untouched
         and falls through to the CHF-01 backstop as before.
 
-        S205 (VL-01): each leg's records pass the signature seam (parse ->
+        Each leg's records pass the signature seam (parse ->
         epoch -> VERIFY -> gate -> apply): verification against the ORIGIN
         device's registered signing key; refusals are counted on the result
         (``refused``), never applied, never prompted, and never hold the
         watermark. ``unverified`` counts records accepted without verification
-        (the verify-incapable posture; the historical S205..S207 grace, now
+        (the verify-incapable posture; the historical grace, now
         closed). See :meth:`_verify_records`.
         """
         assert_sync_allowed()
         store = self._resolve_store()
         if not store.has_peer(peer_id):
             raise PeerNotFound(peer_id)
-        # PAIR-02 (S206): a pending pairing gates nothing. The check is
+        # A pending pairing gates nothing. The check is
         # hasattr/getattr-defensive (the since_page forward-compat precedent)
         # so a store predating the pending state simply skips it.
         rec = store.get_peer(peer_id) if hasattr(store, "get_peer") else None
@@ -1933,7 +1933,7 @@ class SyncEngine:
         feed = self._resolve_feed()
         previous = store.get_watermark(peer_id)
 
-        # S204 (CHF-05): the per-peer last-seen feed epoch, read once and cached
+        # The per-peer last-seen feed epoch, read once and cached
         # locally; writes only on a transition. hasattr-guarded so a store that
         # predates the epoch accessors simply skips the handling (the since_page
         # forward-compat precedent).
@@ -1951,13 +1951,13 @@ class SyncEngine:
         # reached. The leg-local cursor is seeded from the persisted watermark
         # and advanced by each chunk's high-water; the watermark is persisted
         # once, monotonically, at the last fully-consumed chunk boundary.
-        # S207 (SYN-05): a deferral neither ends the loop nor holds the
+        # A deferral neither ends the loop nor holds the
         # boundary -- the deferred record is in the ledger, so every consumed
         # chunk advances. Pagination rides the existing monotonic advance, no
         # new token.
         cursor = previous
         # The boundary we will persist: advanced past every fully-consumed chunk
-        # (S207: deferrals included -- the deferred records live in the ledger).
+        # (deferrals included -- the deferred records live in the ledger).
         committed = previous
         total_applied = 0
         total_conflicts = 0
@@ -1979,7 +1979,7 @@ class SyncEngine:
                 parsed = False
                 break
 
-            # S204 (CHF-05): the epoch check sits after parse and BEFORE the
+            # The epoch check sits after parse and BEFORE the
             # gate, so no approval prompt fires for records about to be
             # discarded. A missing/malformed epoch (None) is a pre-epoch peer:
             # the stored epoch stays untouched and CHF-01 remains the floor.
@@ -2003,7 +2003,7 @@ class SyncEngine:
                         # paginates in over the normal leg loop this same
                         # round, never the backstop (cursor 0 is always
                         # valid). The deferred ledger STANDS across the reset
-                        # (S207): record clocks are domain state, not journal
+                        # Record clocks are domain state, not journal
                         # sequences, so the resync re-serves the same versions
                         # and they dedup into their entries silently -- the
                         # pending decision survives, never re-prompted.
@@ -2022,7 +2022,7 @@ class SyncEngine:
                         epoch_reset = True
                         continue
 
-            # S205 (VL-01): the signature seam sits after the epoch check (no
+            # The signature seam sits after the epoch check (no
             # work on a leg about to be discarded) and BEFORE the approval
             # gate (no prompt for a record about to be refused -- the CHF-05
             # placement precedent). Refusals do not touch the chunk's
@@ -2039,15 +2039,15 @@ class SyncEngine:
                 conversation_id=conversation_id,
                 approval_manager=approval_manager,
             )
-            # S264: land note_update records through the store BEFORE the
+            # Land note_update records through the store BEFORE the
             # feed journal (sections 3 and 5); a refused update never enters
             # the feed and is therefore never served onward.
             appliable = self._land_note_updates(appliable, peer_id=peer_id)
-            # S199 (SYN-01): materialise CONVERSATION winners into the domain
+            # Materialise CONVERSATION winners into the domain
             # store on the same seam, BEFORE the feed journal -- a refused
             # conversation never enters the feed and is never served onward.
             appliable = self._land_conversations(appliable, peer_id=peer_id)
-            # S199 (SYN-01): materialise NOTE existence + metadata into the
+            # Materialise NOTE existence + metadata into the
             # notes store on the same seam (the body converges via NOTE_UPDATE).
             appliable = self._land_notes(appliable, peer_id=peer_id)
             # SYN-01 (Direction D): materialise MEMORY_CANONICAL winners into
@@ -2074,7 +2074,7 @@ class SyncEngine:
             total_rejected += int(getattr(apply_result, "rejected", 0))
             total_deferred += deferred
 
-            # S207 (SYN-05) purge-on-apply, the defensive backstop: a
+            # Purge-on-apply, the defensive backstop: a
             # sensitive record landing through the seam supersedes any OLDER
             # version of its key sitting in the ledger. In the single-threaded
             # flow the gate's dedup-first order makes this unreachable (a key
@@ -2155,7 +2155,7 @@ class SyncEngine:
         )
         return result
 
-    # The deferred ledger surface (S207, SYN-05). Local-disk decisions on
+    # The deferred ledger surface. Local-disk decisions on
     # already-fetched, already-quarantined records: permitted in any mode,
     # like pairing management -- only the wire round that FILLS the ledger is
     # Daily-gated. Fail-secure: an approval re-enters the same verify -> gate
@@ -2253,7 +2253,7 @@ class SyncEngine:
             rejected=0,
             epoch=None,
         )
-        # The ungated local-disk apply (S207): the record is already locally
+        # The ungated local-disk apply: the record is already locally
         # held (fetched through the fully-gated round, quarantined since); the
         # human's approval is a local decision permitted in any mode. The wire
         # apply stays apply_record_batch, gated.
@@ -2346,8 +2346,8 @@ def get_sync_engine(
 
     With no explicit ``device`` the engine takes this installation's persistent
     device identity from the peer store (SYN-02), falling back to "local" only
-    when the identity cannot be resolved. The ``signer`` (S205) and the
-    ``ledger`` (S207) are injectable like the feed and store; None resolves to
+    when the identity cannot be resolved. The ``signer`` and the
+    ``ledger`` are injectable like the feed and store; None resolves to
     the process default lazily.
     """
     global _engine

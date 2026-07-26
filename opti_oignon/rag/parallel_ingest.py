@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Parallel RAG ingestion engine (S160).
+Parallel RAG ingestion engine.
 
 Provides concurrent chunk processing for RAG document ingestion using
 ``concurrent.futures.ThreadPoolExecutor``.  Each chunk is processed
@@ -12,7 +12,7 @@ Key features:
 - Progress tracking callback (called after each chunk completes)
 - Batch-level statistics (success/fail/skip counts, elapsed time)
 - Thread-safe result aggregation
-- Integration point for ``ConnectionPool`` from S159
+- Integration point for ``ConnectionPool``
 
 Usage::
 

@@ -1,4 +1,4 @@
-"""Vector layer for Opti-Oignon personal memory (S173, Theme 3 / Odysseus Core).
+"""Vector layer for Opti-Oignon personal memory.
 
 A ChromaDB collection named ``oo_memories`` in cosine space
 (``hnsw:space = cosine``), kept distinct from the RAG collection so personal

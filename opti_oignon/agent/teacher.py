@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Teacher escalation for the agent loop (S176, Theme 3 / Odysseus Core).
+"""Teacher escalation for the agent loop.
 
 A small local student model drives the agent; when a step is hard or fails, it
 escalates to a stronger teacher model (ODYSSEUS_SPEC.md Section 5.6, Section
@@ -8,9 +8,9 @@ authoritative SKILL.md draft. Two rules shape this module:
 
 - Guidance, not authority. A teacher-produced SKILL.md draft is tagged with a
   ``teacher-escalation`` source and treated as guidance. It is NOT published
-  here: it still passes the human-approval gate before publication. S176
+  here: it still passes the human-approval gate before publication. This module
   produces the draft and the gate hook (``request_skill_approval``); the publish
-  path itself is S177. The draft's ``approved`` flag stays False until a human
+  path itself lives in ``skills``. The draft's ``approved`` flag stays False until a human
   approves it, and nothing is written to disk in this module.
 - Never raise into the conversation path. A missing teacher client, a teacher
   error, or a teacher timeout becomes an ``EscalationResult`` with a reason, not
@@ -18,7 +18,7 @@ authoritative SKILL.md draft. Two rules shape this module:
 
 Escalation thresholds are configurable and fit the laptop-lite preset (a small
 student escalating to a stronger teacher); the defaults here are the reference
-values, and ``config.yaml`` (S176/S177) carries the per-deployment values. The
+values, and ``config.yaml`` carries the per-deployment values. The
 teacher client is injected (same shape as the loop's model client: an object
 with ``stream(messages, tools=None)`` or a callable, or one returning a single
 response / string), so this module is isolatable and collects without the
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# The source tag for teacher-produced drafts (consumed by the S177 skills path).
+# The source tag for teacher-produced drafts (consumed by the skills path).
 SOURCE_TEACHER = "teacher-escalation"
 
 # Reference defaults (laptop-lite preset). config.yaml overrides these.
@@ -126,8 +126,8 @@ class TeacherSkillDraft:
     """A SKILL.md draft proposed by the teacher.
 
     Guidance only: ``approved`` stays False until a human approves it through
-    the gate hook, and this object is never written to disk in S176 (publish is
-    S177). ``source`` records the teacher-escalation provenance.
+    the gate hook, and this object is never written to disk here (publish is
+    elsewhere). ``source`` records the teacher-escalation provenance.
     """
 
     name: str
@@ -397,7 +397,7 @@ def escalate(
     )
 
 
-# The human-approval gate hook for a teacher draft (publish itself is S177)
+# The human-approval gate hook for a teacher draft (publish lives elsewhere)
 
 
 def request_skill_approval(
@@ -410,7 +410,7 @@ def request_skill_approval(
     """Submit a teacher draft to the human gate, fail-secure.
 
     Returns True only on an explicit human approval. This is the gate a draft
-    must pass before publication; S176 provides the hook, S177 performs the
+    must pass before publication; this module provides the hook, ``skills`` performs the
     publish. Nothing is written to disk here. A missing gate, a denial, a
     timeout, or any error returns False.
     """

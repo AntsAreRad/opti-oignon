@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-device change journal for Veilid sync (S179 Goal 3, Theme 4).
+"""Per-device change journal for Veilid sync.
 
 A device journals every change it makes to a syncable record, so a peer can ask
 "what have you changed since this point?" and receive only the delta. The journal
@@ -22,7 +22,7 @@ the Bulbe boundary: a device may record its own changes in any mode. Only moving
 delta over the wire is Daily-only, and that gate lives in the protocol envelope at
 the transport seam, not here.
 
-The journal compacts transparently (S202, CHF-02): a row superseded by a later
+The journal compacts transparently: a row superseded by a later
 sequence for the same (kind, record_id) can be deleted without changing any
 watermark's delta, the high-water, or any key's current clock, because ``since()``
 collapses to the latest per key, the global MAX(seq) row is by construction the
@@ -31,7 +31,7 @@ Compaction is on-demand (``compact()``) plus an optional every-N-appends trigger
 (``compact_every``, off by default); like journalling it is local-disk maintenance,
 permitted in any mode, never gated.
 
-The journal also serves bounded pages (S203, PRT-04): ``since_page`` reads at most
+The journal also serves bounded pages: ``since_page`` reads at most
 a caller-given count of rows after a watermark, stops at a caller-given wire-byte
 budget (always keeping one row so a page never stalls), and reports the page's max
 sequence as its high-water, so a peer walks the journal chunk by chunk over the
@@ -39,7 +39,7 @@ existing monotonic-advance semantics. ``since`` (the whole delta in one read) is
 unchanged and still serves the CHF-01 backstop for an impossible watermark; the
 paged read serves the same backstop in bounded pages.
 
-The journal carries an identity (S204, CHF-05): a random feed epoch, minted once
+The journal carries an identity: a random feed epoch, minted once
 per journal file in a one-row meta table (the SYN-02 identity-row idiom) and read
 through ``feed_epoch``. The epoch travels in the batch envelope so an asker can
 detect that a peer's journal was recreated (the file remade, sequences restarted)
@@ -77,7 +77,7 @@ from opti_oignon.veilid.records import (
     verify_record_hash,
 )
 
-# S136 audit fix: use encrypted DB connections (same pattern as sync_queue.py).
+# Audit fix: use encrypted DB connections (same pattern as sync_queue.py).
 # The change-feed journal holds the synced record payloads (conversations, memory,
 # etc.), so it must be encrypted at rest like the rest of the data layer rather than
 # stored in a plain sqlite3 file.
@@ -100,7 +100,7 @@ FEATURE_AVAILABLE = True
 TABLE_NAME = "veilid_change_feed"
 DB_FILENAME = "veilid_change_feed.db"
 
-# The one-row feed-identity meta table (S204, CHF-05): the journal's random epoch,
+# The one-row feed-identity meta table: the journal's random epoch,
 # minted once per journal file. A second physical identifier in this database; it
 # joins the allowlist below (the peers.py two-table precedent), while the
 # compaction statement keeps naming the feed table only, so compaction never
@@ -156,7 +156,7 @@ _SELECT_SINCE = (
     f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} WHERE seq > ? ORDER BY seq ASC"
 )
 
-# S203 (PRT-04): the bounded page read. Same WHERE/ORDER as _SELECT_SINCE with a
+# The bounded page read. Same WHERE/ORDER as _SELECT_SINCE with a
 # row cap; the byte cap is applied in Python over the fetched rows so the page's
 # wire size is bounded by the same encoding the envelope ships. Names the feed
 # table only, through the allowlist.
@@ -172,13 +172,13 @@ _SELECT_MAX_SEQ = f"SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)}"
 _SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
 _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
-# S199 (SYN-01, clock discipline): the read side of per-key clocks. Uses the
+# The read side of per-key clocks. Uses the
 # existing (kind, record_id) index; a read-only query, no schema change.
 _SELECT_MAX_CLOCK = (
     f"SELECT MAX(clock) FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ?"
 )
 
-# S202 (CHF-02): the transparent supersession rule -- delete any row superseded
+# The transparent supersession rule -- delete any row superseded
 # by a later sequence for the same (kind, record_id). One bounded statement: the
 # subquery keeps the MAX(seq) row per key, served by the existing
 # (kind, record_id) index (``seq`` is the rowid alias every secondary index
@@ -189,7 +189,7 @@ _DELETE_SUPERSEDED = (
     f"(SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)} GROUP BY kind, record_id)"
 )
 
-# S204 (CHF-05): the one-row meta table holding the feed epoch, minted once per
+# The one-row meta table holding the feed epoch, minted once per
 # journal file. INSERT OR IGNORE under the CHECK(id = 1) constraint keeps the
 # first minted value under concurrency -- the SYN-02 identity-row idiom
 # (peers.py, veilid_local_identity). These are the only statements that name the
@@ -239,7 +239,7 @@ class ChangeFeed:
         *,
         compact_every: int | None = None,
     ) -> None:
-        # S202 (CHF-02): the optional every-N-appends compaction trigger. OFF by
+        # The optional every-N-appends compaction trigger. OFF by
         # default (None) -- a convenience, not the guarantee; ``compact()`` is the
         # on-demand entry point. The counter is in-process on purpose: a trigger
         # missed across a restart costs nothing.
@@ -277,9 +277,9 @@ class ChangeFeed:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(_CREATE_TABLE)
             conn.execute(_CREATE_INDEX)
-            # S205 (VL-01): add the signature column to journals that predate
+            # Add the signature column to journals that predate
             # it. SQLite has no ADD COLUMN IF NOT EXISTS, so guard with
-            # table_info (the S204/AU-06 idiom). Nullable on purpose: NULL or
+            # table_info. Nullable on purpose: NULL or
             # '' means an unsigned (pre-VL-01) row.
             cols = {
                 row[1]
@@ -325,7 +325,7 @@ class ChangeFeed:
             record.updated_at,
             payload_json,
             journaled_at,
-            # S205 (VL-01): the signature is journalled with the record
+            # The signature is journalled with the record
             # (sign-at-publish): signed once per local edit, and a received,
             # verified winner keeps its originator's signature -- provenance
             # preserved end to end. NULL for an unsigned (pre-VL-01) row.
@@ -349,7 +349,7 @@ class ChangeFeed:
             cur = conn.execute(_INSERT, params)
             conn.commit()
             seq = int(cur.lastrowid)
-            # S202 (CHF-02): the trigger ticks after the commit, under the lock;
+            # The trigger ticks after the commit, under the lock;
             # the sequence is captured first and returned whatever the trigger does.
             self._maybe_autocompact(conn, 1)
             return seq
@@ -357,7 +357,7 @@ class ChangeFeed:
     def record_many(self, records: Iterable[SyncRecord]) -> list[int]:
         """Append several record versions in one transaction; sequences in order.
 
-        All-or-nothing (S202, the F9b per-record-commit note folded): every
+        All-or-nothing (the per-record-commit note folded): every
         record is type-, hash- and serialisation-verified before anything is
         inserted, the batch lands under a single commit, and a mid-batch
         failure rolls the whole batch back and raises -- nothing is journalled,
@@ -418,7 +418,7 @@ class ChangeFeed:
             "deleted": bool(deleted),
             "updated_at": updated_at,
         }
-        # S205 (VL-01): a stored signature rides back through the decoder; a
+        # A stored signature rides back through the decoder; a
         # NULL/'' column stays an unsigned record (the field is omitted, the
         # pre-VL-01 wire shape). The decoder's hash check still gates the row.
         if isinstance(signature, str) and signature:
@@ -464,7 +464,7 @@ class ChangeFeed:
     def current_clock(self, kind: RecordKind | str, record_id: str) -> int:
         """The highest clock journalled for a record key, or 0 when unseen.
 
-        The read side of clock discipline (S199, SYN-01): a domain hook computes
+        The read side of clock discipline: a domain hook computes
         the clock for a local edit as ``current_clock(kind, key) + 1``. The
         journal is the merged latest view (``apply_record_batch`` journals
         winners, including clock-only adoptions since PRT-02), so the local
@@ -563,7 +563,7 @@ class ChangeFeed:
     def since_page(
         self, watermark: int, *, max_count: int, max_bytes: int
     ) -> Delta:
-        """One bounded page of the delta after ``watermark`` (S203, PRT-04).
+        """One bounded page of the delta after ``watermark``.
 
         Like :meth:`since` but bounded: it reads at most ``max_count`` rows after
         the watermark (in ascending sequence) and stops accumulating once the

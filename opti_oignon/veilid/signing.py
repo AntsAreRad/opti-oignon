@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Per-device record signing for Veilid sync (S205, VL-01, sync cycle Bloc 2).
+"""Per-device record signing for Veilid sync.
 
 The authenticity layer over the wire records. The content hash (records.py) is
 integrity only: any peer can compute the correct SHA-256 for a forged payload,
 and a record's ``device`` provenance is self-asserted -- a paired-but-compromised
 peer could forge records under another device's name and steer LWW merges (the
-S184 register's VL-01). This module closes that: every device holds an
+long-standing risk register). This module closes that: every device holds an
 ML-DSA-65 signing keypair; a local publish attaches a signature over the
 record's canonical bytes (``records.canonical_record_bytes`` -- v, kind, id,
 clock, device, hash, payload, deleted, updated_at, so re-clocking or
@@ -40,16 +40,16 @@ public_key() -> bytes), :class:`PqcRecordSigner` is the liboqs-backed default
 suite), and tests inject a deterministic fake -- liboqs is absent in the test
 container; the real path is host-verified by the shakedown's crypto item.
 
-Migration (the bounded grace window, CLOSED at S208). Journals were young when
+Migration (the bounded grace window, now CLOSED). Journals were young when
 signing landed (the producers arrived this same cycle), so the chosen path was
 a one-time full re-publish of the local set with signatures
 (``SyncEngine.republish_signed``) plus a fleet re-pair to distribute the
 public keys -- NOT a permanent accept-unsigned mode. During the mixed-fleet
-window (S205..S207), an unsigned record whose ORIGIN device had no registered
+window, an unsigned record whose ORIGIN device had no registered
 signing key was accepted-and-counted (surfaced as ``unverified`` on the round)
 under :data:`ACCEPT_UNSIGNED_FROM_UNKEYED_ORIGINS`; an unsigned or invalid
 record whose origin HAS a registered key was always refused, window or no
-window. The window ended at this cycle's Bloc 4 release session (S208, 3.7.0):
+window. The window ended at the 3.7.0 release:
 the constant is False and an unkeyed-origin record refuses like the rest. The
 fleet upgrade order and the honest recovery for a device that flips before its
 peers republish are documented on the constant below.
@@ -100,8 +100,8 @@ KEY_FILENAME = ".veilid_signing_key"
 # the SQLCipher and field-level labels by construction.
 _KEY_WRAP_LABEL = b"oo-veilid-signing-v1"
 
-# S205 (VL-01) opened a bounded migration grace window under this constant;
-# S208 (sync cycle Bloc 4, the 3.7.0 release) CLOSED it. False means an
+# An earlier stage opened a bounded migration grace window under this constant;
+# the 3.7.0 release CLOSED it. False means an
 # unsigned record from an origin with NO registered signing key REFUSES like
 # the rest (counted, never applied, never holding the watermark). The window
 # was a migration aid for mixed fleets, never a permanent mode, and it is a
@@ -113,7 +113,7 @@ _KEY_WRAP_LABEL = b"oo-veilid-signing-v1"
 #
 # Fleet upgrade order (also in VEILID_SPEC.md section 8 and the CHANGELOG):
 # upgrade every device to 3.7.0, re-pair each peer pair (ONE confirmation per
-# peer by the S206 key-change demotion design), run the one-time
+# peer by the key-change demotion design), run the one-time
 # ``SyncEngine.republish_signed`` on each device (the sync panel exposes it),
 # then run rounds and watch the surfaced counters: ``refused`` falls to zero
 # once every peer has republished. A device that flips BEFORE its peers
@@ -405,7 +405,7 @@ def encode_public_key(raw: bytes) -> str:
     """Encode a public key to base64url text (the wire and registry form).
 
     The producer-side counterpart of :func:`decode_public_key`: what the
-    pairing payload carries (S205) and the peer registry stores. Validating,
+    pairing payload carries and the peer registry stores. Validating,
     not defensive -- raises ``ValueError`` on a non-bytes or empty value (a
     programmer error; the key comes from this module's own custody).
     """

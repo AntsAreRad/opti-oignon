@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-mode tool gating for the agent loop (S175, Theme 3 / Odysseus Core).
+"""Per-mode tool gating for the agent loop.
 
 Tool availability is gated per security context by Daily and Bulbe through
 ``frozenset`` allowlists (ODYSSEUS_SPEC.md Section 5.4). Two rules:
@@ -16,7 +16,7 @@ Tool availability is gated per security context by Daily and Bulbe through
 Bulbe is structurally tighter than Daily: it is derived from the Daily set by
 removing the network tool and the persistent-state mutation tools, so the
 subset relation cannot drift. What remains is the sandboxed filesystem /
-shell / code tool set, plus (S228) the pure session-state tool ``todo`` and
+shell / code tool set, plus the pure session-state tool ``todo`` and
 the bounded subagent tool ``task``. In Bulbe the agent may inspect and edit
 inside the disposable sandbox under per-call human approval, but may not reach
 the network or mutate persistent memory or skills autonomously.
@@ -48,8 +48,8 @@ MODE_BULBE = "bulbe"
 VALID_MODES = (MODE_DAILY, MODE_BULBE)
 
 # The sandboxed filesystem / shell / code tools, the ones that MUST dispatch
-# through the S73/S74 disposable bwrap sandbox (consumed by dispatch.py).
-# S228 (AGT_SPEC 5.1/5.5): grep, glob and ls join as read-only workspace
+# through the disposable bwrap sandbox (consumed by dispatch.py).
+# Grep, glob and ls join as read-only workspace
 # tools on the view precedent (trusted host-side reads, path-confined,
 # active session required); they ride the same dispatch seam and the same
 # per-call Bulbe approvals as the original four.
@@ -68,13 +68,13 @@ STATE_MUTATION_TOOLS = frozenset(
     {"manage_memory", "manage_skills", "manage_notes"}
 )
 
-# Pure per-run session-state tools (S228, AGT_SPEC 5.3). They mutate nothing
+# Pure per-run session-state tools. They mutate nothing
 # outside the run, touch no filesystem and no network, so they are present in
 # BOTH modes and exempt from the per-call Bulbe approval ceremony (the 5.6
 # mode-posture table: the ceremony gates actions with consequences).
 SESSION_STATE_TOOLS = frozenset({"todo"})
 
-# The bounded subagent tool (S228, AGT_SPEC 5.4): loop-managed, present in
+# The bounded subagent tool: loop-managed, present in
 # both modes. The call itself launches nothing ungated -- the child registry
 # is the real gate and every child sandbox call inherits the Bulbe per-call
 # approval -- so the launch is exempt from the per-call approval like the
@@ -83,7 +83,7 @@ SUBAGENT_TOOLS = frozenset({"task"})
 
 # Daily: frictionless. The sandboxed tools plus the network and state tools;
 # the sandbox plus the copy-out review carry the safety. The session-state
-# and subagent tools (S228) join the base set and survive the Bulbe
+# and subagent tools join the base set and survive the Bulbe
 # derivation by construction.
 DAILY_ALLOWLIST = frozenset(
     SANDBOX_TOOL_NAMES
@@ -96,7 +96,7 @@ DAILY_ALLOWLIST = frozenset(
 # Bulbe: derived from Daily by removing the network and state-mutation tools,
 # so the subset relation is structural. What remains is the sandboxed tool
 # set, each call additionally human-approved, plus the session-state and
-# subagent tools (S228), whose launches carry no approval of their own (todo
+# subagent tools, whose launches carry no approval of their own (todo
 # mutates nothing outside the run; a task launch is bounded by the child
 # registry, with every child sandbox call human-approved).
 BULBE_ALLOWLIST = frozenset(DAILY_ALLOWLIST - NETWORK_TOOLS - STATE_MUTATION_TOOLS)
@@ -271,7 +271,7 @@ def evaluate(
     The allowlist is consulted first. In Bulbe an allowed call must then pass
     the human gate (the injected ``approval_fn``, or the default manager-backed
     one). Any exception in the approval path is treated as a denial. The
-    session-state and subagent tools (S228) are exempt from the per-call gate
+    session-state and subagent tools are exempt from the per-call gate
     per the 5.6 mode-posture table: todo mutates nothing outside the run, and
     a task launch is bounded by the child registry, every child sandbox call
     riding its own approval.

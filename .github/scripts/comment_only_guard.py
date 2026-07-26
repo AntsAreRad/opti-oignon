@@ -29,12 +29,19 @@ Two shape provers, because the published trees have nothing in common:
     removed, found by a per-file state machine that also tracks quotes, so a
     comment marker inside a string or a URL is never mistaken for a comment.
 
-ONE class of docstring is deliberately NOT neutralised: the docstring of a
-web route handler. The framework publishes it verbatim as the endpoint
-description of the generated API schema, which makes it a shipped artefact
-rather than an internal note. Editing one is a real change to a public
-surface and this guard says so, loudly, instead of waving it through with
-the comments.
+TWO families of docstring are deliberately NOT neutralised, because the
+framework publishes both verbatim into the generated API schema: the
+docstring of a web route handler, which becomes the endpoint description,
+and the docstring of a model class the schema carries, which becomes the
+schema description. Both are shipped artefacts rather than internal notes.
+Editing one is a real change to a public surface and this guard says so,
+loudly, instead of waving it through with the comments.
+
+Which route handlers exist is decidable from one file, so it is decided
+here. Which model classes reach the schema is NOT, so it is not guessed: it
+is read from the digest recorded by the published-prose guard, which asks
+the framework rather than predicting it. That guard remains the outer judge;
+this one is the earlier, cheaper signal, and neither is the other's proof.
 
 A file that cannot be parsed or read is REFUSED, never assumed equivalent: a
 prover that stays silent on what it failed to understand proves nothing.
@@ -132,11 +139,66 @@ def _route_docstring_ids(tree):
     return marked
 
 
+_DIGEST_NAME = "published_prose.digest"
+_UNSET = object()
+_DIGEST_CACHE = {}
+
+
+def published_model_names(path=None):
+    """Names of model classes the framework publishes, read from the digest.
+
+    The framework publishes a model class docstring as the description of its
+    schema, exactly as it publishes a route handler docstring as the endpoint
+    description. Which classes reach the schema is not decidable from one
+    file, so it is not guessed here: it is read from the digest recorded
+    beside this script by the published-prose guard.
+
+    Returns None when the digest cannot be read. A caller handed None must
+    treat EVERY class docstring as published. A prover that cannot establish
+    what is published does not get to assume that nothing is.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent / _DIGEST_NAME
+    path = str(path)
+    if path in _DIGEST_CACHE:
+        return _DIGEST_CACHE[path]
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        names = None
+    else:
+        names = set()
+        for line in text.splitlines():
+            parts = line.split(" ")
+            if len(parts) == 3 and parts[0] == "schema":
+                names.add(parts[1])
+    _DIGEST_CACHE[path] = names
+    return names
+
+
+def _model_docstring_ids(tree, published):
+    """Ids of docstring constants belonging to published model classes."""
+    marked = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or not node.body:
+            continue
+        if published is not None and node.name not in published:
+            continue
+        first = node.body[0]
+        if (isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            marked.add(id(first.value))
+    return marked
+
+
 class _BlankDocstrings(ast.NodeTransformer):
     """Replace each internal docstring with a fixed placeholder.
 
-    A published route docstring is left exactly as written, so a change to
-    one moves the shape and has to be declared rather than absorbed.
+    A published docstring -- on a route handler or on a model class the
+    schema carries -- is left exactly as written, so a change to one moves
+    the shape and has to be declared rather than absorbed.
     """
 
     def __init__(self, published):
@@ -160,17 +222,25 @@ class _BlankDocstrings(ast.NodeTransformer):
     visit_AsyncFunctionDef = _blank
 
 
-def python_shape(text):
+def python_shape(text, published_models=_UNSET):
     """Digest of everything in ``text`` that executes.
 
     Comments never reach the parser; internal docstrings are blanked. What
-    remains is the code, its literals and its published route descriptions.
+    remains is the code, its literals and its published descriptions -- of
+    endpoints, and of the model schemas the framework builds from classes.
+
+    ``published_models`` names the model classes that reach the schema. Left
+    unset it is read from the recorded digest; None means the published set
+    is unknown and every class docstring is held published.
     """
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError) as exc:
         raise ShapeUnavailable(f"cannot parse: {exc}") from exc
+    if published_models is _UNSET:
+        published_models = published_model_names()
     published = _route_docstring_ids(tree)
+    published |= _model_docstring_ids(tree, published_models)
     tree = _BlankDocstrings(published).visit(tree)
     ast.fix_missing_locations(tree)
     dump = ast.dump(tree, annotate_fields=True, include_attributes=False)

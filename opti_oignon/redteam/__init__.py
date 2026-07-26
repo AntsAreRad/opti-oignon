@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RED TEAM AUDIT FRAMEWORK — Opti-Oignon S147/S148
+RED TEAM AUDIT FRAMEWORK — Opti-Oignon
 ==================================================
 
 LLM-powered dynamic security testing of defense layers.

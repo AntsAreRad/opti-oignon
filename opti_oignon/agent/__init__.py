@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""opti_oignon.agent -- the sandboxed agent loop (S175, Theme 3 / Odysseus Core).
+"""opti_oignon.agent -- the sandboxed agent loop.
 
-A thin facade over the agent package built in S175:
+A thin facade over the agent package:
 
 - ``loop``             -- the multi-turn streaming loop with a bounded verifier.
 - ``dispatch``         -- dual tool dispatch (native vs parser) and the sandbox
-                          dispatch invariant (S73/S74 bwrap, never the host).
+                          dispatch invariant (bwrap, never the host).
 - ``tool_parsing``     -- fenced / bracketed / XML tool-block parsing.
 - ``allowlists``       -- per-mode (Daily / Bulbe) gating and the Bulbe approval
                           seam.
 - ``untrusted_context`` -- the Odysseus prompt-security pattern: external
                           content wrapped as untrusted user-role data.
 - ``tools``            -- the concrete sandboxed tool set plus the web-search
-                          and memory handlers, with per-mode schemas (S176).
+                          and memory handlers, with per-mode schemas.
 - ``teacher``          -- student-to-teacher escalation with an authoritative
-                          SKILL.md draft and the human-approval gate hook (S176).
-- ``config_loader``    -- the guarded loader for ``config.yaml`` (S176).
+                          SKILL.md draft and the human-approval gate hook.
+- ``config_loader``    -- the guarded loader for ``config.yaml``.
 - ``skills``           -- the on-disk SKILL.md registry plus the approval-gated
                           ``manage_skills`` tool and the teacher-draft publish
-                          path (S177).
+                          path.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ __all__ = [
     "AgentRunResult",
     "AgentEvent",
     "VerifierResult",
-    # loop hardening (S229, AGT_SPEC Section 6)
+    # loop hardening
     "STOP_DOOM_LOOP",
     "MAX_STEPS_REMINDER",
     "AGENT_OBS_MAX_BYTES",
@@ -180,7 +180,7 @@ __all__ = [
     "wrap",
     "memory_untrusted_message",
     "UNTRUSTED_POLICY",
-    # tools (S176)
+    # tools
     "ToolSchema",
     "ToolSet",
     "ToolRegistry",
@@ -192,7 +192,7 @@ __all__ = [
     "system_prompt_section_for",
     "get_tool_registry",
     "reset_tool_registry",
-    # teacher (S176)
+    # teacher
     "EscalationPolicy",
     "EscalationDecision",
     "EscalationResult",
@@ -202,13 +202,13 @@ __all__ = [
     "escalate",
     "request_skill_approval",
     "SOURCE_TEACHER",
-    # config (S176)
+    # config
     "AgentConfig",
     "load_config",
     "available_presets",
     "get_agent_config",
     "reset_agent_config",
-    # skills (S177)
+    # skills
     "SkillRegistry",
     "Skill",
     "VerificationResult",

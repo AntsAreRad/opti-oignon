@@ -2,10 +2,10 @@
 """Notes media post-processing (N.6 picture caption / OCR): the opt-in, sandboxed
 vision caption / OCR orchestration.
 
-N.1 (S243) built the media data layer for all three kinds and S249 landed the
+An earlier bloc built the media data layer for all three kinds and landed the
 shared notes-attachment route over it; the ``attachment`` manifest carries
 ``caption_text`` and ``ocr_text`` columns that stay NULL until a post-processing
-bloc fills them. S250 landed the audio sibling (``transcription.py``) and the
+bloc fills them. Later work landed the audio sibling (``transcription.py``) and the
 additive ``NotesStore.update_attachment`` write-back, whose caption / ocr legs
 this module reuses unchanged. This module is the post-processing bloc for images:
 it turns an encrypted image attachment into a caption and/or OCR text and writes
@@ -17,7 +17,7 @@ It is a sibling of ``transcription.py`` (the same orchestration shape), NOT a
 second function bolted onto it: a separate module mirrors the separate trigger
 router, keeping each media concern independent.
 
-The disposable-bubblewrap floor (S73 / S74) is non-negotiable here, because
+The disposable-bubblewrap floor is non-negotiable here, because
 caption / OCR is file-touching post-processing of user content:
 
 - FAIL-SECURE. If a real bubblewrap is not available (``sandbox.bwrap_available``
@@ -36,7 +36,7 @@ caption / OCR is file-touching post-processing of user content:
   in-container, so the live run is host-assured and never simulated here.
 - HUMAN APPROVAL BEFORE THE DURABLE WRITE-BACK. The derived text is written to
   the manifest only when the caller passes ``approve=True``. Without approval the
-  result is returned for review (a preview) but NOT persisted; the S116 copy-out
+  result is returned for review (a preview) but NOT persisted; the copy-out
   / approval discipline governs the durable result.
 - DISPOSABLE TEARDOWN. The sandbox (and the plaintext image inside it) is
   destroyed in a ``finally``, on every path after creation.
@@ -282,7 +282,7 @@ def build_live_captioner(
     HOST-ASSURED. The vision/OCR tooling is absent in-container, so this returns
     None here; the live captioner runs the tool INSIDE the disposable sandbox
     (zero host filesystem, zero network) over the injected image, then reads the
-    OCR text out under the S116 approve / copy-out discipline. The sandboxed core
+    OCR text out under the approve / copy-out discipline. The sandboxed core
     produces the OCR leg; the optional model-driven "describe" caption leg (via
     the existing local vision pipeline) is a host-assured refinement and is not
     the sandboxed file-touching step. The exact tool invocation is settled on the

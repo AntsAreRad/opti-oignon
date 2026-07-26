@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Agent eval runner -- S230 (AGT_SPEC Section 7.2).
+Agent eval runner.
 
 EvalRunner on the BenchmarkRunner idiom: a background thread, is_busy, one
 run at a time, cancel; start_run(models, suite, repeats). Per (model, task,
-repeat) the runner creates a FRESH SandboxToolSession (the S73/S74
+repeat) the runner creates a FRESH SandboxToolSession (the
 disposable shape at its purest), materializes the task fixture, drives the
 Lot 1/2 agent loop, executes the checks in the same sandbox, and destroys
 the session. Nothing persists between tasks except the result row.
 
 Admission (RESOURCE_GOVERNOR_SPEC 4.3 and Section 8, the benchmark-runner
-S224/S225 idiom mirrored): when the resource_governor module is importable
+idiom mirrored): when the resource_governor module is importable
 and enabled, the runner admits each model (caller "agent_eval") before its
 first task; a refusal records every (task, repeat) row as failure_class
 "not_admitted" and SKIPS the model -- NEVER a silent downsize, because
@@ -21,13 +21,13 @@ honest: governor_present false on the run row, admitted "absent" on every
 task row, the static requested_ctx used as-is -- comparable WITHIN a run,
 marked unadmitted ACROSS runs, visible never masked.
 
-Ticket composition (the S229 6.6 seam): the runner holds
+Ticket composition: the runner holds
 ticket_scope(decision) around each agent run, so the loop's thread-local
 ticket read lights the FED branch live -- the admitted num_ctx is the one
 the truncation caps and prune thresholds derive from. admitted_num_ctx is
-deliberately NOT also passed explicitly: one seam (DI-S230 1).
+deliberately NOT also passed explicitly: one seam.
 
-State and egress neutralization (DI-S230 8): the model sees the production
+State and egress neutralization: the model sees the production
 Daily tool surface verbatim (all twelve schemas), but the manage_skills,
 manage_memory and web_search handlers are replaced with honest refusal
 stubs -- an eval run never mutates user state and never reaches the
@@ -100,12 +100,12 @@ except Exception:  # pragma: no cover - governor module absent
 
 FEATURE_AVAILABLE = _AGENT_OK
 
-# Per-check command timeout inside the sandbox (DI-S230 5). Micro tasks
+# Per-check command timeout inside the sandbox. Micro tasks
 # are small by construction; a check that needs more than this is not a
 # micro check.
 CHECK_TIMEOUT_S = 60
 
-# Tools whose handlers are neutralized on the eval path (DI-S230 8).
+# Tools whose handlers are neutralized on the eval path.
 _DISABLED_TOOLS = ("manage_skills", "manage_memory", "web_search")
 
 # Spill references live in the transcript as workspace-relative paths
@@ -116,7 +116,7 @@ _DIAGNOSTICS_MARKER = "[diagnostics]"
 
 
 # ---------------------------------------------------------------------------
-# Governor plumbing (the benchmark-runner S224/S225 idiom, mirrored --
+# Governor plumbing (the benchmark-runner idiom, mirrored --
 # never imported from benchmark_runner, which stays unedited)
 # ---------------------------------------------------------------------------
 
@@ -155,7 +155,7 @@ def _admit_model(model: str, requested_ctx: int) -> Any:
     """Per-model admission with eval semantics (spec 4.3 / 7.2):
     admit or refuse, NEVER downsize. None when the governor is absent or
     disabled (the honest-degradation path). Mirrors the benchmark
-    runner's S225 entry: admit_or_wait when present degrades to plain
+    runner's entry: admit_or_wait when present degrades to plain
     admit() with the shipped default (nobody enrolled in the queue).
     """
     governor_module = _resolve_resource_governor()
@@ -179,8 +179,8 @@ def _admit_model(model: str, requested_ctx: int) -> Any:
 
 
 def _evict_loaded_models() -> int:
-    """Best-effort eviction between models (the S224 benchmark idiom):
-    the backend registry's existing unload idiom (keep_alive=0, the S215
+    """Best-effort eviction between models (the benchmark idiom):
+    the backend registry's existing unload idiom (keep_alive=0, the
     primitive), then the governor snapshot invalidated. Host-effective
     only; every path fails open. Returns the number unloaded (0 on any
     failure).
@@ -249,7 +249,7 @@ def _default_client_factory(model: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Tool surface (the AgentRunManager wiring, with DI-S230 8 neutralization)
+# Tool surface (the AgentRunManager wiring, with neutralization)
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +284,7 @@ def _build_eval_surface() -> tuple[Any, dict[str, Any], str]:
 def _host_fingerprint_lite() -> str:
     """A short, human-readable host descriptor for cross-run comparison.
 
-    Deliberately lite (DI-S230 11): platform facts only, no GPU probe
+    Deliberately lite: platform facts only, no GPU probe
     (real VRAM behaviour is host-assured territory).
     """
     import json
@@ -302,7 +302,7 @@ def _host_fingerprint_lite() -> str:
 
 
 def _extract_spill_refs(messages: list[dict[str, Any]]) -> str | None:
-    """Collect .agent/spill/ paths from the final transcript (DI-S230 9).
+    """Collect .agent/spill/ paths from the final transcript.
 
     Spill paths exist only in the transcript: the 6.1 truncation stubs
     ("full output: <path>") and the 6.2 prune stubs ("spill: <path>")
@@ -323,7 +323,7 @@ def _extract_spill_refs(messages: list[dict[str, Any]]) -> str | None:
 def _diagnostics_seen(tool_results: list[Any]) -> bool:
     """Whether any tool observation carried a [diagnostics] block.
 
-    The DispatchResults keep full pre-cap text (the S229 posture), so the
+    The DispatchResults keep full pre-cap text, so the
     scan is exact regardless of transcript truncation.
     """
     for result in tool_results or []:
@@ -341,7 +341,7 @@ def _classify_outcome(
     calls_attempted: int,
     calls_executed: int,
 ) -> tuple[bool, str]:
-    """(passed, failure_class) per DI-S230 6/7, deterministic.
+    """(passed, failure_class), deterministic.
 
     Order: error (loop error or a blocked check -- an environment refusal
     is not a task failure), doom_loop, timeout, then the checks verdict:
@@ -571,7 +571,7 @@ class EvalRunner:
                         )
                         if row is None:
                             # Cancel landed mid-task: the in-flight task is
-                            # not recorded (DI-S230 6).
+                            # not recorded.
                             cancelled = True
                             break
                         self._store.record_task(
@@ -638,7 +638,7 @@ class EvalRunner:
             session_id = session.session_id
 
             # Fixture materialization through the path-confined create_file
-            # handler (DI-S230 4): the exact write seam the session itself
+            # handler: the exact write seam the session itself
             # uses, minus the diagnostics suffix (a feedback feature, not a
             # materialization feature).
             for relpath, content in task.fixture.items():

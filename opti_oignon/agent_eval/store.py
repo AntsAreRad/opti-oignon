@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent eval results store -- S230 (AGT_SPEC Section 7.3).
+Agent eval results store.
 
 SQLite-backed storage on the ResultsStore idiom (benchmark_runner.py is
 the source idiom: lock + safe_connect, executescript schema, parameterized
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# Encrypted DB connections (the S136 posture), with the established
+# Encrypted DB connections, with the established
 # guarded fallback for standalone loading.
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect

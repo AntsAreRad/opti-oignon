@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent eval task model and suite loader -- S230 (AGT_SPEC Section 7.1).
+Agent eval task model and suite loader.
 
 A TaskSpec is one micro-task: a prompt, a fixture (relative path to file
 content, materialized into a fresh sandbox workspace), and checks (commands

@@ -1,4 +1,4 @@
-"""Served remote-inference handler for cas 7 Lot 1 (S234, REMOTE_INFERENCE_SPEC).
+"""Served remote-inference handler.
 
 cas 7 lets a paired, lower-trust device -- the phone -- borrow the desktop's
 local models without the model, the prompt, or the response leaving the user's
@@ -64,7 +64,7 @@ from opti_oignon.veilid.protocol import (
 
 logger = logging.getLogger(__name__)
 
-# S73/S74: every new module hardcodes the checkpoint sentinel; never overridable.
+# Every new module hardcodes the checkpoint sentinel; never overridable.
 checkpoint_before_apply = True
 
 FEATURE_AVAILABLE = True
@@ -72,11 +72,11 @@ FEATURE_AVAILABLE = True
 # The tier 1 bounded surface (REMOTE_INFERENCE_SPEC section 3). A remote request
 # may carry ONLY these fields. The allow-set is the gate: any other field is out
 # of surface and refused. ``rag`` is within the tier 1 ceiling but gated by a
-# per-device sub-grant (cas 7 Lot 2, S235): a request carrying ``rag`` is refused
+# per-device sub-grant: a request carrying ``rag`` is refused
 # unless the asking device's RAG read-only sub-grant is on.
 _ALLOWED_FIELDS = frozenset({"v", "type", "device", "request_id", "prompt", "rag"})
 
-# cas 7 Lot 2 (S235): a streaming continuation may carry ONLY these fields. It
+# A streaming continuation may carry ONLY these fields. It
 # builds no chat -- it reads a chunk from the buffer -- so its surface is the
 # request id and the cursor, bound to the route-authenticated device.
 _CONT_ALLOWED_FIELDS = frozenset({"v", "type", "device", "request_id", "cursor"})
@@ -195,7 +195,7 @@ def _enforce_bounded_surface(
     ``None``. Refuses BEFORE any chat request is built. Any field outside the
     allow-set is refused (the offending capability named when recognised). A RAG
     scope is refused UNLESS the asking device's RAG read-only sub-grant is on
-    (cas 7 Lot 2, S235): a device can have remote chat without remote RAG.
+    (a device can have remote chat without remote RAG).
     """
     for key in request.keys():
         if key in _ALLOWED_FIELDS:

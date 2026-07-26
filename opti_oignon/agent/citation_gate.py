@@ -2,15 +2,15 @@
 """Citation gate: the additive wiring that a producing path will call to verify
 a produced answer's cited claims.
 
-The verification arc is complete through its parts: the role S267
+The verification arc is complete through its parts: the role
 (``opti_oignon.agent.claim_verification``) checks one (claim, source) pair and
-returns a fail-secure verdict; the aggregation S271
+returns a fail-secure verdict; the aggregation
 (``opti_oignon.agent.claim_aggregation``) folds a list of (claim, source) pairs
-through the role into one per-answer verdict; the extractor S273
+through the role into one per-answer verdict; the extractor
 (``opti_oignon.agent.citation_extraction``) parses a produced answer plus its
-ordered sources into exactly those pairs; the route S274
+ordered sources into exactly those pairs; the route
 (``opti_oignon.api.routes_citation_verification``) exposes the whole pipeline
-over HTTP for a UI. Both the S271 and S273 docstrings record that the final
+over HTTP for a UI. Both the aggregation and extractor docstrings record that the final
 piece -- calling ``verify_answer`` on the extracted pairs inside a live
 producing path -- is "a later lot". This module is the staging for that lot: it
 composes the extractor and the aggregation into a single caller-driven seam so
@@ -25,7 +25,7 @@ Design notes:
   taxonomy, no anti-injection wrapping, and no fail-secure mapping of its own.
   It calls ``citation_extraction.extract_pairs`` for the pairs and
   ``claim_aggregation.make_answer_verifier`` for the per-answer verifier, which
-  in turn composes the S267 role. Each extracted claim and its cited source are
+  in turn composes the role. Each extracted claim and its cited source are
   wrapped as untrusted data under one policy header by the role; this module
   places no untrusted text in a trusted message and interprets nothing.
 - Not a model-reachable tool. Like the role, the aggregation, and the
@@ -48,7 +48,7 @@ Design notes:
   yields a clean per-pair failure rather than guessing a model, so the gate
   degrades cleanly. ``run_gate`` additionally takes the built ``verify_answer``
   directly, so the composition can be exercised by pytest with an injected seam
-  and no fastapi / ollama chain (the S243 lesson).
+  and no fastapi / ollama chain.
 - Activation behind a flag. ``GATE_ANSWERS_ON_PRODUCE`` is False by default. The
   gate always computes the verdict (a harmless read), but the blocking decision
   ``should_block_answer`` honours the flag: it returns False while the flag is
@@ -108,7 +108,7 @@ class CitationGateResult:
     one pair was extracted and every pair verified cleanly). ``reason`` carries a
     brief summary on a not-ok aggregate. ``results`` is the per-pair list of the
     role's results. ``pairs`` is the (claim, source) pairs the extractor derived
-    from the answer, positionally aligned with ``results`` (the S274 result
+    from the answer, positionally aligned with ``results`` (the result
     shape). The gate never raises.
     """
 

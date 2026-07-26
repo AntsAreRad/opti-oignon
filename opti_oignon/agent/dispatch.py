@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tool-call dispatch for the agent loop (S175, Theme 3 / Odysseus Core).
+"""Tool-call dispatch for the agent loop.
 
 Two responsibilities (ODYSSEUS_SPEC.md Section 5.2 and Section 5.3):
 
@@ -11,14 +11,14 @@ Two responsibilities (ODYSSEUS_SPEC.md Section 5.2 and Section 5.3):
    in ``tool_parsing`` -- and normalises both into a single ``ToolCall``.
 
 2. The sandbox dispatch invariant. Every filesystem / shell / code tool runs
-   ONLY through the S73/S74 disposable bwrap sandbox via the injected
+   ONLY through the disposable bwrap sandbox via the injected
    ``sandbox_tools.SandboxToolSession``. There is no in-process, tempdir, or
    host path in this module: the only way a sandboxed tool executes is by
    calling a method on the session object, and the dispatch refuses to act
    unless that session is backed by an available bwrap. When bwrap is
    unavailable the agent refuses; it never falls back to the host. Copy-out of
    results stays behind the human approval gate (Daily at copy-out, Bulbe
-   per-call). The concrete sandboxed tool set lands in S176; S175 lands this
+   per-call). The concrete sandboxed tool set comes later; this stage lands this
    seam and proves the invariant.
 
 Gating is delegated to ``allowlists``: the dispatch consults the active mode's
@@ -308,7 +308,7 @@ _SANDBOX_DISPATCH: dict[str, Callable[[Any, dict[str, Any]], str]] = {
     "str_replace": lambda s, a: s.str_replace(
         _as_str(a.get("path")), _as_str(a.get("old_str")), _as_str(a.get("new_str"))
     ),
-    # S228 (AGT_SPEC 5.1/5.5): the three read-only workspace tools, methods on
+    # The three read-only workspace tools, methods on
     # the same session object; argument names match the schemas exactly.
     "grep": lambda s, a: s.grep(
         _as_str(a.get("pattern")),
@@ -415,8 +415,8 @@ def dispatch_tool_call(
             mode=decision.mode,
         )
 
-    # Allowed non-sandbox tool. No executor ships in S175; an injected handler
-    # is the forward hook for the S176 tool set.
+    # Allowed non-sandbox tool. No executor ships; an injected handler
+    # is the forward hook for the tool set.
     handler = (tool_handlers or {}).get(call.name)
     if handler is None:
         return DispatchResult(

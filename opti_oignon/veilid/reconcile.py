@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convergent reconciliation for Veilid sync (S179 Goal 2, Theme 4).
+"""Convergent reconciliation for Veilid sync.
 
 Sync is convergent: every device holds the full set of records and reconciles
 incoming changes, with no primary. This module is the merge. Given any number of
