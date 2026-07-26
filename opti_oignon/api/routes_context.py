@@ -248,7 +248,7 @@ def context_stats(
 
     Return stats of the last window operation
     glissante, incluant les messages gardes/supprimes et
-    les metriques de tokens. Includes S123 optimization report
+    les metriques de tokens. Includes the optimization report
     when the context optimizer is active.
     """
     stats = {

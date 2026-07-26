@@ -33,7 +33,7 @@ def _check_available():
     response_model=list[ArtifactInfo],
 )
 def list_artifacts(conv_id: str) -> list:
-    """Liste les artifacts of ae conversation."""
+    """List a conversation's artifacts."""
     _check_available()
     artifacts = artifact_manager.get_artifacts(conv_id)
     return [

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fix_colors.py -- Automated batch color fixer for S92.
+fix_colors.py -- Automated batch color fixer, companion to audit_colors.py.
 Replaces hardcoded Tailwind color classes and inline hex/rgba
 with CSS variable references in all Svelte components.
 """

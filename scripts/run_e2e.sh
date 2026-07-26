@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # run_e2e.sh — Opti-Oignon Playwright E2E test runner
-# S149 — Frontend E2E Tests
+# Frontend E2E Tests
 #
 # Usage:
 #   ./scripts/run_e2e.sh              # default: headless chromium

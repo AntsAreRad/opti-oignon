@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-INFERENCE BACKEND ABSTRACTION -- OPTI-OIGNON S105
+INFERENCE BACKEND ABSTRACTION -- OPTI-OIGNON
 =================================================
 
 Backend-agnostic inference layer allowing Opti-Oignon to run
@@ -48,7 +48,7 @@ except ImportError:
     LLAMA_CPP_AVAILABLE = False
     _LlamaCpp = None
 
-# Telemetry integration (S112) -- lazy import to avoid circular deps.
+# Telemetry integration -- lazy import to avoid circular deps.
 _telemetry_collector = None  # type: Any
 _TELEMETRY_CHECKED = False
 
@@ -67,10 +67,10 @@ def _get_telemetry() -> Any:
     return _telemetry_collector
 
 
-# Resource Governor mechanical seam (S224, spec Section 4.1) -- lazy and
+# Resource Governor mechanical seam (spec Section 4.1) -- lazy and
 # fail-open by construction: resolved per call (never cached, so a
 # test-seeded or standalone module is reused as-is), absent or unavailable
-# means proceed unguarded (the S216 availability-control posture).
+# means proceed unguarded (the availability-control posture).
 
 
 def _resolve_resource_governor() -> Any:
@@ -89,7 +89,7 @@ def _resolve_resource_governor() -> Any:
 
 
 def _governor_admission(model: str, options: dict | None) -> None:
-    """The internal hook at the four generate/stream heads (S224).
+    """The internal hook at the four generate/stream heads.
 
     Additive and internal: generate/stream signatures DO NOT change. A
     funnel-held ticket (resource_governor.ticket_scope) stands the gate
@@ -391,7 +391,7 @@ class OllamaBackend(InferenceBackend):
     def unload_all(self) -> int:
         """Evict every model currently loaded in Ollama (frees VRAM).
 
-        S215: Ollama exposes no dedicated unload endpoint; the documented
+        Ollama exposes no dedicated unload endpoint; the documented
         eviction is a generate call with ``keep_alive=0``, which unloads the
         model immediately. Loaded models are enumerated via ``ps()`` (both
         the dict and the object response forms are handled, the CC-01
@@ -430,7 +430,7 @@ class OllamaBackend(InferenceBackend):
         return count
 
     def unload_model(self, model_name: str) -> bool:
-        """Evict ONE model from Ollama (S225: the unload_all idiom
+        """Evict ONE model from Ollama (the unload_all idiom
         narrowed to a single name for the governor's targeted eviction).
 
         Same documented primitive: a generate call with ``keep_alive=0``
@@ -518,11 +518,11 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             raise RuntimeError("Ollama is not installed (pip install ollama)")
 
-        # S224: governor admission hook (after the availability guard so
+        # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
         _governor_admission(model, options)
 
-        # S112: telemetry start.
+        # Telemetry start.
         tel = _get_telemetry()
         rid = tel.on_inference_start(model, messages) if tel else ""
         t0 = time.time()
@@ -546,7 +546,7 @@ class OllamaBackend(InferenceBackend):
         thinking_text = msg.get("thinking", "") if isinstance(msg, dict) else getattr(msg, "thinking", "")
         total_dur = response.get("total_duration") if isinstance(response, dict) else getattr(response, "total_duration", None)
 
-        # S112: telemetry end.
+        # Telemetry end.
         if tel and rid:
             tokens_out = len(content.split()) if content else 0
             tokens_in = sum(len(str(m.get("content", "")).split()) for m in messages)
@@ -577,12 +577,12 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             raise RuntimeError("Ollama is not installed (pip install ollama)")
 
-        # S224: governor admission hook. A generator head runs at first
+        # Governor admission hook. A generator head runs at first
         # iteration; the funnel's ticket is thread-local, so funnels set it
         # on the consuming thread (see resource_governor.ticket_scope).
         _governor_admission(model, options)
 
-        # S112: telemetry start.
+        # Telemetry start.
         tel = _get_telemetry()
         rid = tel.on_inference_start(model, messages) if tel else ""
         t0 = time.time()
@@ -617,7 +617,7 @@ class OllamaBackend(InferenceBackend):
 
             done = chunk.get("done", False) if isinstance(chunk, dict) else getattr(chunk, "done", False)
 
-            # S112: telemetry per-token.
+            # Telemetry per-token.
             if content and tel and rid:
                 tel.on_token_generated(rid, count=1)
                 token_count += 1
@@ -629,7 +629,7 @@ class OllamaBackend(InferenceBackend):
                 model=model,
             )
 
-        # S112: telemetry end.
+        # Telemetry end.
         if tel and rid:
             tokens_in = sum(len(str(m.get("content", "")).split()) for m in messages)
             latency = (time.time() - t0) * 1000.0
@@ -718,7 +718,7 @@ def _is_within_dir(base: Path, candidate: Path) -> bool:
 
 def _resolve_ggml_kv_type(name: str) -> int | None:
     """Resolve a KV-cache type name (e.g. "q8_0") to the installed
-    llama-cpp-python's GGML_TYPE_* constant (S259).
+    llama-cpp-python's GGML_TYPE_* constant.
 
     Fail-open by design: an absent library or an unexposed constant
     answers None and the caller skips the knob with a warning -- a perf
@@ -743,8 +743,8 @@ class LlamaCppBackend(InferenceBackend):
     -md / --draft-* flags target an external llama-server, which this backend
     does not launch. The speculative-decoding config, draft selection, VRAM
     budgeting and acceptance stats live in SpeculativeDecodingManager
-    (opti_oignon.speculative_decoding); the S70 prompt-level draft-verify path
-    lives in opti_oignon.speculative. S259 wires the external path: the argv
+    (opti_oignon.speculative_decoding); the prompt-level draft-verify path
+    lives in opti_oignon.speculative. The external path is wired here: the argv
     is materialised by speculative_decoding.build_llama_server_command and the
     running server is consumed through LlamaServerBackend below (launching the
     process stays host-side, per INFERENCE_PERF_S259.md -- this codebase never
@@ -772,7 +772,7 @@ class LlamaCppBackend(InferenceBackend):
         self._n_ctx = n_ctx
         self._n_gpu_layers = n_gpu_layers
         self._n_threads = n_threads
-        # S259 perf knobs, inert by default: flash attention and KV-cache
+        # Perf knobs, inert by default: flash attention and KV-cache
         # quantization type names (e.g. "q8_0"), resolved to ggml type
         # constants at load time, fail-open when the installed
         # llama-cpp-python does not expose the requested constant.
@@ -839,10 +839,10 @@ class LlamaCppBackend(InferenceBackend):
         images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming inference via llama-cpp-python."""
-        # S224: governor admission hook (additive, signature untouched).
+        # Governor admission hook (additive, signature untouched).
         _governor_admission(model, options)
 
-        # S112: telemetry start.
+        # Telemetry start.
         tel = _get_telemetry()
         rid = tel.on_inference_start(model, messages) if tel else ""
         t0 = time.time()
@@ -867,7 +867,7 @@ class LlamaCppBackend(InferenceBackend):
             msg = result["choices"][0].get("message", {})
             content = msg.get("content", "")
 
-        # S112: telemetry end.
+        # Telemetry end.
         if tel and rid:
             tokens_out = len(content.split()) if content else 0
             tokens_in = sum(len(str(m.get("content", "")).split()) for m in messages)
@@ -893,10 +893,10 @@ class LlamaCppBackend(InferenceBackend):
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference via llama-cpp-python."""
-        # S224: governor admission hook (additive, signature untouched).
+        # Governor admission hook (additive, signature untouched).
         _governor_admission(model, options)
 
-        # S112: telemetry start.
+        # Telemetry start.
         tel = _get_telemetry()
         rid = tel.on_inference_start(model, messages) if tel else ""
         t0 = time.time()
@@ -926,7 +926,7 @@ class LlamaCppBackend(InferenceBackend):
                 if "choices" in chunk and chunk["choices"]:
                     done = chunk["choices"][0].get("finish_reason") is not None
 
-                # S112: telemetry per-token.
+                # Telemetry per-token.
                 if content and tel and rid:
                     tel.on_token_generated(rid, count=1)
                     token_count += 1
@@ -937,7 +937,7 @@ class LlamaCppBackend(InferenceBackend):
                     model=model,
                 )
 
-        # S112: telemetry end.
+        # Telemetry end.
         if tel and rid:
             tokens_in = sum(len(str(m.get("content", "")).split()) for m in messages)
             latency = (time.time() - t0) * 1000.0
@@ -971,13 +971,13 @@ class LlamaCppBackend(InferenceBackend):
     def _resolve_model_path(self, model_name: str) -> Path | None:
         """Find a .gguf file by name across configured directories.
 
-        S136 audit fix: NEVER accepts absolute paths or paths outside
+        Audit fix: NEVER accepts absolute paths or paths outside
         configured model_dirs.  Previously, an attacker could send
         model='/tmp/evil.gguf' via the API and load arbitrary GGUF files,
         potentially exploiting llama.cpp vulnerabilities or loading
         trojaned models.
         """
-        # S136: reject absolute paths and path traversal
+        # Reject absolute paths and path traversal
         if os.path.isabs(model_name) or ".." in model_name:
             logger.warning(
                 "Rejected model path (absolute or traversal): %s", model_name
@@ -1065,7 +1065,7 @@ class LlamaCppBackend(InferenceBackend):
             }
             if self._n_threads is not None:
                 kwargs["n_threads"] = self._n_threads
-            # S259 perf knobs: flash attention is a plain boolean; the
+            # Perf knobs: flash attention is a plain boolean; the
             # KV-cache type names resolve against the installed
             # llama-cpp-python's GGML_TYPE_* constants. Fail-open: an
             # unresolvable name is skipped with a warning, never blocking
@@ -1087,7 +1087,7 @@ class LlamaCppBackend(InferenceBackend):
                 else:
                     kwargs[knob] = resolved
 
-            # S226 (R-03): optional, off-by-default process-wide rlimits,
+            # Optional, off-by-default process-wide rlimits,
             # applied at most once per process BEFORE the first in-process
             # load (resource_governor.yaml, rlimits.enabled). Caveat: the
             # limits cap the ENTIRE process, not this backend alone (why
@@ -1114,7 +1114,7 @@ class LlamaCppBackend(InferenceBackend):
     def unload_model(self, model_name: str) -> bool:
         """Unload a model from memory.
 
-        IB-04 (S215 pick-up): pop-based removal -- the previous
+        pop-based removal -- the previous
         ``in``-then-``del`` was a TOCTOU that could raise ``KeyError``
         under concurrent unload of the same name.
         """
@@ -1126,7 +1126,7 @@ class LlamaCppBackend(InferenceBackend):
     def unload_all(self) -> int:
         """Unload all cached models.
 
-        IB-04 (S215 pick-up): pop-based drain over a key snapshot, so a
+        pop-based drain over a key snapshot, so a
         concurrent unload of one name cannot raise and the count reflects
         what this call actually removed.
         """
@@ -1139,11 +1139,11 @@ class LlamaCppBackend(InferenceBackend):
 
 
 # ---------------------------------------------------------------------------
-# llama-server backend (S259): the external-process seam
+# llama-server backend: the external-process seam
 # ---------------------------------------------------------------------------
 
 class LlamaServerBackend(InferenceBackend):
-    """Backend speaking to an EXTERNAL llama-server over HTTP (S259).
+    """Backend speaking to an EXTERNAL llama-server over HTTP.
 
     This is the process-isolated counterpart to LlamaCppBackend: the
     server runs outside the Opti-Oignon process (an inference OOM can
@@ -1421,7 +1421,7 @@ class BackendRegistry:
         return self._backends.get(name)
 
     def backends(self) -> list[InferenceBackend]:
-        """Snapshot of the registered backend objects (S215).
+        """Snapshot of the registered backend objects.
 
         Taken under the lock so callers (the emergency-stop unload step)
         iterate a stable list while registration may happen concurrently.
@@ -1605,7 +1605,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
         n_ctx = llama_cfg.get("n_ctx", 4096)
         n_gpu_layers = llama_cfg.get("n_gpu_layers", -1)
         n_threads = llama_cfg.get("n_threads")
-        # S259 perf knobs (inert when absent).
+        # Perf knobs (inert when absent).
         flash_attn = bool(llama_cfg.get("flash_attn", False))
         type_k = llama_cfg.get("type_k")
         type_v = llama_cfg.get("type_v")
@@ -1627,7 +1627,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
                 "configured but llama.cpp backend unavailable"
             )
 
-    # S259: register the external llama-server seam when configured.
+    # Register the external llama-server seam when configured.
     # Registration is config presence, not reachability -- availability
     # is the backend's health_check, asked at use time; the process
     # itself is launched host-side (INFERENCE_PERF_S259.md), never here.

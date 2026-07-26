@@ -219,7 +219,7 @@ def get_acceptance_history(
         description="Number of recent records to return (0 = all)",
     ),
 ) -> dict:
-    """Get per-request acceptance rate history (S111).
+    """Get per-request acceptance rate history.
 
     Returns a list of AcceptanceRecord dicts, oldest first, with
     per-request draft/accepted counts, acceptance rates, and speedups.

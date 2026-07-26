@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SMART ROUTER -- Model Selection per Pipeline Step (S54)
+SMART ROUTER -- Model Selection per Pipeline Step
 ========================================================
 
 Selects the optimal model for each task/pipeline step type
@@ -43,7 +43,7 @@ except ImportError:
     RoutingReason = None
     _default_profile_manager = None
 
-# Conditional import of adaptive routing (S62)
+# Conditional import of adaptive routing
 try:
     from .adaptive_routing import (
         FeedbackRoutingAdapter,
@@ -57,7 +57,7 @@ except ImportError:
     FeedbackRoutingAdapter = None
     _default_feedback_adapter = None
 
-# Conditional import of model health monitor (S63)
+# Conditional import of model health monitor
 try:
     from .model_health import (
         ModelHealthMonitor,
@@ -73,7 +73,7 @@ except ImportError:
     ModelStatus = None
     _default_health_monitor = None
 
-# Conditional import of learned router (S67)
+# Conditional import of learned router
 try:
     from .learned_router import (
         LEARNED_ROUTER_AVAILABLE as _LR_AVAIL,
@@ -134,7 +134,7 @@ PIPELINE_TO_TASK_MAPPING = {
     "self_correct": ["code_python", "debug", "analysis"],
 }
 
-# S171: RAM pre-flight tuning. Rough resident-memory estimate per billion
+# RAM pre-flight tuning. Rough resident-memory estimate per billion
 # parameters for a typical quantized (q4/q5) GGUF weight set plus KV cache
 # headroom. Deliberately conservative -- the goal is to avoid selecting a model
 # the host plainly cannot hold, not to model VRAM precisely. A safety margin is
@@ -206,11 +206,11 @@ class SmartRoutingResult:
     alternatives: list[dict[str, Any]] = field(default_factory=list)
     profile_used: bool = False
     fallback: bool = False
-    feedback_adjusted: bool = False  # S62: Whether feedback adjustments were applied
-    failover: bool = False  # S63: Whether model substitution occurred due to health
-    original_model: str = ""  # S63: Original model before failover
-    routing_source: str = "yaml"  # S67: 'learned' or 'yaml'
-    learned_confidence: float = 0.0  # S67: ML confidence score (0 when yaml used)
+    feedback_adjusted: bool = False  # Whether feedback adjustments were applied
+    failover: bool = False  # Whether model substitution occurred due to health
+    original_model: str = ""  # Original model before failover
+    routing_source: str = "yaml"  # 'learned' or 'yaml'
+    learned_confidence: float = 0.0  # ML confidence score (0 when yaml used)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for API responses."""
@@ -271,8 +271,8 @@ class SmartRouter:
             context_requirements: Custom context requirements per step type
             speed_preference: 'fast', 'balanced', or 'quality'
             config_path: Path to YAML config (None = default)
-            feedback_adapter: FeedbackRoutingAdapter instance (None = singleton, S62)
-            health_monitor: ModelHealthMonitor instance (None = disable, _UNSET = singleton, S63)
+            feedback_adapter: FeedbackRoutingAdapter instance (None = singleton)
+            health_monitor: ModelHealthMonitor instance (None = disable, _UNSET = singleton)
         """
         self._profile_manager = profile_manager or _default_profile_manager
         self._enabled = enabled
@@ -282,13 +282,13 @@ class SmartRouter:
         self._speed_preference = speed_preference
         self._cache: dict[str, SmartRoutingResult] = {}
         self._config_path = config_path or _DEFAULT_CONFIG_PATH
-        # S62: Feedback-based adaptive routing
+        # Feedback-based adaptive routing
         self._feedback_adapter = feedback_adapter or _default_feedback_adapter
-        # S63: Model health monitor for failover
+        # Model health monitor for failover
         self._health_monitor = _default_health_monitor if health_monitor is _UNSET else health_monitor
-        # S67: Learned router for ML-based task classification
+        # Learned router for ML-based task classification
         self._learned_router = _default_learned_router
-        # S171: pre-flight RAM check toggle (skip models that plainly will not
+        # Pre-flight RAM check toggle (skip models that plainly will not
         # fit in available system RAM). Fail-open when memory state is unknown.
         self._ram_preflight = True
         # Load YAML config (overrides constructor defaults)
@@ -422,7 +422,7 @@ class SmartRouter:
         excluded = set(excluded_models or [])
         task_types = PIPELINE_TO_TASK_MAPPING.get(step_type, [step_type])
 
-        # S171: pre-flight RAM budget. Computed once per selection. A value of
+        # Pre-flight RAM budget. Computed once per selection. A value of
         # 0.0 (memory state unknown) disables the check entirely (fail-open).
         ram_budget_mb = 0.0
         if self._ram_preflight:
@@ -438,7 +438,7 @@ class SmartRouter:
             if profile.capabilities == ["embeddings"]:
                 continue
 
-            # S171: skip models that plainly will not fit in available RAM.
+            # Skip models that plainly will not fit in available RAM.
             # Only applies when both the budget and the model's parameter count
             # are known; an unknown size is never treated as too large.
             if ram_budget_mb > 0.0:
@@ -451,7 +451,7 @@ class SmartRouter:
                     )
                     continue
 
-            # S63: Skip unavailable models entirely when health monitor active
+            # Skip unavailable models entirely when health monitor active
             health_penalty = 1.0
             if self._health_monitor is not None and HEALTH_MONITOR_AVAILABLE:
                 try:
@@ -489,7 +489,7 @@ class SmartRouter:
             else:
                 context_fit = 0.5
 
-            # S63: Apply health penalty to context_fit
+            # Apply health penalty to context_fit
             context_fit *= health_penalty
 
             final_score = task_score * speed_weight * context_fit
@@ -532,7 +532,7 @@ class SmartRouter:
 
         reason = self._build_reason(best_profile, step_type, task_types, best_breakdown)
 
-        # S62: Check if feedback adjustments are active
+        # Check if feedback adjustments are active
         fb_adjusted = False
         if self._feedback_adapter is not None and ADAPTIVE_ROUTING_AVAILABLE:
             try:
@@ -540,7 +540,7 @@ class SmartRouter:
             except Exception:
                 pass
 
-        # S63: Detect failover (health caused model substitution)
+        # Detect failover (health caused model substitution)
         is_failover = False
         original_model = ""
 
@@ -653,7 +653,7 @@ class SmartRouter:
             "context_requirements": dict(self._context_requirements),
             "profile_count": self._profile_manager.count if self._profile_manager else 0,
         }
-        # S62: Include feedback adapter status
+        # Include feedback adapter status
         if self._feedback_adapter is not None and ADAPTIVE_ROUTING_AVAILABLE:
             try:
                 config["feedback_routing_enabled"] = self._feedback_adapter.enabled
@@ -664,7 +664,7 @@ class SmartRouter:
         else:
             config["feedback_routing_enabled"] = False
             config["feedback_routing_active"] = False
-        # S63: Include health monitor status
+        # Include health monitor status
         if self._health_monitor is not None and HEALTH_MONITOR_AVAILABLE:
             try:
                 config["health_monitor_enabled"] = self._health_monitor.enabled
@@ -678,7 +678,7 @@ class SmartRouter:
             config["health_monitor_enabled"] = False
             config["health_monitor_running"] = False
             config["auto_failover"] = False
-        # S67: Include learned router status
+        # Include learned router status
         config["learned_router_available"] = LEARNED_ROUTER_IN_SMART
         if LEARNED_ROUTER_IN_SMART and self._learned_router is not None:
             try:
@@ -732,10 +732,10 @@ class SmartRouter:
     def _compute_task_score(self, profile, task_type: str) -> float:
         """Compute task score using task_scores dict or fallback method.
 
-        Applies feedback-based adjustments (S62) when the adaptive
+        Applies feedback-based adjustments when the adaptive
         routing adapter is available and active.
         """
-        # Use numeric task_scores if available (S54 enhancement)
+        # Use numeric task_scores if available
         task_scores = getattr(profile, "task_scores", None)
         if task_scores and isinstance(task_scores, dict):
             if task_type in task_scores:
@@ -752,7 +752,7 @@ class SmartRouter:
             # Fallback to existing scoring method
             base_score = profile.score_for_task(task_type)
 
-        # S62: Apply feedback-based adjustment
+        # Apply feedback-based adjustment
         if self._feedback_adapter is not None and ADAPTIVE_ROUTING_AVAILABLE:
             try:
                 adj = self._feedback_adapter.get_adjustment(profile.name, task_type)
@@ -842,7 +842,7 @@ class SmartRouter:
         return config
 
     # -------------------------------------------------------------------------
-    # S67: Learned router integration
+    # Learned router integration
     # -------------------------------------------------------------------------
 
     def classify_task_type(

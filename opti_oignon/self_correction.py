@@ -93,7 +93,7 @@ def _clamp01(value: Any, default: float) -> float:
 
 @dataclass
 class InstructionCheck:
-    """Result de la verification of ae instruction individuelle."""
+    """Result of verifying a single instruction."""
     instruction: str
     satisfied: bool
     explanation: str = ""
@@ -138,7 +138,7 @@ class QualityResult:
 
 @dataclass
 class CorrectionIteration:
-    """Result of ae iteration de correction."""
+    """Result of a correction iteration."""
     iteration: int
     compliance_score: float
     quality_score: float

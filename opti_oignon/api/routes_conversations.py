@@ -187,7 +187,7 @@ except ImportError:
 
 @router.get("/{conv_id}/tool-history")
 def get_tool_history(conv_id: str) -> dict:
-    """Get tool call history for a conversation (S62).
+    """Get tool call history for a conversation.
 
     Returns all prior tool call results stored in memory
     for this conversation, enabling multi-turn tool reference.
@@ -216,7 +216,7 @@ def get_tool_history(conv_id: str) -> dict:
 
 @router.delete("/{conv_id}/tool-history")
 def clear_tool_history(conv_id: str) -> dict:
-    """Clear tool call history for a conversation (S62)."""
+    """Clear tool call history for a conversation."""
     if not _AGENTIC_AVAILABLE or _agentic_executor is None:
         return {"conversation_id": conv_id, "cleared": 0}
 

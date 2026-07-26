@@ -389,7 +389,7 @@ def execute_sandbox_tool(request: SandboxExecuteRequest) -> dict:
 def list_sessions() -> list:
     """List all sandbox sessions.
 
-    S213: each row is enriched with ``has_cloned_baseline`` from the
+    Each row is enriched with ``has_cloned_baseline`` from the
     manifests store (guarded; absent store means False) so the settings
     strip can sharpen the exfiltration warning when host files were
     cloned in.
@@ -616,7 +616,7 @@ def approve_sandbox_files(session_id: str, request: SandboxApproveRequest) -> di
 def copy_out_sandbox_files(session_id: str, request: SandboxApproveRequest) -> dict:
     """Copy approved files from the sandbox to the host filesystem.
 
-    S136 audit fix: dest_dir is validated to stay within the data/
+    The dest_dir is validated to stay within the data/
     directory. Copies only files that have been approved.
     """
     _require_sandbox()
@@ -837,7 +837,7 @@ def stop_sandbox_command(
     session_id: str,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """SIGKILL the workspace's running command; keep the workspace (S210).
+    """SIGKILL the workspace's running command; keep the workspace.
 
     Honest semantics: 404 for an unknown session, 403 for a foreign owner,
     and stopped=False (200) when nothing was running -- a no-op, never an
@@ -1022,7 +1022,7 @@ def upload_workspace_files(
     No host filesystem path is ever enumerated or read by the server on
     this path -- the browser supplies the bytes. Sizes are summed BEFORE
     any write; an exceeded cap (request file count, per-file bytes, or the
-    S210 workspace quota) refuses the WHOLE request with 413 and the
+    workspace quota) refuses the WHOLE request with 413 and the
     workspace untouched. Individually invalid names and destination
     collisions are refused per file in the 200 response, never overwritten.
     """
@@ -1105,7 +1105,7 @@ def clone_host_directory(
     """Clone an allowlisted host directory into the workspace (spec 5.2b).
 
     Symlink-safe (links skipped and counted, targets never exposed),
-    specials skipped, caps and the S210 quota enforced by an exact
+    specials skipped, caps and the workspace quota enforced by an exact
     pre-walk BEFORE any copy (413), destination collisions refused (409),
     sources outside the allowlisted roots refused (403). The baseline
     manifest (6.1) is recorded from the hashes computed during the copy;
@@ -1198,7 +1198,7 @@ def get_workspace_diff(
     session_id: str,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """The live workspace classified against the baseline manifest (S212).
+    """The live workspace classified against the baseline manifest.
 
     Hash-driven added/modified/deleted against the recorded 6.1 baseline;
     matching hashes count as unchanged; symlinks and specials are skipped
@@ -1241,7 +1241,7 @@ def confirm_workspace_deletions(
     request: SandboxConfirmDeletionsRequest,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """Explicitly confirm deletions for apply-to-host (S212, 6.2).
+    """Explicitly confirm deletions for apply-to-host.
 
     Distinct from approval by design: removing a host file requires its
     own confirmation and is never bundled into a blanket approve-all.
@@ -1295,7 +1295,7 @@ def apply_workspace_changes(
     request: SandboxApplyRequest,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """Write ONLY approved changes back to the host (S212, 6.2).
+    """Write ONLY approved changes back to the host.
 
     The cycle's highest-risk route; a USER action through the manager UI
     -- the model can trigger nothing here (the dispatch invariant is
@@ -1369,7 +1369,7 @@ def toggle_workspace_network(
     request: SandboxNetworkToggleRequest,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """Flip the per-workspace network flag (S213, spec 8.3).
+    """Flip the per-workspace network flag.
 
     An explicit USER action -- never a config default, never
     model-triggerable (the dispatch invariant is unchanged; no tool
@@ -1406,11 +1406,11 @@ def provision_workspace(
     request: SandboxProvisionRequest,
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """Run the provision phase: the one scoped egress (S213, spec 8.4).
+    """Run the provision phase: the one scoped egress.
 
     A USER action. Ladder: 404/403 owner, 503 partial build, 403 under
     Bulbe (the binding-layer gate; unknown mode is Bulbe), 409 when the
-    per-workspace network flag is off (a state precondition, the S211
+    per-workspace network flag is off (a state precondition, the
     collision precedent), 400 on a bad path or a requirements set that is
     not exact-and-hash-pinned (per-line refusals listed honestly; nothing
     installs on a partial validation). The command is built server-side
@@ -1558,7 +1558,7 @@ def destroy_sandbox(
 ) -> dict:
     """Destroy a sandbox session and remove all its files.
 
-    S210: ownership is checked (403 on mismatch; unchanged behaviour in
+    Ownership is checked (403 on mismatch; unchanged behaviour in
     single-user mode where everything is "local"). A second destroy of the
     same id answers 404 -- the effect is idempotent and the code honest.
     """

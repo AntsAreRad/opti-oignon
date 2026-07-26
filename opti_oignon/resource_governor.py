@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Resource Governor -- Blocs 0-3: measurement, admission, backpressure, limits.
 
-RESOURCE_GOVERNOR_SPEC.md Section 3 implemented verbatim at S223: a cached
+RESOURCE_GOVERNOR_SPEC.md Section 3 implemented verbatim: a cached
 ResourceSnapshot assembled from ranked, individually-optional sources with
 honest provenance; the measure-and-adapt store (Section 3.2); the YAML
-config loader (Section 10 keys). Bloc 1 (S224) adds the admission gate on
+config loader (Section 10 keys). The admission layer adds the gate on
 top: admit() and the AdmissionDecision ticket (Section 4.4), the 4.2 fit
 math on the cached snapshot (get_snapshot_fast), the per-caller ctx ladder
 and floors (4.3, benchmark/AGT never downsized), the R-04 emergency-stop
 honour (4.5: the flag checked FIRST through the existing seams only, the
 refusal built from refusal_payload()), the thread-local ticket pass-through
-(ticket_scope, the S224 gate arbitration) and the mechanical backend gate
+(ticket_scope, the gate arbitration) and the mechanical backend gate
 (backend_admission_gate) consumed by the four generate/stream heads.
-Bloc 2 (S225) adds runtime backpressure (Section 5, the escalation order
+The second layer adds runtime backpressure (Section 5, the escalation order
 verbatim): the pressure signal (in_use over effective capacity against the
 config soft/hard thresholds, plus a bounded refusal-rate window), the
 per-decision keep_alive override under soft pressure with the
@@ -22,12 +22,12 @@ is never stopped here), the targeted per-model eviction honouring
 conditional-on-eviction admissions (audit-chained off the hot path,
 degrading to Ollama's own LRU on any failure, the Section 12 posture),
 and the bounded opt-in queue (per-caller enrollment, depth and wait
-bounds, re-admission on wake, the estop never bypassed). Bloc 3 (S226)
+bounds, re-admission on wake, the estop never bypassed). The third layer
 adds limit management (Section 6, R-03): the pure spawn-path env
 construction (build_ollama_spawn_env, the contract for any future
 Ollama spawner -- none exists in-app today), the external-Ollama
 advisory (compute_ollama_limits_advisory and the governor method,
-consumed by the startup security checklist through the S145
+consumed by the startup security checklist through the standing
 advisory-only precedent: never blocking startup in any mode), and the
 optional, off-by-default process-wide rlimits applier
 (apply_llamacpp_rlimits, consumed by the llama.cpp load seam BEFORE the
@@ -59,13 +59,13 @@ Ranked sources (Section 3, decision D2):
   value (``total_vram_gb``, null by default meaning unknown), refined
   downward by the learned ceiling (Section 3.2); host RAM comes from
   /proc/meminfo MemAvailable with the psutil fallback. The RAM read is a
-  deliberate LOCAL EQUIVALENT of the S171 smart_router idiom (read-gate
-  decision DI-1): the S171 pre-flight is NOT moved out of smart_router
+  deliberate LOCAL EQUIVALENT of the smart_router idiom (a design
+  decision): the pre-flight is NOT moved out of smart_router
   and its private helper is not imported across modules; the few lines
   are replicated by decision so this module stays standalone-loadable
   and zero existing files are edited this bloc.
 
-Design decisions (S223 read gate, arbitrated):
+Design decisions (arbitrated):
 
 - DI-2: the default DB path follows the benchmark ResultsStore precedent
   (``opti_oignon/data/resource_governor.db``); ``db_path`` injectable.
@@ -191,13 +191,13 @@ _DEFAULT_DB_PATH = _DATA_DIR / "resource_governor.db"
 _CEILING_RELAX_AFTER_SUCCESSES = 5
 _CEILING_RELAX_STEP_GB = 1.0
 
-# Bloc 2 (S225) constants. The queue waits in bounded real-time slices so
+# Backpressure constants. The queue waits in bounded real-time slices so
 # a fake injected clock can drive deadline math in container tests while
 # notify-based wakes stay immediate. The refusal-rate rule raises the
 # pressure level to AT LEAST soft when at least
 # _REFUSAL_RATE_MIN_DECISIONS recorded decisions fall inside the config
 # window and the refused fraction reaches _REFUSAL_RATE_SOFT; the rate
-# alone never reaches hard (DI-S225-2).
+# alone never reaches hard.
 _QUEUE_WAIT_SLICE_S = 0.5
 _REFUSAL_RATE_SOFT = 0.5
 _REFUSAL_RATE_MIN_DECISIONS = 3
@@ -218,7 +218,7 @@ _SIZE_STR_RE = re.compile(r"^([\d.]+)\s*(GB|MB|B)$", re.IGNORECASE)
 def _read_available_ram_mb(meminfo_path: str | Path = "/proc/meminfo") -> float:
     """Return available system RAM in MB, or 0.0 when undeterminable.
 
-    Deliberate local equivalent of the S171 smart_router idiom (read-gate
+    Deliberate local equivalent of the smart_router idiom (a design
     decision DI-1): /proc/meminfo MemAvailable first, the psutil fallback
     second, 0.0 fail-open last (a 0.0 result means the RAM half of the
     snapshot is unknown and must never exclude anything). The smart_router
@@ -244,7 +244,7 @@ def _parse_parameter_size_b(value: Any) -> float:
     """Parse a parameter-size label ("7B", "3.2b", 7.0) to billions.
 
     Returns 0.0 when missing or unparseable (fail-open: an unknown size is
-    never treated as too large -- the S171 idiom restated by Section 3.1).
+    never treated as too large -- the idiom restated by Section 3.1).
     """
     if isinstance(value, (int, float)):
         return float(value)
@@ -409,7 +409,7 @@ def _as_int(value: Any, default: int) -> int:
 
 def _as_kv_override_map(value: Any) -> dict[str, float]:
     """Coerce one ``kv_overrides`` sub-mapping to {lowercase name: GiB
-    per 1024 tokens} (S259).
+    per 1024 tokens}.
 
     Conservative by construction: a non-mapping yields the EMPTY table
     (the global coefficient then answers everything, fail-secure); an
@@ -446,9 +446,9 @@ def _as_kv_override_map(value: Any) -> dict[str, float]:
 
 def _as_weights_override_map(value: Any) -> dict[str, float]:
     """Coerce one ``weights_overrides`` sub-mapping to {lowercase name:
-    weights-residency GiB} (S261).
+    weights-residency GiB}.
 
-    The S259 kv coercer mirrored as a sibling so the kv path stays
+    The kv coercer mirrored as a sibling so the kv path stays
     byte-identical: a non-mapping yields the EMPTY table (the estimator
     chain then answers everything, fail-secure); an entry whose value
     does not coerce to a positive float is dropped with a warning,
@@ -525,13 +525,13 @@ class GovernorConfig:
     # admission itself stays fail-open; only the quantum is fail-secure.
     dynamic_ctx_enabled: bool = False
     dynamic_ctx_unknown_ceiling: int = 8192
-    # S259 per-model KV overrides (resolution: exact model name >
+    # Per-model KV overrides (resolution: exact model name >
     # longest matching family substring > the global coefficient above,
     # which stays the fail-secure answer for any model neither table
     # names). Keys are normalised to lowercase at load.
     kv_override_models: dict[str, float] = field(default_factory=dict)
     kv_override_families: dict[str, float] = field(default_factory=dict)
-    # S261 per-model weights-residency overrides in GiB (the MoE gap:
+    # Per-model weights-residency overrides in GiB (the MoE gap:
     # active-params residency differs from file size). Resolution:
     # exact model name > longest matching family substring > None,
     # which leaves the estimator chain untouched -- an unknown model
@@ -553,11 +553,11 @@ class GovernorConfig:
     pressure_soft_threshold: float = 0.85
     pressure_hard_threshold: float = 0.95
     pressure_keep_alive: str = "5m"
-    # Bloc 2 (S225): soft-or-worse pressure must persist this long before
+    # Backpressure: soft-or-worse pressure must persist this long before
     # the governor writes the warmup keep_alive through its settable
     # property; the original is restored at the first clear observation.
     pressure_sustain_s: float = 60.0
-    # Bloc 2 (S225): the bounded window the refusal-rate signal reads.
+    # Backpressure: the bounded window the refusal-rate signal reads.
     pressure_refusal_window_s: float = 60.0
     queue_enabled_per_caller: dict[str, bool] = field(default_factory=dict)
     queue_depth: int = 2
@@ -750,7 +750,7 @@ def build_ollama_spawn_env(config: GovernorConfig) -> dict[str, str]:
     ``ollama_limits.spawn_applies: false`` yields an empty dict.
 
     This is the spawn-path CONTRACT: no in-app Ollama spawner exists
-    today (verified at the S226 read -- emergency_stop only warms up an
+    today (verified by review -- emergency_stop only warms up an
     already running server), so whoever spawns first (a launcher script
     or a future process manager) consumes this helper instead of
     rebuilding the mapping. The wiring entry lives on the standing list.
@@ -786,7 +786,7 @@ def compute_ollama_limits_advisory(
     mixed observations resolve mismatch > unknown > match; a visible
     value that does not parse as an integer counts as a mismatch.
     Advisory-only by contract: the consumer (the startup security
-    checklist) never blocks startup on it, in any mode (the S145
+    checklist) never blocks startup on it, in any mode (the standing
     precedent). Never raises.
     """
     source: Mapping[str, str] = os.environ if env is None else env
@@ -1086,7 +1086,7 @@ class AdmissionDecision:
     num_gpu stays None (conservative: full offload when the fit
     holds means no option is sent; computed partial offload stays
     deferred behind a flag); keep_alive carries the Bloc 2 soft-pressure
-    override when the pressure signal fills it (S225).
+    override when the pressure signal fills it.
     """
 
     admitted: bool
@@ -1190,7 +1190,7 @@ def clear_active_ticket() -> None:
 def ticket_scope(decision: AdmissionDecision | None):
     """Hold an admission ticket around a backend call (Section 4.4).
 
-    The pass-through mechanism arbitrated at the S224 read gate: a thread
+    The pass-through mechanism, as arbitrated: a thread
     local, never an options key (an options sidecar would leak a private
     key to the transport on the direct-ollama fallback paths). The hook at
     the generate/stream heads reads it through get_active_ticket(). A
@@ -1570,11 +1570,11 @@ class ResourceGovernor:
         self._pending_attribution: dict[str, int | None] = {}
         self._refresh_in_flight = False
         self._capacity_warning_emitted = False
-        # S224 (R-04 wiring): the admission path observes the estop flag;
+        # The admission path observes the estop flag;
         # a transition triggers the drain/resume invalidation hooks
         # without editing emergency_stop. None until first observation.
         self._last_estop_seen: bool | None = None
-        # S225 (Bloc 2): runtime backpressure state. The refusal-rate
+        # Runtime backpressure state. The refusal-rate
         # window is in-memory by design (a runtime signal, never
         # persisted; the maxlen is a memory bound, the time window is
         # the config key). The remembered keep_alive original does NOT
@@ -1584,7 +1584,7 @@ class ResourceGovernor:
         self._pressure_soft_since: float | None = None
         self._keep_alive_original: str | None = None
         self._last_pressure_level: str | None = None
-        # S225 queue: waiters block on the condition in bounded slices;
+        # Queue: waiters block on the condition in bounded slices;
         # the invalidation hooks notify it (capacity may have moved).
         self._queue_cond = threading.Condition()
         self._queue_depth = 0
@@ -1696,7 +1696,7 @@ class ResourceGovernor:
         self._notify_queue()
 
     def _notify_queue(self) -> None:
-        """Wake queued admissions (S225): the world may have moved.
+        """Wake queued admissions: the world may have moved.
 
         Called by every invalidation hook AFTER the cache lock is
         released (strictly sequential locking, never nested), so a
@@ -1710,7 +1710,7 @@ class ResourceGovernor:
     # -- estimation API --------------------------------------------------------
 
     def resolve_kv_coefficient(self, model: str | None) -> float:
-        """Per-model KV coefficient (S259).
+        """Per-model KV coefficient.
 
         Resolution order: an exact entry in ``kv_override_models``, else
         the LONGEST ``kv_override_families`` key contained in the
@@ -1741,7 +1741,7 @@ class ResourceGovernor:
         """KV-cache increment as a function of the requested num_ctx.
 
         ``kv_coefficient`` is GiB per 1024 tokens (DI-4); 0 tokens or an
-        unset request cost nothing. S259: the optional ``model`` kwarg
+        unset request cost nothing. The optional ``model`` kwarg
         routes through :meth:`resolve_kv_coefficient`; without it the
         global coefficient applies, byte-compatible with every
         pre-existing caller.
@@ -1787,7 +1787,7 @@ class ResourceGovernor:
     def resolve_weights_override(
         self, model: str | None
     ) -> float | None:
-        """Per-model weights-residency override in GiB (S261).
+        """Per-model weights-residency override in GiB.
 
         Resolution order: an exact entry in ``weights_override_models``,
         else the LONGEST ``weights_override_families`` key contained in
@@ -2115,7 +2115,7 @@ class ResourceGovernor:
         this governor's config; the seat the Bloc 4 status surface
         reads. The startup security checklist consumes the pure
         function directly (advisory-only in all modes, never blocking
-        startup -- the S145 precedent).
+        startup -- the standing precedent).
         """
         return compute_ollama_limits_advisory(self._config)
 
@@ -2355,7 +2355,7 @@ class ResourceGovernor:
         snapshot = self.get_snapshot_fast()
         provenance = list(snapshot.sources)
 
-        # S225 (Bloc 2): the pressure signal rides every admission; a
+        # The pressure signal rides every admission; a
         # soft-or-worse level fills the decision's keep_alive override
         # (Section 5, escalation step 1) when capacity is known. The
         # same read drives the sustained-write/restore policy.
@@ -2381,7 +2381,7 @@ class ResourceGovernor:
             weights_gb: float | None = 0.0
         else:
             weights_gb, _basis = self.estimate_model_vram_gb(model, digest)
-            # S261: an operator-named weights-residency override (the
+            # An operator-named weights-residency override (the
             # MoE active-params gap) replaces the estimate; absent, the
             # estimator answer above stands -- today's pricing.
             weights_override = self.resolve_weights_override(model)
@@ -2394,7 +2394,7 @@ class ResourceGovernor:
                 continue
             load_expected = True
             extra_est, _eb = self.estimate_model_vram_gb(extra)
-            # S261: the same override seam for the extra models.
+            # The same override seam for the extra models.
             extra_override = self.resolve_weights_override(extra)
             if extra_override is not None:
                 extra_est = extra_override
@@ -2635,7 +2635,7 @@ class ResourceGovernor:
     def _evictable_now_gb(self, snapshot: ResourceSnapshot) -> float:
         """Summed size_vram of loaded models idle past the threshold (4.2).
 
-        Delegates to _evictable_candidates (S225) so the fit math and
+        Delegates to _evictable_candidates so the fit math and
         the targeted eviction read the SAME definition of evictable.
         """
         return sum(
@@ -2903,7 +2903,7 @@ class ResourceGovernor:
     def _record_admission(self, decision: AdmissionDecision) -> None:
         """Ring write for every recorded decision (4.4); never raises.
 
-        S225: the same seam feeds the in-memory refusal-rate window
+        The same seam feeds the in-memory refusal-rate window
         (resource decisions only -- an estop refusal is not a resource
         signal and never enters it).
         """
@@ -2981,7 +2981,7 @@ def backend_admission_gate(
     ticket = get_active_ticket()
     if ticket is not None and ticket.model == model:
         if ticket.admitted and ticket.load_expected:
-            # S225: act on a conditional grant just before its load
+            # Act on a conditional grant just before its load
             # (oldest-idle first, only as much as the shortfall needs;
             # fail-open to Ollama's own LRU, Section 12).
             if ticket.conditional_on_eviction:

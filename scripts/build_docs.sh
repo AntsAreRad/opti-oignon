@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/build_docs.sh -- Build the MkDocs documentation site (S161)
+# scripts/build_docs.sh -- Build the MkDocs documentation site
 #
 # Usage:
 #   ./scripts/build_docs.sh          # build only

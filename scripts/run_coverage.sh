@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opti-Oignon — Coverage Gate Script (S140)
+# Opti-Oignon — Coverage Gate Script
 #
 # Runs the full test suite with coverage measurement and enforces
 # minimum coverage thresholds.
@@ -25,7 +25,7 @@ cd "$PROJECT_ROOT"
 # -------------------------------------------------------------------------
 # Coverage thresholds
 # -------------------------------------------------------------------------
-# Overall minimum (set after baseline measurement in S140)
+# Overall minimum (set after baseline measurement)
 OVERALL_FAIL_UNDER=30
 
 # Per-file minimums for security-critical modules (target: 80%)

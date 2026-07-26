@@ -1441,7 +1441,7 @@ async def _stream_chat_coding(
 async def chat_stream(websocket: WebSocket) -> None:
     """WebSocket endpoint for chat streaming.
 
-    S136 audit fix: authenticates before processing.
+    Authenticates before processing.
     """
     await websocket.accept()
 
@@ -1537,7 +1537,7 @@ async def chat_stream(websocket: WebSocket) -> None:
 async def chat_retry(websocket: WebSocket) -> None:
     """WebSocket endpoint to regenerate the last response.
 
-    S136 audit fix: authenticates before processing.
+    Authenticates before processing.
     """
     await websocket.accept()
 

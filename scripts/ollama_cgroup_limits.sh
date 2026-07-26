@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ollama OS-level resource limits -- HOST-BOUND reference recipe (R-03, S226).
+# Ollama OS-level resource limits -- HOST-BOUND reference recipe (R-03).
 #
 # Usage:
 #   scripts/ollama_cgroup_limits.sh

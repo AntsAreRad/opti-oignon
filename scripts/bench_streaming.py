@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script for S159 streaming and connection improvements.
+Benchmark script for streaming and connection improvements.
 
 Measures:
 - SSE/WebSocket backpressure buffer throughput and latency
@@ -53,7 +53,7 @@ def _load_module(name: str, filepath: str):
 
 
 def _ensure_modules():
-    """Pre-load the S159 modules we need without triggering the full
+    """Pre-load the streaming modules we need without triggering the full
     opti_oignon import chain (which requires ollama)."""
     import types
     pkg = os.path.join(_PROJECT_ROOT, "opti_oignon")

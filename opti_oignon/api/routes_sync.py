@@ -913,9 +913,9 @@ try:
         Local-disk and permitted in any mode, but the routing key is read from the
         live transport: 503 when no attached node can supply one (the framework is
         absent, the node is not attached, or the mode is Bulbe, under which the node
-        never attaches). The payload itself carries only public material. S206:
-        the device's signing PUBLIC key joins the payload when custody can
-        supply one (S205; a device that cannot sign pairs as an honest
+        never attaches). The payload itself carries only public material.
+        The device's signing PUBLIC key joins the payload when custody can
+        supply one (a device that cannot sign pairs as an honest
         pre-VL-01 peer), and the generated canonical material is PINNED in the
         peer store's meta row so the PAIR-02 confirmation code recomputes from
         local disk in any mode -- a pin failure degrades to a payload without
@@ -977,7 +977,7 @@ try:
         The body is either the pairing payload itself, or an envelope
         ``{"payload": {...}, "label": "..."}``. Local-disk and permitted in any
         mode; the integrity check rejects a tampered payload before it is stored.
-        PAIR-02 (S206): the peer registers PENDING; the response carries the
+        The peer registers PENDING; the response carries the
         confirmation code to compare on both devices (``null`` until this
         device generates its own pairing code).
         """
@@ -1152,7 +1152,7 @@ try:
     ) -> dict[str, Any]:
         """Set or clear a paired peer's device class; the human-confirmed path.
 
-        N.9 / S260: the control surface the S258 accept seam deferred to
+        The control surface the earlier accept seam deferred to
         (phone -> desktop never happens at the ceremony; it happens HERE,
         by a human). The body carries ``{"device_class": "phone" |
         "desktop" | null}``; free text is refused with a 400 before the

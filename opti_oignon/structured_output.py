@@ -60,7 +60,7 @@ def _message_field(response: Any, field: str) -> str:
 
 
 class StructuredResult(BaseModel):
-    """Resultat of ae generation structuree."""
+    """Result of a structured generation."""
     success: bool
     data: Any | None = None      # Le modele Pydantic valide
     raw_response: str = ""           # Reponse brute du LLM

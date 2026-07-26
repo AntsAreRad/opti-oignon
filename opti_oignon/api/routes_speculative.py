@@ -83,7 +83,7 @@ def update_speculative_config(update: SpeculativeConfigUpdate) -> dict:
         if cascading_inference.enabled:
             cascading_inference.enabled = False
             cascading_inference._save_config()
-            logger.info("S70: Disabled cascading inference (mutual exclusion with speculative)")
+            logger.info("Disabled cascading inference (mutual exclusion with speculative)")
 
     speculative_generator.update_config(
         enabled=update.enabled,

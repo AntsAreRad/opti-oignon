@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-CODING AGENT - OPTI-OIGNON v1.8.3 (S74/S76/S77/S78/S79/S80/S81)
+CODING AGENT - OPTI-OIGNON v1.8.3
 =========================================
 
 Multi-step autonomous coding agent: plan -> implement -> test -> fix -> review -> apply.
 The "local Claude Code" milestone.
 
-Uses S73 SandboxToolSession for all filesystem operations (fully isolated).
-Uses S65 token budget for context window management.
-Uses S66 conversation compressor for long coding sessions.
+Uses SandboxToolSession for all filesystem operations (fully isolated).
+Uses token budget for context window management.
+Uses conversation compressor for long coding sessions.
 
-S77: Batch file reads via tar+base64 (SQ-06), background execution support (SQ-07).
-S79: Auto-retry on transient sandbox errors with exponential backoff.
-S80: Robust JSON parsing (json_repair), plan retries with fallback,
+Batch file reads via tar+base64, background execution support.
+Auto-retry on transient sandbox errors with exponential backoff.
+Robust JSON parsing (json_repair), plan retries with fallback,
      WorkingMemory structured scratchpad for cross-step context.
-S81: Cascading model escalation on fix failures, optional per-step routing,
+Cascading model escalation on fix failures, optional per-step routing,
      security audit hardening.
 
 SECURITY: The apply phase is the ONLY exit from the sandbox.
@@ -170,10 +170,10 @@ class CodingAgentConfig:
     checkpoint_after_plan: bool = True
     checkpoint_before_apply: bool = True  # NEVER set to False
     context_window_reserve: int = 2048
-    # Cascading escalation in fix loop (S81)
+    # Cascading escalation in fix loop
     enable_cascading: bool = True
     escalate_after_failures: int = 2
-    # Per-step routing: route simple steps to fast tier (S81, experimental)
+    # Per-step routing: route simple steps to fast tier (experimental)
     per_step_routing: bool = False
 
 
@@ -594,7 +594,7 @@ Respond ONLY with the JSON object, no markdown fences"""
 def _parse_json_response(text: str) -> dict[str, Any]:
     """Parse a JSON response from the LLM, with tolerant repair.
 
-    Uses the json_repair module (S80) for progressive repair when
+    Uses the json_repair module for progressive repair when
     available, falling back to basic fence-stripping + json.loads.
 
     Args:
@@ -619,7 +619,7 @@ def _parse_json_response(text: str) -> dict[str, Any]:
         except ValueError as exc:
             raise ValueError(f"JSON repair failed: {exc}") from exc
     else:
-        # Fallback: basic fence stripping (pre-S80 behavior)
+        # Fallback: basic fence stripping (legacy behavior)
         cleaned = text.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
@@ -777,13 +777,13 @@ class CodingAgent:
             llm_call: Callable for LLM interaction. Signature:
                 llm_call(prompt: str, system: str, model: str) -> str
             config: Agent configuration. Loaded from YAML if None.
-            fingerprint_manager: Session fingerprint tracker (S75).
+            fingerprint_manager: Session fingerprint tracker.
                 Created automatically if None and feature is available.
             cascading_engine: CascadingInference instance for model
-                escalation on fix failures (S81). Auto-created if None
+                escalation on fix failures. Auto-created if None
                 and feature is available + enabled in config.
             smart_router: SmartRouter instance for per-step routing
-                (S81, experimental). Auto-created if None and
+                (experimental). Auto-created if None and
                 per_step_routing is enabled in config.
         """
         self._config = config or _load_config()
@@ -824,7 +824,7 @@ class CodingAgent:
         self._progress_callbacks: list[Callable] = []
         self._diffs_hash: str = ""  # integrity hash set by generate_diffs
 
-        # Session fingerprint (S75)
+        # Session fingerprint
         if fingerprint_manager is not None:
             self._fingerprint = fingerprint_manager
         elif FINGERPRINT_AVAILABLE and FingerprintManager is not None:
@@ -832,16 +832,16 @@ class CodingAgent:
         else:
             self._fingerprint = None
 
-        # Persistent history store (S76)
+        # Persistent history store
         self._history_store = (
             _history_store if _HISTORY_AVAILABLE else None
         )
         self._test_run_counter = 0
 
-        # Working memory (S80)
+        # Working memory
         self._working_memory: WorkingMemory | None = None
 
-        # Cascading model escalation (S81)
+        # Cascading model escalation
         if cascading_engine is not None:
             self._cascading = cascading_engine
         elif (
@@ -857,7 +857,7 @@ class CodingAgent:
         else:
             self._cascading = None
 
-        # Smart router for per-step routing (S81, experimental)
+        # Smart router for per-step routing (experimental)
         if smart_router is not None:
             self._smart_router = smart_router
         elif (
@@ -873,7 +873,7 @@ class CodingAgent:
         else:
             self._smart_router = None
 
-        # Track consecutive fix failures for escalation (S81)
+        # Track consecutive fix failures for escalation
         self._consecutive_fix_failures: int = 0
         self._escalated_model: str | None = None
 
@@ -1011,11 +1011,11 @@ class CodingAgent:
             self._fix_count = 0
             self._diffs_hash = ""
 
-            # Reset cascading escalation state (S81)
+            # Reset cascading escalation state
             self._consecutive_fix_failures = 0
             self._escalated_model = None
 
-            # Initialize working memory (S80)
+            # Initialize working memory
             self._working_memory = WorkingMemory(task_id=self._task_id)
 
             # Start sandbox session
@@ -1027,7 +1027,7 @@ class CodingAgent:
 
             self._log("init", "task_started", f"Task: {task[:200]}")
 
-            # Persist task start (S76)
+            # Persist task start
             if self._history_store is not None:
                 try:
                     self._history_store.record_task_start(
@@ -1040,7 +1040,7 @@ class CodingAgent:
                     logger.debug("History record_task_start failed: %s", exc)
             self._test_run_counter = 0
 
-            # Initialize session fingerprint (S75)
+            # Initialize session fingerprint
             if self._fingerprint is not None:
                 self._fingerprint.set_task(task)
 
@@ -1227,7 +1227,7 @@ class CodingAgent:
         Sends the task to the LLM with the planning system prompt.
         Parses the structured response into a CodingPlan.
 
-        S80: Retries with reinforced prompts on JSON parse failure.
+        Retries with reinforced prompts on JSON parse failure.
         Falls back to numbered list parsing after max_plan_retries.
 
         Returns:
@@ -1273,7 +1273,7 @@ class CodingAgent:
         )
         self._emit("plan_ready", {"plan": self._plan.to_dict()})
 
-        # Persist plan (S76)
+        # Persist plan
         if self._history_store is not None and self._plan:
             try:
                 self._history_store.update_task_status(
@@ -1284,7 +1284,7 @@ class CodingAgent:
             except Exception as exc:
                 logger.debug("History update_task_status failed: %s", exc)
 
-        # Update fingerprint with plan size (S75)
+        # Update fingerprint with plan size
         if self._fingerprint is not None and self._plan:
             self._fingerprint.set_task(self._task, self._plan.total_steps)
 
@@ -1293,7 +1293,7 @@ class CodingAgent:
     def _generate_plan_with_retries(self, base_prompt: str) -> CodingPlan:
         """Generate plan with retry on JSON parse failure.
 
-        Retry strategy (S80):
+        Retry strategy:
         1. First attempt: standard prompt
         2. Retries 1..N-1: append JSON_RETRY_SUFFIX to prompt
         3. Final attempt: request numbered list via SIMPLIFIED_PLAN_SUFFIX
@@ -1405,7 +1405,7 @@ class CodingAgent:
     # Phase 2: Implementation
     # -----------------------------------------------------------------
 
-    # -- Error classification (S79) --
+    # -- Error classification --
 
     # Patterns indicating transient sandbox errors that may succeed on retry
     _TRANSIENT_PATTERNS = (
@@ -1530,7 +1530,7 @@ class CodingAgent:
                 f"Exceeded {self._config.max_iterations} iterations",
                 success=False,
             )
-            # Persist failure (S76)
+            # Persist failure
             if self._history_store is not None:
                 try:
                     self._history_store.update_task_status(
@@ -1572,7 +1572,7 @@ class CodingAgent:
             "error": step.error,
         })
 
-        # Update session fingerprint (S75)
+        # Update session fingerprint
         if self._fingerprint is not None:
             self._fingerprint.on_step({
                 "file_path": step.file_path or "",
@@ -1582,7 +1582,7 @@ class CodingAgent:
                 "completed": step.completed,
             })
 
-        # Update working memory (S80)
+        # Update working memory
         if self._working_memory is not None:
             self._working_memory.update_from_step(
                 step_number=step.step_number,
@@ -1602,7 +1602,7 @@ class CodingAgent:
                 except Exception as exc:
                     logger.debug("Working memory persist failed: %s", exc)
 
-        # Persist step (S76)
+        # Persist step
         if self._history_store is not None:
             try:
                 self._history_store.record_step(
@@ -1756,7 +1756,7 @@ class CodingAgent:
             "output": result.output[:500],
         })
 
-        # Update session fingerprint (S75)
+        # Update session fingerprint
         if self._fingerprint is not None:
             self._fingerprint.on_test({
                 "passed": result.passed,
@@ -1764,7 +1764,7 @@ class CodingAgent:
                 "error": result.error or "",
             })
 
-        # Persist test result (S76)
+        # Persist test result
         if self._history_store is not None:
             try:
                 self._test_run_counter += 1
@@ -1786,7 +1786,7 @@ class CodingAgent:
     def _fix_loop(self, test_result: TestResult) -> bool:
         """Attempt to fix test failures using the LLM.
 
-        S81: After escalate_after_failures consecutive failures on the
+        After escalate_after_failures consecutive failures on the
         current model, auto-escalate to the next cascade tier if
         cascading is enabled.
 
@@ -1844,7 +1844,7 @@ class CodingAgent:
                 test_result = new_result
                 self._consecutive_fix_failures += 1
 
-                # S81: Check if we should escalate to a stronger model
+                # Check if we should escalate to a stronger model
                 self._maybe_escalate(attempt)
 
             except Exception as exc:
@@ -1858,7 +1858,7 @@ class CodingAgent:
         return False
 
     def _maybe_escalate(self, current_attempt: int) -> None:
-        """Check if fix failures warrant model escalation (S81).
+        """Check if fix failures warrant model escalation.
 
         If cascading is enabled and we have reached
         escalate_after_failures consecutive failures, find the next
@@ -1911,12 +1911,12 @@ class CodingAgent:
             "tier_index": next_tier_idx,
         })
 
-    # Step types considered "simple" for per-step routing (S81)
+    # Step types considered "simple" for per-step routing
     _SIMPLE_STEP_TYPES = frozenset({PlanStepType.BASH, PlanStepType.TEST})
     _COMPLEX_STEP_TYPES = frozenset({PlanStepType.CREATE, PlanStepType.EDIT})
 
     def _get_model_for_step(self, step: PlanStep) -> str | None:
-        """Resolve the model to use for a given step (S81 per-step routing).
+        """Resolve the model to use for a given step (per-step routing).
 
         When per_step_routing is enabled and a cascading engine is
         available, simple steps (bash, test) are routed to the fastest
@@ -1966,7 +1966,7 @@ class CodingAgent:
                     except Exception:
                         pass
 
-        # Inject working memory context (S80)
+        # Inject working memory context
         memory_context = ""
         if self._working_memory is not None:
             compact = self._working_memory.to_compact()
@@ -2163,7 +2163,7 @@ class CodingAgent:
 
         for diff in self._diffs:
             dest = os.path.join(target, diff.path)
-            # SECURITY (S184): the apply phase is the ONLY exit from the sandbox.
+            # SECURITY: the apply phase is the ONLY exit from the sandbox.
             # Constrain every write/delete to within ``target``. A diff path that
             # contains ".." (or resolves outside the project via a symlink) must
             # not escape onto the host filesystem. _validate_apply_target only
@@ -2211,7 +2211,7 @@ class CodingAgent:
             "errors": len(errors),
         })
 
-        # Persist completion (S76)
+        # Persist completion
         if self._history_store is not None:
             try:
                 self._history_store.record_checkpoint(
@@ -2247,7 +2247,7 @@ class CodingAgent:
         self._log("abort", "task_aborted", f"Task {self._task_id} aborted")
         self._emit("aborted", {})
 
-        # Persist abort (S76)
+        # Persist abort
         if self._history_store is not None:
             try:
                 self._history_store.record_checkpoint(
@@ -2262,7 +2262,7 @@ class CodingAgent:
             except Exception as exc:
                 logger.debug("History abort persist failed: %s", exc)
 
-        # Record abort in fingerprint (S75)
+        # Record abort in fingerprint
         if self._fingerprint is not None:
             self._fingerprint.on_checkpoint({
                 "action": "abort",
@@ -2272,7 +2272,7 @@ class CodingAgent:
         return self._cleanup()
 
     # -----------------------------------------------------------------
-    # Session fingerprint (S75)
+    # Session fingerprint
     # -----------------------------------------------------------------
 
     def record_checkpoint(
@@ -2295,7 +2295,7 @@ class CodingAgent:
                 "anchor": anchor,
             })
 
-        # Persist checkpoint (S76)
+        # Persist checkpoint
         if self._history_store is not None:
             try:
                 plan_snap = self._plan.to_dict() if self._plan else None
@@ -2327,17 +2327,17 @@ class CodingAgent:
 
     @property
     def working_memory(self) -> WorkingMemory | None:
-        """Access the current working memory (S80)."""
+        """Access the current working memory."""
         return self._working_memory
 
     @property
     def cascading_engine(self) -> "CascadingInference | None":
-        """Access the cascading inference engine (S81)."""
+        """Access the cascading inference engine."""
         return self._cascading
 
     @property
     def escalated_model(self) -> str | None:
-        """Current escalated model, or None if not escalated (S81)."""
+        """Current escalated model, or None if not escalated."""
         return self._escalated_model
 
     def get_working_memory_compact(self) -> str:

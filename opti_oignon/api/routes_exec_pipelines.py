@@ -38,7 +38,7 @@ except ImportError:
 # =============================================================================
 
 class ExecStepSchema(BaseModel):
-    """Schema of ae etape d'execution."""
+    """Schema of an execution step."""
     step_type: str
     label: str = ""
     model_override: str | None = None

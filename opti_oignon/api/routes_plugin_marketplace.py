@@ -379,7 +379,7 @@ def add_plugin_review(
 ) -> dict:
     """Add a review for a plugin.
 
-    REV-2 (S219): the review author and owner are bound server-side to
+    The review author and owner are bound server-side to
     the authenticated identity (the router already carries the auth
     dependency, MKT-01); clients cannot review under an arbitrary name.
     """

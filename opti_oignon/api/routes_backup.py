@@ -208,7 +208,7 @@ class EncryptedImportRequest(BaseModel):
 
 @router.post("/export/encrypted")
 def export_encrypted_backup(req: EncryptedExportRequest) -> dict:
-    """Export an encrypted backup (S125).
+    """Export an encrypted backup.
 
     Encrypts the backup JSON with a user-provided password using
     PBKDF2 key derivation and AES encryption. Returns base64-encoded
@@ -256,7 +256,7 @@ def export_encrypted_backup(req: EncryptedExportRequest) -> dict:
 
 @router.post("/import/encrypted")
 def import_encrypted_backup(req: EncryptedImportRequest) -> JSONResponse:
-    """Import an encrypted backup (S125).
+    """Import an encrypted backup.
 
     Decrypts the backup with the provided password, then applies
     it using the specified strategy (merge or replace).

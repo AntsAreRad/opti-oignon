@@ -645,7 +645,7 @@ class PerformanceMonitor:
 try:
     performance_monitor = PerformanceMonitor()
     PERFORMANCE_MONITOR_AVAILABLE = True
-    logger.info("PerformanceMonitor initialized (S72)")
+    logger.info("PerformanceMonitor initialized")
 except Exception as _e:
     logger.warning("PerformanceMonitor unavailable: %s", _e)
     performance_monitor = None

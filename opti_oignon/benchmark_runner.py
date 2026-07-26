@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Runner — S88
+Benchmark Runner
 
 Orchestrates benchmark runs across models and profiles. Runs questions
 sequentially or in parallel, collects evaluation results, computes
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -165,7 +165,7 @@ class ModelScore:
     composite: float = 0.0
     questions_evaluated: int = 0
     question_results: list = field(default_factory=list)
-    # S224 (R-01 benchmark semantics, spec 4.3): a model the governor
+    # Benchmark semantics (spec 4.3): a model the governor
     # refuses is SKIPPED and recorded as not-admitted with the reason --
     # never silently downsized.
     not_admitted: bool = False
@@ -262,9 +262,9 @@ class ResultsStore:
                     CREATE INDEX IF NOT EXISTS idx_qresults_run
                         ON benchmark_question_results(run_id, model);
                 """)
-                # S224: additive columns for the not-admitted recording
+                # Additive columns for the not-admitted recording
                 # (R-01 benchmark semantics). Guarded ALTERs migrate
-                # pre-S224 databases; fresh databases already carry the
+                # legacy databases; fresh databases already carry the
                 # columns through the CREATE above (duplicate-column
                 # errors are the expected no-op). House precedent:
                 # auth_2fa, plugin_reviews, semantic_cache.
@@ -621,7 +621,7 @@ def _question_result_details(qr: Any) -> dict:
 # LLM query helper
 # ---------------------------------------------------------------------------
 
-# S193 BMK-02: per-timeout cached Ollama clients (RSN-02 idiom) so the
+# Per-timeout cached Ollama clients so the
 # profile timeout is actually enforced at the transport level; it was
 # previously accepted and silently ignored.
 _OLLAMA_CLIENTS: dict[int, Any] = {}
@@ -642,7 +642,7 @@ def _get_ollama_client(timeout: int) -> Any:
 def _chunk_message_text(chunk: Any) -> str:
     """Extract message content from a stream chunk (dict or object form).
 
-    S193 BMK-01: the ollama client returns dicts in older versions and
+    The ollama client returns dicts in older versions and
     typed objects in newer ones; handle both (MEM-06 idiom) instead of
     the dict-only access that silently emptied every response.
     """
@@ -704,7 +704,7 @@ def _query_ollama(
         for chunk in stream:
             content = _chunk_message_text(chunk)
             if content:
-                # S193 BMK-03: TTFT measured at the first content-bearing
+                # TTFT measured at the first content-bearing
                 # chunk, not at a role-only preamble chunk.
                 if ttft == 0.0:
                     ttft = (time.time() - start) * 1000
@@ -720,7 +720,7 @@ def _query_ollama(
 
     total_ms = (time.time() - start) * 1000
     response = "".join(chunks)
-    # S193 BMK-03: prefer the exact token count reported by Ollama in the
+    # Prefer the exact token count reported by Ollama in the
     # final chunk over the chunk-count approximation.
     if eval_count:
         token_count = eval_count
@@ -728,12 +728,12 @@ def _query_ollama(
 
 
 # ---------------------------------------------------------------------------
-# Resource Governor wiring (S224, R-01 benchmark semantics)
+# Resource Governor wiring (benchmark semantics)
 # ---------------------------------------------------------------------------
 
 
 def _resolve_resource_governor() -> Any:
-    """S224: lazy governor resolver; None means unguarded (fail-open).
+    """Lazy governor resolver; None means unguarded (fail-open).
 
     sys.modules is consulted first so a test-seeded or standalone-loaded
     module is reused as-is, then the package import; any error degrades
@@ -753,7 +753,7 @@ def _resolve_resource_governor() -> Any:
 
 
 def _admit_benchmark_model(model: str) -> Any:
-    """S224: per-model admission with benchmark semantics (spec 4.3):
+    """Per-model admission with benchmark semantics (spec 4.3):
     admit or refuse, NEVER downsize (the governor enforces it through
     the absent ctx floor for this caller). None when the governor is
     absent or disabled. A positive admission expecting a load is
@@ -767,12 +767,12 @@ def _admit_benchmark_model(model: str) -> Any:
         governor = governor_module.get_resource_governor()
         if not governor.config.enabled:
             return None
-        # S225 (Bloc 2): route through the bounded opt-in queue entry.
+        # Route through the bounded opt-in queue entry.
         # With the shipped default (nobody enrolled) this degrades to
         # plain admit() bit for bit; enrolling "benchmark" in
         # queue.enabled_per_caller makes a refused admission wait
         # bounded-then-retry instead of skipping. Defensive getattr so
-        # an injected pre-S225 governor still fails open.
+        # an injected legacy governor still fails open.
         admit_fn = getattr(governor, "admit_or_wait", governor.admit)
         decision = admit_fn(model, None, caller="benchmark")
         if decision.admitted and decision.load_expected:
@@ -784,8 +784,8 @@ def _admit_benchmark_model(model: str) -> Any:
 
 
 def _evict_loaded_models() -> int:
-    """S224: best-effort eviction between benchmark models through the
-    registry's existing unload idiom (keep_alive=0, the S215 primitive);
+    """Best-effort eviction between benchmark models through the
+    registry's existing unload idiom (keep_alive=0);
     the governor snapshot is then invalidated so the next admission sees
     the clean slate. Returns the number of models unloaded (0 on any
     failure); every path fails open.
@@ -1010,7 +1010,7 @@ class BenchmarkRunner:
     ) -> None:
         """Execute a benchmark run with a fail-safe outer guard.
 
-        S193 BMK-12: an unhandled exception in the run body (e.g. a malformed
+        An unhandled exception in the run body (e.g. a malformed
         profile field) must not leave a zombie RUNNING progress and a
         permanently-busy runner (is_busy would then lock the v2 run endpoint
         at 409). Mark the run FAILED, persist a minimal failed record, clear
@@ -1134,7 +1134,7 @@ class BenchmarkRunner:
             if run_id in self._cancelled:
                 break
 
-            # S224: per-model resource admission (R-01, benchmark
+            # Per-model resource admission (benchmark
             # semantics 4.3: admit or refuse, NEVER downsize). A refused
             # model is SKIPPED and recorded as not-admitted in results;
             # the run continues with the remaining models.
@@ -1189,14 +1189,14 @@ class BenchmarkRunner:
 
                 # Evaluate accuracy (for non-code-generation questions)
                 is_code_gen = question.category == "code_generation"
-                # S193 BJD-03: track the axes actually evaluated so the
+                # Track the axes actually evaluated so the
                 # composite renormalizes over them instead of carrying a
                 # dead axis weight.
                 evaluated_axes = {"structure", "speed"}
                 evaluated_axes.add("code" if is_code_gen else "accuracy")
 
                 if not response.strip():
-                    # S193 BJD-02: a failed/empty generation scores zero on
+                    # A failed/empty generation scores zero on
                     # every axis instead of being evaluated as text (an
                     # empty response previously scored ~0.57 composite).
                     if is_code_gen:
@@ -1292,7 +1292,7 @@ class BenchmarkRunner:
                 sum(speed_scores) / len(speed_scores)
                 if speed_scores else 0.0
             )
-            # S193 BJD-03: aggregate composite renormalized over the axes
+            # Aggregate composite renormalized over the axes
             # this model was actually evaluated on.
             model_axes = {"structure", "speed"}
             if accuracy_scores:
@@ -1309,14 +1309,14 @@ class BenchmarkRunner:
 
             model_scores[model] = ms
 
-            # S224: evict-between is the runner's default (spec 4.3): a
+            # Evict-between is the runner's default (spec 4.3): a
             # clean slate after each benchmarked model, through the
             # existing keep_alive=0 unload idiom; the governor snapshot
             # is invalidated alongside.
             if evict_between:
                 _evict_loaded_models()
 
-        # -- LLM-as-Judge evaluation (S89) --
+        # -- LLM-as-Judge evaluation --
         judge_summary = None
         if use_judge and judge_model and self._judge and BENCHMARK_JUDGE_AVAILABLE:
             if run_id not in self._cancelled:
@@ -1385,7 +1385,7 @@ class BenchmarkRunner:
             result.error = str(e)
             result.status = RunStatus.FAILED
 
-        # S193 BMK-05: enforce the configured retention so the results DB
+        # Enforce the configured retention so the results DB
         # does not grow without bound (results_retention_days existed in
         # config but cleanup() had no caller).
         if result.status == RunStatus.COMPLETED:

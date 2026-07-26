@@ -360,7 +360,7 @@ async def ingest_document(
     The file is temporarily saved, chunked, embedded, and stored in
     the specified collection.
 
-    BUG-11 S108: Improved validation and error handling.
+    Improved validation and error handling.
     """
     store = _get_store()
 
@@ -679,7 +679,7 @@ def query_knowledge_base(request: QueryRequest) -> dict:
 
 @router.post("/query/stream")
 def query_knowledge_base_stream(request: QueryRequest):
-    """Query the knowledge base with chunked transfer encoding (S159).
+    """Query the knowledge base with chunked transfer encoding.
 
     Returns the same JSON payload as ``/query`` but delivered via
     chunked transfer encoding for large responses.  The ``chunk_size``
@@ -767,7 +767,7 @@ def list_documents(
     offset: int = Query(0, ge=0),
 ) -> dict:
     """
-    List ingested documents with optional filters (S119 enhanced).
+    List ingested documents with optional filters.
 
     Supports filtering by collection, searching by filename, and
     filtering by file type. Results are paginated.
@@ -858,7 +858,7 @@ class AuditQueryRequest(BaseModel):
 
 @router.post("/injection-defense/sanitize-preview")
 def sanitize_preview(request: SanitizePreviewRequest) -> dict:
-    """Preview retrieved chunks after sanitization pipeline (S144).
+    """Preview retrieved chunks after sanitization pipeline.
 
     Returns sanitized chunks with injection scores, flags, and blocking
     decisions. If preview mode is enabled, chunks flagged as suspicious
@@ -897,7 +897,7 @@ def sanitize_preview(request: SanitizePreviewRequest) -> dict:
 
 @router.post("/injection-defense/approve")
 def approve_chunks(request: ChunkApprovalRequest) -> dict:
-    """Approve or reject chunks after preview (S144).
+    """Approve or reject chunks after preview.
 
     This is a stateless endpoint — the caller must track chunk IDs
     from the sanitize-preview response and pass approved/rejected
@@ -919,7 +919,7 @@ def query_audit_log(
     min_score: float | None = Query(None, ge=0.0, le=1.0),
     collection: str | None = Query(None),
 ) -> dict:
-    """Query the injection audit log (S144).
+    """Query the injection audit log.
 
     Returns flagged injection attempts with metadata, pattern matches,
     and chunk text (if configured).
@@ -935,7 +935,7 @@ def query_audit_log(
 
 @router.delete("/injection-defense/audit")
 def clear_audit_log() -> dict:
-    """Clear all injection audit log entries (S144)."""
+    """Clear all injection audit log entries."""
     sanitizer = _get_sanitizer()
     deleted = sanitizer.get_audit_log().clear()
     return {"deleted": deleted}
@@ -943,7 +943,7 @@ def clear_audit_log() -> dict:
 
 @router.get("/injection-defense/config")
 def get_injection_defense_config() -> dict:
-    """Get the current injection defense configuration (S144)."""
+    """Get the current injection defense configuration."""
     sanitizer = _get_sanitizer()
     config = sanitizer.config
     return {

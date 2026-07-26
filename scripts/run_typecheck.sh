@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/run_typecheck.sh — CI-ready mypy type checking with baseline gate
-# Created: S141
+# Companion to the CI typecheck job.
 #
 # Usage:
 #   ./scripts/run_typecheck.sh          # Run mypy, fail if errors exceed baseline

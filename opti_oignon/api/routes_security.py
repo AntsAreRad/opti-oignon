@@ -382,10 +382,10 @@ class SecurityConfigUpdate(BaseModel):
     rate_limiting: dict[str, Any] | None = Field(default=None, description="Rate limiting")
     sandbox: dict[str, Any] | None = Field(default=None, description="Sandbox settings")
     plugins: dict[str, Any] | None = Field(default=None, description="Plugin security")
-    encryption: dict[str, Any] | None = Field(default=None, description="Encryption settings (S125)")
-    jwt: dict[str, Any] | None = Field(default=None, description="JWT cookie settings (S125)")
-    search_safety: dict[str, Any] | None = Field(default=None, description="Search injection defense (S125)")
-    backup: dict[str, Any] | None = Field(default=None, description="Backup encryption settings (S125)")
+    encryption: dict[str, Any] | None = Field(default=None, description="Encryption settings")
+    jwt: dict[str, Any] | None = Field(default=None, description="JWT cookie settings")
+    search_safety: dict[str, Any] | None = Field(default=None, description="Search injection defense")
+    backup: dict[str, Any] | None = Field(default=None, description="Backup encryption settings")
 
 
 # =========================================================================

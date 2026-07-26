@@ -720,7 +720,7 @@ class ChatCodingSession:
                         )
                         self._last_compression_result = compressed
                         logger.info(
-                            "S66 chat coding compression: %d msgs -> "
+                            "Chat coding compression: %d msgs -> "
                             "%d compressed + %d kept, %dt saved",
                             compressed.original_count,
                             compressed.compressed_count,
@@ -729,7 +729,7 @@ class ChatCodingSession:
                         )
                 except Exception as exc:
                     logger.warning(
-                        "S66 compression failed in chat coding: %s", exc
+                        "Compression failed in chat coding: %s", exc
                     )
 
         # -- Archive retrieval: search old context on follow-ups -------------

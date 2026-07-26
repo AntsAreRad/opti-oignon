@@ -108,7 +108,7 @@ def get_metrics_status() -> dict:
 async def metrics_stream_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time metrics streaming.
 
-    S136 audit fix: authenticates before processing.
+    Authenticates before processing.
     """
     await websocket.accept()
 

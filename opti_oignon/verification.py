@@ -68,7 +68,7 @@ _LANGUAGE_ALIASES = {
 
 
 class VerificationIteration(BaseModel):
-    """Detail of ae iteration de verification."""
+    """Detail of a verification iteration."""
     iteration: int
     success: bool
     error: str = ""

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 audit_colors.py -- Automated color scanner for Opti-Oignon Svelte components.
-S92: Detects hardcoded colors, inline styles bypassing CSS variables,
+Detects hardcoded colors, inline styles bypassing CSS variables,
 and Tailwind color utility classes that override theme.css tokens.
 
 Output: JSON report with file, line number, violation type, suggested fix.

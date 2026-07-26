@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opti-Oignon -- opencode side-by-side baseline (S230, AGT_SPEC 7.5)
+# Opti-Oignon -- opencode side-by-side baseline (AGT_SPEC 7.5)
 #
 # OPTIONAL, HOST-ONLY, ONE-SHOT, REFERENCE ONLY. This script runs the SAME
 # micro-suite task fixtures through opencode (the pinned reference version)

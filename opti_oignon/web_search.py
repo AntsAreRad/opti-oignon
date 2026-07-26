@@ -244,7 +244,7 @@ class SearchResultSanitizer:
         }
         self._audit_log.append(entry)
         logger.warning(
-            "S125 PROMPT INJECTION DETECTED: pattern=%s matched=%r in %s",
+            "PROMPT INJECTION DETECTED: pattern=%s matched=%r in %s",
             pattern, matched[:60], field,
         )
 

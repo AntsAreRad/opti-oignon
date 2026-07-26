@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opti-Oignon -- Agent Eval Harness, one-command host entry (S230, AGT_SPEC 7.4)
+# Opti-Oignon -- Agent Eval Harness, one-command host entry (AGT_SPEC 7.4)
 #
 # Runs the whole (model, task, repeat) matrix against the local Ollama
 # fleet and prints the register summary. The model-in-the-loop runs are

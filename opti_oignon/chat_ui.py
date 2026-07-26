@@ -10,6 +10,6 @@ The original code is archived in opti_oignon/_deprecated/chat_ui.py
 """
 
 raise ImportError(
-    "chat_ui (Gradio) is deprecated since v1.4.0 S39. "
+    "chat_ui (Gradio) is deprecated since v1.4.0. "
     "Use the FastAPI backend + SvelteKit frontend instead."
 )

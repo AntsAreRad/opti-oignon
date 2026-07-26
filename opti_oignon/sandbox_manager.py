@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-SANDBOX MANAGER - OPTI-OIGNON v2.1.0 (S73/S81/S116)
+SANDBOX MANAGER - OPTI-OIGNON v2.1.0
 ============================================
 
 Manages fully isolated, disposable sandbox environments for LLM
 filesystem and shell tool execution. Every LLM-initiated file or
 command operation runs inside a sandbox with strict security boundaries.
 
-S116: File copy-out with human approval workflow.
+File copy-out with human approval workflow.
 - ApprovalState enum: PENDING -> APPROVED -> copied out
 - preview_file(): read file content for display (capped at 64KB)
 - approve_files(): explicitly approve specific paths for copy-out
@@ -38,7 +38,7 @@ ISOLATION BACKENDS:
 The command blocklist (blocked_commands + blocked_patterns) is applied
 on ALL backends as defense-in-depth -- even with bwrap.
 
-S81: Security audit hardening:
+Security audit hardening:
 - CommandValidator inspects recently created file contents before
   allowing bash execution that references those files
 - Extended base64-pipe-to-shell detection
@@ -75,7 +75,7 @@ _CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "config", "sandbox.yaml"
 )
 
-# Per-sandbox resource-cap bounds (S209, Bloc 0). Out-of-range configured
+# Per-sandbox resource-cap bounds. Out-of-range configured
 # values are CLAMPED into these ranges, never disabled: a cap that is set too
 # low or too high is corrected, not switched off. Defaults are conservative.
 _CAP_MEMORY_BYTES_DEFAULT = 2 * 1024 ** 3      # 2 GiB (RLIMIT_AS, per process)
@@ -94,8 +94,8 @@ _CAP_TMPFS_BYTES_DEFAULT = 256 * 1024 ** 2     # 256 MiB (--size on the tmpfs)
 _CAP_TMPFS_BYTES_MIN = 1 * 1024 ** 2           # 1 MiB
 _CAP_TMPFS_BYTES_MAX = 8 * 1024 ** 3           # 8 GiB
 
-# Workspace lifecycle bounds (S210, Bloc 1). Same clamp discipline as the
-# S209 caps: out-of-range values are corrected, never disabled. idle TTL 0
+# Workspace lifecycle bounds. Same clamp discipline as the
+# caps: out-of-range values are corrected, never disabled. idle TTL 0
 # is the documented "disabled" value (no idle reaping).
 _TTL_SECONDS_DEFAULT = 3600                     # 1 hour idle -> destroyed
 _TTL_SECONDS_MIN = 0                            # 0 disables the idle TTL
@@ -104,15 +104,15 @@ _DISK_SOFT_BYTES_DEFAULT = 512 * 1024 ** 2     # 512 MiB per workspace
 _DISK_SOFT_BYTES_MIN = 1 * 1024 ** 2           # 1 MiB
 _DISK_SOFT_BYTES_MAX = 16 * 1024 ** 3          # 16 GiB
 
-# Bounded disk-use walk (S210): the approximate per-workspace disk figure is
+# Bounded disk-use walk: the approximate per-workspace disk figure is
 # a scandir walk capped on entries and depth so a pathological tree cannot
 # stall the manager. The figure is approximate by design.
 _DISK_WALK_MAX_ENTRIES = 10000
 _DISK_WALK_MAX_DEPTH = 32
 
-# Copy-in bounds (S211, Bloc 2). Same clamp discipline (correct, never
+# Copy-in bounds. Same clamp discipline (correct, never
 # disable). The per-request upload total and the clone total are ALSO bounded
-# by the S210 per-workspace disk soft quota: the caps below bound a single
+# by the per-workspace disk soft quota: the caps below bound a single
 # request, the quota bounds the workspace as a whole -- both apply.
 _UPLOAD_MAX_FILES_DEFAULT = 64
 _UPLOAD_MAX_FILES_MIN = 1
@@ -127,23 +127,23 @@ _CLONE_MAX_FILES_DEFAULT = 20000
 _CLONE_MAX_FILES_MIN = 1
 _CLONE_MAX_FILES_MAX = 1000000
 
-# Exact pre-walk bound for the clone source (S211): unlike the approximate
+# Exact pre-walk bound for the clone source: unlike the approximate
 # disk-use walk above, hitting this depth REFUSES the clone rather than
 # silently undercounting -- a cap enforced on a partial figure is no cap.
 _CLONE_WALK_MAX_DEPTH = 32
 
-# Streamed copy/hash chunk size for the copy-in paths (S211).
+# Streamed copy/hash chunk size for the copy-in paths.
 _COPYIN_CHUNK_BYTES = 65536
 
-# Diff review bound (S212, Bloc 3). A review gate must present the WHOLE
+# Diff review bound. A review gate must present the WHOLE
 # change set or refuse: a truncated or paginated review would let the user
 # approve against an incomplete picture. Exceeding this entry bound REFUSES
-# the diff (the S211 exact-prewalk refusal semantics), never truncates.
+# the diff (the exact-prewalk refusal semantics), never truncates.
 _DIFF_MAX_ENTRIES_DEFAULT = 50000
 _DIFF_MAX_ENTRIES_MIN = 1
 _DIFF_MAX_ENTRIES_MAX = 1000000
 
-# Provision-run timeout (S213, Bloc 4). The provision phase is the one
+# Provision-run timeout. The provision phase is the one
 # network-on run (dependency installation into a workspace venv); a real
 # pip install needs longer than the interactive command_timeout. This is a
 # TIMEOUT key only -- there is no configuration key that turns the network
@@ -170,7 +170,7 @@ def _clamp(value: int, low: int, high: int) -> int:
 
 
 def _normalize_share_roots(raw: list[str] | None) -> list[str]:
-    """Normalize the host-share root allowlist (S211, Bloc 2).
+    """Normalize the host-share root allowlist.
 
     Each entry is expanduser'd and realpath'd at load time so the browse and
     clone confinement checks compare resolved paths against resolved roots.
@@ -266,7 +266,7 @@ class IsolationBackend(enum.Enum):
 
 
 class ApprovalState(enum.Enum):
-    """Approval state for sandbox file copy-out (S116).
+    """Approval state for sandbox file copy-out.
 
     Files created inside the sandbox MUST go through this state
     machine before they can be copied to the host filesystem.
@@ -372,9 +372,9 @@ class SandboxConfig:
     ])
     bwrap_never_bind: list[str] = field(default_factory=list)
     disable_web_search_in_sandbox: bool = False
-    # S124: Strict mode — refuse ALL code execution if bwrap is unavailable
+    # Strict mode — refuse ALL code execution if bwrap is unavailable
     strict_mode: bool = True
-    # S209 (Bloc 0): per-sandbox resource caps. limits_enabled gates the caps;
+    # Per-sandbox resource caps. limits_enabled gates the caps;
     # resource_backend selects the mechanism. "rlimit" (default) installs
     # RLIMIT_* via a preexec hook (dependency-free, native, per-process AS and
     # per-uid NPROC semantics). "cgroup" wraps the launch in a transient
@@ -387,13 +387,13 @@ class SandboxConfig:
     limit_fsize_bytes: int = _CAP_FSIZE_BYTES_DEFAULT
     limit_cpu_seconds: int = _CAP_CPU_SECONDS_DEFAULT
     tmpfs_size_bytes: int = _CAP_TMPFS_BYTES_DEFAULT
-    # S209 (Bloc 0): seccomp denylist. seccomp_enabled builds and passes the
+    # Seccomp denylist. seccomp_enabled builds and passes the
     # filter on every bwrap launch. seccomp_required makes a build/pass failure
     # REFUSE the launch (fail-secure) rather than run unfiltered; flip it off
     # only with the loud warning logged below.
     seccomp_enabled: bool = True
     seccomp_required: bool = True
-    # S210 (Bloc 1): workspace lifecycle. Workspaces default ephemeral under
+    # Workspace lifecycle. Workspaces default ephemeral under
     # workspace_base (which is volatile under /tmp and does not survive a
     # reboot). workspace_persistent=True skips the startup reconcile so files
     # under a configured persistent base survive restarts -- the documented
@@ -406,32 +406,32 @@ class SandboxConfig:
     reconcile_on_start: bool = True
     idle_ttl_seconds: int = _TTL_SECONDS_DEFAULT
     disk_soft_limit_bytes: int = _DISK_SOFT_BYTES_DEFAULT
-    # S211 (Bloc 2): copy-in. host_share_roots is the allowlist the host
+    # Copy-in. host_share_roots is the allowlist the host
     # browse and clone are confined to (normalized at load: expanduser +
     # realpath, "/" refused, non-directories dropped; empty/unset defaults to
     # the user's home). The upload caps bound a single multipart request
     # (count and per-file bytes); the clone caps bound a single clone (bytes
     # and file count). The request/clone TOTAL is additionally bounded by the
-    # S210 per-workspace disk soft quota -- the caps and the quota both
+    # per-workspace disk soft quota -- the caps and the quota both
     # apply, neither subsumes the other.
     host_share_roots: list[str] = field(default_factory=list)
     upload_max_files: int = _UPLOAD_MAX_FILES_DEFAULT
     upload_max_file_bytes: int = _UPLOAD_MAX_FILE_BYTES_DEFAULT
     clone_max_bytes: int = _CLONE_MAX_BYTES_DEFAULT
     clone_max_files: int = _CLONE_MAX_FILES_DEFAULT
-    # S212 (Bloc 3): the diff review entry bound. A diff whose classified
+    # The diff review entry bound. A diff whose classified
     # entry count (baseline union live files) would exceed this REFUSES
     # instead of truncating or paginating: the review gate must present the
     # whole change set or nothing.
     diff_max_entries: int = _DIFF_MAX_ENTRIES_DEFAULT
 
-    # S213 (Bloc 4): the provision-run timeout. NOT a network default --
+    # The provision-run timeout. NOT a network default --
     # the per-workspace network flag has no configuration surface at all.
     provision_timeout_seconds: int = _PROVISION_TIMEOUT_DEFAULT
 
     def __post_init__(self) -> None:
         # Clamp every cap into its documented range. Out-of-range values are
-        # corrected, never disabled (S209). resource_backend falls back to the
+        # corrected, never disabled. resource_backend falls back to the
         # dependency-free default if an unknown value is configured.
         self.limit_memory_bytes = _clamp(
             self.limit_memory_bytes, _CAP_MEMORY_BYTES_MIN, _CAP_MEMORY_BYTES_MAX
@@ -450,7 +450,7 @@ class SandboxConfig:
         )
         if self.resource_backend not in _RESOURCE_BACKENDS:
             self.resource_backend = "rlimit"
-        # S210 lifecycle clamps (same discipline: correct, never disable).
+        # Lifecycle clamps (same discipline: correct, never disable).
         self.idle_ttl_seconds = _clamp(
             self.idle_ttl_seconds, _TTL_SECONDS_MIN, _TTL_SECONDS_MAX
         )
@@ -459,7 +459,7 @@ class SandboxConfig:
             _DISK_SOFT_BYTES_MIN,
             _DISK_SOFT_BYTES_MAX,
         )
-        # S211 copy-in clamps + share-root normalization (correct, never
+        # Copy-in clamps + share-root normalization (correct, never
         # disable; "/" is never an allowed share root).
         self.upload_max_files = _clamp(
             self.upload_max_files, _UPLOAD_MAX_FILES_MIN, _UPLOAD_MAX_FILES_MAX
@@ -475,11 +475,11 @@ class SandboxConfig:
         self.clone_max_files = _clamp(
             self.clone_max_files, _CLONE_MAX_FILES_MIN, _CLONE_MAX_FILES_MAX
         )
-        # S212 diff review bound (same discipline: correct, never disable).
+        # Diff review bound (same discipline: correct, never disable).
         self.diff_max_entries = _clamp(
             self.diff_max_entries, _DIFF_MAX_ENTRIES_MIN, _DIFF_MAX_ENTRIES_MAX
         )
-        # S213 provision timeout (same discipline).
+        # Provision timeout (same discipline).
         self.provision_timeout_seconds = _clamp(
             self.provision_timeout_seconds,
             _PROVISION_TIMEOUT_MIN,
@@ -568,7 +568,7 @@ def _load_config() -> SandboxConfig:
     except Exception as exc:
         logger.warning("Failed to load sandbox config: %s", exc)
 
-    # S124: security.yaml strict_mode overrides sandbox.yaml
+    # Security.yaml strict_mode overrides sandbox.yaml
     try:
         import yaml
         sec_path = os.path.join(
@@ -594,7 +594,7 @@ def _load_config() -> SandboxConfig:
 class SandboxSession:
     """Tracks a single sandbox session.
 
-    S210 (Bloc 1): a session is a user-owned workspace with a stable id.
+    A session is a user-owned workspace with a stable id.
     Stored state lives here (label, owner, binding, activity); derived
     figures (age, running, approximate disk use) are computed by
     ``list_sessions`` so they are never stale on the object.
@@ -606,16 +606,16 @@ class SandboxSession:
     created_at: float = field(default_factory=time.time)
     active: bool = True
     command_count: int = 0
-    # S116: Approval state machine for copy-out
+    # Approval state machine for copy-out
     approval_state: ApprovalState = ApprovalState.PENDING
     approved_paths: set[str] = field(default_factory=set)
     approved_at: float | None = None
-    # S210 (Bloc 1): workspace lifecycle fields. label is the optional human
+    # Workspace lifecycle fields. label is the optional human
     # name; owner_user_id follows the effective_user_id isolation pattern
     # (the workspace implies its owning user); bound_conversation_id mirrors
     # the sandbox_workspace binding store (write-through, the store is the
     # mutation point); network_enabled is the per-workspace network flag --
-    # default False, flipped ONLY by set_network_enabled (S213, Bloc 4: an
+    # default False, flipped ONLY by set_network_enabled (an
     # explicit user action behind the Daily-only gate; never a config
     # default, never model-triggerable); last_activity drives the idle TTL;
     # timeout_override is the per-sandbox command timeout.
@@ -625,7 +625,7 @@ class SandboxSession:
     network_enabled: bool = False
     last_activity: float = field(default_factory=time.time)
     timeout_override: int | None = None
-    # S212 (Bloc 3): deletions confirmed for apply-to-host. PARALLEL to
+    # Deletions confirmed for apply-to-host. PARALLEL to
     # approved_paths by design: approve_files validates os.path.isfile so a
     # deleted entry can never enter approved_paths, and a blanket approve-all
     # can never include a deletion. The load-bearing check is in the apply
@@ -638,7 +638,7 @@ class SandboxSession:
 class WorkspaceQuotaExceeded(Exception):
     """A copy-in would push the workspace past its disk soft quota.
 
-    Raised by the inject paths (S210). Soft semantics: the copy-in is
+    Raised by the inject paths. Soft semantics: the copy-in is
     refused with this error; the workspace itself is never destroyed.
     """
 
@@ -673,7 +673,7 @@ class AuditLog:
     def _get_conn(self) -> sqlite3.Connection:
         """Get a SQLite connection.
 
-        S136 audit fix: routes through get_encrypted_connection().
+        Audit fix: routes through get_encrypted_connection().
         """
         return safe_connect(self._db_path)
 
@@ -775,7 +775,7 @@ class AuditLog:
             conn = self._get_conn()
             try:
                 conn.execute("DELETE FROM sandbox_audit")
-                # S116: clear approval audit if table exists
+                # Clear approval audit if table exists
                 try:
                     conn.execute("DELETE FROM sandbox_approval_audit")
                 except sqlite3.OperationalError:
@@ -785,7 +785,7 @@ class AuditLog:
                 conn.close()
 
     def _ensure_approval_table(self) -> None:
-        """Create the approval audit table if it does not exist (S116)."""
+        """Create the approval audit table if it does not exist."""
         with self._lock:
             conn = self._get_conn()
             try:
@@ -816,7 +816,7 @@ class AuditLog:
         dest_dir: str = "",
         detail: str = "",
     ) -> None:
-        """Record an approval/rejection/copy-out event (S116)."""
+        """Record an approval/rejection/copy-out event."""
         self._ensure_approval_table()
         import json
         paths_json = json.dumps(paths or [])
@@ -836,7 +836,7 @@ class AuditLog:
                 conn.close()
 
     def get_approval_log(self, session_id: str) -> list[dict[str, Any]]:
-        """Retrieve all approval audit entries for a session (S116)."""
+        """Retrieve all approval audit entries for a session."""
         self._ensure_approval_table()
         with self._lock:
             conn = self._get_conn()
@@ -863,7 +863,7 @@ class CommandValidator:
     A blocklist can never be exhaustive, but it catches the obvious
     cases and adds friction against accidental damage.
 
-    S81 additions:
+    Additions:
     - Tracks recently created files and inspects their content before
       allowing bash execution that references them (write-then-execute
       attack vector).
@@ -872,7 +872,7 @@ class CommandValidator:
     - Extended Python subprocess pattern detection.
     """
 
-    # S209 boundary note: this regex command denylist is SECONDARY
+    # Boundary note: this regex command denylist is SECONDARY
     # defense-in-depth ONLY. It is bypassable -- base64/eval, here-docs,
     # write-then-execute, obscure interpreters -- and must never be relied on
     # as the security boundary. The boundary is the namespace isolation that
@@ -920,7 +920,7 @@ class CommandValidator:
                     "Invalid blocked pattern '%s': %s", pattern_str, exc
                 )
 
-        # S81: Track recently created files for write-then-execute detection
+        # Track recently created files for write-then-execute detection
         self._recent_files: dict[str, str] = {}
         self._recent_files_lock = threading.Lock()
 
@@ -995,7 +995,7 @@ class CommandValidator:
         ):
             return False, "Blocked python -c with network module"
 
-        # S81: Block python -c with subprocess (constructed args attack)
+        # Block python -c with subprocess (constructed args attack)
         if re.search(
             r"python[23]?\s+-c\s+.*\b(subprocess|os\.system|os\.popen|"
             r"os\.exec[a-z]*|pty\.spawn)\b",
@@ -1004,7 +1004,7 @@ class CommandValidator:
         ):
             return False, "Blocked python -c with subprocess/os.exec"
 
-        # S81: Block base64-encoded commands piped to execution
+        # Block base64-encoded commands piped to execution
         # Extended: covers hex decode, xxd, and printf byte sequences
         if re.search(
             r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh|python|perl|ruby)",
@@ -1013,14 +1013,14 @@ class CommandValidator:
         ):
             return False, "Blocked base64 decode piped to shell"
 
-        # S81: Block echo with base64 piped to decode then execute
+        # Block echo with base64 piped to decode then execute
         if re.search(
             r"echo\s+['\"]?[A-Za-z0-9+/=]{20,}['\"]?\s*\|\s*base64\s+(-d|--decode)",
             command,
         ):
             return False, "Blocked echo of base64 payload to decode"
 
-        # S81: Block xxd reverse piped to shell
+        # Block xxd reverse piped to shell
         if re.search(
             r"xxd\s+-r.*\|\s*(bash|sh|zsh|python)",
             command,
@@ -1028,7 +1028,7 @@ class CommandValidator:
         ):
             return False, "Blocked xxd reverse piped to shell"
 
-        # S81: Block Python subprocess with shell=True or Popen
+        # Block Python subprocess with shell=True or Popen
         if re.search(
             r"python[23]?\s+-c\s+.*\bsubprocess\.(Popen|call|run|"
             r"check_output|check_call)\b",
@@ -1037,7 +1037,7 @@ class CommandValidator:
         ):
             return False, "Blocked python -c with subprocess calls"
 
-        # S81: Check write-then-execute attack vector
+        # Check write-then-execute attack vector
         safe, reason = self._check_file_execution(command)
         if not safe:
             return False, reason
@@ -1185,7 +1185,7 @@ def _build_bwrap_command(
       LANG, LC_ALL are set; no host environment variable is inherited
     - NO network, NO host PIDs, NO host home/var/etc
 
-    S213 (Bloc 4): ``allow_network`` is keyword-only and defaults to False,
+    ``allow_network`` is keyword-only and defaults to False,
     keeping the default argv byte-identical (pinned by test). When True --
     the PROVISION run only, never a task run -- ``--unshare-net`` is
     omitted and the name-resolution files (the realpath of
@@ -1200,7 +1200,7 @@ def _build_bwrap_command(
         workspace: Host path to the sandbox workspace.
         config: Sandbox configuration.
         seccomp_fd: Inheritable fd carrying the seccomp filter, if any.
-        allow_network: Provision-run network grant (S213); default False.
+        allow_network: Provision-run network grant; default False.
 
     Returns:
         Complete command list for subprocess.run().
@@ -1254,7 +1254,7 @@ def _build_bwrap_command(
     # Isolated /proc (shows only sandbox PID namespace processes)
     cmd.extend(["--proc", "/proc"])
 
-    # Isolated /tmp (tmpfs, separate from host) with a size cap (S209). The
+    # Isolated /tmp (tmpfs, separate from host) with a size cap. The
     # --size option applies to the immediately following filesystem mount, so
     # it must precede --tmpfs. The read-write workspace is a real bind, not a
     # tmpfs: its disk is bounded by RLIMIT_FSIZE (per file) plus the Bloc 1
@@ -1264,14 +1264,14 @@ def _build_bwrap_command(
         "--tmpfs", "/tmp",
     ])
 
-    # Namespace isolation flags. net and pid were already unshared; S209 adds
+    # Namespace isolation flags. net and pid were already unshared; this adds
     # ipc, uts, and cgroup so the child shares no host SysV/POSIX IPC, sees no
     # host hostname/domainname, and has no host cgroup view. net and pid stay
     # listed explicitly (not folded into --unshare-all) so each isolation
     # boundary is individually pinned and the user namespace / uid-gid mapping
     # is left untouched.
     #
-    # S213 (Bloc 4): --unshare-net is unconditional on every task run; ONLY
+    # --unshare-net is unconditional on every task run; ONLY
     # the provision run (allow_network=True, reachable solely through
     # execute_provision_command behind the Daily-only gate) omits it. Raw
     # --share-net does not exist as a grant here: bwrap networking is simply
@@ -1282,14 +1282,14 @@ def _build_bwrap_command(
         cmd.append("--unshare-net")   # No network access whatsoever
     cmd.extend([
         "--unshare-pid",       # Isolated PID namespace
-        "--unshare-ipc",       # No host SysV/POSIX IPC sharing (S209)
-        "--unshare-uts",       # No host hostname/domainname leak (S209)
-        "--unshare-cgroup",    # No host cgroup view (S209)
+        "--unshare-ipc",       # No host SysV/POSIX IPC sharing
+        "--unshare-uts",       # No host hostname/domainname leak
+        "--unshare-cgroup",    # No host cgroup view
         "--new-session",       # No terminal/tty escape
         "--die-with-parent",   # Kill sandbox if parent dies
     ])
 
-    # S213: name resolution for the provision run only. File-level ro-binds
+    # Name resolution for the provision run only. File-level ro-binds
     # (never directories); resolv.conf is bound via its realpath because on
     # systemd-resolved hosts /etc/resolv.conf is a symlink into /run, which
     # is (and stays) in the never-bind list. These files carry no secrets.
@@ -1302,7 +1302,7 @@ def _build_bwrap_command(
             if os.path.isfile(real):
                 cmd.extend(["--ro-bind", real, ns_file])
 
-    # Seccomp denylist filter (S209). The fd is created and passed by
+    # Seccomp denylist filter. The fd is created and passed by
     # _run_bwrap; the filter reduces kernel syscall surface but is NOT the
     # boundary -- the namespaces are. Only emitted when a fd is supplied.
     if seccomp_fd is not None:
@@ -1318,7 +1318,7 @@ def _build_bwrap_command(
 
 
 # ---------------------------------------------------------------------------
-# Resource caps (S209, Bloc 0)
+# Resource caps
 # ---------------------------------------------------------------------------
 
 def _make_rlimit_preexec(config: SandboxConfig):
@@ -1395,7 +1395,7 @@ class SandboxManager:
         self._validator = CommandValidator(self._config)
         self._degraded_confirmed = False
         self._unshare_available: bool | None = None  # Lazy-detected
-        # S210 (Bloc 1): per-session running-process registry. The stop path
+        # Per-session running-process registry. The stop path
         # needs a handle on the running child, so spawns register their Popen
         # here (under the lock) for the duration of the command and deregister
         # in a finally. A session with an entry is "running"; without, "idle".
@@ -1408,7 +1408,7 @@ class SandboxManager:
         # Ensure workspace base exists
         os.makedirs(self._config.workspace_base, mode=0o700, exist_ok=True)
 
-        # S210 (Bloc 1): startup reconcile. Sessions are in-memory and die
+        # Startup reconcile. Sessions are in-memory and die
         # with the process, so any sandbox-* directory found under
         # workspace_base at startup is an orphan; reap it (reset_*-style)
         # unless the user opted into a persistent base, where surviving
@@ -1439,7 +1439,7 @@ class SandboxManager:
     def _resolve_backend(self) -> IsolationBackend:
         """Determine which isolation backend to use.
 
-        S124: In strict_mode, refuse tempdir fallback entirely.
+        In strict_mode, refuse tempdir fallback entirely.
         """
         preference = self._config.isolation_backend.lower()
 
@@ -1506,12 +1506,12 @@ class SandboxManager:
 
     @property
     def strict_mode(self) -> bool:
-        """Whether strict mode is enabled (S124)."""
+        """Whether strict mode is enabled."""
         return self._config.strict_mode
 
     @property
     def execution_blocked(self) -> bool:
-        """Whether code execution is blocked (strict_mode + no bwrap) (S124)."""
+        """Whether code execution is blocked (strict_mode + no bwrap)."""
         return (
             self._config.strict_mode
             and not self._bwrap_available
@@ -1519,7 +1519,7 @@ class SandboxManager:
         )
 
     def get_isolation_status(self) -> dict[str, Any]:
-        """Return comprehensive isolation status for health checks (S124).
+        """Return comprehensive isolation status for health checks.
 
         Returns a dict suitable for inclusion in /api/health responses.
         """
@@ -1581,16 +1581,16 @@ class SandboxManager:
 
         Args:
             session_id: Unique identifier for this sandbox session, or None
-                to auto-generate one (S210; previously a None leaked into
+                to auto-generate one (previously a None leaked into
                 the key and the directory prefix).
             allow_degraded: If True, allow tempdir mode without prior
                 confirmation. If False (default), degraded mode requires
                 confirm_degraded_mode() to have been called first.
-            label: Optional human label for the workspace manager (S210).
+            label: Optional human label for the workspace manager.
             owner_user_id: Owning user per the effective_user_id isolation
-                pattern (S210); defaults to the single-user "local".
+                pattern; defaults to the single-user "local".
             timeout_override: Optional per-sandbox command timeout in
-                seconds (S210); None uses the config default.
+                seconds; None uses the config default.
 
         Returns:
             SandboxSession with workspace path set.
@@ -1615,7 +1615,7 @@ class SandboxManager:
                         "risks, or install bubblewrap for real isolation."
                     )
 
-        # S210: reap idle, unbound workspaces past the TTL before the
+        # Reap idle, unbound workspaces past the TTL before the
         # concurrency check, so a stale workspace never blocks a new one.
         self._sweep_idle_sessions()
 
@@ -1678,7 +1678,7 @@ class SandboxManager:
             if session is None:
                 return False
             session.active = False
-            # S116: Log pending approved paths that were never copied out
+            # Log pending approved paths that were never copied out
             pending_approved = sorted(session.approved_paths)
 
         # Remove workspace directory tree
@@ -1689,10 +1689,10 @@ class SandboxManager:
         with self._lock:
             self._sessions.pop(session_id, None)
 
-        # S81: Clear file tracking for this session
+        # Clear file tracking for this session
         self._validator.clear_recent_files()
 
-        # S116: Audit the destruction with approval context
+        # Audit the destruction with approval context
         if pending_approved:
             self._audit.log_approval(
                 session_id,
@@ -1720,7 +1720,7 @@ class SandboxManager:
                 return None
             return session.workspace_path
 
-    # -- S210 (Bloc 1): workspace lifecycle ------------------------------
+    # -- Workspace lifecycle ---------------------------------------------
 
     def is_running(self, session_id: str) -> bool:
         """Whether a command is currently executing in this workspace."""
@@ -1788,7 +1788,7 @@ class SandboxManager:
         return True
 
     def set_binding(self, session_id: str, conversation_id: str | None) -> None:
-        """Write-through mirror of the conversation binding (S210).
+        """Write-through mirror of the conversation binding.
 
         The sandbox_workspace binding store is the single mutation point;
         it calls this so the session object (and list_sessions) reflects
@@ -1908,7 +1908,7 @@ class SandboxManager:
     def _workspace_disk_use(path: str) -> int:
         """Approximate disk use of a workspace tree, bounded.
 
-        A scandir walk capped on entries and depth (S210 constants) so a
+        A scandir walk capped on entries and depth so a
         pathological tree cannot stall the manager; symlinks are not
         followed. The figure is approximate by design and recomputed per
         list call, never cached on the session.
@@ -1942,7 +1942,7 @@ class SandboxManager:
     def register_created_file(
         self, relative_path: str, content: str,
     ) -> None:
-        """Register a file creation for write-then-execute detection (S81).
+        """Register a file creation for write-then-execute detection.
 
         Called by file_tools after creating a file in the sandbox.
         The CommandValidator will inspect this file's content before
@@ -1978,7 +1978,7 @@ class SandboxManager:
         workspace = self._get_active_workspace(session_id)
         injected: list[str] = []
 
-        # S210: per-workspace disk soft quota. Compute the incoming size up
+        # Per-workspace disk soft quota. Compute the incoming size up
         # front and refuse the whole copy-in when it would push the
         # workspace past the soft limit; the workspace is never destroyed.
         incoming = 0
@@ -2046,7 +2046,7 @@ class SandboxManager:
         else:
             dest_path = workspace
 
-        # S210: per-workspace disk soft quota on the incoming tree.
+        # Per-workspace disk soft quota on the incoming tree.
         incoming = self._workspace_disk_use(src_dir)
         self._check_disk_quota(session_id, workspace, incoming)
 
@@ -2071,7 +2071,7 @@ class SandboxManager:
     ) -> None:
         """Refuse a copy-in that would exceed the workspace soft quota.
 
-        Soft semantics (S210): raises WorkspaceQuotaExceeded; the caller's
+        Soft semantics: raises WorkspaceQuotaExceeded; the caller's
         copy-in is refused and the workspace is left untouched. The tmpfs
         --size from Bloc 0 caps /tmp inside the sandbox; this quota covers
         the workspace bind on the host side.
@@ -2086,15 +2086,15 @@ class SandboxManager:
             )
 
     # -----------------------------------------------------------------
-    # Copy-in (S211, Bloc 2): drag-and-drop upload, allowlisted host
+    # Copy-in: drag-and-drop upload, allowlisted host
     # browse, and the symlink-safe host clone. All three are EXPLICIT,
     # user-initiated actions through the manager UI -- the model can
-    # trigger none of them (S73/S74); the agent only ever sees /workspace.
+    # trigger none of them; the agent only ever sees /workspace.
     # -----------------------------------------------------------------
 
     @staticmethod
     def sanitize_upload_filename(name: str) -> tuple[bool, str]:
-        """Sanitize a client-supplied upload filename (S211).
+        """Sanitize a client-supplied upload filename.
 
         Returns (ok, clean_name_or_error). The client controls this string,
         so it is reduced to a basename and refused outright when empty,
@@ -2119,12 +2119,12 @@ class SandboxManager:
         items: list[tuple[str, Any, int]],
         dest_subdir: str = "",
     ) -> dict[str, Any]:
-        """Write user-uploaded file streams into the workspace (S211, 5.1).
+        """Write user-uploaded file streams into the workspace (5.1).
 
         ``items`` is a list of (filename, binary stream, size_bytes); sizes
         are summed BEFORE any write. Caps: at most ``upload_max_files`` per
         request and ``upload_max_file_bytes`` per file; the request total is
-        bounded by the S210 disk soft quota. Any exceeded cap refuses the
+        bounded by the disk soft quota. Any exceeded cap refuses the
         WHOLE request (WorkspaceQuotaExceeded -> the route's 413) with the
         workspace untouched. Individually invalid names and destination
         collisions are refused PER FILE (never overwritten, never renamed)
@@ -2249,7 +2249,7 @@ class SandboxManager:
 
     def browse_host(self, path: str | None = None) -> dict[str, Any]:
         """List a host directory's IMMEDIATE entries, allowlist-confined
-        (S211, 5.2a).
+        (5.2a).
 
         With no path, the allowlisted roots themselves are returned as the
         entry set (the explorer's entry points). Symlinks are displayed
@@ -2306,7 +2306,7 @@ class SandboxManager:
     def _prewalk_clone_source(
         self, src: str, remaining_quota: int
     ) -> tuple[int, int]:
-        """Exact bounded pre-walk of a clone source (S211, 5.2b).
+        """Exact bounded pre-walk of a clone source (5.2b).
 
         Counts the bytes and regular files a symlink-safe clone would copy
         (symlinks and special files are NOT counted: the clone skips them).
@@ -2362,13 +2362,13 @@ class SandboxManager:
         src_path: str,
         dest_subdir: str = "",
     ) -> dict[str, Any]:
-        """Clone an allowlisted host directory into the workspace (S211,
+        """Clone an allowlisted host directory into the workspace (spec
         5.2b), symlink-safe, with the section 6.1 baseline hashes computed
         on the fly.
 
         The source must resolve under an allowlisted share root (the same
         confinement as the browse). The exact pre-walk enforces the clone
-        caps AND the remaining S210 quota before any copy. The copy itself
+        caps AND the remaining quota before any copy. The copy itself
         never follows a symlink (every symlink is skipped and counted; its
         target is never read, copied, or exposed) and skips device/special
         files. Regular files are copied in bounded chunks with an
@@ -2378,7 +2378,7 @@ class SandboxManager:
         ``<workspace>/[dest_subdir/]<basename(src)>`` must not already
         exist (FileExistsError -> the route's 409): explicit, never merged.
 
-        ``inject_directory`` (S116 semantics, copytree) is deliberately
+        ``inject_directory`` (approval semantics, copytree) is deliberately
         left byte-identical; this path owns the symlink-safe discipline.
         """
         workspace = self._get_active_workspace(session_id)
@@ -2506,7 +2506,7 @@ class SandboxManager:
 
         return files
 
-    # -- S116: File preview, approval, and copy-out --
+    # -- File preview, approval, and copy-out --
 
     def preview_file(
         self,
@@ -2514,7 +2514,7 @@ class SandboxManager:
         path: str,
         max_bytes: int = 65536,
     ) -> dict[str, Any]:
-        """Preview a file's content from the sandbox (S116).
+        """Preview a file's content from the sandbox.
 
         Returns text content capped at max_bytes for display.
         Binary files return a truncated hex preview.
@@ -2564,7 +2564,7 @@ class SandboxManager:
         session_id: str,
         paths: list[str],
     ) -> list[str]:
-        """Approve specific files for copy-out (S116).
+        """Approve specific files for copy-out.
 
         Each path is validated against the workspace. Only valid files
         within the workspace are approved. Approval is additive.
@@ -2616,7 +2616,7 @@ class SandboxManager:
         return approved
 
     def reject_files(self, session_id: str) -> None:
-        """Reject all files, preventing any copy-out (S116).
+        """Reject all files, preventing any copy-out.
 
         Args:
             session_id: Sandbox session.
@@ -2632,7 +2632,7 @@ class SandboxManager:
                 raise ValueError(f"Session not found: {session_id}")
             session.approval_state = ApprovalState.REJECTED
             session.approved_paths.clear()
-            # S212: a full reject also withdraws every confirmed deletion --
+            # A full reject also withdraws every confirmed deletion --
             # reject means "apply nothing", writes and deletions alike.
             session.confirmed_deletions.clear()
             session.approved_at = time.time()
@@ -2645,17 +2645,17 @@ class SandboxManager:
         logger.info("Files rejected: session=%s", session_id)
 
     def is_file_approved(self, session_id: str, path: str) -> bool:
-        """Check if a specific file is approved for copy-out (S116)."""
+        """Check if a specific file is approved for copy-out."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 return False
             return path in session.approved_paths
 
-    # -- S212 (Bloc 3): diff-gated write-back support --
+    # -- Diff-gated write-back support --
 
     def get_active_workspace_path(self, session_id: str) -> str:
-        """Public wrapper for the active-workspace lookup (S212).
+        """Public wrapper for the active-workspace lookup.
 
         The workspace diff and the apply writer live in
         ``sandbox_workspace.py`` (the section 12 cartography); this thin
@@ -2669,16 +2669,16 @@ class SandboxManager:
         return self._get_active_workspace(session_id)
 
     def resolve_share_target(self, path: str) -> str:
-        """Public wrapper over the share-root confinement (S212).
+        """Public wrapper over the share-root confinement.
 
-        The apply writer validates its target through the exact S211
+        The apply writer validates its target through the exact
         ``_resolve_share_path`` discipline: confinement BEFORE existence
         (PermissionError -> 403 whether or not the path exists; inside a
         root, missing/non-directory -> ValueError -> 404).
         """
         return self._resolve_share_path(path)
 
-    # -- S213 (Bloc 4): the per-workspace network flag and the provision run
+    # -- The per-workspace network flag and the provision run
 
     @staticmethod
     def _network_gate_allows() -> bool:
@@ -2710,7 +2710,7 @@ class SandboxManager:
     ) -> bool:
         """Flip the per-workspace network flag -- an explicit USER action.
 
-        S213 (Bloc 4, spec 8.3). Enabling is Daily-only: the binding-layer
+        Enabling is Daily-only (spec 8.3): the binding-layer
         gate is consulted live and an unset, unknown, or undeterminable
         mode refuses (fail-secure); the refusal is audited and raised as
         PermissionError for the route's 403. DISABLING is permitted in any
@@ -2793,7 +2793,7 @@ class SandboxManager:
         command: str,
         timeout: int | None = None,
     ) -> CommandResult:
-        """Run the ONE network-on step: the provision install (S213, 8.4).
+        """Run the ONE network-on step: the provision install (8.4).
 
         The single seam that ever reaches ``_run_bwrap`` with
         ``allow_network=True``. Refusals are fail-secure and audited with
@@ -2898,7 +2898,7 @@ class SandboxManager:
         return result
 
     def confirm_deletions(self, session_id: str, paths: list[str]) -> list[str]:
-        """Record explicit deletion confirmations for apply-to-host (S212).
+        """Record explicit deletion confirmations for apply-to-host.
 
         Deliberately PARALLEL to ``approve_files`` (spec 6.2): a "deleted"
         change removes a HOST file, so it carries its own confirmation,
@@ -2939,7 +2939,7 @@ class SandboxManager:
         return recorded
 
     def get_confirmed_deletions(self, session_id: str) -> set[str]:
-        """The deletion paths confirmed for apply (a copy; S212)."""
+        """The deletion paths confirmed for apply (a copy)."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -2952,7 +2952,7 @@ class SandboxManager:
         path: str,
         dest_dir: str,
     ) -> dict[str, Any]:
-        """Copy a single approved file from the sandbox to the host (S116).
+        """Copy a single approved file from the sandbox to the host.
 
         The file MUST have been approved via approve_files() first.
         No auto-approve. No bypass.
@@ -3023,7 +3023,7 @@ class SandboxManager:
         paths: list[str],
         dest_dir: str,
     ) -> list[dict[str, Any]]:
-        """Copy multiple approved files from the sandbox to the host (S116).
+        """Copy multiple approved files from the sandbox to the host.
 
         Only approved files are copied. Non-approved files are skipped
         with a warning (not an error, to allow partial copy-out).
@@ -3069,7 +3069,7 @@ class SandboxManager:
         return results
 
     def get_approval_info(self, session_id: str) -> dict[str, Any]:
-        """Get approval state summary for a session (S116).
+        """Get approval state summary for a session.
 
         Returns:
             Dict with approval_state, approved_paths, approved_at.
@@ -3116,7 +3116,7 @@ class SandboxManager:
             ValueError: If session not found or inactive.
         """
         workspace = self._get_active_workspace(session_id)
-        # S210: timeout resolution order is explicit call > per-sandbox
+        # Timeout resolution order is explicit call > per-sandbox
         # override > config default.
         if timeout is not None:
             effective_timeout = timeout
@@ -3129,7 +3129,7 @@ class SandboxManager:
             effective_timeout = _override or self._config.command_timeout
         backend = self._isolation_backend
 
-        # S124: Strict mode — refuse execution if bwrap is not available
+        # Strict mode — refuse execution if bwrap is not available
         if (
             self._config.strict_mode
             and not self._bwrap_available
@@ -3194,7 +3194,7 @@ class SandboxManager:
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all sandbox sessions with their status.
 
-        S210 (Bloc 1): runs the lazy idle-TTL sweep first, then returns the
+        Runs the lazy idle-TTL sweep first, then returns the
         manager view: the stored lifecycle fields plus the derived figures
         (age, running/idle from the process registry, approximate disk use
         from the bounded walk). network_enabled is surfaced and stays False
@@ -3271,7 +3271,7 @@ class SandboxManager:
     ) -> subprocess.CompletedProcess:
         """Spawn a command in its own process group, tracked for the stop path.
 
-        S210 (Bloc 1): replaces the blocking ``subprocess.run`` so the stop
+        Replaces the blocking ``subprocess.run`` so the stop
         path has a handle on the running child. The child is launched with
         ``start_new_session=True`` (its pid is the process-group id), the
         ``Popen`` is registered in the per-session running-process registry
@@ -3330,7 +3330,7 @@ class SandboxManager:
     ) -> CommandResult:
         """Run a command inside a bubblewrap sandbox.
 
-        S209: a seccomp denylist filter is built and passed on every launch
+        A seccomp denylist filter is built and passed on every launch
         (fail-secure -- a build or fd failure refuses the launch when
         seccomp_required is True, rather than running unfiltered), and
         per-sandbox resource caps are applied via the configured backend
@@ -3338,13 +3338,13 @@ class SandboxManager:
         when resource_backend is "cgroup" and systemd-run is available, with a
         rlimit fallback that never disables the caps).
 
-        S210: the spawn goes through ``_spawn_tracked`` (Popen in its own
+        The spawn goes through ``_spawn_tracked`` (Popen in its own
         process group, registered per session) so the stop path can SIGKILL
         the running command; the timeout and output-truncation behaviour are
         preserved. ``session_id`` is keyword-only and optional so existing
         positional callers are unchanged.
 
-        S213: ``allow_network`` is keyword-only, defaults to False (the argv
+        ``allow_network`` is keyword-only, defaults to False (the argv
         stays byte-identical for every existing caller), and is forwarded to
         ``_build_bwrap_command`` only by ``execute_provision_command`` -- the
         single, gated provision seam. Seccomp and the resource caps apply to
@@ -3445,7 +3445,7 @@ class SandboxManager:
         the LLM from creating a script with network code and running
         it (the main attack vector in tempdir mode).
 
-        S210: spawns through ``_spawn_tracked`` so the stop path works on
+        Spawns through ``_spawn_tracked`` so the stop path works on
         this backend too (same registry, same group kill).
         """
         # Build restricted environment: minimal PATH, no dangerous vars

@@ -524,7 +524,7 @@ def abort_task() -> dict:
 async def websocket_coding_live(ws: WebSocket) -> None:
     """Stream live coding agent progress events.
 
-    S136 audit fix: authenticates before processing.
+    Authenticates before processing.
     """
     await ws.accept()
 
@@ -625,7 +625,7 @@ def get_history_stats() -> dict:
 
 @router.get("/history/analytics", response_model=CodingAnalyticsResponse)
 def get_history_analytics() -> dict:
-    """Get full coding history analytics (S78 SQ-08).
+    """Get full coding history analytics.
 
     Aggregates success rates, step counts, model comparison,
     failure reasons, time trends, and test pass rates.

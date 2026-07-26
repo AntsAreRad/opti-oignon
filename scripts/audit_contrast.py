@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 audit_contrast.py — WCAG AA contrast validator for Opti-Oignon theme.css
-S93: Parses CSS custom properties from theme.css, resolves var() references,
+Parses CSS custom properties from theme.css, resolves var() references,
 computes relative luminance and contrast ratios for all fg/bg pairs.
 
 WCAG AA requirements:

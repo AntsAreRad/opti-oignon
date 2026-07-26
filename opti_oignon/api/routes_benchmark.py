@@ -872,7 +872,7 @@ async def submit_user_score(request: UserScoreRequest) -> dict:
 async def benchmark_progress_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for live benchmark progress.
 
-    S136 audit fix: authenticates before processing.
+    Authenticates before processing.
     """
     await websocket.accept()
 

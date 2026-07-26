@@ -523,7 +523,7 @@ class SearchInterceptor:
 
                 # Audit log for search injection
                 logger.info(
-                    "S125 search injection audit: query=%r results=%d tokens~%d",
+                    "Search injection audit: query=%r results=%d tokens~%d",
                     query, len(raw_results), self._token_budget,
                 )
             else:

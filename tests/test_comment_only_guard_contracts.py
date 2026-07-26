@@ -7,9 +7,9 @@ behaviour is verified independently of git:
 
   * C1 -- a file that sheds nomenclature from its comments alone is
     accepted: comments never reach the parser, so the shape cannot move.
-  * C2 -- a file that sheds nomenclature AND edits a runtime string is
-    refused. That string is a log line, a banner or a schema description: a
-    surface no suite in this repository pins.
+  * C2 -- a file that sheds nomenclature while a runtime string edit
+    leaves nomenclature behind, or touches a string that carried none, is
+    refused. The one string movement the prover accepts is a purge in full.
   * C3 -- a file that sheds nomenclature AND renames an identifier is
     refused.
   * C4 -- a file whose nomenclature count is unchanged is never examined,
@@ -17,10 +17,11 @@ behaviour is verified independently of git:
     aimed at one dull mechanical edit.
   * C5 -- a file that GAINS nomenclature is not this guard's business; the
     public-clean guard owns that direction.
-  * C6 -- the docstring of a web route handler is NOT free. The framework
+  * C6 -- the docstring of a web route handler is NOT free: the framework
     publishes it verbatim as the endpoint description of the generated API
-    schema, so editing one while shedding nomenclature moves the shape and
-    is refused. An internal docstring in the very same file is free.
+    schema. A purge in full is accepted there on the same terms as any
+    string; rewording one that carried no nomenclature is refused. An
+    internal docstring in the very same file stays free.
   * C7 -- outside Python the proof is comment stripping, quote-aware: a
     comment-only edit is accepted, and an edit inside a string literal is
     refused even though it looks like a comment marker.
@@ -36,6 +37,11 @@ behaviour is verified independently of git:
   * C13 -- when the published set is unknown, every class docstring is held
     published. A prover that cannot establish what ships does not get to
     assume that nothing does.
+  * C14 -- a runtime string that sheds its nomenclature in full is
+    accepted, and nothing else may ride along with the purge: the masked
+    structure must hold, position for position.
+  * C15 -- a websocket handler publishes its docstring the same way, so the
+    same full purge is accepted there on the same proof.
 
 Every input carrying nomenclature is assembled from fragments at runtime, so
 the literal form never appears in this file's source and neither guard trips
@@ -122,15 +128,24 @@ def test_c2_runtime_string_edit_is_refused():
     guard, restore = _load()
     try:
         before = _python_before()
-        after = before.replace("# helper for " + _CODE + " routing",
+        purge = before.replace("# helper for " + _CODE + " routing",
                                "# helper for routing")
-        after = after.replace('"cache ' + _CODE + ' hit"', '"cache hit"')
-        assert guard.debt_count(after) < guard.debt_count(before)
-        reason = guard.verdict("m.py", before, after)
+        # A string edit that leaves nomenclature behind rides on nothing.
+        residue = purge.replace('"cache ' + _CODE + ' hit"',
+                                '"cache ' + _OTHER + ' hit"')
+        assert guard.debt_count(residue) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, residue)
         assert reason is not None, (
-            "a runtime string is a shipped surface; it must not ride along"
+            "a string still carrying nomenclature must not ride along"
         )
         assert "shape" in reason
+        # A string that carried none is no purge target at all.
+        untouched = purge.replace('os.path.join(a, "x")',
+                                  'os.path.join(a, "y")')
+        assert guard.debt_count(untouched) < guard.debt_count(before)
+        assert guard.verdict("m.py", before, untouched) is not None, (
+            "rewording a clean string must not ride along with a purge"
+        )
     finally:
         restore()
 
@@ -202,12 +217,77 @@ def test_c6_published_route_description_is_not_free():
         assert guard.verdict("m.py", before, internal) is None, (
             "an internal docstring is not a shipped surface"
         )
-        # Route handler docstring: published in the API schema, so it counts.
+        # Route handler docstring: published, yet a purge in full is a purge.
         published = before.replace('"""Return the thing (' + _CODE + ')."""',
                                    '"""Return the thing."""')
         assert guard.debt_count(published) < guard.debt_count(before)
-        assert guard.verdict("m.py", before, published) is not None, (
-            "an endpoint description ships; it must be declared, not absorbed"
+        assert guard.verdict("m.py", before, published) is None, (
+            "a full purge of an endpoint description is the dull edit itself"
+        )
+        # Rewording a published description that carried none is refused.
+        clean = before.replace('"""Return the thing (' + _CODE + ')."""',
+                               '"""Return the thing."""')
+        reworded = clean.replace("# helper for " + _CODE + " routing",
+                                 "# helper for routing")
+        reworded = reworded.replace('"""Return the thing."""',
+                                    '"""Return the whole thing."""')
+        assert guard.debt_count(reworded) < guard.debt_count(clean)
+        assert guard.verdict("m.py", clean, reworded) is not None, (
+            "an endpoint description that carried none must not move"
+        )
+    finally:
+        restore()
+
+
+def _python_ws_before():
+    return (
+        'import os\n'
+        '\n'
+        'router = os\n'
+        '\n'
+        '\n'
+        '@router.websocket("/w")\n'
+        'def stream(a):\n'
+        '    """Feed the thing (' + _CODE + ')."""\n'
+        '    return a\n'
+    )
+
+
+# ---------------------------------------------------------------------------
+# C14 -- a full purge of a runtime string is accepted, alone
+# ---------------------------------------------------------------------------
+def test_c14_full_string_purge_is_accepted_alone():
+    guard, restore = _load()
+    try:
+        before = _python_before()
+        purge = before.replace("# helper for " + _CODE + " routing",
+                               "# helper for routing")
+        purge = purge.replace('"cache ' + _CODE + ' hit"', '"cache hit"')
+        assert guard.debt_count(purge) < guard.debt_count(before)
+        assert guard.verdict("m.py", before, purge) is None, (
+            "a string that sheds its nomenclature in full is the dull edit"
+        )
+        # The same purge with a rename riding along is refused.
+        riding = purge.replace("LABEL", "TAG")
+        assert guard.verdict("m.py", before, riding) is not None, (
+            "the masked structure must hold, position for position"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# C15 -- a websocket description purges on the same proof
+# ---------------------------------------------------------------------------
+def test_c15_websocket_docstring_purge_is_accepted():
+    guard, restore = _load()
+    try:
+        before = _python_ws_before()
+        after = before.replace('"""Feed the thing (' + _CODE + ')."""',
+                               '"""Feed the thing."""')
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.verdict("m.py", before, after) is None, (
+            "a full purge of a websocket description is the dull edit"
         )
     finally:
         restore()
@@ -393,6 +473,16 @@ def _run_all():
          test_c9_glued_hash_does_not_open_a_comment),
         ("C10 honest hash positions still comment",
          test_c10_line_start_and_spaced_hash_still_comment),
+        ("C11 published model description is shape",
+         test_c11_published_model_description_is_not_free),
+        ("C12 unpublished model docstring free",
+         test_c12_unpublished_model_keeps_a_free_docstring),
+        ("C13 unknown published set holds every class",
+         test_c13_unknown_published_set_holds_every_class),
+        ("C14 full string purge accepted alone",
+         test_c14_full_string_purge_is_accepted_alone),
+        ("C15 websocket description purges the same",
+         test_c15_websocket_docstring_purge_is_accepted),
     ]
     passed = 0
     for label, fn in tests:

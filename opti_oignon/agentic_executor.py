@@ -53,7 +53,7 @@ except ImportError:
     Executor = None
     RoutingResult = None
 
-# Conditional import of the ToolExecutor (S44)
+# Conditional import of the ToolExecutor
 try:
     from .tool_executor import (
         ToolCallResult,
@@ -91,7 +91,7 @@ except ImportError:
     def _normalize_for_match(text: str) -> str:
         return (text or "").lower()
 
-# Conditional import of the StructuredOutputEngine (S42)
+# Conditional import of the StructuredOutputEngine
 try:
     from .structured_output import (
         StructuredOutputEngine,
@@ -107,7 +107,7 @@ except ImportError:
     StructuredOutputEngine = None
     TaskAnalysis = None
 
-# Conditional import of the VerificationEngine (S43)
+# Conditional import of the VerificationEngine
 try:
     from .verification import (
         VerificationResult,
@@ -121,7 +121,7 @@ except ImportError:
     _default_verification_engine = None
     VerificationResult = None
 
-# Conditional import of the ReasoningEngine (S49)
+# Conditional import of the ReasoningEngine
 try:
     from .reasoning import (
         ReasoningConfig,
@@ -141,7 +141,7 @@ except ImportError:
     ReasoningStep = None
     ReasoningConfig = None
 
-# Conditional import of the ConsensusEngine (S50)
+# Conditional import of the ConsensusEngine
 try:
     from .consensus import (
         ConsensusConfig,
@@ -163,7 +163,7 @@ except ImportError:
     ConsensusConfig = None
     ConsensusModelResponse = None
 
-# Conditional import of the SelfCorrectionEngine (S51)
+# Conditional import of the SelfCorrectionEngine
 try:
     from .self_correction import (
         SelfCorrectionConfig,
@@ -181,7 +181,7 @@ except ImportError:
     SelfCorrectionResult = None
     SelfCorrectionConfig = None
 
-# Conditional import of the CascadingInference (S69)
+# Conditional import of the CascadingInference
 try:
     from .cascading import (
         CascadeResult,
@@ -197,7 +197,7 @@ except ImportError:
     CascadingInference = None
     CascadeResult = None
 
-# Conditional import of the SpeculativeGenerator (S70)
+# Conditional import of the SpeculativeGenerator
 try:
     from .speculative import (
         SpeculativeGenerator,
@@ -213,7 +213,7 @@ except ImportError:
     SpeculativeGenerator = None
     SpeculativeResult = None
 
-# Conditional import of the ToolRegistry (S73 security)
+# Conditional import of the ToolRegistry (security)
 try:
     from .tool_registry import tool_registry as _default_tool_registry
     TOOL_REGISTRY_AVAILABLE = True
@@ -242,11 +242,11 @@ PIPELINE_CODE_VERIFY = "code_verify"
 PIPELINE_THINK = "think"
 PIPELINE_WEB_SEARCH = "web_search"
 PIPELINE_THINK_TOOLS = "think_tools"
-PIPELINE_REASONING = "reasoning"  # S49
-PIPELINE_CONSENSUS = "consensus"  # S50
-PIPELINE_SELF_CORRECT = "self_correct"  # S51
-PIPELINE_CASCADING = "cascading"  # S69
-PIPELINE_SPECULATIVE = "speculative"  # S70
+PIPELINE_REASONING = "reasoning"
+PIPELINE_CONSENSUS = "consensus"
+PIPELINE_SELF_CORRECT = "self_correct"
+PIPELINE_CASCADING = "cascading"
+PIPELINE_SPECULATIVE = "speculative"
 
 
 # =============================================================================
@@ -254,7 +254,7 @@ PIPELINE_SPECULATIVE = "speculative"  # S70
 # =============================================================================
 
 # The keyword lists below are DETECTION DATA: the French entries match
-# French user phrasings and are deliberately kept (S261).
+# French user phrasings and are deliberately kept.
 
 # Tool-need detection keywords
 _TOOL_KEYWORDS = [
@@ -290,7 +290,7 @@ _COMPLEXITY_KEYWORDS = [
     "avantages", "inconvenients", "strategie", "etape par etape",
 ]
 
-# S49: Advanced-reasoning keywords (CoT, decomposition)
+# Advanced-reasoning keywords (CoT, decomposition)
 _REASONING_KEYWORDS = [
     "step by step", "etape par etape",
     "break down", "decompose", "decomposer",
@@ -333,14 +333,14 @@ def _quick_classify(message: str) -> dict:
     needs_web = any(kw in msg_lower for kw in _WEB_SEARCH_KEYWORDS_NORM)
     is_code = any(kw in msg_lower for kw in _CODE_KEYWORDS_NORM)
     is_complex = any(kw in msg_lower for kw in _COMPLEXITY_KEYWORDS_NORM)
-    # S49: Advanced-reasoning need detection
+    # Advanced-reasoning need detection
     needs_reasoning = any(kw in msg_lower for kw in _REASONING_KEYWORDS_NORM)
 
     # Length heuristic: long messages are often complex
     word_count = len(message.split())
     if word_count > 80:
         is_complex = True
-    # S49: Very long messages with several questions suggest reasoning
+    # Very long messages with several questions suggest reasoning
     if word_count > 100 and message.count("?") >= 2:
         needs_reasoning = True
 
@@ -429,7 +429,7 @@ def _select_pipeline(
         web_search_override: True/False forces, None = auto
         tool_executor_available: Whether the ToolExecutor is available
         verification_available: Whether the VerificationEngine is available
-        reasoning_available: Whether the ReasoningEngine is available (S49)
+        reasoning_available: Whether the ReasoningEngine is available
         capabilities_armed: Whether the per-request capability manifest
             announced a non-empty tool set; arms the tools pipelines the
             same way an explicit tool keyword or an active sandbox does,
@@ -480,7 +480,7 @@ def _select_pipeline(
     if classification.get("needs_web"):
         return PIPELINE_WEB_SEARCH
 
-    # S49: Advanced reasoning when detected and available. Gated by the think
+    # Advanced reasoning when detected and available. Gated by the think
     # guard too -- the reasoning pipeline emits think=True internally.
     if (
         classification.get("needs_reasoning")
@@ -605,11 +605,11 @@ class AgenticExecutor:
             tool_executor: ToolExecutor instance (or None for the singleton)
             structured_engine: StructuredOutputEngine instance (or None)
             verification_engine: VerificationEngine instance (or None)
-            reasoning_engine: ReasoningEngine instance (or None, S49)
-            consensus_engine: ConsensusEngine instance (or None, S50)
-            self_correction_engine: SelfCorrectionEngine instance (or None, S51)
-            cascading_inference: CascadingInference instance (or None, S69)
-            speculative_generator: SpeculativeGenerator instance (or None, S70)
+            reasoning_engine: ReasoningEngine instance (or None)
+            consensus_engine: ConsensusEngine instance (or None)
+            self_correction_engine: SelfCorrectionEngine instance (or None)
+            cascading_inference: CascadingInference instance (or None)
+            speculative_generator: SpeculativeGenerator instance (or None)
             default_model: Default model for task analysis
             fast_tool_model: Optional fast tool-capable model; tool-bound work
                 routes to it only when execute() is called with optimize=True
@@ -641,24 +641,24 @@ class AgenticExecutor:
         self._last_verification_hints: int = 0
         self._last_pipeline: str = PIPELINE_DIRECT
         self._last_task_analysis: Any | None = None
-        # S49: Last reasoning result
+        # Last reasoning result
         self._last_reasoning_result: Any | None = None
-        # S50: Last consensus result
+        # Last consensus result
         self._last_consensus_result: Any | None = None
-        # S51: Last self-correction result
+        # Last self-correction result
         self._last_correction_result: Any | None = None
-        # S69: Last cascading result
+        # Last cascading result
         self._last_cascade_result: Any | None = None
-        # S70: Last speculative result
+        # Last speculative result
         self._last_speculative_result: Any | None = None
 
-        # S62: Per-conversation tool call history for multi-turn tool use
+        # Per-conversation tool call history for multi-turn tool use
         self._tool_call_history: dict[str, list] = {}
         self._max_history_per_conversation: int = 20
 
         # Callback for real-time events (tool calls, etc.)
         self._on_tool_call: Callable | None = None
-        # S49: Callback for the reasoning steps
+        # Callback for the reasoning steps
         self._on_reasoning_step: Callable | None = None
 
     # -----------------------------------------------------------------
@@ -711,40 +711,40 @@ class AgenticExecutor:
 
     @property
     def last_prompt_budget(self):
-        """S65: Last calculated PromptTokenBudget from the executor, or None."""
+        """Last calculated PromptTokenBudget from the executor, or None."""
         if self._executor is not None and hasattr(self._executor, "last_prompt_budget"):
             return self._executor.last_prompt_budget
         return None
 
     @property
     def last_compression_result(self):
-        """S66: Last CompressedContext from the executor, or None."""
+        """Last CompressedContext from the executor, or None."""
         if self._executor is not None and hasattr(self._executor, "last_compression_result"):
             return self._executor.last_compression_result
         return None
 
     @property
     def s68_cache_hit(self) -> bool:
-        """S68: Whether the last call was served from the S68 semantic cache."""
+        """Whether the last call was served from the semantic cache."""
         if self._executor is not None and hasattr(self._executor, "s68_cache_hit"):
             return self._executor.s68_cache_hit
         return False
 
     @property
     def s68_cache_key(self) -> str:
-        """S68: The cache key used for the last S68 cache lookup."""
+        """The cache key used for the last cache lookup."""
         if self._executor is not None and hasattr(self._executor, "s68_cache_key"):
             return self._executor.s68_cache_key
         return ""
 
     @property
     def last_cascade_result(self):
-        """S69: Last CascadeResult from cascading inference, or None."""
+        """Last CascadeResult from cascading inference, or None."""
         return self._last_cascade_result
 
     @property
     def cascading_available(self) -> bool:
-        """S69: Whether cascading inference is available and enabled."""
+        """Whether cascading inference is available and enabled."""
         return (
             CASCADING_INFERENCE_AVAILABLE
             and self._cascading_inference is not None
@@ -753,12 +753,12 @@ class AgenticExecutor:
 
     @property
     def last_speculative_result(self):
-        """S70: Last SpeculativeResult from speculative generation, or None."""
+        """Last SpeculativeResult from speculative generation, or None."""
         return self._last_speculative_result
 
     @property
     def speculative_available(self) -> bool:
-        """S70: Whether speculative generation is available and enabled."""
+        """Whether speculative generation is available and enabled."""
         return (
             SPECULATIVE_GENERATION_AVAILABLE
             and self._speculative_generator is not None
@@ -785,7 +785,7 @@ class AgenticExecutor:
     def verification_available(self) -> bool:
         """Whether the VerificationEngine is available.
 
-        SECURITY (S73): Returns False when the tool_registry is in
+        SECURITY: Returns False when the tool_registry is in
         sandbox mode. This prevents the code_verify pipeline from
         auto-executing LLM-generated code on the host, bypassing
         the sandbox. In sandbox mode, code execution must go through
@@ -812,7 +812,7 @@ class AgenticExecutor:
 
     @property
     def reasoning_available(self) -> bool:
-        """Whether the ReasoningEngine is available (S49)."""
+        """Whether the ReasoningEngine is available."""
         return (
             REASONING_AVAILABLE
             and self._reasoning_engine is not None
@@ -857,12 +857,12 @@ class AgenticExecutor:
 
     @property
     def last_reasoning_result(self) -> Any | None:
-        """Last reasoning result (S49)."""
+        """Last reasoning result."""
         return self._last_reasoning_result
 
     @property
     def consensus_available(self) -> bool:
-        """Whether the ConsensusEngine is available (S50)."""
+        """Whether the ConsensusEngine is available."""
         return (
             CONSENSUS_AVAILABLE
             and self._consensus_engine is not None
@@ -871,12 +871,12 @@ class AgenticExecutor:
 
     @property
     def last_consensus_result(self) -> Any | None:
-        """Last consensus result (S50)."""
+        """Last consensus result."""
         return self._last_consensus_result
 
     @property
     def self_correction_available(self) -> bool:
-        """Whether the SelfCorrectionEngine is available (S51)."""
+        """Whether the SelfCorrectionEngine is available."""
         return (
             SELF_CORRECTION_AVAILABLE
             and self._self_correction_engine is not None
@@ -885,11 +885,11 @@ class AgenticExecutor:
 
     @property
     def last_correction_result(self) -> Any | None:
-        """Last self-correction result (S51)."""
+        """Last self-correction result."""
         return self._last_correction_result
 
     # -----------------------------------------------------------------
-    # S62: Multi-turn tool call history
+    # Multi-turn tool call history
     # -----------------------------------------------------------------
 
     def get_tool_history(self, conversation_id: str) -> list:
@@ -1072,13 +1072,13 @@ class AgenticExecutor:
         Yields streaming chunks:
         - str for normal tokens
         - ("thinking", str) for the thinking content
-        - ("reasoning_step", ReasoningStep) for the reasoning steps (S49)
-        - ("reasoning_done", ReasoningResult) end of reasoning (S49)
-        - ("consensus_model_done", ModelResponse) individual response (S50)
-        - ("consensus_done", ConsensusResult) consensus result (S50)
-        - ("correction_step", dict) self-correction step (S51)
-        - ("correction_done", SelfCorrectionResult) correction result (S51)
-        - ("cascade_done", CascadeResult) cascading result (S69)
+        - ("reasoning_step", ReasoningStep) for the reasoning steps
+        - ("reasoning_done", ReasoningResult) end of reasoning
+        - ("consensus_model_done", ModelResponse) individual response
+        - ("consensus_done", ConsensusResult) consensus result
+        - ("correction_step", dict) self-correction step
+        - ("correction_done", SelfCorrectionResult) correction result
+        - ("cascade_done", CascadeResult) cascading result
         Tool calls are signalled via the on_tool_call callback.
 
         Args:
@@ -1087,25 +1087,25 @@ class AgenticExecutor:
             conversation_id: Optional conversation ID
             think: None = auto-decide, True = force, False = disable
             web_search: None = auto-decide, True = force, False = disable
-            consensus: None = auto, True = force, False = disable (S50)
-            consensus_models: Model list for the consensus (S50)
-            consensus_strategy: Consensus strategy (S50)
-            self_correct: None = auto, True = force, False = disable (S51)
-            cascading: None = auto, True = force, False = disable (S69)
+            consensus: None = auto, True = force, False = disable
+            consensus_models: Model list for the consensus
+            consensus_strategy: Consensus strategy
+            self_correct: None = auto, True = force, False = disable
+            cascading: None = auto, True = force, False = disable
             on_status: Optional status callback
             on_tool_call: Callback invoked for each tool call
                 Signature: on_tool_call(tool_call_result: ToolCallResult)
-            on_reasoning_step: Callback for each reasoning step (S49)
+            on_reasoning_step: Callback for each reasoning step
                 Signature: on_reasoning_step(step: ReasoningStep)
-            on_consensus_model: Callback for each model response (S50)
+            on_consensus_model: Callback for each model response
                 Signature: on_consensus_model(model_response: ModelResponse)
-            on_correction_step: Callback for each correction step (S51)
+            on_correction_step: Callback for each correction step
                 Signature: on_correction_step(step_info: dict)
             use_llm_analysis: When True, use the LLM to analyze the task
                 (slower but more precise). Defaults to False for speed.
             approval_fn: Optional per-invocation tool-approval gate
                 (tool_name, arguments) -> bool, forwarded to the tool executor.
-                S185 (EX-02): bound to this call rather than to a shared
+                Bound to this call rather than to a shared
                 singleton attribute, so concurrent Bulbe sessions cannot
                 clobber or drop each other's gate.
 
@@ -1119,15 +1119,15 @@ class AgenticExecutor:
         self._last_verification_results = []
         self._last_verification_hints = 0
         self._last_task_analysis = None
-        # S49: Last reasoning result
+        # Last reasoning result
         self._last_reasoning_result = None
-        # S50: Last consensus result
+        # Last consensus result
         self._last_consensus_result = None
-        # S51: Last self-correction result
+        # Last self-correction result
         self._last_correction_result = None
-        # S69: Last cascading result
+        # Last cascading result
         self._last_cascade_result = None
-        # S70: Last speculative result
+        # Last speculative result
         self._last_speculative_result = None
         self._on_tool_call = on_tool_call
         self._on_reasoning_step = on_reasoning_step
@@ -1139,7 +1139,7 @@ class AgenticExecutor:
             yield "[ERR] Executor not available"
             return
 
-        # S70: Speculative override -- if explicitly requested, use
+        # Speculative override -- if explicitly requested, use
         # speculative pipeline directly (mutually exclusive with cascading)
         if speculative is True and self.speculative_available:
             self._last_pipeline = PIPELINE_SPECULATIVE
@@ -1154,7 +1154,7 @@ class AgenticExecutor:
             )
             return
 
-        # S69: Cascading override -- when explicitly requested, use
+        # Cascading override -- when explicitly requested, use
         # the cascading pipeline directly
         if cascading is True and self.cascading_available:
             self._last_pipeline = PIPELINE_CASCADING
@@ -1169,7 +1169,7 @@ class AgenticExecutor:
             )
             return
 
-        # S51: Self-correct override -- when explicitly requested, use
+        # Self-correct override -- when explicitly requested, use
         # the self_correct pipeline directly
         if self_correct is True and self.self_correction_available:
             self._last_pipeline = PIPELINE_SELF_CORRECT
@@ -1184,7 +1184,7 @@ class AgenticExecutor:
             )
             return
 
-        # S50: Consensus override -- when explicitly requested, use
+        # Consensus override -- when explicitly requested, use
         # the consensus pipeline directly without classification
         if consensus is True and self.consensus_available:
             self._last_pipeline = PIPELINE_CONSENSUS
@@ -1429,10 +1429,10 @@ class AgenticExecutor:
 
         Executes the necessary tools, then yields the final response.
         Tool calls are signalled via callback and stored.
-        S62: Prior tool call history is passed for multi-turn context.
-        S261: approval_fn is the per-invocation tool-approval gate
-        (S185, EX-02), threaded from execute() and forwarded to
-        execute_with_tools; the pre-S261 dispatch dropped it and this
+        Prior tool call history is passed for multi-turn context.
+        approval_fn is the per-invocation tool-approval gate,
+        threaded from execute() and forwarded to
+        execute_with_tools; the previous dispatch dropped it and this
         method then raised an unbound-name error into its fallback.
         """
         if not self.tool_executor_available:
@@ -1449,7 +1449,7 @@ class AgenticExecutor:
         # Fetch the conversation context when available
         conv_messages = self._get_conversation_context(conversation_id)
 
-        # S62: Retrieve prior tool call history for multi-turn context
+        # Retrieve prior tool call history for multi-turn context
         prior_tool_history = self.get_tool_history(conversation_id) if conversation_id else []
 
         try:
@@ -1509,7 +1509,7 @@ class AgenticExecutor:
                 result, "verification_hints", 0,
             )
 
-            # S62: Record tool calls in per-conversation history
+            # Record tool calls in per-conversation history
             self._record_tool_calls(conversation_id, result.tool_calls)
 
             # Yield the final response
@@ -1542,8 +1542,8 @@ class AgenticExecutor:
 
         Combines the think mode with tool use for complex requests
         that need both reasoning and execution.
-        S261: approval_fn is the per-invocation tool-approval gate
-        (S185, EX-02), threaded from execute() into the tools phase.
+        approval_fn is the per-invocation tool-approval gate,
+        threaded from execute() into the tools phase.
         """
         # Phase 1: direct call with think mode for the reasoning pass
         full_response = ""
@@ -1599,7 +1599,7 @@ class AgenticExecutor:
         ):
             conv_messages = self._get_conversation_context(conversation_id)
 
-            # S62: Prior tool call history for multi-turn context
+            # Prior tool call history for multi-turn context
             prior_tool_history = self.get_tool_history(conversation_id) if conversation_id else []
 
             try:
@@ -1619,7 +1619,7 @@ class AgenticExecutor:
                     result, "verification_hints", 0,
                 )
 
-                # S62: Record tool calls in per-conversation history
+                # Record tool calls in per-conversation history
                 self._record_tool_calls(conversation_id, result.tool_calls)
 
                 # When the tools produced results, append them (and fold them
@@ -1650,7 +1650,7 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
     ) -> Generator:
-        """Reasoning pipeline (S49): multi-step decomposition and solving.
+        """Reasoning pipeline: multi-step decomposition and solving.
 
         Uses the ReasoningEngine to decompose the request into
         sub-steps, solve them sequentially, then synthesize a final
@@ -1678,7 +1678,7 @@ class AgenticExecutor:
         try:
             gen = self._reasoning_engine.execute_reasoning(
                 question=message,
-                # RSN-04 (S192): None lets the engine resolve the strategy
+                # None lets the engine resolve the strategy
                 # from reasoning.yaml (default_strategy) instead of pinning
                 # "decompose" and leaving the other strategies unreachable.
                 strategy=None,
@@ -1714,7 +1714,7 @@ class AgenticExecutor:
             )
 
     # -----------------------------------------------------------------
-    # Consensus pipeline (S50)
+    # Consensus pipeline
     # -----------------------------------------------------------------
 
     def _execute_consensus_pipeline(
@@ -1726,7 +1726,7 @@ class AgenticExecutor:
         models: list[str] | None = None,
         strategy: str | None = None,
     ) -> Generator:
-        """Consensus pipeline (S50): query N models and merge.
+        """Consensus pipeline: query N models and merge.
 
         Uses the ConsensusEngine to query several models in parallel,
         compare the responses, and select the best one.
@@ -1786,7 +1786,7 @@ class AgenticExecutor:
             )
 
     # -----------------------------------------------------------------
-    # Self-correction pipeline (S51)
+    # Self-correction pipeline
     # -----------------------------------------------------------------
 
     def _execute_self_correct_pipeline(
@@ -1796,7 +1796,7 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
     ) -> Generator:
-        """Self-correction pipeline (S51): generate then correct.
+        """Self-correction pipeline: generate then correct.
 
         1. Generate the initial response via the direct pipeline
         2. Run the self-correction over the response
@@ -2005,7 +2005,7 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
     ) -> Generator:
-        """S69: Cascading pipeline -- route through progressive tiers.
+        """Cascading pipeline -- route through progressive tiers.
 
         Uses CascadingInference to try fast -> standard -> power models,
         stopping at the first tier whose response meets the quality threshold.
@@ -2062,10 +2062,10 @@ class AgenticExecutor:
         conversation_id: str | None,
         on_status: Callable | None,
     ) -> Generator:
-        """S70: Speculative pipeline -- draft-verify pattern.
+        """Speculative pipeline -- draft-verify pattern.
 
         Uses SpeculativeGenerator: a fast model drafts, a larger model verifies.
-        Mutually exclusive with cascading inference (S69).
+        Mutually exclusive with cascading inference.
         """
         if not self.speculative_available:
             yield "[ERR] Speculative generation not available"

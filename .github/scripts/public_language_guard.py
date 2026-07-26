@@ -269,7 +269,7 @@ def census_tree(repo, scan_paths=None):
 # nothing comes off this ledger; a file that grows is a regression.
 LEDGER = {
     "opti_oignon/agents/dynamic_pipeline.py": 1,
-    "opti_oignon/api/routes_artifacts.py": 6,
+    "opti_oignon/api/routes_artifacts.py": 5,
     "opti_oignon/api/routes_chat.py": 17,
     "opti_oignon/api/routes_code.py": 2,
     "opti_oignon/api/routes_context.py": 2,
@@ -288,7 +288,6 @@ LEDGER = {
     "opti_oignon/config.py": 1,
     "opti_oignon/context_window.py": 1,
     "opti_oignon/conversation.py": 16,
-    "opti_oignon/executor.py": 1,
     "opti_oignon/memory/legacy.py": 13,
     "opti_oignon/performance_benchmark.py": 15,
     "opti_oignon/pipelines.py": 17,

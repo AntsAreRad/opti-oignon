@@ -73,7 +73,7 @@ def get_tuner_status() -> dict:
 def start_tuning(body: TunerRunRequest) -> dict:
     """Start a tuning session for a model.
 
-    S111: Detects the active inference backend (Ollama or llama.cpp)
+    Detects the active inference backend (Ollama or llama.cpp)
     and creates a real benchmark function that measures actual token
     generation speed. Falls back to a mock if no backend is available
     (testing/CI mode). Returns a job object that can be polled for

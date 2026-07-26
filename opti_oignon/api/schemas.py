@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 # -- Conversations --
 
 class ConversationSummary(BaseModel):
-    """Resume of ae conversation (sans messages)."""
+    """Summary of a conversation (without messages)."""
     id: str
     title: str
     created_at: str | None = None
@@ -24,7 +24,7 @@ class ConversationSummary(BaseModel):
 
 
 class ConversationDetail(BaseModel):
-    """Detail complet of ae conversation avec messages."""
+    """Full detail of a conversation with messages."""
     id: str
     title: str
     messages: list[dict[str, Any]] = Field(default_factory=list)
@@ -597,7 +597,7 @@ class PresetDuplicateRequest(BaseModel):
 # -- Pipelines --
 
 class PipelineStepSchema(BaseModel):
-    """Schema of ae etape de pipeline."""
+    """Schema of a pipeline step."""
     name: str
     agent: str
     prompt_template: str | None = None

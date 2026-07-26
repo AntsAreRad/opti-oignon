@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audit_deps.sh -- Automated dependency vulnerability scan for Opti-Oignon (S155).
+# audit_deps.sh -- Automated dependency vulnerability scan for Opti-Oignon.
 #
 # Runs pip-audit (Python) and npm audit (frontend) and produces
 # machine-readable JSON reports suitable for CI integration.

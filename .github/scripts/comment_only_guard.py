@@ -362,6 +362,64 @@ def shape(path, text):
     return comment_free(path, text)
 
 
+def _masked_python_shape(text, published_models=_UNSET):
+    """AST dump with every live string masked, plus those strings in order.
+
+    Internal docstrings are blanked first, exactly as ``python_shape`` does,
+    so they stay free. Every remaining string constant -- runtime literal or
+    published docstring -- is collected and replaced by one placeholder, so
+    the dump pins everything else: identifiers, calls, structure, numbers.
+    """
+    if published_models is _UNSET:
+        published_models = published_model_names()
+    tree = ast.parse(text)
+    published = (_route_docstring_ids(tree)
+                 | _model_docstring_ids(tree, published_models))
+    tree = _BlankDocstrings(published).visit(tree)
+    ast.fix_missing_locations(tree)
+    strings = []
+
+    class _Mask(ast.NodeTransformer):
+        def visit_Constant(self, node):
+            if isinstance(node.value, str) and node.value != "<doc>":
+                strings.append(node.value)
+                node.value = "<s>"
+            return node
+
+    tree = _Mask().visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.dump(tree, annotate_fields=True, include_attributes=False), strings
+
+
+def string_purge_equivalent(before, after, published_models=_UNSET,
+                            clean_guard=None):
+    """``None`` when the only delta is nomenclature leaving string constants.
+
+    Three refusals, each on its own ground: something other than a string
+    constant moved; a changed string still carries nomenclature; a changed
+    string carried none to begin with. Equal masked dumps guarantee that the
+    two string lists pair position for position, so the walk is total.
+
+    The prover does not judge whether a message still says what it should;
+    that stays with human review. What it proves is narrower and mechanical:
+    the delta cannot hide a change outside the purged strings, and every
+    purged string went from carrying nomenclature to carrying none.
+    """
+    guard = clean_guard or _load_clean_guard()
+    dump_before, old_strings = _masked_python_shape(before, published_models)
+    dump_after, new_strings = _masked_python_shape(after, published_models)
+    if dump_before != dump_after:
+        return "something other than a string constant moved"
+    for old, new in zip(old_strings, new_strings):
+        if old == new:
+            continue
+        if not guard.find_violations(old.split("\n")):
+            return "a changed string carried no nomenclature"
+        if guard.find_violations(new.split("\n")):
+            return "a changed string still carries nomenclature"
+    return None
+
+
 def verdict(path, before, after, clean_guard=None):
     """Return ``None`` if acceptable, else a one-line reason to refuse.
 
@@ -376,6 +434,12 @@ def verdict(path, before, after, clean_guard=None):
             return None
     except ShapeUnavailable as exc:
         return f"shape could not be established ({exc})"
+    if Path(path).suffix == ".py":
+        reason = string_purge_equivalent(before, after, clean_guard=guard)
+        if reason is None:
+            return None
+        return ("nomenclature was removed AND the executable shape moved "
+                f"({reason})")
     return "nomenclature was removed AND the executable shape moved"
 
 
@@ -426,9 +490,9 @@ def main(argv=None):
     if not refusals:
         print(
             "comment-only guard: "
-            f"{examined} file(s) shed nomenclature, all with an unchanged "
-            f"executable shape (base {base_ref}); route descriptions are "
-            "published, so they count as shape, not as comment"
+            f"{examined} file(s) shed nomenclature, each within an unchanged "
+            f"executable shape or a proven string purge (base {base_ref}); "
+            "published prose still answers to its own digest"
         )
         return 0
 
