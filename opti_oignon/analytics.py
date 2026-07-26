@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ANALYTICS ENGINE -- Performance Tracking & Trend Analysis (S55)
+ANALYTICS ENGINE -- Performance Tracking & Trend Analysis
 =================================================================
 
 Tracks response times, token counts, pipeline/model usage, and
@@ -23,7 +23,7 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -78,7 +78,7 @@ def _parse_window(window_str: str) -> int:
 
 
 # =============================================================================
-# SAFE SQL QUERY BUILDER (S156 -- SA-155-020)
+# SAFE SQL QUERY BUILDER
 # =============================================================================
 
 # Allowlist of valid SQL condition fragments for dynamic WHERE construction.

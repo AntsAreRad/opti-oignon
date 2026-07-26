@@ -256,7 +256,7 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
     # -- Update vite proxy --
     _update_vite_proxy(project_root, backend_port)
 
-    # -- Determine bind address (S133: route through bind guard) --
+    # -- Determine bind address (route through bind guard) --
     bind_host = "127.0.0.1"
     try:
         from opti_oignon.network_bind_guard import get_safe_bind_address

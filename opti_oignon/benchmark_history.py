@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark History -- SQLite persistence for benchmark runs (S60).
+Benchmark History -- SQLite persistence for benchmark runs.
 
 Stores LLM benchmark results with full run/result tracking,
 comparison support, trend analysis, and regression detection.
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

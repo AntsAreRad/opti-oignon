@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin worker process for Opti-Oignon (S143).
+Plugin worker process for Opti-Oignon.
 
 This script is launched by PluginSubprocessManager as a child process.
 It reads configuration from environment variables, applies resource

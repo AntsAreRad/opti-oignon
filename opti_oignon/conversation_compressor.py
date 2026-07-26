@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CONVERSATION COMPRESSOR -- OPTI-OIGNON S66
+CONVERSATION COMPRESSOR -- OPTI-OIGNON
 ==========================================
 
-Compresses conversation history to fit within the S65 token budget's
+Compresses conversation history to fit within the token budget's
 history_tokens allocation while preserving semantic content.
 
 Implements a dual-layer context pattern:

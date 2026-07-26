@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# MODEL FAMILY DETECTION AND TOKEN CALIBRATION (S123)
+# MODEL FAMILY DETECTION AND TOKEN CALIBRATION
 # =============================================================================
 
 # Per-family chars_per_token calibration measured from actual tokenizer stats.
@@ -709,7 +709,7 @@ class ContextManager:
     def estimate_tokens(self, text: str, model: str | None = None) -> int:
         """Estimate the number of tokens in text.
 
-        Uses model-family-aware calibration (S123) when a model name is
+        Uses model-family-aware calibration when a model name is
         provided, with refined code detection and language-specific
         adjustments. Falls back to ModelLimits chars_per_token when
         family detection yields 'unknown'.
@@ -724,7 +724,7 @@ class ContextManager:
         if not text:
             return 0
 
-        # S123: Use calibrated family-aware estimation
+        # Use calibrated family-aware estimation
         if model:
             family = detect_model_family(model)
             if family != "unknown":
@@ -754,7 +754,7 @@ class ContextManager:
         """Estimate total tokens for a batch of messages.
 
         Avoids repeated model family lookups by delegating to the
-        module-level batch helper (S123).
+        module-level batch helper.
 
         Args:
             messages: Ollama-format messages list.

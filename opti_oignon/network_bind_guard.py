@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Network Bind Guard for Opti-Oignon (S133, extended S145).
+Network Bind Guard for Opti-Oignon.
 
 Enforces that the server bind address is localhost-only in Bulbe mode.
 This is a *physical constraint* at the socket level, not a policy.
@@ -9,7 +9,7 @@ Defense layers provided by this module:
   1. get_safe_bind_address() — forces 127.0.0.1 in Bulbe regardless of input
   2. assert_localhost_only() — kills the process if somehow not 127.0.0.1
   3. is_remote_access_allowed() — triple-gated check (mode + config + TLS)
-  4. check_ollama_bind() — detect if Ollama is exposed on 0.0.0.0 (S145)
+  4. check_ollama_bind() — detect if Ollama is exposed on 0.0.0.0
 
 All six defense layers (this module + middleware + ModePolicy + tls_manager +
 API routes) are independent. An attacker must bypass ALL SIX.
@@ -312,7 +312,7 @@ def _audit_critical_event(event: str, **details) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Ollama Bind Guard (S145)
+# Ollama Bind Guard
 # ---------------------------------------------------------------------------
 
 # Default Ollama port

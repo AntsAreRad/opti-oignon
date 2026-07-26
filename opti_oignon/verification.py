@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VERIFICATION ENGINE -- OPTI-OIGNON v1.5.0 (S43)
+VERIFICATION ENGINE -- OPTI-OIGNON v1.5.0
 
 Moteur de verification de code avec boucle generate-execute-verify-fix.
 

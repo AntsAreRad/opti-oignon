@@ -42,7 +42,7 @@ def cmd_ui(args):
 
 
 # =============================================================================
-# API COMMAND (S26)
+# API COMMAND
 # =============================================================================
 
 def cmd_api(args):
@@ -61,7 +61,7 @@ def cmd_api(args):
         print("      pip install fastapi uvicorn")
         sys.exit(1)
 
-    # S133: Enforce bind address via network_bind_guard
+    # Enforce bind address via network_bind_guard
     actual_host = args.host
     try:
         from .network_bind_guard import get_safe_bind_address
@@ -72,7 +72,7 @@ def cmd_api(args):
         # Guard module not available; default to requested host
         pass
 
-    # S133/N-01: deterministic backstop -- refuse to start if the bind address
+    # Deterministic backstop -- refuse to start if the bind address
     # is somehow non-loopback in Bulbe mode (defense-in-depth behind the forcing
     # above). NOTE: invoking uvicorn directly (bypassing this launcher) skips
     # both the forcing and this assertion; the middleware, ModePolicy,
@@ -86,7 +86,7 @@ def cmd_api(args):
     print(f"Starting Opti-Oignon API on {actual_host}:{args.port}")
     print(f"  Docs: http://{actual_host}:{args.port}/docs")
 
-    # S133: Build TLS config if remote access is allowed (Daily mode only)
+    # Build TLS config if remote access is allowed (Daily mode only)
     ssl_kwargs = _get_tls_kwargs()
 
     uvicorn.run(app, host=actual_host, port=args.port, **ssl_kwargs)
@@ -670,7 +670,7 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
     )
 
     # -------------------------------------------------------------------------
-    # Command: api (S26)
+    # Command: api
     # -------------------------------------------------------------------------
     api_parser = subparsers.add_parser(
         "api",

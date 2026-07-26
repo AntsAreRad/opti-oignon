@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Admin audit logging for Opti-Oignon (S142).
+Admin audit logging for Opti-Oignon.
 
 Provides a dedicated audit table for admin actions on user data.
 Separate from the signed_audit_log (which covers security events)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rate Limiter -- Sliding Window Rate Limiting (S156)
+Rate Limiter -- Sliding Window Rate Limiting
 
 Lightweight, thread-safe rate limiter with per-endpoint configuration.
 Supports keying by IP address or user ID, with Bulbe-mode awareness
@@ -35,7 +35,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# S145 pattern: hardcoded sentinel for pre-apply verification
+# Hardcoded sentinel for pre-change verification
 checkpoint_before_apply = True
 
 

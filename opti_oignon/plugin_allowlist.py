@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin Allowlist for Opti-Oignon Bulbe mode (S126).
+Plugin Allowlist for Opti-Oignon Bulbe mode.
 
 In Bulbe mode, only explicitly approved plugins may be loaded.  Each plugin
 is identified by a SHA-512 hash of its source files.  Approval uses a
@@ -136,14 +136,14 @@ def compute_batch_hash(plugin_hashes: list[str]) -> str:
 def _load_signing_key():
     """Load signing key from the keyfile.
 
-    S129: Returns SecureBytes when available (from load_keyfile()),
+    Returns SecureBytes when available (from load_keyfile()),
     falls back to raw bytes from file if keyfile module is unavailable.
     Use .as_bytes() to extract raw bytes for HMAC operations.
     """
     try:
         from opti_oignon.encryption import load_keyfile
         key, _salt, _kdf = load_keyfile()
-        return key  # SecureBytes (S129)
+        return key  # SecureBytes
     except Exception:
         pass
     try:
@@ -160,7 +160,7 @@ def _load_signing_key():
 def _extract_key_bytes(key) -> bytes:
     """Extract raw bytes from a key (SecureBytes or plain bytes).
 
-    S129: Helper for HMAC operations that require raw bytes.
+    Helper for HMAC operations that require raw bytes.
     """
     if hasattr(key, "as_bytes"):
         return key.as_bytes()
@@ -173,7 +173,7 @@ def _sign_entry(entry: AllowlistEntry, key) -> str:
     Covers plugin_id || code_hash || permissions || batch_id.
     Security derives from the key, not from format secrecy.
 
-    S129: Accepts SecureBytes or raw bytes via _extract_key_bytes().
+    Accepts SecureBytes or raw bytes via _extract_key_bytes().
     """
     raw_key = _extract_key_bytes(key)
     perms_str = ",".join(sorted(entry.permissions))

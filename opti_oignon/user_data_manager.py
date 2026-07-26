@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-User data management for Opti-Oignon (S142).
+User data management for Opti-Oignon.
 
 Provides GDPR-ready user data export and cascade deletion:
 - Export all user data (conversations, memories, RAG docs, plugin configs,
@@ -86,7 +86,7 @@ def _get_plugin_config_store() -> Any:
 
 
 def _get_plugin_review_store() -> Any:
-    """Plugin review store (REV-2, S219: identity-bound reviews)."""
+    """Plugin review store."""
     try:
         from opti_oignon.plugin_reviews import plugin_review_store
         return plugin_review_store
@@ -116,12 +116,12 @@ def _get_admin_audit() -> Any:
 
 _RAG_USER_PREFIX = "user_"
 
-# UD-03 (S194): stores that the per-user export/wipe CANNOT cover today,
+# Stores that the per-user export/wipe CANNOT cover today,
 # either because the store is single-user (CA-04 class, no user_id
 # column) or because its data is not user-scoped. Surfaced in results so
 # a wipe never silently implies completeness. Shrinks as the scoping
 # cycle (FBK-01 and family) lands.
-# UD-04 (S219): completed against the full at-rest inventory
+# Completed against the full at-rest inventory
 # (ATREST_INVENTORY.md): projects, conversation branches, learned
 # routing, and the plugin-owned data stores were missing from this
 # surface; plugin reviews left it the same session (REV-2:
@@ -143,7 +143,7 @@ WIPE_NOT_COVERED = (
     "plugin-owned data stores (plugin-local DBs)",
 )
 
-# UD-04 (S219): stores deliberately RETAINED on a per-user wipe. Audit
+# Stores deliberately RETAINED on a per-user wipe. Audit
 # trails are tamper-evident accountability records; erasing them on
 # request would defeat their purpose. Surfaced alongside not_covered so
 # the wipe result is honest about what survives by design (the GDPR
@@ -228,10 +228,10 @@ class UserDataExporter:
             "export_metadata": {
                 "user_id": user_id,
                 "exported_at": export_time,
-                # 1.1 (S219): adds plugin_reviews and retained_by_design.
+                # 1.1: adds plugin_reviews and retained_by_design.
                 "format_version": "1.1",
                 "not_covered": list(WIPE_NOT_COVERED),
-                # UD-04 (S219): audit trails survive a wipe by design.
+                # Audit trails survive a wipe by design.
                 "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
             },
             "conversations": self._export_conversations(user_id),
@@ -252,7 +252,7 @@ class UserDataExporter:
     def _export_conversations(self, user_id: str) -> list[dict[str, Any]]:
         """Export user conversations.
 
-        UD-03 (S194): the conversation store is single-user today (no
+        The conversation store is single-user today (no
         user_id column); probing it with a user_id kwarg raised a
         swallowed TypeError that masqueraded as "no data". The kwarg is
         now checked explicitly and the unscoped case is an explicit,
@@ -286,7 +286,7 @@ class UserDataExporter:
     def _export_memories(self, user_id: str) -> list[dict[str, Any]]:
         """Export user memories.
 
-        UD-03 (S194): the two-tier canonical store carries the
+        The two-tier canonical store carries the
         user-scoped data and a `list(user_id=...)` API; the legacy
         facade (whose API never matched the probes below) is kept as a
         fallback only.
@@ -359,7 +359,7 @@ class UserDataExporter:
             return []
 
     def _export_plugin_reviews(self, user_id: str) -> list[dict[str, Any]]:
-        """Export the user's plugin reviews (REV-2, S219)."""
+        """Export the user's plugin reviews."""
         store = _get_plugin_review_store()
         if store is None:
             return []
@@ -424,9 +424,9 @@ class UserDataDeleter:
             "plugin_reviews": self._delete_plugin_reviews(user_id),
             "settings": self._delete_settings(user_id),
             "encryption_keys": self._delete_encryption_keys(user_id),
-            # UD-03 (S194): stores the per-user wipe cannot cover today.
+            # Stores the per-user wipe cannot cover today.
             "not_covered": list(WIPE_NOT_COVERED),
-            # UD-04 (S219): audit trails survive the wipe by design.
+            # Audit trails survive the wipe by design.
             "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
         }
 
@@ -447,7 +447,7 @@ class UserDataDeleter:
     def _delete_conversations(self, user_id: str) -> int:
         """Delete user conversations. Returns count of deleted items.
 
-        UD-03 (S194): the conversation store is single-user today; the
+        The conversation store is single-user today; the
         unscoped case is an explicit, logged skip instead of a swallowed
         TypeError (forward-compatible with a future user_id parameter).
         """
@@ -482,7 +482,7 @@ class UserDataDeleter:
     def _delete_memories(self, user_id: str) -> int:
         """Delete user memories.
 
-        UD-03 (S194): clears the two-tier stores (canonical SQLite +
+        Clears the two-tier stores (canonical SQLite +
         vector layer), both user-scoped. The legacy facade probes (whose
         API never matched) remain as a fallback only.
         """
@@ -551,7 +551,7 @@ class UserDataDeleter:
             return 0
 
     def _delete_plugin_reviews(self, user_id: str) -> int:
-        """Delete the user's plugin reviews (REV-2, S219).
+        """Delete the user's plugin reviews.
 
         Legacy rows with a NULL user_id are unattributable and stay
         untouched by construction (the store's equality predicate).

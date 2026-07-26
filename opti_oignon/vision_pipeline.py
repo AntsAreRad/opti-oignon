@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Transparent vision pipeline (S95).
+Transparent vision pipeline.
 
 When the user sends an image to a non-vision model, this pipeline:
 1. Detects the delegation need (image present + model lacks vision).
@@ -9,7 +9,7 @@ When the user sends an image to a non-vision model, this pipeline:
 4. Returns the augmented message so the original model can respond
    with full image context.
 
-The vision model selection respects the VisionConfig from S94:
+The vision model selection respects the VisionConfig:
 - User can pick a specific model in Settings > Vision Model.
 - "auto" mode detects the first available vision-capable model.
 - Manual known_vision_models list is honored.
@@ -363,7 +363,7 @@ class VisionPipeline:
         whether delegation is needed, describes the image(s) via the
         user's preferred vision model, and returns an augmented message.
 
-        BUG-09 S108: When images are present but no vision model is available
+        When images are present but no vision model is available
         and the current model is not vision-capable, strip images and inject
         a user-friendly warning instead of passing images through to crash.
 
@@ -385,7 +385,7 @@ class VisionPipeline:
         empty_meta: dict = {}
 
         if not self.detect_needs_delegation(message, images, current_model):
-            # BUG-09 S108: If images are present but model is not vision-capable
+            # If images are present but model is not vision-capable
             # and delegation didn't trigger (no vision model / disabled),
             # strip images to prevent 500 from non-vision model.
             if images and not self._is_vision_capable(current_model):

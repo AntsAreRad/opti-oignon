@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data-at-rest encryption for Opti-Oignon (S125, hardened).
+Data-at-rest encryption for Opti-Oignon.
 
 Security guarantees:
   - AES-256-GCM authenticated encryption (confidentiality + integrity)
@@ -40,7 +40,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# S129: SecureBytes for key memory protection
+# SecureBytes for key memory protection
 # ---------------------------------------------------------------------------
 
 try:
@@ -528,7 +528,7 @@ def load_keyfile(
 
     Returns:
         Tuple of (key_as_SecureBytes, salt_or_None, kdf_name). The key is
-        wrapped in SecureBytes for memory protection (S129).
+        wrapped in SecureBytes for memory protection.
 
     Raises:
         FileNotFoundError: the keyfile does not exist.
@@ -589,7 +589,7 @@ def load_keyfile(
 def get_encryption_key() -> SecureBytes | None:
     """Get the encryption key from the best available source.
 
-    Returns a SecureBytes wrapper for memory protection (S129).
+    Returns a SecureBytes wrapper for memory protection.
 
     Priority:
       1. Environment variable OPTI_ENCRYPTION_KEY
@@ -640,7 +640,7 @@ class EncryptionManager:
             self._enabled = cfg.get("enabled", False)
 
         if key is not None:
-            # S129: Wrap raw bytes in SecureBytes for memory protection
+            # Wrap raw bytes in SecureBytes for memory protection
             if isinstance(key, bytes):
                 self._key: SecureBytes | None = secure_key_from_bytes(key)
             else:
@@ -770,7 +770,7 @@ class EncryptionManager:
         This is the core of key rotation. Call this for each batch of
         encrypted values, then update the keyfile.
 
-        S129: Wipes old key from memory after rotation.
+        Wipes old key from memory after rotation.
 
         Args:
             new_key: New 32-byte encryption key
@@ -790,7 +790,7 @@ class EncryptionManager:
             # Re-encrypt with new key
             result.append(new_mgr.encrypt(plain))
 
-        # S129: Wipe old key from memory
+        # Wipe old key from memory
         if self._key is not None and isinstance(self._key, SecureBytes):
             self._key.wipe()
         # Install new key
@@ -804,7 +804,7 @@ class EncryptionManager:
             key, salt, kdf_name = derive_key_from_passphrase(passphrase)
             # Wrap the key at rest under a KEK derived from the same passphrase.
             save_keyfile(key, salt, kdf_name, passphrase=passphrase)
-            # S129: Wipe old key, wrap new key in SecureBytes
+            # Wipe old key, wrap new key in SecureBytes
             if self._key is not None and isinstance(self._key, SecureBytes):
                 self._key.wipe()
             self._key = secure_key_from_bytes(key)
@@ -826,7 +826,7 @@ class EncryptionManager:
                 passphrase=env_pass,
                 allow_unprotected=env_pass is None,
             )
-            # S129: Wipe old key, wrap new key in SecureBytes
+            # Wipe old key, wrap new key in SecureBytes
             if self._key is not None and isinstance(self._key, SecureBytes):
                 self._key.wipe()
             self._key = secure_key_from_bytes(key)

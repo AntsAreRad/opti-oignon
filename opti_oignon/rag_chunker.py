@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG CHUNKER -- Unified document chunking engine (S99).
+RAG CHUNKER -- Unified document chunking engine.
 
 Provides a single entry point for chunking any supported document type
 (PDF, DOCX, XLSX, CSV, plain text, code) with configurable parameters.

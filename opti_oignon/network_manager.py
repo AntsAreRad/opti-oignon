@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NETWORK MANAGER -- Connectivity Detection & Health Polling (S71)
+NETWORK MANAGER -- Connectivity Detection & Health Polling
 =================================================================
 
 Monitors Ollama availability through background health polling.

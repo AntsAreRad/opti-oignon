@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FILE TOOLS - OPTI-OIGNON v1.7.5 (S73)
+FILE TOOLS - OPTI-OIGNON v1.7.5
 =======================================
 
 Four sandboxed filesystem tools for LLM agentic execution:
@@ -15,7 +15,7 @@ through the SandboxManager, which provides either bwrap kernel isolation
 or (degraded) tempdir isolation with command blocklist.
 
 Each tool produces a ToolDefinition compatible with the existing
-tool_registry (S44) and tool_executor (S44) interfaces.
+tool_registry and tool_executor interfaces.
 
 Author: Leon
 """
@@ -326,7 +326,7 @@ def _handle_sandbox_create_file(
     except OSError as exc:
         return f"Error writing file: {exc}"
 
-    # S81: Register created file for write-then-execute detection
+    # Register created file for write-then-execute detection
     try:
         mgr.register_created_file(path, content)
     except Exception:
@@ -340,7 +340,7 @@ def _handle_sandbox_create_file(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# S229 (AGT_SPEC 6.4): the conservative str_replace recovery chain.
+# The conservative str_replace recovery chain.
 #
 # Exact match stays first. On a MISS (zero exact occurrences) the three
 # conservative replacers run in order -- line-trimmed, whitespace-normalized,
@@ -575,7 +575,7 @@ def _handle_sandbox_str_replace(
     # Count occurrences
     count = content.count(old_str)
     if count == 0:
-        # S229 (AGT_SPEC 6.4): exact match failed -- run the conservative
+        # Exact match failed -- run the conservative
         # recovery chain; on a clean miss, append the structured hint to the
         # unchanged not-found message so the next attempt is informed.
         recovered = _attempt_recovery(resolved, content, old_str, new_str)

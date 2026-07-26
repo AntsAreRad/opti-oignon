@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scoped sandbox network egress: gate, provision phase, audit shapes (S213).
+"""Scoped sandbox network egress: gate, provision phase, audit shapes.
 
 Bloc 4 of the Sandbox Workspace cycle (SANDBOX_WORKSPACE_SPEC section 8).
 The sandbox network is the cycle's one new capability and its most
@@ -124,7 +124,7 @@ _REL_PATH_MAX_LEN = 1024
 def refuse_rel_path(path: str) -> str | None:
     """Refusal reason for a workspace-relative request path, else None.
 
-    Same rules as the S212 apply writer's request-path validator: empty,
+    Same rules as the apply writer's request-path validator: empty,
     ".", absolute, NUL, over-long, or any ``..`` segment after
     normalization is refused. Backslashes are refused outright rather than
     interpreted.

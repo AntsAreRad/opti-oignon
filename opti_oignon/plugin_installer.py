@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Remote plugin installer for Opti-Oignon (S102).
+Remote plugin installer for Opti-Oignon.
 
 RemotePluginInstaller: download plugins from URLs (GitHub repos,
 zip archives, tar.gz), verify manifest, check integrity hash,

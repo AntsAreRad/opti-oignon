@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SYSTEM PRESETS - OPTI-OIGNON S84
+SYSTEM PRESETS - OPTI-OIGNON
 =================================
 
 Infrastructure-level presets that configure multiple YAML files at once.
@@ -525,7 +525,7 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
 
     Nested dicts are merged recursively; other values are replaced.
 
-    S171: defensive validation. Both arguments must be dicts, and a key that
+    Defensive validation. Both arguments must be dicts, and a key that
     is a mapping on one side but a non-mapping on the other is a structural
     type conflict that would silently corrupt nested configuration -- such a
     conflict raises TypeError with the offending key instead of being applied

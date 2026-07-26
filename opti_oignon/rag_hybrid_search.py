@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG HYBRID SEARCH ENGINE -- Vector + Keyword search fusion (S100).
+RAG HYBRID SEARCH ENGINE -- Vector + Keyword search fusion.
 
 Provides:
 - Vector search via existing ChromaDB store (rag_store)

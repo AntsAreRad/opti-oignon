@@ -94,10 +94,10 @@ class SearchResult:
 
 
 # =============================================================================
-# S125: Search Result Sanitizer (Prompt Injection Defense)
+# Search Result Sanitizer (Prompt Injection Defense)
 # =============================================================================
 
-# S186 RG-02: the prompt-injection patterns and the invisible-char / HTML-tag /
+# The prompt-injection patterns and the invisible-char / HTML-tag /
 # hidden-CSS / base64-instruction strippers are defined once in rag_sanitizer
 # (the single source of truth) and imported here, so the RAG sanitizer and the
 # search-result sanitizer cannot drift apart. The injection list is
@@ -112,7 +112,7 @@ from opti_oignon.rag_sanitizer import (
 
 
 def _load_search_safety_config() -> dict:
-    """Load search safety config from security.yaml (S125)."""
+    """Load search safety config from security.yaml."""
     import yaml
     cfg_path = Path(__file__).parent / "config" / "security.yaml"
     try:
@@ -126,7 +126,7 @@ def _load_search_safety_config() -> dict:
 
 
 class SearchResultSanitizer:
-    """Sanitizes search results to defend against indirect prompt injection (S125).
+    """Sanitizes search results to defend against indirect prompt injection.
 
     Performs multiple layers of defense:
     1. Strip HTML tags from titles and snippets
@@ -651,7 +651,7 @@ class WebSearcher:
                         source="duckduckgo",
                     ))
 
-                # S125: Sanitize results against prompt injection
+                # Sanitize results against prompt injection
                 results = get_search_sanitizer().sanitize_results(results)
 
                 return results

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin manifest and registry for Opti-Oignon (S101).
+Plugin manifest and registry for Opti-Oignon.
 
 PluginManifest: YAML-driven plugin descriptor with validation.
 PluginRegistry: discover, register, resolve dependencies, SQLite-backed state.
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -45,7 +45,7 @@ VALID_PERMISSIONS = frozenset({
     "ui_panel_register",
     "filesystem_plugin_dir",
     "network_outbound",
-    # S124: New permissions for security hardening
+    # New permissions for security hardening
     "filesystem_read",       # Can read files within plugin dir only
     "filesystem_write",      # Can write files within plugin dir only
     "inference_content",     # Can see prompt/response content in hooks
@@ -78,7 +78,7 @@ class PluginManifest:
     permissions: list[str] = field(default_factory=list)
     min_opti_version: str = "1.0.0"
     config_schema: dict[str, Any] = field(default_factory=dict)
-    resource_limits: dict[str, int] = field(default_factory=dict)  # S143
+    resource_limits: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PluginManifest":
@@ -161,7 +161,7 @@ class PluginManifest:
                 f"Invalid min_opti_version '{self.min_opti_version}'."
             )
 
-        # S143: resource_limits validation
+        # resource_limits validation
         _VALID_RLIMIT_KEYS = {
             "cpu_time_seconds", "memory_bytes", "max_file_descriptors",
         }
@@ -273,7 +273,7 @@ class PluginRegistry:
                 )
             """)
             # PI-12: migrate pre-existing databases created before the
-            # resource_limits column was added (S195).
+            # resource_limits column was added.
             try:
                 conn.execute(
                     "ALTER TABLE plugins ADD COLUMN resource_limits "

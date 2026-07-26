@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-INFERENCE PROFILER -- OPTI-OIGNON S113
+INFERENCE PROFILER -- OPTI-OIGNON
 ========================================
 
 Per-request detailed profiling that hooks into the telemetry pipeline
@@ -187,7 +187,7 @@ class InferenceProfiler:
             if trace.first_token_ts <= 0:
                 trace.first_token_ts = now
             trace.last_token_ts = now
-            # S193 PRF-04: null-guard ev.data like _on_end (a None payload
+            # Null-guard ev.data like _on_end (a None payload
             # would otherwise raise AttributeError inside the consumer loop).
             trace.token_count += (getattr(ev, "data", {}) or {}).get("count", 1)
 

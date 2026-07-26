@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LIVE PERFORMANCE METRICS -- OPTI-OIGNON S111
+LIVE PERFORMANCE METRICS -- OPTI-OIGNON
 =============================================
 
 Real-time performance metrics collection during active inference.
@@ -414,7 +414,7 @@ class LiveMetricsCollector:
             time.sleep(interval)
 
     def _should_sample_gpu(self, now: float) -> bool:
-        """Whether to spawn nvidia-smi this cycle (S193 LMT-01).
+        """Whether to spawn nvidia-smi this cycle.
 
         True while generating or within the rolling-speed window of the last
         recorded token; otherwise the GPU subprocess is skipped and the last
@@ -457,7 +457,7 @@ class LiveMetricsCollector:
                     sample.tokens_per_second = 1.0 / elapsed
 
         # GPU metrics (outside lock to avoid blocking).
-        # S193 LMT-01: nvidia-smi is a subprocess spawn. The collector never
+        # nvidia-smi is a subprocess spawn. The collector never
         # stops once started (any /api/metrics hit or a telemetry generation
         # event auto-starts it), so querying every interval forked nvidia-smi
         # ~2x/sec forever, even at idle. Query the GPU only while generating

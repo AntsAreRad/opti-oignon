@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Speculative Generation Engine -- S70
+Speculative Generation Engine
 
 Draft-verify pattern: a fast model generates a draft response, then a larger
 model verifies and optionally corrects it. This is mutually exclusive with
-cascading inference (S69) -- the user picks one strategy at a time.
+cascading inference -- the user picks one strategy at a time.
 
 Flow:
   1. Draft phase -- Fast model generates a complete response draft.

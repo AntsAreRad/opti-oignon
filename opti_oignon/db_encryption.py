@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SQLCipher full-database encryption for Opti-Oignon (S126).
+SQLCipher full-database encryption for Opti-Oignon.
 
 Provides a centralized ``get_encrypted_connection()`` factory that replaces
 all direct ``sqlite3.connect()`` calls.  When SQLCipher is available, the
@@ -176,7 +176,7 @@ def _get_db_encryption_key() -> bytes | None:
         from opti_oignon.encryption import get_encryption_key
         master_key = get_encryption_key()
         if master_key:
-            # S129: Extract raw bytes if SecureBytes
+            # Extract raw bytes if SecureBytes
             raw_key = master_key.as_bytes() if hasattr(master_key, "as_bytes") else master_key
             # Derive DB subkey: HMAC-SHA256(master_key, "opti-oignon-sqlcipher-v1")
             import hmac

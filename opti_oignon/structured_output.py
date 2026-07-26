@@ -39,11 +39,11 @@ T = TypeVar('T', bound=BaseModel)
 def _message_field(response: Any, field: str) -> str:
     """Pull a message field from an ollama chat response, dict or object form.
 
-    SOU-01 (S192): the engine assumed the object form
+    The engine assumed the object form
     (response.message.content); a dict-form ollama-python response raised an
     AttributeError caught by the generic handler, which broke the retry
     loop. The inverse of the RSN-01 / SCR-01 dict-only sites -- both
-    conventions coexisted in the codebase (the S189/S191 dict-vs-object
+    conventions coexisted in the codebase (the dict-vs-object
     class).
     """
     if response is None:
@@ -299,7 +299,7 @@ class StructuredOutputEngine:
 # -- Schemas internes pour usage par les sessions suivantes --
 
 class TaskAnalysis(BaseModel):
-    """Analyse structuree of ae requete utilisateur (S46)."""
+    """Structured analysis of a user request."""
     task_type: str  # "code_r", "code_python", "debug", "explanation", etc.
     complexity: str  # "simple", "moderate", "complex"
     requires_tools: list[str] = []  # "web_search", "code_execution", "rag"
@@ -309,14 +309,14 @@ class TaskAnalysis(BaseModel):
 
 
 class ToolCallRequest(BaseModel):
-    """Requete d'appel d'outil par le LLM (S44)."""
+    """Tool-call request issued by the LLM."""
     tool_name: str
     arguments: dict[str, Any] = {}
     reasoning: str = ""
 
 
 class CodeVerification(BaseModel):
-    """Resultat de verification de code (S43)."""
+    """Resultat de verification de code."""
     has_errors: bool
     error_type: str | None = None  # "syntax", "runtime", "logic", "import"
     error_message: str = ""

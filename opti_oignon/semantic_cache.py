@@ -14,7 +14,7 @@ global scope, and token-savings tracking.
 
 Configuration loaded from config/cache.yaml with runtime overrides.
 
-Backward-compatible: retains S23 methods (get_with_fallback,
+Backward-compatible: retains methods (get_with_fallback,
 put_with_embedding, store_embedding, find_similar) alongside the new
 simplified get/put/invalidate/get_stats API.
 
@@ -159,10 +159,10 @@ class CacheStats:
     embeddings_available: bool = False
 
 
-# Legacy dataclass kept for backward compatibility (S23)
+# Legacy dataclass kept for backward compatibility
 @dataclass
 class SemanticMatch:
-    """Result of a semantic similarity search (S23 compat).
+    """Result of a semantic similarity search.
 
     Attributes:
         cache_key: Key of the matching cache entry.
@@ -176,10 +176,10 @@ class SemanticMatch:
     query_text: str
 
 
-# Legacy dataclass kept for backward compatibility (S23)
+# Legacy dataclass kept for backward compatibility
 @dataclass
 class SemanticCacheStats:
-    """Legacy stats for S23 compatibility.
+    """Legacy stats for compatibility.
 
     Attributes:
         total_embeddings: Total stored embeddings.
@@ -455,7 +455,7 @@ class SemanticCache:
         if conn is None:
             return
         try:
-            # S68: Unified cache entries table
+            # Unified cache entries table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cache_entries (
                     query_hash TEXT NOT NULL,
@@ -485,7 +485,7 @@ class SemanticCache:
                 ON cache_entries(last_accessed)
             """)
 
-            # S23 legacy: Keep old embeddings table for backward compat
+            # Legacy: Keep old embeddings table for backward compat
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS semantic_embeddings (
                     cache_key TEXT PRIMARY KEY,
@@ -497,7 +497,7 @@ class SemanticCache:
                     context_fingerprint TEXT NOT NULL DEFAULT ''
                 )
             """)
-            # S193 TC-04: guarded migration for pre-existing databases. Legacy
+            # Guarded migration for pre-existing databases. Legacy
             # rows keep '' and therefore never match a requested fingerprint
             # (invalidation by attrition under the response-cache TTL).
             try:
@@ -616,7 +616,7 @@ class SemanticCache:
         self._embeddings_available = bool(value)
 
     # -------------------------------------------------------------------------
-    # S68 Primary API: get / put / invalidate / get_stats
+    # Primary API: get / put / invalidate / get_stats
     # -------------------------------------------------------------------------
 
     def get(
@@ -636,7 +636,7 @@ class SemanticCache:
             query: The user query text.
             conversation_id: Optional conversation scope.
             model: LLM model filter (empty = any model).
-            context_fingerprint: S193 TC-04 -- hash of the fully assembled
+            context_fingerprint: hash of the fully assembled
                 generation context (system prompt). When non-empty, an entry
                 only matches if it was stored under the same fingerprint, so
                 a response generated under stale RAG/memory context is never
@@ -735,7 +735,7 @@ class SemanticCache:
         )
         query_hash = _make_query_hash(query)
         now = time.time()
-        # S193 TC-04: persist the generation-context fingerprint with the
+        # Persist the generation-context fingerprint with the
         # entry so lookups can refuse stale-context matches.
         meta = dict(metadata or {})
         if context_fingerprint:
@@ -934,7 +934,7 @@ class SemanticCache:
             model: Model filter (empty = any).
             now: Current timestamp.
             ttl: TTL in seconds.
-            context_fingerprint: S193 TC-04 -- when non-empty, the stored
+            context_fingerprint: when non-empty, the stored
                 entry must carry the same fingerprint or the lookup misses.
 
         Returns:
@@ -976,7 +976,7 @@ class SemanticCache:
             except Exception:
                 pass
 
-            # S193 TC-04: context fingerprint must match when requested.
+            # Context fingerprint must match when requested.
             # Entries stored without one (legacy) never match a request that
             # carries a fingerprint -- treated as a plain miss.
             if context_fingerprint and meta.get("context_fingerprint", "") != context_fingerprint:
@@ -1027,7 +1027,7 @@ class SemanticCache:
             model: Model filter (empty = any).
             now: Current timestamp.
             ttl: TTL in seconds.
-            context_fingerprint: S193 TC-04 -- when non-empty, candidates
+            context_fingerprint: when non-empty, candidates
                 stored under a different fingerprint are skipped.
 
         Returns:
@@ -1081,7 +1081,7 @@ class SemanticCache:
 
             for row in rows:
                 try:
-                    # S193 TC-04: skip candidates stored under a different
+                    # Skip candidates stored under a different
                     # generation context when a fingerprint is requested.
                     if context_fingerprint:
                         try:
@@ -1290,7 +1290,7 @@ class SemanticCache:
         return self._tokens_saved
 
     # -------------------------------------------------------------------------
-    # S23 Legacy API (backward compatibility)
+    # Legacy API (backward compatibility)
     # -------------------------------------------------------------------------
 
     def store_embedding(
@@ -1301,7 +1301,7 @@ class SemanticCache:
         embedding: list[float] | None = None,
         context_fingerprint: str = "",
     ) -> bool:
-        """Store an embedding in the legacy table (S23 compat).
+        """Store an embedding in the legacy table.
 
         Args:
             cache_key: SHA-256 cache key.
@@ -1364,7 +1364,7 @@ class SemanticCache:
         exclude_key: str | None = None,
         context_fingerprint: str = "",
     ) -> SemanticMatch | None:
-        """Find the most similar entry in the legacy table (S23 compat).
+        """Find the most similar entry in the legacy table.
 
         Args:
             query_text: Query to search for.
@@ -1401,7 +1401,7 @@ class SemanticCache:
         query_text: str = "",
         context_fingerprint: str = "",
     ) -> SemanticMatch | None:
-        """Search by pre-computed embedding in legacy table (S23 compat).
+        """Search by pre-computed embedding in legacy table.
 
         Args:
             query_embedding: Pre-computed embedding vector.
@@ -1419,7 +1419,7 @@ class SemanticCache:
         threshold = threshold or self._config["similarity_threshold"]
         max_cands = self._config["max_candidates"]
 
-        # S193 TC-04: when a fingerprint is requested, only candidates
+        # When a fingerprint is requested, only candidates
         # stored under the same generation context qualify (legacy rows keep
         # '' and are excluded by construction).
         fp_clause = " AND context_fingerprint = ?" if context_fingerprint else ""
@@ -1497,7 +1497,7 @@ class SemanticCache:
         query_text: str,
         context_fingerprint: str = "",
     ) -> tuple[Any | None, float, str]:
-        """Exact cache lookup with semantic fallback (S23 compat).
+        """Exact cache lookup with semantic fallback.
 
         Args:
             response_cache: ResponseCache instance.
@@ -1543,7 +1543,7 @@ class SemanticCache:
         ttl: int | None = None,
         explicit_key: str | None = None,
     ) -> tuple[str, bool]:
-        """Store in response cache + generate embedding (S23 compat).
+        """Store in response cache + generate embedding.
 
         Args:
             response_cache: ResponseCache instance.

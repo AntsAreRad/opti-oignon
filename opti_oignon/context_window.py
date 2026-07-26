@@ -126,11 +126,11 @@ _DEFAULT_GENERATION_RATIO = 0.30
 
 
 class TokenBudgetManager:
-    """3-zone token budget manager (S16).
+    """3-zone token budget manager.
 
     .. deprecated:: 2.4.0
-        Superseded by ``PromptTokenBudgetManager`` (S65, 6-zone) and
-        ``ContextOptimizer`` (S123, unified orchestrator). Retained for
+        Superseded by ``PromptTokenBudgetManager`` and
+        ``ContextOptimizer``. Retained for
         backward compatibility -- modules like ``routes_context.py`` and
         ``SlidingWindowManager`` still reference it. Do not use in new code.
     """

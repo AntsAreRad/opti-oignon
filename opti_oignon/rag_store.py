@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG VECTOR STORE -- Collection management, ingestion & retrieval (S99).
+RAG VECTOR STORE -- Collection management, ingestion & retrieval.
 
 Provides:
 - ChromaDB collection CRUD (create, list, delete, stats)
@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -478,7 +478,7 @@ class RAGVectorStore:
         self.db = _RAGDatabase(self.data_dir / "rag_documents.db")
 
         # ChromaDB client.
-        # RS-01 (S185, recorded): ChromaDB has no native at-rest encryption, so
+        # ChromaDB has no native at-rest encryption, so
         # the ingested chunk text and embedding vectors persisted under
         # chroma_dir are PLAINTEXT on disk. The RAG metadata DB above is
         # encrypted via safe_connect, but this vector store is not. Full-disk

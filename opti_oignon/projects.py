@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-PROJECT STORE -- Project Management with File Storage (S57)
+PROJECT STORE -- Project Management with File Storage
 ==============================================================
 
 SQLite-backed storage for projects, project files, project outputs,
 and conversation linking. Provides CRUD operations, file upload
 handling, and cascade deletion.
 
-Prepares the data layer for RAG-based context injection in S58.
+Prepares the data layer for RAG-based context injection.
 
 Author: Leon
 """
@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

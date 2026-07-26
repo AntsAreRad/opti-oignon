@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG PROMPT INJECTION DEFENSE — Opti-Oignon S144
+RAG PROMPT INJECTION DEFENSE — Opti-Oignon
 =================================================
 
 Protects RAG-augmented prompts against indirect prompt injection attacks.
@@ -14,7 +14,7 @@ Features:
 - Audit logging of flagged injection attempts (SQLite, WAL mode)
 - Configurable via config/rag.yaml [injection_defense] section
 
-Reuses pattern definitions from web_search.SearchResultSanitizer (S125)
+Reuses pattern definitions from web_search.SearchResultSanitizer
 with additional RAG-specific patterns and weighted confidence scoring.
 
 Author: Leon
@@ -42,7 +42,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# -- Safe DB connection (S138 pattern) --------------------------------------
+# -- Safe DB connection -----------------------------------------------------
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

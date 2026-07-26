@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin review store for Opti-Oignon (S102).
+Plugin review store for Opti-Oignon.
 
 PluginReviewStore: SQLite-backed local ratings (1-5 stars) and text
 reviews per plugin. Compute averages, sort by rating/popularity/recency.
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -34,7 +34,7 @@ class PluginReview:
     text: str
     author: str
     created_at: float
-    # REV-2 (S219): authenticated owner identity; None on legacy rows
+    # Authenticated owner identity; None on legacy rows
     # written before the user_id column existed.
     user_id: str | None = None
 
@@ -122,7 +122,7 @@ class PluginReviewStore:
                 CREATE INDEX IF NOT EXISTS idx_reviews_rating
                 ON plugin_reviews (rating)
             """)
-            # REV-2 (S219): authenticated owner identity. Guarded additive
+            # Authenticated owner identity. Guarded additive
             # migration, same idiom as veilid/peers.py: legacy rows read
             # NULL (unattributable) and are never matched by the per-user
             # cascade delete by construction.
@@ -171,11 +171,11 @@ class PluginReviewStore:
         text : str
             Optional review body text.
         author : str
-            Reviewer display name. REV-2 (S219): the API route derives
+            Reviewer display name. The API route derives
             this from the authenticated identity; it is no longer
             client-supplied free text.
         user_id : str, optional
-            Authenticated owner identity (REV-2, S219). Scopes the
+            Authenticated owner identity. Scopes the
             review for per-user export and cascade delete. None only
             for legacy or identity-less callers.
 
@@ -395,7 +395,7 @@ class PluginReviewStore:
             conn.close()
 
     def get_reviews_for_user(self, user_id: str) -> list[PluginReview]:
-        """All reviews owned by a user (REV-2, S219).
+        """All reviews owned by a user.
 
         Feeds the per-user data export (UD-04 family). Legacy rows with
         a NULL user_id are unattributable and never returned.
@@ -414,7 +414,7 @@ class PluginReviewStore:
     def delete_reviews_for_user(self, user_id: str) -> int:
         """Delete all reviews owned by a user. Returns count deleted.
 
-        REV-2 (S219): the per-user cascade-delete hook. Legacy rows with
+        The per-user cascade-delete hook. Legacy rows with
         a NULL user_id never match the equality predicate, so they stay
         untouched by construction (documented in ATREST_INVENTORY.md).
         """

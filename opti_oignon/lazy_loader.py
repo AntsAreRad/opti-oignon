@@ -223,7 +223,7 @@ def preload_in_background(
     return thread
 
 
-# Modules considered "heavy" for lazy loading (S134 update)
+# Modules considered "heavy" for lazy loading
 HEAVY_MODULES = [
     "opti_oignon.rag_store",
     "opti_oignon.rag_hybrid_search",
@@ -253,7 +253,7 @@ HEAVY_MODULES = [
 ]
 
 
-# Alias for compatibility with S134 prompt spec
+# Alias kept for backward compatibility
 get_lazy_module = lazy_import
 
 

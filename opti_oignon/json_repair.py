@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JSON REPAIR - OPTI-OIGNON v1.8.2 (S80)
+JSON REPAIR - OPTI-OIGNON v1.8.2
 ========================================
 
 Tolerant JSON extraction and repair for local LLM outputs.
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Markdown fence stripping
 # ---------------------------------------------------------------------------
 
-# JRP-01 (S192): the previous pattern ```...\s*\n?(.*?)\n?\s*``` had an
+# The previous pattern ```...\s*\n?(.*?)\n?\s*``` had an
 # ambiguous whitespace sandwich around the lazy group and backtracked
 # catastrophically on an unclosed fence followed by whitespace (5k chars
 # already took seconds; 20k effectively hung). The rewrite anchors the lazy
@@ -183,7 +183,7 @@ def fix_single_quotes(text: str) -> str:
     i = 0
     in_double_string = False
     in_single_string = False
-    # JRP-02 (S192): track the last significant (non-whitespace) appended
+    # Track the last significant (non-whitespace) appended
     # character incrementally instead of rebuilding and rstripping the whole
     # buffer at every quote ('"".join(result).rstrip()' made the pass
     # O(n^2) on quote-dense input -- 1.3s at 20k quotes).
@@ -525,7 +525,7 @@ def repair_json(text: str) -> dict[str, Any] | list[Any]:
     original = text.strip()
 
     # Strategy 1: direct parse
-    # JRP-03 (S192): deep-nesting input can make json.loads raise
+    # Deep-nesting input can make json.loads raise
     # RecursionError instead of JSONDecodeError; catch it at every strategy
     # so the documented ValueError contract holds on adversarial input.
     try:

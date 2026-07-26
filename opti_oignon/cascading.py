@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cascading Inference Engine -- S69
+Cascading Inference Engine
 
 Reduces latency by routing queries through progressively larger models,
 stopping at the first model whose response meets a quality threshold.

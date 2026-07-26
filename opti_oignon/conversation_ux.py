@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Conversation UX utilities (S154).
+Conversation UX utilities.
 
 Provides:
 - Branch tree builder: converts flat branch list into nested tree structure

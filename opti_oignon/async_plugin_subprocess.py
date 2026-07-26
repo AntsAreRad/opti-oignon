@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Async plugin subprocess communication (S160).
+Async plugin subprocess communication.
 
 Provides non-blocking plugin subprocess management using
 ``asyncio.create_subprocess_exec`` with JSON message passing over

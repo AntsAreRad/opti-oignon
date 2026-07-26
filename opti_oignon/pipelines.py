@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-PIPELINES - OPTI-OIGNON v1.5.7 (S53)
-======================================
+PIPELINES - OPTI-OIGNON v1.5.7
+==============================
 
-Pipelines d'execution personnalisables basees sur les types de
-pipeline de l'agentic executor. Permet aux utilisateurs de creer
-des sequences d'etapes (THINK -> CODE_VERIFY -> SELF_CORRECT, etc.)
-et de les sauvegarder en YAML.
+Customisable execution pipelines built on the pipeline types of
+the agentic executor. Lets users create sequences of steps
+(THINK -> CODE_VERIFY -> SELF_CORRECT, etc.) and save them
+as YAML.
 
-Each etape reference un type de pipeline de l'AgenticExecutor
+Each step references an AgenticExecutor pipeline type
 (direct, tools, think, code_verify, web_search, reasoning,
-consensus, self_correct) avec des parametres optionnels et un
+consensus, self_correct) with optional parameters and a
 model override.
 
 Author: Leon
@@ -31,11 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_emergency_stop():
-    """Lazily resolve the emergency-stop module (S216, R-04 precursor).
+    """Lazily resolve the emergency-stop module.
 
-    Monkeypatchable proof seam, mirroring the S215 pattern. Module-absent
+    Monkeypatchable proof seam, mirroring the emergency-stop pattern. Module-absent
     returns None and the pipeline runs unguarded: an availability control,
-    not a security boundary (the documented S215 posture).
+    not a security boundary (the documented posture).
     """
     try:
         from opti_oignon import emergency_stop
@@ -45,7 +45,7 @@ def _resolve_emergency_stop():
 
 
 def _resolve_resource_governor():
-    """Lazily resolve the resource governor (S224, R-01 per-step gate).
+    """Lazily resolve the resource governor.
 
     Same posture as the estop seam above: sys.modules is consulted first
     (so a test-seeded or standalone-loaded module is reused as-is),
@@ -478,7 +478,7 @@ class PipelineRunner:
     step is injected into the next step's prompt if
     pass_previous_output is True.
 
-    S54: Optionally uses SmartRouter for automatic per-step
+    Optionally uses SmartRouter for automatic per-step
     model selection when no explicit model_override is set.
     """
 
@@ -503,7 +503,7 @@ class PipelineRunner:
             return None
 
     def _get_smart_router(self):
-        """Retrieve the smart router (lazy import, S54)."""
+        """Retrieve the smart router."""
         if self._smart_router is not None:
             return self._smart_router
         try:
@@ -527,32 +527,32 @@ class PipelineRunner:
         on_correction_step: Callable | None = None,
         approval_fn: Callable | None = None,
     ) -> Generator:
-        """Execute le pipeline step par step.
+        """Run the pipeline step by step.
 
-        Yields des chunks de streaming. Les etapes sont chainee:
-        le result de each etape est passe a la suivante.
+        Yields streaming chunks. Steps are chained: the result of
+        each step is passed to the next one.
 
-        Yields also des tuples speciaux:
-        - ("pipeline_step_start", int, ExecutionStep) debut d'etape
-        - ("pipeline_step_end", int, str) fin d'etape avec le result
+        Also yields special tuples:
+        - ("pipeline_step_start", int, ExecutionStep) at step start
+        - ("pipeline_step_end", int, str) at step end with the result
 
         Args:
-            pipeline: Pipeline a executer
-            message: Message utilisateur original
-            routing: RoutingResult du routeur
-            conversation_id: ID de conversation
-            on_status: Callback de statut
-            on_step_start: Callback debut d'etape (index, step)
-            on_step_end: Callback fin d'etape (index, step, result)
-            on_tool_call: Callback pour les appels d'outils
-            on_reasoning_step: Callback pour les etapes de raisonnement
-            on_consensus_model: Callback pour les reponses consensus
-            on_correction_step: Callback pour les corrections
+            pipeline: Pipeline to run
+            message: Original user message
+            routing: RoutingResult from the router
+            conversation_id: Conversation ID
+            on_status: Status callback
+            on_step_start: Step-start callback (index, step)
+            on_step_end: Step-end callback (index, step, result)
+            on_tool_call: Callback for tool calls
+            on_reasoning_step: Callback for reasoning steps
+            on_consensus_model: Callback for consensus answers
+            on_correction_step: Callback for corrections
             approval_fn: Per-request tool-approval gate forwarded to the
-                executor at every step (S185 EX-02 semantics, S216)
+                executor at every step
 
         Yields:
-            Chunks de streaming (str ou tuples)
+            Streaming chunks (str or tuples)
         """
         executor = self._get_executor()
         if executor is None:
@@ -568,7 +568,7 @@ class PipelineRunner:
         accumulated_output = ""
 
         for step_idx, step in enumerate(pipeline.steps):
-            # S216: inter-step emergency-stop check (R-04 precursor). A stop
+            # Inter-step emergency-stop check. A stop
             # engaged mid-pipeline must end the whole run honestly, not let
             # the runner chain into the next step after the inner cancel.
             _estop = _resolve_emergency_stop()
@@ -609,7 +609,7 @@ class PipelineRunner:
                     f"Now continue with: {step.label}"
                 )
             elif step_idx > 0 and not step.pass_previous_output:
-                # PIP-01 (S192): pass_previous_output=False means the step
+                # pass_previous_output=False means the step
                 # runs on the original message. current_input carries the
                 # previous step output here and would silently drop the
                 # original question.
@@ -644,7 +644,7 @@ class PipelineRunner:
                         routing, step.model_override
                     )
                 else:
-                    # S54: Try smart routing for automatic model selection
+                    # Try smart routing for automatic model selection
                     sr = self._get_smart_router()
                     if sr and sr.enabled:
                         step_routing = sr.override_routing(
@@ -655,8 +655,8 @@ class PipelineRunner:
                 consensus_models = step.parameters.get("models")
                 consensus_strategy = step.parameters.get("strategy")
 
-                # S224: per-step resource admission (R-01), beside the
-                # S216 estop check above and never replacing it. The
+                # Per-step resource admission, beside the
+                # estop check above and never replacing it. The
                 # step's resolved model is admitted with pipeline
                 # semantics (floor 4096, downsize-then-refuse); a refusal
                 # aborts the WHOLE run honestly with the established
@@ -702,7 +702,7 @@ class PipelineRunner:
                     on_reasoning_step=on_reasoning_step,
                     on_consensus_model=on_consensus_model,
                     on_correction_step=on_correction_step,
-                    # S216: the per-request approval gate holds at every step
+                    # The per-request approval gate holds at every step
                     approval_fn=approval_fn,
                 ):
                     # Collecter la sortie texte
@@ -725,7 +725,7 @@ class PipelineRunner:
                 on_step_end(step_idx, step, step_output)
 
             # Mettre a jour le contexte
-            # PIP-02 (S192): a failed step must not poison the chain context;
+            # A failed step must not poison the chain context;
             # the next step keeps the last good context instead of receiving
             # the error text as "previous analysis".
             if not step_failed:

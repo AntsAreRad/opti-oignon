@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conversation <-> workspace binding for the Sandbox Workspace cycle (S210).
+"""Conversation <-> workspace binding for the Sandbox Workspace cycle.
 
 Bloc 1 of SANDBOX_WORKSPACE_SPEC.md (section 4.1): a workspace is a named,
 user-owned sandbox with a stable id that outlives a single run. This module
@@ -9,7 +9,7 @@ that workspace's ``SandboxToolSession`` into ``dispatch.dispatch_tool_call``
 instead of creating and destroying a session per run (this is the ATL-02
 remediation: the sandboxed tools become reachable from ``/api/agent/run``).
 
-Design decisions (S210 read gate, arbitrated):
+Design decisions:
 
 - The store is IN-MEMORY and thread-safe. Sandbox sessions themselves live in
   the manager's in-memory map and die with the process, so persisting a
@@ -30,7 +30,7 @@ Design decisions (S210 read gate, arbitrated):
   Resolution lazily self-heals: a binding whose session is gone or inactive
   is dropped on lookup.
 
-The S73/S74 boundary is untouched: this module never executes anything; it
+The execution boundary is untouched: this module never executes anything; it
 only resolves which existing, isolated workspace a conversation uses. The
 dispatch invariant is unchanged (the sandbox stays an injected session).
 
@@ -295,7 +295,7 @@ def reset_workspace_bindings() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Baseline manifest (S211, Bloc 2 -- the section 6.1 seam Bloc 3 consumes)
+# Baseline manifest (the section 6.1 seam the apply writer consumes)
 # ---------------------------------------------------------------------------
 
 def manifest_hash_file(path: str, chunk_size: int = 65536) -> str:
@@ -319,7 +319,7 @@ def manifest_hash_file(path: str, chunk_size: int = 65536) -> str:
 
 
 class WorkspaceManifests:
-    """Thread-safe in-memory baseline-manifest store (S211, section 6.1).
+    """Thread-safe in-memory baseline-manifest store.
 
     Per workspace: ``relative_path -> sha256`` for every file recorded at
     copy-in (upload AND clone, per the spec's 6.1 text), plus the
@@ -329,7 +329,7 @@ class WorkspaceManifests:
     ("writes only under the ORIGINALLY-cloned root"). Upload-only
     workspaces keep it None -- no implicit target.
 
-    Design decisions (S211 read gate, arbitrated):
+    Design decisions:
 
     - IN-MEMORY, like the bindings: a manifest inside ``/workspace`` would
       be writable by the sandboxed code, which could then hide its own
@@ -364,7 +364,7 @@ class WorkspaceManifests:
         """Merge manifest entries for a workspace; returns its new size.
 
         ``cloned_root`` is recorded only if none is set yet (write-once).
-        ``cloned_mount`` (S212) is the clone's WORKSPACE-relative
+        ``cloned_mount`` is the clone's WORKSPACE-relative
         destination (e.g. ``src`` for a clone of ``/share/src``), recorded
         write-once TOGETHER with the root: the apply writer maps
         ``mount/<rel>`` onto ``cloned_root/<rel>`` so the round-trip lands
@@ -393,7 +393,7 @@ class WorkspaceManifests:
             return self._cloned_roots.get(session_id)
 
     def get_cloned_mount(self, session_id: str) -> str | None:
-        """The clone's workspace-relative destination (S212), if any."""
+        """The clone's workspace-relative destination, if any."""
         with self._lock:
             return self._cloned_mounts.get(session_id)
 
@@ -431,23 +431,23 @@ def reset_workspace_manifests() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Workspace diff + apply-to-host writer (S212, Bloc 3 -- spec section 6)
+# Workspace diff + apply-to-host writer (spec section 6)
 # ---------------------------------------------------------------------------
 
-# The S211 exact-walk refusal semantics: hitting a bound REFUSES, never
+# The exact-walk refusal semantics: hitting a bound REFUSES, never
 # undercounts -- a review computed on a partial walk is no review.
 _WORKSPACE_WALK_MAX_DEPTH = 32
 # Fallback when no manager config is reachable (tests, partial builds);
 # the authoritative knob is SandboxConfig.diff_max_entries.
 _DIFF_MAX_ENTRIES_FALLBACK = 50000
-# Streamed write chunk size for the apply writer (the S211 copy-in family).
+# Streamed write chunk size for the apply writer (the copy-in family).
 _APPLY_CHUNK_BYTES = 65536
 # Sane default mode when a workspace source carries no permission bits.
 _APPLY_DEFAULT_MODE = 0o644
 
 
 class WorkspaceDiffError(Exception):
-    """Base class for diff/apply refusals (S212)."""
+    """Base class for diff/apply refusals."""
 
 
 class WorkspaceDiffBoundExceeded(WorkspaceDiffError):
@@ -455,7 +455,7 @@ class WorkspaceDiffBoundExceeded(WorkspaceDiffError):
 
     A review gate must present the WHOLE change set or refuse: a truncated
     or paginated diff would let the user approve against an incomplete
-    picture, so exceeding a bound refuses (the S211 exact-prewalk
+    picture, so exceeding a bound refuses (the exact-prewalk
     semantics), never silently truncates.
     """
 
@@ -562,7 +562,7 @@ def _walk_workspace_hashes(
     create them, and following one during the review would read host files
     into the diff -- an exfiltration channel into the very gate meant to
     stop it. Symlinks and special files are skipped and COUNTED so the
-    review can state them honestly (the S211 clone discipline). Exceeding
+    review can state them honestly (the clone discipline). Exceeding
     the file-count bound or the depth bound REFUSES
     (``WorkspaceDiffBoundExceeded``), never undercounts.
 
@@ -589,8 +589,8 @@ def _walk_workspace_hashes(
                         skipped_symlinks += 1
                         continue
                     if entry.is_dir(follow_symlinks=False):
-                        # S229 manifest rule (AGT_SPEC 6.1, cross-cycle with
-                        # S211/S212): the workspace-root .agent/ prefix is
+                        # Manifest rule (cross-cycle with the clone and
+                        # apply layers): the workspace-root .agent/ prefix is
                         # agent-internal (spill files); the copy-out diff
                         # excludes it, so it can never classify as a change.
                         if depth == 0 and entry.name == ".agent":
@@ -626,7 +626,7 @@ def generate_workspace_diff(
     """Classify the live workspace against the recorded baseline (6.1).
 
     Recomputes per-file hashes over the live workspace
-    (``manifest_hash_file``, the recompute function the S211 status note
+    (``manifest_hash_file``, the recompute function the status note
     names) and compares them against the ``WorkspaceManifests`` baseline:
     a live file absent from the baseline is "added", a hash mismatch is
     "modified", a baseline entry absent from the live tree is "deleted";
@@ -831,12 +831,12 @@ def apply_workspace_changes(
     the model can trigger nothing here (the dispatch invariant is
     unchanged).
 
-    Target rule (arbitrated S212): the write-once ``cloned_root`` when
+    Target rule: the write-once ``cloned_root`` when
     present, RE-VALIDATED at apply time against the CURRENT
     ``host_share_roots`` (an operator who narrowed the allowlist after
     the clone fails secure); a conflicting explicit ``target_dir`` is
     refused, never silently ignored. Without a cloned root an EXPLICIT
-    user-chosen target is required, resolved through the S211
+    user-chosen target is required, resolved through the
     confinement (403-before-existence). No cloned root and no explicit
     target: refuse; never guess. Path mapping under the cloned root: the
     clone lands at the workspace-relative ``cloned_mount`` (e.g. ``src``

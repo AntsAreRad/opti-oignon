@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Remote Session Guard for Opti-Oignon (S133).
+Remote Session Guard for Opti-Oignon.
 
 Hardens remote sessions with:
   - JWT bound to client certificate fingerprint

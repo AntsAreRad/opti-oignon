@@ -1,5 +1,5 @@
 """
-Tool Call Approval — Opti-Oignon S128.
+Tool Call Approval — Opti-Oignon.
 
 In Bulbe mode, every LLM tool call requires explicit human approval
 before execution. This module implements a thread-safe approval queue
@@ -292,7 +292,7 @@ class ToolCallApprovalManager:
         if len(self._audit_log) > MAX_AUDIT_LOG_SIZE:
             self._audit_log = self._audit_log[-MAX_AUDIT_LOG_SIZE:]
 
-        # S130: Forward to hash-chain signed audit log
+        # Forward to hash-chain signed audit log
         try:
             from opti_oignon.signed_audit_log import chain_log
             chain_log(

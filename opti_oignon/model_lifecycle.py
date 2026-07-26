@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MODEL LIFECYCLE MANAGEMENT -- OPTI-OIGNON S112
+MODEL LIFECYCLE MANAGEMENT -- OPTI-OIGNON
 ================================================
 
 Pull, delete, update, and alias Ollama models through a unified manager.

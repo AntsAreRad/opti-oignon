@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Centralized SQLite connection utility (S136 audit fix).
+Centralized SQLite connection utility.
 
 Provides ``safe_connect()`` as a drop-in replacement for
 ``sqlite3.connect()`` that routes through ``get_encrypted_connection()``

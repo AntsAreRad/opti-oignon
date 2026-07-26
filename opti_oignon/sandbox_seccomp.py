@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seccomp denylist BPF builder for the bubblewrap sandbox (S209, Bloc 0).
+"""Seccomp denylist BPF builder for the bubblewrap sandbox.
 
 Pure, dependency-free assembly of a classic cBPF seccomp program suitable for
 ``bwrap --seccomp <fd>``. The program is a moderate DENYLIST: it kills a set of

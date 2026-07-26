@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin index for Opti-Oignon (S102).
+Plugin index for Opti-Oignon.
 
 PluginIndex: browse available plugins from a local SQLite index
 and a remote GitHub-hosted index.json. Supports search by name,
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

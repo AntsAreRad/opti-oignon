@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TELEMETRY HISTORY STORE -- OPTI-OIGNON S114
+TELEMETRY HISTORY STORE -- OPTI-OIGNON
 =============================================
 
 SQLite persistence for inference telemetry events.  Registers as a
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -500,7 +500,7 @@ class TelemetryHistoryStore:
             "auto_purge_enabled": self._auto_purge_enabled,
         }
 
-    # ----- Settings management (S115) -----
+    # ----- Settings management ------------
 
     def update_settings(
         self,
@@ -573,7 +573,7 @@ class TelemetryHistoryStore:
             self._auto_purge_timer.cancel()
             self._auto_purge_timer = None
 
-    # ----- CSV export (S115) -----
+    # ----- CSV export ------------
 
     def export_csv(self, *, model: str = "") -> str:
         """Export event history as CSV string.

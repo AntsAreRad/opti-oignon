@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dependency Monitor -- Periodic pip-audit integration (S158).
+Dependency Monitor -- Periodic pip-audit integration.
 
 Provides DependencyMonitor for running pip-audit, parsing JSON output,
 filtering by severity threshold, and storing results with timestamps.

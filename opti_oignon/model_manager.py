@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GGUF MODEL MANAGER -- OPTI-OIGNON S105
+GGUF MODEL MANAGER -- OPTI-OIGNON
 ======================================
 
 Manages local GGUF model files: scanning directories, parsing
@@ -361,9 +361,9 @@ def _estimate_parameter_count(
 
 
 # ---------------------------------------------------------------------------
-# SSRF-safe download (MM-01, S185)
+# SSRF-safe download
 #
-# _validate_download_url (S136) only validated the original URL. urllib's
+# _validate_download_url only validated the original URL. urllib's
 # default opener then followed HTTP redirects whose Location was never
 # re-validated, and re-resolved DNS independently of validation, so a public
 # host could 302 to a private IP and a name could flip its A record between
@@ -809,7 +809,7 @@ class ModelManager:
 
     @staticmethod
     def _validate_download_url(url: str) -> None:
-        """Validate a download URL to prevent SSRF attacks (S136 audit fix).
+        """Validate a download URL to prevent SSRF attacks.
 
         Blocks:
           - Non-HTTPS URLs (except localhost for dev)
@@ -818,7 +818,7 @@ class ModelManager:
           - URLs without a hostname
 
         Raises ValueError if the URL is suspicious. This is the early-reject
-        gate for the initial URL; MM-01 (S185) additionally re-validates and
+        gate for the initial URL additionally re-validates and
         pins every redirect hop inside urlopen_ssrf_safe, so redirect-following
         and DNS rebinding can no longer bypass this check.
         """
@@ -834,7 +834,7 @@ class ModelManager:
     ) -> dict:
         """Download a GGUF model from a URL.
 
-        S136 audit fix: validates URL to prevent SSRF attacks.
+        Audit fix: validates URL to prevent SSRF attacks.
         Only HTTPS URLs to public hosts are allowed.
 
         The SSRF guard proves WHERE the bytes came from. Only a digest proves
@@ -857,7 +857,7 @@ class ModelManager:
             Dict with download result info, including the computed sha256 and
             the outcome of enrolling it in the provenance manifest.
         """
-        # S136/MM-01 audit fix: SSRF protection. urlopen_ssrf_safe (below)
+        # Audit fix: SSRF protection. urlopen_ssrf_safe (below)
         # re-validates and pins every redirect hop, so neither redirect
         # following nor DNS rebinding can reach an internal address. This
         # call is the early-reject gate for the initial URL.

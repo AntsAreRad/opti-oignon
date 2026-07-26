@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FEEDBACK STORE -- User Feedback Collection & Aggregation (S55)
+FEEDBACK STORE -- User Feedback Collection & Aggregation
 ================================================================
 
 SQLite-backed storage for user feedback on model/pipeline responses.
@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover
     YAML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -706,7 +706,7 @@ class FeedbackStore:
 # MODULE-LEVEL SINGLETON
 # =============================================================================
 
-# S193 FBK-02: guard the singleton like the benchmark stores so an init
+# Guard the singleton like the benchmark stores so an init
 # failure degrades to None (deps already treats None as unavailable) instead
 # of breaking the module import.
 try:

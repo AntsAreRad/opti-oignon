@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin template generator for Opti-Oignon (S102).
+Plugin template generator for Opti-Oignon.
 
 PluginTemplateGenerator: generate a new plugin scaffold with
 manifest.yaml, entry_point.py (with hook stubs), and README.md.
@@ -388,7 +388,7 @@ class PluginTemplateGenerator:
         """Return a list of valid permissions a plugin can request.
 
         TPL-2: derived from plugin_manifest.VALID_PERMISSIONS so this list
-        cannot drift from the validator (the S124 additions
+        cannot drift from the validator (the additions
         filesystem_read / filesystem_write / inference_content were missing
         from the previous hardcoded list).
         """

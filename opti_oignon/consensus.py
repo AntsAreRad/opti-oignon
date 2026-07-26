@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CONSENSUS ENGINE - OPTI-OIGNON v1.5.4 (S50)
+CONSENSUS ENGINE - OPTI-OIGNON v1.5.4
 ==============================================
 
 Multi-model consensus engine -- queries several models
@@ -37,7 +37,7 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
-# Conditional import of model profiles (S46)
+# Conditional import of model profiles
 try:
     from .model_profiles import ModelProfile, profile_manager
     PROFILES_AVAILABLE = True
@@ -281,7 +281,7 @@ class ConsensusEngine:
         return content.strip()
 
     def _get_model_quality_tier(self, model_name: str) -> str:
-        """Retrieve the quality tier of a model via profiles (S46).
+        """Retrieve the quality tier of a model via profiles.
 
         Args:
             model_name: Model name

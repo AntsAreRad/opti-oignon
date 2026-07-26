@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-Quantum Cryptographic Signatures for Opti-Oignon (S129).
+Post-Quantum Cryptographic Signatures for Opti-Oignon.
 
 Provides ML-DSA-65 (Dilithium) digital signatures for backup integrity
 verification, using liboqs-python when available.
@@ -381,7 +381,7 @@ def generate_pqc_keypair() -> tuple[bytes, bytes]:
 # ---------------------------------------------------------------------------
 
 def sign_bytes(data: bytes, private_key: bytes) -> bytes:
-    """Sign arbitrary bytes with ML-DSA-65 (S205, VL-01).
+    """Sign arbitrary bytes with ML-DSA-65.
 
     The generic signing primitive. ``sign_backup`` is a thin delegation kept
     for the historical backup call sites; the Veilid per-record signing
@@ -416,7 +416,7 @@ def sign_bytes(data: bytes, private_key: bytes) -> bytes:
 
 
 def verify_bytes(data: bytes, signature: bytes, public_key: bytes) -> bool:
-    """Verify an ML-DSA-65 signature over arbitrary bytes (S205, VL-01).
+    """Verify an ML-DSA-65 signature over arbitrary bytes.
 
     The generic verification primitive; ``verify_backup`` delegates here.
     Never raises: an unavailable backend or a verification error returns
@@ -447,7 +447,7 @@ def verify_bytes(data: bytes, signature: bytes, public_key: bytes) -> bool:
 def sign_backup(backup_bytes: bytes, private_key: bytes) -> bytes:
     """Sign backup data with ML-DSA-65.
 
-    Thin delegation to :func:`sign_bytes` (S205): the primitive was always
+    Thin delegation to :func:`sign_bytes`: the primitive was always
     content-agnostic; the historical name is kept for the backup call sites.
 
     Args:
@@ -471,7 +471,7 @@ def verify_backup(
 ) -> bool:
     """Verify a PQC signature on backup data.
 
-    Thin delegation to :func:`verify_bytes` (S205). Never raises.
+    Thin delegation to :func:`verify_bytes`. Never raises.
 
     Args:
         backup_bytes: The signed backup data.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TOOL EXECUTOR - OPTI-OIGNON v1.5.0 (S44)
+TOOL EXECUTOR - OPTI-OIGNON v1.5.0
 ==========================================
 
 Tool executor with a ReAct loop (Reason + Act).
@@ -10,7 +10,7 @@ Orchestrates the interaction between the LLM and the registered tools:
 2. If so, the tool is executed and the result is injected
 3. The LLM generates the final response with the results
 
-Uses the StructuredOutputEngine (S42) to obtain
+Uses the StructuredOutputEngine to obtain
 decisions structurees du LLM via ToolCallRequest.
 
 Author: Leon
@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-# Conditional import of the structured-output engine (S42)
+# Conditional import of the structured-output engine
 try:
     from .structured_output import (
         StructuredOutputEngine,
@@ -41,7 +41,7 @@ except ImportError:
     StructuredOutputEngine = None
     ToolCallRequest = None
 
-# Conditional import of the tool registry (S44)
+# Conditional import of the tool registry
 try:
     from .tool_registry import ToolRegistry
     from .tool_registry import tool_registry as _default_registry
@@ -398,12 +398,12 @@ class ToolExecutor:
         self.tool_transcript = (
             tool_transcript if _explicit else _resolve_tool_transcript()
         )
-        # S128: Optional pre-execution approval hook.
+        # Optional pre-execution approval hook.
         # Callable(tool_name, arguments) -> bool.
         # If set, called before each tool execution. Returns True to
         # proceed, False to deny. May block (e.g. waiting for human
         # approval in Bulbe mode).
-        # S185 (EX-02): this attribute is the legacy process-wide fallback
+        # This attribute is the legacy process-wide fallback
         # only. The live request path passes a per-invocation approval_fn
         # through execute_with_tools -> _execute_tool instead, so that
         # concurrent generation threads (overlapping Bulbe sessions) cannot
@@ -496,10 +496,10 @@ class ToolExecutor:
             message: User message
             model: Ollama model to use
             conversation_messages: Optional conversation history
-            tool_history: Prior tool call results from earlier turns (S62)
+            tool_history: Prior tool call results from earlier turns
             approval_fn: Optional per-invocation approval gate
                 (tool_name, arguments) -> bool, called before each tool
-                execution. S185 (EX-02): bound to this call rather than to a
+                execution. Bound to this call rather than to a
                 shared singleton attribute, so overlapping Bulbe sessions
                 cannot clobber or drop each other's gate. Takes precedence
                 over the legacy pre_tool_call_hook attribute.
@@ -722,7 +722,7 @@ class ToolExecutor:
         # Conversation context
         context_messages = list(conversation_messages or [])
 
-        # S62: Include prior tool history in context
+        # Include prior tool history in context
         tool_results_context = []
         # Native transcript: the same history in the format function-calling
         # models are trained on. Prior-turn calls are replayed as
@@ -1189,8 +1189,8 @@ class ToolExecutor:
         """Execute a single tool call."""
         start_time = time.time()
 
-        # S128: Pre-execution approval hook (Bulbe mode tool call approval).
-        # S185 (EX-02): an explicit per-invocation approval_fn takes precedence
+        # Pre-execution approval hook (Bulbe mode tool call approval).
+        # An explicit per-invocation approval_fn takes precedence
         # over the legacy process-wide pre_tool_call_hook attribute. Binding the
         # gate to the call (not a shared attribute) means two concurrent Bulbe
         # generation threads cannot clobber each other's hook or drop the gate

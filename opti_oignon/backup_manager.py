@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Backup Manager -- Opti-Oignon S121
+Backup Manager -- Opti-Oignon
 
 Full configuration backup and restore system. Exports and imports
 platform configuration as a single JSON file (.oo-backup.json).
@@ -34,7 +34,7 @@ Import strategies:
 
 Schema version 1.0 for forward compatibility.
 
-Forward compatibility (S220 BK-06): sections grow additively and the
+Forward compatibility: sections grow additively and the
 schema version stays 1.0. An old backup imports cleanly on a newer
 install (all of its sections are still known). A backup written by a
 newer install can carry sections an older install does not know;
@@ -55,7 +55,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# PQC signature support (S129)
+# PQC signature support
 # ---------------------------------------------------------------------------
 
 try:
@@ -332,7 +332,7 @@ class BackupManager:
                 logger.error("Failed to export section '%s': %s", section, exc)
                 backup["sections"][section] = {"_error": str(exc)}
 
-        # S129: PQC signature on exported backup
+        # PQC signature on exported backup
         self._sign_backup_pqc(backup)
 
         return backup
@@ -536,7 +536,7 @@ class BackupManager:
             result.errors = validation_errors
             return result
 
-        # S129 / BK-01: PQC signature policy.
+        # PQC signature policy.
         pqc_check = self._verify_backup_pqc(data)
         if pqc_check is False:
             # Signature present but verification FAILED. Always rejected;
@@ -573,7 +573,7 @@ class BackupManager:
         sections = data.get("sections", {})
 
         # Snapshot current state for rollback.
-        # BK-05 (S194): a failed snapshot is recorded as a None sentinel,
+        # A failed snapshot is recorded as a None sentinel,
         # never {} -- rolling back onto {} would wipe the live section
         # state (replace-mode importers treat {} as "delete everything").
         # _rollback already skips None snapshots with a warning.
@@ -622,7 +622,7 @@ class BackupManager:
 
                 # Rollback all previously applied sections AND the failing
                 # one: its importer may have partially applied before
-                # raising (BK-04, S194). Its snapshot is in `snapshots`.
+                # raising. Its snapshot is in `snapshots`.
                 self._rollback(applied + [section_name], snapshots)
                 result.rolled_back = True
                 return result
@@ -656,7 +656,7 @@ class BackupManager:
                 logger.error("Rollback failed for '%s': %s", section_name, exc)
 
     # -----------------------------------------------------------------
-    # S129: PQC signing / verification helpers
+    # PQC signing / verification helpers
     # -----------------------------------------------------------------
 
     def _sign_backup_pqc(self, backup: dict[str, Any]) -> None:
@@ -1046,7 +1046,7 @@ class BackupManager:
             return {}
 
     def _export_semantic_cache(self) -> dict[str, Any]:
-        """Export semantic cache configuration (S220 BK-06).
+        """Export semantic cache configuration.
 
         Config only: cached entries are regenerable content and stay
         excluded by design (ATREST_INVENTORY).
@@ -1061,7 +1061,7 @@ class BackupManager:
             return {}
 
     def _export_benchmark_auto_trigger(self) -> dict[str, Any]:
-        """Export benchmark auto-trigger configuration (S220 BK-06).
+        """Export benchmark auto-trigger configuration.
 
         Custom benchmark profiles already live in the 'benchmarks'
         section; this covers the auto-trigger settings only.
@@ -1076,7 +1076,7 @@ class BackupManager:
             return {}
 
     def _export_humanizer(self) -> dict[str, Any]:
-        """Export humanizer configuration (S220 BK-06).
+        """Export humanizer configuration.
 
         Config only: the humanizer feedback store is data and stays
         excluded by design (ATREST_INVENTORY).
@@ -1091,7 +1091,7 @@ class BackupManager:
             return {}
 
     def _export_fine_tune(self) -> dict[str, Any]:
-        """Export fine-tune config and the variants registry (S220 BK-06).
+        """Export fine-tune config and the variants registry.
 
         Two halves: 'config' (config/fine_tune.yaml) and 'variants'
         (the user-authored registry). A/B comparison results are
@@ -1116,7 +1116,7 @@ class BackupManager:
         return result
 
     def _export_custom_pipelines(self) -> dict[str, Any]:
-        """Export user-authored agent pipelines (S220 BK-06).
+        """Export user-authored agent pipelines.
 
         Data section: data/pipelines_custom.yaml is user-authored.
         Builtin pipelines ship with the install and are excluded.
@@ -1132,7 +1132,7 @@ class BackupManager:
             return {}
 
     def _export_execution_pipelines(self) -> dict[str, Any]:
-        """Export user-authored execution pipelines (S220 BK-06).
+        """Export user-authored execution pipelines.
 
         Data section: data/execution_pipelines.yaml is user-authored.
         Builtin pipelines ship with the install and are excluded.
@@ -1148,7 +1148,7 @@ class BackupManager:
             return {}
 
     def _export_projects_settings(self) -> dict[str, Any]:
-        """Export projects feature settings from YAML (S220 BK-06).
+        """Export projects feature settings from YAML.
 
         Settings only (config/projects.yaml): project content (the
         projects DB and project files) is never in the backup.
@@ -1657,7 +1657,7 @@ def _summarize(value: Any) -> Any:
 
 
 # =====================================================================
-# S125: Encrypted backup support
+# Encrypted backup support
 # =====================================================================
 
 # Encrypted backup magic bytes for format detection
@@ -1665,7 +1665,7 @@ _ENCRYPTED_MAGIC = b"OOENC1"
 
 
 def _load_backup_config() -> dict:
-    """Load backup encryption config from security.yaml (S125)."""
+    """Load backup encryption config from security.yaml."""
     import yaml
     cfg_path = Path(__file__).parent / "config" / "security.yaml"
     try:
@@ -1679,7 +1679,7 @@ def _load_backup_config() -> dict:
 
 
 def encrypt_backup(backup_data: dict[str, Any], password: str) -> bytes:
-    """Encrypt a backup dict with a password (S125, hardened).
+    """Encrypt a backup dict with a password.
 
     Uses Argon2id (or PBKDF2 fallback) key derivation and AES-256-GCM.
 
@@ -1725,7 +1725,7 @@ def encrypt_backup(backup_data: dict[str, Any], password: str) -> bytes:
 
 
 def decrypt_backup(encrypted_data: bytes, password: str) -> dict[str, Any]:
-    """Decrypt an encrypted backup file (S125, hardened).
+    """Decrypt an encrypted backup file.
 
     Args:
         encrypted_data: Raw bytes from an .oo-backup.enc file.
@@ -1776,7 +1776,7 @@ def decrypt_backup(encrypted_data: bytes, password: str) -> dict[str, Any]:
 
 
 def is_encrypted_backup(data: bytes) -> bool:
-    """Check if data is an encrypted backup file (S125).
+    """Check if data is an encrypted backup file.
 
     Args:
         data: Raw file bytes.

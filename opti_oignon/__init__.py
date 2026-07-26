@@ -55,7 +55,7 @@ except ImportError:
     Pipeline = None
     PipelineStep = None
 
-# S216 (PIP-06 lot): the Gradio-era dynamic_pipeline_ui shim and the unwired
+# The Gradio-era dynamic_pipeline_ui shim and the unwired
 # dynamic_planning module (DPL-01) are retired. Execution pipelines run via
 # opti_oignon.pipelines.PipelineRunner, wired into the chat path.
 
@@ -94,7 +94,7 @@ except ImportError:
     CodeBlock = None
     ExecutionResult = None
 
-# Response Cache (v1.4.0 — S18/C3)
+# Response Cache
 try:
     from .response_cache import (
         CacheEntry,
@@ -110,7 +110,7 @@ except ImportError:
     CacheEntry = None
     CacheStats = None
 
-# Semantic Similarity Cache (v1.4.0 — S23 G1)
+# Semantic Similarity Cache
 try:
     from .semantic_cache import (
         SemanticCache,
@@ -127,7 +127,7 @@ except ImportError:
     SemanticMatch = None
     SemanticCacheStats = None
 
-# Lazy Loader (v1.4.0 — S23 F1)
+# Lazy Loader
 try:
     from .lazy_loader import (
         LazyModule,
@@ -142,7 +142,7 @@ except ImportError:
     LazyModule = None
     get_lazy_stats = None
 
-# Model Warm-up / Keepalive (v1.4.0 — S24 F2)
+# Model Warm-up / Keepalive
 try:
     from .model_warmup import (
         MODEL_WARMUP_AVAILABLE,
@@ -160,7 +160,7 @@ except ImportError:
     WarmupStats = None
     LoadedModel = None
 
-# Performance Benchmarks (v1.4.0 — S25 H2)
+# Performance Benchmarks
 try:
     from .performance_benchmark import (
         BENCHMARK_AVAILABLE,
@@ -182,7 +182,7 @@ except ImportError:
     BenchmarkSuite = None
     run_benchmarks = None
 
-# Inference backend abstraction (v2.0 -- S105)
+# Inference backend abstraction
 try:
     from .inference_backend import (
         BackendRegistry,
@@ -198,7 +198,7 @@ except ImportError:
     get_backend_registry = None
     init_backends_from_config = None
 
-# GGUF model manager (v2.0 -- S105)
+# GGUF model manager
 try:
     from .model_manager import (
         ModelManager,
@@ -214,7 +214,7 @@ except ImportError:
     init_model_manager = None
     parse_gguf_header = None
 
-# FastAPI API (v1.4.0 -- S26)
+# FastAPI API
 try:
     from .api.app import app as api_app
     API_AVAILABLE = True
@@ -222,7 +222,7 @@ except ImportError:
     API_AVAILABLE = False
     api_app = None
 
-# Context Optimizer (v2.4.0 -- S123)
+# Context Optimizer
 try:
     from .context_optimizer import (
         ContextOptimizer,
@@ -295,7 +295,7 @@ __all__ = [
     "CacheEntry",
     "CacheStats",
 
-    # Semantic Cache (S23 G1)
+    # Semantic Cache
     "SEMANTIC_CACHE_AVAILABLE",
     "semantic_cache",
     "SemanticCache",
@@ -303,13 +303,13 @@ __all__ = [
     "SemanticCacheStats",
     "cosine_similarity",
 
-    # Lazy Loader (S23 F1)
+    # Lazy Loader
     "LAZY_LOADER_AVAILABLE",
     "lazy_import",
     "LazyModule",
     "get_lazy_stats",
 
-    # Model Warm-up (S24 F2)
+    # Model Warm-up
     "MODEL_WARMUP_AVAILABLE",
     "model_warmup",
     "ModelWarmup",
@@ -317,7 +317,7 @@ __all__ = [
     "WarmupStats",
     "LoadedModel",
 
-    # Performance Benchmarks (S25 H2)
+    # Performance Benchmarks
     "BENCHMARK_AVAILABLE",
     "benchmark_runner",
     "BenchmarkRunner",
@@ -325,21 +325,21 @@ __all__ = [
     "BenchmarkSuite",
     "run_benchmarks",
 
-    # Inference backend (S105)
+    # Inference backend
     "INFERENCE_BACKEND_AVAILABLE",
     "InferenceBackend",
     "BackendRegistry",
     "get_backend_registry",
     "init_backends_from_config",
 
-    # GGUF model manager (S105)
+    # GGUF model manager
     "MODEL_MANAGER_AVAILABLE",
     "ModelManager",
     "get_model_manager",
     "init_model_manager",
     "parse_gguf_header",
 
-    # FastAPI API (S26)
+    # FastAPI API
     "API_AVAILABLE",
     "api_app",
 ]

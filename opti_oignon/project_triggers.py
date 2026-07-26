@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PROJECT TRIGGERS -- 3-Level Query Relevance Detection (S58)
+PROJECT TRIGGERS -- 3-Level Query Relevance Detection
 ============================================================
 
 Determines whether a user query is relevant to the active project,
@@ -91,7 +91,7 @@ _L1_PATTERNS = [
     for p in _EXPLICIT_PATTERNS_EN + _EXPLICIT_PATTERNS_FR
 ]
 
-# PTR-01 (S192): word-boundary verdict patterns for the L3 classification.
+# Word-boundary verdict patterns for the L3 classification.
 # The previous substring parse checked "YES" first, so any answer
 # containing YES anywhere (e.g. "NO. YES would imply ...") returned True
 # -- the AGL-01 verdict-substring class. A naive \bNO\b alone would miss

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SYNC QUEUE -- SQLite-Backed Request Queue for Offline Mode (S71)
+SYNC QUEUE -- SQLite-Backed Request Queue for Offline Mode
 =================================================================
 
 Stores pending LLM requests when Ollama is offline. Requests are
@@ -24,7 +24,7 @@ from typing import Any, Callable
 import yaml
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

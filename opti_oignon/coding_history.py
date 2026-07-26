@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-CODING HISTORY - OPTI-OIGNON v1.8.2 (S76/S78/S79/S80)
+CODING HISTORY - OPTI-OIGNON v1.8.2
 ===================================================
 
 SQLite-backed task history and checkpoint/resume for the coding agent.
 Persists tasks, steps, test results, and human checkpoint decisions.
 Supports resuming interrupted tasks from last checkpoint.
 
-S78: Coding History Analytics (SQ-08) -- aggregated success rates,
+Coding History Analytics -- aggregated success rates,
 step counts, model comparison, failure reasons, time trends, test
 pass rates. All aggregation done via SQL.
 
-S79: Export (JSON/CSV) and batch delete operations.
+Export (JSON/CSV) and batch delete operations.
 
-S80: Working memory persistence (working_memory table) for cross-step
+Working memory persistence (working_memory table) for cross-step
 context retention in the coding agent.
 
 Separate database: coding_history.db (follows per-feature-domain pattern).
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -495,7 +495,7 @@ class CodingHistoryStore:
         finally:
             conn.close()
 
-    # -- Working memory (S80) ----------------------------------------------
+    # -- Working memory ----------------------------------------------------
 
     def save_working_memory(
         self, task_id: str, memory_data: dict[str, Any]
@@ -878,7 +878,7 @@ class CodingHistoryStore:
             finally:
                 conn.close()
 
-    # -- Export (S79) ------------------------------------------------------
+    # -- Export ------------------------------------------------------------
 
     def export_tasks_json(self) -> list[dict[str, Any]]:
         """Export all tasks with steps and tests as JSON-serializable dicts.
@@ -1004,7 +1004,7 @@ class CodingHistoryStore:
         finally:
             conn.close()
 
-    # -- Batch delete (S79) ------------------------------------------------
+    # -- Batch delete ------------------------------------------------------
 
     def batch_delete_by_ids(self, task_ids: list[str]) -> int:
         """Delete multiple tasks by their IDs.
@@ -1129,7 +1129,7 @@ class CodingHistoryStore:
         finally:
             conn.close()
 
-    # -- Analytics (S78 SQ-08) --------------------------------------------
+    # -- Analytics --------------------------------------------------------
 
     def get_success_rate_by_model(self) -> list[dict[str, Any]]:
         """Get task success rate grouped by model.

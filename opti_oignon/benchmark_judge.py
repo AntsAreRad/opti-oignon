@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Judge — S89
+Benchmark Judge
 
 LLM-as-Judge evaluation layer for the autonomous benchmark engine.
 Uses a selected model to evaluate responses on a structured rubric
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -524,7 +524,7 @@ class BenchmarkJudge:
         """Blend autonomous and judge scores using configured weights.
 
         Args:
-            autonomous_score: Score from S88 autonomous metrics (0-1).
+            autonomous_score: Score from autonomous metrics (0-1).
             judge_score: Score from LLM judge (0-1).
 
         Returns:
@@ -591,7 +591,7 @@ class BenchmarkJudge:
 
         # Parse scores
         parsed = self.parse_judge_response(raw_text)
-        # S193 BJD-04: a judge output that yields no rubric dimension at
+        # A judge output that yields no rubric dimension at
         # all is a parse failure, not a legitimate zero score; flag it so
         # evaluate_run excludes it from the model averages instead of
         # silently averaging a 0.0 in.
@@ -691,7 +691,7 @@ class BenchmarkJudge:
 # Default query function (mirrors _query_ollama from benchmark_runner)
 # ---------------------------------------------------------------------------
 
-# S193 BMK-02: per-timeout cached Ollama clients (RSN-02 idiom) so
+# Per-timeout cached Ollama clients so
 # judge_timeout is actually enforced at the transport level.
 _JUDGE_CLIENTS: dict[int, Any] = {}
 _JUDGE_CLIENTS_LOCK = threading.Lock()
@@ -711,7 +711,7 @@ def _get_judge_client(timeout: int) -> Any:
 def _judge_chunk_text(chunk: Any) -> str:
     """Extract message content from a stream chunk (dict or object form).
 
-    S193 BMK-01: handle both client forms (MEM-06 idiom) instead of the
+    Handle both client forms instead of the
     dict-only access that silently emptied every judge response.
     """
     if isinstance(chunk, dict):

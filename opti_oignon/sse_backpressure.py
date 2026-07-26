@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SSE / WebSocket backpressure buffer (S159).
+SSE / WebSocket backpressure buffer.
 
 Provides a bounded event buffer that sits between a producer (LLM token
 generator) and a consumer (WebSocket or SSE client).  When the consumer

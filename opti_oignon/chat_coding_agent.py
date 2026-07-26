@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-CHAT CODING AGENT - OPTI-OIGNON v2.2.0 (S118)
+CHAT CODING AGENT - OPTI-OIGNON v2.2.0
 ===============================================
 
 Conversational coding agent that lives in the chat, combining the
-multi-step intelligence of the Coding Agent (S74-S81) with the natural
+multi-step intelligence of the Coding Agent with the natural
 conversation flow of regular chat.
 
 Unlike the standalone CodingAgent panel (one-shot task, fixed pipeline),
@@ -13,7 +13,7 @@ the ChatCodingAgent supports:
   - Adaptive pipeline (plan -> implement -> test -> fix, any phase skippable)
   - Natural language directives ("skip tests", "just write it", "try harder")
   - Smart follow-up detection (minimal diff plans for modifications)
-  - Full conversation memory: S66 compression, archive retrieval,
+  - Full conversation memory: compression, archive retrieval,
     context window management, working memory state injection
 
 Architecture:
@@ -229,11 +229,11 @@ class LLMCallContext:
 
     Mirrors the capabilities of the regular chat pipeline so the coding
     agent has access to all the same tools and features:
-    - Vision delegation (S95): images analyzed by vision-capable model
-    - Web search (S42): search and inject results
-    - Think mode (S42): chain-of-thought reasoning
-    - Tool calls (S44/S45): all registered tools (file, CSV, XLSX, etc.)
-    - Plugin hooks (S114): pre/post inference hooks
+    - Vision delegation: images analyzed by vision-capable model
+    - Web search: search and inject results
+    - Think mode: chain-of-thought reasoning
+    - Tool calls: all registered tools (file, CSV, XLSX, etc.)
+    - Plugin hooks: pre/post inference hooks
     """
     images: list[str] | None = None
     web_search: bool = False
@@ -647,7 +647,7 @@ class ChatCodingSession:
         """Build the full messages array with conversation history.
 
         Loads conversation history from the conversation backend,
-        applies S66 compression if history exceeds budget, and injects
+        applies compression if history exceeds budget, and injects
         the sandbox state as context. Also supports archive retrieval
         for follow-up questions that reference older context.
 
@@ -682,7 +682,7 @@ class ChatCodingSession:
                     "Failed to load conversation history: %s", exc
                 )
 
-        # -- S66: Compress history if it exceeds token budget ----------------
+        # -- Compress history if it exceeds token budget ---------------------
         history_budget = self._get_model_context_budget(model)
         self._last_compression_result = None
 
@@ -1318,7 +1318,7 @@ class ChatCodingSession:
             message: User message (after /code prefix removal).
             model: Model to use for inference.
             directives: Parsed runtime directives (or auto-parsed if None).
-            images: Base64-encoded images for vision delegation (S95).
+            images: Base64-encoded images for vision delegation.
                 If the model lacks vision, a vision-capable model
                 analyzes the images and injects the description.
             web_search: Enable web search for documentation lookup.

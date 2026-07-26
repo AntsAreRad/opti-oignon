@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Chunked transfer encoding utilities for large responses (S159).
+Chunked transfer encoding utilities for large responses.
 
 Provides a generator that breaks a JSON-serialisable payload into
 fixed-size chunks suitable for ``StreamingResponse``.  Each chunk

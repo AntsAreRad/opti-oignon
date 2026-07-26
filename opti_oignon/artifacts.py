@@ -480,7 +480,7 @@ class ArtifactManager:
         for artifact in artifacts:
             parent = self._find_version_parent(conversation_id, artifact)
             if parent is not None:
-                # Link as a new version. ART-01 (S194): number from the
+                # Link as a new version. Number from the
                 # chain maximum, not the matched member -- similarity
                 # ordering can match an older member of the chain and
                 # would otherwise produce duplicate version numbers.
@@ -675,7 +675,7 @@ class ArtifactManager:
         paths = []
         seen_names = set()
         for a in artifacts:
-            # S156: sanitize filename to prevent path traversal
+            # Sanitize filename to prevent path traversal
             fname = os.path.basename(a.filename)
             # Handle duplicate filenames
             if fname in seen_names:

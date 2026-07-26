@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Network Hardening Checks for Opti-Oignon (S131).
+Network Hardening Checks for Opti-Oignon.
 
 Provides advisory checks for network security posture:
 

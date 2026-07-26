@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG EXTERNAL VECTOR STORE CONNECTORS -- S100.
+RAG EXTERNAL VECTOR STORE CONNECTORS.
 
 Provides:
 - Abstract connector interface (connect, query, disconnect, health)

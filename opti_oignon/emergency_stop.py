@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Emergency stop (S215): panic control that makes the machine quiet, plus resume.
+"""Emergency stop: panic control that makes the machine quiet, plus resume.
 
 An availability/safety control, NOT a security boundary. It is explicitly
-distinct from the S126/S128 web-search kill switch (a module unload whose
+distinct from the web-search kill switch (a module unload whose
 re-enable requires a multi-factor ceremony): resume here needs no ceremony.
 Authentication is still required at the route layer (routes_security).
 
-Semantics, as arbitrated at the S215 gate:
+Semantics:
 
 - ``stop()`` sets the global "stopped" flag FIRST, so the admission path
   closes before the drain begins and the flag is set even if every later
@@ -31,7 +31,7 @@ Semantics, as arbitrated at the S215 gate:
   reported, never overridden). Audit-chained. No ceremony.
 
 - The flag is in-process only: a crash-restart comes back UNSTOPPED by
-  design (arbitrated S215 -- persistence would create a lockout-on-boot
+  design (persistence would create a lockout-on-boot
   failure mode for an availability control). The audit chain carries the
   history.
 

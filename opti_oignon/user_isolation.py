@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Per-user data isolation layer for Opti-Oignon (S98).
+Per-user data isolation layer for Opti-Oignon.
 
 Provides:
 - Default "local" user for single-user mode backward compatibility
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -60,7 +60,7 @@ ISOLATION_TARGETS = [
     ("fingerprint.db", "preferences"),
 ]
 
-# S138: Allowed table names for dynamic DDL queries
+# Allowed table names for dynamic DDL queries
 _ALLOWED_TABLES = frozenset(t[1] for t in ISOLATION_TARGETS)
 
 USER_SETTINGS_AVAILABLE = True
@@ -138,7 +138,7 @@ def migrate_table(db_path: str | Path, table: str) -> bool:
             conn.close()
             return False  # Already migrated
 
-        # S138: validate table name against allowlist
+        # Validate table name against allowlist
         assert table in _ALLOWED_TABLES, f"Invalid table: {table}"
 
         # Add column with default value

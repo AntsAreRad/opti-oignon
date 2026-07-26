@@ -56,7 +56,7 @@ class ExecutionResult:
     working_dir: str = ""
 
 
-# Regex to match fenced code blocks (BUG-07 S108: more lenient).
+# Regex to match fenced code blocks.
 # Handles: optional leading spaces, language tag with special chars (c++, c#),
 # optional newline after language tag, alternative fence styles.
 _CODE_BLOCK_RE = re.compile(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Thread-safe SQLite/SQLCipher connection pool (S159).
+Thread-safe SQLite/SQLCipher connection pool.
 
 Provides a bounded pool of reusable database connections with health
 checks, WAL mode enforcement, and context-manager-based checkout/checkin.
@@ -138,7 +138,7 @@ class ConnectionPool:
         Set to 0 for non-blocking (raises immediately).
     health_check : bool
         Run a liveness probe (``SELECT 1``) on every checkout and
-        replace dead connections (S193 CPL-03: the previous
+        replace dead connections (the previous
         ``PRAGMA integrity_check`` scanned the entire database on
         every checkout). Set to False to skip entirely; integrity
         verification belongs to offline maintenance, not the hot path.
@@ -203,7 +203,7 @@ class ConnectionPool:
         """Create a new raw connection and apply WAL mode if configured.
 
         Args:
-            reserved: S193 CPL-01 -- True when the caller already reserved
+            reserved: True when the caller already reserved
                 the pool slot (incremented ``_total_created``) under the
                 lock; the count is then not incremented again here.
         """
@@ -232,7 +232,7 @@ class ConnectionPool:
         if not self._health_check:
             return True
         try:
-            # S193 CPL-03: liveness probe, not a full integrity scan.
+            # Liveness probe, not a full integrity scan.
             result = pc.conn.execute("SELECT 1").fetchone()
             return result is not None and result[0] == 1
         except Exception as exc:
@@ -279,7 +279,7 @@ class ConnectionPool:
 
         # If none idle, try creating a new one if under limit
         if pc is None:
-            # S193 CPL-01: reserve the slot inside the lock. The previous
+            # Reserve the slot inside the lock. The previous
             # check-then-act let two threads both pass the bound check and
             # overshoot pool_size under concurrency. On creation failure the
             # reserved slot is released.
@@ -332,7 +332,7 @@ class ConnectionPool:
                 pass
             return
 
-        # S193 CPL-02: never return a connection holding an open transaction
+        # Never return a connection holding an open transaction
         # to the pool -- the next checkout would inherit dirty state and a
         # write lock. rollback() is a no-op on a clean connection; if it
         # fails, the connection is discarded rather than pooled.

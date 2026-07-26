@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Security Scheduler -- Automated red team runs and dependency monitoring (S158).
+Security Scheduler -- Automated red team runs and dependency monitoring.
 
 Provides SecurityScheduler singleton that runs periodic security tasks:
 - Red team campaigns at configured intervals (daily/weekly)

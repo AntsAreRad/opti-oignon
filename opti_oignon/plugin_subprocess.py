@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin out-of-process isolation for Opti-Oignon (S143).
+Plugin out-of-process isolation for Opti-Oignon.
 
 Runs each plugin in its own subprocess communicating via JSON-RPC over
 Unix domain sockets.  HMAC-signed messages, resource limits, watchdog
@@ -76,7 +76,7 @@ def _build_plugin_env(extra: dict[str, str]) -> dict[str, str]:
 
     The host environment is not inherited; only a small allowlist of benign
     variables (``_FORWARDED_ENV_VARS``) is forwarded, plus the explicit
-    ``extra`` mapping. PATH is backfilled to a safe default if absent.
+    ``extra`` mapping. PATH is set to a safe default if absent.
     """
     env = {k: os.environ[k] for k in _FORWARDED_ENV_VARS if k in os.environ}
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")

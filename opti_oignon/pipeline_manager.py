@@ -355,7 +355,7 @@ class PipelineManager:
             pipelines_data = data.get("pipelines", {})
 
             for pipe_id, pipe_data in pipelines_data.items():
-                # PIP-03 (S192): custom entries must not overwrite builtins
+                # Custom entries must not overwrite builtins
                 # (mirrors import_from_yaml and the execution-pipeline store).
                 if pipe_id in self._pipelines and self._pipelines[pipe_id].is_builtin:
                     logger.warning(
@@ -494,7 +494,7 @@ class PipelineManager:
 
     def validate_for_write(self, pipeline: Pipeline) -> list[str]:
         """
-        Validate a pipeline before create/update (PIP-05, S192).
+        Validate a pipeline before create/update.
 
         Uses the loaded agent registry when available. When config.yaml did
         not load (empty registry), the agent-existence check is skipped so a
@@ -523,7 +523,7 @@ class PipelineManager:
             logger.warning(f"Pipeline '{pipeline.id}' already exists")
             return False
 
-        # PIP-05 (S192): validate before persisting (id format, name, steps,
+        # Validate before persisting (id format, name, steps,
         # agent/template existence). Mirrors the execution-pipeline store.
         errors = self.validate_for_write(pipeline)
         if errors:
@@ -565,7 +565,7 @@ class PipelineManager:
             logger.warning(f"Cannot modify builtin pipeline: {pipeline_id}")
             return False
 
-        # PIP-05 (S192): validate before persisting, same as create. The id
+        # Validate before persisting, same as create. The id
         # is normalized to the target pipeline_id first (callers may pass a
         # payload without it).
         pipeline.id = pipeline_id

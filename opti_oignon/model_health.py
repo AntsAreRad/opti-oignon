@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MODEL HEALTH MONITOR -- Real-time Ollama Model Availability Tracking (S63)
+MODEL HEALTH MONITOR -- Real-time Ollama Model Availability Tracking
 ============================================================================
 
 Monitors Ollama model availability and performance through periodic

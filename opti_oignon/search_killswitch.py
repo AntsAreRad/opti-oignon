@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Web Search Hardware Kill Switch for Opti-Oignon (S126).
+Web Search Hardware Kill Switch for Opti-Oignon.
 
 When the kill switch is engaged:
   1. The ``WebSearcher`` singleton is destroyed

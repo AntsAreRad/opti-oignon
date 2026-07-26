@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TLS Manager for Opti-Oignon (S133).
+TLS Manager for Opti-Oignon.
 
 Handles certificate generation and management for secure remote access
 in Daily mode ONLY. Every public function checks security mode first

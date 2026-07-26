@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Security Mode System for Opti-Oignon (S126).
+Security Mode System for Opti-Oignon.
 
 Implements the dual-mode Daily/Bulbe architecture:
 
-  - **Daily**: frictionless everyday use with baseline S124/S125 security.
+  - **Daily**: frictionless everyday use with baseline security.
   - **Bulbe**: maximum security -- every layer active, wrapping the
     core like the protective bulb at the heart of an onion.
 
@@ -140,7 +140,7 @@ class ModePolicy:
                 rate_limit_max_attempts=RATE_LIMIT[MODE_BULBE]["max_attempts"],
                 rate_limit_window=RATE_LIMIT[MODE_BULBE]["window_seconds"],
                 bearer_auth_allowed=False,
-                # S133: Hardcoded False in Bulbe. Not from config.
+                # Hardcoded False in Bulbe. Not from config.
                 # This is defense layer 4 of 6.
                 remote_access_allowed=False,
             )
@@ -185,13 +185,13 @@ class ModePolicy:
 def _load_signing_key():
     """Load the signing key from the keyfile.
 
-    S129: Returns SecureBytes when available (from load_keyfile()),
+    Returns SecureBytes when available (from load_keyfile()),
     falls back to raw bytes from file if keyfile module is unavailable.
     """
     try:
         from opti_oignon.encryption import load_keyfile
         key, _salt, _kdf = load_keyfile()
-        return key  # SecureBytes (S129)
+        return key  # SecureBytes
     except Exception:
         pass
     # Direct keyfile read fallback
@@ -209,7 +209,7 @@ def _load_signing_key():
 def _extract_key_bytes(key) -> bytes:
     """Extract raw bytes from a key (SecureBytes or plain bytes).
 
-    S129: Helper for HMAC operations that require raw bytes.
+    Helper for HMAC operations that require raw bytes.
     """
     if hasattr(key, "as_bytes"):
         return key.as_bytes()
@@ -246,7 +246,7 @@ def _compute_lockfile_hmac(
     field change invalidates the HMAC.  Security derives from
     the signing key, not from the format (Kerckhoffs).
 
-    S129: Accepts SecureBytes or raw bytes.
+    Accepts SecureBytes or raw bytes.
     """
     raw_key = _extract_key_bytes(key)
     message = f"{mode}||{timestamp}||{user_id}".encode()
@@ -260,7 +260,7 @@ def _compute_lockfile_hmac(
 def _write_lockfile(mode: str, user_id: str, key) -> float:
     """Write the HMAC-signed lockfile.  Returns the timestamp used.
 
-    S129: Accepts SecureBytes or raw bytes for key.
+    Accepts SecureBytes or raw bytes for key.
     """
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.time()
@@ -311,7 +311,7 @@ def _read_lockfile() -> dict[str, str]:
 def _verify_lockfile(fields: dict[str, str], key) -> bool:
     """Verify the HMAC in the lockfile fields.
 
-    S129: Accepts SecureBytes or raw bytes for key.
+    Accepts SecureBytes or raw bytes for key.
     """
     mode = fields.get("MODE", "")
     ts_str = fields.get("TIMESTAMP", "0")
@@ -387,7 +387,7 @@ def _audit_log(event: str, severity: str = "INFO", **details: Any) -> None:
     """Log a security audit event.
 
     Also persists to the security audit DB if available,
-    and to the hash-chain signed audit log (S130).
+    and to the hash-chain signed audit log.
     """
     log_data = {
         "event": event,
@@ -413,7 +413,7 @@ def _audit_log(event: str, severity: str = "INFO", **details: Any) -> None:
     except Exception:
         pass
 
-    # S130: Forward to hash-chain signed audit log
+    # Forward to hash-chain signed audit log
     try:
         from opti_oignon.signed_audit_log import chain_log
         chain_log(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark Custom Profiles — S90
+Benchmark Custom Profiles
 
 CRUD operations for user-defined benchmark profiles. Custom profiles
 are stored in ``data/custom_benchmark_profiles.yaml`` and merged with
@@ -63,7 +63,7 @@ def _save_yaml(data: dict, path: Path) -> bool:
 
 
 def _validate_profile_fields(fields: dict) -> None:
-    """Validate custom-profile numeric fields (S193 BMK-13, PIP-05 idiom).
+    """Validate custom-profile numeric fields.
 
     Only validates keys that are present and non-None, so it serves both
     create (full set) and partial update. Raises ValueError on the first
@@ -199,7 +199,7 @@ class CustomProfileStore:
         profiles_raw = data.get("profiles", {})
         self._profiles = {}
         for pid, pdata in profiles_raw.items():
-            # S193 BMK-14: custom profile ids are always custom_*; reject a
+            # Custom profile ids are always custom_*; reject a
             # hand-edited entry with a builtin id, which would otherwise
             # shadow the builtin at the evaluator merge (the PIP-03 class).
             if not str(pid).startswith("custom_"):
@@ -268,7 +268,7 @@ class CustomProfileStore:
                 f"Profile name too long ({len(stripped)} chars, max 64)"
             )
 
-        # S193 BMK-13: bound the numeric fields before persisting.
+        # Bound the numeric fields before persisting.
         _validate_profile_fields({
             "timeout": timeout,
             "max_response_tokens": max_response_tokens,
@@ -344,7 +344,7 @@ class CustomProfileStore:
                         )
                 updates["name"] = new_name
 
-            # S193 BMK-13: validate any numeric fields present in the update
+            # Validate any numeric fields present in the update
             # (custom_weights here must also carry the four keys, aligning
             # update with the create-path check).
             _validate_profile_fields(updates)

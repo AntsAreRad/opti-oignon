@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Key Memory Protection for Opti-Oignon (S126).
+Key Memory Protection for Opti-Oignon.
 
 Provides ``SecureBytes``, a wrapper around sensitive key material that:
 
@@ -362,7 +362,7 @@ def get_platform_info() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# S131: Swap / Hibernation Protection
+# Swap / Hibernation Protection
 # ---------------------------------------------------------------------------
 
 @dataclass

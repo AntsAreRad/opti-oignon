@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-QUICK SANDBOX - OPTI-OIGNON v2.1.1 (S117)
+QUICK SANDBOX - OPTI-OIGNON v2.1.1
 ==========================================
 
 Lightweight orchestrator for chat-integrated sandboxed code execution.

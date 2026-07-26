@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LUKS / Full-Disk Encryption Detector for Opti-Oignon (S145).
+LUKS / Full-Disk Encryption Detector for Opti-Oignon.
 
 Checks whether the system root filesystem (and optionally /home) is
 protected by full-disk encryption (LUKS/dm-crypt).

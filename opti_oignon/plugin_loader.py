@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin loader for Opti-Oignon (S101).
+Plugin loader for Opti-Oignon.
 
 PluginLoader: load plugins from directories, execute them in a restricted
 sandbox (no host filesystem access outside plugin dir, no network by
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Modules that plugins are NOT allowed to import
 _BLOCKED_IMPORTS = frozenset({
-    # Original S101/S106 blocks
+    # Original blocks
     "subprocess",
     "shutil",
     "ctypes",
@@ -35,27 +35,27 @@ _BLOCKED_IMPORTS = frozenset({
     "codeop",
     "compileall",
     "py_compile",
-    "importlib",      # importlib.import_module() bypass (S106)
-    # S124: Critical additions — system access
+    "importlib",      # importlib.import_module() bypass
+    # Critical additions — system access
     "os",             # os.system(), os.popen(), os.environ, os.listdir
     "sys",            # sys.modules manipulation, sys._getframe
     "pathlib",        # Path.read_text() / .write_text() bypass builtins.open
     "io",             # io.open() bypasses builtins.open patch
     "glob",           # File enumeration
-    # S124: Critical additions — code execution via deserialization
+    # Critical additions — code execution via deserialization
     "pickle",         # Arbitrary code execution via __reduce__
     "shelve",         # Uses pickle internally
     "marshal",        # Low-level serialization, code object execution
-    # S124: Critical additions — introspection / memory access
+    # Critical additions — introspection / memory access
     "gc",             # gc.get_objects() exposes all Python objects in memory
     "inspect",        # Read source code of any loaded module
     "dis",            # Disassemble bytecode of any function
     "ast",            # Parse + compile arbitrary code
-    # S124: Critical additions — import system manipulation
+    # Critical additions — import system manipulation
     "zipimport",      # Load code from zip files
     "pkgutil",        # Package utilities, import scanning
     "runpy",          # Run modules as scripts
-    # S124: Miscellaneous dangerous modules
+    # Miscellaneous dangerous modules
     "webbrowser",     # Open URLs (information disclosure)
     "antigravity",    # Opens browser via webbrowser
     "turtle",         # Can open GUI windows
@@ -133,7 +133,7 @@ class _RestrictedPathAccessor:
     can be accessed.  This is defense-in-depth: the primary defense is
     blocking os/pathlib/io at import time via _RestrictedImporter.
 
-    S124: Extended to cover pathlib.Path.open / read_text / read_bytes /
+    Extended to cover pathlib.Path.open / read_text / read_bytes /
     write_text / write_bytes / iterdir / glob / rglob and io.open.
     """
 
@@ -349,7 +349,7 @@ class _RestrictedPathAccessor:
             _Path.rglob = self._original_path_rglob  # type: ignore[assignment]
 
 
-# Builtins that plugins are NOT allowed to use (S124 Phase 2c).
+# Builtins that plugins are NOT allowed to use.
 # __import__ is handled separately with a selective wrapper.
 # exec/eval/compile are blocked at the builtins level but with a
 # caller-check so Python's own import machinery still works.
@@ -782,7 +782,7 @@ class PluginLoader:
         except PluginManifestError as exc:
             raise PluginLoadError(f"Invalid manifest: {exc}") from exc
 
-        # --- S126: Bulbe mode allowlist check ---
+        # --- Bulbe mode allowlist check ---
         try:
             from opti_oignon.security_mode import is_bulbe
             if is_bulbe():
@@ -907,7 +907,7 @@ class PluginLoader:
         except PluginManifestError as exc:
             raise PluginLoadError(f"Invalid manifest: {exc}") from exc
 
-        # --- S126: Bulbe mode allowlist check ---
+        # --- Bulbe mode allowlist check ---
         try:
             from opti_oignon.security_mode import is_bulbe
             if is_bulbe():
@@ -1160,7 +1160,7 @@ class PluginLoader:
         return unloaded or unregistered
 
     # ------------------------------------------------------------------
-    # Hook registration bridge (S114)
+    # Hook registration bridge
     # ------------------------------------------------------------------
 
     def _register_hooks(self, loaded: LoadedPlugin) -> int:

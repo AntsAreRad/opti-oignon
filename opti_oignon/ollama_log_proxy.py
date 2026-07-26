@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ollama Log Sanitization Proxy for Opti-Oignon (S131).
+Ollama Log Sanitization Proxy for Opti-Oignon.
 
 Ollama logs prompt content at ``debug`` level, which may include
 sensitive user messages, API keys, or PII.  This module:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-REASONING ENGINE - OPTI-OIGNON v1.5.3 (S49)
+REASONING ENGINE - OPTI-OIGNON v1.5.3
 =============================================
 
 Moteur de raisonnement avance offrant trois strategies:
@@ -53,7 +53,7 @@ def _reply_text(response: Any) -> str:
     ollama-python (a ChatResponse is not subscriptable and has no .get), so
     an object-form response no longer raises an AttributeError swallowed
     into the strategy fallbacks. Mirrors memory/legacy._reply_text
-    (RSN-01, S192; the S189/S191 dict-vs-object class).
+    (the dict-vs-object class).
     """
     if response is None:
         return ""
@@ -119,7 +119,7 @@ class ReasoningConfig:
     decompose_model: str | None = None
     evaluate_model: str | None = None
     timeout_per_step: int = 60
-    # RSN-04 (S192): strategy used by the live pipeline when the caller
+    # Strategy used by the live pipeline when the caller
     # does not force one ("decompose", "tree_of_thought", "self_consistency").
     default_strategy: str = "decompose"
 
@@ -291,7 +291,7 @@ class ReasoningEngine:
         self._config = config or ReasoningConfig()
         self._default_model = default_model
         self._last_result: ReasoningResult | None = None
-        # RSN-02 (S192): per-timeout ollama clients so timeout_per_step is
+        # Per-timeout ollama clients so timeout_per_step is
         # actually enforced on every call.
         self._clients: dict[int, Any] = {}
 
@@ -343,7 +343,7 @@ class ReasoningEngine:
         _timeout = timeout or self._config.timeout_per_step
 
         try:
-            # RSN-02 (S192): route through a timeout-bound client so
+            # Route through a timeout-bound client so
             # timeout_per_step is enforced (it was computed but never used;
             # a hung model call blocked the executor pipeline indefinitely).
             client = self._get_client(_timeout)
@@ -352,7 +352,7 @@ class ReasoningEngine:
                 messages=messages,
                 options={"temperature": temperature},
             )
-            # RSN-01 (S192): both-form parse (dict / object ollama-python).
+            # Both-form parse (dict / object ollama-python).
             content = _reply_text(response)
             return content.strip()
         except Exception as e:
@@ -396,7 +396,7 @@ class ReasoningEngine:
         except json.JSONDecodeError:
             pass
 
-        # RSN-03 (S192): fall back to the in-house tolerant repair before
+        # Fall back to the in-house tolerant repair before
         # giving up (trailing prose, truncation, single quotes, comments).
         # A parse failure here silently degrades the strategy to a
         # single-step / single-branch run, so repairing directly raises the
@@ -883,19 +883,19 @@ class ReasoningEngine:
     ) -> Generator:
         """Execute reasoning and yield results for streaming.
 
-        Yields des tuples pour le streaming:
-        - ("reasoning_step", ReasoningStep) pour each etape
-        - ("reasoning_done", ReasoningResult) a la fin
-        - str pour les tokens de la reponse finale
+        Yields tuples for streaming:
+        - ("reasoning_step", ReasoningStep) for each step
+        - ("reasoning_done", ReasoningResult) at the end
+        - str for the tokens of the final answer
 
         Args:
-            question: Question a raisonner
+            question: Question to reason about
             strategy: "decompose", "tree_of_thought", "self_consistency",
-                or None to use config.default_strategy (RSN-04, S192)
-            model: Model a utiliser
-            on_step: Callback optionnel pour each etape
+                or None to use config.default_strategy
+            model: Model to use
+            on_step: Optional callback for each step
         """
-        # RSN-04 (S192): resolve the strategy from config when the caller
+        # Resolve the strategy from config when the caller
         # does not force one, so tree_of_thought / self_consistency are
         # reachable from the live path via reasoning.yaml (the executor
         # previously hardcoded "decompose").

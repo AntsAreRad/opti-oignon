@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG DASHBOARD & AUTO-REFRESH -- S100.
+RAG DASHBOARD & AUTO-REFRESH.
 
 Provides:
 - RAGDashboardStats: usage stats, collection health, source reliability
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:

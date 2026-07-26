@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MODEL PROFILES -- Smart Auto-Routing (S46/S54)
+MODEL PROFILES -- Smart Auto-Routing
 ===============================================
 
 Defines model capability profiles in a YAML-driven system.
@@ -60,9 +60,9 @@ class ModelProfile:
     quality_tier: str = "medium"                # high, medium, low
     recommended_for: list[str] = field(default_factory=list)
     not_recommended_for: list[str] = field(default_factory=list)
-    # S54: Numeric task scores for smart routing (task_type -> 0.0-1.0)
+    # Numeric task scores for smart routing (task_type -> 0.0-1.0)
     task_scores: dict[str, float] = field(default_factory=dict)
-    # S54: Auto-detected model metadata
+    # Auto-detected model metadata
     parameter_count: str | None = None       # e.g. "32B"
     quantization: str | None = None          # e.g. "Q4_K_M"
     family: str | None = None                # e.g. "qwen3"
@@ -84,7 +84,7 @@ class ModelProfile:
         if self.quality_tier not in VALID_QUALITY_TIERS:
             logger.warning(f"Profile {self.name}: invalid quality_tier '{self.quality_tier}', fallback 'medium'")
             self.quality_tier = "medium"
-        # S54: Validate task_scores range
+        # Validate task_scores range
         if self.task_scores:
             for k, v in list(self.task_scores.items()):
                 self.task_scores[k] = max(0.0, min(1.0, float(v)))
@@ -169,7 +169,7 @@ class ModelProfile:
             "recommended_for": self.recommended_for,
             "not_recommended_for": self.not_recommended_for,
         }
-        # S54: Include task_scores and metadata if present
+        # Include task_scores and metadata if present
         if self.task_scores:
             d["task_scores"] = dict(self.task_scores)
         if self.parameter_count:
@@ -490,7 +490,7 @@ class ModelProfileManager:
             )
 
     # -------------------------------------------------------------------------
-    # S54: CRUD operations
+    # CRUD operations
     # -------------------------------------------------------------------------
 
     def add_profile(self, profile: "ModelProfile") -> bool:
@@ -586,7 +586,7 @@ class ModelProfileManager:
             return False
 
     # -------------------------------------------------------------------------
-    # S54: Auto-detection via ollama.show()
+    # Auto-detection via ollama.show()
     # -------------------------------------------------------------------------
 
     def auto_detect(self, model_name: str) -> Optional["ModelProfile"]:

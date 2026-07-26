@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Performance Monitor -- S72 Step 1.
+Performance Monitor.
 
 Real-time metrics collection for token throughput, latency, model utilization,
 quality drift detection, and rule-based optimization recommendations.
@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -143,7 +143,7 @@ class PerformanceMonitor:
         self._db_path = str(db_path)
 
         self._lock = threading.Lock()
-        # S193 PRF-03: opportunistic retention. performance_metrics.db had no
+        # Opportunistic retention. performance_metrics.db had no
         # auto-purge (cleanup only via the manual /api/performance/cleanup
         # route), so it grew unbounded on a daily-use machine. Run cleanup at
         # most once per retention-check interval from record_execution, with
@@ -234,7 +234,7 @@ class PerformanceMonitor:
         finally:
             conn.close()
 
-        # S193 PRF-03: opportunistic retention (no background thread).
+        # Opportunistic retention (no background thread).
         if ts - self._last_cleanup_ts > self._cleanup_interval_s:
             self._last_cleanup_ts = ts
             try:
@@ -398,7 +398,7 @@ class PerformanceMonitor:
             else:
                 return None
 
-            # S138: validate column name against allowlist
+            # Validate column name against allowlist
             _METRIC_COLS = frozenset({"latency_ms", "quality_score"})
             assert col in _METRIC_COLS, f"Invalid metric column: {col}"
 

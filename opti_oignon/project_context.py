@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PROJECT CONTEXT -- Indexation + RAG Retrieval for Projects (S58)
+PROJECT CONTEXT -- Indexation + RAG Retrieval for Projects
 ================================================================
 
 Provides two main classes:
@@ -188,7 +188,7 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _l2_normalize(vec: Any) -> list[float]:
-    """L2-normalize an embedding vector (PCX-01, S192).
+    """L2-normalize an embedding vector.
 
     The per-project collections are created in ChromaDB's default l2 space
     and the retrieval score is computed as 1 - distance/2, which is only
@@ -594,7 +594,7 @@ class ProjectIndexer:
             result.error = "No valid embeddings produced"
             return result
 
-        # PCX-01 (S192): normalize before storing (see _l2_normalize).
+        # Normalize before storing (see _l2_normalize).
         valid_embeddings = [_l2_normalize(e) for e in valid_embeddings]
 
         # Store in ChromaDB
@@ -897,7 +897,7 @@ class ProjectContextBuilder:
             query_embedding = embedder.embed_single(query)
             if query_embedding is None:
                 return []
-            # PCX-01 (S192): normalize the query like the stored vectors.
+            # Normalize the query like the stored vectors.
             query_embedding = _l2_normalize(query_embedding)
         except Exception as e:
             logger.warning("Query embedding failed: %s", e)

@@ -8,7 +8,7 @@ Validates WCAG AA contrast ratios. Provides built-in preset themes
 and manages user-defined custom presets.
 
 All generated variables follow the --oo-* convention and are a strict
-superset of the accent variables defined in theme.css (S93 palette v4e).
+superset of the accent variables defined in theme.css.
 """
 
 import colorsys
@@ -234,7 +234,7 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 # -- Built-in preset themes --
 #
-# S166: the five built-in presets are renamed to the design-system presets
+# The five built-in presets are renamed to the design-system presets
 # (anthracite, parchment, slate, linen, high-contrast). The previous ids
 # (default, ocean, forest, rose, monochrome) remain reserved for backward
 # compatibility and resolve through _LEGACY_PRESET_ALIASES, so older stored
@@ -328,7 +328,7 @@ def get_preset_by_id(preset_id: str) -> dict[str, Any] | None:
 
     Legacy preset ids (default, ocean, forest, rose, monochrome) are
     resolved through _LEGACY_PRESET_ALIASES to their closest new preset so
-    older stored selections keep working after the S166 rename.
+    older stored selections keep working after the rename.
     """
     for preset in _PRESET_THEMES:
         if preset["id"] == preset_id:
@@ -483,7 +483,7 @@ def export_presets(presets: list[dict[str, Any]]) -> str:
     return json.dumps(exportable, indent=2, ensure_ascii=False)
 
 
-# -- S166 design-system foundation schema --
+# -- Design-system foundation schema --
 # Curated per-preset foundation palettes (38 tokens each), the
 # single source of truth shared with the split theme-<id>.css files.
 BUILTIN_PRESET_PALETTES: dict[str, dict[str, str]] = {
@@ -724,7 +724,7 @@ def generate_foundation_schema(
     accent_warmth: int = 0,
     base_preset: str | None = None,
 ) -> dict[str, str]:
-    """Emit the full S166 foundation schema (--oo-* tokens) for a custom preset.
+    """Emit the full foundation schema (--oo-* tokens) for a custom preset.
 
     Background, foreground, border and semantic tokens are inherited from a
     mode-appropriate base preset (anthracite for dark, parchment for light);

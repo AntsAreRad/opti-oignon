@@ -33,7 +33,7 @@ from pathlib import Path
 from .config import DATA_DIR
 
 logger = logging.getLogger(__name__)
-# S136 audit fix: use encrypted DB connections
+# Audit fix: use encrypted DB connections
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 except ImportError:
@@ -397,7 +397,7 @@ class ResponseCache:
             response: Complete LLM response to cache
             task_type: Optional task type for stats
             ttl: Optional TTL override (uses default if None)
-            explicit_key: Optional pre-computed cache key (S19 G3 multi-turn)
+            explicit_key: Optional pre-computed cache key
 
         Returns:
             The cache key for the stored entry

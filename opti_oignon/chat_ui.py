@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Opti-Oignon Chat UI -- DEPRECATED (Gradio removed in v1.4.0 S39)
+Opti-Oignon Chat UI -- DEPRECATED (Gradio removed in v1.4.0)
 =================================================================
 
 The Gradio-based chat interface has been replaced by SvelteKit components.

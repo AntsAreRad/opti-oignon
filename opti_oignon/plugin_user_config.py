@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Per-user plugin configuration store for Opti-Oignon (S142).
+Per-user plugin configuration store for Opti-Oignon.
 
 Provides user-scoped plugin settings:
 - Users can enable/disable plugins independently

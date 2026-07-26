@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-INFERENCE TELEMETRY PIPELINE -- OPTI-OIGNON S112
+INFERENCE TELEMETRY PIPELINE -- OPTI-OIGNON
 ==================================================
 
 Central event bus for inference events. Instruments inference at a
 single point and fans out to downstream consumers:
 
-    - LiveMetricsCollector  (S111) -- real-time tok/s, GPU, memory
-    - PerformanceMonitor    (S72)  -- execution records, drift, latency
-    - SpeculativeDecodingManager (S110) -- acceptance rate tracking
+    - LiveMetricsCollector       -- real-time tok/s, GPU, memory
+    - PerformanceMonitor         -- execution records, drift, latency
+    - SpeculativeDecodingManager -- acceptance rate tracking
     - InferenceProfiler -- per-request time breakdown, off by default
 
 Every consumer is registered here and nowhere else, and each one is gated

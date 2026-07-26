@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Startup Security Checklist for Opti-Oignon (S145).
+Startup Security Checklist for Opti-Oignon.
 
 Unified module that runs all security guards at application startup
 and caches results. Combines:
@@ -8,7 +8,7 @@ and caches results. Combines:
   - Ollama bind guard (0.0.0.0 detection)
   - LUKS full-disk encryption detection
   - Existing security score checks
-  - Resource governor Ollama limits advisory (R-03, S226)
+  - Resource governor Ollama limits advisory
 
 Results are cached for the lifetime of the process and exposed via
 ``GET /api/security/startup-checks``.
@@ -144,7 +144,7 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
     # --- Check 5: Encrypted swap ---
     result.checks.append(_check_encrypted_swap())
 
-    # --- Check 6: Resource governor Ollama limits advisory (S226) ---
+    # --- Check 6: Resource governor Ollama limits advisory ---
     result.checks.append(_check_governor_ollama_limits())
 
     # --- Check 7: Post-quantum signature primitive ---
@@ -634,9 +634,9 @@ def _check_encrypted_swap() -> CheckItem:
 # ---------------------------------------------------------------------------
 
 def _check_governor_ollama_limits() -> CheckItem:
-    """R-03 external-Ollama limits advisory (S226, spec Section 6).
+    """External-Ollama limits advisory.
 
-    ADVISORY-ONLY in all modes, never blocking startup: the S145
+    ADVISORY-ONLY in all modes, never blocking startup: the
     LUKS-detector precedent applied verbatim -- this check NEVER
     returns severity "critical", so it can never set the blocked
     flag. Honoured config switches: ``ollama_limits.external_advisory``

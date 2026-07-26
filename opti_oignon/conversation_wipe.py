@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Conversation RAM Wipe for Opti-Oignon (S131).
+Conversation RAM Wipe for Opti-Oignon.
 
 Provides best-effort zeroing of in-memory conversation data (messages,
 system prompts, tool call results, embedding buffers) to reduce the
@@ -23,7 +23,7 @@ In **Bulbe mode**, ``bulbe_wipe_per_turn`` triggers an automatic wipe
 after every LLM response so that no conversation history accumulates
 in RAM beyond the current exchange.
 
-Scope: RAM vs disk (CW-01, S185)
+Scope: RAM vs disk
 --------------------------------
 
 By default a wipe is **RAM-only**: it zeroes in-memory buffers but does NOT
@@ -210,7 +210,7 @@ class WipeResult:
     error: str = ""
     timestamp: float = field(default_factory=time.time)
     memset_available: bool = _HAS_MEMSET
-    # CW-01 (S185): set when the opt-in full wipe also purged persisted rows.
+    # Set when the opt-in full wipe also purged persisted rows.
     disk_purged: bool = False
     rows_deleted: int = 0
 
@@ -333,7 +333,7 @@ class ConversationWipeManager:
         Zeroes memory (best-effort), removes from registry, and logs
         to the audit chain.
 
-        CW-01 (S185): by default this is RAM-only -- it does NOT delete the
+        By default this is RAM-only -- it does NOT delete the
         persisted (SQLCipher-encrypted in Bulbe) conversation rows on disk.
         Pass ``purge_disk=True`` to opt into a full wipe that also deletes the
         persisted rows via the conversation manager (best-effort; the RAM wipe
@@ -377,7 +377,7 @@ class ConversationWipeManager:
     def wipe_all(self, *, purge_disk: bool = False) -> list[WipeResult]:
         """Emergency wipe: zero all registered conversations.
 
-        CW-01 (S185): RAM-only by default. With ``purge_disk=True`` this also
+        RAM-only by default. With ``purge_disk=True`` this also
         deletes ALL persisted conversation rows from disk (not only those with a
         registered RAM buffer), returning a WipeResult per purged conversation.
         """

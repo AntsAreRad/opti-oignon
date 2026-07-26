@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Per-user encryption key management for Opti-Oignon (S142).
+Per-user encryption key management for Opti-Oignon.
 
 Provides:
 - Argon2id-based per-user subkey derivation from user password

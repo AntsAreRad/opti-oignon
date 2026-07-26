@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RBAC enforcement and user-context dependencies for Opti-Oignon (S142).
+RBAC enforcement and user-context dependencies for Opti-Oignon.
 
 Provides reusable FastAPI dependencies for:
 - Extracting authenticated user from JWT (cookie or Bearer header)
@@ -10,7 +10,7 @@ Provides reusable FastAPI dependencies for:
 - Per-user data filtering helpers
 
 All API routes should use these dependencies instead of duplicating
-auth logic. The auth middleware (S136) handles deny-by-default; these
+auth logic. The auth middleware handles deny-by-default; these
 dependencies provide fine-grained per-route control.
 
 Usage in routes::

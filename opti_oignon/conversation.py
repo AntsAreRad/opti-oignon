@@ -35,7 +35,7 @@ from opti_oignon.db_utils import safe_connect
 
 from .config import DATA_DIR
 
-# EXP-01 (S194): real app version for export metadata (was hardcoded "1.6.3")
+# Real app version for export metadata (was hardcoded "1.6.3")
 try:
     from .__version__ import __version__ as _APP_VERSION
 except ImportError:  # pragma: no cover - standalone module loading
@@ -44,7 +44,7 @@ except ImportError:  # pragma: no cover - standalone module loading
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# S125: Data-at-rest encryption
+# Data-at-rest encryption
 # ============================================================================
 
 try:
@@ -85,7 +85,7 @@ def _estimate_tokens(text: str, model: str | None = None) -> int:
     return int(len(text) / 4)
 
 
-# S138: Allowed column names for dynamic UPDATE queries
+# Allowed column names for dynamic UPDATE queries
 _CONV_UPDATE_COLS = frozenset({
     "title", "model", "task_type", "preset", "metadata", "updated_at",
 })
@@ -179,7 +179,7 @@ class Conversation:
 
 
 # ============================================================================
-# S199: Veilid sync publish hook (SYN-01, Bloc 0 lot 1)
+# Veilid sync publish hook
 # ============================================================================
 
 
@@ -309,7 +309,7 @@ class ConversationManager:
     def _get_connection(self) -> sqlite3.Connection:
         """Create a configured SQLite connection.
 
-        S136 audit fix: routes through get_encrypted_connection() for
+        Audit fix: routes through get_encrypted_connection() for
         SQLCipher support when available. Each call creates a new
         connection for multi-thread compatibility.
         """
@@ -397,7 +397,7 @@ class ConversationManager:
             id=row["id"],
             conversation_id=row["conversation_id"],
             role=row["role"],
-            content=_decrypt(row["content"]),  # S125: transparent decryption
+            content=_decrypt(row["content"]),  # transparent decryption
             timestamp=row["timestamp"],
             token_estimate=row["token_estimate"],
             model=row["model"],
@@ -407,7 +407,7 @@ class ConversationManager:
     def _sync_snapshot(
         self, conn: sqlite3.Connection, conv_id: str
     ) -> dict[str, Any] | None:
-        """Build the full-state sync payload for a conversation (S199, SYN-01).
+        """Build the full-state sync payload for a conversation.
 
         The change feed is state-based LWW: ``since`` collapses to the latest
         record per key and CHF-02 compaction will delete superseded rows, so
@@ -416,7 +416,7 @@ class ConversationManager:
         late-joining peer would never converge. The reads reuse the caller's
         ALREADY-OPEN connection (no second connection, no network); message
         content is decrypted to plaintext for cross-device portability (the
-        S125 field key is per-install) -- at rest the change feed itself is
+        field key is per-install) -- at rest the change feed itself is
         SQLCipher via ``safe_connect``, in flight the Veilid route is E2E.
         Local SQLite message ids are device-local identities and are excluded;
         messages are ordered by timestamp then id. Cost: two SELECTs on the
@@ -503,7 +503,7 @@ class ConversationManager:
                     (conv_id, title, now, now, model, task_type, preset, meta_json),
                 )
                 conn.commit()
-                # S199 SYN-01: domain commit first, then the sync publish
+                # Domain commit first, then the sync publish
                 # (best-effort; a snapshot or journalling failure never breaks
                 # the save -- the hook builds the snapshot inside its guard).
                 _sync_publish_conversation(
@@ -632,7 +632,7 @@ class ConversationManager:
                 deleted = cursor.rowcount > 0
                 if deleted:
                     logger.debug(f"Conversation supprimee: {conv_id}")
-                    # S199 SYN-01: a domain delete publishes a tombstone so the
+                    # A domain delete publishes a tombstone so the
                     # deletion converges on peers (empty payload, deleted=True).
                     _sync_publish_conversation(
                         conv_id,
@@ -668,7 +668,7 @@ class ConversationManager:
                 renamed = cursor.rowcount > 0
                 if renamed:
                     logger.debug(f"Conversation renommee: {conv_id} -> {new_title}")
-                    # S199 SYN-01: a rename is synced state; publish the new state.
+                    # A rename is synced state; publish the new state.
                     _sync_publish_conversation(
                         conv_id,
                         lambda: self._sync_snapshot(conn, conv_id),
@@ -737,7 +737,7 @@ class ConversationManager:
                     params.append(json.dumps(existing))
 
                 params.append(conv_id)
-                # S138: validate column names against allowlist
+                # Validate column names against allowlist
                 for u in updates:
                     col = u.split("=")[0].strip()
                     assert col in _CONV_UPDATE_COLS, f"Invalid column: {col}"
@@ -749,7 +749,7 @@ class ConversationManager:
                 conn.commit()
                 updated = cursor.rowcount > 0
                 if updated:
-                    # S199 SYN-01: metadata is synced state; publish the new state.
+                    # Metadata is synced state; publish the new state.
                     _sync_publish_conversation(
                         conv_id,
                         lambda: self._sync_snapshot(conn, conv_id),
@@ -788,7 +788,7 @@ class ConversationManager:
         and its messages are cleared and re-inserted from the payload, so
         applying the same winner twice converges to the same state. Message
         content arrives as plaintext (the journal is cross-device portable) and
-        is RE-ENCRYPTED here under this install's S125 field key, exactly like
+        is RE-ENCRYPTED here under this install's field key, exactly like
         :meth:`add_message`, so at rest it stays ciphertext on every device. A
         ``deleted`` record removes the conversation and its messages
         (a converged deletion).
@@ -866,7 +866,7 @@ class ConversationManager:
                                 (
                                     conv_id,
                                     role,
-                                    _encrypt(content),  # S125: ciphertext at rest
+                                    _encrypt(content),  # ciphertext at rest
                                     m.get("timestamp") or "",
                                     token_estimate,
                                     m.get("model"),
@@ -922,7 +922,7 @@ class ConversationManager:
                     return None
 
                 # Insere le message
-                # S125: Encrypt content at rest
+                # Encrypt content at rest
                 stored_content = _encrypt(content)
                 cursor = conn.execute(
                     """INSERT INTO messages
@@ -940,7 +940,7 @@ class ConversationManager:
                     update_params.append(model)
                 update_params.append(conv_id)
 
-                # S138: validate column names against allowlist
+                # Validate column names against allowlist
                 for u in update_fields:
                     col = u.split("=")[0].strip()
                     assert col in _CONV_UPDATE_COLS, f"Invalid column: {col}"
@@ -951,7 +951,7 @@ class ConversationManager:
 
                 conn.commit()
 
-                # S199 SYN-01: domain commit first, then the sync publish
+                # Domain commit first, then the sync publish
                 # (best-effort; the hook builds the full-state snapshot inside
                 # its guard, on this already-open connection, and only when
                 # sync is available -- the save never pays otherwise).
@@ -1320,7 +1320,7 @@ class ConversationManager:
                     result.append(_esc(line))
             if in_code:
                 result.append("</code></pre>")
-            # EXP-03 (S194): .message-content is white-space: pre-wrap, so
+            # .message-content is white-space: pre-wrap, so
             # plain newlines already render as line breaks; <br> joins
             # doubled the spacing on messages without code blocks.
             return "\n".join(result)
@@ -1332,7 +1332,7 @@ class ConversationManager:
         # Messages HTML
         messages_html = []
         for msg in conv.messages:
-            # EXP-02 (S194): whitelist the class value and escape the
+            # Whitelist the class value and escape the
             # timestamp fallback (defense in depth; values are
             # app-controlled today).
             role_class = (
@@ -1475,7 +1475,7 @@ class ConversationManager:
                 conn.execute("DELETE FROM messages WHERE id = ?", (row["id"],))
                 conn.commit()
                 logger.debug(f"Dernier message supprime: id={row['id']} conv={conv_id[:8]}")
-                # S199 SYN-01: a retry-delete is an edit of the conversation,
+                # A retry-delete is an edit of the conversation,
                 # not a deletion of it; publish the reduced full state.
                 _sync_publish_conversation(
                     conv_id,

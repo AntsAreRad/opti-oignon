@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-PRE-CACHE -- Predictive Pre-Caching of Common Queries (S71)
+PRE-CACHE -- Predictive Pre-Caching of Common Queries
 =============================================================
 
-Warms the S68 semantic cache with responses to commonly requested
+Warms the semantic cache with responses to commonly requested
 query patterns. Pre-cache runs when Ollama is online and idle,
 filling the cache proactively so that offline lookups have more
 chance of a hit.
@@ -105,7 +105,7 @@ class PreCache:
     """Predictive pre-caching for common query patterns.
 
     Generates LLM responses for a configured list of common queries
-    and stores them in the S68 semantic cache proactively.
+    and stores them in the semantic cache proactively.
 
     Args:
         config_path: Path to YAML config. None uses default.
@@ -233,7 +233,7 @@ class PreCache:
                             "temperature": self._config.get("temperature", 0.3),
                         },
                     )
-                    # S193 PCH-01: handle both dict-form and object-form
+                    # Handle both dict-form and object-form
                     # client responses. The previous dict-first .get() raised
                     # AttributeError on object responses BEFORE the object
                     # fallback below it could run (dead code) -- the

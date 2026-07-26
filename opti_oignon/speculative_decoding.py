@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-SPECULATIVE DECODING ENGINE -- OPTI-OIGNON S110 + S111
+SPECULATIVE DECODING ENGINE -- OPTI-OIGNON
 =======================================================
 
 Pairs a small draft model with the main model for 2-5x token generation
 speedup via llama.cpp's native speculative decoding flags. Zero quality
 loss -- the main model verifies every draft token.
 
-This module is separate from S70's speculative.py (prompt-level
+This module is separate from speculative.py (prompt-level
 draft-verify pattern). Here we leverage llama.cpp's --draft-max /
 --draft-min / -md flags for hardware-level speculative decoding.
 
@@ -19,12 +19,12 @@ Architecture:
     VRAMBudgetCalculator    -- estimate if main + draft fit in VRAM
     SpeculativeDecodingManager -- orchestrate config, selection, stats
 
-S111 additions:
+Additions:
     AcceptanceRecord        -- per-request acceptance data
     AcceptanceStats.history -- rolling deque of per-request records
     parse_llamacpp_log_line -- extract acceptance data from llama.cpp logs
 
-S259 addition:
+Addition:
     build_llama_server_command -- the pure argv materialisation that
     finally wires this module's config to the external llama-server
     (consumed through inference_backend.LlamaServerBackend; the process
@@ -165,7 +165,7 @@ class DraftCandidate:
 
 @dataclass
 class AcceptanceRecord:
-    """Single per-request acceptance record (S111)."""
+    """Single per-request acceptance record."""
 
     timestamp: float = 0.0
     draft_tokens: int = 0
@@ -201,7 +201,7 @@ class AcceptanceStats:
     last_speedup_factor: float = 1.0
     last_updated: float = 0.0
 
-    # S111: per-request history for real-time monitoring.
+    # Per-request history for real-time monitoring.
     _history: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=_MAX_ACCEPTANCE_HISTORY),
         repr=False,
@@ -231,7 +231,7 @@ class AcceptanceStats:
         self.last_speedup_factor = speedup
         self.last_updated = time.time()
 
-        # S111: append per-request record to history.
+        # Append per-request record to history.
         self._history.append(AcceptanceRecord(
             timestamp=self.last_updated,
             draft_tokens=draft_tokens,
@@ -242,7 +242,7 @@ class AcceptanceStats:
         ))
 
     def get_history(self, last_n: int = 0) -> list[dict]:
-        """Get per-request acceptance history (S111).
+        """Get per-request acceptance history.
 
         Args:
             last_n: If > 0, return only the last N records.
@@ -257,7 +257,7 @@ class AcceptanceStats:
         return [r.to_dict() for r in records]
 
     def get_rolling_acceptance_rate(self, last_n: int = 10) -> float:
-        """Calculate rolling acceptance rate over the last N runs (S111).
+        """Calculate rolling acceptance rate over the last N runs.
 
         Returns 0.0 if no history is available.
         """
@@ -518,7 +518,7 @@ class SpeculativeDecodingManager:
         self._vram_budget_cfg: dict = {}
         self._stats = AcceptanceStats()
         self._lock = threading.RLock()
-        # S171: stats path is injectable so tests can use an isolated temp file
+        # Stats path is injectable so tests can use an isolated temp file
         # instead of the shared data/speculative_stats.json (which otherwise
         # leaks state across pytest invocations). Production behavior is
         # unchanged: stats_path=None falls back to the module default.
@@ -648,7 +648,7 @@ class SpeculativeDecodingManager:
             self._save_stats()
 
     def get_acceptance_history(self, last_n: int = 50) -> list[dict]:
-        """Get per-request acceptance history (S111).
+        """Get per-request acceptance history.
 
         Args:
             last_n: Number of recent records to return (0 = all).
@@ -660,12 +660,12 @@ class SpeculativeDecodingManager:
             return self._stats.get_history(last_n=last_n)
 
     def get_rolling_acceptance_rate(self, window: int = 10) -> float:
-        """Get rolling acceptance rate over last N requests (S111)."""
+        """Get rolling acceptance rate over last N requests."""
         with self._lock:
             return self._stats.get_rolling_acceptance_rate(last_n=window)
 
     def process_log_line(self, line: str) -> bool:
-        """Parse a llama.cpp server log line for acceptance data (S111).
+        """Parse a llama.cpp server log line for acceptance data.
 
         When using llama-server with speculative decoding, it logs
         acceptance stats like:
@@ -795,7 +795,7 @@ def _parse_param_size(value: Any) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Log parser for llama.cpp speculative decoding (S111)
+# Log parser for llama.cpp speculative decoding
 # ---------------------------------------------------------------------------
 
 # Regex patterns for llama.cpp speculative decoding log lines.
@@ -899,7 +899,7 @@ def build_llama_server_command(
     type_k: str | None = None,
     type_v: str | None = None,
 ) -> list[str]:
-    """Materialise the llama-server argv from a SpeculativeConfig (S259).
+    """Materialise the llama-server argv from a SpeculativeConfig.
 
     PURE by contract: no filesystem reads, no process spawning, no
     state -- the same inputs always answer the same argv. Launching the

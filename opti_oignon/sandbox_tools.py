@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SANDBOX TOOLS - OPTI-OIGNON v1.7.5 (S73)
+SANDBOX TOOLS - OPTI-OIGNON v1.7.5
 ==========================================
 
 Session-aware wrapper layer for sandboxed file tools.
@@ -16,7 +16,7 @@ needing to manage session_id:
 
 The session_id is injected automatically by the wrapper.
 
-Usage in S74's coding_agent:
+Usage in the coding_agent:
     session = SandboxToolSession(sandbox_manager)
     session.start("coding-task-1")
     # Register session.get_tool_definitions() in tool_registry
@@ -81,7 +81,7 @@ except ImportError:
     ToolRegistry = None
     _default_tool_registry = None
 
-# Guarded YAML import for the [agent.diagnostics] config block (S228). The
+# Guarded YAML import for the [agent.diagnostics] config block. The
 # loader falls back to the built-in defaults when PyYAML or the file is
 # unavailable, so behaviour never depends on the file being present.
 try:
@@ -90,7 +90,7 @@ except ImportError:  # pragma: no cover - defensive guard
     _yaml = None
 
 # ---------------------------------------------------------------------------
-# S228 (AGT Lot 1) constants: read-only workspace tools and diagnostics
+# Constants: read-only workspace tools and diagnostics
 # ---------------------------------------------------------------------------
 
 # Hard caps for the read-only tools (AGT_SPEC 5.1). Requested values are
@@ -182,7 +182,7 @@ def load_diagnostics_config() -> dict[str, Any]:
     """The [agent.diagnostics] block of agent/config.yaml, defaults applied.
 
     A tiny guarded reader local to this module (the agent config_loader is
-    deliberately not edited at S228): a missing file, missing PyYAML, a
+    deliberately left unedited): a missing file, missing PyYAML, a
     malformed file, or a missing block all yield ``DIAGNOSTICS_DEFAULTS``.
     """
     cfg = dict(DIAGNOSTICS_DEFAULTS)
@@ -308,7 +308,7 @@ class SandboxToolSession:
         self._registry = tool_registry or _default_tool_registry
         self._session: SandboxSession | None = None
         self._session_id: str | None = None
-        # S228 diagnostics: the linter ladder is probed once per session and
+        # Diagnostics: the linter ladder is probed once per session and
         # cached; the cache is cleared on every lifecycle change.
         self._diag_probed: bool = False
         self._diag_tool: str | None = None
@@ -371,7 +371,7 @@ class SandboxToolSession:
         return sid
 
     def attach(self, session_id: str) -> str:
-        """Bind this wrapper to an EXISTING managed workspace (S210).
+        """Bind this wrapper to an EXISTING managed workspace.
 
         The conversation-binding seam (SANDBOX_WORKSPACE_SPEC section 4.1):
         unlike start(), nothing is created; unlike stop(), the matching
@@ -409,7 +409,7 @@ class SandboxToolSession:
         return session_id
 
     def detach(self) -> bool:
-        """Release an attached workspace WITHOUT destroying it (S210).
+        """Release an attached workspace WITHOUT destroying it.
 
         Re-enables the tools the lockout disabled; the workspace and its
         files persist (the conversation binding owns the lifetime).
@@ -430,7 +430,7 @@ class SandboxToolSession:
     def _apply_registry_lockout(self) -> None:
         """Disable the unsafe unsandboxed tools while a workspace is active.
 
-        Factored from start() at S210 so attach() enforces the identical
+        Factored from start() so attach() enforces the identical
         invariant; behaviour is unchanged.
         """
         if self._registry is None:
@@ -542,10 +542,10 @@ class SandboxToolSession:
     def create_file(self, path: str, content: str) -> str:
         """Create or overwrite a file in the sandbox.
 
-        S228: when the write succeeds and the filename matches the
+        When the write succeeds and the filename matches the
         diagnostics suffix map, an in-sandbox linter pass (or the host-side
         Svelte tag-balance read) may append a ``[diagnostics]`` block; a
-        clean write returns byte-identical output to the pre-S228 shape.
+        clean write returns byte-identical output to the prior shape.
         """
         self._check_active()
         result = _handle_sandbox_create_file(
@@ -562,7 +562,7 @@ class SandboxToolSession:
     ) -> str:
         """Find and replace a unique string in a sandbox file.
 
-        S228: a successful edit may append a ``[diagnostics]`` block exactly
+        A successful edit may append a ``[diagnostics]`` block exactly
         as for ``create_file``; the clean path is byte-identical.
         """
         self._check_active()
@@ -573,7 +573,7 @@ class SandboxToolSession:
         return result + self._maybe_diagnostics(path, result)
 
     # -----------------------------------------------------------------
-    # S228 read-only workspace tools (AGT_SPEC 5.1): grep, glob, ls.
+    # Read-only workspace tools: grep, glob, ls.
     # Trusted host-side reads on the view precedent: path-confined via
     # validate_sandbox_path, active session required, deterministic sorted
     # output, truncated flags, null-byte binary sniff, 1 MiB skip.
@@ -731,7 +731,7 @@ class SandboxToolSession:
         for name in names:
             full = os.path.join(resolved, name)
             if os.path.islink(full):
-                continue  # symlinks are skipped in every S228 walk
+                continue  # symlinks are skipped in every walk
             if os.path.isdir(full):
                 dirs.append(name)
             elif os.path.isfile(full):
@@ -954,7 +954,7 @@ class SandboxToolSession:
         if not self.active:
             raise RuntimeError("No active sandbox session")
 
-    # -- S228 diagnostics-after-write (AGT_SPEC 5.2) --
+    # -- Diagnostics-after-write --
 
     def _reset_diag_cache(self) -> None:
         """Clear the per-session diagnostics probe cache."""

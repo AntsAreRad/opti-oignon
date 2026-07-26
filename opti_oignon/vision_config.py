@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vision model configuration manager (S94).
+Vision model configuration manager.
 
 Handles selection and persistence of the vision model used for image
 analysis. Three detection strategies:

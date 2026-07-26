@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plugin hook system for Opti-Oignon (S101).
+Plugin hook system for Opti-Oignon.
 
 HookManager: register, unregister, and execute hooks at defined points
 in the inference pipeline. Each hook runs with error isolation so one
@@ -239,7 +239,7 @@ class HookManager:
         metadata : dict, optional
             Additional metadata for hooks.
         redact_sensitive : bool
-            S124: If True, redact sensitive fields (message, response,
+            If True, redact sensitive fields (message, response,
             arguments, result) for plugins lacking inference_content
             permission. Default False for backward compatibility.
 
@@ -265,7 +265,7 @@ class HookManager:
             if not reg.enabled:
                 continue
 
-            # S124: Per-plugin data redaction
+            # Per-plugin data redaction
             if redact_sensitive:
                 plugin_data = redact_hook_data(
                     current_data, reg.plugin_name,
@@ -424,7 +424,7 @@ class HookManager:
 
 
 # =========================================================================
-# S124: Hook data redaction for plugin permission model
+# Hook data redaction for plugin permission model
 # =========================================================================
 
 REDACTED_PLACEHOLDER = "[REDACTED -- requires inference_content permission]"
