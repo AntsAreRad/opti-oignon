@@ -214,10 +214,24 @@ fail_under = 0
 # record; deselecting them here keeps the suite green now that the module
 # refuses to run without its connection layer, which their hand-rolled
 # windows never seed. Remove a line only by deleting its file.
+#
+# The last entry deselects a single contract rather than a file, the first
+# of that kind here. Its property became false: it asserted that a
+# non-Python file whose shape moved stays refused, which reported an
+# absence of proof as a verdict. It stays in the tree word for word as the
+# record; the replacement is C29 in the same file.
+#
+# C7 goes the same way. Its first half stays true; its second
+# asserted a refusal where the property was that a string literal
+# reaches the shape. A full purge of that string is now accepted on
+# its own ground, so the spelling became false while the property
+# held. The replacement is C31, which pins the shape directly.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
     --deselect=tests/test_semantic_cache_management_contracts.py
     --deselect=tests/test_semantic_cache_no_model_lookup_contracts.py
     --deselect=tests/test_semantic_cache_semantic_tier_contracts.py
+    --deselect=tests/test_comment_only_guard_contracts.py::test_c23_outside_python_a_moved_shape_stays_refused
+    --deselect=tests/test_comment_only_guard_contracts.py::test_c7_non_python_proof_is_quote_aware
 """

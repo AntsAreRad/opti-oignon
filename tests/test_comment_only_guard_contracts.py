@@ -390,6 +390,18 @@ def test_c9_glued_hash_does_not_open_a_comment():
             "a hash with no whitespace before it is not a comment opener; "
             "the code after it must stay visible to the prover"
         )
+        # The line above is satisfied by any non-None verdict, a
+        # non-judgement included, so it cannot carry this contract alone.
+        # What the contract actually pins is that the loop bound is shape.
+        assert (guard.shape("run.sh", before) != guard.shape("run.sh", after)), (
+            "the code after a glued hash must reach the shape, or the "
+            "comment model has swallowed it"
+        )
+        assert guard.verdict("run.sh", before, after) is guard.CANNOT_JUDGE, (
+            "the change is real but unattributable outside Python, so the "
+            "verdict is a non-judgement and not a refusal"
+        )
+        assert not guard.is_refusal(guard.verdict("run.sh", before, after))
     finally:
         restore()
 
@@ -419,6 +431,14 @@ def test_c10_line_start_and_spaced_hash_still_comment():
         assert guard.verdict("a.yaml", spaced, moved) is not None, (
             "an edit to the value must not pass as a comment edit"
         )
+        assert (guard.shape("a.yaml", spaced) != guard.shape("a.yaml", moved)), (
+            "the value is shape; a comment model that swallowed it would "
+            "make the two files identical"
+        )
+        assert guard.verdict("a.yaml", spaced, moved) is guard.CANNOT_JUDGE, (
+            "the value moved and nothing here can attribute the movement"
+        )
+        assert not guard.is_refusal(guard.verdict("a.yaml", spaced, moved))
     finally:
         restore()
 
@@ -844,6 +864,130 @@ def test_c28_a_real_collision_in_the_variable_space_is_refused():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# C29-C30 -- a non-judgement is not a verdict, and must never read as one
+# ---------------------------------------------------------------------------
+def test_c29_an_unattributable_non_python_change_is_not_judged():
+    """Supersedes C23, whose intent became false.
+
+    C23 asserted that a non-Python file whose shape moved stays REFUSED.
+    That was the guard reporting an absence of proof as a verdict. The
+    replacement pins what is actually true: the change is real, the guard
+    has no analyser to attribute it, and it says exactly that.
+    """
+    guard, restore = _load()
+    try:
+        before = (
+            '// note for ' + _CODE + ' routing\n'
+            'const total = 3;\n'
+            'export function g() { return total; }\n'
+        )
+        # The count falls, and a line that carried nothing at all changes.
+        after = (
+            '// note for routing\n'
+            'const total = 4;\n'
+            'export function g() { return total; }\n'
+        )
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.shape("a.ts", before) != guard.shape("a.ts", after), (
+            "the fixture must actually move the shape"
+        )
+        result = guard.verdict("a.ts", before, after)
+        assert result is guard.CANNOT_JUDGE, (
+            "an unattributable non-Python change is not judged, neither "
+            "accepted nor refused"
+        )
+        assert not guard.is_refusal(result), (
+            "a non-judgement must never count as a refusal"
+        )
+        assert result is not None, (
+            "and it must never be an acceptance either"
+        )
+    finally:
+        restore()
+
+
+def test_c31_a_string_literal_is_shape_outside_python():
+    """Supersedes C7, whose second half encoded its intent as a refusal.
+
+    C7 pinned two things: a comment-only edit outside Python is accepted,
+    and an edit inside a string literal is NOT read as a comment edit. The
+    second was spelled ``verdict is not None``, which conflated "not treated
+    as a comment edit" with "refused". A string that sheds its nomenclature
+    in full is now accepted on the line-purge ground, exactly as C14 accepts
+    that shape of change in Python, so the refusal spelling became false
+    while the property it meant to pin stayed true. Pinned directly here,
+    on the shape rather than on the verdict's polarity.
+    """
+    guard, restore = _load()
+    try:
+        before = _typescript_before()
+        comment_only = before.replace("// helper for " + _CODE + " routing",
+                                      "// helper for routing")
+        assert guard.debt_count(comment_only) < guard.debt_count(before)
+        assert (guard.shape("a.ts", before)
+                == guard.shape("a.ts", comment_only)), (
+            "a comment never reaches the shape outside Python either"
+        )
+        assert guard.verdict("a.ts", before, comment_only) is None, (
+            "a comment-only edit outside Python is accepted"
+        )
+
+        in_string = comment_only.replace("example.invalid/" + _CODE,
+                                         "example.invalid/x")
+        # The property C7 existed for. Were the // inside the URL read as a
+        # comment opener, the rest of the line would be cut from BOTH sides
+        # and these two shapes would be equal.
+        assert (guard.shape("a.ts", before)
+                != guard.shape("a.ts", in_string)), (
+            "the content of a string literal is shape; a comment model that "
+            "swallowed it would make these two files identical"
+        )
+        # The verdict holds for a stated reason, not by default.
+        assert guard.line_purge_equivalent("a.ts", before, in_string) is None, (
+            "the changed line went from carrying nomenclature to carrying "
+            "none, which is what makes it a proven purge"
+        )
+        assert guard.verdict("a.ts", before, in_string) is None, (
+            "accepted on the line-purge ground, never because the edit "
+            "passed as a comment"
+        )
+        assert not guard.is_refusal(guard.verdict("a.ts", before, in_string))
+    finally:
+        restore()
+
+
+def test_c30_a_non_judgement_satisfies_no_refusal_assertion():
+    """The blade against the trap this block was written to close.
+
+    Every refusal assertion in this file was once spelled ``is not None``.
+    A non-judgement satisfies that spelling, so those contracts would have
+    gone on passing while proving nothing, and nothing would have gone red
+    to say so. This contract pins the distinction itself: the weak
+    spellings accept a non-judgement, and the real test refuses it.
+    """
+    guard, restore = _load()
+    try:
+        unjudged = guard.CANNOT_JUDGE
+        # The two weak spellings both pass -- which is exactly why neither
+        # of them may ever be the whole of a refusal assertion again.
+        assert unjudged is not None, (
+            "a falsy or None non-judgement would be a silent acceptance"
+        )
+        assert bool(unjudged) is True, (
+            "a falsy non-judgement would slip through the caller's "
+            "truthiness test and vanish from the output"
+        )
+        # The real test tells them apart.
+        assert guard.is_refusal(unjudged) is False, (
+            "a non-judgement is not a refusal"
+        )
+        assert guard.is_refusal("nomenclature was removed AND more") is True
+        assert guard.is_refusal(None) is False
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -900,6 +1044,12 @@ def _run_all():
          test_c27_a_real_collision_in_the_attribute_space_is_refused),
         ("C28 variable-space collision refused",
          test_c28_a_real_collision_in_the_variable_space_is_refused),
+        ("C29 unattributable non-Python change not judged",
+         test_c29_an_unattributable_non_python_change_is_not_judged),
+        ("C30 non-judgement satisfies no refusal assertion",
+         test_c30_a_non_judgement_satisfies_no_refusal_assertion),
+        ("C31 string literal is shape outside Python",
+         test_c31_a_string_literal_is_shape_outside_python),
     ]
     passed = 0
     for label, fn in tests:

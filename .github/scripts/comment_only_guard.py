@@ -344,8 +344,13 @@ def _comment_spans(text, markup=False, hash_style=False):
     return spans
 
 
-def comment_free(path, text):
-    """Digest of ``text`` with every comment byte removed."""
+def _comment_free_lines(path, text):
+    """``text`` as lines with every comment byte removed, trailing space cut.
+
+    An unrecognised suffix gets no comment model at all, so every byte stays
+    shape. That is the fail-closed direction: a file this guard cannot even
+    tokenise is never treated as though its comments were understood.
+    """
     suffix = Path(path).suffix
     if suffix in _MARKUP_LIKE:
         spans = _comment_spans(text, markup=True)
@@ -364,7 +369,14 @@ def comment_free(path, text):
                 if not any(low <= col < high for low, high in cuts)
             )
         kept.append(line.rstrip())
-    return hashlib.md5("\n".join(kept).encode()).hexdigest()
+    return kept
+
+
+def comment_free(path, text):
+    """Digest of ``text`` with every comment byte removed."""
+    return hashlib.md5(
+        "\n".join(_comment_free_lines(path, text)).encode()
+    ).hexdigest()
 
 
 def shape(path, text):
@@ -718,8 +730,66 @@ def rename_equivalent(before, after, published_models=_UNSET,
     return f"differences not attributable to a substitution: {listed}"
 
 
+class _CannotJudge:
+    """The verdict for a file this guard has no means to attribute.
+
+    Deliberately NOT ``None`` and deliberately truthy. A falsy value would
+    slip through ``if reason:`` in the caller and become a silent
+    acceptance -- an absence of checking recorded as a check that passed,
+    which is the one outcome this whole guard exists to prevent.
+
+    Deliberately not a string either. The weak spelling ``reason is not
+    None`` is satisfied by a non-judgement, so a contract written that way
+    would go on passing while proving nothing. Callers and contracts must
+    ask ``is_refusal`` instead, which this value answers False to.
+    """
+
+    __slots__ = ()
+
+    def __bool__(self):
+        return True
+
+    def __repr__(self):
+        return "CANNOT_JUDGE"
+
+
+CANNOT_JUDGE = _CannotJudge()
+
+
+def is_refusal(result):
+    """True only for an actual refusal, never for a non-judgement."""
+    return result is not None and result is not CANNOT_JUDGE
+
+
+def line_purge_equivalent(path, before, after, clean_guard=None):
+    """``None`` when a non-Python delta is a nomenclature purge, line by line.
+
+    Outside Python there is no parse tree, so the finest grain available is
+    the comment-stripped line. The test is the string purge's, coarsened to
+    that grain: every line that changed must have carried nomenclature and
+    must carry none now. It proves less than its Python counterpart -- it
+    cannot pin that only a literal moved within the line -- so it is only
+    ever the difference between an acceptance and a NON-judgement here,
+    never between an acceptance and a refusal.
+    """
+    guard = clean_guard or _load_clean_guard()
+    old = _comment_free_lines(path, before)
+    new = _comment_free_lines(path, after)
+    if len(old) != len(new):
+        return "the number of lines outside comments changed"
+    for one, two in zip(old, new):
+        if one == two:
+            continue
+        if not guard.find_violations([one]):
+            return "a changed line carried no nomenclature"
+        if guard.find_violations([two]):
+            return "a changed line still carries nomenclature"
+    return None
+
+
 def verdict(path, before, after, clean_guard=None):
-    """Return ``None`` if acceptable, else a one-line reason to refuse.
+    """Return ``None`` if acceptable, ``CANNOT_JUDGE`` if unattributable,
+    else a one-line reason to refuse.
 
     A file is examined only when its nomenclature count fell. Anything else
     -- unchanged, or risen -- is not this guard's business.
@@ -745,7 +815,13 @@ def verdict(path, before, after, clean_guard=None):
             reason = renamed
         return ("nomenclature was removed AND the executable shape moved "
                 f"({reason})")
-    return "nomenclature was removed AND the executable shape moved"
+    # Outside Python the shape moved and there is no analyser to attribute
+    # the movement. A proven line-level purge is still an acceptance; what
+    # is left is not a refusal, because the guard has established that
+    # something changed, not that the change is wrong.
+    if line_purge_equivalent(path, before, after, guard) is None:
+        return None
+    return CANNOT_JUDGE
 
 
 # ------------------------------------------------------------------ main ---
@@ -776,6 +852,7 @@ def main(argv=None):
     clean_guard = _load_clean_guard()
 
     refusals = []
+    unjudged = []
     examined = 0
     for path in _changed_paths(base_ref):
         before = _blob_at(base_ref, path)
@@ -789,15 +866,27 @@ def main(argv=None):
             continue
         examined += 1
         reason = verdict(path, before, after, clean_guard)
-        if reason:
+        if reason is CANNOT_JUDGE:
+            unjudged.append(path)
+        elif is_refusal(reason):
             refusals.append((path, reason))
+
+    # Printed before any verdict, so an absence of checking is never folded
+    # into a line that reads as a check that passed.
+    if unjudged:
+        print("comment-only guard: NOT JUDGED -- no analyser for these files, "
+              "the check belongs elsewhere:")
+        for path in unjudged:
+            print(f"  {path}")
 
     if not refusals:
         print(
             "comment-only guard: "
-            f"{examined} file(s) shed nomenclature, each within an unchanged "
-            "executable shape, a proven string purge or a proven rename "
+            f"{examined - len(unjudged)} of {examined} file(s) shed "
+            "nomenclature within an unchanged executable shape, a proven "
+            "string purge, a proven rename or a proven line purge "
             f"(base {base_ref}); "
+            f"{len(unjudged)} not judged; "
             "published prose still answers to its own digest"
         )
         return 0
