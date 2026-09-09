@@ -81,7 +81,7 @@ t3() {
   say "  Manual tier, driven by the blade skill: for each new contract, apply its"
   say "  blade, observe red, restore byte-exact, confirm the checksum."
   if [ -f .claude/state/blades.md ]; then
-    pending=$(grep -c '^- \[ \]' .claude/state/blades.md 2>/dev/null | head -1)
+    pending=$(grep -cE '^[[:space:]]*- \[ \]' .claude/state/blades.md 2>/dev/null | head -1)
     pending=${pending:-0}
     if [ "$pending" -eq 0 ]; then pass "no blade left unproven"
     else fail "$pending blade(s) still unproven in .claude/state/blades.md"; fi
