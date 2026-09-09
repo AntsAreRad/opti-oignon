@@ -42,6 +42,28 @@ behaviour is verified independently of git:
     structure must hold, position for position.
   * C15 -- a websocket handler publishes its docstring the same way, so the
     same full purge is accepted there on the same proof.
+  * C16 -- a shape difference explained in full by substituting identifiers
+    that carry nomenclature for identifiers that do not is accepted.
+  * C17 -- a map that is not injective is refused: two names collapsing onto
+    one is not a substitution, and the collapse could hide anything.
+  * C18 -- a substitution whose source carried no nomenclature is refused.
+    The blade exists for one mechanical edit, not for renaming at large.
+  * C19 -- a substitution whose target still carries nomenclature is refused.
+  * C20 -- a structural change beside a rename is refused, and the refusal
+    lists what it could not attribute. That list is the specification of the
+    extraction the file still owes.
+  * C21 -- the map applies inside string literals exactly as the string purge
+    applies to them, and shape equality is still required afterwards.
+  * C22 -- a literal the map does not explain is refused, on the same ground
+    as any other unproven movement.
+  * C23 -- the shape-equality proof is Python only. A non-Python file whose
+    shape moves stays refused however much it looks like a rename.
+  * C24 -- the published set is resolved THROUGH the map. Otherwise a renamed
+    model class flips publication status mid-proof: the guard would refuse a
+    docstring the diff never touched, and free one it did.
+  * C25 -- an alias sequence re-sorted by a rename is refused, and named as a
+    re-sort. A blade that tolerated reordering would stop guaranteeing that
+    nothing else moved, which is the whole of what this guard is for.
 
 Every input carrying nomenclature is assembled from fragments at runtime, so
 the literal form never appears in this file's source and neither guard trips
@@ -452,6 +474,265 @@ def test_c13_unknown_published_set_holds_every_class():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# C16-C25 -- the proven-rename blade
+#
+# A file that sheds nomenclature may also move its executable shape, but only
+# when the whole difference is explained by substituting identifiers that
+# carry nomenclature for identifiers that do not. Every fragment carrying
+# nomenclature is assembled at runtime, as everywhere else in this file.
+# ---------------------------------------------------------------------------
+def _carry():
+    """An identifier carrying nomenclature."""
+    return _CODE + "Cache"
+
+
+def _carry_low():
+    """The same nomenclature in the form that appears inside literals."""
+    return (_CODE + "_cache").lower()
+
+
+def _rename_before():
+    """Nomenclature in a comment and in an identifier used twice."""
+    return (
+        'import os\n'
+        '\n'
+        '# note for ' + _CODE + ' routing\n'
+        'class ' + _carry() + 'Stats:\n'
+        '    """An internal note."""\n'
+        '    size = 3\n'
+        '\n'
+        '\n'
+        'def build(entry):\n'
+        '    return os.path.join(entry, str(' + _carry() + 'Stats.size))\n'
+    )
+
+
+def _purged(text):
+    """The same file with the nomenclature-bearing comment removed."""
+    return text.replace('# note for ' + _CODE + ' routing\n', '')
+
+
+def _literal_before():
+    """Nomenclature in a comment, in an identifier, and inside a string."""
+    return (
+        'import os\n'
+        '\n'
+        '# note for ' + _CODE + ' routing\n'
+        + _carry_low() + ' = "' + _carry_low() + '_hit"\n'
+        '\n'
+        '\n'
+        'def build(entry):\n'
+        '    return os.path.join(entry, ' + _carry_low() + ')\n'
+    )
+
+
+def _published_model(name, note):
+    """A model class the schema may carry, under a chosen name."""
+    return (
+        'from pydantic import BaseModel\n'
+        '\n'
+        '\n'
+        'class ' + name + '(BaseModel):\n'
+        '    """' + note + '"""\n'
+        '    size: int\n'
+    )
+
+
+def test_c16_a_proven_rename_is_accepted():
+    guard, restore = _load()
+    try:
+        before = _rename_before()
+        after = _purged(before).replace(_carry() + "Stats", "SemCacheStats")
+        assert guard.debt_count(after) < guard.debt_count(before), (
+            "the fixture must actually shed nomenclature"
+        )
+        assert guard.python_shape(before) != guard.python_shape(after), (
+            "the fixture must actually move the shape, or the acceptance "
+            "proves nothing that shape equality did not already prove"
+        )
+        assert guard.verdict("m.py", before, after) is None, (
+            "a substitution explaining the whole shape difference must be "
+            "accepted"
+        )
+    finally:
+        restore()
+
+
+def test_c17_a_non_injective_map_is_refused():
+    guard, restore = _load()
+    try:
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            'class ' + _carry() + 'Stats:\n'
+            '    size = 3\n'
+            '\n'
+            '\n'
+            'class ' + _OTHER + 'CacheStats:\n'
+            '    size = 4\n'
+        )
+        after = (_purged(before)
+                 .replace(_carry() + "Stats", "SemCacheStats")
+                 .replace(_OTHER + "CacheStats", "SemCacheStats"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "two names collapsing onto one is not a substitution"
+        )
+        assert "injective" in reason, reason
+    finally:
+        restore()
+
+
+def test_c18_renaming_an_identifier_that_carried_nothing_is_refused():
+    guard, restore = _load()
+    try:
+        before = _rename_before()
+        after = (_purged(before)
+                 .replace(_carry() + "Stats", "SemCacheStats")
+                 .replace("build", "assemble"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "a clean identifier must not be renamed under cover of a purge"
+        )
+        assert "carried no nomenclature" in reason, reason
+    finally:
+        restore()
+
+
+def test_c19_renaming_onto_a_name_that_still_carries_is_refused():
+    guard, restore = _load()
+    try:
+        before = _rename_before()
+        after = _purged(before).replace(_carry() + "Stats",
+                                        _OTHER + "CacheStats")
+        assert guard.debt_count(after) < guard.debt_count(before), (
+            "the fixture must still shed nomenclature overall"
+        )
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "renaming nomenclature onto more nomenclature is not a purge"
+        )
+        assert "still carries nomenclature" in reason, reason
+    finally:
+        restore()
+
+
+def test_c20_structural_change_beside_a_rename_is_refused_and_listed():
+    guard, restore = _load()
+    try:
+        before = _rename_before()
+        after = (_purged(before).replace(_carry() + "Stats", "SemCacheStats")
+                 + '\n\ndef extra():\n    return 1\n')
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "a new function must not ride along with a rename"
+        )
+        assert "not attributable" in reason, reason
+        assert "FunctionDef" in reason, (
+            "the refusal must name the residue, not merely report one: "
+            + str(reason)
+        )
+    finally:
+        restore()
+
+
+def test_c21_the_map_applies_inside_string_literals():
+    guard, restore = _load()
+    try:
+        before = _literal_before()
+        after = _purged(before).replace(_carry_low(), "semcache")
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.python_shape(before) != guard.python_shape(after), (
+            "the fixture must actually move the shape"
+        )
+        assert guard.verdict("m.py", before, after) is None, (
+            "a literal whose change the map explains is part of the rename"
+        )
+    finally:
+        restore()
+
+
+def test_c22_a_literal_the_map_does_not_explain_is_refused():
+    guard, restore = _load()
+    try:
+        before = _literal_before()
+        after = (_purged(before)
+                 .replace('"' + _carry_low() + '_hit"', '"semcache_miss"')
+                 .replace(_carry_low(), "semcache"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "a literal edit beyond the substitution must not ride along"
+        )
+        assert "not explained" in reason, reason
+    finally:
+        restore()
+
+
+def test_c23_outside_python_a_moved_shape_stays_refused():
+    guard, restore = _load()
+    try:
+        before = (
+            '// note for ' + _CODE + ' routing\n'
+            'const ' + _carry() + 'Stats = 3;\n'
+            'export function g() { return ' + _carry() + 'Stats; }\n'
+        )
+        after = (before.replace('// note for ' + _CODE + ' routing\n', '')
+                 .replace(_carry() + "Stats", "SemCacheStats"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.verdict("a.ts", before, after) is not None, (
+            "the shape-equality proof is Python only; a non-Python file "
+            "whose shape moves stays refused whatever it looks like"
+        )
+    finally:
+        restore()
+
+
+def test_c24_the_published_set_is_resolved_through_the_map():
+    guard, restore = _load()
+    try:
+        note = "A widget as the client sees it."
+        before = _published_model(_carry() + "Stats", note)
+        after = _published_model("SemCacheStats", note)
+        published = {"SemCacheStats"}
+        assert guard.rename_equivalent(
+            before, after, published_models=published) is None, (
+            "a renamed published model whose description never moved must "
+            "not be refused for a docstring the diff never touched"
+        )
+        moved = _published_model("SemCacheStats", note + " Today.")
+        assert guard.rename_equivalent(
+            before, moved, published_models=published) is not None, (
+            "a published description that did move must still be refused"
+        )
+    finally:
+        restore()
+
+
+def test_c25_a_rename_induced_alias_resort_is_refused_as_a_resort():
+    guard, restore = _load()
+    try:
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            'from os import (path, ' + _carry() + 'Stats)\n'
+        )
+        after = 'from os import (AaaCache, path)\n'
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "a re-sorted alias sequence is not an identifier substitution"
+        )
+        assert "re-sorted" in reason, (
+            "the re-sort must be named as such, not reported as any "
+            "difference: " + str(reason)
+        )
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -483,6 +764,25 @@ def _run_all():
          test_c14_full_string_purge_is_accepted_alone),
         ("C15 websocket description purges the same",
          test_c15_websocket_docstring_purge_is_accepted),
+        ("C16 proven rename accepted", test_c16_a_proven_rename_is_accepted),
+        ("C17 non-injective map refused",
+         test_c17_a_non_injective_map_is_refused),
+        ("C18 clean source rename refused",
+         test_c18_renaming_an_identifier_that_carried_nothing_is_refused),
+        ("C19 carrying target refused",
+         test_c19_renaming_onto_a_name_that_still_carries_is_refused),
+        ("C20 structural residue listed",
+         test_c20_structural_change_beside_a_rename_is_refused_and_listed),
+        ("C21 map applies inside literals",
+         test_c21_the_map_applies_inside_string_literals),
+        ("C22 unexplained literal refused",
+         test_c22_a_literal_the_map_does_not_explain_is_refused),
+        ("C23 non-Python moved shape refused",
+         test_c23_outside_python_a_moved_shape_stays_refused),
+        ("C24 published set resolved through the map",
+         test_c24_the_published_set_is_resolved_through_the_map),
+        ("C25 alias re-sort named as a re-sort",
+         test_c25_a_rename_induced_alias_resort_is_refused_as_a_resort),
     ]
     passed = 0
     for label, fn in tests:

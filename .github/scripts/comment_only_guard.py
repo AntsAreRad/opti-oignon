@@ -239,12 +239,24 @@ def python_shape(text, published_models=_UNSET):
         raise ShapeUnavailable(f"cannot parse: {exc}") from exc
     if published_models is _UNSET:
         published_models = published_model_names()
+    return hashlib.md5(
+        _shape_dump(tree, published_models).encode()
+    ).hexdigest()
+
+
+def _blanked(tree, published_models):
+    """``tree`` with every internal docstring blanked, published ones kept."""
     published = _route_docstring_ids(tree)
     published |= _model_docstring_ids(tree, published_models)
     tree = _BlankDocstrings(published).visit(tree)
     ast.fix_missing_locations(tree)
-    dump = ast.dump(tree, annotate_fields=True, include_attributes=False)
-    return hashlib.md5(dump.encode()).hexdigest()
+    return tree
+
+
+def _shape_dump(tree, published_models):
+    """The dump ``python_shape`` digests; shared so provers compare trees."""
+    return ast.dump(_blanked(tree, published_models), annotate_fields=True,
+                    include_attributes=False)
 
 
 # ----------------------------------------------------------- everything ---
@@ -420,6 +432,235 @@ def string_purge_equivalent(before, after, published_models=_UNSET,
     return None
 
 
+# ------------------------------------------------------------ renaming ---
+#
+# Stripping nomenclature out of identifiers moves the shape by construction,
+# so the two provers above refuse the whole of that edit. This one accepts it
+# on a narrow proof: the difference is a substitution of identifiers that
+# carry nomenclature by identifiers that do not, and nothing else.
+#
+# The proof is by reconstruction, never by inspection. A candidate map is
+# read off the two trees, checked to be a function and injective, and then
+# APPLIED to the before side; what it produces must equal the after side
+# exactly. A map read wrongly therefore cannot buy an acceptance -- it simply
+# fails to reproduce the file. Every identifier slot this module does not
+# know about is left out of the map, which can only cause a refusal.
+
+# Node fields holding a plain identifier. Anything absent here is not
+# substitutable, so a change in it lands in the residue and is refused.
+_ID_FIELDS = {
+    ast.Name: ("id",),
+    ast.Attribute: ("attr",),
+    ast.arg: ("arg",),
+    ast.FunctionDef: ("name",),
+    ast.AsyncFunctionDef: ("name",),
+    ast.ClassDef: ("name",),
+    ast.alias: ("name", "asname"),
+    ast.keyword: ("arg",),
+    ast.ExceptHandler: ("name",),
+}
+
+
+def _identifier_slots(tree):
+    """Every ``(node, field)`` holding an identifier, depth first."""
+    slots = []
+
+    def walk(node):
+        for field in _ID_FIELDS.get(type(node), ()):
+            if isinstance(getattr(node, field, None), str):
+                slots.append((node, field))
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    walk(tree)
+    return slots
+
+
+def _alias_nodes(tree):
+    """Import nodes, depth first, so two trees pair theirs positionally."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            found.append(node)
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    walk(tree)
+    return found
+
+
+def _pairing_dump(text):
+    """Dump with identifiers and strings masked, plus the identifiers.
+
+    Import alias lists are sorted before masking, so a rename that changes
+    where a name sorts still pairs its identifiers correctly. The sorting is
+    only how the CANDIDATE map is read; the map is verified against the
+    unsorted trees afterwards, where a re-sort is refused like any other
+    movement.
+
+    Every string is masked, docstrings included, so this pairing does not
+    depend on the published set -- which is itself resolved through the map
+    once the map is known.
+    """
+    tree = ast.parse(text)
+    for node in _alias_nodes(tree):
+        node.names.sort(key=lambda a: (a.name, a.asname or ""))
+    names = []
+    for node, field in _identifier_slots(tree):
+        names.append(getattr(node, field))
+        setattr(node, field, "<id>")
+
+    class _Mask(ast.NodeTransformer):
+        def visit_Constant(self, node):
+            if isinstance(node.value, str):
+                node.value = "<s>"
+            return node
+
+    tree = _Mask().visit(tree)
+    ast.fix_missing_locations(tree)
+    dump = ast.dump(tree, annotate_fields=True, include_attributes=False)
+    return dump, names, tree
+
+
+def _substitute(text, mapping):
+    """Apply the map inside a literal, longest source first."""
+    for old in sorted(mapping, key=len, reverse=True):
+        text = text.replace(old, mapping[old])
+    return text
+
+
+def _renamed_tree(text, mapping):
+    """``text`` parsed with the map applied to identifiers and to literals."""
+    tree = ast.parse(text)
+    for node, field in _identifier_slots(tree):
+        value = getattr(node, field)
+        if value in mapping:
+            setattr(node, field, mapping[value])
+
+    class _Sub(ast.NodeTransformer):
+        def visit_Constant(self, node):
+            if isinstance(node.value, str):
+                node.value = _substitute(node.value, mapping)
+            return node
+
+    tree = _Sub().visit(tree)
+    ast.fix_missing_locations(tree)
+    return tree
+
+
+def _resort_reason(mapped, after):
+    """Name an alias re-sort, when that is what the two trees disagree on."""
+    for one, two in zip(_alias_nodes(mapped), _alias_nodes(after)):
+        first = [(a.name, a.asname) for a in one.names]
+        second = [(a.name, a.asname) for a in two.names]
+        if first != second and sorted(first) == sorted(second):
+            return "an import alias sequence was re-sorted"
+    return None
+
+
+def _differences(one, two, out, limit=6):
+    """Short descriptions of where two blanked trees disagree."""
+    if len(out) >= limit:
+        return
+    if type(one) is not type(two):
+        out.append(f"{type(one).__name__} became {type(two).__name__}")
+        return
+    for field, left in ast.iter_fields(one):
+        right = getattr(two, field, None)
+        if isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                longer = right if len(right) > len(left) else left
+                extra = [type(n).__name__ for n in longer[min(len(left),
+                                                              len(right)):]
+                         if isinstance(n, ast.AST)]
+                out.append(f"{type(one).__name__}.{field} changed length"
+                           + (f" ({', '.join(extra)})" if extra else ""))
+            for x, y in zip(left, right):
+                if isinstance(x, ast.AST) and isinstance(y, ast.AST):
+                    _differences(x, y, out, limit)
+                elif x != y:
+                    out.append(f"{type(one).__name__}.{field}: {x!r} -> {y!r}")
+        elif isinstance(left, ast.AST) and isinstance(right, ast.AST):
+            _differences(left, right, out, limit)
+        elif left != right:
+            out.append(f"{type(one).__name__}.{field}: {left!r} -> {right!r}")
+        if len(out) >= limit:
+            return
+
+
+_NO_RENAME = "no identifier was renamed"
+
+
+def rename_equivalent(before, after, published_models=_UNSET,
+                      clean_guard=None):
+    """``None`` when the whole delta is a proven identifier substitution.
+
+    The map must be a function and injective, every source must carry
+    nomenclature and no target may. The map is then applied to the before
+    side -- to identifiers and, exactly as the string purge treats them, to
+    string literals -- and the result must have the same shape as the after
+    side. Anything the substitution does not reproduce is listed and refused.
+
+    Returns the sentinel ``_NO_RENAME`` when no identifier moved at all, so a
+    caller can report the more accurate refusal of whichever prover owns the
+    delta instead of this one's.
+    """
+    guard = clean_guard or _load_clean_guard()
+    if published_models is _UNSET:
+        published_models = published_model_names()
+
+    dump_before, old_names, masked_before = _pairing_dump(before)
+    dump_after, new_names, masked_after = _pairing_dump(after)
+    if dump_before != dump_after:
+        # Identifiers and strings are masked on both sides here, so what is
+        # left to differ is exactly what no substitution could explain. That
+        # list is the specification of the extraction the file still owes.
+        found = []
+        _differences(masked_before, masked_after, found)
+        listed = "; ".join(found) if found else "the structure moved"
+        return f"differences not attributable to a substitution: {listed}"
+
+    mapping = {}
+    for old, new in zip(old_names, new_names):
+        if old == new:
+            continue
+        if mapping.setdefault(old, new) != new:
+            return (f"the identifier map is not a function ({old} goes to "
+                    f"both {mapping[old]} and {new})")
+    if not mapping:
+        return _NO_RENAME
+
+    targets = list(mapping.values())
+    unchanged = {old for old, new in zip(old_names, new_names) if old == new}
+    if len(set(targets)) != len(targets) or unchanged & set(targets):
+        return ("the identifier map is not injective (two names collapse "
+                "onto one)")
+    for old, new in sorted(mapping.items()):
+        if not guard.find_violations([old]):
+            return f"a renamed identifier carried no nomenclature ({old} -> {new})"
+        if guard.find_violations([new]):
+            return f"a renamed identifier still carries nomenclature ({new})"
+
+    mapped = _blanked(_renamed_tree(before, mapping), published_models)
+    target = _blanked(ast.parse(after), published_models)
+    if (ast.dump(mapped, annotate_fields=True, include_attributes=False)
+            == ast.dump(target, annotate_fields=True,
+                        include_attributes=False)):
+        return None
+
+    resort = _resort_reason(mapped, target)
+    if resort:
+        return resort
+    found = []
+    _differences(mapped, target, found)
+    if found and all(d.startswith("Constant.value:") for d in found):
+        return ("a changed string is not explained by the identifier map "
+                f"({found[0].split(': ', 1)[1]})")
+    listed = "; ".join(found) if found else "the shapes differ"
+    return f"differences not attributable to a substitution: {listed}"
+
+
 def verdict(path, before, after, clean_guard=None):
     """Return ``None`` if acceptable, else a one-line reason to refuse.
 
@@ -438,6 +679,13 @@ def verdict(path, before, after, clean_guard=None):
         reason = string_purge_equivalent(before, after, clean_guard=guard)
         if reason is None:
             return None
+        renamed = rename_equivalent(before, after, clean_guard=guard)
+        if renamed is None:
+            return None
+        # Whichever prover owns the delta gives the more useful refusal: the
+        # purge's when no identifier moved, the rename's when one did.
+        if renamed != _NO_RENAME:
+            reason = renamed
         return ("nomenclature was removed AND the executable shape moved "
                 f"({reason})")
     return "nomenclature was removed AND the executable shape moved"
@@ -491,7 +739,8 @@ def main(argv=None):
         print(
             "comment-only guard: "
             f"{examined} file(s) shed nomenclature, each within an unchanged "
-            f"executable shape or a proven string purge (base {base_ref}); "
+            "executable shape, a proven string purge or a proven rename "
+            f"(base {base_ref}); "
             "published prose still answers to its own digest"
         )
         return 0
