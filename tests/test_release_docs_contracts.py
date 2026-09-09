@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import importlib
 import re
+import shutil
 import subprocess
 import sys
-from pathlib import Path
+import tempfile
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -49,14 +52,119 @@ NAV_ENTRY = re.compile(r":\s+([A-Za-z][A-Za-z0-9_./-]*\.md)\s*$", re.MULTILINE)
 DOCUMENTED_PORT = re.compile(r"(?:localhost|127\.0\.0\.1):(\d{2,5})")
 
 
-def _markdown_files() -> list[Path]:
-    """Every markdown file that ships, excluding installed dependencies."""
-    skip = {"node_modules", ".svelte-kit", "build", "site"}
-    return sorted(
-        p
-        for p in ROOT.rglob("*.md")
-        if not skip.intersection(p.relative_to(ROOT).parts)
+def _tracked_markdown(root: Path = ROOT) -> list[Path] | None:
+    """Every markdown file the repository tracks, or None off a repository.
+
+    Asking the repository is the whole of the fix. A walk of the disk
+    returns whatever happens to be lying in the tree: installed
+    dependencies, build output, caches the run in progress writes as it
+    goes, and the private working documents this repository refuses by
+    name. None of those are published prose, and holding published prose
+    to them makes the verdict a statement about the machine rather than
+    about the release.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.md"],
+        cwd=str(root), capture_output=True, text=True, check=False,
     )
+    if listed.returncode != 0:
+        return None
+    names = [name for name in listed.stdout.split("\0") if name]
+    if not names:
+        return None
+    return sorted(root / name for name in names)
+
+
+def _refusals(root: Path) -> tuple[list[str], list[str]]:
+    """The refusal patterns the repository writes down, and its exceptions."""
+    text = (root / ".gitignore").read_text(encoding="utf-8")
+    refused: list[str] = []
+    kept: list[str] = []
+    for line in text.splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if entry.startswith("!"):
+            kept.append(entry[1:].lstrip("/"))
+        else:
+            refused.append(entry)
+    return refused, kept
+
+
+def _matches(pattern: str, parts: tuple[str, ...]) -> bool:
+    """Glob a whole path segment by segment.
+
+    A star never crosses a separator here. The ordinary string glob lets
+    one match across directory boundaries, which turns the recorded rule
+    for root-level documents into a rule against every document in the
+    tree -- a refusal far wider than the one written down, and silent.
+    """
+    pattern_parts = PurePosixPath(pattern).parts
+    if len(pattern_parts) != len(parts):
+        return False
+    return all(
+        fnmatch(part, expected)
+        for expected, part in zip(pattern_parts, parts)
+    )
+
+
+def _refused_off_repository(root: Path, relative: str) -> bool:
+    """True when the recorded refusals cover ``relative``."""
+    refused, kept = _refusals(root)
+    parts = PurePosixPath(relative).parts
+    if any(_matches(pattern, parts) for pattern in kept):
+        return False
+    for pattern in refused:
+        cleaned = pattern.strip("/")
+        if not cleaned:
+            continue
+        # A pattern that leads with a separator, or carries one anywhere
+        # but at its end, is read from the root; a bare name applies at
+        # any depth, as a directory on the way down or as the file at the
+        # end. Deciding that before the separators are stripped is the
+        # whole of it: a rule written for the root of the tree, read as a
+        # bare name, becomes a rule against the entire tree.
+        anchored = pattern.startswith("/") or "/" in pattern.rstrip("/")
+        if anchored:
+            if _matches(cleaned, parts):
+                return True
+            continue
+        if any(fnmatch(part, cleaned) for part in parts[:-1]):
+            return True
+        if not pattern.endswith("/") and fnmatch(parts[-1], cleaned):
+            return True
+    return False
+
+
+def _markdown_off_repository(root: Path = ROOT) -> list[Path]:
+    """The census with no repository to ask, and it says so.
+
+    A fallback that quietly returns a plausible answer is a worse defect
+    than the one it replaces: the reading looks like every other reading
+    and nothing in the result records that a different route was taken.
+    So this one announces itself, and it derives what to leave out from
+    the refusals the repository writes down rather than from a list kept
+    here -- a list kept here would go stale the first time the recorded
+    refusals changed, silently and in the safe-looking direction.
+    """
+    print(
+        "markdown census: no repository to ask, falling back to the "
+        "recorded refusals in .gitignore",
+        file=sys.stderr,
+    )
+    return sorted(
+        path
+        for path in root.rglob("*.md")
+        if not _refused_off_repository(
+            root, path.relative_to(root).as_posix()
+        )
+    )
+
+
+def _markdown_files() -> list[Path]:
+    """Every markdown file that ships, asked of the repository."""
+    tracked = _tracked_markdown()
+    return _markdown_off_repository() if tracked is None else tracked
 
 
 def _nav_entries() -> list[str]:
@@ -275,7 +383,132 @@ def test_d5b_the_version_the_smoke_test_reads_is_the_declared_one() -> None:
         capture_output=True, text=True, check=False,
     )
     assert resolved.returncode == 0, resolved.stderr
-    assert resolved.stdout.strip() == match.group(1)
+
+    # The answer is the last line, not the whole stream. Any library the
+    # package imports is free to greet the reader on standard output at
+    # import time -- several do -- and a comparison against the raw
+    # stream turns a banner printed by a dependency into a disagreement
+    # about the declared version, which is neither true nor actionable.
+    printed = [line for line in resolved.stdout.splitlines() if line.strip()]
+    assert printed, "the version probe printed nothing at all"
+    assert printed[-1].strip() == match.group(1)
+
+
+def test_d10_the_markdown_census_asks_the_repository_not_the_disk(tmp_path):
+    """A file the repository refuses is not published prose.
+
+    Built as a throwaway repository rather than asserted against this
+    one, because the property under test is what the census does when a
+    refused file is present -- and this tree, by construction, does not
+    carry one.
+    """
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed here")
+
+    def run(*args):
+        return subprocess.run(
+            ["git", *args], cwd=str(tmp_path), capture_output=True,
+            text=True, check=True,
+        )
+
+    run("init", "-q")
+    run("config", "user.email", "tester@example.invalid")
+    run("config", "user.name", "Release Tester")
+
+    (tmp_path / ".gitignore").write_text("/PRIVATE.md\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# shipped\n", encoding="utf-8")
+    (tmp_path / "PRIVATE.md").write_text("# refused\n", encoding="utf-8")
+    run("add", ".gitignore", "README.md")
+    run("commit", "-qm", "initial")
+
+    tracked = _tracked_markdown(tmp_path)
+    assert tracked is not None, "the repository route must answer here"
+    names = sorted(path.name for path in tracked)
+    assert names == ["README.md"], (
+        f"the repository route must return tracked prose only, got {names}"
+    )
+
+    walked = sorted(path.name for path in tmp_path.rglob("*.md"))
+    assert "PRIVATE.md" in walked, (
+        "the refused file must be present on disk, or this clause proves "
+        "nothing about the difference between the two routes"
+    )
+    with tempfile.TemporaryDirectory() as outside:
+        assert _tracked_markdown(Path(outside)) is None, (
+            "off a repository the route must decline rather than invent "
+            "an answer, so the caller can take the announced fallback"
+        )
+
+
+def test_d11_off_a_repository_the_census_still_refuses_and_says_so(capsys):
+    """The fallback is loud, and it reads the recorded refusals.
+
+    A fallback that passes quietly is one more green that means nothing.
+    This one names itself on the error stream, and it leaves out what
+    .gitignore leaves out rather than what a list in this file leaves
+    out -- the recorded refusals are the register, and there is one.
+    """
+    refused, kept = _refusals(ROOT)
+    assert refused, "the repository records no refusals at all"
+    assert kept, "the repository records no exceptions to its refusals"
+
+    assert _refused_off_repository(ROOT, "MOBILE_NOTES.md"), (
+        "a root-level document outside the standard set is refused by "
+        "the recorded rule and must not be read as published prose"
+    )
+    assert not _refused_off_repository(ROOT, "README.md")
+    assert not _refused_off_repository(ROOT, "docs/index.md")
+    assert not _refused_off_repository(ROOT, "frontend/README.md")
+    assert _refused_off_repository(ROOT, ".pytest_cache/README.md"), (
+        "the run in progress writes this file; a census that reads it is "
+        "reading its own exhaust"
+    )
+    assert _refused_off_repository(
+        ROOT, "frontend/node_modules/pkg/README.md"
+    )
+
+    capsys.readouterr()
+    _markdown_off_repository()
+    assert "no repository to ask" in capsys.readouterr().err, (
+        "the fallback must announce itself"
+    )
+
+
+def test_d12_a_banner_on_the_probe_does_not_move_the_version_verdict():
+    """A dependency greeting the reader is not a version disagreement.
+
+    Reproduced with a line printed ahead of the answer rather than by
+    installing a library that prints one, so the clause holds wherever
+    it runs and does not depend on what is installed here.
+    """
+    declared = (ROOT / "opti_oignon" / "__version__.py").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', declared)
+    assert match, "the package declares no version"
+
+    greeted = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; print('a dependency greets the reader');"
+         "sys.path.insert(0, %r);"
+         "from opti_oignon.__version__ import __version__;"
+         "print(__version__)" % str(ROOT)],
+        capture_output=True, text=True, check=False,
+    )
+    assert greeted.returncode == 0, greeted.stderr
+
+    printed = [line for line in greeted.stdout.splitlines() if line.strip()]
+    assert len(printed) >= 2, (
+        f"the probe must have printed a banner and an answer, got {printed}"
+    )
+    # Not an exact count: whatever else the environment prints ahead of
+    # the answer is precisely what this clause exists to tolerate, and an
+    # exact count would be the same defect again in a new place.
+    assert printed[-1].strip() == match.group(1)
+    assert greeted.stdout.strip() != match.group(1), (
+        "the raw stream must differ from the answer, or this clause is "
+        "not exercising the difference it exists for"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

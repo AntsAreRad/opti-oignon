@@ -197,10 +197,15 @@ def test_rs8_exit_codes_match_the_documented_map(tmp_path):
     must also end at its message: an exit code leaking into the printed
     line is an argument passed one slot too far.
     """
-    home, _ = _keyring(tmp_path, _ORDINARY_UID)
+    home, fingerprint = _keyring(tmp_path, _ORDINARY_UID)
     archive = _archive(tmp_path)
     _sign(home, archive)
-    result = _verify(home, archive, "--strict")
+    # The caller names its key. Without that the script reads the project
+    # pin ahead of everything else and refuses on identity long before it
+    # reaches the checksum, so this clause would report the refusal code
+    # for a throwaway signer instead of the code for the absent file it
+    # was written to pin. The sibling clause above already had it right.
+    result = _verify(home, archive, "--strict", "--key", fingerprint)
     assert result.returncode == 3, result.stdout + result.stderr
     combined = result.stdout + result.stderr
     for line in combined.splitlines():
@@ -249,3 +254,51 @@ def test_rs9_a_pinned_project_key_refuses_any_other_signer(tmp_path):
     pin.write_text(fingerprint + "\n", encoding="utf-8")
     accepted = _verify_pinned()
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+
+def test_rs10_a_named_key_takes_precedence_over_the_project_pin(tmp_path):
+    """An explicit key must reach the checks the pin would pre-empt.
+
+    The pin is read before anything else and answers on identity, which
+    is right when nobody said which key to expect and wrong when someone
+    did. Unpinned, that ordering is invisible: every clause that omits a
+    key passes for as long as no pin exists, and the day one is recorded
+    they all report the refusal code in place of whatever they were
+    written to pin. This holds the precedence itself, so the ordering is
+    a contract rather than a property of whether a file happens to exist.
+    """
+    home, fingerprint = _keyring(tmp_path, _ORDINARY_UID)
+    archive = _archive(tmp_path)
+    _sign(home, archive)
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    script_copy = scripts_dir / "verify_release.sh"
+    script_copy.write_text(
+        open(_VERIFY, encoding="utf-8").read(), encoding="utf-8"
+    )
+    (scripts_dir / "release_key.fpr").write_text(
+        "A1B2" * 10 + "\n", encoding="utf-8"
+    )
+
+    def _run(*args):
+        env = dict(os.environ, GNUPGHOME=home)
+        return subprocess.run(
+            ["bash", str(script_copy), archive.name, *args],
+            cwd=str(archive.parent), env=env, capture_output=True, text=True,
+        )
+
+    silent = _run("--strict")
+    assert silent.returncode == 1, (
+        "with a pin recorded and no key named, the refusal is on identity"
+    )
+
+    named = _run("--strict", "--key", fingerprint)
+    assert named.returncode == 3, (
+        "a named key must carry past the pin and reach the documented "
+        "missing-file code:\n" + named.stdout + named.stderr
+    )
+
+    _checksum(archive)
+    complete = _run("--strict", "--key", fingerprint)
+    assert complete.returncode == 0, complete.stdout + complete.stderr
