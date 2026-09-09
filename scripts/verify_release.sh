@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# verify_release.sh — Verify GPG signature of an Opti-Oignon release archive
+# verify_release.sh -- Verify GPG signature of an Opti-Oignon release archive
 #
 # Usage:
 #   ./scripts/verify_release.sh <archive.zip> [--key <KEY_ID>] [--strict]
@@ -14,12 +14,12 @@
 #   --strict         Exit non-zero on any warning (missing checksum, etc.)
 #
 # Exit codes:
-#   0  — Signature valid (and checksum matches if present)
-#   1  — Signature invalid or missing
-#   2  — Checksum mismatch
-#   3  — Missing dependencies or files
+#   0  -- Signature valid (and checksum matches if present)
+#   1  -- Signature invalid or missing
+#   2  -- Checksum mismatch
+#   3  -- Missing dependencies or files
 #
-# See SECURITY.md § "Release Signing" for full documentation.
+# See SECURITY.md section "Release Signing" for full documentation.
 # =============================================================================
 
 set -euo pipefail
@@ -38,7 +38,7 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[verify]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[verify]${NC} $*"; }
 error() { echo -e "${RED}[verify]${NC} $*" >&2; }
-die()   { error "$@"; exit "${2:-1}"; }
+die()   { error "$1"; exit "${2:-1}"; }
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -76,6 +76,21 @@ done
 [[ -f "$ARCHIVE" ]] || die "File not found: $ARCHIVE" 3
 
 # ---------------------------------------------------------------------------
+# Pinned project key
+# ---------------------------------------------------------------------------
+# A fingerprint recorded next to this script names THE release key. When no
+# --key is given and the pin exists, the pin is the expected key. Without
+# either, a valid signature only proves the archive matches some key in the
+# local keyring -- integrity, not identity.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIN_FILE="${SCRIPT_DIR}/release_key.fpr"
+if [[ -z "$KEY_ID" && -f "$PIN_FILE" ]]; then
+    KEY_ID="$(tr -d '[:space:]' < "$PIN_FILE")"
+    [[ -n "$KEY_ID" ]] || die "Pinned key file is empty: $PIN_FILE" 3
+    info "Expected key: pinned project fingerprint ($(basename "$PIN_FILE"))"
+fi
+
+# ---------------------------------------------------------------------------
 # Check GPG availability
 # ---------------------------------------------------------------------------
 if ! command -v gpg &>/dev/null; then
@@ -95,19 +110,44 @@ info "Verifying GPG signature..."
 info "  Archive:   $ARCHIVE"
 info "  Signature: $SIG_FILE"
 
-GPG_OUTPUT=$(gpg --batch --status-fd 1 --verify "$SIG_FILE" "$ARCHIVE" 2>&1) || true
+# The verdict is taken from the machine-readable status channel, written to
+# its own file, and never from the rendered output. A signer chooses their
+# own user id, so anything printed for humans is partly the signer's text:
+# searching it for words like "Good signature" lets whoever signed the
+# archive write the sentence that judges it.
+STATUS_FILE=$(mktemp)
+trap 'rm -f "$STATUS_FILE"' EXIT
 
-# Check for GOODSIG in status output
-if echo "$GPG_OUTPUT" | grep -q "GOODSIG\|Good signature"; then
+GPG_OUTPUT=$(gpg --batch --status-file "$STATUS_FILE" \
+    --verify "$SIG_FILE" "$ARCHIVE" 2>&1) || true
+
+# GOODSIG is emitted only for a signature that covers the bytes on disk.
+if grep -q '^\[GNUPG:\] GOODSIG ' "$STATUS_FILE"; then
     info "GPG signature: ${GREEN}VALID${NC}"
 
-    # Extract signer info
-    SIGNER=$(echo "$GPG_OUTPUT" | grep -oP 'Good signature from "\K[^"]+' || echo "unknown")
-    info "  Signed by: $SIGNER"
+    # VALIDSIG carries the full fingerprint of the signing key.
+    # Extraction must not decide anything: a missing line is reported as
+    # unknown, never as a failure that happens to stop the script. The
+    # verdict above is the only thing allowed to refuse.
+    SIGNING_FPR=$(grep -m1 '^\[GNUPG:\] VALIDSIG ' "$STATUS_FILE" \
+        | awk '{print $3}' || true)
+    SIGNER=$(grep -m1 '^\[GNUPG:\] GOODSIG ' "$STATUS_FILE" \
+        | cut -d' ' -f4- || true)
+    info "  Signed by: ${SIGNER:-unknown}"
+    info "  Key fingerprint: ${SIGNING_FPR:-unknown}"
 
-    # If --key specified, verify it matches
+    # If --key specified, it must match the signing key itself. A hex string
+    # that merely appears somewhere in the output is not a match.
+    if [[ -z "$KEY_ID" ]]; then
+        warn "No pinned key: this proves integrity for a key in the local"
+        warn "keyring, not the identity of the project. Record the release"
+        warn "fingerprint in scripts/release_key.fpr or pass --key."
+    fi
     if [[ -n "$KEY_ID" ]]; then
-        if echo "$GPG_OUTPUT" | grep -qi "$KEY_ID"; then
+        WANTED="${KEY_ID^^}"
+        WANTED="${WANTED#0X}"
+        HAVE="${SIGNING_FPR^^}"
+        if [[ -n "$HAVE" && "$HAVE" == *"$WANTED" ]]; then
             info "  Key match: ${GREEN}$KEY_ID${NC}"
         else
             die "Signature valid but NOT from expected key $KEY_ID" 1
@@ -134,7 +174,7 @@ if [[ -f "$CHECKSUM_FILE" ]]; then
     fi
 else
     if [[ "$STRICT" -eq 1 ]]; then
-        die "Checksum file not found: $CHECKSUM_FILE (strict mode)" 2
+        die "Checksum file not found: $CHECKSUM_FILE (strict mode)" 3
     else
         warn "Checksum file not found: $CHECKSUM_FILE (skipping)"
     fi

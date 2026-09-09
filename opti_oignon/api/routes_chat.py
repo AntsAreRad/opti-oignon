@@ -1008,7 +1008,7 @@ async def _stream_response(
                 "reasoning": tc.reasoning,
             })
 
-    # Fire post_inference hooks — plugins can annotate/modify the response
+    # Fire post_inference hooks -- plugins can annotate/modify the response
     # redact_sensitive=True applies per-plugin data redaction
     plugin_annotations: list[dict] = []
     if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("post_inference"):
@@ -1128,7 +1128,7 @@ async def _stream_response(
 
 
 # ---------------------------------------------------------------------------
-# Chat Coding Agent — rich LLM callback + streaming
+# Chat Coding Agent -- rich LLM callback + streaming
 # ---------------------------------------------------------------------------
 
 def _build_rich_llm_callback(

@@ -1,14 +1,14 @@
-# API Reference -- Endpoints Added in v3.2.0 (S138-S150)
+# API Reference -- Endpoints Added in v2.2.0
 
-This document covers the API endpoints introduced during the S138-S150
+This document covers the API endpoints introduced during the
 development cycle. For the full OpenAPI specification, see
-http://localhost:8000/docs when the backend is running.
+http://localhost:8001/docs when the backend is running.
 
 All endpoints require authentication via JWT cookie unless noted
 otherwise. Admin-only endpoints require `role: admin`.
 
 
-## Red Team Engine (S147-S148)
+## Red Team Engine
 
 Prefix: `/api/security/redteam`
 
@@ -112,7 +112,7 @@ Download the full report in the specified format.
 **Response (200):** JSON object, or plain text depending on `fmt`.
 
 
-## Audit Chain External Anchor (S146)
+## Audit Chain External Anchor
 
 Prefix: `/api/security/audit`
 
@@ -129,7 +129,7 @@ Generate a QR code PNG containing the audit chain tip.
     "chain_tip_hash": "a1b2c3d4...",
     "entry_count": 1542,
     "timestamp": 1710936000.0,
-    "version": "3.2.0"
+    "version": "2.2.0"
   }
 }
 ```
@@ -149,7 +149,7 @@ Export the chain tip as a signed JSON file for USB or external storage.
   "chain_tip_hash": "a1b2c3d4...",
   "entry_count": 1542,
   "timestamp": 1710936000.0,
-  "version": "3.2.0",
+  "version": "2.2.0",
   "anchor_version": 1,
   "hmac_sha256": "e5f6a7b8..."
 }
@@ -178,7 +178,7 @@ Verify an imported anchor against the current chain.
   "chain_tip_hash": "a1b2c3d4...",
   "entry_count": 1542,
   "timestamp": 1710936000.0,
-  "version": "3.2.0",
+  "version": "2.2.0",
   "anchor_version": 1,
   "hmac_sha256": "e5f6a7b8..."
 }
@@ -207,7 +207,7 @@ Verify an imported anchor against the current chain.
 ```
 
 
-## Startup Security Checklist (S145)
+## Startup Security Checklist
 
 ### GET /api/security/startup-checks
 
@@ -256,7 +256,7 @@ for the process lifetime unless `force=true`.
 ```
 
 
-## RAG Prompt Injection Defense (S144)
+## RAG Prompt Injection Defense
 
 Prefix: `/api/rag/injection-defense`
 
@@ -405,7 +405,7 @@ Get the current injection defense configuration.
 ```
 
 
-## User Management and RBAC (S142)
+## User Management and RBAC
 
 Prefix: `/api/users`
 

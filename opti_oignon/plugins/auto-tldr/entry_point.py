@@ -6,7 +6,7 @@ Uses extractive summarization: sentences are scored by position,
 keyword density, and length, then the top-scoring sentences are
 selected as the summary.
 
-Pure text processing — no external dependencies, no permissions needed.
+Pure text processing -- no external dependencies, no permissions needed.
 """
 
 import logging

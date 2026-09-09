@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# run_e2e.sh — Opti-Oignon Playwright E2E test runner
+# run_e2e.sh -- Opti-Oignon Playwright E2E test runner
 # Frontend E2E Tests
 #
 # Usage:
@@ -19,7 +19,7 @@ echo "=== Opti-Oignon E2E Tests ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Frontend dir: $FRONTEND_DIR"
 
-# ── Check prerequisites ────────────────────────────────────────────────────
+# -- Check prerequisites ----------------------------------------------------
 if ! command -v node &>/dev/null; then
     echo "ERROR: Node.js is required. Install it first."
     exit 1
@@ -35,28 +35,31 @@ if [ ! -d "$FRONTEND_DIR/node_modules/@playwright" ]; then
     exit 1
 fi
 
-# ── Ensure Playwright browsers are installed ───────────────────────────────
+# -- Ensure Playwright browsers are installed -------------------------------
 echo ">> Checking Playwright browsers..."
 (cd "$FRONTEND_DIR" && npx playwright install chromium --with-deps 2>/dev/null) || {
     echo "WARNING: Could not install Playwright browsers automatically."
     echo "Run manually: cd frontend && npx playwright install chromium --with-deps"
 }
 
-# ── Run E2E tests ──────────────────────────────────────────────────────────
+# -- Run E2E tests ----------------------------------------------------------
 echo ""
 echo ">> Running Playwright E2E tests..."
+# errexit is disarmed for exactly one command: a red run is a result to
+# report, not a reason to leave before reporting it.
+set +e
 (cd "$FRONTEND_DIR" && npx playwright test "$@")
-
 EXIT_CODE=$?
+set -e
 
-# ── Report ─────────────────────────────────────────────────────────────────
+# -- Report -----------------------------------------------------------------
 if [ $EXIT_CODE -eq 0 ]; then
     echo ""
     echo "=== E2E Tests PASSED ==="
 else
     echo ""
     echo "=== E2E Tests FAILED (exit code: $EXIT_CODE) ==="
-    echo "View report: cd frontend && npx playwright show-report ../tests/e2e/playwright-report"
+    echo "View report: cd frontend && npx playwright show-report tests/e2e/playwright-report"
 fi
 
 exit $EXIT_CODE

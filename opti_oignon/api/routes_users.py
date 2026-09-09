@@ -3,15 +3,15 @@
 API routes for multi-user data isolation.
 
 Endpoints:
-  GET    /api/users/{user_id}/export    — Export all user data (GDPR)
-  DELETE /api/users/{user_id}/data      — Cascade delete all user data
-  GET    /api/admin/audit               — Query admin audit log
-  GET    /api/admin/audit/count         — Count admin audit events
-  GET    /api/users/me/key-status       — Per-user encryption key status
-  POST   /api/users/me/derive-key       — Derive and cache user encryption key
-  DELETE /api/users/me/key-cache        — Wipe cached user encryption key
-  GET    /api/users/{user_id}/plugins   — Get per-user plugin configs
-  PUT    /api/users/{user_id}/plugins/{plugin} — Set per-user plugin config
+  GET    /api/users/{user_id}/export    -- Export all user data (GDPR)
+  DELETE /api/users/{user_id}/data      -- Cascade delete all user data
+  GET    /api/admin/audit               -- Query admin audit log
+  GET    /api/admin/audit/count         -- Count admin audit events
+  GET    /api/users/me/key-status       -- Per-user encryption key status
+  POST   /api/users/me/derive-key       -- Derive and cache user encryption key
+  DELETE /api/users/me/key-cache        -- Wipe cached user encryption key
+  GET    /api/users/{user_id}/plugins   -- Get per-user plugin configs
+  PUT    /api/users/{user_id}/plugins/{plugin} -- Set per-user plugin config
 """
 
 from __future__ import annotations

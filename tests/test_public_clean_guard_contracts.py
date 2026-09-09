@@ -18,6 +18,12 @@ independently of git:
     the Python trees alone. The detector is a regex over added lines and is
     agnostic to language, so a tree of TypeScript, shell or Kotlin is
     guarded on exactly the same terms as a tree of Python.
+  * G7 -- a lowercase session code is flagged: case is not a disguise.
+  * G8 -- a session code continued by a capitalized word (the camel-case
+    identifier shape) is flagged: a missing word boundary is not an exit.
+  * G9 -- scope control: a hardware architecture triple, whose digits run
+    straight into a lowercase letter, is NOT flagged. The widened pattern
+    must catch disguises without charging ordinary platform names.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -146,6 +152,82 @@ def test_g5_perimeter_covers_every_published_tree():
 
 
 # ---------------------------------------------------------------------------
+# G6 -- a lint pragma's rule code is exempt; a bare code elsewhere is not
+# ---------------------------------------------------------------------------
+def test_g6_lint_pragma_rule_code_is_exempt():
+    guard, restore = _load()
+    try:
+        code = _S + _DIGITS  # assembled rule-code shape
+        pragma_line = (
+            "response = urlopen(request)  # noqa: " + code
+            + " (scheme enforced above)"
+        )
+        assert guard.find_violations([pragma_line]) == [], (
+            "a lint pragma names a rule of the linter, not a fragment of "
+            "internal history; charging it would force authors to strip "
+            "real suppressions to read clean"
+        )
+        # The exemption is the pragma form, never the bare token.
+        bare_line = "    # see " + code + " for details"
+        violations = guard.find_violations([bare_line])
+        assert violations, "a bare standalone code outside a pragma must flag"
+        assert "session_code" in _kinds(violations)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G7 -- a lowercase session code is flagged
+# ---------------------------------------------------------------------------
+def test_g7_lowercase_session_code_is_flagged():
+    guard, restore = _load()
+    try:
+        code = _S.lower() + _DIGITS  # assembled lowercase form
+        for line in (
+            "    # migrated in " + code + " with the queue",
+            'strategy = "' + code + _UNDERSCORE + 'optimizer"',
+            "route = '/api/cache/" + code + "/status'",
+        ):
+            violations = guard.find_violations([line])
+            assert violations, f"lowercase form must flag: {line!r}"
+            assert "session_code" in _kinds(violations)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G8 -- a session code continued by a capitalized word is flagged
+# ---------------------------------------------------------------------------
+def test_g8_session_code_in_camel_case_identifier_is_flagged():
+    guard, restore = _load()
+    try:
+        ident = _S + _DIGITS + "CacheStatusResponse"  # assembled identifier
+        line = "class " + ident + "(BaseModel):"
+        violations = guard.find_violations([line])
+        assert violations, "the camel-case identifier shape must flag"
+        assert "session_code" in _kinds(violations)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G9 -- scope control: an architecture triple is not flagged
+# ---------------------------------------------------------------------------
+def test_g9_architecture_triple_is_not_flagged():
+    guard, restore = _load()
+    try:
+        for line in (
+            '"node_modules/@esbuild/linux-s390x": {',
+            'arch = "s390x"',
+        ):
+            assert guard.find_violations([line]) == [], (
+                f"a platform name must never be charged: {line!r}"
+            )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -156,6 +238,14 @@ def _run_all():
         ("G4 process word flagged", test_g4_process_word_is_flagged),
         ("G5 perimeter covers published trees",
          test_g5_perimeter_covers_every_published_tree),
+        ("G6 lint pragma rule code exempt",
+         test_g6_lint_pragma_rule_code_is_exempt),
+        ("G7 lowercase session code flagged",
+         test_g7_lowercase_session_code_is_flagged),
+        ("G8 camel-case identifier shape flagged",
+         test_g8_session_code_in_camel_case_identifier_is_flagged),
+        ("G9 architecture triple not flagged",
+         test_g9_architecture_triple_is_not_flagged),
     ]
     passed = 0
     for label, fn in tests:

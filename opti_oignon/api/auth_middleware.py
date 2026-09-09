@@ -154,7 +154,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Token valid — proceed
+        # Token valid -- proceed
         return await call_next(request)
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Attack Generator — Opti-Oignon Red Team
+Attack Generator -- Opti-Oignon Red Team
 ==============================================
 
 Generates adversarial attack payloads per category using local Ollama models.
@@ -168,6 +168,8 @@ class AttackGenerator:
 
         # Load seeds
         seed_path = Path(seed_file) if seed_file else _DEFAULT_SEED_PATH
+        self._seed_path = seed_path
+        self._seeds_available = False
         self._seeds: dict[str, list[str]] = {}
         self._load_seeds(seed_path)
 
@@ -183,6 +185,7 @@ class AttackGenerator:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             self._seeds = data.get("categories", {})
+            self._seeds_available = True
             total = sum(len(v) for v in self._seeds.values())
             logger.info("Loaded %d seeds from %s", total, path)
         except Exception as exc:
@@ -331,7 +334,7 @@ class AttackGenerator:
             ollama_attempts += 1
 
             if text is None:
-                # Ollama unavailable — skip to seed fallback
+                # Ollama unavailable -- skip to seed fallback
                 logger.info("Ollama unavailable for %s, switching to seeds", cat_enum.value)
                 break
 
@@ -352,6 +355,13 @@ class AttackGenerator:
 
         # Phase 2: Seed fallback if needed
         if len(attacks) < count and self.seed_fallback:
+            if not self._seeds_available:
+                raise RuntimeError(
+                    "seed fallback is needed but the seed corpus is absent: "
+                    f"{self._seed_path}. No model produced enough attacks and "
+                    "there is no corpus to fall back on. Provide a seed file "
+                    "or a reachable model rather than accepting an empty batch."
+                )
             seeds = self._seeds.get(cat_enum.value, [])
             for seed_text in seeds:
                 if len(attacks) >= count:

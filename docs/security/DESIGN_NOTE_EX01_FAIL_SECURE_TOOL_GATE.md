@@ -1,7 +1,7 @@
 # Design note: fail-secure default for the tool-execution approval gate (EX-01)
 
-Status: recorded design decision, not yet implemented. Raised in
-AUDIT_FINDINGS_S184 (EX-01). This note captures the analysis and the proposed
+Status: recorded design decision, not yet implemented. Raised by an
+internal audit (EX-01). This note captures the analysis and the proposed
 direction so a future session can implement it deliberately.
 
 ## Summary
@@ -83,7 +83,7 @@ does not. The risk is everything *outside* that one wiring site.
    disagree, default to Bulbe"). The tool-execution path is the outlier.
 
 The current *production* exposure is limited because the primary chat path is
-wired correctly, and the executor's filesystem tools run under the S73/S74
+wired correctly, and the executor's filesystem tools run under the
 disposable sandbox regardless. But "fail-open unless the caller opts in" is the
 wrong default for this project.
 
@@ -134,14 +134,14 @@ continues to take precedence where present.
 - **Hot-path coupling.** This adds a `security_mode` dependency to the tool
   execution path. Keep it a lazy import with a cached policy read to avoid a
   per-call cost.
-- **Interactions.** Pairs naturally with the auth-hardening lot (A4 / S187) and
+- **Interactions.** Pairs naturally with the auth-hardening lot (A4) and
   the red-team bloc (Bloc 6), both of which touch policy and adversarial tool
   use. The taxonomy is also useful input to red-team scoring (which tools are
   "dangerous").
 
 ## Recommendation
 
-Defer implementation to a dedicated hardening pass (auth lot S187, or the
+Defer implementation to a dedicated hardening pass (the auth-hardening lot, or the
 red-team bloc), because it is a security-policy change to the tool-execution hot
 path and requires (1) a reviewed tool side-effect taxonomy and (2) a settled
 answer on the no-policy default. The decision is recorded here so it is not lost;

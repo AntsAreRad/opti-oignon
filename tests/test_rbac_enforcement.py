@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for RBAC enforcement (rbac_enforcement) — the authorization decisions.
+"""Tests for RBAC enforcement (rbac_enforcement) -- the authorization decisions.
 
 These are the access-control predicates that protect user data isolation on a
 multi-user deployment: who is an admin, which roles may reach an endpoint, and

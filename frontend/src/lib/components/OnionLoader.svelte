@@ -186,7 +186,7 @@
 
 	/*
 	 * Irregular bump pattern over a 7.5s cycle.
-	 * Bumps at ~2s, ~4.5s, and ~6.8s — feels aperiodic.
+	 * Bumps at ~2s, ~4.5s, and ~6.8s -- feels aperiodic.
 	 * Each bump: translate up 4-6px, then squash on landing
 	 * (scaleX slightly wider, scaleY slightly shorter).
 	 */

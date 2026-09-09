@@ -2,13 +2,13 @@
 
 ## Overview
 
-Opti-Oignon exposes a REST API via FastAPI with ~519 endpoints. All
+Opti-Oignon exposes a REST API via FastAPI with 525 endpoints. All
 endpoints require JWT cookie authentication unless noted otherwise.
 Admin-only endpoints require `role: admin`.
 
 The full interactive API documentation is available at
-[http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI) and
-[http://localhost:8000/redoc](http://localhost:8000/redoc) (ReDoc) when
+[http://localhost:8001/docs](http://localhost:8001/docs) (Swagger UI) and
+[http://localhost:8001/redoc](http://localhost:8001/redoc) (ReDoc) when
 the backend is running.
 
 
@@ -37,12 +37,12 @@ the backend is running.
 
 ```bash
 # Login
-curl -c cookies.txt -X POST http://localhost:8000/api/auth/login \
+curl -c cookies.txt -X POST http://localhost:8001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "secret"}'
 
 # Authenticated request
-curl -b cookies.txt http://localhost:8000/api/models
+curl -b cookies.txt http://localhost:8001/api/models
 ```
 
 ### Error responses
@@ -71,7 +71,7 @@ List endpoints support `offset` and `limit` query parameters for
 pagination. Default limit is typically 20.
 
 
-## Red Team API (S147-S148)
+## Red Team API
 
 Prefix: `/api/security/redteam`
 
@@ -87,7 +87,7 @@ Prefix: `/api/security/redteam`
 | POST | `/suggestions/{id}/reject` | Reject a suggestion |
 
 
-## Security scheduler API (S158)
+## Security scheduler API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -95,7 +95,7 @@ Prefix: `/api/security/redteam`
 | POST | `/api/security/scheduler/trigger` | Manual trigger |
 
 
-## Streaming API (S159)
+## Streaming API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -106,5 +106,5 @@ Prefix: `/api/security/redteam`
 ## Full endpoint reference
 
 For complete request/response schemas, see the interactive Swagger UI
-at `http://localhost:8000/docs` when the backend is running. The OpenAPI
-JSON schema is available at `http://localhost:8000/openapi.json`.
+at `http://localhost:8001/docs` when the backend is running. The OpenAPI
+JSON schema is available at `http://localhost:8001/openapi.json`.

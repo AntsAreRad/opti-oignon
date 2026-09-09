@@ -49,7 +49,7 @@ pip install -q -r "$REQUIREMENTS" --break-system-packages 2>/dev/null \
 # -- validate nav references -----------------------------------------------
 
 log "Checking that all nav-referenced files exist..."
-NAV_FILES=$(grep -oP ':\s+\K[a-z].*\.md' "$MKDOCS_YML" || true)
+NAV_FILES=$(grep -oP ':\s+\K[A-Za-z].*\.md' "$MKDOCS_YML" || true)
 MISSING=0
 for f in $NAV_FILES; do
     if [ ! -f "$DOCS_DIR/$f" ]; then

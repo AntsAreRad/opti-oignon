@@ -383,7 +383,7 @@ class AuthManager:
         # Fallback: only useful when SecureBytes is unavailable
         raw = self.config.get("jwt", {}).get("secret_key", "")
         if raw == "[PROTECTED_BY_SECUREBYTES]":
-            # SecureBytes was wiped and config has sentinel — no recovery
+            # SecureBytes was wiped and config has sentinel -- no recovery
             logger.error("JWT secret unavailable: SecureBytes wiped, config has sentinel")
             return ""
         return raw
@@ -1326,7 +1326,7 @@ class LoginRateLimiter:
             self._user_entries[username].attempts.append(now)
 
     def record_success(self, ip: str, username: str) -> None:
-        """Record a successful login — resets counters for that username."""
+        """Record a successful login -- resets counters for that username."""
         if not self.enabled:
             return
 

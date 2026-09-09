@@ -9,6 +9,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+try:
+    from opti_oignon.__version__ import __version__
+except ImportError:
+    # Contract windows load this module from its file with the package
+    # deliberately absent, so the register is unreachable there. The
+    # default degrades to a sentinel that no release could ever carry:
+    # a stale copy of a real version is drift, a zero is a flag.
+    __version__ = "0.0.0"
+
 # -- Conversations --
 
 class ConversationSummary(BaseModel):
@@ -479,7 +488,7 @@ class CacheClearResponse(BaseModel):
 class HealthDashboard(BaseModel):
     """Data completes du tableau de bord."""
     status: str = "ok"
-    version: str = "1.6.6"
+    version: str = __version__
     modules: dict[str, bool] = Field(default_factory=dict)
     conversation_count: int = 0
     memory_fact_count: int = 0
@@ -2701,7 +2710,7 @@ class BackendModelsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Speculative Decoding — llama.cpp native speculative decoding
+# Speculative Decoding -- llama.cpp native speculative decoding
 # ---------------------------------------------------------------------------
 
 class SpeculativeDecodingConfigSchema(BaseModel):
@@ -2778,7 +2787,7 @@ class VRAMBudgetResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auto-Tuner — inference parameter optimization
+# Auto-Tuner -- inference parameter optimization
 # ---------------------------------------------------------------------------
 
 class TunerConfigSchema(BaseModel):
@@ -3246,3 +3255,15 @@ class KeyboardShortcutsUpdateResponse(BaseModel):
     custom_overrides: dict[str, Any] = Field(default_factory=dict)
     browser_conflicts: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class ClaimSourcePair(BaseModel):
+    """One cited claim and the source it is checked against.
+
+    On the wire this is both the extracted-pairs view (what a parser derived
+    from a produced answer) and the natural batch input a citation-extraction
+    step would hand in. Each pair is verified independently and the
+    per-answer verdict is the fail-secure aggregate.
+    """
+    claim: str
+    source: str

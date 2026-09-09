@@ -16,7 +16,8 @@ introduces:
   * an internal process word.
 
 A short list of public product terms is exempt and can never account for a
-violation.
+violation; so are the rule codes of a lint pragma, which name rules of the
+linter rather than anything internal.
 
 Diff-only by design: it guards against NEW nomenclature on added lines
 without failing on pre-existing debt, so it can be adopted before that debt
@@ -40,8 +41,22 @@ checkpoint_before_apply = True
 # Public product terms exempt from every pattern, assembled from fragments.
 _ALLOWED_TERMS = ("network" + "_outbound", "prompt" + "_injection")
 
-# Session code: the letter S then two-to-four digits, as a standalone token.
-_SESSION_CODE = re.compile(r"\bS[0-9]{2,4}\b")
+# A lint pragma's rule codes are exempt: the ``noqa:`` marker followed by
+# letter-digit codes names rules of the linter, not internal history, and
+# charging them would force authors to strip real suppressions to read
+# clean. Only the pragma form is stripped; the bare token elsewhere stays
+# charged.
+_LINT_PRAGMA = re.compile(
+    r"\bnoqa\s*:\s*[A-Z]+[0-9]+(?:\s*,\s*[A-Z]+[0-9]+)*"
+)
+
+# Session code: the letter S (either case) then two-to-four digits. The
+# token may not be entered from a letter or digit, and the digits may not
+# run on into more digits or a lowercase letter. A capitalized continuation
+# stays charged -- the camel-case identifier shape is a disguise, not a
+# boundary -- while a platform name like a hardware architecture triple,
+# whose digits run straight into a lowercase letter, is never charged.
+_SESSION_CODE = re.compile(r"(?<![A-Za-z0-9])[sS][0-9]{2,4}(?![0-9a-z])")
 
 # Internal document reference: a known uppercase prefix immediately followed
 # by a session code or the tracking marker. Prefixes and marker are built
@@ -80,10 +95,10 @@ _DEFAULT_BASE_REF = "origin/main"
 
 
 def _strip_allowed(line):
-    """Remove exempt product terms so they cannot account for a match."""
+    """Remove exempt terms and pragmas so they cannot account for a match."""
     for term in _ALLOWED_TERMS:
         line = line.replace(term, " ")
-    return line
+    return _LINT_PRAGMA.sub(" ", line)
 
 
 def find_violations(lines):
@@ -92,16 +107,17 @@ def find_violations(lines):
     ``lines`` is any iterable of strings -- added lines, without the diff
     ``+`` marker. ``index`` is the position within ``lines``. Exempt product
     terms are removed before matching. At most one violation is reported per
-    line; the earliest-listed kind wins.
+    line; the most specific kind wins, so a document reference outranks the
+    session code it necessarily contains.
     """
     violations = []
     for index, raw in enumerate(lines):
         line = _strip_allowed(raw)
-        if _SESSION_CODE.search(line):
-            violations.append((index, "session_code", raw.strip()))
-            continue
         if _DOC_REFERENCE.search(line):
             violations.append((index, "doc_reference", raw.strip()))
+            continue
+        if _SESSION_CODE.search(line):
+            violations.append((index, "session_code", raw.strip()))
             continue
         for pattern in _PROCESS_WORDS:
             if pattern.search(line):

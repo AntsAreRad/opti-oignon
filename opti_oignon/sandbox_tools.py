@@ -291,7 +291,7 @@ class SandboxToolSession:
     Manages the lifecycle of a sandbox session and produces
     ToolDefinition instances where session_id is pre-bound.
     The LLM sees clean tool interfaces: bash, view, create_file,
-    str_replace — without needing to know about sessions.
+    str_replace -- without needing to know about sessions.
 
     SECURITY: When started, activates sandbox mode on the tool_registry,
     which DISABLES all unsafe unsandboxed tools (execute_code, read_file,

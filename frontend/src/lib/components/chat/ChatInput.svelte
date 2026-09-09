@@ -4,7 +4,7 @@
   Integrates ChatControlBar above the input area.
   Image upload button with thumbnails.
   Ctrl+Enter global send shortcut support.
-  Mobile responsive — full-width, 44px touch targets, enterkeyhint, safe-area.
+  Mobile responsive -- full-width, 44px touch targets, enterkeyhint, safe-area.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
@@ -302,7 +302,7 @@
 	{/if}
 
 	<div class="flex items-end gap-1 sm:gap-2">
-		<!-- Image upload button — touch-friendly -->
+		<!-- Image upload button -- touch-friendly -->
 		<button
 			on:click={handleImageClick}
 			disabled={disabled || isStreaming}
@@ -315,7 +315,7 @@
 			<Icon name="image" size="sm" />
 		</button>
 
-		<!-- Textarea — full-width mobile, enterkeyhint for mobile keyboard -->
+		<!-- Textarea -- full-width mobile, enterkeyhint for mobile keyboard -->
 		<div class="flex-1 relative">
 			<!-- /code slash command indicator -->
 			{#if isCodeCommand}
@@ -347,7 +347,7 @@
 			/>
 		</div>
 
-		<!-- Send/stop button — 44x44px touch target -->
+		<!-- Send/stop button -- 44x44px touch target -->
 		{#if isStreaming}
 			<button
 				on:click={handleCancel}

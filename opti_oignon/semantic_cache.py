@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SEMANTIC CACHE — OPTI-OIGNON v1.7.0 (Session 68)
+SEMANTIC CACHE -- OPTI-OIGNON v1.7.0 (Session 68)
 ==================================================
 
 Persistent dual-threshold cache that avoids redundant LLM calls:

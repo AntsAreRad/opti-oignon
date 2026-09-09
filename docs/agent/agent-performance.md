@@ -1,6 +1,6 @@
 # Agent Performance
 
-The Agent Performance cycle (AGT, S222-S231, released as v3.10.0) makes the
+The Agent Performance cycle (AGT, released as v3.10.0) makes the
 sandboxed agent loop measurably better at multi-step coding and filesystem
 work with local models. Everything below rides the existing security
 posture: every tool goes through the approval-gated, mode-aware dispatch,
@@ -73,7 +73,7 @@ of the API.
 
 The numbers only mean something on a real machine: the model-in-the-loop
 runs themselves, eviction effectiveness on real VRAM, and real bwrap spill
-and diagnostics behaviour are host-assured, directed by
-`HOST_SHAKEDOWN_S231.md` at the repository root. An optional side-by-side
+and diagnostics behaviour are host-assured, directed by an operator
+runbook kept outside this repository. An optional side-by-side
 opencode baseline script exists for the Route A gap question
 (reference-only; it never simulates results).

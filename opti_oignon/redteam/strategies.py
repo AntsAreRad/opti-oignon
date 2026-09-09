@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Attack Strategies — Opti-Oignon Red Team
+Attack Strategies -- Opti-Oignon Red Team
 ===============================================
 
-Each strategy is a pure function ``(str) → str`` that transforms an attack
+Each strategy is a pure function ``(str) -> str`` that transforms an attack
 payload to test defense resilience against obfuscated inputs.
 
 9 strategies:
-- none            — identity (no transformation)
-- base64_encode   — Base64-encode the payload
-- rot13           — ROT13 cipher
-- leetspeak       — l33t substitution
-- roleplay        — wrap in roleplay framing
-- few_shot        — prepend few-shot examples
-- payload_splitting — split into numbered fragments
-- char_swap       — swap adjacent character pairs
-- multilingual    — translate via Ollama (only non-deterministic strategy)
+- none            -- identity (no transformation)
+- base64_encode   -- Base64-encode the payload
+- rot13           -- ROT13 cipher
+- leetspeak       -- l33t substitution
+- roleplay        -- wrap in roleplay framing
+- few_shot        -- prepend few-shot examples
+- payload_splitting -- split into numbered fragments
+- char_swap       -- swap adjacent character pairs
+- multilingual    -- translate via Ollama (only non-deterministic strategy)
 
 All except ``multilingual`` are deterministic (no LLM call required).
 """
@@ -71,7 +71,7 @@ class AttackStrategy(str, Enum):
 # ---------------------------------------------------------------------------
 
 def strategy_none(payload: str) -> str:
-    """Identity transform — returns payload unchanged."""
+    """Identity transform -- returns payload unchanged."""
     return payload
 
 
@@ -188,7 +188,7 @@ def strategy_multilingual(
 ) -> str:
     """Translate payload to another language via Ollama.
 
-    This is the only non-deterministic strategy — requires a running
+    This is the only non-deterministic strategy -- requires a running
     Ollama instance. Falls back to a simple prefix if Ollama is unavailable.
 
     Parameters

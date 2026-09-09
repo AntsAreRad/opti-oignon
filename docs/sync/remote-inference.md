@@ -89,6 +89,7 @@ The four endpoints, under `/api/sync`:
 The wire logic is fully proven in the container. What only a real machine can
 confirm -- the live private route between two devices, the streamed per-chunk
 round-trip latency, and end-to-end remote chat -- is host-assured and never
-simulated in-container. The live walk is directed by `HOST_SHAKEDOWN_S236.md`. The
+simulated in-container. The live walk is directed by an operator runbook kept
+outside this repository. The
 phone client itself is the Mobile app cycle's work; here the wire is validated by a
 desktop-to-desktop exercise over a real route.

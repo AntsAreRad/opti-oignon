@@ -232,6 +232,8 @@ class ArchiveRetriever:
         query: str,
         top_k: int = 3,
         min_score: float = 0.05,
+        *,
+        manager: Any | None = None,
     ) -> list[ArchiveSearchResult]:
         """Search the full conversation archive for messages matching query.
 
@@ -240,16 +242,22 @@ class ArchiveRetriever:
             query: Natural language query string.
             top_k: Maximum number of results to return.
             min_score: Minimum relevance score to include a result.
+            manager: Optional conversation store to search instead of the
+                module-level one; measurement harnesses point this at a
+                throwaway store so the live archive is never involved.
 
         Returns:
             List of ArchiveSearchResult sorted by score descending.
         """
-        if not CONVERSATION_AVAILABLE or conversation_manager is None:
+        source = manager if manager is not None else conversation_manager
+        if manager is None and (
+            not CONVERSATION_AVAILABLE or conversation_manager is None
+        ):
             logger.debug("Archive retrieval skipped: conversation_manager unavailable")
             return []
 
         try:
-            all_messages = conversation_manager.get_context_messages(conversation_id)
+            all_messages = source.get_context_messages(conversation_id)
         except Exception as e:
             logger.error(f"Archive retrieval error loading messages: {e}")
             return []

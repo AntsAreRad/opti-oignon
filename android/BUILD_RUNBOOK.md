@@ -13,7 +13,7 @@ native bridge.
   - Build-tools matching the platform.
 - **Android NDK** r26 or newer (for the JNI C++ in `veilid-bridge`).
 - **CMake 3.22.1+** (the native build uses CMake).
-- **veilid-core** built for Android ABIs (`arm64-v8a`, `x86_64`) — needed only
+- **veilid-core** built for Android ABIs (`arm64-v8a`, `x86_64`) -- needed only
   once you implement the JNI bodies (step 4).
 
 Pin or verify the Gradle/AGP/Kotlin versions in `build.gradle.kts` against the
@@ -39,7 +39,7 @@ gradle wrapper --gradle-version 8.9
 
 This compiles the Kotlin, builds the JNI stub `.so`, and packages a debug APK.
 At this stage the app runs but every Veilid call returns a sentinel: `appCall`
-returns null, so the inference client reports `NoReply`. That is expected — it
+returns null, so the inference client reports `NoReply`. That is expected -- it
 proves the wiring and the contract types compile and link, nothing more.
 
 ## 4. Implement the JNI bridge
@@ -47,16 +47,16 @@ proves the wiring and the contract types compile and link, nothing more.
 Replace the stub bodies in `veilid-bridge/src/main/cpp/veilid_bridge.cpp` with
 calls into veilid-core, and link veilid-core into the `optioignon_veilid` target
 in `CMakeLists.txt`. The function signatures in `veilid_bridge.h` and the
-`external fun` declarations in `VeilidBridge.kt` are the contract — keep them in
+`external fun` declarations in `VeilidBridge.kt` are the contract -- keep them in
 lockstep (the JNI names mangle the class `org/optioignon/veilid/VeilidBridge`).
 
 Map each to veilid-core:
 
-- `nodeInit` / `nodeAttach` / `nodeDetach` / `nodeShutdown` — node lifecycle.
-- `routeAllocate` / `routeImport` — private route setup with the paired desktop.
-- `appCall` — the core RPC: send the encoded request envelope over the route,
+- `nodeInit` / `nodeAttach` / `nodeDetach` / `nodeShutdown` -- node lifecycle.
+- `routeAllocate` / `routeImport` -- private route setup with the paired desktop.
+- `appCall` -- the core RPC: send the encoded request envelope over the route,
   return the reply bytes. Return null on transport failure.
-- `recordOpen` / `recordGet` / `recordSet` / `recordClose` — DHT records for the
+- `recordOpen` / `recordGet` / `recordSet` / `recordClose` -- DHT records for the
   note/vault sync surface.
 
 ## 5. Validate the contract (the real test)

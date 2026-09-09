@@ -11,8 +11,8 @@ side panel.
 
 ## Hook Points
 
-- `tool_call` — intercepts slash commands
-- `ui_panel` — renders the scratchpad side panel
+- `tool_call` -- intercepts slash commands
+- `ui_panel` -- renders the scratchpad side panel
 
 ## Commands
 
@@ -34,10 +34,10 @@ side panel.
 
 ## Permissions
 
-- `conversation_read` — reads user input for command detection
-- `tool_register` — registers slash commands
-- `ui_panel_register` — registers the side panel
-- `filesystem_plugin_dir` — stores the SQLite database
+- `conversation_read` -- reads user input for command detection
+- `tool_register` -- registers slash commands
+- `ui_panel_register` -- registers the side panel
+- `filesystem_plugin_dir` -- stores the SQLite database
 
 ## Auto-Tagging
 

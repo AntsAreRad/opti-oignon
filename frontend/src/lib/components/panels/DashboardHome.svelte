@@ -37,7 +37,7 @@
 					: (chatsResp.value.conversations ?? []).slice(0, 5);
 			}
 		} catch {
-			// Silently handle — dashboard is informational
+			// Silently handle -- dashboard is informational
 		} finally {
 			loading = false;
 		}

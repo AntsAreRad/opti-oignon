@@ -65,7 +65,7 @@ class BaseChunker(ABC):
         pass
 
     def _estimate_tokens(self, text: str) -> int:
-        """Estimate the number of tokens (approximate: 1 token ≈ 4 chars)."""
+        """Estimate the number of tokens (approximate: 1 token ~ 4 chars)."""
         return len(text) // 4
 
     def _split_with_overlap(self, chunks: list[str], overlap_chars: int) -> list[str]:

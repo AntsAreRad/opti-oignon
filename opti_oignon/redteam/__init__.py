@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-RED TEAM AUDIT FRAMEWORK — Opti-Oignon
+RED TEAM AUDIT FRAMEWORK -- Opti-Oignon
 ==================================================
 
 LLM-powered dynamic security testing of defense layers.
 Generates adversarial attacks via local Ollama models, applies obfuscation
 strategies, and evaluates each defense module's resilience.
 
-100% local — no cloud calls, all generation through Ollama.
+100% local -- no cloud calls, all generation through Ollama.
 
 Architecture:
-- generator.py   — AttackGenerator: produces raw attack strings per category
-- strategies.py  — AttackStrategy: obfuscation transforms (base64, rot13, …)
-- targets.py     — TargetAdapter: wraps each defense module for uniform testing
-- config.py      — loads & validates config/redteam.yaml
+- generator.py   -- AttackGenerator: produces raw attack strings per category
+- strategies.py  -- AttackStrategy: obfuscation transforms (base64, rot13, ...)
+- targets.py     -- TargetAdapter: wraps each defense module for uniform testing
+- config.py      -- loads & validates config/redteam.yaml
 
 Author: Leon
 """
@@ -58,7 +58,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Feature flag — can be toggled via config/redteam.yaml or env var
+# Feature flag -- can be toggled via config/redteam.yaml or env var
 REDTEAM_ENABLED: bool = True
 
 try:

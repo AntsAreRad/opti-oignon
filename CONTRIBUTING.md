@@ -109,10 +109,10 @@ Branch protection details are in `BRANCH_PROTECTION.md`.
 
 ## Roadmap and sessions
 
-Opti-Oignon is developed in numbered sessions (S1, S2, ...). Each session
-ships an incremental release with a corresponding `PROMPT_SXX.md` and
-`SESSION_TRACKING_*.md`. External contributors do not need to follow this
-cadence -- it is a private development convention.
+Opti-Oignon is developed in small numbered increments. Each one ships an
+incremental release with its own tracking notes, kept outside this
+repository. External contributors do not need to follow that cadence --
+it is a private working convention.
 
 ## License
 

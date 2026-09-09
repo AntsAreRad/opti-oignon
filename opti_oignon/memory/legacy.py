@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-MEMORY — OPTI-OIGNON 1.4.0
+MEMORY -- OPTI-OIGNON 1.4.0
 ============================
 
 Cross-conversation memory: extracts, stores, and retrieves persistent
 facts about the user across conversations.
 
-This is the biggest gap vs. Claude/ChatGPT — every local conversation
+This is the biggest gap vs. Claude/ChatGPT -- every local conversation
 starts from zero. This module bridges that gap by:
 
 1. Extracting facts from conversations via a lightweight LLM call
@@ -51,7 +51,7 @@ except ImportError:
     def _encrypt(v: str) -> str: return v  # type: ignore[misc]
     def _decrypt(v: str) -> str: return v  # type: ignore[misc]
 
-# Import Ollama — needed for fact extraction
+# Import Ollama -- needed for fact extraction
 try:
     import ollama
     OLLAMA_AVAILABLE = True
@@ -211,8 +211,8 @@ class MemoryManager:
     MAX_INPUT_TOKENS = 4000         # Budget tokens pour l'input
 
     # --- Deduplication thresholds ---
-    DUPLICATE_THRESHOLD = 0.85      # Au-dessus → skip (doublon)
-    MERGE_THRESHOLD = 0.70          # Au-dessus → update existant
+    DUPLICATE_THRESHOLD = 0.85      # Au-dessus -> skip (doublon)
+    MERGE_THRESHOLD = 0.70          # Au-dessus -> update existant
 
     def __init__(self, db_path: Path | None = None):
         """Initialize the memory manager.
@@ -1024,7 +1024,7 @@ class MemoryManager:
     ) -> int:
         """Extract facts from a conversation and store new ones.
 
-        Full pipeline: extraction → deduplication → storage.
+        Full pipeline: extraction -> deduplication -> storage.
 
         Args:
             conversation_id: Conversation ID
@@ -1046,14 +1046,14 @@ class MemoryManager:
             existing_id, score = self.deduplicate(fact_text)
 
             if existing_id and score >= self.DUPLICATE_THRESHOLD:
-                # Doublon exact → skip
+                # Doublon exact -> skip
                 logger.debug(
                     f"Duplicate ignored (score={score:.2f}): {fact_text[:50]}"
                 )
                 continue
 
             if existing_id and score >= self.MERGE_THRESHOLD:
-                # Similar → update existing fact
+                # Similar -> update existing fact
                 self.update_fact(
                     existing_id,
                     new_fact=fact_text,

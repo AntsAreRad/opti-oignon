@@ -1,6 +1,6 @@
 # Opti-Oignon — Demo Scenarios
 
-Step-by-step walkthroughs for the main features of Opti-Oignon v1.9.0. Each scenario assumes the backend is running on `http://localhost:8000` and the frontend on `http://localhost:5173`.
+Step-by-step walkthroughs for the main features of Opti-Oignon v2.2.0. Each scenario assumes the backend is running on `http://localhost:8001` and the frontend on `http://localhost:5173`.
 
 
 ## Scenario 1: Basic Chat with Model Selection

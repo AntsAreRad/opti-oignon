@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAG PROMPT INJECTION DEFENSE — Opti-Oignon
+RAG PROMPT INJECTION DEFENSE -- Opti-Oignon
 =================================================
 
 Protects RAG-augmented prompts against indirect prompt injection attacks.
@@ -8,7 +8,7 @@ Protects RAG-augmented prompts against indirect prompt injection attacks.
 Features:
 - Prompt/data separation markers (XML or separator style)
 - Retrieved content sanitization pipeline (HTML, invisible chars, injections)
-- Confidence scoring: per-chunk injection probability (0.0–1.0)
+- Confidence scoring: per-chunk injection probability (0.0-1.0)
 - Per-collection trust levels (trusted / standard / untrusted)
 - Sandboxed RAG preview (approve/reject chunks before injection)
 - Audit logging of flagged injection attempts (SQLite, WAL mode)
@@ -53,7 +53,7 @@ except ImportError:
 # INJECTION PATTERNS (single source of truth -- web_search imports these; RG-02)
 # ===========================================================================
 
-# Core injection patterns — each tuple is (name, compiled regex, weight).
+# Core injection patterns -- each tuple is (name, compiled regex, weight).
 # Weight is the default contribution to injection probability score.
 _INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     ("ignore_instructions", re.compile(
@@ -139,7 +139,7 @@ class SanitizedChunk:
     chunk_id: str
     source: str
     collection: str
-    injection_score: float  # 0.0–1.0
+    injection_score: float  # 0.0-1.0
     is_flagged: bool
     is_blocked: bool
     matches: list[PatternMatch] = field(default_factory=list)

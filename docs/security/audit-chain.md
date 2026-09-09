@@ -43,7 +43,7 @@ the health endpoint.
 
 ```bash
 # Via the API
-curl http://localhost:8000/api/security/audit/verify
+curl http://localhost:8001/api/security/audit/verify
 
 # Via the CLI (if backend is running)
 oo redteam status  # includes chain integrity in output

@@ -353,7 +353,7 @@ def generate_or_approve_plan(request: CodingCheckpointRequest | None = None) -> 
         agent.set_plan(modified)
         return _build_plan_response(modified)
 
-    # decision == "approve" — just return the current plan
+    # decision == "approve" -- just return the current plan
     if agent.plan is None:
         raise HTTPException(status_code=404, detail="No plan to approve")
 

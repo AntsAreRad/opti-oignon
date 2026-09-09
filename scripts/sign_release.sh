@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# sign_release.sh — GPG-sign an Opti-Oignon release archive
+# sign_release.sh -- GPG-sign an Opti-Oignon release archive
 #
 # Usage:
 #   ./scripts/sign_release.sh <archive.zip> [--key <KEY_ID>]
@@ -18,7 +18,7 @@
 #   Export public:    gpg --armor --export <KEY_ID> > opti-oignon-release.pub
 #   Import public:    gpg --import opti-oignon-release.pub
 #
-# See SECURITY.md § "Release Signing" for full documentation.
+# See SECURITY.md section "Release Signing" for full documentation.
 # =============================================================================
 
 set -euo pipefail

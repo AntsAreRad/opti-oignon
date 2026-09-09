@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SANDBOX MANAGER - OPTI-OIGNON v2.1.0
+SANDBOX MANAGER - OPTI-OIGNON
 ============================================
 
 Manages fully isolated, disposable sandbox environments for LLM
@@ -262,7 +262,7 @@ DEGRADED_WARNING = """
 class IsolationBackend(enum.Enum):
     """Sandbox isolation mechanism."""
     BWRAP = "bwrap"      # Full kernel namespace isolation
-    TEMPDIR = "tempdir"  # Tempdir only — NOT real isolation
+    TEMPDIR = "tempdir"  # Tempdir only -- NOT real isolation
 
 
 class ApprovalState(enum.Enum):
@@ -284,7 +284,7 @@ def _detect_bwrap() -> tuple[bool, str]:
     some container environments block the namespace syscalls bwrap needs.
 
     Returns:
-        (available, message) — message is version string on success,
+        (available, message) -- message is version string on success,
         or failure reason on failure.
     """
     try:
@@ -299,7 +299,7 @@ def _detect_bwrap() -> tuple[bool, str]:
 
         version = ver_result.stdout.decode("utf-8", errors="replace").strip()
 
-        # Step 2: functional test — actually create a namespace
+        # Step 2: functional test -- actually create a namespace
         # This catches environments where bwrap exists but namespaces
         # are blocked (e.g., unprivileged Docker containers).
         # We bind only the minimum needed to run /bin/echo (or /usr/bin/echo).
@@ -372,14 +372,14 @@ class SandboxConfig:
     ])
     bwrap_never_bind: list[str] = field(default_factory=list)
     disable_web_search_in_sandbox: bool = False
-    # Strict mode — refuse ALL code execution if bwrap is unavailable
+    # Strict mode -- refuse ALL code execution if bwrap is unavailable
     strict_mode: bool = True
     # Per-sandbox resource caps. limits_enabled gates the caps;
     # resource_backend selects the mechanism. "rlimit" (default) installs
     # RLIMIT_* via a preexec hook (dependency-free, native, per-process AS and
     # per-uid NPROC semantics). "cgroup" wraps the launch in a transient
     # systemd --user scope (stronger aggregate accounting) when systemd-run is
-    # available, and falls back to rlimit otherwise — it never disables caps.
+    # available, and falls back to rlimit otherwise -- it never disables caps.
     limits_enabled: bool = True
     resource_backend: str = "rlimit"
     limit_memory_bytes: int = _CAP_MEMORY_BYTES_DEFAULT
@@ -1248,7 +1248,7 @@ def _build_bwrap_command(
     # Read-write workspace mounted at /workspace
     cmd.extend(["--bind", workspace, "/workspace"])
 
-    # Minimal /dev (null, zero, urandom, etc. — NOT the real /dev)
+    # Minimal /dev (null, zero, urandom, etc. -- NOT the real /dev)
     cmd.extend(["--dev", "/dev"])
 
     # Isolated /proc (shows only sandbox PID namespace processes)
@@ -3129,7 +3129,7 @@ class SandboxManager:
             effective_timeout = _override or self._config.command_timeout
         backend = self._isolation_backend
 
-        # Strict mode — refuse execution if bwrap is not available
+        # Strict mode -- refuse execution if bwrap is not available
         if (
             self._config.strict_mode
             and not self._bwrap_available

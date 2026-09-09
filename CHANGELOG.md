@@ -3,10 +3,53 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
-## Unreleased
+## 2.2.0 -- 2026-07-28
+
+The semantic cache's published surface loses its legacy naming, which renames
+five HTTP paths and four schemas. That breaks any client that spoke the old
+prefix; the bundled frontend ships updated in the same release, which is why
+it lands as a minor rather than a major. The version register becomes the
+single declarative source, and release verification learns to demand the
+project's key rather than any key.
+
+### Changed
+
+- **Breaking.** The semantic cache endpoints move under
+  `/api/cache/semcache/*`, and the four cache schemas follow
+  (`SemCacheStatusResponse`, `SemCacheStatsSchema`, `SemCacheConfigUpdate`,
+  `SemCacheClearRequest`). The retired prefix carried an internal iteration
+  code, which is exactly why it goes. The bundled frontend is updated in
+  the same release; external clients must adopt the new prefix.
+- The version register (`opti_oignon/__version__.py`) is the only place a
+  version is declared. The packaging manifest, the frontend package and the
+  newest changelog heading are contract-pinned equal to it; the health
+  dashboard default derives from it instead of restating it; code banners
+  no longer carry a version at all. Each retired site had drifted to a
+  different stale value, which is what this policy ends.
+- The merge guard that rejects internal nomenclature now reads a session
+  code in either case and through a camel-case continuation, while never
+  charging platform names whose digits run into a lowercase letter.
+- [SECURITY] **Breaking in Bulbe.** Bulbe now REFUSES to load a GGUF whose
+  provenance does not verify -- including one that is simply not enrolled yet.
+  Enrol existing models before switching to Bulbe. Configuration cannot weaken
+  this; a security mode that cannot be resolved is treated as Bulbe. Daily is
+  unchanged by default: it observes and logs without blocking. Models served
+  through Ollama are not affected, as the gate sits on the in-process load seam.
+
+### Fixed
+
+- [SECURITY] `verify_release.sh` exit codes match their documented map: a
+  checksum file that is absent in strict mode exits 3 (missing file), not
+  2 (mismatch). Failure diagnostics no longer leak the exit code into the
+  printed message.
 
 ### Added
 
+- [SECURITY] `verify_release.sh` honours a pinned project fingerprint
+  recorded in `scripts/release_key.fpr`: when present and no `--key` is
+  given, a genuine signature from any other key is refused. Without a pin
+  it now says out loud that a valid signature proves integrity, not
+  identity.
 - [SECURITY] Model weight provenance. GGUF files are now pinned to the sha256 of
   their bytes in a manifest sealed with ML-DSA-65 (or HMAC-SHA512 where liboqs is
   absent), and the llama.cpp in-process load seam verifies that pin before the
@@ -21,14 +64,35 @@ Security-relevant changes are marked with [SECURITY].
   path that is not trust-on-first-use. Successful downloads are enrolled in the
   manifest automatically.
 
-### Changed
-
-- [SECURITY] **Breaking in Bulbe.** Bulbe now REFUSES to load a GGUF whose
-  provenance does not verify -- including one that is simply not enrolled yet.
-  Enrol existing models before switching to Bulbe. Configuration cannot weaken
-  this; a security mode that cannot be resolved is treated as Bulbe. Daily is
-  unchanged by default: it observes and logs without blocking. Models served
-  through Ollama are not affected, as the gate sits on the in-process load seam.
+- Merge guards under `.github/scripts/`, all wired into CI. `public_clean_guard`
+  and `public_language_guard` hold the public surface to English prose free of
+  internal working nomenclature; `comment_only_guard` catches files that shed
+  that nomenclature without changing behaviour; `isolation_seal_guard` keeps the
+  test-isolation ledger shrinking and never growing; `published_prose_guard`
+  pins every published schema description to a recorded digest, so the API
+  surface cannot drift silently; `summary_fidelity_guard` and `red_team_guard`
+  hold measured floors for summary fidelity and for the defense layers, failing
+  the build when a measurement falls below the written threshold.
+- Red team engine under `opti_oignon/redteam/`: attack generation, strategies,
+  scoring, and reports against named defense targets, with a local probe driver
+  in `scripts/redteam_llm_probe.py`. Documented in `docs/redteam/`.
+- A shared isolation window for contract suites, `tests/_isolation.py`. Suites
+  that load a single module from file no longer hand-roll their own package
+  window, which is what let a dead signature primitive stay invisible.
+- A browser end-to-end harness: Playwright specs under `frontend/tests/e2e/`
+  driven by `scripts/run_e2e.sh`, covering the health surface, the reported
+  security mode, and the sign-in refusal path.
+- `constraints.txt`, the pinned environment under which every guard that reads
+  the published surface runs, and under which its digest is regenerated. A
+  floating resolver could otherwise move the schema without a line of this
+  repository changing.
+- Release signing: `scripts/sign_release.sh` and `scripts/verify_release.sh`
+  produce and check a detached GPG signature plus a sha256 over the archive.
+- `capability_manifest.py`, per-request introspection of what a target model can
+  actually call, and `context_ledger.py`, per-request context measurements that
+  record numbers about a turn and never its words.
+- An Android client skeleton under `android/`. It does not yet talk to a
+  backend; device-to-device sync remains unwired.
 
 ## 2.1.0 -- 2026-06-27
 

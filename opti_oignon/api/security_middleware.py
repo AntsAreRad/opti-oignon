@@ -147,7 +147,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if val and request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = str(val)
 
-        # HSTS (only when explicitly enabled — requires HTTPS)
+        # HSTS (only when explicitly enabled -- requires HTTPS)
         if cfg.get("hsts_enabled"):
             max_age = cfg.get("hsts_max_age", 31536000)
             response.headers["Strict-Transport-Security"] = (

@@ -279,7 +279,7 @@ def get_effective_user_id(
     if target_user_id == caller_id:
         return caller_id
 
-    # Different user requested — admin only
+    # Different user requested -- admin only
     if current_user.get("role") == "admin":
         return target_user_id
 

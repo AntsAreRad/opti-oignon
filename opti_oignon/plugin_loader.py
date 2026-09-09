@@ -36,22 +36,22 @@ _BLOCKED_IMPORTS = frozenset({
     "compileall",
     "py_compile",
     "importlib",      # importlib.import_module() bypass
-    # Critical additions — system access
+    # Critical additions -- system access
     "os",             # os.system(), os.popen(), os.environ, os.listdir
     "sys",            # sys.modules manipulation, sys._getframe
     "pathlib",        # Path.read_text() / .write_text() bypass builtins.open
     "io",             # io.open() bypasses builtins.open patch
     "glob",           # File enumeration
-    # Critical additions — code execution via deserialization
+    # Critical additions -- code execution via deserialization
     "pickle",         # Arbitrary code execution via __reduce__
     "shelve",         # Uses pickle internally
     "marshal",        # Low-level serialization, code object execution
-    # Critical additions — introspection / memory access
+    # Critical additions -- introspection / memory access
     "gc",             # gc.get_objects() exposes all Python objects in memory
     "inspect",        # Read source code of any loaded module
     "dis",            # Disassemble bytecode of any function
     "ast",            # Parse + compile arbitrary code
-    # Critical additions — import system manipulation
+    # Critical additions -- import system manipulation
     "zipimport",      # Load code from zip files
     "pkgutil",        # Package utilities, import scanning
     "runpy",          # Run modules as scripts
@@ -545,7 +545,7 @@ class SubprocessPluginAdapter(LoadedPlugin):
         hooks: dict[str, Any],
         subprocess_manager: Any,
     ) -> None:
-        # Create a dummy module — subprocess plugins don't have in-process modules
+        # Create a dummy module -- subprocess plugins don't have in-process modules
         dummy_module = types.ModuleType(f"_opti_subprocess_{name}")
         dummy_module.__plugin_name__ = name  # type: ignore[attr-defined]
         dummy_module.__plugin_version__ = version  # type: ignore[attr-defined]
@@ -639,9 +639,9 @@ class PluginLoader:
         Base directory where plugin directories are stored.
     subprocess_mode : str
         Plugin execution mode:
-        - ``"auto"`` — try subprocess, fall back to in-process (default)
-        - ``"subprocess"`` — force subprocess only (no fallback)
-        - ``"inprocess"`` — force in-process only (legacy behavior)
+        - ``"auto"`` -- try subprocess, fall back to in-process (default)
+        - ``"subprocess"`` -- force subprocess only (no fallback)
+        - ``"inprocess"`` -- force in-process only (legacy behavior)
     subprocess_manager : PluginSubprocessManager or None
         External subprocess manager instance.  If None and subprocess_mode
         is not ``"inprocess"``, a default manager will be created lazily.

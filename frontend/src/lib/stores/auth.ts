@@ -48,7 +48,7 @@ export const isSingleUserMode = derived(authStatus, ($s) => $s?.single_user_mode
 let _cookieMode = true;
 
 // ---------------------------------------------------------------------------
-// Token persistence (localStorage keys — legacy / non-cookie mode only)
+// Token persistence (localStorage keys -- legacy / non-cookie mode only)
 // ---------------------------------------------------------------------------
 
 const STORAGE_ACCESS_TOKEN = 'oo-access-token';
@@ -165,7 +165,7 @@ export async function initAuth(): Promise<void> {
 		if (status.single_user_mode) {
 			// Single-user mode normally bypasses authentication. Bulbe mode is
 			// the exception: it enforces auth even for a single-user
-			// install. Probe a protected endpoint to tell the two apart — in
+			// install. Probe a protected endpoint to tell the two apart -- in
 			// Daily the backend accepts the request (synthetic local user),
 			// under Bulbe it rejects with 401. Installing a synthetic user when
 			// auth is actually enforced would leave the login screen
@@ -199,7 +199,7 @@ export async function initAuth(): Promise<void> {
 
 		// Multi-user mode: try to restore session
 		if (_cookieMode) {
-			// In cookie mode, just call /me — the httpOnly cookie
+			// In cookie mode, just call /me -- the httpOnly cookie
 			// is sent automatically via credentials: 'include'
 			try {
 				const user = await authApi.getMe();
@@ -288,7 +288,7 @@ async function doRefreshToken(): Promise<boolean> {
 	try {
 		if (_cookieMode) {
 			// In cookie mode, refresh token is in httpOnly cookie.
-			// Send empty string — backend reads cookie automatically.
+			// Send empty string -- backend reads cookie automatically.
 			const tokens = await authApi.refreshToken('');
 			storeTokens(tokens);
 			scheduleRefresh(tokens.expires_in);

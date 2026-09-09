@@ -543,7 +543,16 @@ class ContextOptimizer:
         project_text = ""
         project_zone = ZoneReport(zone="project", budgeted_tokens=budget.project_tokens)
 
-        if project_id and self._project_builder is not None:
+        if self._unified_retrieval_enabled():
+            project_text, project_zone = self._inject_unified_retrieval(
+                query=rag_query or user_message,
+                conversation_id=conversation_id,
+                project_id=project_id,
+                budget_tokens=budget.project_tokens,
+                model=model,
+                already_composed=system_prompt,
+            )
+        elif project_id and self._project_builder is not None:
             project_text, project_zone = self._inject_project_context(
                 project_id=project_id,
                 query=rag_query or user_message,
@@ -784,6 +793,74 @@ class ContextOptimizer:
             context_window_override=context_window_override,
             fingerprint_active=fingerprint_active,
         )
+
+    def _unified_retrieval_enabled(self) -> bool:
+        """Whether the unified retrieval layer fills the project zone.
+
+        Off unless the configuration says otherwise: a config that never
+        mentions the key keeps the exact historical pipeline.
+        """
+        cfg = self._config.get("unified_retrieval") or {}
+        return bool(cfg.get("enabled", False))
+
+    def _inject_unified_retrieval(
+        self,
+        *,
+        query: str,
+        conversation_id: str | None,
+        project_id: str | None,
+        budget_tokens: int,
+        model: str,
+        already_composed: str,
+    ) -> tuple[str, ZoneReport]:
+        """Fill the project zone from the unified retrieval layer.
+
+        The layer is asked with the query, the conversation, the project and
+        the text already composed; its block is trimmed to the same budget
+        the per-project builder would have had. A layer that raises costs
+        nothing: the optimizer falls back to that builder in the same call.
+        """
+        try:
+            from opti_oignon.unified_retrieval import get_unified_retriever
+
+            layer = get_unified_retriever()
+            report = layer.retrieve(
+                query=query,
+                conversation_id=conversation_id,
+                project_id=project_id,
+                already_composed=already_composed,
+            )
+            text = layer.format_for_injection(
+                report.items,
+                budget_tokens=budget_tokens,
+                estimate=lambda block: self._estimate_tokens(block, model),
+            )
+            zone = ZoneReport(zone="project", budgeted_tokens=budget_tokens)
+            zone.actual_tokens = self._estimate_tokens(text, model)
+            zone.strategy = "unified"
+            zone.detail = (
+                f"{len(report.items)} snippet(s), "
+                f"{report.dropped_duplicates} duplicate(s) dropped, "
+                f"order {report.ordering}"
+            )
+            if report.failures:
+                zone.detail += f", {len(report.failures)} source failure(s)"
+            return text, zone
+        except Exception as exc:
+            logger.warning(
+                "Unified retrieval failed; using the project builder: %s", exc
+            )
+            if project_id and self._project_builder is not None:
+                return self._inject_project_context(
+                    project_id=project_id,
+                    query=query,
+                    budget_tokens=budget_tokens,
+                    model=model,
+                )
+            zone = ZoneReport(zone="project", budgeted_tokens=budget_tokens)
+            zone.strategy = "error"
+            zone.detail = str(exc)
+            return "", zone
 
     def _inject_project_context(
         self,
@@ -1075,3 +1152,21 @@ def init_optimizer(**kwargs: Any) -> ContextOptimizer:
     global _optimizer
     _optimizer = ContextOptimizer(**kwargs)
     return _optimizer
+
+
+def unified_gate_open() -> bool:
+    """Whether the unified retrieval layer is switched on.
+
+    This is the layer's own gate statement, exposed so a capability report
+    can consult it instead of guessing. The live singleton's view takes
+    priority when one exists; otherwise the shipped configuration is read
+    directly. A gate that cannot be read reports itself closed: a
+    capability must never be advertised on a failure.
+    """
+    try:
+        if _optimizer is not None:
+            return bool(_optimizer._unified_retrieval_enabled())
+        section = _load_config().get("unified_retrieval") or {}
+        return bool(section.get("enabled", False))
+    except Exception:
+        return False

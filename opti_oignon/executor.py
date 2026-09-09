@@ -97,6 +97,18 @@ except ImportError:
     CONTEXT_SUMMARY_AVAILABLE = False
     context_summarizer = None
 
+# Tiered summary layer: frozen segments and a rollup, verified against the
+# archive on every load. Guarded like its siblings so an install without
+# the module keeps the exact historical pipeline.
+try:
+    from .context_summary_tiers import TIERS_METADATA_KEY, TierManager
+
+    CONTEXT_SUMMARY_TIERS_AVAILABLE = True
+except ImportError:
+    CONTEXT_SUMMARY_TIERS_AVAILABLE = False
+    TierManager = None
+    TIERS_METADATA_KEY = "context_summary_tiers"
+
 # Cross-source deduplication of retrieved snippets before injection. Imported
 # plainly, not behind a guard: it is first-party and standard-library only, so
 # there is no absence for a guard to describe, and a guard here would only turn
@@ -202,7 +214,7 @@ except ImportError:
     VERIFICATION_AVAILABLE = False
     _verification_engine = None
 
-# Project context injection (v1.5.9)
+# Project context injection
 try:
     from .project_context import project_context_builder as _project_context_builder
     from .project_triggers import trigger_detector as _trigger_detector
@@ -1223,16 +1235,36 @@ class Executor:
                 and conversation_manager is not None
             ):
                 try:
+                    metadata_update = {
+                        "context_summary": summary,
+                        "summary_msg_count": (
+                            len(messages_to_summarize)
+                            + (1 if existing_summary else 0)
+                        ),
+                        "summary_updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    }
+                    if CONTEXT_SUMMARY_TIERS_AVAILABLE:
+                        # The tier layer verifies its record against the
+                        # archive and freezes what has grown past the
+                        # segment budget. It returns metadata to persist,
+                        # or nothing at all when the archive could not be
+                        # read -- either way this write goes through.
+                        try:
+                            conv = conversation_manager.get_conversation(
+                                conversation_id
+                            )
+                            tier_update = TierManager().advance(
+                                conversation_id,
+                                conv.metadata if conv else {},
+                            )
+                            metadata_update.update(tier_update)
+                        except Exception as tier_error:
+                            logger.debug(
+                                f"Tier advance skipped: {tier_error}"
+                            )
                     conversation_manager.update_conversation_metadata(
                         conversation_id,
-                        metadata={
-                            "context_summary": summary,
-                            "summary_msg_count": (
-                                len(messages_to_summarize)
-                                + (1 if existing_summary else 0)
-                            ),
-                            "summary_updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                        },
+                        metadata=metadata_update,
                     )
                 except Exception as e:
                     logger.warning(f"Unable to save summary: {e}")
@@ -1507,8 +1539,34 @@ class Executor:
             ):
                 try:
                     conv = conversation_manager.get_conversation(conversation_id)
-                    if conv and conv.metadata.get("context_summary"):
+                    stored_summary = None
+                    if (
+                        conv
+                        and CONTEXT_SUMMARY_TIERS_AVAILABLE
+                        and conv.metadata.get(TIERS_METADATA_KEY)
+                    ):
+                        # The tiered record is verified against the archive
+                        # on every load; whatever no longer matches its
+                        # digest contributes nothing. An empty composition
+                        # falls through to the legacy cumulative key.
+                        try:
+                            stored_summary = (
+                                TierManager().compose(
+                                    conversation_id, conv.metadata
+                                )
+                                or None
+                            )
+                        except Exception as tier_error:
+                            logger.debug(
+                                f"Tier composition skipped: {tier_error}"
+                            )
+                    if (
+                        stored_summary is None
+                        and conv
+                        and conv.metadata.get("context_summary")
+                    ):
                         stored_summary = conv.metadata["context_summary"]
+                    if stored_summary:
                         summary_msg = context_summarizer.create_summary_message(
                             stored_summary
                         )

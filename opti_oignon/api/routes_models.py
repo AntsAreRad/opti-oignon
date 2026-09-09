@@ -52,7 +52,7 @@ def _format_size(size_bytes) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# MTP Detection — Multi-Token Prediction capability check
+# MTP Detection -- Multi-Token Prediction capability check
 # ---------------------------------------------------------------------------
 
 # Known MTP-capable model families/names. This list will grow as more
@@ -71,7 +71,7 @@ def _detect_mtp_support(model_name: str, family: str | None = None) -> bool:
     """Detect if a model supports Multi-Token Prediction.
 
     Checks model name and family against known MTP-capable patterns.
-    Detection only — MTP execution is not yet supported (llama.cpp MTP
+    Detection only -- MTP execution is not yet supported (llama.cpp MTP
     support still in development).
 
     Args:

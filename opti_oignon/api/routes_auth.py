@@ -480,12 +480,12 @@ def _get_current_user(
     """Extract and validate the current user (cookie-first, then header).
 
     In single-user mode, returns a synthetic local user.
-    Audit fix: Bulbe mode overrides single_user_mode — authentication
+    Audit fix: Bulbe mode overrides single_user_mode -- authentication
     is always required in Bulbe regardless of the single_user_mode setting.
     """
     mgr = _get_auth_manager()
 
-    # Audit fix: check Bulbe mode — never bypass auth in Bulbe
+    # Audit fix: check Bulbe mode -- never bypass auth in Bulbe
     _bulbe_active = False
     try:
         from opti_oignon.security_mode import is_bulbe
@@ -543,8 +543,8 @@ async def authenticate_websocket(websocket) -> dict | None:
     """Authenticate a WebSocket connection (audit-hardened).
 
     Extracts JWT from:
-      1. Cookie (oo_access_token) — browser clients
-      2. Query parameter (?token=xxx) — CLI/API clients
+      1. Cookie (oo_access_token) -- browser clients
+      2. Query parameter (?token=xxx) -- CLI/API clients
 
     Audit fix: validates the Origin header to prevent Cross-Site
     WebSocket Hijacking (CSWSH).  A malicious website cannot connect

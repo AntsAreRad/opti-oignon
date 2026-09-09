@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/run_typecheck.sh — CI-ready mypy type checking with baseline gate
+# scripts/run_typecheck.sh -- CI-ready mypy type checking with baseline gate
 # Companion to the CI typecheck job.
 #
 # Usage:

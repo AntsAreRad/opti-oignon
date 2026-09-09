@@ -70,21 +70,19 @@ tests should follow it.
 - **Parameterized queries only** -- no f-string SQL
 
 
-## Session workflow
+## Development workflow
 
-Development follows a session-based workflow (S65, S66, ... S161+).
-Each session:
+Development follows a numbered-increment workflow. Each increment:
 
 1. Starts with reconnaissance of existing code
 2. Implements features in sequential phases with confirmation gates
 3. AST-verifies all modified Python files
 4. Runs the test suite
 5. Bumps the version in `__version__.py`
-6. Produces four deliverables:
-   - Project zip (all directories)
-   - `PROMPT_S{N}.md` for the current session
-   - `SESSION_TRACKING_S65_S{N}.md`
-   - `PROMPT_S{N+1}.md` for the next session
+6. Produces its deliverables: a project archive covering all directories,
+   the notes for the increment just closed, and the brief for the next one
+
+The deliverable files are kept outside this repository.
 
 
 ## FastAPI conventions

@@ -5,16 +5,16 @@ LUKS / Full-Disk Encryption Detector for Opti-Oignon.
 Checks whether the system root filesystem (and optionally /home) is
 protected by full-disk encryption (LUKS/dm-crypt).
 
-This is an **advisory** check only — it never blocks startup, even in
+This is an **advisory** check only -- it never blocks startup, even in
 Bulbe mode. It provides:
   - Security score deduction (minor) if unencrypted
   - Actionable tips for the user to enable encryption
   - Audit logging of the detection result
 
 Detection methods (in order):
-  1. ``lsblk --json`` — reliable, structured output
-  2. ``/proc/mounts`` + ``/sys/block`` — fallback without lsblk
-  3. ``dmsetup table`` — last resort, requires root
+  1. ``lsblk --json`` -- reliable, structured output
+  2. ``/proc/mounts`` + ``/sys/block`` -- fallback without lsblk
+  3. ``dmsetup table`` -- last resort, requires root
 
 Kerckhoffs compliance: no secrets are used; detection is purely
 observational.
@@ -94,7 +94,7 @@ def check_luks_encryption() -> LUKSCheckResult:
     """Detect whether the root filesystem is LUKS-encrypted.
 
     Tries multiple detection methods in order of reliability.
-    This check is always advisory — it never blocks startup.
+    This check is always advisory -- it never blocks startup.
 
     Returns:
         LUKSCheckResult with detection details and tips if unencrypted.

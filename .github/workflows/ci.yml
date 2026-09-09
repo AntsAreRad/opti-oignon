@@ -1,10 +1,12 @@
 # Opti-Oignon CI Pipeline
 #
 # Jobs, in declaration order:
-#   lint          - ruff check on the Python codebase
+#   lint          - ruff check on opti_oignon/
 #   public-clean  - the nomenclature, language and comment-only guards,
 #                   over the diff
-#   isolation     - the test windows, under both install layouts
+#   isolation     - the test windows, under both install layouts, plus
+#                   the seal, published-prose, summary-fidelity and
+#                   red-team guards
 #   typecheck     - mypy on key modules (baseline gate)
 #   frontend      - svelte-check (TypeScript, baseline) + eslint
 #   install       - build the distribution, install it in a fresh venv, smoke
@@ -124,15 +126,20 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_DEFAULT }}
 
+      # The constraints file pins the exact resolver outcome for the
+      # packages that shape the published schema surface. The digest this
+      # job checks was written under those versions; installing "whatever
+      # is newest" would make the guard compare two different surfaces and
+      # call the difference a regression.
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pytest
-          pip install -r requirements-backend.txt
+          pip install pytest -c constraints.txt
+          pip install -r requirements-backend.txt -c constraints.txt
 
       - name: Install the project (editable layout only)
         if: matrix.layout == 'editable'
-        run: pip install -e .
+        run: pip install -e . -c constraints.txt
 
       - name: Isolation-seal guard (the ledger may only shrink)
         run: python .github/scripts/isolation_seal_guard.py tests
@@ -145,6 +152,22 @@ jobs:
       # published surface does not depend on how the project was installed.
       - name: Published-prose guard (the schema must match its digest)
         run: python .github/scripts/published_prose_guard.py
+
+      # What a summary keeps is measured, not asserted. The deterministic
+      # harness drives the shipped fixture through the real tier machinery
+      # and plants needles in a throwaway store; the floor it must clear
+      # lives in a committed threshold file next to the guard.
+      - name: Summary-fidelity guard (measured floor vs the written threshold)
+        run: python .github/scripts/summary_fidelity_guard.py
+
+      # Static contracts prove a defense answers a fixed input. They cannot
+      # say whether it holds when something pushes back. The deterministic
+      # path drives a versioned adversarial corpus, through the shipped
+      # obfuscation strategies, at the real defense modules -- no model, no
+      # network, and no payload is ever executed. The model-driven path is
+      # an operator measurement and is deliberately absent from this job.
+      - name: Red-team guard (defense hold vs the written threshold)
+        run: python .github/scripts/red_team_guard.py
 
       - name: Contracts for the shared window
         run: python -m pytest tests/test_isolation_window_contracts.py -q
@@ -180,7 +203,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install mypy
-          pip install -r requirements.txt 2>/dev/null || true
+          pip install -r requirements-backend.txt 2>/dev/null || true
 
       - name: Run mypy
         run: |
@@ -293,7 +316,7 @@ jobs:
       - name: Install security tools
         run: |
           pip install bandit pip-audit
-          pip install -r requirements.txt 2>/dev/null || true
+          pip install -r requirements-backend.txt 2>/dev/null || true
 
       - name: Run bandit
         run: |

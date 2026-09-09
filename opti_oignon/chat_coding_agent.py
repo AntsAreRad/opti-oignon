@@ -220,7 +220,7 @@ class CodingEvent:
 
 
 # ---------------------------------------------------------------------------
-# Rich LLM call context — same capabilities as regular chat pipeline
+# Rich LLM call context -- same capabilities as regular chat pipeline
 # ---------------------------------------------------------------------------
 
 @dataclass

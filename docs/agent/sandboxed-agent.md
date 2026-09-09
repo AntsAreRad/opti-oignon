@@ -23,11 +23,11 @@ copied out only after review. Tool output is always wrapped as untrusted data:
 the model is told to treat everything between the untrusted-data markers as
 information to reason about, never as instructions to obey. The non-sandbox tools
 (`web_search`, `manage_memory`, `manage_skills`) are handler-backed and follow
-the same untrusted-output discipline. Since the workspace cycle (S209-S213) the
+the same untrusted-output discipline. Since the workspace cycle the
 sandbox behind these tools can be a named, conversation-bound workspace with
 explicit copy-in and a diff-gated write-back -- see
 [Sandbox Workspaces](sandbox-workspaces.md). The agent performance cycle
-(S228-S230) added read-only search tools (`grep`, `glob`, `ls`), a
+A later cycle added read-only search tools (`grep`, `glob`, `ls`), a
 diagnostics pass after writes, `todo` and `task` tools, loop hardening and
 an eval harness -- see [Agent Performance](agent-performance.md).
 

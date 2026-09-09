@@ -8,7 +8,7 @@
   Displays inline tool calls.
   Displays feedback widget (thumbs up/down) on assistant messages.
   Retry button on last assistant message.
-  Mobile responsive — reduced padding, code block scroll, responsive images.
+  Mobile responsive -- reduced padding, code block scroll, responsive images.
   Quick-branch fork button, collapsible long messages, code block copy buttons.
 -->
 <script lang="ts">
@@ -252,7 +252,7 @@
 			<CorrectionIndicator {correction} />
 		{/if}
 
-		<!-- Content — mobile code scroll, responsive images — collapsible -->
+		<!-- Content -- mobile code scroll, responsive images -- collapsible -->
 		<div
 			class="whitespace-pre-wrap break-words msg-content"
 			bind:this={contentEl}
@@ -334,7 +334,7 @@
 			</div>
 		{/if}
 
-		<!-- Feedback widget (always visible on assistant messages, not streaming) — BUG-05 -->
+		<!-- Feedback widget (always visible on assistant messages, not streaming) -- BUG-05 -->
 		{#if !isUser && !isStreaming}
 			<div class="flex items-center justify-between mt-1">
 				<div class="text-xs" style="color: var(--oo-fg-faint);">

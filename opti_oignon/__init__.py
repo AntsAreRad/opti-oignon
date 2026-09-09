@@ -59,7 +59,7 @@ except ImportError:
 # dynamic_planning module (DPL-01) are retired. Execution pipelines run via
 # opti_oignon.pipelines.PipelineRunner, wired into the chat path.
 
-# Context Summarization (v1.4.0 — F2)
+# Context Summarization (v1.4.0 -- F2)
 try:
     from .context_summary import ContextSummarizer, context_summarizer
     CONTEXT_SUMMARY_AVAILABLE = True
@@ -68,7 +68,7 @@ except ImportError:
     context_summarizer = None
     ContextSummarizer = None
 
-# Cross-Conversation Memory (v1.4.0 — F1)
+# Cross-Conversation Memory (v1.4.0 -- F1)
 try:
     from .memory import MemoryFact, MemoryManager, memory_manager
     MEMORY_AVAILABLE = True
@@ -78,7 +78,7 @@ except ImportError:
     MemoryManager = None
     MemoryFact = None
 
-# Code Execution (v1.4.0 — F3)
+# Code Execution (v1.4.0 -- F3)
 try:
     from .code_executor import (
         CodeBlock,

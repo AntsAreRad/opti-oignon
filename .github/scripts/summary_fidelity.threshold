@@ -1,0 +1,11 @@
+# Written floor for the summary-fidelity guard.
+#
+# The deterministic harness measures the tier machinery on the shipped
+# micro fixture, and the needle sweep measures archive recovery on a
+# throwaway store. Both paths are deterministic, so the floor is total:
+# losing any declared fact, or missing any planted needle, fails the
+# build. Changing an engagement is a reviewed edit to this file, never a
+# constant buried in code.
+
+fidelity_floor = 1.0
+needle_floor = 1.0

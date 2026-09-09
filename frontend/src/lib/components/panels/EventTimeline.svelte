@@ -144,7 +144,7 @@
 	}
 
 	function dotSize(ev: HistoryEvent): number {
-		// Scale by token count — more tokens = bigger dot
+		// Scale by token count -- more tokens = bigger dot
 		const tokens = ev.tokens_in + ev.tokens_out;
 		if (tokens < 100) return 5;
 		if (tokens < 500) return 7;

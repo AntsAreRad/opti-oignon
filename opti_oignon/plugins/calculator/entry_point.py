@@ -190,8 +190,8 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
     """Handle tool_call hook: evaluate math expressions.
 
     Expects ctx.data to contain:
-        tool_name: str — if "calculator" or "calc", evaluate expression
-        expression: str — the math expression
+        tool_name: str -- if "calculator" or "calc", evaluate expression
+        expression: str -- the math expression
     """
     tool_name = ctx.data.get("tool_name", "")
     if tool_name not in ("calculator", "calc", "math"):

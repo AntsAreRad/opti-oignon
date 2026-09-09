@@ -9,13 +9,13 @@ When a response exceeds the configured word threshold (default 300 words),
 the plugin scores every sentence on four criteria and selects the top-scoring
 sentences as the summary:
 
-1. **Position (30%)** — first and last sentences score higher (topic
+1. **Position (30%)** -- first and last sentences score higher (topic
    sentences and conclusions)
-2. **Keyword density (40%)** — overlap with the most frequent meaningful
+2. **Keyword density (40%)** -- overlap with the most frequent meaningful
    words in the full text
-3. **Length (20%)** — sentences close to the average length score highest;
+3. **Length (20%)** -- sentences close to the average length score highest;
    very short or very long sentences are penalized
-4. **Filler penalty** — sentences containing filler phrases ("it is worth
+4. **Filler penalty** -- sentences containing filler phrases ("it is worth
    noting", "at the end of the day") are penalized
 
 The selected sentences are reordered by their original position and
@@ -23,7 +23,7 @@ prepended as a TL;DR block.
 
 ## Hook Point
 
-- `post_inference` — processes the LLM response after generation
+- `post_inference` -- processes the LLM response after generation
 
 ## Configuration
 

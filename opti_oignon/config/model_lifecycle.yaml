@@ -1,4 +1,4 @@
-# Model Lifecycle Management — Opti-Oignon
+# Model Lifecycle Management -- Opti-Oignon
 # Pull, delete, update models via Ollama API with progress tracking.
 
 enabled: true
@@ -22,7 +22,7 @@ update_check:
   # Include model digest comparison for staleness detection.
   compare_digests: true
 
-# Model aliases — user-friendly names mapped to full model identifiers.
+# Model aliases -- user-friendly names mapped to full model identifiers.
 # Example:
 #   aliases:
 #     fast: "qwen2.5:0.5b"

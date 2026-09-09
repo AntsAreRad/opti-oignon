@@ -8,18 +8,18 @@ Replaces compressed history with a compact ~150-200 token fingerprint
 that captures the essential state of an ongoing coding session.
 
 10 Dimensions:
-  D1  task_type       — classify from task text
-  D2  stack           — detect from file extensions + imports
-  D3  hot_files       — touch counter per file, top 5
-  D4  recent_bugs     — regex classify test failures
-  D5  test_health     — rolling pass rate, failure types
-  D6  momentum        — steps completed/remaining, velocity
-  D7  domain_terms    — TF-IDF on names from hot files (batch)
-  D8  dep_clusters    — import graph communities (batch)
-  D9  user_preferences — learned from checkpoint decisions (persistent SQLite)
-  D10 context_anchors — explicit invariants from fix loops
+  D1  task_type       -- classify from task text
+  D2  stack           -- detect from file extensions + imports
+  D3  hot_files       -- touch counter per file, top 5
+  D4  recent_bugs     -- regex classify test failures
+  D5  test_health     -- rolling pass rate, failure types
+  D6  momentum        -- steps completed/remaining, velocity
+  D7  domain_terms    -- TF-IDF on names from hot files (batch)
+  D8  dep_clusters    -- import graph communities (batch)
+  D9  user_preferences -- learned from checkpoint decisions (persistent SQLite)
+  D10 context_anchors -- explicit invariants from fix loops
 
-No LLM calls — purely heuristic/statistical.
+No LLM calls -- purely heuristic/statistical.
 O(1) incremental updates for on_step/on_test/on_checkpoint.
 
 Author: Leon
@@ -992,16 +992,16 @@ class FingerprintManager:
     Serializes to a compact blob (~150-200 tokens) for context injection.
 
     Dimensions:
-        D1  task_type       — from classify_task()
-        D2  stack           — from detect_stack()
-        D3  hot_files       — HotFilesTracker
-        D4  recent_bugs     — BugTracker
-        D5  test_health     — SuiteHealthTracker
-        D6  momentum        — MomentumTracker
-        D7  domain_terms    — DomainTermsTracker (batch, every N steps)
-        D8  dep_clusters    — DepClustersTracker (batch, once at planning)
-        D9  user_preferences — UserPreferencesStore (persistent SQLite)
-        D10 context_anchors — ContextAnchorsTracker
+        D1  task_type       -- from classify_task()
+        D2  stack           -- from detect_stack()
+        D3  hot_files       -- HotFilesTracker
+        D4  recent_bugs     -- BugTracker
+        D5  test_health     -- SuiteHealthTracker
+        D6  momentum        -- MomentumTracker
+        D7  domain_terms    -- DomainTermsTracker (batch, every N steps)
+        D8  dep_clusters    -- DepClustersTracker (batch, once at planning)
+        D9  user_preferences -- UserPreferencesStore (persistent SQLite)
+        D10 context_anchors -- ContextAnchorsTracker
     """
 
     def __init__(
@@ -1093,11 +1093,11 @@ class FingerprintManager:
         """Update fingerprint after a coding step.
 
         Expected step keys:
-            file_path: str — file affected
-            step_type: str — 'create', 'edit', 'bash', 'test'
-            content: str — file content (optional, for D7)
-            size: int — file size in bytes (optional)
-            completed: bool — whether step succeeded
+            file_path: str -- file affected
+            step_type: str -- 'create', 'edit', 'bash', 'test'
+            content: str -- file content (optional, for D7)
+            size: int -- file size in bytes (optional)
+            completed: bool -- whether step succeeded
 
         Updates: D3 (hot_files), D6 (momentum), D7 (domain_terms, batched).
         """
@@ -1132,9 +1132,9 @@ class FingerprintManager:
         """Update fingerprint after a test run.
 
         Expected result keys:
-            passed: bool — whether tests passed
-            output: str — test output text
-            error: str — error text (if failed)
+            passed: bool -- whether tests passed
+            output: str -- test output text
+            error: str -- error text (if failed)
 
         Updates: D4 (recent_bugs), D5 (test_health), D6 (momentum on failure).
         """
@@ -1160,10 +1160,10 @@ class FingerprintManager:
         """Update fingerprint after a human checkpoint.
 
         Expected decision keys:
-            action: str — 'approve', 'modify', 'abort'
-            phase: str — current phase name
-            context: str — optional context
-            anchor: str — optional context anchor to add (D10)
+            action: str -- 'approve', 'modify', 'abort'
+            phase: str -- current phase name
+            context: str -- optional context
+            anchor: str -- optional context anchor to add (D10)
 
         Updates: D9 (user_preferences), D10 (context_anchors).
         """

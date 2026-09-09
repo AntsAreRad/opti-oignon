@@ -10,8 +10,8 @@ It is a single-page application with client-side routing, streaming chat, and
 real-time panel updates.
 
 ```
-Backend (FastAPI :8000) <── REST/SSE ──> Frontend (SvelteKit :5173)
-         │
+Backend (FastAPI :8000) <-- REST/SSE --> Frontend (SvelteKit :5173)
+         |
     Ollama (local LLMs)
 ```
 
@@ -33,7 +33,7 @@ npm install
 npm run dev
 # -> http://localhost:5173
 
-# The backend API must be running on http://localhost:8000
+# The backend API must be running on http://localhost:8001
 # Start it with: opti-oignon api
 ```
 
@@ -195,7 +195,7 @@ CSS animations (all in `app.css`):
 
 | Variable              | Default                  | Description            |
 |-----------------------|--------------------------|------------------------|
-| `VITE_API_URL`        | `http://localhost:8000`  | Backend API base URL   |
+| `VITE_API_URL`        | same origin (empty)      | Backend API base URL. Unset, requests go to the page origin and the dev server proxies them; set it to `http://localhost:8001` to bypass the proxy. |
 
 
 ## API Communication

@@ -91,12 +91,11 @@ nav:
       - Audit Chain: security/audit-chain.md
       - Authentication: security/authentication.md
       - Design Note, Fail-Secure Tool Gate: security/DESIGN_NOTE_EX01_FAIL_SECURE_TOOL_GATE.md
-      - Security Audit S155: SECURITY_AUDIT_S155.md
   - Red Team Guide:
       - Running Audits: redteam/running-audits.md
       - Interpreting Reports: redteam/interpreting-reports.md
   - API Reference: api-reference.md
-  - API Reference, v3.2.0 Additions: API_REFERENCE.md
+  - API Reference, v2.2.0 Additions: API_REFERENCE.md
   - Plugin Development: plugin-development.md
   - Plugin Development Guide (extended): PLUGIN_DEVELOPMENT_GUIDE.md
   - CLI Reference: cli-reference.md
@@ -107,6 +106,4 @@ nav:
   - Project Notes:
       - Demo Scenarios: demo_scenarios.md
       - Branch Protection: BRANCH_PROTECTION.md
-      - Roadmap Side Quests: ROADMAP_SIDE_QUESTS.md
-      - Color Inspiration (S93): COLOR_INSPIRATION_S93.md
   - Contributing: contributing.md

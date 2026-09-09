@@ -6,10 +6,10 @@ Enforces that the server bind address is localhost-only in Bulbe mode.
 This is a *physical constraint* at the socket level, not a policy.
 
 Defense layers provided by this module:
-  1. get_safe_bind_address() — forces 127.0.0.1 in Bulbe regardless of input
-  2. assert_localhost_only() — kills the process if somehow not 127.0.0.1
-  3. is_remote_access_allowed() — triple-gated check (mode + config + TLS)
-  4. check_ollama_bind() — detect if Ollama is exposed on 0.0.0.0
+  1. get_safe_bind_address() -- forces 127.0.0.1 in Bulbe regardless of input
+  2. assert_localhost_only() -- kills the process if somehow not 127.0.0.1
+  3. is_remote_access_allowed() -- triple-gated check (mode + config + TLS)
+  4. check_ollama_bind() -- detect if Ollama is exposed on 0.0.0.0
 
 All six defense layers (this module + middleware + ModePolicy + tls_manager +
 API routes) are independent. An attacker must bypass ALL SIX.
@@ -50,7 +50,7 @@ def get_safe_bind_address(requested_host: str) -> str:
     """Return the safe bind address for the server.
 
     In Bulbe mode: **always returns '127.0.0.1'** regardless of
-    requested_host. This is not configurable — it is hardcoded.
+    requested_host. This is not configurable -- it is hardcoded.
 
     In Daily mode with remote access enabled: returns requested_host.
     In Daily mode without remote access: returns '127.0.0.1'.
@@ -360,7 +360,7 @@ def check_ollama_bind(
     Args:
         port: Ollama port to check. Defaults to 11434.
         block_if_exposed_bulbe: If True, log CRITICAL in Bulbe mode
-            when Ollama is exposed. Does NOT call sys.exit — the caller
+            when Ollama is exposed. Does NOT call sys.exit -- the caller
             (startup_checks) decides whether to block.
 
     Returns:

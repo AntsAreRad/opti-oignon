@@ -12,7 +12,7 @@ opti-oignon/
     data/                # Static data (redteam seeds, allowlists)
     middleware/          # Auth, CSRF, CSP middleware
     plugins/             # Built-in plugins
-    rag/                 # RAG subsystem (ingest, query, sanitize)
+    rag/                 # RAG subsystem (chunk, index, retrieve, augment)
     redteam/             # Red team engine
     ...                  # ~255 modules total
   frontend/              # Frontend (SvelteKit + Tailwind)
@@ -59,13 +59,12 @@ opti-oignon/
 | Module | Purpose |
 |--------|---------|
 | `agentic_executor.py` | Orchestrates multi-step pipelines |
-| `dynamic_planning.py` | Automatic pipeline construction |
 | `reasoning.py` | Advanced reasoning strategies |
 | `self_correction.py` | Iterative refinement loop |
 | `context_manager.py` | Token budget and context allocation |
 | `context_optimizer.py` | Context compression and optimization |
 | `conversation_compressor.py` | History summarization |
-| `working_memory.py` | Persistent agent memory |
+| `memory/canonical_store.py` | Source of truth for personal memory facts |
 
 ### Coding agent
 
@@ -100,10 +99,13 @@ opti-oignon/
 | Module | Purpose |
 |--------|---------|
 | `rag/embeddings.py` | Embedding generation, batch processing |
-| `rag/ingest.py` | Document chunking and ingestion |
+| `rag/chunkers.py` | Intelligent document splitting |
+| `rag/batch_ingest.py` | Batch ingestion engine |
+| `rag/indexer.py` | Document indexing into the vector store |
 | `rag/parallel_ingest.py` | Parallel ingestion with thread pool |
-| `rag/query.py` | Retrieval and context augmentation |
-| `rag/sanitizer.py` | Prompt injection filtering |
+| `rag/retriever.py` | Semantic search over indexed documents |
+| `rag/augmenter.py` | Prompt augmentation with retrieved context |
+| `rag_sanitizer.py` | Prompt injection filtering |
 | `rag/pool_integration.py` | Connection pool for RAG databases |
 
 ### Plugins

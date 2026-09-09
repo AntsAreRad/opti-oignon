@@ -24,6 +24,10 @@ frontend/node_modules/
 frontend/build/
 frontend/.svelte-kit/
 
+# --- Browser test output (written into the tree by a run) ---
+frontend/tests/e2e/playwright-report/
+frontend/test-results/
+
 # --- Databases and SQLite sidecars (runtime; may hold personal data) ---
 *.db
 *.db-wal

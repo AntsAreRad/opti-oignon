@@ -1,5 +1,5 @@
 # =============================================================================
-# Red Team Audit Configuration — Opti-Oignon
+# Red Team Audit Configuration -- Opti-Oignon
 # =============================================================================
 # LLM-powered adversarial testing of defense layers.
 # All generation is 100% local via Ollama.

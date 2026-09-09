@@ -1,6 +1,6 @@
 /**
  * Playwright E2E test configuration for Opti-Oignon frontend.
- * — Frontend E2E Tests
+ * -- Frontend E2E Tests
  *
  * Usage:
  *   npx playwright test              # run all E2E tests
@@ -15,8 +15,11 @@ import { defineConfig, devices } from '@playwright/test';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  /* Test directory — E2E specs live in tests/e2e/ at project root */
-  testDir: '../tests/e2e',
+  /* Test directory. The specs sit inside this npm project on purpose:
+     they import the browser runner, and Node resolves that import from the
+     spec's own directory upwards, so a tree outside this one cannot load
+     it. */
+  testDir: './tests/e2e',
 
   /* Maximum time one test can run */
   timeout: 30_000,
@@ -43,7 +46,7 @@ export default defineConfig({
   /* Reporters */
   reporter: [
     ['list'],
-    ['html', { open: 'never', outputFolder: '../tests/e2e/playwright-report' }],
+    ['html', { open: 'never', outputFolder: './tests/e2e/playwright-report' }],
   ],
 
   /* Shared settings for all projects */

@@ -1,13 +1,13 @@
-# Prompt Templates — Opti-Oignon
+# Prompt Templates -- Opti-Oignon
 # ====================================
 # Task-specific system prompt templates with variable interpolation.
 # Resolution order: project-specific override -> task-type template -> general fallback.
 #
 # Supported variables in templates (use {variable_name} syntax):
-#   {language_rule}  — Auto-injected language matching instruction
-#   {project_name}   — Active project name (empty if none)
-#   {model_name}     — Selected model name
-#   {task_type}      — Detected task type
+#   {language_rule}  -- Auto-injected language matching instruction
+#   {project_name}   -- Active project name (empty if none)
+#   {model_name}     -- Selected model name
+#   {task_type}      -- Detected task type
 
 # Default language rule injected into all templates
 language_rule: "Respond in the same language as the user's question."

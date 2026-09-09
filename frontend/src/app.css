@@ -130,7 +130,7 @@ html.oo-reduce-motion *::after {
 /*  LIGHT MODE SURFACE OVERRIDES (Tailwind class compatibility)        */
 /*  Maps Tailwind surface-* and accent-* classes to theme variables    */
 /*  so existing dark-mode Tailwind classes work in light mode.         */
-/*  All values reference CSS variables — no hardcoded hex.             */
+/*  All values reference CSS variables -- no hardcoded hex.             */
 /* ------------------------------------------------------------------ */
 
 html:not(.dark) .bg-surface-950 { background-color: var(--oo-sidebar-bg); }

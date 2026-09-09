@@ -167,7 +167,7 @@ injection_defense:
     system_tag: "SYSTEM_INSTRUCTIONS"
     # User query tag (medium priority)
     user_tag: "USER_QUERY"
-    # Retrieved data tag (lowest priority — untrusted)
+    # Retrieved data tag (lowest priority -- untrusted)
     data_tag: "RETRIEVED_CONTEXT"
     # Instruction hierarchy reminder injected before retrieved data
     hierarchy_reminder: >-
@@ -198,12 +198,12 @@ injection_defense:
     #   regex: "(?i)do something malicious"
 
   # -- Confidence scoring ----------------------------------------------------
-  # Each retrieved chunk receives an injection probability score (0.0–1.0).
+  # Each retrieved chunk receives an injection probability score (0.0-1.0).
   # Chunks above the threshold are flagged and optionally blocked.
   scoring:
-    # Minimum score to flag a chunk as suspicious (0.0–1.0)
+    # Minimum score to flag a chunk as suspicious (0.0-1.0)
     flag_threshold: 0.3
-    # Minimum score to auto-block a chunk from prompt injection (0.0–1.0)
+    # Minimum score to auto-block a chunk from prompt injection (0.0-1.0)
     block_threshold: 0.7
     # Weight multipliers for different pattern categories
     weights:

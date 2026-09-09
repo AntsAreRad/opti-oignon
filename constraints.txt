@@ -1,0 +1,13 @@
+# Pip constraints for verification installs.
+#
+# A constraints file adds no dependency of its own; it pins the resolver
+# wherever these names are requested. The published-schema digest is a
+# contract only if the environment that checks it is the environment that
+# wrote it: the framework derives model names, and a floating resolver can
+# change them between two runs without a single line of this repository
+# moving. Every guard that reads the published surface -- and every
+# regeneration of its digest -- runs under these versions and nowhere else.
+fastapi==0.139.2
+starlette==1.3.1
+pydantic==2.13.4
+pytest==9.1.1

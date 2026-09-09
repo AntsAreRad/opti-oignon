@@ -2,7 +2,7 @@
   Chat view: messages + streaming + input.
   Handles WebSocket streaming, cancellation and retry.
   Passes chat options (model, preset, temperature) via chatOptions.
-  Mobile responsive — scroll FAB, tighter padding, safe-area.
+  Mobile responsive -- scroll FAB, tighter padding, safe-area.
 -->
 <script lang="ts">
 	import { page } from '$app/stores';
@@ -101,7 +101,7 @@
 		showScrollFab = scrollHeight - scrollTop - clientHeight > 300;
 	}
 
-	// FAB click handler — smooth scroll to bottom
+	// FAB click handler -- smooth scroll to bottom
 	function handleScrollFabClick() {
 		shouldAutoScroll = true;
 		showScrollFab = false;
@@ -190,7 +190,7 @@
 		</div>
 	{/if}
 
-	<!-- Zone de messages — reduced padding on mobile -->
+	<!-- Zone de messages -- reduced padding on mobile -->
 	<div
 		bind:this={messagesContainer}
 		on:scroll={handleScroll}
@@ -269,7 +269,7 @@
 	<!-- Scroll-to-bottom floating action button -->
 	<ScrollToBottomFab visible={showScrollFab} onClick={handleScrollFabClick} />
 
-	<!-- Zone de saisie — safe-area bottom, tighter mobile padding -->
+	<!-- Zone de saisie -- safe-area bottom, tighter mobile padding -->
 	<div class="shrink-0 px-2 sm:px-4 py-2 sm:py-3 safe-area-bottom" style="border-top: 1px solid var(--oo-bd-subtle);">
 		<div class="max-w-2xl mx-auto">
 			<FileUpload

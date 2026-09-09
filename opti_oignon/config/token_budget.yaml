@@ -1,4 +1,4 @@
-# Token Budget Configuration — Opti-Oignon
+# Token Budget Configuration -- Opti-Oignon
 # ==============================================
 # Controls how the context window is divided for prompt assembly.
 # Each ratio is a fraction of the total context window.
@@ -35,7 +35,7 @@ fallback_context_windows:
 # Ultimate fallback when model is completely unknown
 default_context_window: 8192
 
-# Minimum budget floors (tokens) — prevents any section from being zero
+# Minimum budget floors (tokens) -- prevents any section from being zero
 minimum_budgets:
   system: 256
   project: 0               # 0 when no project active

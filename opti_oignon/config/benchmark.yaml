@@ -1,5 +1,5 @@
 # =============================================================================
-# OPTI-OIGNON v1.6.0 — BENCHMARK CONFIGURATION
+# OPTI-OIGNON v1.6.0 -- BENCHMARK CONFIGURATION
 # =============================================================================
 # Defines benchmark suites, tasks, scoring methods, and runner defaults.
 # Each suite groups tasks by category for organized model evaluation.

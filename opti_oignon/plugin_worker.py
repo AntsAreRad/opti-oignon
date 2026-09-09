@@ -8,14 +8,14 @@ limits, loads the plugin entry point, creates a Unix domain socket,
 and serves JSON-RPC requests from the host.
 
 Environment variables (set by the host):
-    OO_PLUGIN_NAME   — plugin identifier
-    OO_PLUGIN_DIR    — absolute path to plugin directory
-    OO_PLUGIN_ENTRY  — relative path to entry point file
-    OO_SOCKET_PATH   — Unix socket path for IPC
-    OO_HMAC_KEY      — hex-encoded 32-byte HMAC key
-    OO_RLIMIT_CPU    — CPU time limit in seconds
-    OO_RLIMIT_MEM    — memory limit in bytes
-    OO_RLIMIT_NOFILE — max open file descriptors
+    OO_PLUGIN_NAME   -- plugin identifier
+    OO_PLUGIN_DIR    -- absolute path to plugin directory
+    OO_PLUGIN_ENTRY  -- relative path to entry point file
+    OO_SOCKET_PATH   -- Unix socket path for IPC
+    OO_HMAC_KEY      -- hex-encoded 32-byte HMAC key
+    OO_RLIMIT_CPU    -- CPU time limit in seconds
+    OO_RLIMIT_MEM    -- memory limit in bytes
+    OO_RLIMIT_NOFILE -- max open file descriptors
 """
 
 import hashlib
@@ -142,7 +142,7 @@ def apply_resource_limits(
 
 
 # ---------------------------------------------------------------------------
-# Plugin loading (simplified, no sandbox — isolation is via process boundary)
+# Plugin loading (simplified, no sandbox -- isolation is via process boundary)
 # ---------------------------------------------------------------------------
 
 class _HostPackageGuard:

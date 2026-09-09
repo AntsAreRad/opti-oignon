@@ -1,5 +1,5 @@
 """
-Tool Call Approval — Opti-Oignon.
+Tool Call Approval -- Opti-Oignon.
 
 In Bulbe mode, every LLM tool call requires explicit human approval
 before execution. This module implements a thread-safe approval queue

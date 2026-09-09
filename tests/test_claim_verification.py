@@ -31,7 +31,7 @@ SOURCE = "The reference notes that water boils at 100 degrees Celsius at sea lev
 
 
 # ===========================================================================
-# normalize_verdict — empty / lead-word mapping
+# normalize_verdict -- empty / lead-word mapping
 # ===========================================================================
 
 def test_none_or_blank_is_uncertain():
@@ -63,7 +63,7 @@ def test_other_unsupported_markers_in_lead():
 
 
 # ===========================================================================
-# normalize_verdict — fail-secure asymmetry
+# normalize_verdict -- fail-secure asymmetry
 # ===========================================================================
 
 def test_ambiguous_answer_is_uncertain_not_supported():
@@ -106,7 +106,7 @@ def test_build_messages_rejects_empty():
 
 
 # ===========================================================================
-# make_claim_verifier — orchestration with an injected client
+# make_claim_verifier -- orchestration with an injected client
 # ===========================================================================
 
 def _client_returning(text):

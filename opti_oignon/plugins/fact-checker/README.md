@@ -8,13 +8,13 @@ After the LLM generates a response, this plugin scans for factual claims
 (dates, numbers, proper nouns, named entities) and verifies them via
 DuckDuckGo web search. Each claim is annotated inline:
 
-- **[verified]** — claim matches web search results
-- **[unverified]** — no confirmation found (or web search unavailable)
-- **[conflict: ...]** — web results contradict the claim
+- **[verified]** -- claim matches web search results
+- **[unverified]** -- no confirmation found (or web search unavailable)
+- **[conflict: ...]** -- web results contradict the claim
 
 ## Hook Point
 
-- `post_inference` — processes the LLM response after generation
+- `post_inference` -- processes the LLM response after generation
 
 ## Configuration
 
@@ -27,8 +27,8 @@ DuckDuckGo web search. Each claim is annotated inline:
 
 ## Permissions
 
-- `network_outbound` — required for web search
-- `conversation_read` — reads the LLM response
+- `network_outbound` -- required for web search
+- `conversation_read` -- reads the LLM response
 
 ## Graceful Degradation
 

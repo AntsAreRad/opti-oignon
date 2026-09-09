@@ -15,15 +15,15 @@ IMPORTANT: The system can be enabled/disabled!
     - Disable: set_multi_agent_enabled(False)
 
 Architecture:
-    ┌─────────────────────────────────────────┐
-    │           ORCHESTRATOR                  │
-    │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────────┐  │
-    │  │Coder│ │Review│ │Expl.│ │Planner  │  │
-    │  └─────┘ └─────┘ └─────┘ └─────────┘  │
-    │              ↓                         │
-    │         PIPELINES                      │
-    │  [data_analysis] [debug] [writing]    │
-    └─────────────────────────────────────────┘
+    +-----------------------------------------+
+    |           ORCHESTRATOR                  |
+    |  +-----+ +-----+ +-----+ +---------+  |
+    |  |Coder| |Review| |Expl.| |Planner  |  |
+    |  +-----+ +-----+ +-----+ +---------+  |
+    |              v                         |
+    |         PIPELINES                      |
+    |  [data_analysis] [debug] [writing]    |
+    +-----------------------------------------+
 
 Basic usage:
     from opti_oignon.agents import run_auto, is_multi_agent_enabled

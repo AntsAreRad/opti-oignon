@@ -23,12 +23,13 @@ proven unreachable and ZERO seeded project modules -- the module is
 import-pure, and q1 proves that purity rather than assuming it. The module
 itself is left byte-identical by this suite.
 
-Two recorded observations are pinned as they stand rather than judged here:
+One recorded observation is pinned as it stands rather than judged here:
 the ``bound_conversation_id`` annotation appears twice in
 ``SandboxSessionInfo`` (the second one is dead -- pydantic collapses them
-into a single field at its first position), and ``HealthDashboard.version``
-still defaults to the historical ``"1.6.6"`` string while the package
-register says otherwise. Both are pinned exactly so any change surfaces.
+into a single field at its first position). It is pinned exactly so any
+change surfaces. The ``HealthDashboard.version`` default, once pinned here
+as a lagging literal, is now derived from the package register and lives
+under the version-registry contracts instead.
 """
 
 import sys
@@ -193,6 +194,7 @@ REQUIRED = {
     'ModelPullRequest': ('model_name',),
     'ModelDeleteRequest': ('model_name',),
     'ModelAliasRequest': ('alias', 'model_name'),
+    'ClaimSourcePair': ('claim', 'source'),
 }
 
 # Every constrained field in the module, with its exact constraint set.
@@ -259,7 +261,7 @@ def test_q1_window_holds_and_the_module_is_import_pure():
     Inside the window, ``ollama`` is neutralised (proven unreachable by the
     window before the module ran), the only project entries are the two
     stand-in packages and the target, and the module's public namespace is
-    exactly its 322 models plus ``Any`` and ``Field`` (``BaseModel`` is
+    exactly its 323 models plus ``Any`` and ``Field`` (``BaseModel`` is
     counted with the model classes). Nothing else resolves, so the module
     demonstrably needs nothing else.
     """
@@ -274,7 +276,7 @@ def test_q1_window_holds_and_the_module_is_import_pure():
                 _SCHEMAS,
             ), f"unexpected live project module inside the window: {name}"
         classes = _models(S)
-        assert len(classes) == 322
+        assert len(classes) == 323
         residue = {
             k
             for k, v in vars(S).items()
@@ -736,19 +738,6 @@ def test_q30_duplicated_annotation_collapses_to_one_early_field():
         assert names.index("bound_conversation_id") == 1
         m = S.SandboxSessionInfo(session_id="s", workspace_path="/w")
         assert m.bound_conversation_id is None
-    finally:
-        restore()
-
-
-def test_q31_health_dashboard_still_defaults_to_the_historical_version():
-    """Pinned as found: the declaration default lags the package register.
-
-    The route is expected to overwrite it; the pin exists so the day the
-    default moves (or starts leaking through) is a visible day.
-    """
-    S, restore = _load()
-    try:
-        assert S.HealthDashboard().version == "1.6.6"
     finally:
         restore()
 

@@ -212,7 +212,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 	URL.revokeObjectURL(url);
 }
 
-// -- — Custom Profile endpoints --
+// -- -- Custom Profile endpoints --
 
 /** List all custom profiles. */
 export async function getCustomProfiles(): Promise<BenchmarkV2CustomProfilesListResponse> {
@@ -272,7 +272,7 @@ export async function previewProfileQuestions(
 	return resp.json();
 }
 
-// -- — Auto-Trigger endpoints --
+// -- -- Auto-Trigger endpoints --
 
 /** Get auto-trigger status. */
 export async function getAutoTriggerStatus(): Promise<BenchmarkV2AutoTriggerStatus> {
@@ -329,7 +329,7 @@ export async function resetAutoTriggerSnapshot(): Promise<{ reset: boolean }> {
 	return resp.json();
 }
 
-// -- — Test Poll --
+// -- -- Test Poll --
 
 /** Run a single poll without triggering (test connection). */
 export async function testPollAutoTrigger(): Promise<BenchmarkV2AutoTriggerTestPollResponse> {

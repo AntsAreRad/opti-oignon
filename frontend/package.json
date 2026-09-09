@@ -1,6 +1,6 @@
 {
   "name": "opti-oignon-frontend",
-  "version": "1.5.9",
+  "version": "2.2.0",
   "private": true,
   "scripts": {
     "dev": "vite dev",
@@ -10,7 +10,6 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:e2e": "playwright test",
-    "test:e2e:a11y": "playwright test tests/e2e/a11y.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed"
   },

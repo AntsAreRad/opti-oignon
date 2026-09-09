@@ -27,7 +27,7 @@ except ImportError:
 # Default staleness threshold: 1 hour
 DEFAULT_CACHE_TTL_SECONDS = 3600
 
-# Default GitHub index URL (placeholder — user configures their own)
+# Default GitHub index URL (placeholder -- user configures their own)
 DEFAULT_INDEX_URL = ""
 
 

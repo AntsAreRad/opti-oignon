@@ -36,7 +36,7 @@
 	export let initialModelFilter: string = '';
 
 	// -------------------------------------------------------------------------
-	// State — history table
+	// State -- history table
 	// -------------------------------------------------------------------------
 
 	let loading = true;
@@ -52,7 +52,7 @@
 	let availableModels: string[] = [];
 
 	// -------------------------------------------------------------------------
-	// State — trends
+	// State -- trends
 	// -------------------------------------------------------------------------
 
 	let trendBuckets: TrendBucket[] = [];
@@ -60,13 +60,13 @@
 	let trendLoading = false;
 
 	// -------------------------------------------------------------------------
-	// State — model breakdown
+	// State -- model breakdown
 	// -------------------------------------------------------------------------
 
 	let modelBreakdown: ModelBreakdown[] = [];
 
 	// -------------------------------------------------------------------------
-	// State — stats & purge
+	// State -- stats & purge
 	// -------------------------------------------------------------------------
 
 	let historyStats: TelemetryHistoryStats | null = null;

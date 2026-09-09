@@ -1,14 +1,14 @@
 # Opti-Oignon mobile client (skeleton)
 
 This directory is the starting tree for the Android client (Kotlin + JNI +
-Veilid). It is a **skeleton, validated host-side** — there is no Android
+Veilid). It is a **skeleton, validated host-side** -- there is no Android
 toolchain in the environment it was generated in, so nothing here has been
 compiled or run. Treat every Kotlin/native file as a contract to validate on a
 real machine, not as working code.
 
 ## What is real vs. what is a stub
 
-- **Real (and the point of this tree):** `MOBILE_SYNC_CONTRACT.md` — the exact
+- **Real (and the point of this tree):** `MOBILE_SYNC_CONTRACT.md` -- the exact
   wire behaviour the desktop responder already enforces and proves, restated for
   the phone. The Kotlin envelopes, the pull-loop client, and the consumer-only
   notes stance encode that contract directly. These are derived from, and match,

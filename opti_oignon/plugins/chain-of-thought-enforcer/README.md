@@ -17,8 +17,8 @@ a clear visual separation between the thought process and conclusion.
 
 ## Hook Points
 
-- `pre_inference` — injects CoT instruction
-- `post_inference` — formats reasoning vs answer
+- `pre_inference` -- injects CoT instruction
+- `post_inference` -- formats reasoning vs answer
 
 ## Configuration
 

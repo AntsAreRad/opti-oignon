@@ -90,13 +90,13 @@ class HookManager:
     """Manages hook registration and execution across all plugins.
 
     Hook points (defined in plugin_manifest.VALID_HOOKS):
-        pre_prompt      — Before prompt construction
-        post_prompt     — After prompt construction, before inference
-        pre_inference   — Just before sending to the LLM
-        post_inference  — After receiving LLM response
-        tool_call       — When a tool is invoked
-        pipeline_step   — During pipeline execution
-        ui_panel        — For UI panel registration
+        pre_prompt      -- Before prompt construction
+        post_prompt     -- After prompt construction, before inference
+        pre_inference   -- Just before sending to the LLM
+        post_inference  -- After receiving LLM response
+        tool_call       -- When a tool is invoked
+        pipeline_step   -- During pipeline execution
+        ui_panel        -- For UI panel registration
 
     Hooks are executed in priority order (lower number = higher priority).
     If two hooks have the same priority, they execute in registration order.

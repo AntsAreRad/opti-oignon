@@ -80,7 +80,7 @@ encryption. Full-disk encryption (LUKS) is therefore a deployment
 requirement for the RAG corpus (see Deployment Recommendations).
 Application-layer encryption of the vector store (encrypt the chunk
 text before storing, decrypt on retrieval) is a planned cycle
-(ROADMAP_POST_S183, RAG-at-rest cycle).
+(planned RAG-at-rest hardening cycle).
 
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the
@@ -296,11 +296,11 @@ verification.
 
 ```bash
 # Sign an archive (auto-selects GPG key or specify --key)
-./scripts/sign_release.sh opti-oignon-v2.1.0.zip
+./scripts/sign_release.sh opti-oignon-v2.2.0.zip
 
 # Produces:
-#   opti-oignon-v2.1.0.zip.sig    (detached GPG signature)
-#   opti-oignon-v2.1.0.zip.sha256 (SHA-256 checksum)
+#   opti-oignon-v2.2.0.zip.sig    (detached GPG signature)
+#   opti-oignon-v2.2.0.zip.sha256 (SHA-256 checksum)
 ```
 
 ### Verifying a release
@@ -310,15 +310,25 @@ verification.
 gpg --import opti-oignon-release.pub
 
 # Verify signature and checksum
-./scripts/verify_release.sh opti-oignon-v2.1.0.zip
+./scripts/verify_release.sh opti-oignon-v2.2.0.zip
 
 # Before trusting an imported key, check its fingerprint against the
 # project's published fingerprint through an independent channel:
 gpg --fingerprint --keyid-format=long
 
 # Strict mode (fails on missing checksum file)
-./scripts/verify_release.sh opti-oignon-v2.1.0.zip --strict
+./scripts/verify_release.sh opti-oignon-v2.2.0.zip --strict
 ```
+
+### Pinning the project key
+
+A valid signature proves the archive matches a key in *your* keyring --
+integrity, not identity. To make the verifier demand the project's key
+specifically, record its full fingerprint (40 hex characters) in
+`scripts/release_key.fpr`. When that file is present and no `--key` is
+given, `verify_release.sh` refuses any signature from another key.
+Obtain the fingerprint through an independent channel, never from the
+archive being verified.
 
 ### CI/CD integration
 

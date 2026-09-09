@@ -285,18 +285,18 @@ agents:
 # ORCHESTRATION PATTERNS
 # -----------------------------------------------------------------------------
 patterns:
-  # Linear chain: A → B → C
+  # Linear chain: A -> B -> C
   chain:
     description: "Sequential execution"
     allows_rollback: false
   
-  # Verification: Generator → Verifier (with iteration)
+  # Verification: Generator -> Verifier (with iteration)
   verifier:
     description: "Generation with verification"
     max_iterations: 3
     allows_rollback: true
   
-  # Decomposition: Break down → Solve each → Synthesize
+  # Decomposition: Break down -> Solve each -> Synthesize
   decomposition:
     description: "Decomposition and synthesis"
     max_subtasks: 5

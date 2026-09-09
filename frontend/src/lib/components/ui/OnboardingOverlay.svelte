@@ -49,7 +49,7 @@
 				if (attempt < MAX_RETRIES - 1) {
 					await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
 				} else {
-					// All retries exhausted — backend not available
+					// All retries exhausted -- backend not available
 					visible = false;
 				}
 			}

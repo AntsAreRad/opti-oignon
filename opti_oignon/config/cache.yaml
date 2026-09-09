@@ -1,7 +1,7 @@
 # Semantic Cache Configuration
 # Persistent dual-threshold cache: exact hash + embedding similarity
 
-# Master toggle (off by default — enable when ready)
+# Master toggle (off by default -- enable when ready)
 enabled: false
 
 # Tier 1: Exact hash match (SHA-256 of query text)

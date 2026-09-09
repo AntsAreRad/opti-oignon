@@ -468,7 +468,7 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
 
     db = _get_db(ctx)
 
-    # /tasks — list pending
+    # /tasks -- list pending
     if _CMD_TASKS_LIST.match(user_input):
         tasks = db.list_tasks(include_done=False)
         return {
@@ -476,7 +476,7 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
             "handled": True,
         }
 
-    # /tasks all — list all including done
+    # /tasks all -- list all including done
     if _CMD_TASKS_ALL.match(user_input):
         tasks = db.list_tasks(include_done=True)
         return {

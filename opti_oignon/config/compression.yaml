@@ -1,5 +1,5 @@
 # ============================================================================
-# CONVERSATION COMPRESSOR — OPTI-OIGNON
+# CONVERSATION COMPRESSOR -- OPTI-OIGNON
 # ============================================================================
 # Configuration for conversation history compression and archive retrieval.
 # The compressor reduces prompt history to fit the token budget while
@@ -51,7 +51,7 @@ rule_min_message_length: 50
 # Default number of top results to return from archive search
 archive_retrieval_top_k: 3
 
-# Minimum relevance score (0.0–1.0) to include a result
+# Minimum relevance score (0.0-1.0) to include a result
 archive_retrieval_min_score: 0.05
 
 # Maximum snippet length (characters) per retrieved message

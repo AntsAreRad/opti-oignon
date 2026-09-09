@@ -4,11 +4,11 @@ Two-Factor Authentication for Opti-Oignon.
 
 Supports three 2FA methods (in priority order):
 
-  1. **WebAuthn/FIDO2** — hardware keys (YubiKey 5, Google Titan),
+  1. **WebAuthn/FIDO2** -- hardware keys (YubiKey 5, Google Titan),
      platform authenticators (Apple Passkeys, Windows Hello)
-  2. **TOTP** — time-based one-time passwords (Google Authenticator,
+  2. **TOTP** -- time-based one-time passwords (Google Authenticator,
      Authy) as backup when hardware key unavailable
-  3. **Recovery codes** — 10 one-time codes shown once at setup,
+  3. **Recovery codes** -- 10 one-time codes shown once at setup,
      AES-256-GCM encrypted at rest
 
 Mode behaviour:

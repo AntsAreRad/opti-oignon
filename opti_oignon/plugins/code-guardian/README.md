@@ -8,17 +8,17 @@ indicating whether the code is correct or contains errors.
 After the LLM generates a response, this plugin extracts all fenced
 code blocks, identifies the language, and runs the appropriate validator:
 
-- **Python** — `ast.parse()` for syntax validation, plus pitfall detection
+- **Python** -- `ast.parse()` for syntax validation, plus pitfall detection
   (unused imports, bare except, mutable default arguments)
-- **JSON** — `json.loads()` with line/column error reporting
-- **R** — Heuristic validation: matching delimiters (parentheses, braces,
+- **JSON** -- `json.loads()` with line/column error reporting
+- **R** -- Heuristic validation: matching delimiters (parentheses, braces,
   brackets), unclosed string detection, comment handling
 
 A badge is appended after each validated block.
 
 ## Hook Point
 
-- `post_inference` — processes the LLM response after generation
+- `post_inference` -- processes the LLM response after generation
 
 ## Configuration
 
@@ -30,7 +30,7 @@ A badge is appended after each validated block.
 
 ## Permissions
 
-- `conversation_read` — reads the LLM response
+- `conversation_read` -- reads the LLM response
 
 ## Badge Formats
 
@@ -64,6 +64,6 @@ The plugin recognizes common language tag variations:
 
 Beyond syntax validation, the Python validator checks for:
 
-- **Unused imports** — imported names not referenced in the code
-- **Bare except clauses** — `except:` without specifying an exception type
-- **Mutable default arguments** — `def f(x=[])` pattern
+- **Unused imports** -- imported names not referenced in the code
+- **Bare except clauses** -- `except:` without specifying an exception type
+- **Mutable default arguments** -- `def f(x=[])` pattern

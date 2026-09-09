@@ -439,7 +439,7 @@ def check_csrf_protection(files: list[Path]) -> CheckResult:
             # Global CSRF middleware covers all routes
             return result
 
-    # No global CSRF middleware found — this is a violation
+    # No global CSRF middleware found -- this is a violation
     result.add_violation(
         str(app_py.relative_to(_PROJECT_ROOT)) if app_py.exists() else "api/app.py",
         1,
@@ -586,7 +586,7 @@ def _is_french_line(line: str) -> bool:
 
     # Check for accented characters (strong signal)
     if _FRENCH_ACCENTS.search(stripped):
-        # Extract accented words — skip if only in proper nouns
+        # Extract accented words -- skip if only in proper nouns
         words = re.findall(r"\w*[éèêëàâùûôïîçÉÈÊÀ]\w*", stripped)
         if all(w in {"Léon", "León"} for w in words):
             return False
@@ -995,13 +995,13 @@ def main() -> int:
     """Entry point for CLI usage."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Opti-Oignon Security Scanner (S130/S155)")
+    parser = argparse.ArgumentParser(description="Opti-Oignon Security Scanner")
     parser.add_argument("--json", action="store_true", help="Output JSON report")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
     if not args.json:
-        print("Opti-Oignon Security Scanner (S130/S155)")
+        print("Opti-Oignon Security Scanner")
         print("=" * 50)
 
     report = run_all_checks(verbose=not args.json)

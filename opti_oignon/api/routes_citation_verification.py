@@ -73,6 +73,8 @@ from typing import Any, Callable
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from .schemas import ClaimSourcePair
+
 logger = logging.getLogger(__name__)
 
 # Hardcoded checkpoint discipline for every new module; never overridable.
@@ -98,18 +100,6 @@ except ImportError:  # pragma: no cover - auth optional
 
     def _get_current_user() -> dict:  # type: ignore[misc]
         return {"sub": None}
-
-
-class ClaimSourcePair(BaseModel):
-    """One cited claim and the source it is checked against.
-
-    On the wire these are both the extracted-pairs view (what the parser derived
-    from the answer) and the natural per-pair record: each pair is verified
-    independently and the per-answer verdict is the fail-secure aggregate.
-    """
-
-    claim: str
-    source: str
 
 
 class CitationVerificationRequest(BaseModel):

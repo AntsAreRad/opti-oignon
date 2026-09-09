@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opti-Oignon — Coverage Gate Script
+# Opti-Oignon -- Coverage Gate Script
 #
 # Runs the full test suite with coverage measurement and enforces
 # minimum coverage thresholds.
@@ -12,10 +12,10 @@
 #   bash scripts/run_coverage.sh --no-gate    # Run without fail-under checks
 #
 # Exit codes:
-#   0 — all tests passed AND coverage gates met
-#   1 — test failures
-#   2 — coverage below minimum threshold
-#   3 — setup error
+#   0 -- all tests passed AND coverage gates met
+#   1 -- test failures
+#   2 -- coverage below minimum threshold
+#   3 -- setup error
 
 set -euo pipefail
 

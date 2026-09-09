@@ -1,0 +1,141 @@
+# Compression-fidelity micro fixture.
+#
+# Two synthetic conversations, long enough that the tier machinery freezes
+# several segments and builds a rollup under the parameters declared here.
+# Every declared fact is digit-bearing on purpose: the deterministic
+# instrument keeps digit-bearing sentences, so a fact that goes missing
+# between this file and the composed block went missing in the machinery.
+# The keywords are the proof of survival; the probes are how a person or a
+# model would ask for the fact later.
+
+version: 1
+conversations:
+  - id: staging-migration
+    segment_budget_tokens: 160
+    tail_keep_messages: 2
+    facts:
+      - id: database-port
+        probe: which port does the staging database listen on
+        keywords: ["port 5433"]
+      - id: training-budget
+        probe: how much budget was approved for the training environment
+        keywords: ["2750 euros"]
+      - id: incident-ticket
+        probe: which ticket tracks the migration incident
+        keywords: ["ticket 8841"]
+    messages:
+      - role: user
+        content: >-
+          Before we plan anything, walk me through the current staging
+          layout. I want the constraints on the table first, and the wish
+          list afterwards, so the plan stays anchored in what exists today.
+      - role: assistant
+        content: >-
+          The staging database listens on port 5433, not the usual default,
+          because the old replica still occupies it. Everything else about
+          the layout is unremarkable and follows the standard template.
+      - role: user
+        content: >-
+          Good, that matches my notes. Keep the address book untouched for
+          now. The migration itself should move schema first and data
+          second, with a rehearsal on a disposable copy before any real run.
+      - role: assistant
+        content: >-
+          Agreed on the ordering. The rehearsal copy can live on the same
+          host as long as we throttle it. I will draft the runbook so each
+          step names its owner and its rollback before anyone touches prod.
+      - role: user
+        content: >-
+          Finance came back this morning: the approved envelope for the
+          training environment is 2750 euros for the quarter, travel
+          excluded. Anything beyond that needs a separate request in
+          writing.
+      - role: assistant
+        content: >-
+          Understood, that envelope covers the plan comfortably. The
+          rehearsal host is already paid for, so the only new spending is
+          the monitoring add-on, which sits well inside the approved
+          amount.
+      - role: user
+        content: >-
+          One more thing from the retro: the write-up owes a clear timeline
+          of the outage, who was paged, and what the first mitigation was.
+          Keep the tone factual and let the log excerpts speak for
+          themselves.
+      - role: assistant
+        content: >-
+          Noted. I will keep opinions out of it and let the sequence of
+          events carry the narrative. The mitigation section will quote the
+          exact commands used, so the next responder can follow them
+          verbatim.
+      - role: user
+        content: >-
+          For traceability, the migration incident is tracked under ticket
+          8841 in the shared tracker. Reference it in every commit message
+          touching the runbook so the audit trail stays in one place.
+      - role: assistant
+        content: >-
+          Will do. Everything lands under that reference and the runbook
+          links back to the tracker entry, so anyone auditing later finds
+          the whole story from either end without guessing.
+
+  - id: release-handover
+    segment_budget_tokens: 120
+    tail_keep_messages: 3
+    facts:
+      - id: release-version
+        probe: which release version is being handed over
+        keywords: ["4.7.2"]
+      - id: latency-target
+        probe: what latency target did the review settle on
+        keywords: ["85 ms"]
+      - id: meeting-room
+        probe: where does the handover review take place
+        keywords: ["room 312"]
+    messages:
+      - role: user
+        content: >-
+          The handover covers release 4.7.2 and nothing older; previous
+          branches are frozen. Start from the changelog and flag anything
+          that still lacks an owner before we meet.
+      - role: assistant
+        content: >-
+          Understood. The changelog is short and mostly maintenance, with
+          two entries that deserve a second reader. I will annotate both
+          and circulate the notes before the review so nobody reads cold.
+      - role: user
+        content: >-
+          Please also fold in the packaging change. It alters how the
+          artifact is signed, and the operations side should hear it from
+          us rather than discover it in a diff during a quiet weekend.
+      - role: assistant
+        content: >-
+          Agreed, that change gets its own paragraph and a short demo. The
+          signing step is scripted now, so the demo is exactly 2 commands
+          and a verification, which fits comfortably in the review slot.
+      - role: user
+        content: >-
+          On performance, the review board wants a number, not an
+          adjective. Bring the measurements from the last soak run and be
+          ready to defend the sampling method if anyone pushes on it.
+      - role: assistant
+        content: >-
+          The soak run settled at a latency target of 85 ms at the
+          ninety-fifth percentile, and the sampling method is documented
+          next to the raw numbers, so the defense is a pointer, not a
+          speech.
+      - role: user
+        content: >-
+          Logistics are booked: the handover review takes place in room
+          312, the one with the wall display, so the timeline can stay on
+          screen while we walk the changelog top to bottom.
+      - role: assistant
+        content: >-
+          Perfect. I will arrive early to load the timeline and the notes
+          on the display, and leave printed copies for anyone who prefers
+          paper over screens during the walkthrough.
+      - role: user
+        content: >-
+          Last item: after the review, send the summary to the release
+          list the same day. Short, factual, links to the notes. If
+          anything slips, say what slipped and when it lands instead.

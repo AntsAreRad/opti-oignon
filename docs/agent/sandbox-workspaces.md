@@ -1,6 +1,6 @@
 # Sandbox Workspaces
 
-A workspace (S209-S213) is a named, user-managed sandbox bound to a
+A workspace is a named, user-managed sandbox bound to a
 conversation, replacing the per-run, auto-destroyed session for interactive
 work. It is still the same disposable, host-isolated bubblewrap environment
 the agent's tools have always run in -- the cycle adds lifecycle, copy-in,

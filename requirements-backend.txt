@@ -1,5 +1,5 @@
 # Opti-Oignon backend dependencies
-# S163 -- Docker build requirements
+# Docker build requirements
 #
 # Core framework
 fastapi>=0.104.0

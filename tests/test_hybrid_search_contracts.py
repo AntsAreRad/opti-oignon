@@ -36,6 +36,7 @@ shared isolation window.
 import ast
 import sys
 import traceback
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -353,6 +354,97 @@ def test_h9_the_reported_capability_is_bounded_by_reach():
     assert "HYBRID_SEARCH_ROUTED" in imported, (
         "the capability report reads a name it never imports"
     )
+
+
+def test_h10_the_reported_capability_consults_the_gate():
+    """Routed is not switched on. The report must also ask the gate."""
+    app_source = (_OO / "api" / "app.py").read_text(encoding="utf-8")
+    tree = ast.parse(app_source)
+
+    published = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "hybrid_search":
+                published = value
+    assert published is not None, "the capability report names no hybrid entry"
+
+    called = {
+        n.func.id
+        for n in ast.walk(published)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "_unified_gate_open" in called, (
+        "the reported capability ignores the gate: an install with the "
+        "unified layer switched off would advertise a retrieval path no "
+        "product query can take"
+    )
+
+    gate_fn = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_unified_gate_open":
+            gate_fn = node
+    assert gate_fn is not None, "the gate helper is referenced but not defined"
+    consulted = {
+        alias.name
+        for node in ast.walk(gate_fn)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "opti_oignon.context_optimizer"
+        for alias in node.names
+    }
+    assert "unified_gate_open" in consulted, (
+        "the helper must ask the layer's own gate statement, not invent one"
+    )
+
+
+def test_h11_the_gate_statement_is_closed_unless_the_key_opens_it():
+    """Closed by default, open under the explicit key, closed on failure."""
+    optimizer_module = "opti_oignon.context_optimizer"
+    layer = types.ModuleType("opti_oignon.unified_retrieval")
+    layer.get_unified_retriever = lambda: None
+    loaded, restore = isolate(
+        targets={optimizer_module: source("context_optimizer.py")},
+        seeded={"opti_oignon.unified_retrieval": layer},
+        blocked=("ollama",),
+    )
+    module = loaded[optimizer_module]
+    try:
+        original_loader = module._load_config
+
+        module._load_config = lambda path=None: {}
+        module.reset_optimizer()
+        assert module.unified_gate_open() is False, (
+            "a configuration that never mentions the key must keep the "
+            "gate closed"
+        )
+
+        module.init_optimizer(
+            config={"unified_retrieval": {"enabled": True}},
+        )
+        assert module.unified_gate_open() is True, (
+            "the explicit key must open the gate on the live instance"
+        )
+
+        module.init_optimizer(
+            config={"unified_retrieval": {"enabled": False}},
+        )
+        assert module.unified_gate_open() is False
+
+        module.reset_optimizer()
+
+        def _broken(path=None):
+            raise OSError("configuration unreadable")
+
+        module._load_config = _broken
+        assert module.unified_gate_open() is False, (
+            "a gate that cannot be read must report itself closed, never "
+            "open"
+        )
+    finally:
+        module._load_config = original_loader
+        module.reset_optimizer()
+        restore()
 
 
 # ---------------------------------------------------------------------------

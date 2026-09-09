@@ -1,0 +1,17 @@
+# Written floor for the red-team guard.
+#
+# The deterministic harness drives the shipped adversarial corpus, through
+# the shipped obfuscation strategies, at the real defense modules. Every
+# case is scored inside the defense's DECLARED reach, so the floor is total:
+# one case giving way anywhere it claims to cover fails the build.
+#
+# A total floor is only honest because the corpus is scoped. Charging a
+# defense for ground it never claimed would force this number below one and
+# turn it into a tolerance -- and a tolerance is where a regression hides.
+# Findings outside a defense's declared reach belong in a report, never in
+# this file.
+#
+# Changing an engagement is a reviewed edit here, never a constant buried
+# in code.
+
+defense_floor = 1.0

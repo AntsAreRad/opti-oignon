@@ -368,7 +368,7 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
 
     db = _get_db(ctx)
 
-    # /notes — list all
+    # /notes -- list all
     if _CMD_NOTES_LIST.match(user_input):
         notes = db.list_notes()
         return {
@@ -410,7 +410,7 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
             "handled": True,
         }
 
-    # /note <text> — add new note
+    # /note <text> -- add new note
     m = _CMD_NOTE_ADD.match(user_input)
     if m:
         text = m.group(1).strip()

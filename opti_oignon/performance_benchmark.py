@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PERFORMANCE BENCHMARK — Module de benchmarks de performance
+PERFORMANCE BENCHMARK -- Module de benchmarks de performance
 ============================================================
 
 Measures the latency and throughput of Opti-Oignon subsystems:
@@ -28,7 +28,7 @@ Usage:
     # Rapport texte
     print(benchmark_runner.get_report())
 
-Session 25 — H2
+Session 25 -- H2
 """
 
 import json

@@ -116,12 +116,12 @@ For programmatic access, authenticate via the login endpoint:
 
 ```bash
 # Login and get a session cookie
-curl -c cookies.txt -X POST http://localhost:8000/api/auth/login \
+curl -c cookies.txt -X POST http://localhost:8001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "your-password"}'
 
 # Use the cookie for subsequent requests
-curl -b cookies.txt http://localhost:8000/api/health
+curl -b cookies.txt http://localhost:8001/api/health
 ```
 
 The CLI (`oo`) handles authentication automatically using the stored

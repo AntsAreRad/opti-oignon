@@ -514,7 +514,9 @@ get_hybrid_engine = _LazyAttr("opti_oignon.rag_hybrid_search", "get_hybrid_engin
 # install cannot take, so capability reporting consults this statement
 # instead. It is checked against the tree by contract: wiring a caller
 # without flipping it fails, and flipping it without a caller fails too.
-HYBRID_SEARCH_ROUTED = False
+# The unified retrieval layer is that caller: it reaches the engine as one of
+# its sources, so a routed query is now a path an install can actually take.
+HYBRID_SEARCH_ROUTED = True
 
 # -- RAG External Stores (lazy) --
 EXTERNAL_STORES_AVAILABLE = _module_exists("opti_oignon.rag_external")

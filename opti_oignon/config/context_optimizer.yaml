@@ -1,4 +1,4 @@
-# Context Optimizer Configuration — Opti-Oignon
+# Context Optimizer Configuration -- Opti-Oignon
 # ===================================================
 # Controls the unified context window orchestrator.
 # When enabled, replaces the manual 5-step pipeline in executor.py.
@@ -7,7 +7,7 @@
 # manual pipeline in the caller; this line is the whole rollback.
 enabled: true
 
-# Priority presets — predefined zone weight profiles
+# Priority presets -- predefined zone weight profiles
 # Each preset overrides allocation ratios from token_budget.yaml
 priority_presets:
   balanced:

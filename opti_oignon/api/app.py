@@ -439,6 +439,21 @@ except Exception as _ledger_route_exc:
     )
 
 
+def _unified_gate_open() -> bool:
+    """Ask the retrieval layer's own gate statement, closed on failure.
+
+    The optimizer owns the gate; this helper only relays it. Any failure
+    to consult it reports the gate closed, because the capability table
+    below must never advertise a path on a guess.
+    """
+    try:
+        from opti_oignon.context_optimizer import unified_gate_open
+
+        return unified_gate_open()
+    except Exception:
+        return False
+
+
 @app.get("/api/health", tags=["health"])
 def health_check():
     """Basic health check endpoint."""
@@ -568,8 +583,11 @@ def health_check():
             "rag_store": RAG_STORE_AVAILABLE,
             "rag_chunker": RAG_CHUNKER_AVAILABLE,
             # Presence is not reach: the engine imports, but the
-            # capability is only real where a query can reach it.
-            "hybrid_search": HYBRID_SEARCH_AVAILABLE and HYBRID_SEARCH_ROUTED,
+            # capability is only real where a query can reach it -- and
+            # only while the gate that routes it is open.
+            "hybrid_search": HYBRID_SEARCH_AVAILABLE
+            and HYBRID_SEARCH_ROUTED
+            and _unified_gate_open(),
             "external_stores": EXTERNAL_STORES_AVAILABLE,
             "rag_dashboard": RAG_DASHBOARD_AVAILABLE,
             "plugin_registry": PLUGIN_REGISTRY_AVAILABLE,

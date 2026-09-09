@@ -6,7 +6,7 @@ Validates code blocks found in LLM responses. Supports Python
 Appends a syntax badge after each code block indicating whether
 the code is valid or contains errors.
 
-Pure text processing with stdlib only — no external dependencies.
+Pure text processing with stdlib only -- no external dependencies.
 """
 
 import ast

@@ -3,7 +3,7 @@
   Main layout: collapsible sidebar + content area + right panel.
   Mobile: sidebar as overlay with swipe-to-close, panel as overlay.
   Desktop: sidebar fixed, panel on the right.
-  Enhanced mobile responsive — swipe gesture, touch targets, dvh, safe-area.
+  Enhanced mobile responsive -- swipe gesture, touch targets, dvh, safe-area.
   Slots: header, subheader, panel-toggle, default (main area), panel (right panel).
 -->
 <script lang="ts">

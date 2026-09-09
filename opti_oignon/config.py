@@ -161,7 +161,7 @@ class OptiOignonConfig:
         Returns:
             Ollama model name
         """
-        # Use the 'routing' section for task type → model mapping
+        # Use the 'routing' section for task type -> model mapping
         routing = self._models_config.get("routing", {})
         type_models = routing.get(model_type, {})
 

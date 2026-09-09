@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Red Team Report Generation — Opti-Oignon
+Red Team Report Generation -- Opti-Oignon
 ================================================
 
 Generates human-readable and machine-readable reports from campaign scores.
 
 Formats:
-- JSON   — structured data for programmatic consumption
-- Text   — plain-text summary for terminal / logs
-- Markdown — tables and sections for documentation
+- JSON   -- structured data for programmatic consumption
+- Text   -- plain-text summary for terminal / logs
+- Markdown -- tables and sections for documentation
 
 Reports include timestamp, config snapshot, per-target heatmap data,
 and per-category / per-strategy / per-target breakdowns.
@@ -432,7 +432,7 @@ def save_report(
     Returns
     -------
     dict[str, str]
-        Mapping of format name → file path written.
+        Mapping of format name -> file path written.
     """
     if formats is None:
         formats = ["json", "text", "markdown"]

@@ -8,10 +8,10 @@ maintains a persistent task list that you can manage via slash commands.
 **Post-inference:** Scans each LLM response for action patterns using
 three extraction strategies:
 
-1. **Pattern matching** — phrases like "you should", "next step",
+1. **Pattern matching** -- phrases like "you should", "next step",
    "TODO:", "make sure to", "remember to"
-2. **Numbered steps** — detects "1. Do X", "2) Do Y" sequences
-3. **Imperative detection** — sentences starting with action verbs
+2. **Numbered steps** -- detects "1. Do X", "2) Do Y" sequences
+3. **Imperative detection** -- sentences starting with action verbs
    (install, configure, create, deploy, test, etc.)
 
 Extracted tasks are stored in SQLite and a summary is appended to the
@@ -21,8 +21,8 @@ response.
 
 ## Hook Points
 
-- `post_inference` — extracts tasks from responses
-- `tool_call` — handles task management commands
+- `post_inference` -- extracts tasks from responses
+- `tool_call` -- handles task management commands
 
 ## Commands
 
@@ -44,9 +44,9 @@ response.
 
 ## Permissions
 
-- `conversation_read` — reads LLM responses for extraction
-- `tool_register` — registers slash commands
-- `filesystem_plugin_dir` — stores the SQLite database
+- `conversation_read` -- reads LLM responses for extraction
+- `tool_register` -- registers slash commands
+- `filesystem_plugin_dir` -- stores the SQLite database
 
 ## Deduplication
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Opti-Oignon -- Smoke Test: End-to-End API Validation (v1.9.0)
+# Opti-Oignon -- Smoke Test: End-to-End API Validation
 # =============================================================================
 # Starts the FastAPI backend, runs a sequence of curl tests, then cleans up.
 #
@@ -21,6 +21,17 @@ RED="\033[91m"
 YELLOW="\033[93m"
 BLUE="\033[94m"
 RESET="\033[0m"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# The version this run expects is read from the package register, never
+# restated here. A copy kept in this file would agree on the day it was
+# written and disagree silently from then on, and the job that notices
+# would be a release job.
+EXPECTED_VERSION="$(cd "$PROJECT_ROOT" && python3 -c \
+    'from opti_oignon.__version__ import __version__; print(__version__)' \
+    2>/dev/null)"
 
 PORT=8199
 BASE="http://localhost:${PORT}"
@@ -51,7 +62,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo -e "${BOLD}============================================="
-echo "  Opti-Oignon Smoke Test v1.9.0"
+echo "  Opti-Oignon Smoke Test v${EXPECTED_VERSION}"
 echo -e "=============================================${RESET}"
 
 # -------------------------------------------------
@@ -101,10 +112,10 @@ fi
 # -------------------------------------------------
 step "Version check"
 VERSION=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null)
-if [ "$VERSION" = "1.9.0" ]; then
+if [ -n "$EXPECTED_VERSION" ] && [ "$VERSION" = "$EXPECTED_VERSION" ]; then
     ok "Version: $VERSION"
 else
-    fail "Version: expected 1.9.0, got $VERSION"
+    fail "Version: expected ${EXPECTED_VERSION:-<unreadable>}, got $VERSION"
 fi
 
 # -------------------------------------------------
@@ -124,7 +135,7 @@ fi
 step "POST /api/conversations"
 RESP=$(curl -sf -X POST "${BASE}/api/conversations" \
     -H "Content-Type: application/json" \
-    -d '{"title": "Smoke Test v1.9.0"}' 2>&1)
+    -d "{\"title\": \"Smoke Test v${EXPECTED_VERSION}\"}" 2>&1)
 CONV_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
 if [ -n "$CONV_ID" ] && [ "$CONV_ID" != "null" ]; then
     ok "Created conversation: $CONV_ID"
@@ -255,7 +266,7 @@ fi
 # Test 15: Analytics overview
 # -------------------------------------------------
 step "GET /api/feedback/analytics/overview"
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/feedback/analytics/overview" 2>&1)
+HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/analytics/overview" 2>&1)
 if [ "$HTTP_CODE" = "200" ]; then
     ok "Analytics overview: 200"
 else
@@ -321,7 +332,7 @@ fi
 # Test 21: Sandbox status
 # -------------------------------------------------
 step "GET /api/sandbox"
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/sandbox" 2>&1)
+HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${BASE}/api/sandbox/status" 2>&1)
 if [ "$HTTP_CODE" = "200" ]; then
     ok "Sandbox status: 200"
 else

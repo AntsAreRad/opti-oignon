@@ -2,13 +2,13 @@
 """
 Plugin management API routes.
 
-GET    /api/plugins                — List installed plugins
-POST   /api/plugins/install       — Install from directory/archive
-POST   /api/plugins/{name}/enable — Enable plugin
-POST   /api/plugins/{name}/disable — Disable plugin
-DELETE /api/plugins/{name}        — Uninstall plugin
-GET    /api/plugins/{name}/config — Get plugin config
-PUT    /api/plugins/{name}/config — Update plugin config
+GET    /api/plugins                -- List installed plugins
+POST   /api/plugins/install       -- Install from directory/archive
+POST   /api/plugins/{name}/enable -- Enable plugin
+POST   /api/plugins/{name}/disable -- Disable plugin
+DELETE /api/plugins/{name}        -- Uninstall plugin
+GET    /api/plugins/{name}/config -- Get plugin config
+PUT    /api/plugins/{name}/config -- Update plugin config
 """
 
 import logging

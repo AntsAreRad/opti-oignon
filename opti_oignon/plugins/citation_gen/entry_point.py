@@ -190,7 +190,7 @@ def hook_tool_call(ctx: Any) -> dict[str, Any] | None:
 
     Expects ctx.data:
         tool_name: "cite" or "citation" or "citation_gen"
-        sources: list[dict] — source metadata
+        sources: list[dict] -- source metadata
         style: str (optional)
     """
     tool_name = ctx.data.get("tool_name", "")

@@ -77,7 +77,7 @@ Once both services are running:
 You can also check the backend health endpoint:
 
 ```bash
-curl http://localhost:8000/api/health
+curl http://localhost:8001/api/health
 ```
 
 

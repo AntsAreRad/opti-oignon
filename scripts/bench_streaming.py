@@ -465,7 +465,7 @@ def _format_human(results: dict) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="S159 streaming benchmarks")
+    parser = argparse.ArgumentParser(description="Streaming latency benchmarks")
     parser.add_argument("--json", action="store_true", help="Output JSON for CI")
     parser.add_argument("--output", "-o", help="Write results to file")
     parser.add_argument(

@@ -1,13 +1,13 @@
 <!--
-  LearnedRouterPanel — ML-based routing panel.
+  LearnedRouterPanel -- ML-based routing panel.
 
   Sections:
-  1. Status card — training state, sample count, last accuracy
-  2. Training controls — Train button, model type selector, threshold slider
-  3. Live classifier test — query input, ML vs YAML side-by-side
-  4. A/B metrics — learned vs yaml usage ratio, confidence, agreement rate
-  5. Confidence histogram — bar chart of ML confidence distribution
-  6. Top disagreements — table of ML vs YAML divergences
+  1. Status card -- training state, sample count, last accuracy
+  2. Training controls -- Train button, model type selector, threshold slider
+  3. Live classifier test -- query input, ML vs YAML side-by-side
+  4. A/B metrics -- learned vs yaml usage ratio, confidence, agreement rate
+  5. Confidence histogram -- bar chart of ML confidence distribution
+  6. Top disagreements -- table of ML vs YAML divergences
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
