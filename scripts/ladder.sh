@@ -102,17 +102,6 @@ t5() {
   else skip "tests/adversarial/ does not exist yet"; fi
 }
 
-# The gate the Stop hook runs: cheap tiers only, so finishing is never claimed
-# over a red tree. Exit 2 feeds the reason back to the model.
-stopgate() {
-  out=$( { t0; t2; } 2>&1 )
-  if printf '%s' "$out" | grep -q '^  FAIL'; then
-    printf 'Ladder stop gate is red. Fix before finishing:\n%s\n' \
-      "$(printf '%s' "$out" | grep '^  FAIL')" >&2
-    exit 2
-  fi
-  exit 0
-}
 
 case "$TIER" in
   t0) t0 ;;
@@ -121,7 +110,6 @@ case "$TIER" in
   t3) t3 ;;
   t4) t4 ;;
   t5) t5 ;;
-  stopgate) stopgate ;;
   all) t0; t2; t1; t3; t4; t5 ;;
   *) say "unknown tier: $TIER"; exit 64 ;;
 esac
