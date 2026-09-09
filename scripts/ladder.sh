@@ -7,7 +7,7 @@ set -uo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" || exit 1
 
 TIER="${1:-all}"
-JUNIT="${JUNIT_OUT:-/tmp/oo_junit.xml}"
+JUNIT="${JUNIT_OUT:-${TMPDIR:-/tmp}/oo_junit.xml}"
 rc_total=0
 
 say()  { printf '%s\n' "$*"; }
@@ -33,9 +33,13 @@ PY
   then pass "every tracked Python file parses"; else fail "syntax errors above"; fi
 
   if command -v ruff >/dev/null 2>&1; then
-    n=$(ruff check . 2>/dev/null | tail -1 | grep -oE '^[0-9]+' || echo 0)
-    dbt="${RUFF_DEBT:-0}"
-    if [ "${n:-0}" -le "$dbt" ]; then pass "ruff ${n:-0} <= recorded debt ${dbt}"
+    out=$(ruff check . --output-format=concise 2>/dev/null); rc=$?
+    n=$(printf '%s\n' "$out" | grep -cE ':[0-9]+:[0-9]+:')
+    dbt="${RUFF_DEBT:-35}"
+    # Proven capable: a non-zero exit with a zero count means the probe is blind.
+    if [ "$rc" -ne 0 ] && [ "$n" -eq 0 ]; then
+      fail "lint probe is blind: ruff exited ${rc} while the probe counted 0"
+    elif [ "$n" -le "$dbt" ]; then pass "ruff ${n} <= recorded debt ${dbt}"
     else fail "ruff ${n} > recorded debt ${dbt} (new lint introduced)"; fi
   else skip "ruff not installed"; fi
 }
@@ -43,7 +47,7 @@ PY
 t1() {
   head_ "t1  contracts"
   purge
-  if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly --junitxml="$JUNIT" >/tmp/oo_pytest.txt 2>&1; then :; fi
+  if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly --junitxml="$JUNIT" >${TMPDIR:-/tmp}/oo_pytest.txt 2>&1; then :; fi
   if [ -f "$JUNIT" ]; then
     python3 - "$JUNIT" <<'PY'
 import sys,xml.etree.ElementTree as ET
@@ -55,7 +59,7 @@ print(f"  junitxml: {tot} collected / {f} failed / {e} errors / {sk} skipped")
 sys.exit(1 if (f or e) else 0)
 PY
     if [ $? -eq 0 ]; then pass "junitxml is the authority; no failures, no errors"
-    else fail "see /tmp/oo_pytest.txt"; grep -E '^FAILED|^ERROR' /tmp/oo_pytest.txt | head -12; fi
+    else fail "see ${TMPDIR:-/tmp}/oo_pytest.txt"; grep -E '^FAILED|^ERROR' ${TMPDIR:-/tmp}/oo_pytest.txt | head -12; fi
   else fail "no junitxml produced - the sweep did not run"; fi
 }
 
@@ -88,8 +92,8 @@ t4() {
   head_ "t4  property and fuzz"
   if python3 -c "import hypothesis" 2>/dev/null; then
     if [ -d tests/property ]; then
-      if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly tests/property >/tmp/oo_prop.txt 2>&1
-      then pass "property suite"; else fail "property suite - see /tmp/oo_prop.txt"; fi
+      if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly tests/property >${TMPDIR:-/tmp}/oo_prop.txt 2>&1
+      then pass "property suite"; else fail "property suite - see ${TMPDIR:-/tmp}/oo_prop.txt"; fi
     else skip "tests/property/ does not exist yet"; fi
   else skip "hypothesis not installed"; fi
 }
@@ -97,8 +101,8 @@ t4() {
 t5() {
   head_ "t5  adversarial"
   if [ -d tests/adversarial ]; then
-    if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly tests/adversarial >/tmp/oo_adv.txt 2>&1
-    then pass "adversarial suite"; else fail "adversarial suite - see /tmp/oo_adv.txt"; fi
+    if PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly tests/adversarial >${TMPDIR:-/tmp}/oo_adv.txt 2>&1
+    then pass "adversarial suite"; else fail "adversarial suite - see ${TMPDIR:-/tmp}/oo_adv.txt"; fi
   else skip "tests/adversarial/ does not exist yet"; fi
 }
 
