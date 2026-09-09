@@ -64,6 +64,16 @@ behaviour is verified independently of git:
   * C25 -- an alias sequence re-sorted by a rename is refused, and named as a
     re-sort. A blade that tolerated reordering would stop guaranteeing that
     nothing else moved, which is the whole of what this guard is for.
+  * C26 -- injectivity is per namespace. A method name and a local never
+    denoted the same binding, so renaming both onto one name merges nothing
+    and is accepted.
+  * C27 -- a real collision inside one namespace is still refused: two
+    attributes of one object collapsing onto a single name is a merge.
+  * C28 -- and so is a module-level definition colliding with a local. Both
+    bind in the ordinary variable space, so that is a merge by shadowing --
+    the case a definition-names namespace would have waved through, and the
+    one the reconstruction cannot catch, because the after file really does
+    contain both names.
 
 Every input carrying nomenclature is assembled from fragments at runtime, so
 the literal form never appears in this file's source and neither guard trips
@@ -733,6 +743,107 @@ def test_c25_a_rename_induced_alias_resort_is_refused_as_a_resort():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# C26-C28 -- injectivity is per namespace, not global
+#
+# Two names may converge on one only when they never denoted the same binding.
+# Which namespace a name lives in is decided by where Python binds it, not by
+# the syntax that spells it.
+# ---------------------------------------------------------------------------
+def _method_name():
+    """A method name carrying nomenclature; binds in the class namespace."""
+    return (_CODE + "_cache_key").lower()
+
+
+def _local_name():
+    """A local name carrying nomenclature; binds in the variable namespace."""
+    return (_CODE + "_key").lower()
+
+
+def test_c26_two_namespaces_may_converge_on_one_name():
+    guard, restore = _load()
+    try:
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            'class Executor:\n'
+            '    def ' + _method_name() + '(self):\n'
+            '        return 1\n'
+            '\n'
+            '\n'
+            'def build(entry):\n'
+            '    ' + _local_name() + ' = entry\n'
+            '    return ' + _local_name() + '\n'
+        )
+        after = (_purged(before)
+                 .replace(_method_name(), "semcache_key")
+                 .replace(_local_name(), "semcache_key"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.python_shape(before) != guard.python_shape(after), (
+            "the fixture must actually move the shape"
+        )
+        assert guard.verdict("m.py", before, after) is None, (
+            "a method name and a local never denoted the same binding, so "
+            "renaming both onto one name merges nothing"
+        )
+    finally:
+        restore()
+
+
+def test_c27_a_real_collision_in_the_attribute_space_is_refused():
+    guard, restore = _load()
+    try:
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            'class Executor:\n'
+            '    def run(self):\n'
+            '        return self._' + _method_name() + ' + self._' \
+            + _local_name() + '\n'
+        )
+        after = (_purged(before)
+                 .replace("_" + _method_name(), "_semcache_key")
+                 .replace("_" + _local_name(), "_semcache_key"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "two attributes of one object collapsing onto one name is a "
+            "merge, whatever else the file does"
+        )
+        assert "injective" in reason, reason
+    finally:
+        restore()
+
+
+def test_c28_a_real_collision_in_the_variable_space_is_refused():
+    guard, restore = _load()
+    try:
+        # A module-level definition binds in the ordinary variable space, the
+        # same space as a local. Holding definition names apart as a space of
+        # their own would accept this merge, and the reconstruction cannot
+        # catch it: the after file really does contain both names.
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            'def ' + _method_name() + '():\n'
+            '    return 1\n'
+            '\n'
+            '\n'
+            'def build(entry):\n'
+            '    ' + _local_name() + ' = entry\n'
+            '    return ' + _local_name() + '\n'
+        )
+        after = (_purged(before)
+                 .replace(_method_name(), "semcache_key")
+                 .replace(_local_name(), "semcache_key"))
+        assert guard.debt_count(after) < guard.debt_count(before)
+        reason = guard.verdict("m.py", before, after)
+        assert reason is not None, (
+            "a module-level definition and a local share one namespace, so "
+            "renaming both onto one name is a merge by shadowing"
+        )
+        assert "injective" in reason, reason
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -783,6 +894,12 @@ def _run_all():
          test_c24_the_published_set_is_resolved_through_the_map),
         ("C25 alias re-sort named as a re-sort",
          test_c25_a_rename_induced_alias_resort_is_refused_as_a_resort),
+        ("C26 two namespaces may converge",
+         test_c26_two_namespaces_may_converge_on_one_name),
+        ("C27 attribute-space collision refused",
+         test_c27_a_real_collision_in_the_attribute_space_is_refused),
+        ("C28 variable-space collision refused",
+         test_c28_a_real_collision_in_the_variable_space_is_refused),
     ]
     passed = 0
     for label, fn in tests:

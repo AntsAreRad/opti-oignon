@@ -461,18 +461,55 @@ _ID_FIELDS = {
 }
 
 
+_ATTRIBUTE = "attribute"
+_VARIABLE = "variable"
+
+_DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _slot_space(node, field, in_class_body):
+    """The namespace an identifier slot binds or reads in.
+
+    Decided by where Python actually binds the name, never by the syntax that
+    spells it. Two names may converge on one only when they never denoted the
+    same binding, so the question is always: same namespace or not.
+
+      * ``self.x`` and a method ``def x`` are the SAME namespace. Both are
+        looked up on the object, so renaming both onto one name is a merge.
+      * A ``def`` or ``class`` at module level, or nested inside a function,
+        binds in the ordinary variable space -- exactly as an assignment
+        does. Definition names are therefore NOT a namespace of their own.
+        Holding them apart would accept a rename that merges a definition
+        with a local by shadowing, and the reconstruction cannot catch that:
+        the after file really does contain both names, so it rebuilds
+        perfectly while two distinct bindings have silently become one.
+      * A parameter and a local of the same name are one binding, so
+        arguments belong with plain names. ``keyword.arg`` names a parameter
+        of the callee rather than binding anything here; it is left in the
+        variable space, which is stricter than it needs to be and therefore
+        safe.
+    """
+    if isinstance(node, ast.Attribute) and field == "attr":
+        return _ATTRIBUTE
+    if isinstance(node, _DEFINITIONS) and field == "name":
+        return _ATTRIBUTE if in_class_body else _VARIABLE
+    return _VARIABLE
+
+
 def _identifier_slots(tree):
-    """Every ``(node, field)`` holding an identifier, depth first."""
+    """Every ``(node, field, space)`` holding an identifier, depth first."""
     slots = []
 
-    def walk(node):
+    def walk(node, in_class_body):
         for field in _ID_FIELDS.get(type(node), ()):
             if isinstance(getattr(node, field, None), str):
-                slots.append((node, field))
+                slots.append((node, field,
+                              _slot_space(node, field, in_class_body)))
+        inside = isinstance(node, ast.ClassDef)
         for child in ast.iter_child_nodes(node):
-            walk(child)
+            walk(child, inside)
 
-    walk(tree)
+    walk(tree, False)
     return slots
 
 
@@ -507,8 +544,10 @@ def _pairing_dump(text):
     for node in _alias_nodes(tree):
         node.names.sort(key=lambda a: (a.name, a.asname or ""))
     names = []
-    for node, field in _identifier_slots(tree):
+    spaces = []
+    for node, field, space in _identifier_slots(tree):
         names.append(getattr(node, field))
+        spaces.append(space)
         setattr(node, field, "<id>")
 
     class _Mask(ast.NodeTransformer):
@@ -520,7 +559,7 @@ def _pairing_dump(text):
     tree = _Mask().visit(tree)
     ast.fix_missing_locations(tree)
     dump = ast.dump(tree, annotate_fields=True, include_attributes=False)
-    return dump, names, tree
+    return dump, names, spaces, tree
 
 
 def _substitute(text, mapping):
@@ -530,18 +569,22 @@ def _substitute(text, mapping):
     return text
 
 
-def _renamed_tree(text, mapping):
-    """``text`` parsed with the map applied to identifiers and to literals."""
+def _renamed_tree(text, maps, literal_map):
+    """``text`` parsed with each namespace's map applied, and literals too.
+
+    A literal belongs to no namespace, so it is substituted through the union
+    of the maps -- which the caller has already proved unambiguous.
+    """
     tree = ast.parse(text)
-    for node, field in _identifier_slots(tree):
+    for node, field, space in _identifier_slots(tree):
         value = getattr(node, field)
-        if value in mapping:
-            setattr(node, field, mapping[value])
+        if value in maps[space]:
+            setattr(node, field, maps[space][value])
 
     class _Sub(ast.NodeTransformer):
         def visit_Constant(self, node):
             if isinstance(node.value, str):
-                node.value = _substitute(node.value, mapping)
+                node.value = _substitute(node.value, literal_map)
             return node
 
     tree = _Sub().visit(tree)
@@ -610,8 +653,8 @@ def rename_equivalent(before, after, published_models=_UNSET,
     if published_models is _UNSET:
         published_models = published_model_names()
 
-    dump_before, old_names, masked_before = _pairing_dump(before)
-    dump_after, new_names, masked_after = _pairing_dump(after)
+    dump_before, old_names, spaces, masked_before = _pairing_dump(before)
+    dump_after, new_names, _, masked_after = _pairing_dump(after)
     if dump_before != dump_after:
         # Identifiers and strings are masked on both sides here, so what is
         # left to differ is exactly what no substitution could explain. That
@@ -621,28 +664,42 @@ def rename_equivalent(before, after, published_models=_UNSET,
         listed = "; ".join(found) if found else "the structure moved"
         return f"differences not attributable to a substitution: {listed}"
 
-    mapping = {}
-    for old, new in zip(old_names, new_names):
+    maps = {_ATTRIBUTE: {}, _VARIABLE: {}}
+    unchanged = {_ATTRIBUTE: set(), _VARIABLE: set()}
+    for space, old, new in zip(spaces, old_names, new_names):
         if old == new:
+            unchanged[space].add(old)
             continue
-        if mapping.setdefault(old, new) != new:
+        if maps[space].setdefault(old, new) != new:
             return (f"the identifier map is not a function ({old} goes to "
-                    f"both {mapping[old]} and {new})")
-    if not mapping:
+                    f"both {maps[space][old]} and {new})")
+    if not any(maps.values()):
         return _NO_RENAME
 
-    targets = list(mapping.values())
-    unchanged = {old for old, new in zip(old_names, new_names) if old == new}
-    if len(set(targets)) != len(targets) or unchanged & set(targets):
-        return ("the identifier map is not injective (two names collapse "
-                "onto one)")
-    for old, new in sorted(mapping.items()):
+    # Injectivity is asked of each namespace separately: a collision only
+    # merges two things when the two names denoted one binding to begin with.
+    for space, mapping in sorted(maps.items()):
+        targets = list(mapping.values())
+        if len(set(targets)) != len(targets) or unchanged[space] & set(targets):
+            return (f"the identifier map is not injective in the {space} "
+                    "namespace (two names collapse onto one)")
+
+    # Literals have no namespace, so the union has to be unambiguous.
+    literal_map = {}
+    for mapping in maps.values():
+        for old, new in mapping.items():
+            if literal_map.setdefault(old, new) != new:
+                return (f"{old} is renamed differently in different "
+                        "namespaces, so a literal carrying it is ambiguous")
+
+    for old, new in sorted(literal_map.items()):
         if not guard.find_violations([old]):
             return f"a renamed identifier carried no nomenclature ({old} -> {new})"
         if guard.find_violations([new]):
             return f"a renamed identifier still carries nomenclature ({new})"
 
-    mapped = _blanked(_renamed_tree(before, mapping), published_models)
+    mapped = _blanked(_renamed_tree(before, maps, literal_map),
+                      published_models)
     target = _blanked(ast.parse(after), published_models)
     if (ast.dump(mapped, annotate_fields=True, include_attributes=False)
             == ast.dump(target, annotate_fields=True,
