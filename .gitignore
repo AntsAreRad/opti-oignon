@@ -135,3 +135,4 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/state/
 !CLAUDE.md
+!.claude/state/blades.md
