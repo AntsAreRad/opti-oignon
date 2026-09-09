@@ -20,11 +20,11 @@ from .schemas import (
     CacheClearResponse,
     CacheCombinedStats,
     CacheStatsSchema,
-    S68CacheClearRequest,
-    S68CacheConfigUpdate,
-    S68CacheStatsSchema,
-    S68CacheStatusResponse,
     SemanticCacheStatsSchema,
+    SemCacheClearRequest,
+    SemCacheConfigUpdate,
+    SemCacheStatsSchema,
+    SemCacheStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,21 +119,21 @@ def clear_cache_model(model: str) -> dict:
 # =========================================================================
 
 
-@router.get("/s68/status", response_model=S68CacheStatusResponse)
-def s68_cache_status() -> dict:
+@router.get("/semcache/status", response_model=SemCacheStatusResponse)
+def semcache_status() -> dict:
     """Get semantic cache status, stats, and config."""
     if not SEMANTIC_CACHE_AVAILABLE or semantic_cache is None:
-        return S68CacheStatusResponse(
+        return SemCacheStatusResponse(
             enabled=False,
             available=False,
         )
 
     try:
         stats = semantic_cache.get_stats()
-        return S68CacheStatusResponse(
+        return SemCacheStatusResponse(
             enabled=stats.enabled,
             available=True,
-            stats=S68CacheStatsSchema(
+            stats=SemCacheStatsSchema(
                 total_entries=stats.total_entries,
                 exact_hits=stats.exact_hits,
                 semantic_hits=stats.semantic_hits,
@@ -158,8 +158,8 @@ def s68_cache_status() -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/s68/toggle", response_model=S68CacheStatusResponse)
-def s68_cache_toggle() -> dict:
+@router.post("/semcache/toggle", response_model=SemCacheStatusResponse)
+def semcache_toggle() -> dict:
     """Toggle the semantic cache on/off."""
     if not SEMANTIC_CACHE_AVAILABLE or semantic_cache is None:
         raise HTTPException(
@@ -169,14 +169,14 @@ def s68_cache_toggle() -> dict:
 
     try:
         semantic_cache.enabled = not semantic_cache.enabled
-        return s68_cache_status()
+        return semcache_status()
     except Exception as e:
         logger.error("Semantic cache toggle error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/s68/config", response_model=S68CacheStatusResponse)
-def s68_cache_update_config(body: S68CacheConfigUpdate) -> dict:
+@router.put("/semcache/config", response_model=SemCacheStatusResponse)
+def semcache_update_config(body: SemCacheConfigUpdate) -> dict:
     """Update semantic cache configuration."""
     if not SEMANTIC_CACHE_AVAILABLE or semantic_cache is None:
         raise HTTPException(
@@ -188,14 +188,14 @@ def s68_cache_update_config(body: S68CacheConfigUpdate) -> dict:
         updates = {k: v for k, v in body.model_dump().items() if v is not None}
         if updates:
             semantic_cache.update_config(updates)
-        return s68_cache_status()
+        return semcache_status()
     except Exception as e:
         logger.error("Semantic cache config update error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/s68/clear", response_model=CacheClearResponse)
-def s68_cache_clear(body: S68CacheClearRequest = S68CacheClearRequest()) -> dict:
+@router.post("/semcache/clear", response_model=CacheClearResponse)
+def semcache_clear(body: SemCacheClearRequest = SemCacheClearRequest()) -> dict:
     """Clear semantic cache entries.
 
     If conversation_id is provided, only clears that conversation.
@@ -209,9 +209,9 @@ def s68_cache_clear(body: S68CacheClearRequest = S68CacheClearRequest()) -> dict
 
     try:
         count = semantic_cache.invalidate(body.conversation_id)
-        source = "s68_cache"
+        source = "semcache"
         if body.conversation_id:
-            source = f"s68_cache:{body.conversation_id}"
+            source = f"semcache:{body.conversation_id}"
         return CacheClearResponse(
             entries_removed=count,
             source=source,
@@ -221,8 +221,8 @@ def s68_cache_clear(body: S68CacheClearRequest = S68CacheClearRequest()) -> dict
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/s68/expire", response_model=CacheClearResponse)
-def s68_cache_expire() -> dict:
+@router.post("/semcache/expire", response_model=CacheClearResponse)
+def semcache_expire() -> dict:
     """Remove expired entries from the semantic cache."""
     if not SEMANTIC_CACHE_AVAILABLE or semantic_cache is None:
         raise HTTPException(
@@ -234,7 +234,7 @@ def s68_cache_expire() -> dict:
         count = semantic_cache.expire_stale()
         return CacheClearResponse(
             entries_removed=count,
-            source="s68_cache_expire",
+            source="semcache_expire",
         )
     except Exception as e:
         logger.error("Semantic cache expire error: %s", e)

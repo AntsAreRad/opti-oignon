@@ -778,8 +778,8 @@ class Executor:
         self._last_prompt_budget = None  # last calculated PromptTokenBudget
         self._compression_enabled: bool = True  # conversation compressor
         self._last_compression_result = None  # last CompressedContext or None
-        self._s68_cache_hit: bool = False  # last call was cache hit
-        self._s68_cache_key: str = ""  # last cache key used
+        self._semcache_hit: bool = False  # last call was cache hit
+        self._semcache_key: str = ""  # last cache key used
         self._last_cascade_result = None  # last CascadeResult or None
         self._last_speculative_result = None  # last SpeculativeResult or None
         self._last_offline_queued: bool = False  # last call was queued offline
@@ -830,14 +830,14 @@ class Executor:
         return self._last_cache_hit
 
     @property
-    def s68_cache_hit(self) -> bool:
+    def semcache_hit(self) -> bool:
         """Whether the last call was served from the semantic cache."""
-        return self._s68_cache_hit
+        return self._semcache_hit
 
     @property
-    def s68_cache_key(self) -> str:
+    def semcache_key(self) -> str:
         """The cache key used for the last cache lookup."""
-        return self._s68_cache_key
+        return self._semcache_key
 
     @property
     def last_verification_results(self) -> list:
@@ -2347,8 +2347,8 @@ class Executor:
         # Step 3b: Cache lookup (exact + multi-turn)
         # Cache s'applique en single-turn ET multi-turn (conversation hashing)
         self._last_cache_hit = False
-        self._s68_cache_hit = False
-        self._s68_cache_key = ""
+        self._semcache_hit = False
+        self._semcache_key = ""
         cache_key = ""
 
         # Fingerprint of the fully assembled generation context
@@ -2367,31 +2367,31 @@ class Executor:
             and _semantic_cache.enabled
         ):
             try:
-                s68_entry = _semantic_cache.get(
+                semcache_entry = _semantic_cache.get(
                     user_content,
                     conversation_id=conversation_id,
                     model=routing.model,
                     context_fingerprint=_ctx_fp,
                 )
-                if s68_entry is not None:
+                if semcache_entry is not None:
                     self._last_cache_hit = True
-                    self._s68_cache_hit = True
-                    self._s68_cache_key = s68_entry.query_hash
-                    hit_label = "CACHE-" + s68_entry.match_type.upper()
+                    self._semcache_hit = True
+                    self._semcache_key = semcache_entry.query_hash
+                    hit_label = "CACHE-" + semcache_entry.match_type.upper()
                     status(
                         f"[{hit_label}] Hit for {routing.model} "
-                        f"(sim={s68_entry.similarity:.4f})"
+                        f"(sim={semcache_entry.similarity:.4f})"
                     )
-                    yield s68_entry.response
+                    yield semcache_entry.response
                     self._current_task = None
                     _emit_ledger(
                         "cache_hit",
                         **_ledger_tokens,
                         cache_hit=True,
-                        cache_hit_type=str(s68_entry.match_type),
-                        cache_similarity=float(s68_entry.similarity),
+                        cache_hit_type=str(semcache_entry.match_type),
+                        cache_similarity=float(semcache_entry.similarity),
                     )
-                    return refined_question, s68_entry.response
+                    return refined_question, semcache_entry.response
             except Exception as e:
                 logger.debug("Semantic cache lookup error: %s", e)
 
@@ -2910,7 +2910,7 @@ class Executor:
             and _semantic_cache.enabled
         ):
             try:
-                s68_key = _semantic_cache.put(
+                semcache_key = _semantic_cache.put(
                     query=user_content,
                     response=full_response,
                     model=routing.model,
@@ -2918,9 +2918,9 @@ class Executor:
                     conversation_id=conversation_id,
                     context_fingerprint=_ctx_fp,
                 )
-                if s68_key:
-                    self._s68_cache_key = s68_key
-                    logger.debug("Semantic cache put: %s", s68_key[:12])
+                if semcache_key:
+                    self._semcache_key = semcache_key
+                    logger.debug("Semantic cache put: %s", semcache_key[:12])
             except Exception as e:
                 logger.debug("Semantic cache put skipped: %s", e)
 
@@ -3062,22 +3062,22 @@ class Executor:
             and _semantic_cache.enabled
         ):
             try:
-                s68_entry = _semantic_cache.get(
+                semcache_entry = _semantic_cache.get(
                     question,
                     conversation_id=conversation_id,
                     context_fingerprint=_CTX_FP_NOCTX,
                 )
-                if s68_entry is not None:
-                    self._s68_cache_hit = True
-                    self._s68_cache_key = s68_entry.query_hash
+                if semcache_entry is not None:
+                    self._semcache_hit = True
+                    self._semcache_key = semcache_entry.query_hash
                     logger.info(
                         "Semantic cache hit before cascade (sim=%.4f)",
-                        s68_entry.similarity,
+                        semcache_entry.similarity,
                     )
                     # Build a synthetic CascadeResult for the cached response
                     if _CascadeResult is not None:
                         result = _CascadeResult(
-                            final_response=s68_entry.response,
+                            final_response=semcache_entry.response,
                             model_used="cache",
                             tier_index=-1,
                             tier_name="cache",
@@ -3132,7 +3132,7 @@ class Executor:
                 and _semantic_cache.enabled
             ):
                 try:
-                    s68_key = _semantic_cache.put(
+                    semcache_key = _semantic_cache.put(
                         query=question,
                         response=result.final_response,
                         model=result.model_used,
@@ -3140,9 +3140,9 @@ class Executor:
                         conversation_id=conversation_id,
                         context_fingerprint=_CTX_FP_NOCTX,
                     )
-                    if s68_key:
-                        self._s68_cache_key = s68_key
-                        logger.debug("Semantic cache put after cascade: %s", s68_key[:12])
+                    if semcache_key:
+                        self._semcache_key = semcache_key
+                        logger.debug("Semantic cache put after cascade: %s", semcache_key[:12])
                 except Exception as e:
                     logger.debug("Semantic cache put skipped: %s", e)
 
@@ -3192,21 +3192,21 @@ class Executor:
             and _semantic_cache.enabled
         ):
             try:
-                s68_entry = _semantic_cache.get(
+                semcache_entry = _semantic_cache.get(
                     question,
                     conversation_id=conversation_id,
                     context_fingerprint=_CTX_FP_NOCTX,
                 )
-                if s68_entry is not None:
-                    self._s68_cache_hit = True
-                    self._s68_cache_key = s68_entry.query_hash
+                if semcache_entry is not None:
+                    self._semcache_hit = True
+                    self._semcache_key = semcache_entry.query_hash
                     logger.info(
                         "Semantic cache hit before speculative (sim=%.4f)",
-                        s68_entry.similarity,
+                        semcache_entry.similarity,
                     )
                     if _SpeculativeResult is not None:
                         result = _SpeculativeResult(
-                            final_response=s68_entry.response,
+                            final_response=semcache_entry.response,
                             draft_response="",
                             verify_response="",
                             draft_model="cache",
@@ -3281,7 +3281,7 @@ class Executor:
                         if result.draft_accepted
                         else result.verify_model
                     )
-                    s68_key = _semantic_cache.put(
+                    semcache_key = _semantic_cache.put(
                         query=question,
                         response=result.final_response,
                         model=model_used,
@@ -3292,9 +3292,9 @@ class Executor:
                         conversation_id=conversation_id,
                         context_fingerprint=_CTX_FP_NOCTX,
                     )
-                    if s68_key:
-                        self._s68_cache_key = s68_key
-                        logger.debug("Semantic cache put after speculative: %s", s68_key[:12])
+                    if semcache_key:
+                        self._semcache_key = semcache_key
+                        logger.debug("Semantic cache put after speculative: %s", semcache_key[:12])
                 except Exception as e:
                     logger.debug("Semantic cache put skipped: %s", e)
 

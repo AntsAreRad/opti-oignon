@@ -348,7 +348,7 @@ export interface CacheClearResponse {
 
 // --: Semantic Cache (enhanced) --
 
-export interface S68CacheStats {
+export interface SemCacheStats {
 	total_entries: number;
 	exact_hits: number;
 	semantic_hits: number;
@@ -367,14 +367,14 @@ export interface S68CacheStats {
 	embeddings_available: boolean;
 }
 
-export interface S68CacheStatus {
+export interface SemCacheStatus {
 	enabled: boolean;
 	available: boolean;
-	stats: S68CacheStats | null;
+	stats: SemCacheStats | null;
 	config: Record<string, unknown>;
 }
 
-export interface S68CacheConfigUpdate {
+export interface SemCacheConfigUpdate {
 	enabled?: boolean;
 	similarity_threshold?: number;
 	ttl_seconds?: number;
@@ -2271,7 +2271,7 @@ export interface BenchmarkV2HistoryResponse {
 	total: number;
 }
 
-// — LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
+// -- LLM-as-Judge, Leaderboard, Head-to-Head, Trends, Recommendations
 
 export interface BenchmarkV2JudgeScore {
 	question_id: string;
@@ -2371,7 +2371,7 @@ export interface BenchmarkV2ApplyResponse {
 	error: string;
 }
 
-// — Custom Profiles
+// -- Custom Profiles
 
 export interface BenchmarkV2CustomProfile {
 	profile_id: string;
@@ -2419,7 +2419,7 @@ export interface BenchmarkV2QuestionPreview {
 	total: number;
 }
 
-// — Auto-Trigger
+// -- Auto-Trigger
 
 export interface BenchmarkV2AutoTriggerStatus {
 	enabled: boolean;

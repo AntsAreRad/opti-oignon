@@ -1,5 +1,5 @@
 <!--
-  CacheStatsPanel — Semantic Cache settings panel.
+  CacheStatsPanel -- Semantic Cache settings panel.
 
   Sections:
   1. Enable/disable toggle + embeddings availability
@@ -11,14 +11,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		getS68CacheStatus,
-		toggleS68Cache,
-		updateS68CacheConfig,
-		clearS68Cache,
-		expireS68Cache,
+		getSemCacheStatus,
+		toggleSemCache,
+		updateSemCacheConfig,
+		clearSemCache,
+		expireSemCache,
 	} from '$lib/api/semanticCache';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
-	import type { S68CacheStats, S68CacheStatus } from '$lib/types';
+	import type { SemCacheStats, SemCacheStatus } from '$lib/types';
 
 	// -------------------------------------------------------------------------
 	// State
@@ -27,8 +27,8 @@
 	let loading = true;
 	let error = '';
 
-	let status: S68CacheStatus | null = null;
-	let stats: S68CacheStats | null = null;
+	let status: SemCacheStatus | null = null;
+	let stats: SemCacheStats | null = null;
 
 	// Config edits
 	let localEnabled = false;
@@ -54,7 +54,7 @@
 		loading = true;
 		error = '';
 		try {
-			status = await getS68CacheStatus();
+			status = await getSemCacheStatus();
 			stats = status.stats ?? null;
 			if (status.config) {
 				localEnabled = (status.config.enabled as boolean) ?? false;
@@ -78,7 +78,7 @@
 
 	async function handleToggle() {
 		try {
-			status = await toggleS68Cache();
+			status = await toggleSemCache();
 			localEnabled = status.enabled;
 			stats = status.stats ?? null;
 			toastSuccess(`Cache ${localEnabled ? 'enabled' : 'disabled'}`);
@@ -90,7 +90,7 @@
 	async function handleSaveConfig() {
 		savingConfig = true;
 		try {
-			status = await updateS68CacheConfig({
+			status = await updateSemCacheConfig({
 				enabled: localEnabled,
 				similarity_threshold: localThreshold,
 				ttl_seconds: localTtl,
@@ -111,7 +111,7 @@
 	async function handleClear() {
 		clearing = true;
 		try {
-			const result = await clearS68Cache();
+			const result = await clearSemCache();
 			toastSuccess(`Cleared ${result.entries_removed} entries`);
 			await loadData();
 		} catch (e) {
@@ -124,7 +124,7 @@
 	async function handleExpire() {
 		expiring = true;
 		try {
-			const result = await expireS68Cache();
+			const result = await expireSemCache();
 			toastSuccess(`Expired ${result.entries_removed} stale entries`);
 			await loadData();
 		} catch (e) {

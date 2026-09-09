@@ -887,7 +887,7 @@ class CorrectionConfigResponse(BaseModel):
 
 # -- Semantic Cache (enhanced) --
 
-class S68CacheStatsSchema(BaseModel):
+class SemCacheStatsSchema(BaseModel):
     """Enhanced semantic cache statistics."""
     total_entries: int = 0
     exact_hits: int = 0
@@ -907,15 +907,15 @@ class S68CacheStatsSchema(BaseModel):
     embeddings_available: bool = False
 
 
-class S68CacheStatusResponse(BaseModel):
+class SemCacheStatusResponse(BaseModel):
     """Cache status for ChatControlBar and panels."""
     enabled: bool = False
     available: bool = False
-    stats: S68CacheStatsSchema | None = None
+    stats: SemCacheStatsSchema | None = None
     config: dict = Field(default_factory=dict)
 
 
-class S68CacheConfigUpdate(BaseModel):
+class SemCacheConfigUpdate(BaseModel):
     """Cache configuration update request."""
     enabled: bool | None = None
     similarity_threshold: float | None = None
@@ -926,7 +926,7 @@ class S68CacheConfigUpdate(BaseModel):
     semantic_match_enabled: bool | None = None
 
 
-class S68CacheClearRequest(BaseModel):
+class SemCacheClearRequest(BaseModel):
     """Cache clear request."""
     conversation_id: str | None = None
 

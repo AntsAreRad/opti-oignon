@@ -5,35 +5,35 @@
  */
 
 import { apiGet, apiPost, apiPut } from './client';
-import type { S68CacheStatus, S68CacheConfigUpdate, CacheClearResponse } from '$lib/types';
+import type { SemCacheStatus, SemCacheConfigUpdate, CacheClearResponse } from '$lib/types';
 
 /** Get semantic cache status, stats, and config. */
-export async function getS68CacheStatus(): Promise<S68CacheStatus> {
-	return apiGet<S68CacheStatus>('/api/cache/s68/status');
+export async function getSemCacheStatus(): Promise<SemCacheStatus> {
+	return apiGet<SemCacheStatus>('/api/cache/semcache/status');
 }
 
 /** Toggle semantic cache on/off. */
-export async function toggleS68Cache(): Promise<S68CacheStatus> {
-	return apiPost<S68CacheStatus>('/api/cache/s68/toggle');
+export async function toggleSemCache(): Promise<SemCacheStatus> {
+	return apiPost<SemCacheStatus>('/api/cache/semcache/toggle');
 }
 
 /** Update semantic cache configuration (partial). */
-export async function updateS68CacheConfig(
-	updates: S68CacheConfigUpdate
-): Promise<S68CacheStatus> {
-	return apiPut<S68CacheStatus>('/api/cache/s68/config', updates);
+export async function updateSemCacheConfig(
+	updates: SemCacheConfigUpdate
+): Promise<SemCacheStatus> {
+	return apiPut<SemCacheStatus>('/api/cache/semcache/config', updates);
 }
 
 /** Clear cache entries (all or by conversation). */
-export async function clearS68Cache(
+export async function clearSemCache(
 	conversationId?: string
 ): Promise<CacheClearResponse> {
-	return apiPost<CacheClearResponse>('/api/cache/s68/clear', {
+	return apiPost<CacheClearResponse>('/api/cache/semcache/clear', {
 		conversation_id: conversationId ?? null,
 	});
 }
 
 /** Remove expired entries from cache. */
-export async function expireS68Cache(): Promise<CacheClearResponse> {
-	return apiPost<CacheClearResponse>('/api/cache/s68/expire');
+export async function expireSemCache(): Promise<CacheClearResponse> {
+	return apiPost<CacheClearResponse>('/api/cache/semcache/expire');
 }

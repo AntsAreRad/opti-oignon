@@ -724,17 +724,17 @@ class AgenticExecutor:
         return None
 
     @property
-    def s68_cache_hit(self) -> bool:
+    def semcache_hit(self) -> bool:
         """Whether the last call was served from the semantic cache."""
-        if self._executor is not None and hasattr(self._executor, "s68_cache_hit"):
-            return self._executor.s68_cache_hit
+        if self._executor is not None and hasattr(self._executor, "semcache_hit"):
+            return self._executor.semcache_hit
         return False
 
     @property
-    def s68_cache_key(self) -> str:
+    def semcache_key(self) -> str:
         """The cache key used for the last cache lookup."""
-        if self._executor is not None and hasattr(self._executor, "s68_cache_key"):
-            return self._executor.s68_cache_key
+        if self._executor is not None and hasattr(self._executor, "semcache_key"):
+            return self._executor.semcache_key
         return ""
 
     @property

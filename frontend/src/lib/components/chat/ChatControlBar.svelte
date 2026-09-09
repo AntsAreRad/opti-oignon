@@ -6,7 +6,7 @@
   All active toggles use a borderless tobacco tint (v4e palette).
   Responsive labels, unified style, ddgs availability check,
        model family grouping with parameter badges.
-  Mobile responsive — horizontal scroll overflow, touch-friendly min-height.
+  Mobile responsive -- horizontal scroll overflow, touch-friendly min-height.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -102,7 +102,7 @@
 		}
 		// Load initial cache status
 		try {
-			const resp = await fetch('/api/cache/s68/status');
+			const resp = await fetch('/api/cache/semcache/status');
 			if (resp.ok) {
 				const data = await resp.json();
 				cacheEnabled.set(data.enabled || false);
@@ -180,7 +180,7 @@
 
 	async function toggleCache() {
 		try {
-			const resp = await fetch('/api/cache/s68/toggle', { method: 'POST' });
+			const resp = await fetch('/api/cache/semcache/toggle', { method: 'POST' });
 			if (resp.ok) {
 				const data = await resp.json();
 				cacheEnabled.set(data.enabled || false);
@@ -236,7 +236,7 @@
 
 	async function toggleQuickSandbox() {
 		if (!qsAvailable) return;
-		// Mutual exclusion — disable Code Agent when toggling Sandbox on
+		// Mutual exclusion -- disable Code Agent when toggling Sandbox on
 		if (!$quickSandboxEnabled && $chatCodingEnabled) {
 			chatCodingEnabled.set(false);
 		}
@@ -260,7 +260,7 @@
 
 	async function toggleChatCoding() {
 		if (!ccAvailable) return;
-		// Mutual exclusion — when Code Agent is ON, Sandbox is implicitly ON
+		// Mutual exclusion -- when Code Agent is ON, Sandbox is implicitly ON
 		// When toggling Code Agent on, disable standalone Sandbox toggle
 		const newVal = !$chatCodingEnabled;
 		if (newVal && $quickSandboxEnabled) {
