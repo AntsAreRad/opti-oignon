@@ -133,6 +133,6 @@ data/.audit_chain_anchor
 data/sandbox_exports/
 CLAUDE.local.md
 .claude/settings.local.json
-.claude/state/
 !CLAUDE.md
+.claude/state/*
 !.claude/state/blades.md
