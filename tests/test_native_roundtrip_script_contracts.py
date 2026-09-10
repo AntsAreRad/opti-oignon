@@ -187,3 +187,19 @@ def test_rt7_the_runbook_names_the_gate_and_its_checks():
         "is that no entry point still returns the sentinel, and it must be "
         "a row of the gate rather than a remark somewhere above it"
     )
+
+
+def test_rt8_the_workflow_names_the_skip():
+    """CI checks the script's shape and does not run its measurement.
+
+    Running it there would exit owed, which is not a failure and not a pass,
+    and a job cannot express that. So CI does not run it -- and says so,
+    because a measurement absent without a word reads as one that passed.
+    """
+    text = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    lines = [one for one in text.splitlines()
+             if "native_bridge_roundtrip" in one and one.lstrip().startswith("#")]
+    assert lines, (
+        "the workflow must name the round trip it does not run, as a comment "
+        "rather than a step: a step would fail the job on an owed code"
+    )
