@@ -209,6 +209,47 @@ def test_d3_refusing_layer_leaves_the_import_and_singleton_alive():
 
 
 # ---------------------------------------------------------------------------
+# d15 -- supersedes d3: the refusal is met on use, not on import
+# ---------------------------------------------------------------------------
+
+def test_d15_refusing_layer_leaves_the_import_and_singleton_alive():
+    """Supersedes d3, whose second assertion became false by design.
+
+    d3 pinned two things: a layer that refuses every connection leaves the
+    import and the shared instance alive, and the construction CONSULTED the
+    layer rather than assuming it works. The first is the fail-secure
+    property and it is re-asserted here unchanged.
+
+    The second held only while the cache built its schema in its constructor,
+    which is what opened a database on every import of the package. The
+    consultation still happens and is still load-bearing; it happens at the
+    first connection now, and this pins that it happens there and that the
+    refusal is still met without raising.
+    """
+    seam = _LayerSeam(_refusing())
+    module, data_dir, restore = _load(seam=seam)
+    try:
+        assert module.semantic_cache is not None, (
+            "a refusing layer must leave the shared instance alive"
+        )
+        assert seam.calls == 0, (
+            "the import must consult nothing; the cost and the refusal both "
+            "belong to the first caller who asks for a connection"
+        )
+
+        assert module.semantic_cache._get_connection() is None, (
+            "the layer refuses, so there is no connection and the cache "
+            "degrades to a miss"
+        )
+        assert seam.calls >= 1, (
+            "the consultation is load-bearing, not decorative: the layer "
+            "must be asked before the cache decides it cannot store"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # d4 -- every read and count is benign while the layer refuses
 # ---------------------------------------------------------------------------
 

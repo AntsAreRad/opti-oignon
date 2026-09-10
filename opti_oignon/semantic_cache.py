@@ -347,8 +347,12 @@ class SemanticCache:
         # One loud storage-failure warning per instance, then debug only.
         self._layer_failure_logged = False
 
-        # Initialize database (degrades in place when the layer is not there)
-        self._init_db()
+        # The schema is built at the first connection, not here. This cache
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package. The degradation is
+        # unchanged: when the layer is absent there is no connection to
+        # build on, and nothing is attempted.
+        self._schema_ready = False
 
         logger.info(
             "SemanticCache initialized: model=%s, threshold=%.2f, "
@@ -531,10 +535,16 @@ class SemanticCache:
         try:
             conn = _safe_connect(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
-            return conn
         except (sqlite3.Error, RuntimeError, OSError) as exc:
             self._note_layer_failure(exc)
             return None
+        if not self._schema_ready:
+            # Only ever reached with a connection in hand, so the degraded
+            # path -- no layer, or a layer that refused -- builds nothing and
+            # returns None exactly as it did before.
+            self._schema_ready = True
+            self._init_db()
+        return conn
 
     def _note_layer_failure(self, exc: BaseException) -> None:
         """Log a storage-layer failure loudly once per instance, then quietly.

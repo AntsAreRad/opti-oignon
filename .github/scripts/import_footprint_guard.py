@@ -66,9 +66,11 @@ LEDGER = {
         "benchmark_history.db", "branches.db", "coding_history.db",
         "feedback.db", "fingerprint.db",
         "humanizer_feedback.db", "learned_router.db", "memories.db",
+        # response_cache.db and semantic_cache.db are PAID: both caches build
+        # their schema at the first connection instead of in a constructor
+        # that runs at import. The semantic cache's degradation is unchanged.
         "performance_metrics.db", "plugins.db", "projects.db",
-        "response_cache.db", "sandbox_audit.db", "semantic_cache.db",
-        "sync_queue.db",
+        "sandbox_audit.db", "sync_queue.db",
     }),
     # PAID. The preference store's path was configured as a bare filename
     # and resolved against the caller's directory; it is now anchored on the

@@ -240,6 +240,12 @@ fail_under = 0
 # window, both modules, the route layer resolving to the identical in-window
 # singleton -- is re-asserted unchanged in a3, which pins the seam at first
 # use instead.
+#
+# And d3, the third of the same shape. It pinned that a refusing layer leaves
+# the import and the singleton alive -- still true, still fail-secure, and
+# re-asserted unchanged -- and that construction CONSULTED the layer, which
+# held only while the cache built its schema in its constructor. The
+# consultation is still load-bearing; d15 pins it at the first connection.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -250,4 +256,5 @@ addopts = """
     --deselect=tests/test_comment_only_guard_contracts.py::test_c7_non_python_proof_is_quote_aware
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b1_the_import_reaches_storage_through_the_seeded_seam
     --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_a1_grouped_load_exercises_seam_and_shares_the_manager
+    --deselect=tests/test_semantic_cache_fail_secure_contracts.py::test_d3_refusing_layer_leaves_the_import_and_singleton_alive
 """
