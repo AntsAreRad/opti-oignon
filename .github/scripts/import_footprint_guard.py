@@ -57,18 +57,18 @@ _ROOT = _HERE.parent.parent.parent
 # time it was written. MAY ONLY SHRINK. Removing an entry is how the debt is
 # paid; adding one is how the guard is defeated.
 LEDGER = {
-    # Ten remain. Each is opened by a singleton built at module scope whose
-    # constructor creates its schema; the ten paid so far all had that shape
-    # and were paid the same way, by ensuring the schema at the first
-    # connection instead. Two of the ten below need more than that: one
-    # writes outside the tree, and one is opened twice by two different
-    # owners. The four under the data directory are not this guard's to read.
+    # Eight remain, and none yields to the pattern that paid the other
+    # twelve. Four live under the data directory, which this guard may not
+    # read. One writes outside the tree. One is opened twice by two different
+    # owners. One has no connection helper to ensure anything in. And one --
+    # branches.db -- was deferred and then put back: its module-level
+    # availability flag is false only when construction RAISES, and
+    # construction raised because it opened this database. Deferring it lost
+    # a fail-secure property rather than merely moving a cost.
     "databases": frozenset({
         "audit_chain.db",
-        "auth.db",
-        "benchmark_history.db",
         "branches.db",
-        "coding_history.db",
+        "auth.db",
         "fingerprint.db",
         "humanizer_feedback.db",
         "learned_router.db",

@@ -246,6 +246,12 @@ fail_under = 0
 # re-asserted unchanged -- and that construction CONSULTED the layer, which
 # held only while the cache built its schema in its constructor. The
 # consultation is still load-bearing; d15 pins it at the first connection.
+#
+# And h5, the fourth. It pinned that CONSTRUCTION lays out every table the
+# store writes to -- true only while the constructor opened a database -- and
+# that re-opening is idempotent, which is untouched and re-asserted in h35
+# alongside the property that now holds: first use lays the tables out, and
+# nothing before it touches storage.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -257,4 +263,5 @@ addopts = """
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b1_the_import_reaches_storage_through_the_seeded_seam
     --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_a1_grouped_load_exercises_seam_and_shares_the_manager
     --deselect=tests/test_semantic_cache_fail_secure_contracts.py::test_d3_refusing_layer_leaves_the_import_and_singleton_alive
+    --deselect=tests/test_coding_history_contracts.py::test_h5_construction_creates_schema_and_is_idempotent
 """

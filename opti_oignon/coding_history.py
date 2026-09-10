@@ -187,7 +187,11 @@ class CodingHistoryStore:
         self._db_path = str(db_path)
 
         self._lock = threading.Lock()
-        self._init_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
     # -- Database setup ----------------------------------------------------
 
@@ -196,6 +200,12 @@ class CodingHistoryStore:
         conn = _safe_connect(self._db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        if not self._schema_ready:
+            # Safe in the direct form here: unlike its two neighbours,
+            # this store's initialiser does not take the instance lock,
+            # so a caller already holding it cannot deadlock.
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self) -> None:

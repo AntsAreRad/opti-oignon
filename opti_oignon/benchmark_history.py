@@ -124,7 +124,11 @@ class BenchmarkHistory:
         self._db_path = db_path or (DATA_DIR / "benchmark_history.db")
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._init_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
     def _get_conn(self) -> sqlite3.Connection:
         """Create a new connection with row factory."""
@@ -132,66 +136,78 @@ class BenchmarkHistory:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        if not self._schema_ready:
+            # Built on the connection just opened, without taking the
+            # lock: a caller already holding it would otherwise hang.
+            self._schema_ready = True
+            self._create_schema(conn)
         return conn
 
-    def _init_db(self):
-        """Create tables if they do not exist."""
+    def _create_schema(self, conn) -> None:
+        """Build the schema on a connection the caller already holds.
+
+        Deliberately takes no lock. Callers of the connection helper hold the
+        instance lock; if building the schema reacquired it, the first of them
+        to run before the schema existed would hang rather than fail -- the
+        worst way for a suite to tell you, because it tells you last.
+        """
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS benchmark_runs (
+                id TEXT PRIMARY KEY,
+                run_type TEXT NOT NULL DEFAULT 'llm',
+                started_at TEXT NOT NULL,
+                completed_at TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                models TEXT DEFAULT '[]',
+                tasks TEXT DEFAULT '[]',
+                total_tests INTEGER DEFAULT 0,
+                avg_score REAL,
+                best_model TEXT,
+                duration_sec REAL,
+                config_snapshot TEXT DEFAULT '{}',
+                error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS benchmark_results (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                task TEXT NOT NULL,
+                task_name TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                score REAL DEFAULT 0.0,
+                auto_score REAL DEFAULT 0.0,
+                user_score REAL,
+                time_seconds REAL DEFAULT 0.0,
+                status TEXT DEFAULT 'success',
+                response_preview TEXT DEFAULT '',
+                keywords_found TEXT DEFAULT '[]',
+                keywords_missing TEXT DEFAULT '[]',
+                error_message TEXT,
+                FOREIGN KEY (run_id) REFERENCES benchmark_runs(id)
+                    ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_results_run_id
+                ON benchmark_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_results_model
+                ON benchmark_results(model);
+            CREATE INDEX IF NOT EXISTS idx_runs_type
+                ON benchmark_runs(run_type);
+            CREATE INDEX IF NOT EXISTS idx_runs_status
+                ON benchmark_runs(status);
+        """)
+        conn.commit()
+
+    def _init_db(self) -> None:
+        """Create the schema on a connection of its own."""
+        self._schema_ready = True
         with self._lock:
             conn = self._get_conn()
             try:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS benchmark_runs (
-                        id TEXT PRIMARY KEY,
-                        run_type TEXT NOT NULL DEFAULT 'llm',
-                        started_at TEXT NOT NULL,
-                        completed_at TEXT DEFAULT '',
-                        status TEXT NOT NULL DEFAULT 'running',
-                        models TEXT DEFAULT '[]',
-                        tasks TEXT DEFAULT '[]',
-                        total_tests INTEGER DEFAULT 0,
-                        avg_score REAL,
-                        best_model TEXT,
-                        duration_sec REAL,
-                        config_snapshot TEXT DEFAULT '{}',
-                        error TEXT
-                    );
-
-                    CREATE TABLE IF NOT EXISTS benchmark_results (
-                        id TEXT PRIMARY KEY,
-                        run_id TEXT NOT NULL,
-                        model TEXT NOT NULL,
-                        task TEXT NOT NULL,
-                        task_name TEXT DEFAULT '',
-                        category TEXT DEFAULT '',
-                        score REAL DEFAULT 0.0,
-                        auto_score REAL DEFAULT 0.0,
-                        user_score REAL,
-                        time_seconds REAL DEFAULT 0.0,
-                        status TEXT DEFAULT 'success',
-                        response_preview TEXT DEFAULT '',
-                        keywords_found TEXT DEFAULT '[]',
-                        keywords_missing TEXT DEFAULT '[]',
-                        error_message TEXT,
-                        FOREIGN KEY (run_id) REFERENCES benchmark_runs(id)
-                            ON DELETE CASCADE
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_results_run_id
-                        ON benchmark_results(run_id);
-                    CREATE INDEX IF NOT EXISTS idx_results_model
-                        ON benchmark_results(model);
-                    CREATE INDEX IF NOT EXISTS idx_runs_type
-                        ON benchmark_runs(run_type);
-                    CREATE INDEX IF NOT EXISTS idx_runs_status
-                        ON benchmark_runs(status);
-                """)
-                conn.commit()
+                self._create_schema(conn)
             finally:
                 conn.close()
-
-    # -------------------------------------------------------------------------
-    # RUN CRUD
-    # -------------------------------------------------------------------------
 
     def save_run(self, run: BenchmarkRunRecord) -> str:
         """Save or update a benchmark run record.

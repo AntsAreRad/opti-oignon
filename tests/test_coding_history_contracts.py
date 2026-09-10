@@ -270,6 +270,59 @@ def test_h5_construction_creates_schema_and_is_idempotent(tmp_path):
         restore()
 
 
+def test_h35_first_use_lays_out_the_schema_and_reopening_is_idempotent():
+    """Supersedes h5, whose first half became false by design.
+
+    h5 pinned that CONSTRUCTION lays out every table the store writes to,
+    and that re-opening an existing database is idempotent and still writes.
+    The second is untouched and re-asserted here. The first held only while
+    the constructor opened a database, which is what made importing the
+    package open one before any caller had asked for anything.
+
+    Every table is still laid out, and this pins that it happens at the
+    first connection and that nothing before it touches storage.
+    """
+    import tempfile
+    tmp_path = Path(tempfile.mkdtemp())
+    ch, restore = _load(tmp_path)
+    try:
+        store = _store(ch, tmp_path)
+
+        raw = _raw(tmp_path)
+        before = {
+            r[0] for r in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        raw.close()
+        assert not before, (
+            f"construction laid out {before}; the cost belongs to the first "
+            "caller who asks for a connection"
+        )
+
+        store._get_conn().close()
+
+        raw = _raw(tmp_path)
+        names = {
+            r[0] for r in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        raw.close()
+        assert {"tasks", "steps", "tests", "checkpoints",
+                "working_memory"} <= names, (
+            f"first use lays out every table the store writes to, got {names}"
+        )
+
+        again = _store(ch, tmp_path)
+        again.record_task_start("t", "x")
+        assert again.count_tasks() == 1, (
+            "re-opening an existing database is idempotent and still writes"
+        )
+    finally:
+        restore()
+
+
 # =========================================================================
 # Task lifecycle and the enabled gate
 # =========================================================================
