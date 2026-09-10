@@ -105,6 +105,10 @@ jobs:
       # device. Both files are text, so the agreement is decided here instead.
       # EnvelopesTest runs on the host via ./gradlew :app:test, never in CI:
       # there is no JVM toolchain and no Gradle wrapper in this workflow.
+      # scripts/native_bridge_roundtrip.py is NOT run here: it needs a
+      # pinned Kotlin compiler and a JVM, and it exits owed without
+      # them -- neither a pass nor a failure, which a job cannot say.
+      # Its shape is checked by the suite; its measurement is owed.
       - name: Run native bridge concordance (declarations against exports)
         run: python scripts/native_bridge_concordance.py
 
