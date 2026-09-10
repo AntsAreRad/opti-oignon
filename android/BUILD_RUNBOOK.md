@@ -79,6 +79,39 @@ execution that is absent without a word reads as an execution that passed.
 Until the wrapper is generated on this machine, that run is owed and no number
 from it may be quoted.
 
+## 4c. Interlanguage round trip (host, pinned compiler)
+
+The concordance checker proves the declarations and the native exports agree
+as text, and it proves it on every change. It cannot prove the binding holds:
+that the library loads, that the symbol resolves, that the value crosses back
+intact. Only a compiler and a running JVM establish that.
+
+```bash
+python3 scripts/native_bridge_roundtrip.py
+```
+
+It builds the smallest thing that can fail for the right reason -- one Kotlin
+`external fun`, one C++ implementation returning the not-implemented sentinel
+-- compiles both, runs them, and compares what comes back with what was sent.
+A wrong mangling fails to resolve; a wrong receiver is refused by the JVM; a
+wrong type arrives corrupted.
+
+Three exit codes, and the third is the point:
+
+| code | meaning |
+|---|---|
+| 0 | the round trip ran and the value crossed back intact |
+| 1 | it ran and something is wrong |
+| 2 | **owed** -- it did not run, and no number from it may be quoted |
+
+The measurement is pinned to `kotlinc 2.0.20`. A different compiler is
+refused rather than accepted quietly, because a number without the compiler
+that produced it is not a measurement. Record which install produced it here
+when you run it.
+
+**CI does not run this**, for the same reason it does not run `EnvelopesTest`:
+no Kotlin toolchain. Only the script's shape is checked there.
+
 ## 5. Validate the contract (the real test)
 
 Runtime validation is host-side and is what finally confirms the contract:
