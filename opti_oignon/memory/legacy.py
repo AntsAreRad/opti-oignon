@@ -229,8 +229,11 @@ class MemoryManager:
         self._model_checked_at: float = 0.0
         self._model_cache_ttl: float = 300.0  # 5 min
 
-        # Schema initialization
-        self._init_db()
+        # The schema is built at the first connection, not here. The package
+        # reaches this module on every import, so building it here opened a
+        # database each time -- with encryption not enforced, at a moment
+        # where a refusal could not be handled by any caller.
+        self._schema_ready = False
         logger.info(f"MemoryManager initialized: {self._db_path}")
 
     # -----------------------------------------------------------------------
@@ -243,16 +246,27 @@ class MemoryManager:
         Audit fix: routes through get_encrypted_connection() for
         SQLCipher support when available.
         """
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = safe_connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        if not self._schema_ready:
+            # Built on the connection just opened, without taking the lock:
+            # a caller already holding it would otherwise hang here.
+            self._schema_ready = True
+            self._create_schema(conn)
         return conn
 
-    def _init_db(self) -> None:
-        """Create the memories table if it does not exist."""
-        with self._lock:
-            conn = self._get_connection()
-            try:
+    def _create_schema(self, conn: sqlite3.Connection) -> None:
+        """Build the schema on a connection the caller already holds.
+
+        Deliberately takes no lock. Ten methods in this class hold the
+        instance lock and then ask for a connection; if building the schema
+        reacquired that lock, the first of them to run before the schema
+        existed would deadlock rather than fail -- which is the worst way for
+        a suite to tell you, because it tells you last.
+        """
+        try:
                 conn.executescript("""
                     CREATE TABLE IF NOT EXISTS memories (
                         id TEXT PRIMARY KEY,
@@ -271,9 +285,17 @@ class MemoryManager:
                         ON memories(active);
                 """)
                 conn.commit()
-            except Exception as e:
-                logger.error(f"Memory DB initialization error: {e}")
-                raise
+        except Exception as e:
+            logger.error(f"Memory DB initialization error: {e}")
+            raise
+
+    def _init_db(self) -> None:
+        """Create the memories table if it does not exist."""
+        self._schema_ready = True
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                self._create_schema(conn)
             finally:
                 conn.close()
 

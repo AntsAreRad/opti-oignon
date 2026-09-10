@@ -64,8 +64,10 @@ LEDGER = {
         # conversations.db is PAID: the manager builds its schema at the
         # first connection rather than in a constructor that runs at import.
         "benchmark_history.db", "branches.db", "coding_history.db",
+        # memories.db is PAID: the manager builds its schema on a connection
+        # handed to it, without taking the lock ten of its methods hold.
         "feedback.db", "fingerprint.db",
-        "humanizer_feedback.db", "learned_router.db", "memories.db",
+        "humanizer_feedback.db", "learned_router.db",
         # response_cache.db and semantic_cache.db are PAID: both caches build
         # their schema at the first connection instead of in a constructor
         # that runs at import. The semantic cache's degradation is unchanged.
