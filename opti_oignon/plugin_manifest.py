@@ -234,19 +234,41 @@ class PluginRegistry:
     ) -> None:
         self._db_path = Path(db_path)
         self._plugins_dir = Path(plugins_dir) if plugins_dir else None
-        self._plugins: dict[str, PluginRecord] = {}
+        self._plugin_map: dict[str, PluginRecord] = {}
+        self._loaded = False
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-        self._load_from_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
     # -----------------------------------------------------------------
     # SQLite schema & helpers
     # -----------------------------------------------------------------
 
+    @property
+    def _plugins(self) -> "dict[str, PluginRecord]":
+        """The records, read from storage the first time they are asked for.
+
+        Loading them in the constructor opened this database on every import
+        of the package, for a registry most callers never touch. Every read
+        in this class goes through here, so there is one place to be right,
+        and the flag is set before the load because the load writes back
+        through this same accessor.
+        """
+        if not self._loaded:
+            self._loaded = True
+            self._load_from_db()
+        return self._plugin_map
+
     def _get_conn(self) -> sqlite3.Connection:
         conn = _safe_connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self) -> None:

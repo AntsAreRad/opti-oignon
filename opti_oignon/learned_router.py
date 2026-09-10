@@ -289,7 +289,11 @@ class LearnedRouter:
         self._samples_since_retrain: int = 0
 
         self._load_config()
-        self._init_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
         if SKLEARN_AVAILABLE:
             self._try_load_model()
@@ -358,6 +362,9 @@ class LearnedRouter:
         conn = _safe_connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self) -> None:

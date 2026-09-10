@@ -201,13 +201,20 @@ class UserSettingsStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = _safe_connect(self.db_path, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self):

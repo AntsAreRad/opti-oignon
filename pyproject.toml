@@ -252,6 +252,17 @@ fail_under = 0
 # that re-opening is idempotent, which is untouched and re-asserted in h35
 # alongside the property that now holds: first use lays the tables out, and
 # nothing before it touches storage.
+#
+# And l2, the fifth and the last of them. It pinned that the training store is
+# opened through the encrypted helper -- still true, still the security
+# property -- and that a SQL-control payload is stored verbatim rather than
+# executed, which is untouched. Only the moment moved: construction opens
+# nothing now, so l5 pins the helper at the first write and pins that nothing
+# reaches storage before it. Its replacement lives in a file of its own rather
+# than beside it: that suite is carried by the isolation seal under a byte
+# digest, and adding a contract to it would have broken the seal. Regenerating
+# a seal to quiet a guard is the habit the ratchet exists to break, so the
+# sealed suite stays byte-identical.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -264,4 +275,5 @@ addopts = """
     --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_a1_grouped_load_exercises_seam_and_shares_the_manager
     --deselect=tests/test_semantic_cache_fail_secure_contracts.py::test_d3_refusing_layer_leaves_the_import_and_singleton_alive
     --deselect=tests/test_coding_history_contracts.py::test_h5_construction_creates_schema_and_is_idempotent
+    --deselect=tests/test_learned_router_integrity_contracts.py::test_l2_persistence_uses_safe_connect_and_parameterized_sql
 """

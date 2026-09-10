@@ -57,8 +57,10 @@ _ROOT = _HERE.parent.parent.parent
 # time it was written. MAY ONLY SHRINK. Removing an entry is how the debt is
 # paid; adding one is how the guard is defeated.
 LEDGER = {
-    # Eight remain, and none yields to the pattern that paid the other
-    # twelve. Four live under the data directory, which this guard may not
+    # Seven remain, and none yields to the pattern that paid the other
+    # thirteen. Two of the seven are half paid: their file has a second
+    # owner that still builds eagerly, and deferring THOSE is a decision
+    # about what a feature does at startup rather than a mechanical move. Four live under the data directory, which this guard may not
     # read. One writes outside the tree. One is opened twice by two different
     # owners. One has no connection helper to ensure anything in. And one --
     # branches.db -- was deferred and then put back: its module-level
@@ -71,7 +73,6 @@ LEDGER = {
         "auth.db",
         "fingerprint.db",
         "humanizer_feedback.db",
-        "learned_router.db",
         "plugins.db",
         "sandbox_audit.db",
     }),
