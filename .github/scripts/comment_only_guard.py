@@ -472,6 +472,15 @@ _ID_FIELDS = {
     ast.ExceptHandler: ("name",),
 }
 
+# ``global x, y`` and ``nonlocal x`` hold plain identifiers in a LIST rather
+# than in a field of their own. They bind the very names a Name node reads, so
+# leaving them out does not merely miss a rename: the two trees stop pairing
+# and a pure rename is refused.
+_ID_LISTS = {
+    ast.Global: "names",
+    ast.Nonlocal: "names",
+}
+
 
 _ATTRIBUTE = "attribute"
 _VARIABLE = "variable"
@@ -517,6 +526,10 @@ def _identifier_slots(tree):
             if isinstance(getattr(node, field, None), str):
                 slots.append((node, field,
                               _slot_space(node, field, in_class_body)))
+        field = _ID_LISTS.get(type(node))
+        if field:
+            for index in range(len(getattr(node, field, ()))):
+                slots.append((node, (field, index), _VARIABLE))
         inside = isinstance(node, ast.ClassDef)
         for child in ast.iter_child_nodes(node):
             walk(child, inside)
@@ -539,6 +552,21 @@ def _alias_nodes(tree):
     return found
 
 
+def _slot_get(node, field):
+    """Read an identifier slot, field or list position alike."""
+    if isinstance(field, tuple):
+        return getattr(node, field[0])[field[1]]
+    return getattr(node, field)
+
+
+def _slot_set(node, field, value):
+    """Write an identifier slot, field or list position alike."""
+    if isinstance(field, tuple):
+        getattr(node, field[0])[field[1]] = value
+    else:
+        setattr(node, field, value)
+
+
 def _pairing_dump(text):
     """Dump with identifiers and strings masked, plus the identifiers.
 
@@ -558,9 +586,9 @@ def _pairing_dump(text):
     names = []
     spaces = []
     for node, field, space in _identifier_slots(tree):
-        names.append(getattr(node, field))
+        names.append(_slot_get(node, field))
         spaces.append(space)
-        setattr(node, field, "<id>")
+        _slot_set(node, field, "<id>")
 
     class _Mask(ast.NodeTransformer):
         def visit_Constant(self, node):
@@ -589,9 +617,9 @@ def _renamed_tree(text, maps, literal_map):
     """
     tree = ast.parse(text)
     for node, field, space in _identifier_slots(tree):
-        value = getattr(node, field)
+        value = _slot_get(node, field)
         if value in maps[space]:
-            setattr(node, field, maps[space][value])
+            _slot_set(node, field, maps[space][value])
 
     class _Sub(ast.NodeTransformer):
         def visit_Constant(self, node):
@@ -787,6 +815,40 @@ def line_purge_equivalent(path, before, after, clean_guard=None):
     return None
 
 
+def proven_rename_map(before, after, published_models=_UNSET,
+                      clean_guard=None):
+    """The substitution behind an accepted rename, or ``None``.
+
+    Separate from ``rename_equivalent`` on purpose: that function's return
+    value already carries three meanings, and a fourth would make it
+    unreadable. This one answers a single question with a single type.
+    """
+    if rename_equivalent(before, after, published_models, clean_guard) is not None:
+        return None
+    maps = {_ATTRIBUTE: {}, _VARIABLE: {}}
+    dump_before, old_names, spaces, _ = _pairing_dump(before)
+    _, new_names, _, _ = _pairing_dump(after)
+    for space, old, new in zip(spaces, old_names, new_names):
+        if old != new:
+            maps[space][old] = new
+    merged = {}
+    for mapping in maps.values():
+        merged.update(mapping)
+    return merged
+
+
+def format_rename_map(mapping):
+    """The acceptance line's map: ``k identifier(s): old->new, ...``.
+
+    Empty renders empty. An acceptance that renamed nothing must not read as
+    though it had proved a rename.
+    """
+    if not mapping:
+        return ""
+    pairs = ", ".join(f"{old}->{new}" for old, new in sorted(mapping.items()))
+    return f"{len(mapping)} identifier(s): {pairs}"
+
+
 def verdict(path, before, after, clean_guard=None):
     """Return ``None`` if acceptable, ``CANNOT_JUDGE`` if unattributable,
     else a one-line reason to refuse.
@@ -853,6 +915,7 @@ def main(argv=None):
 
     refusals = []
     unjudged = []
+    renamed = []
     examined = 0
     for path in _changed_paths(base_ref):
         before = _blob_at(base_ref, path)
@@ -870,6 +933,10 @@ def main(argv=None):
             unjudged.append(path)
         elif is_refusal(reason):
             refusals.append((path, reason))
+        elif path.endswith(".py"):
+            mapping = proven_rename_map(before, after, clean_guard=clean_guard)
+            if mapping:
+                renamed.append((path, format_rename_map(mapping)))
 
     # Printed before any verdict, so an absence of checking is never folded
     # into a line that reads as a check that passed.
@@ -878,6 +945,14 @@ def main(argv=None):
               "the check belongs elsewhere:")
         for path in unjudged:
             print(f"  {path}")
+
+    # An acceptance that does not say what it accepted asks to be trusted
+    # rather than read. Every proven rename names its substitution.
+    if renamed:
+        print("comment-only guard: PROVEN RENAME -- accepted, and here is "
+              "what moved:")
+        for path, line in renamed:
+            print(f"  {path}: {line}")
 
     if not refusals:
         print(

@@ -988,6 +988,79 @@ def test_c30_a_non_judgement_satisfies_no_refusal_assertion():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# C32-C33 -- the map is named, and a global declaration is part of it
+# ---------------------------------------------------------------------------
+def test_c32_an_accepted_rename_names_its_map():
+    """An acceptance that does not say what it accepted proves little.
+
+    The reader of a green run has to be able to see WHICH identifiers moved,
+    or the guard is asking to be trusted rather than read. Proven capable:
+    the rendered line carries every source and every target, and a map that
+    is genuinely empty renders as nothing rather than as a false claim.
+    """
+    guard, restore = _load()
+    try:
+        before = _rename_before()
+        after = _purged(before).replace(_carry() + "Stats", "SemCacheStats")
+        assert guard.verdict("m.py", before, after) is None, (
+            "the fixture must be an accepted rename to begin with"
+        )
+        mapping = guard.proven_rename_map(before, after)
+        assert mapping, (
+            "an accepted rename must be able to report a non-empty map, or "
+            "the reporting probe has never been shown able to say anything"
+        )
+        assert mapping == {_carry() + "Stats": "SemCacheStats"}, mapping
+        line = guard.format_rename_map(mapping)
+        for name in (_carry() + "Stats", "SemCacheStats"):
+            assert name in line, (
+                "the acceptance line must carry both the old name and the "
+                "new one: " + line
+            )
+        assert "1" in line, "the line states how many identifiers moved"
+        # A file with no rename reports nothing, never a false claim.
+        assert guard.proven_rename_map(before, _purged(before)) in (None, {}), (
+            "a comment-only purge renames nothing and must say so"
+        )
+    finally:
+        restore()
+
+
+def test_c33_a_name_declared_global_is_part_of_the_map():
+    """``global x`` binds the same name a Name node reads.
+
+    ``Global.names`` and ``Nonlocal.names`` hold plain identifiers in a list
+    rather than a field, so a prover that only walks string fields misses
+    them, cannot pair the two trees, and refuses a rename that is pure.
+    """
+    guard, restore = _load()
+    try:
+        before = (
+            '# note for ' + _CODE + ' routing\n'
+            + _carry_low() + ' = 0\n'
+            '\n'
+            '\n'
+            'def bump():\n'
+            '    global ' + _carry_low() + '\n'
+            '    ' + _carry_low() + ' = ' + _carry_low() + ' + 1\n'
+        )
+        after = _purged(before).replace(_carry_low(), "semcache")
+        assert guard.debt_count(after) < guard.debt_count(before)
+        assert guard.python_shape(before) != guard.python_shape(after), (
+            "the fixture must actually move the shape"
+        )
+        assert guard.verdict("m.py", before, after) is None, (
+            "a global declaration holds an identifier like any other; a "
+            "rename that covers it is still a proven rename"
+        )
+        assert guard.proven_rename_map(before, after) == {
+            _carry_low(): "semcache"
+        }
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -1050,6 +1123,10 @@ def _run_all():
          test_c30_a_non_judgement_satisfies_no_refusal_assertion),
         ("C31 string literal is shape outside Python",
          test_c31_a_string_literal_is_shape_outside_python),
+        ("C32 accepted rename names its map",
+         test_c32_an_accepted_rename_names_its_map),
+        ("C33 global declaration is part of the map",
+         test_c33_a_name_declared_global_is_part_of_the_map),
     ]
     passed = 0
     for label, fn in tests:
