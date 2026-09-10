@@ -3,6 +3,54 @@
 All notable changes to Opti-Oignon are documented in this file.
 Security-relevant changes are marked with [SECURITY].
 
+## Unreleased
+
+The merge guards learn to say what they cannot prove, rather than reporting an
+absence of proof as a verdict, and a new one measures what importing the
+package costs.
+
+### Added
+
+- `import_footprint_guard.py` observes the import in a subprocess, through an
+  audit hook, and refuses any database, any file written into the caller's
+  directory, or any heavy dependency that its ledger does not already carry.
+  The ledger records the debt that predates the guard and **may only shrink**.
+  The module count carries a ceiling because it is stable to the digit; wall
+  time and resident memory are recorded and never enforced, because both move
+  with the machine and a ceiling that moves with the machine forbids nothing.
+- A static concordance check pairs the mobile bridge's declarations with its
+  native entry points by name, arity and type. A type outside the agreed table
+  is refused rather than mapped by default, and zero declarations on either
+  side is refused rather than agreed.
+- A driver for the interlanguage round trip, which compiles both sides and
+  compares what comes back with what was sent. It reports three outcomes, not
+  two: the third means the measurement did not run, and nothing downstream may
+  read it as either a pass or a failure.
+- Unit tests for the wire envelopes, in the source set that needs no device.
+
+### Changed
+
+- `comment_only_guard.py` accepts a rename proven by reconstruction: a
+  substitution of names that carry internal naming for names that do not,
+  applied to the before side and required to reproduce the after side exactly.
+  Injectivity is asked of each namespace separately, since two names that never
+  denoted the same binding merge nothing. Outside Python, where no analyser
+  exists, an unattributable change is now reported as unjudged -- neither
+  accepted nor refused -- and listed by name, so an absence of checking stays
+  visible instead of passing for a check that succeeded.
+- `public_clean_guard.py`, `public_language_guard.py`, `published_prose_guard.py`,
+  `summary_fidelity_guard.py`, `isolation_seal_guard.py` and `red_team_guard.py`
+  are unchanged in this cycle and continue to gate merges.
+
+### Fixed
+
+- The browser specs no longer race the first-run dialog. The helper waited a
+  fixed budget for it to appear and, when the budget ran out first, returned as
+  though there were nothing to dismiss; the dialog then opened over the page and
+  swallowed the next click, so the failure landed on an unrelated locator. No
+  budget can tell "not yet" from "never", so the application now marks the
+  moment it has decided and the helper waits for that mark.
+
 ## 2.2.0 -- 2026-07-28
 
 The semantic cache's published surface loses its legacy naming, which renames
