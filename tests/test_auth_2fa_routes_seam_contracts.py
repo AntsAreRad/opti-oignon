@@ -466,6 +466,56 @@ def test_a1_grouped_load_exercises_seam_and_shares_the_manager():
         ctx.restore()
 
 
+
+def test_a3_grouped_load_shares_the_manager_and_builds_on_first_use():
+    """Supersedes a1, whose first half became false by design.
+
+    a1 pinned that the seeded connector is reached AT IMPORT, because the
+    two-factor module built its schema as it loaded. That is exactly what
+    was removed: a module that opens a database merely by being imported
+    charges every caller for a capability most never use, and does it at a
+    moment where a refusal cannot be handled by anyone.
+
+    What a1 exists for -- that one window loads both modules and the route
+    layer's lazy lookup resolves to the IDENTICAL in-window singleton --
+    survives untouched and is re-asserted here. The seam is still
+    load-bearing; it is now exercised at the first connection instead, and
+    this pins that it lands on the module's own database path when it does.
+    """
+    ctx = _load()
+    try:
+        assert ctx.seam.calls == 0, (
+            "importing the module must open nothing; the cost belongs to "
+            "the first caller who asks for a connection"
+        )
+
+        conn = ctx.tfa._get_2fa_conn()
+        conn.close()
+
+        assert ctx.seam.calls > 0, (
+            "the seeded connector must be reached on first use; the seed is "
+            "load-bearing, not decorative"
+        )
+        assert str(ctx.tfa._2FA_DB_PATH) in ctx.seam.paths, (
+            "the touch must land on the module's own database path, got "
+            f"{ctx.seam.paths}"
+        )
+        assert str(ctx.tfa._2FA_DB_PATH).endswith("auth_2fa.db")
+
+        looked_up = ctx.routes._get_2fa_manager()
+        assert looked_up is ctx.tfa.two_factor_manager, (
+            "the route layer's lookup must resolve to the in-window "
+            "singleton itself, not a copy and not None"
+        )
+        assert ctx.routes.router.prefix == "/api/auth"
+        assert isinstance(ctx.routes._challenge_store, ctx.routes._ChallengeStore)
+        assert ctx.tfa.TOTP_AVAILABLE is True
+        assert ctx.tfa.WEBAUTHN_AVAILABLE is False
+        assert ctx.tfa.QRCODE_AVAILABLE is False
+    finally:
+        ctx.restore()
+
+
 def test_a2_login_flow_reaches_tokens_through_the_shared_manager():
     """a2: with an enrollment active on the SHARED singleton, the password
     step issues a challenge instead of tokens; the second step with a live

@@ -159,17 +159,33 @@ class TwoFAStatus:
 # Database
 # ---------------------------------------------------------------------------
 
+# Whether the schema has been built in this process. The cost is paid once,
+# at the first connection, rather than at import: a module that builds a
+# database merely by being imported charges every caller for a capability
+# most of them never use, and does it at a moment where a refusal -- an
+# operator who requires encrypted storage, say -- cannot be handled by
+# anyone.
+_SCHEMA_READY = False
+
+
 def _get_2fa_conn() -> sqlite3.Connection:
     """Get a connection to the 2FA database.
 
     Audit fix: routes through get_encrypted_connection() for
     SQLCipher support when available.
     """
+    global _SCHEMA_READY
+
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = safe_connect(str(_2FA_DB_PATH), timeout=10.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
+    if not _SCHEMA_READY:
+        # Set before the call, not after: the initialiser asks for its own
+        # connection and would otherwise recur through this branch.
+        _SCHEMA_READY = True
+        _init_2fa_db()
     return conn
 
 
@@ -239,9 +255,6 @@ def _init_2fa_db() -> None:
     finally:
         conn.close()
 
-
-# Initialize on import
-_init_2fa_db()
 
 
 # ---------------------------------------------------------------------------

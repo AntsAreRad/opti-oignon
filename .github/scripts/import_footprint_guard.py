@@ -58,7 +58,9 @@ _ROOT = _HERE.parent.parent.parent
 # paid; adding one is how the guard is defeated.
 LEDGER = {
     "databases": frozenset({
-        "analytics.db", "audit_chain.db", "auth.db", "auth_2fa.db",
+        # auth_2fa.db is PAID: its schema is built at the first connection
+        # rather than by a call at module scope.
+        "analytics.db", "audit_chain.db", "auth.db",
         "benchmark_history.db", "branches.db", "coding_history.db",
         "conversations.db", "feedback.db", "fingerprint.db",
         "humanizer_feedback.db", "learned_router.db", "memories.db",

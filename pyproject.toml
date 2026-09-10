@@ -233,6 +233,13 @@ fail_under = 0
 # nothing more than an import. Anchoring the path is the fix and it makes the
 # old spelling false. Its first half, that the seam is reached eagerly at
 # import, is re-asserted unchanged in the replacement, b35.
+#
+# And a1, for the same reason in the same block. It pinned that the seeded
+# connector is reached AT IMPORT, because the two-factor module built its
+# schema as it loaded. That is the cost R2 removes. What a1 exists for -- one
+# window, both modules, the route layer resolving to the identical in-window
+# singleton -- is re-asserted unchanged in a3, which pins the seam at first
+# use instead.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -242,4 +249,5 @@ addopts = """
     --deselect=tests/test_comment_only_guard_contracts.py::test_c23_outside_python_a_moved_shape_stays_refused
     --deselect=tests/test_comment_only_guard_contracts.py::test_c7_non_python_proof_is_quote_aware
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b1_the_import_reaches_storage_through_the_seeded_seam
+    --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_a1_grouped_load_exercises_seam_and_shares_the_manager
 """
