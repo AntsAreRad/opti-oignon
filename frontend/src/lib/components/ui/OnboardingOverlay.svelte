@@ -33,6 +33,19 @@
 	const RETRY_DELAY_MS = 2000;
 
 	onMount(async () => {
+		try {
+			await resolveOnboarding();
+		} finally {
+			// The browser specs cannot tell "the dialog has not appeared yet"
+			// from "the dialog will never appear" by looking at the page: both
+			// are an absence. Marking the decision is what makes them
+			// distinguishable, and a finally is the only place that covers all
+			// three ways out -- configured, not configured, backend silent.
+			document.documentElement.setAttribute('data-onboarding', 'resolved');
+		}
+	});
+
+	async function resolveOnboarding() {
 		for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 			try {
 				const state = await getOnboardingState();
@@ -54,7 +67,7 @@
 				}
 			}
 		}
-	});
+	}
 
 	async function loadData() {
 		step = 'loading';

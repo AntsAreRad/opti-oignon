@@ -9,25 +9,27 @@
  * was never reachable.
  *
  * The dialog opens only once the backend has answered what it knows about
- * the install, so it is waited for rather than sampled: an instantaneous
- * check runs before it exists, reports nothing to dismiss, and lets it
- * open on top of the page a moment later.
+ * the install. Waiting a fixed budget for it to appear cannot distinguish
+ * "not yet" from "never": when the budget ran out first, this helper
+ * returned as though there were nothing to dismiss, and the dialog opened
+ * over the page a moment later and swallowed the next click. The failure
+ * then landed on an unrelated locator and looked like a product regression.
+ *
+ * So the application marks the moment it has decided, and this waits for
+ * that mark before looking. There is no budget here on purpose: if the
+ * decision never comes, that is a real failure and the runner's own timeout
+ * should report it, rather than this helper reporting success.
  */
 import type { Page } from '@playwright/test';
 
-/** How long a fresh install may take to raise its first-run dialog. */
-const APPEARANCE_BUDGET_MS = 7_000;
-
 /** Close the first-run dialog when the install has not been configured yet. */
 export async function dismissFirstRun(page: Page): Promise<void> {
+	await page
+		.locator('html[data-onboarding="resolved"]')
+		.waitFor({ state: 'attached' });
+
 	const dialog = page.getByRole('dialog', { name: /welcome to opti-oignon/i });
-
-	const appeared = await dialog
-		.waitFor({ state: 'visible', timeout: APPEARANCE_BUDGET_MS })
-		.then(() => true)
-		.catch(() => false);
-
-	if (!appeared) {
+	if (!(await dialog.isVisible())) {
 		return;
 	}
 
