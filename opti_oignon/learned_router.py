@@ -21,6 +21,7 @@ Architecture:
 
 import hashlib
 import hmac
+import importlib.util
 import logging
 import sqlite3
 import time
@@ -43,22 +44,40 @@ except ImportError:
 # CONDITIONAL IMPORTS
 # =============================================================================
 
-try:
-    import joblib
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import cross_val_score
-    from sklearn.pipeline import Pipeline
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    joblib = None
-    LogisticRegression = None
-    RandomForestClassifier = None
-    TfidfVectorizer = None
-    cross_val_score = None
-    Pipeline = None
+# Whether the classifier's dependencies CAN be imported is a different
+# question from whether they are needed, and it is answerable without
+# importing them. importlib.util.find_spec locates a module without executing
+# it, so the flag below costs a path lookup rather than the several hundred
+# milliseconds and two further libraries that importing scikit-learn costs.
+#
+# A try at module scope is not deferral: it runs at import like anything
+# else, and when the import succeeds the whole cost is paid. That is what
+# this replaces. The concrete names are imported in the three methods that
+# use them, which run only once a caller asks the router to build, score or
+# load a model.
+SKLEARN_AVAILABLE = all(
+    importlib.util.find_spec(name) is not None
+    for name in ("joblib", "sklearn")
+)
+
+# Bound on first use, and deliberately left as a module attribute rather than
+# imported inside each method. Deserializing a model is pickle execution, and
+# the contract that proves it never happens without a valid MAC does so by
+# substituting this name and watching whether it is touched. An import local
+# to the method would shadow that substitution and quietly blind the check --
+# which is exactly what happened when this deferral was first written, and
+# what that contract caught.
+joblib = None
+
+
+def _joblib():
+    """The persistence library, imported on first use, substitutable."""
+    global joblib
+    if joblib is None:
+        import joblib as _module
+
+        joblib = _module
+    return joblib
 
 # Whether this module is fully operational
 LEARNED_ROUTER_AVAILABLE = SKLEARN_AVAILABLE
@@ -492,6 +511,14 @@ class LearnedRouter:
             Unfitted sklearn Pipeline.
         """
         ngram_range = tuple(self._config.get("feature_ngram_range", [1, 2]))
+        # Imported here rather than at module scope: this runs only when
+        # a caller asks for a pipeline, and until then the dependency
+        # costs nothing.
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import Pipeline
+
         vectorizer = TfidfVectorizer(
             max_features=self._config.get("feature_max_features", 5000),
             ngram_range=ngram_range,
@@ -550,6 +577,8 @@ class LearnedRouter:
 
         try:
             pipe = self._build_pipeline()
+            from sklearn.model_selection import cross_val_score
+
             scores = cross_val_score(pipe, texts, labels, cv=cv_folds, scoring="accuracy")
             accuracy = float(scores.mean())
 
@@ -560,7 +589,7 @@ class LearnedRouter:
 
             # Persist model
             self._model_path.parent.mkdir(parents=True, exist_ok=True)
-            joblib.dump(pipe, str(self._model_path))
+            _joblib().dump(pipe, str(self._model_path))
             # Write a keyed MAC so the artifact is authenticated
             # on load. Without a master key the model is persisted but cannot be
             # reloaded (verify fails safe); warn so the operator knows.
@@ -623,7 +652,7 @@ class LearnedRouter:
             self._pipeline = None
             return False
         try:
-            self._pipeline = joblib.load(str(self._model_path))
+            self._pipeline = _joblib().load(str(self._model_path))
             logger.info("LearnedRouter: loaded persisted model from %s", self._model_path)
             return True
         except Exception as exc:

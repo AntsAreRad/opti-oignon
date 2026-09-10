@@ -136,7 +136,7 @@ def test_fp6_a_module_count_above_the_ceiling_is_refused():
         assert any("module" in one for one in reasons), reasons
         # And the ceiling sits above what the tree actually loads, or it
         # would be a ceiling nothing could satisfy.
-        assert guard.MODULE_CEILING > 2814, guard.MODULE_CEILING
+        assert guard.MODULE_CEILING > 1633, guard.MODULE_CEILING
     finally:
         restore()
 

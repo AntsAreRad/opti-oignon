@@ -71,15 +71,21 @@ LEDGER = {
     # package data directory. The ledger may only shrink, and this is what
     # shrinking looks like: an entry removed because the code earned it.
     "files": frozenset(),
+    # sklearn, and pandas and scipy behind it, are PAID: the classifier's
+    # dependency is located rather than imported, and the concrete names are
+    # imported in the three methods that use them. That took 1181 modules and
+    # 104 MiB off the import.
     "heavy": frozenset({
-        "chromadb", "fastapi", "llama_cpp", "numpy", "pandas", "pydantic",
-        "scipy", "sklearn",
+        "chromadb", "fastapi", "llama_cpp", "numpy", "pydantic",
     }),
 }
 
-# Above the 2814 measured, close enough that a new subtree cannot hide under
-# it. A ceiling set at the measurement would fail on the first honest import.
-MODULE_CEILING = 2900
+# Above the 1633 measured -- stable to the digit across three readings -- and
+# close enough that a new subtree cannot hide under it. A ceiling set at the
+# measurement itself would fail on the first honest import. It was 2900 when
+# the guard shipped; the classifier's deferral took 1181 modules off, and a
+# ceiling left at the old figure would have stopped forbidding anything.
+MODULE_CEILING = 1700
 
 # The import must not start a thread. This one the tree already satisfies.
 THREAD_CEILING = 1
