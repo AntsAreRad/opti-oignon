@@ -171,6 +171,14 @@ jobs:
       - name: Summary-fidelity guard (measured floor vs the written threshold)
         run: python .github/scripts/summary_fidelity_guard.py
 
+      # A capability costs nothing until it is called. This one observes the
+      # import in a subprocess, through an audit hook, and refuses anything
+      # its ledger does not already carry -- the ledger being the debt that
+      # predates the guard, which may only shrink. Wall time and resident
+      # memory are recorded, never enforced: both move with the machine.
+      - name: Import footprint guard (the ledger may only shrink)
+        run: python .github/scripts/import_footprint_guard.py
+
       # Static contracts prove a defense answers a fixed input. They cannot
       # say whether it holds when something pushes back. The deterministic
       # path drives a versioned adversarial corpus, through the shipped
