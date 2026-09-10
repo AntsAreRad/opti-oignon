@@ -63,6 +63,29 @@ _CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "config", "fingerprint.yaml"
 )
 
+# Where a store goes when the configuration names it by filename alone. The
+# configuration file above is already anchored on __file__; the data path read
+# out of it was not, so it resolved against whatever directory the caller
+# happened to be in. Importing the package from the repository root wrote the
+# database into the repository root, and from a temporary directory, there.
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+def _anchor(path: str) -> str:
+    """Resolve a configured store path against the package data directory.
+
+    An absolute path is returned unchanged. An operator who names a location
+    means it, and anchoring it again would move their data without saying so.
+
+    The explicit test is belt and braces: ``os.path.join`` already discards
+    everything before an absolute component. It is kept because the guarantee
+    then survives a change of implementation, and because a reader should not
+    have to know that rule to see the intent.
+    """
+    if os.path.isabs(path):
+        return path
+    return os.path.join(_DATA_DIR, path)
+
 _DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "dimension_weights": {
@@ -790,6 +813,11 @@ class UserPreferencesStore:
     """
 
     def __init__(self, db_path: str = "fingerprint.db"):
+        # Taken as given. A caller that names a path means it, and two
+        # contracts in this tree depend on that: they hand this store a
+        # relative name and expect it opened, not relocated. What was
+        # unanchored was the CONFIGURED default, and that is anchored where
+        # the configuration is read.
         self._db_path = db_path
         self._lock = threading.Lock()
         self._init_db()
@@ -1059,8 +1087,12 @@ class FingerprintManager:
         if preferences_store is not None:
             self._preferences = preferences_store
         else:
+            # The configured path is anchored here. Left bare it resolved
+            # against whatever directory the caller happened to be in, which
+            # is how this database came to be written into the repository
+            # root by nothing more than importing the package.
             self._preferences = UserPreferencesStore(
-                db_path=self._config.sqlite_path
+                db_path=_anchor(self._config.sqlite_path)
             )
 
         # D10: Context anchors

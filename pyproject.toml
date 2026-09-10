@@ -226,6 +226,13 @@ fail_under = 0
 # reaches the shape. A full purge of that string is now accepted on
 # its own ground, so the spelling became false while the property
 # held. The replacement is C31, which pins the shape directly.
+#
+# And b1 the same way. It pinned that the store asks for its configured file
+# NAME, which held only while that name resolved against the caller's
+# directory -- the defect that wrote a database into the repository root on
+# nothing more than an import. Anchoring the path is the fix and it makes the
+# old spelling false. Its first half, that the seam is reached eagerly at
+# import, is re-asserted unchanged in the replacement, b35.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -234,4 +241,5 @@ addopts = """
     --deselect=tests/test_semantic_cache_semantic_tier_contracts.py
     --deselect=tests/test_comment_only_guard_contracts.py::test_c23_outside_python_a_moved_shape_stays_refused
     --deselect=tests/test_comment_only_guard_contracts.py::test_c7_non_python_proof_is_quote_aware
+    --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b1_the_import_reaches_storage_through_the_seeded_seam
 """

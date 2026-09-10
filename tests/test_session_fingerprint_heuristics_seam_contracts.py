@@ -166,6 +166,43 @@ def test_b1_the_import_reaches_storage_through_the_seeded_seam():
         restore()
 
 
+
+def test_b35_the_import_opens_the_configured_path_anchored():
+    """Supersedes b1, whose second half became false by design.
+
+    b1 pinned two things: the seeded connector is reached at import, and the
+    path asked for is the configured store file NAME. The first is still
+    true and is re-asserted here. The second was true only while that name
+    resolved against whatever directory the caller happened to be in, which
+    is how importing the package wrote a database into the repository root.
+    Anchoring the configured path is the fix, and it makes the old spelling
+    false: the store now asks for an absolute path under the package's data
+    directory, whose last component is that same configured name.
+    """
+    mod, restore, counter, requested, _tmp = _load()
+    try:
+        assert counter["n"] > 0, (
+            "the seeded connector must be reached at import; the store "
+            "init is eager, not lazy"
+        )
+        anchored = [one for one in requested
+                    if os.path.basename(one) == _CFG_SQLITE_PATH]
+        assert anchored, (
+            f"the store must open its configured file, got {requested!r}"
+        )
+        for one in anchored:
+            assert os.path.isabs(one), (
+                f"a relative path resolves against the caller's directory, "
+                f"which is the defect this supersedes: {one}"
+            )
+            assert os.path.basename(os.path.dirname(one)) == "data", (
+                f"the store belongs beside the others in the package data "
+                f"directory, got {one}"
+            )
+    finally:
+        restore()
+
+
 def test_b2_availability_latch_and_singletons_present():
     """b2: after a clean load the availability flag is up and both
     module-level singletons exist with their documented types."""

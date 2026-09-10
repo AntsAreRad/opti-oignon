@@ -66,10 +66,11 @@ LEDGER = {
         "response_cache.db", "sandbox_audit.db", "semantic_cache.db",
         "sync_queue.db",
     }),
-    # Written into whatever directory the caller happened to be in, because
-    # the path is relative. The config beside it IS anchored on __file__,
-    # which makes this the one path the module forgot to anchor.
-    "files": frozenset({"fingerprint.db"}),
+    # PAID. The preference store's path was configured as a bare filename
+    # and resolved against the caller's directory; it is now anchored on the
+    # package data directory. The ledger may only shrink, and this is what
+    # shrinking looks like: an entry removed because the code earned it.
+    "files": frozenset(),
     "heavy": frozenset({
         "chromadb", "fastapi", "llama_cpp", "numpy", "pandas", "pydantic",
         "scipy", "sklearn",
