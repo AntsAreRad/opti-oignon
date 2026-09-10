@@ -61,8 +61,10 @@ LEDGER = {
         # auth_2fa.db is PAID: its schema is built at the first connection
         # rather than by a call at module scope.
         "analytics.db", "audit_chain.db", "auth.db",
+        # conversations.db is PAID: the manager builds its schema at the
+        # first connection rather than in a constructor that runs at import.
         "benchmark_history.db", "branches.db", "coding_history.db",
-        "conversations.db", "feedback.db", "fingerprint.db",
+        "feedback.db", "fingerprint.db",
         "humanizer_feedback.db", "learned_router.db", "memories.db",
         "performance_metrics.db", "plugins.db", "projects.db",
         "response_cache.db", "sandbox_audit.db", "semantic_cache.db",

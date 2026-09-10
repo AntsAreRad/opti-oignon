@@ -295,12 +295,14 @@ class ConversationManager:
             db_path: Chemin vers la base SQLite (default: DATA_DIR/conversations.db)
         """
         self._db_path = db_path or (DATA_DIR / "conversations.db")
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-
-        # Initialisation du schema
-        self._init_db()
-        logger.info(f"ConversationManager initialise: {self._db_path}")
+        # The schema is built at the first connection, not here. This manager
+        # is constructed at module scope and the package imports this module,
+        # so building it here opened a database on every import of the
+        # package -- with encryption not enforced, at a moment where a
+        # refusal could not be handled by any caller.
+        self._schema_ready = False
+        logger.info(f"ConversationManager ready: {self._db_path}")
 
     # -----------------------------------------------------------------------
     # Connexion et schema
@@ -313,17 +315,29 @@ class ConversationManager:
         SQLCipher support when available. Each call creates a new
         connection for multi-thread compatibility.
         """
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = safe_connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        if not self._schema_ready:
+            # Built on the connection just opened, without taking the lock:
+            # a caller already holding it would otherwise deadlock here.
+            self._schema_ready = True
+            self._create_schema(conn)
         return conn
 
-    def _init_db(self) -> None:
-        """Create tables if they do not exist."""
-        with self._lock:
-            conn = self._get_connection()
-            try:
+    def _create_schema(self, conn: sqlite3.Connection) -> None:
+        """Build the schema on a connection the caller already holds.
+
+        Deliberately takes no lock. Fifteen methods in this class hold the
+        instance lock and then ask for a connection; if building the schema
+        reacquired that lock, the first of them to run before the schema
+        existed would deadlock. It cannot, because it is handed the
+        connection rather than opening one, and CREATE TABLE IF NOT EXISTS
+        is idempotent if two callers ever race here.
+        """
+        try:
                 conn.executescript("""
                     CREATE TABLE IF NOT EXISTS conversations (
                         id TEXT PRIMARY KEY,
@@ -355,15 +369,19 @@ class ConversationManager:
                         ON conversations(updated_at DESC);
                 """)
                 conn.commit()
-            except Exception as e:
-                logger.error(f"Error initializing DB: {e}")
-                raise
+        except Exception as e:
+            logger.error(f"Error initializing DB: {e}")
+            raise
+
+    def _init_db(self) -> None:
+        """Create tables if they do not exist, on a connection of its own."""
+        self._schema_ready = True
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                self._create_schema(conn)
             finally:
                 conn.close()
-
-    # -----------------------------------------------------------------------
-    # Helpers internes
-    # -----------------------------------------------------------------------
 
     def _row_to_conversation(self, row: sqlite3.Row) -> Conversation:
         """Convert a SQLite row to a Conversation object (without messages)."""

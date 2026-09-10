@@ -145,9 +145,13 @@ def test_fp7_a_ledger_entry_no_longer_reached_is_reported_stale():
     guard, restore = _guard()
     try:
         seen = _observation(guard)
-        seen["databases"] = sorted(set(seen["databases"]) - {"conversations.db"})
+        # Taken from the ledger rather than named here. A hardcoded name
+        # rots the moment that debt is paid, and this contract would then
+        # fail for a reason having nothing to do with what it pins.
+        victim = sorted(guard.LEDGER["databases"])[0]
+        seen["databases"] = sorted(set(seen["databases"]) - {victim})
         stale = guard.stale_entries(seen)
-        assert "conversations.db" in " ".join(stale), (
+        assert victim in " ".join(stale), (
             "a debt that has been paid must come off the ledger, or the "
             "count stops meaning anything"
         )
