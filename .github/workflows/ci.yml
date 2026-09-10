@@ -101,6 +101,13 @@ jobs:
       - name: Run comment-only guard (files that shed nomenclature)
         run: python .github/scripts/comment_only_guard.py "${{ steps.base.outputs.ref }}"
 
+      # Declarations and native exports are bound by name at load time, on a
+      # device. Both files are text, so the agreement is decided here instead.
+      # EnvelopesTest runs on the host via ./gradlew :app:test, never in CI:
+      # there is no JVM toolchain and no Gradle wrapper in this workflow.
+      - name: Run native bridge concordance (declarations against exports)
+        run: python scripts/native_bridge_concordance.py
+
   # -------------------------------------------------------------------
   # Isolation -- the test windows, under BOTH install layouts
   #
