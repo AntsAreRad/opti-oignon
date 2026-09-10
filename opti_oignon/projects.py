@@ -298,7 +298,11 @@ class ProjectStore:
         self._storage_base.mkdir(parents=True, exist_ok=True)
 
         # Initialize database
-        self._init_db()
+        # The schema is built at the first connection, not here. This store
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package -- with encryption not
+        # enforced, at a moment where a refusal could not be handled.
+        self._schema_ready = False
 
         logger.info("ProjectStore initialized (db=%s, storage=%s)", self._db_path, self._storage_base)
 
@@ -366,6 +370,9 @@ class ProjectStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self) -> None:

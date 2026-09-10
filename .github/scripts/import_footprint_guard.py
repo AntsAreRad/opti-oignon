@@ -57,22 +57,23 @@ _ROOT = _HERE.parent.parent.parent
 # time it was written. MAY ONLY SHRINK. Removing an entry is how the debt is
 # paid; adding one is how the guard is defeated.
 LEDGER = {
+    # Ten remain. Each is opened by a singleton built at module scope whose
+    # constructor creates its schema; the ten paid so far all had that shape
+    # and were paid the same way, by ensuring the schema at the first
+    # connection instead. Two of the ten below need more than that: one
+    # writes outside the tree, and one is opened twice by two different
+    # owners. The four under the data directory are not this guard's to read.
     "databases": frozenset({
-        # auth_2fa.db is PAID: its schema is built at the first connection
-        # rather than by a call at module scope.
-        "analytics.db", "audit_chain.db", "auth.db",
-        # conversations.db is PAID: the manager builds its schema at the
-        # first connection rather than in a constructor that runs at import.
-        "benchmark_history.db", "branches.db", "coding_history.db",
-        # memories.db is PAID: the manager builds its schema on a connection
-        # handed to it, without taking the lock ten of its methods hold.
-        "feedback.db", "fingerprint.db",
-        "humanizer_feedback.db", "learned_router.db",
-        # response_cache.db and semantic_cache.db are PAID: both caches build
-        # their schema at the first connection instead of in a constructor
-        # that runs at import. The semantic cache's degradation is unchanged.
-        "performance_metrics.db", "plugins.db", "projects.db",
-        "sandbox_audit.db", "sync_queue.db",
+        "audit_chain.db",
+        "auth.db",
+        "benchmark_history.db",
+        "branches.db",
+        "coding_history.db",
+        "fingerprint.db",
+        "humanizer_feedback.db",
+        "learned_router.db",
+        "plugins.db",
+        "sandbox_audit.db",
     }),
     # PAID. The preference store's path was configured as a bare filename
     # and resolved against the caller's directory; it is now anchored on the
