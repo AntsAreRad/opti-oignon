@@ -160,3 +160,30 @@ def test_rt6_the_script_is_import_safe():
         assert call.start() > guarded, (
             "importing this script must not run a compiler"
         )
+
+
+def test_rt7_the_runbook_names_the_gate_and_its_checks():
+    """The gate is a claim about when evidence becomes possible.
+
+    A gate named in a tracking document drifts from the tree that has to
+    satisfy it. This one is named in the runbook, beside the commands that
+    check it, and this contract keeps the two together.
+    """
+    runbook = (REPO / "android" / "BUILD_RUNBOOK.md").read_text(encoding="utf-8")
+    assert "bound bridge" in runbook, (
+        "the artefact that gates a two-device round must be named"
+    )
+    for check in ("native_bridge_concordance.py",
+                  "native_bridge_roundtrip.py",
+                  "gradlew :app:test"):
+        assert check in runbook, f"the gate does not name {check}"
+    # Scoped to the row, not the document. "sentinel" appears elsewhere in
+    # this runbook, so searching the whole text would pass with the check
+    # deleted -- which is exactly what its blade did before this line.
+    rows = [one for one in runbook.splitlines()
+            if one.startswith("| 3 |") and "sentinel" in one]
+    assert rows, (
+        "the check that separates a proven mechanism from a working bridge "
+        "is that no entry point still returns the sentinel, and it must be "
+        "a row of the gate rather than a remark somewhere above it"
+    )

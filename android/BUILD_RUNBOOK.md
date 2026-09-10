@@ -133,6 +133,35 @@ Cross-check each observed reason against `MOBILE_SYNC_CONTRACT.md`. The desktop
 side of every one of these is already covered by the backend test suite; this
 step confirms the phone speaks the same contract over a real route.
 
+## 6. What must exist before a two-device round is attempted
+
+A two-device round over the live transport is not gated on enthusiasm. It is
+gated on one artefact, named here so that its absence is visible rather than
+argued about:
+
+**A bound bridge**: `libveilid_bridge.so`, built for `arm64-v8a` and
+`x86_64`, whose eleven entry points call into `veilid-core` rather than
+returning the not-implemented sentinel.
+
+It exists when all four of these hold, and not before:
+
+| | check | where |
+|---|---|---|
+| 1 | `python3 scripts/native_bridge_concordance.py` returns 0 | anywhere, every change |
+| 2 | `python3 scripts/native_bridge_roundtrip.py` returns 0 | this machine, pinned compiler |
+| 3 | no entry point returns the not-implemented sentinel any more | this machine |
+| 4 | `./gradlew :app:test` runs and passes | this machine, needs the wrapper |
+
+Checks 1 and 2 prove the mechanism: the names agree, and a value crosses back
+intact. They say nothing about whether the bridge does anything. Check 3 is
+what separates a proven mechanism from a working bridge, and it is the one
+that needs `veilid-core` built for the two ABIs.
+
+Until check 3 passes, a failed two-device round cannot be told apart from an
+unimplemented one, and no conclusion may be drawn from attempting it. That is
+the whole reason this list exists: an attempt made too early produces a
+result that looks like evidence and is not.
+
 ## Note on the live round
 
 The live two-device round (edit on one device, sync, verify on the other) is
