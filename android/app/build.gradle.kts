@@ -30,4 +30,8 @@ android {
 dependencies {
     implementation(project(":veilid-bridge"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+
+    // The wire envelopes are decidable on a JVM alone, so they are checked in
+    // src/test rather than src/androidTest: no device, no emulator.
+    testImplementation("junit:junit:4.13.2")
 }

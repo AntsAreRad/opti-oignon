@@ -59,6 +59,26 @@ Map each to veilid-core:
 - `recordOpen` / `recordGet` / `recordSet` / `recordClose` -- DHT records for the
   note/vault sync surface.
 
+## 4b. Unit tests for the wire envelopes (host, no device)
+
+The envelopes in `app/src/main/kotlin/org/optioignon/mobile/wire/Envelopes.kt`
+are plain data classes with a strict codec, so their behaviour is decidable on
+a JVM alone. `EnvelopesTest.kt` checks the round trips, the omitted null, the
+disjointness of a success and a refusal, and that no two refusal reasons share
+a string.
+
+From `android/`, once the wrapper exists (section 2):
+
+```bash
+./gradlew :app:test
+```
+
+**CI does not run these.** The workflow has no JVM toolchain and no Gradle
+wrapper, so `EnvelopesTest` is skipped there by name rather than silently: an
+execution that is absent without a word reads as an execution that passed.
+Until the wrapper is generated on this machine, that run is owed and no number
+from it may be quoted.
+
 ## 5. Validate the contract (the real test)
 
 Runtime validation is host-side and is what finally confirms the contract:
