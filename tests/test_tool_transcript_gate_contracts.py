@@ -45,32 +45,13 @@ import traceback
 import types
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
+
 _REPO = Path(__file__).resolve().parent.parent
 _OO = _REPO / "opti_oignon"
-
-
-class _IsolationGuard:
-    """Refuse every project submodule the test did not seed.
-
-    A stand-in package whose ``__path__`` is empty isolates the tree only
-    while the parent path is the sole way to resolve a submodule. That
-    assumption breaks wherever the project is installed in editable mode:
-    such an install registers a finder that answers on the module NAME and
-    ignores the parent path, so a real submodule resolves behind the
-    test's back -- silently importing live code. This guard sits ahead of
-    every finder and refuses the names that were not seeded, so a load
-    behaves identically whether the project is installed or not.
-    """
-
-    _PREFIX = "opti_oignon."
-
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(self._PREFIX):
-            raise ModuleNotFoundError(
-                f"not seeded in the isolation window: {fullname}",
-                name=fullname,
-            )
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -121,15 +102,7 @@ def _config_module(stub: _ConfigStub) -> types.ModuleType:
 # Isolated loading (sibling-transcript idiom plus the meta-path guard)
 # ---------------------------------------------------------------------------
 def _load(prefs=None, raise_on=()):
-    keys = (
-        "pydantic", "ollama", "opti_oignon", "opti_oignon.tool_calling",
-        "opti_oignon.tool_registry", "opti_oignon.structured_output",
-        "opti_oignon.response_hygiene", "opti_oignon.tool_executor",
-        "opti_oignon.config", "opti_oignon.agent_eval",
-        "opti_oignon.agent_eval.tasks", "opti_oignon.agent_eval.chat_runner",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-
+    had_pydantic = "pydantic" in sys.modules
     try:
         import pydantic  # noqa: F401
     except ImportError:
@@ -137,72 +110,41 @@ def _load(prefs=None, raise_on=()):
 
     ollama_stub = types.ModuleType("ollama")
     ollama_stub.chat = lambda **kw: None
-    sys.modules["ollama"] = ollama_stub
-
-    guard = _IsolationGuard()
-    sys.meta_path.insert(0, guard)
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
 
     stub = _ConfigStub(prefs=prefs, raise_on=raise_on)
     cfg = _config_module(stub)
-    sys.modules["opti_oignon.config"] = cfg
-    pkg.config = cfg
-
-    def _real(dotted: str, path: Path):
-        spec = importlib.util.spec_from_file_location(dotted, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[dotted] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    pkg.tool_calling = _real(
-        "opti_oignon.tool_calling", _OO / "tool_calling.py",
-    )
-    pkg.tool_registry = _real(
-        "opti_oignon.tool_registry", _OO / "tool_registry.py",
-    )
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.ToolCallRequest = object
     so.structured_output_engine = None
     so.STRUCTURED_OUTPUT_AVAILABLE = False
-    sys.modules["opti_oignon.structured_output"] = so
-    pkg.structured_output = so
 
-    pkg.response_hygiene = _real(
-        "opti_oignon.response_hygiene", _OO / "response_hygiene.py",
+    seeded = {"opti_oignon.config": cfg, "opti_oignon.structured_output": so}
+    seed_registry(seeded, ollama_stub)
+    loaded, win_restore = isolate(
+        targets={
+            "opti_oignon.tool_calling": source("tool_calling.py"),
+            "opti_oignon.tool_registry": source("tool_registry.py"),
+            "opti_oignon.response_hygiene": source("response_hygiene.py"),
+            "opti_oignon.tool_executor": source("tool_executor.py"),
+            "opti_oignon.agent_eval.tasks": source("agent_eval", "tasks.py"),
+            "opti_oignon.agent_eval.chat_runner": source("agent_eval", "chat_runner.py"),
+        },
+        seeded=seeded,
+        packages=("opti_oignon", "opti_oignon.agent_eval"),
     )
-    te = _real("opti_oignon.tool_executor", _OO / "tool_executor.py")
-    pkg.tool_executor = te
-
-    ae = types.ModuleType("opti_oignon.agent_eval")
-    ae.__path__ = []
-    sys.modules["opti_oignon.agent_eval"] = ae
-    pkg.agent_eval = ae
-    ae.tasks = _real(
-        "opti_oignon.agent_eval.tasks", _OO / "agent_eval" / "tasks.py",
-    )
-    cr = _real(
-        "opti_oignon.agent_eval.chat_runner",
-        _OO / "agent_eval" / "chat_runner.py",
-    )
-    ae.chat_runner = cr
-
-    if not cr.FEATURE_AVAILABLE:
-        raise RuntimeError("harness reports FEATURE_AVAILABLE False")
+    te = loaded["opti_oignon.tool_executor"]
+    cr = loaded["opti_oignon.agent_eval.chat_runner"]
 
     def restore():
-        if guard in sys.meta_path:
-            sys.meta_path.remove(guard)
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
+        win_restore()
+        if not had_pydantic:
+            sys.modules.pop("pydantic", None)
+
+    if not cr.FEATURE_AVAILABLE:
+        restore()
+        raise RuntimeError("harness reports FEATURE_AVAILABLE False")
 
     return cr, te, stub, restore
 

@@ -10,8 +10,8 @@ Orchestrates the interaction between the LLM and the registered tools:
 2. If so, the tool is executed and the result is injected
 3. The LLM generates the final response with the results
 
-Uses the StructuredOutputEngine to obtain
-decisions structurees du LLM via ToolCallRequest.
+Asks the inference registry for a native tool decision first, and falls
+back to the StructuredOutputEngine for a structured decision.
 
 Author: Leon
 """
@@ -51,12 +51,31 @@ except ImportError:
     _default_registry = None
     ToolRegistry = None
 
-# Conditional Ollama import for the final response
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+
+def _resolve_backend(model: str):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily: the registry pulls the client library, and this module
+    must stay cheap to import. None is the honest answer when the registry
+    is unavailable or resolves nothing; every head then degrades by name.
+    Nothing here reaches for the client behind the registry's back.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
+
+
+def _payload(response):
+    """The client-shaped dict behind a registry response, for the parsers."""
+    to_dict = getattr(response, "to_dict", None)
+    return to_dict() if callable(to_dict) else response
 
 # Robust tool-calling primitives (Lot 1+2: native function-calling, enum
 # forcing, intent transpiler). Stdlib-only, but guarded to match the module's
@@ -955,7 +974,7 @@ class ToolExecutor:
         """Ask the LLM which tool to use via the StructuredOutputEngine.
 
         Returns:
-            ToolDecision ou None en cas d'erreur
+            ToolDecision, or None on error
         """
         if not STRUCTURED_OUTPUT_AVAILABLE or self.structured_engine is None:
             return None
@@ -978,7 +997,7 @@ class ToolExecutor:
 
         messages.append({"role": "user", "content": user_content})
 
-        # Appel structure
+        # Structured call
         result = self.structured_engine.generate_structured(
             messages=messages,
             schema=ToolDecision,
@@ -1026,7 +1045,6 @@ class ToolExecutor:
 
         use_native = (
             ROBUST_TOOLCALLING_AVAILABLE
-            and OLLAMA_AVAILABLE
             and model_supports_native_tools(model)
         )
         if use_native:
@@ -1038,20 +1056,11 @@ class ToolExecutor:
                 messages = (
                     [{"role": "system", "content": manifest_block}] + messages
                 )
-            resp = None
-            try:
-                resp = ollama.chat(
-                    model=model,
-                    messages=messages,
-                    tools=native_tool_schemas(available),
-                    options={"temperature": 0.0},
-                )
-            except Exception as e:
-                logger.warning(
-                    "Native tool call failed (%s); falling back to format=", e,
-                )
+            calls = self._native_tool_decision(
+                messages, model, native_tool_schemas(available),
+            )
+            resp = self._last_native_response
             if resp is not None:
-                calls = parse_native_tool_calls(resp)
                 if calls:
                     return calls
                 if force:
@@ -1152,26 +1161,64 @@ class ToolExecutor:
         messages.append({"role": "user", "content": content})
         return messages
 
+    def _native_tool_decision(
+        self, messages: list[dict], model: str, tools: list[dict],
+    ) -> list[tuple[str, dict]]:
+        """Ask the registry's backend for native tool calls.
+
+        The tool schemas travel as an engine option, so the registry's
+        admission, provenance and schema handling apply to this head like
+        any other. ``_last_native_response`` keeps the client-shaped payload
+        when a backend answered -- the caller reads a direct answer from it
+        -- and is None when no backend served, which is the signal to take
+        the structured fallback. An empty list is both "no backend" and "the
+        model called nothing"; the payload tells them apart.
+        """
+        self._last_native_response = None
+        backend = _resolve_backend(model)
+        if backend is None:
+            logger.warning(
+                "Native tool decision: no inference backend is registered; "
+                "falling back to format=",
+            )
+            return []
+        try:
+            response = backend.generate(
+                model=model,
+                messages=messages,
+                options={"temperature": 0.0, "tools": tools},
+            )
+        except Exception as e:
+            logger.warning(
+                "Native tool call failed (%s); falling back to format=", e,
+            )
+            return []
+        payload = _payload(response)
+        self._last_native_response = payload
+        return parse_native_tool_calls(payload)
+
     def _enum_force_tool(
         self, messages: list[dict], model: str, tool_names: list[str],
     ) -> tuple[str, dict] | None:
-        """Force a tool selection via an enum-constrained format= schema.
+        """Force a tool selection via an enum-constrained schema.
 
         The schema's tool_name enum excludes "none", so the sampler cannot
         decline -- a tool is guaranteed when the caller knows one is needed.
+        The schema travels as an engine option through the registry.
         """
+        backend = _resolve_backend(model)
+        if backend is None:
+            logger.warning(
+                "Enum-force tool selection: no inference backend is registered",
+            )
+            return None
         try:
-            resp = ollama.chat(
+            response = backend.generate(
                 model=model,
                 messages=messages,
-                format=forced_decision_schema(tool_names),
-                options={"temperature": 0.0},
+                options={"temperature": 0.0, "schema": forced_decision_schema(tool_names)},
             )
-            raw = (
-                resp["message"]["content"]
-                if isinstance(resp, dict)
-                else resp.message.content
-            )
+            raw = response.content
             data = json.loads(raw)
             name = data.get("tool_name")
             if name in tool_names:
@@ -1370,22 +1417,18 @@ class ToolExecutor:
         Falls back to a single-shot generation (yielded once) when the
         backend cannot stream, so the streaming front never loses the answer.
         """
-        if not OLLAMA_AVAILABLE:
-            yield "Cannot generate response: Ollama not available."
+        backend = _resolve_backend(model)
+        if backend is None:
+            yield "Cannot generate response: no inference backend is registered."
             return
         try:
-            stream = ollama.chat(
+            produced = False
+            for chunk in backend.stream(
                 model=model,
                 messages=messages,
                 options={"temperature": 0.3},
-                stream=True,
-            )
-            produced = False
-            for chunk in stream:
-                part = chunk.get("message") if isinstance(chunk, dict) \
-                    else getattr(chunk, "message", None)
-                content = part.get("content") if isinstance(part, dict) \
-                    else getattr(part, "content", "")
+            ):
+                content = getattr(chunk, "content", "")
                 if content:
                     produced = True
                     yield content
@@ -1397,12 +1440,12 @@ class ToolExecutor:
                 "single-shot generation", exc,
             )
         try:
-            response = ollama.chat(
+            response = backend.generate(
                 model=model,
                 messages=messages,
                 options={"temperature": 0.3},
             )
-            yield response.message.content
+            yield response.content
         except Exception as exc:
             logger.error(f"Final response generation error: {exc}")
             yield f"Error generating response: {exc}"
@@ -1421,11 +1464,12 @@ class ToolExecutor:
 
         If no tools were called, generate a direct response.
         """
-        if not OLLAMA_AVAILABLE:
-            # Fallback: assemble raw results
+        backend = _resolve_backend(model)
+        if backend is None:
+            # Degrade by name: assemble raw results, never call the client.
             if tool_results_context:
                 return "\n\n".join(tool_results_context)
-            return "Cannot generate response: Ollama not available."
+            return "Cannot generate response: no inference backend is registered."
 
         messages = self._final_messages(
             message, tool_results_context, context_messages,
@@ -1434,12 +1478,12 @@ class ToolExecutor:
         )
 
         try:
-            response = ollama.chat(
+            response = backend.generate(
                 model=model,
                 messages=messages,
                 options={"temperature": 0.3},
             )
-            return response.message.content
+            return response.content
         except Exception as e:
             logger.error(f"Final response generation error: {e}")
             # Fallback with raw results

@@ -22,6 +22,11 @@ import sys
 import types
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
+
 _REPO = Path(__file__).resolve().parent.parent
 _OO = _REPO / "opti_oignon"
 
@@ -30,58 +35,34 @@ _OO = _REPO / "opti_oignon"
 # Isolated loading: real tool_calling + tool_executor, stubbed heavy deps
 # ---------------------------------------------------------------------------
 def _load():
-    """Return (tool_calling, tool_executor, ollama_stub) loaded in isolation.
+    """Return (tool_calling, tool_executor, ollama_stub, restore) loaded in isolation.
 
-    Saves/restores sys.modules so the suite stays clean for sibling tests.
+    The shared window keeps the suite clean for sibling tests; the stub is
+    the scripted client behind the seeded registry.
     """
-    keys = (
-        "ollama", "opti_oignon", "opti_oignon.tool_calling",
-        "opti_oignon.tool_registry", "opti_oignon.structured_output",
-        "opti_oignon.tool_executor",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-
     ollama_stub = types.ModuleType("ollama")
     ollama_stub.chat = lambda **kw: None
-    sys.modules["ollama"] = ollama_stub
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec_tc = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_calling", _OO / "tool_calling.py",
-    )
-    tc = importlib.util.module_from_spec(spec_tc)
-    sys.modules["opti_oignon.tool_calling"] = tc
-    spec_tc.loader.exec_module(tc)
 
     reg = types.ModuleType("opti_oignon.tool_registry")
     reg.ToolRegistry = object
     reg.tool_registry = None
-    sys.modules["opti_oignon.tool_registry"] = reg
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.structured_engine = None
     so.STRUCTURED_OUTPUT_AVAILABLE = False
-    sys.modules["opti_oignon.structured_output"] = so
 
-    spec_te = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_executor", _OO / "tool_executor.py",
+    seeded = {"opti_oignon.tool_registry": reg, "opti_oignon.structured_output": so}
+    seed_registry(seeded, ollama_stub)
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.tool_calling": source("tool_calling.py"),
+            "opti_oignon.tool_executor": source("tool_executor.py"),
+        },
+        seeded=seeded,
+        packages=("opti_oignon",),
     )
-    te = importlib.util.module_from_spec(spec_te)
-    sys.modules["opti_oignon.tool_executor"] = te
-    spec_te.loader.exec_module(te)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-    return tc, te, ollama_stub, restore
+    return loaded["opti_oignon.tool_calling"], loaded["opti_oignon.tool_executor"], ollama_stub, restore
 
 
 def _param(required=True):

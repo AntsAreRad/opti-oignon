@@ -11,11 +11,12 @@ schema channel built for exactly this purpose cannot reach the one head that
 needs it most.
 
 Why it is owed rather than done: six sealed suites stand on the module's
-direct path with hand-rolled windows that leave the finder open, so a request
-resolved through the registry from inside them reaches the real backend and
-tries a real connection. Twenty-seven contracts. Migrating the module means
-re-asserting those on the shared window first -- a block, not a passenger.
-The ratchet in the registry-funnel guard carries the module's seal until then.
+direct path with hand-rolled windows that left the finder open, so a request
+resolved through the registry from inside them reached the real backend and
+tried a real connection -- measured, once, before those suites moved: forty
+four contracts, twenty eight of them reading the scripted client. They now
+stand on the shared window over the registry bridge, and these four are
+selected again.
 
   * TE1 -- the native decision sends the tool list through the registry and
     reads the calls back off the response.

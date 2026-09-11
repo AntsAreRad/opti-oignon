@@ -287,16 +287,11 @@ fail_under = 0
 # a spelling a later field cannot falsify -- and pins the refusal pair beside
 # them.
 #
-# And the four TE contracts, of a shape none of the above has: they are not
-# superseded, they are OWED. They specify a migration -- the tool executor
-# asking the registry at every head -- that was written, proven red, and then
-# withdrawn in the same block, because six sealed suites stand on that
-# module's direct path with hand-rolled windows, and a request resolved
-# through the registry from inside those windows reaches the real backend.
-# Twenty-seven contracts would have to be re-asserted on the shared window
-# first. The file stays in the tree as the written specification; the
-# registry-funnel guard carries the module's seal until the debt is paid;
-# and these four lines come out the day it is.
+# The four TE contracts were owed here for one block: they specified the
+# tool executor asking the registry at every head while six sealed suites
+# still stood on its direct path with hand-rolled windows. Those suites now
+# stand on the shared window, the module has no direct path left, and the
+# four lines came out the day the debt was paid, as the note said they would.
 #
 # zp2 pinned that nothing in the package imports the memory harness, at a
 # moment when the harness was measurement only. The moment passed by design:
@@ -329,10 +324,6 @@ addopts = """
     --deselect=tests/test_session_fingerprint_bounds_at_rest_contracts.py::test_fp1_preferences_persist_through_the_seam_parameterized
     --deselect=tests/test_registry_schema_lazy_contracts.py::test_rg4_the_ledger_loses_the_one_with_a_single_owner
     --deselect=tests/test_routes_benchmark_v2_contracts.py::test_v13_results_fill_the_gaps_and_prefer_the_stored_identity
-    --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te1_the_native_decision_sends_tools_through_the_registry
-    --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te2_the_forced_decision_sends_its_schema_through_the_registry
-    --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te3_the_streamed_final_answer_streams_through_the_registry
-    --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te4_without_a_backend_each_head_degrades_and_never_reaches_the_client
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp2_nothing_on_the_chat_path_imports_the_harness
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet
 """

@@ -155,9 +155,8 @@ _LEAK_PREFIXES = (
     "[reminder",
 )
 
-# One scripted run at a time: the backend swap below rebinds module-level
-# state on the executor module, mirroring how the sibling runner serializes
-# its runs.
+# One scripted run at a time: the registry overlay below is process-wide
+# state, mirroring how the sibling runner serializes its runs.
 _RUN_LOCK = threading.Lock()
 
 
@@ -454,33 +453,91 @@ def build_scripted_registry(workspace: VirtualWorkspace):
     return registry
 
 
+class _ScriptedBackend:
+    """A registry backend over a scripted client, for the length of a run.
+
+    Forwards each request with the kwargs the executor's former direct call
+    carried -- ``tools=`` and ``format=`` only when the options carry them,
+    ``stream=True`` for a stream -- and carries the reply back in the shape
+    the registry promises, the client's own tool-call objects kept behind
+    ``to_dict()`` for the parser that reads them.
+    """
+
+    name = "scripted-eval"
+    display_name = "scripted client (agent eval)"
+
+    def __init__(self, client: ScriptedChatClient):
+        self._client = client
+
+    def health_check(self) -> bool:
+        return True
+
+    def model_info(self, model: str) -> dict:
+        return {"name": model}
+
+    def slots(self) -> list:
+        return []
+
+    @staticmethod
+    def _kwargs(model, messages, options, stream):
+        opts = None if options is None else dict(options)
+        tools = opts.pop("tools", None) if opts else None
+        schema = opts.pop("schema", None) if opts else None
+        kwargs = dict(model=model, messages=messages, options=opts, stream=stream)
+        if tools is not None:
+            kwargs["tools"] = tools
+        if schema is not None:
+            kwargs["format"] = schema
+        return kwargs
+
+    def generate(self, model, messages, options=None, keep_alive="30m",
+                 think=False, images=None):
+        reply = self._client.chat(**self._kwargs(model, messages, options, False))
+        message = getattr(reply, "message", None)
+        content = getattr(message, "content", "") or ""
+        raw_calls = list(getattr(message, "tool_calls", None) or [])
+        calls = [
+            {"name": c.function.name, "arguments": dict(c.function.arguments or {})}
+            for c in raw_calls
+        ]
+        return types.SimpleNamespace(
+            content=content, thinking=None, model=model, tool_calls=calls,
+            to_dict=lambda: {"message": {"content": content, "tool_calls": raw_calls}},
+        )
+
+    def stream(self, model, messages, options=None, keep_alive="30m",
+               think=False, images=None):
+        for chunk in self._client.chat(**self._kwargs(model, messages, options, True)):
+            message = chunk.get("message", {}) if isinstance(chunk, dict) else getattr(chunk, "message", {})
+            content = message.get("content", "") if isinstance(message, dict) else getattr(message, "content", "")
+            yield types.SimpleNamespace(content=content or "", thinking="", done=False, model=model)
+
+
 @contextmanager
 def scripted_chat_backend(client: ScriptedChatClient):
-    """Route the executor module's chat backend to ``client`` for the block.
+    """Lay a scripted backend over the inference registry for the block.
 
-    The executor resolves its backend at module level; the harness swaps
-    that binding in and restores the previous one afterwards, under the
-    module lock so concurrent runs cannot interleave their swaps.
+    The executor asks the registry for every request; the harness registers
+    a backend over ``client``, activates it, and on exit unregisters it and
+    restores whichever backend was active before, under the module lock so
+    concurrent runs cannot interleave their overlays.
     """
     if _texec_mod is None:
         raise RuntimeError("chat surface unavailable")
+    from opti_oignon.inference_backend import get_backend_registry
+
+    registry = get_backend_registry()
+    backend = _ScriptedBackend(client)
     with _RUN_LOCK:
-        had_client = hasattr(_texec_mod, "ollama")
-        prev_client = getattr(_texec_mod, "ollama", None)
-        prev_flag = getattr(_texec_mod, "OLLAMA_AVAILABLE", False)
-        _texec_mod.ollama = client
-        _texec_mod.OLLAMA_AVAILABLE = True
+        previous = registry.active_name
+        registry.register(backend)
+        registry.activate(backend.name)
         try:
             yield
         finally:
-            if had_client:
-                _texec_mod.ollama = prev_client
-            else:  # pragma: no cover - backend package absent entirely
-                try:
-                    delattr(_texec_mod, "ollama")
-                except AttributeError:
-                    pass
-            _texec_mod.OLLAMA_AVAILABLE = prev_flag
+            registry.unregister(backend.name)
+            if previous and previous != backend.name and registry.get(previous) is not None:
+                registry.activate(previous)
 
 
 # ---------------------------------------------------------------------------

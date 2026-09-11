@@ -39,6 +39,11 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
+
 _ROOT = Path(__file__).resolve().parents[1]
 _OO = _ROOT / "opti_oignon"
 
@@ -104,12 +109,6 @@ def _generation(content):
 # ---------------------------------------------------------------------------
 # Isolated loading (sibling-harness idiom)
 # ---------------------------------------------------------------------------
-_KEYS = (
-    "pydantic", "ollama", "opti_oignon", "opti_oignon.tool_calling",
-    "opti_oignon.tool_registry", "opti_oignon.structured_output",
-    "opti_oignon.response_hygiene", "opti_oignon.tool_executor",
-    "opti_oignon.security_mode", "opti_oignon.config",
-)
 
 
 def _load_executor(*, preferences=None):
@@ -117,8 +116,7 @@ def _load_executor(*, preferences=None):
 
     Returns ``(tool_executor_module, ollama_stub, restore)``.
     """
-    saved = {k: sys.modules.get(k) for k in _KEYS}
-
+    had_pydantic = "pydantic" in sys.modules
     try:
         import pydantic  # noqa: F401
     except ImportError:
@@ -127,16 +125,9 @@ def _load_executor(*, preferences=None):
     ollama_stub = types.ModuleType("ollama")
     scripted = _ScriptedOllama()
     ollama_stub.chat = scripted.chat
-    sys.modules["ollama"] = ollama_stub
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
 
     sm = types.ModuleType("opti_oignon.security_mode")
     sm.is_bulbe = lambda: False
-    sys.modules["opti_oignon.security_mode"] = sm
-    pkg.security_mode = sm
 
     prefs = dict(preferences or {})
     cfg = types.ModuleType("opti_oignon.config")
@@ -144,43 +135,36 @@ def _load_executor(*, preferences=None):
         get_user_preference=lambda key, default=None: prefs.get(key, default),
     )
     cfg.get_model = lambda *a, **k: "scripted-model"
-    sys.modules["opti_oignon.config"] = cfg
-    pkg.config = cfg
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.ToolCallRequest = object
-    sys.modules["opti_oignon.structured_output"] = so
-    pkg.structured_output = so
 
-    def _real(dotted, path):
-        spec = importlib.util.spec_from_file_location(dotted, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[dotted] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    pkg.tool_calling = _real(
-        "opti_oignon.tool_calling", _OO / "tool_calling.py",
+    seeded = {
+        "opti_oignon.security_mode": sm,
+        "opti_oignon.config": cfg,
+        "opti_oignon.structured_output": so,
+    }
+    seed_registry(seeded, ollama_stub)
+    loaded, win_restore = isolate(
+        targets={
+            "opti_oignon.tool_calling": source("tool_calling.py"),
+            "opti_oignon.response_hygiene": source("response_hygiene.py"),
+            "opti_oignon.tool_registry": source("tool_registry.py"),
+            "opti_oignon.tool_executor": source("tool_executor.py"),
+        },
+        seeded=seeded,
+        packages=("opti_oignon",),
     )
-    pkg.response_hygiene = _real(
-        "opti_oignon.response_hygiene", _OO / "response_hygiene.py",
-    )
-    tr = _real("opti_oignon.tool_registry", _OO / "tool_registry.py")
-    pkg.tool_registry = tr
-
-    te = _real("opti_oignon.tool_executor", _OO / "tool_executor.py")
-    pkg.tool_executor = te
+    te = loaded["opti_oignon.tool_executor"]
 
     # Every scripted model is native-capable for these contracts.
     te.model_supports_native_tools = lambda model, capability_lookup=None: True
 
     def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
+        win_restore()
+        if not had_pydantic:
+            sys.modules.pop("pydantic", None)
 
     return te, scripted, restore
 

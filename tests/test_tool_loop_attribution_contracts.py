@@ -33,6 +33,11 @@ import sys
 import types
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
+
 _REPO = Path(__file__).resolve().parent.parent
 _OO = _REPO / "opti_oignon"
 
@@ -62,14 +67,7 @@ def _pydantic_shim() -> types.ModuleType:
 # stubbed heavy deps. Saves/restores sys.modules for sibling suites.
 # ---------------------------------------------------------------------------
 def _load():
-    keys = (
-        "pydantic", "ollama", "opti_oignon", "opti_oignon.tool_calling",
-        "opti_oignon.tool_registry", "opti_oignon.structured_output",
-        "opti_oignon.response_hygiene", "opti_oignon.tool_executor",
-        "opti_oignon.config",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-
+    had_pydantic = "pydantic" in sys.modules
     try:
         import pydantic  # noqa: F401
     except ImportError:
@@ -77,53 +75,34 @@ def _load():
 
     ollama_stub = types.ModuleType("ollama")
     ollama_stub.chat = lambda **kw: None
-    sys.modules["ollama"] = ollama_stub
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec_tc = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_calling", _OO / "tool_calling.py",
-    )
-    tc = importlib.util.module_from_spec(spec_tc)
-    sys.modules["opti_oignon.tool_calling"] = tc
-    spec_tc.loader.exec_module(tc)
 
     reg = types.ModuleType("opti_oignon.tool_registry")
     reg.ToolRegistry = object
     reg.tool_registry = None
-    sys.modules["opti_oignon.tool_registry"] = reg
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.structured_engine = None
     so.STRUCTURED_OUTPUT_AVAILABLE = False
-    sys.modules["opti_oignon.structured_output"] = so
 
-    rh = None
-    rh_path = _OO / "response_hygiene.py"
+    seeded = {"opti_oignon.tool_registry": reg, "opti_oignon.structured_output": so}
+    seed_registry(seeded, ollama_stub)
+    # Order is load order: the executor imports the hygiene names at module
+    # scope, so the hygiene module must have run before the executor does.
+    targets = {"opti_oignon.tool_calling": source("tool_calling.py")}
+    rh_path = source("response_hygiene.py")
     if rh_path.exists():
-        spec_rh = importlib.util.spec_from_file_location(
-            "opti_oignon.response_hygiene", rh_path,
-        )
-        rh = importlib.util.module_from_spec(spec_rh)
-        sys.modules["opti_oignon.response_hygiene"] = rh
-        spec_rh.loader.exec_module(rh)
-
-    spec_te = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_executor", _OO / "tool_executor.py",
-    )
-    te = importlib.util.module_from_spec(spec_te)
-    sys.modules["opti_oignon.tool_executor"] = te
-    spec_te.loader.exec_module(te)
+        targets["opti_oignon.response_hygiene"] = rh_path
+    targets["opti_oignon.tool_executor"] = source("tool_executor.py")
+    loaded, win_restore = isolate(targets=targets, seeded=seeded, packages=("opti_oignon",))
+    tc = loaded["opti_oignon.tool_calling"]
+    te = loaded["opti_oignon.tool_executor"]
+    rh = loaded.get("opti_oignon.response_hygiene")
 
     def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
+        win_restore()
+        if not had_pydantic:
+            sys.modules.pop("pydantic", None)
 
     return tc, te, rh, ollama_stub, restore
 

@@ -77,10 +77,6 @@ LEDGER = {
     "opti_oignon/self_correction.py": "87a6db34185a5f364ba27fb68d8cb757b5cb9c4240f8d796a37cb50afce50deb",
     "opti_oignon/semantic_cache.py": "edd88abf6bd9cc43822e2b6b89802c27fa17c13e3827b7c2934174259c9562e5",
     "opti_oignon/speculative.py": "37db6c66099db9164553a8c7c3f7db12fa8a4f110dbb691fb4f74fa47bf9f951",
-    # Owed with a named reason: six sealed suites stand on this module's direct
-    # path with windows of their own. Migrating it means re-asserting their
-    # twenty-seven contracts on the shared window first -- a block, not a line.
-    "opti_oignon/tool_executor.py": "1be9e85bde46be7ac366e83660254935c13ed06276bb06cb61ff9b429f554f8c",
     "opti_oignon/verification.py": "b8f13ed3269c59079d74a916e895efc1de5f847c26449262075818ae99115124",
 }
 

@@ -46,6 +46,14 @@ package costs.
 
 ### Changed
 
+- The tool executor asks the inference registry at every head -- native tool
+  decision, forced decision, streamed and single-shot final answer -- with
+  tool schemas and decision schemas travelling as engine options, so the
+  registry's admission, provenance and schema handling apply to tool calls
+  like any other request. No direct client path remains in the module; with
+  no backend registered each head degrades by name. The agent-eval harness
+  lays its scripted backend over the registry for the length of a run
+  instead of rebinding a name on the module.
 - `comment_only_guard.py` accepts a rename proven by reconstruction: a
   substitution of names that carry internal naming for names that do not,
   applied to the before side and required to reproduce the after side exactly.
