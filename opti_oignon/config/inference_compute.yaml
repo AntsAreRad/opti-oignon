@@ -1,0 +1,11 @@
+# Inference-time compute -- Opti-Oignon
+# ======================================
+# Tokens are cheap on a local machine; trusting an answer is not. These
+# numbers bound how many candidates one prompt may cost before a verifier
+# has to choose. The module refuses a budget that does not hold together.
+
+inference_compute:
+  max_candidates: 4          # candidates per prompt, at most
+  max_total_tokens: 4096     # generated tokens across candidates; sampling stops past it
+  temperatures: [0.2, 0.7, 1.0]   # cycled over the candidates, in order
+  stop_at_first_pass: true   # search: stop sampling once a candidate is verified

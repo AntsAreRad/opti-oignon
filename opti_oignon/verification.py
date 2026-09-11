@@ -89,6 +89,25 @@ class VerificationResult(BaseModel):
     total_time: float = 0.0
 
 
+def _resolve_backend(model: str):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import. None is the
+    honest answer when the registry is unavailable or resolves nothing; the
+    fix head then produces no fix. Nothing here reaches for the client.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
+
+
 class VerificationEngine:
     """Moteur de verification avec boucle generate-verify-fix.
 
@@ -363,17 +382,20 @@ class VerificationEngine:
             analysis_hint=analysis_hint,
         )
 
+        backend = _resolve_backend(model)
+        if backend is None:
+            logger.warning(
+                "Fix request: no inference backend is registered; no fix produced",
+            )
+            return None
         try:
-            # Import local pour eviter les cycles
-            import ollama as _ollama
-
-            response = _ollama.chat(
+            response = backend.generate(
                 model=model,
                 messages=fix_messages,
                 options={"temperature": 0.0},
             )
 
-            response_text = response.message.content or ""
+            response_text = getattr(response, "content", "") or ""
 
             # Extraire le code corrige de la reponse
             code_blocks = self._extract_code_blocks(response_text, language)

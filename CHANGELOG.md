@@ -11,6 +11,14 @@ package costs.
 
 ### Added
 
+- Inference-time compute (`opti_oignon/inference_compute.py`): N candidates
+  for one prompt sampled through the inference registry under a budget of
+  candidates and tokens (`inference_compute.yaml`), each verified -- tests run
+  through a sandbox runner for code, strict-majority agreement for the rest
+  -- and the first verified one chosen, stopping there. When nothing is
+  verified the best-scored candidate is returned marked unverified; with no
+  score the selection is empty and carries the verdicts. Not wired into any
+  path yet.
 - Onion memory, behind `enabled: false` in `opti_oignon/config/onion.yaml`.
   A bounded window -- Core, receipts, Peels, Flesh -- over an archive that is
   the only source of every compression: a span leaves the window only once
@@ -52,6 +60,10 @@ package costs.
   sampler cannot produce a call the tool cannot take; the native and the
   constrained schema come from one builder. At execution, an argument of the
   wrong type is refused before the handler, named, and marked retryable.
+- The verification engine's fix requests and the consensus engine's model
+  queries go through the inference registry; consensus reports itself
+  available when the registry can serve a model, not when a client library
+  imports.
 - The tool executor asks the inference registry at every head -- native tool
   decision, forced decision, streamed and single-shot final answer -- with
   tool schemas and decision schemas travelling as engine options, so the

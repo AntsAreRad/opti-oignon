@@ -31,11 +31,23 @@ except ImportError:
     YAML_AVAILABLE = False
 
 # Conditional Ollama import
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+
+
+def _resolve_backend(model: str):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import. Every model query
+    goes through it; nothing here reaches for the client behind the
+    registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
 
 # Conditional import of model profiles
 try:
@@ -232,8 +244,8 @@ class ConsensusEngine:
 
     @property
     def available(self) -> bool:
-        """Whether consensus is functional."""
-        return OLLAMA_AVAILABLE
+        """Whether consensus is functional: the registry can serve a model."""
+        return _resolve_backend(self._default_model) is not None
 
     # ----------------------------------------------------------------
     # Parallel execution of the models
@@ -255,29 +267,17 @@ class ConsensusEngine:
         Returns:
             Response text
         """
-        if not OLLAMA_AVAILABLE:
-            raise RuntimeError("Ollama is not available")
-
-        response = ollama.chat(
+        backend = _resolve_backend(model)
+        if backend is None:
+            raise RuntimeError(
+                f"no inference backend is registered in the registry for {model!r}"
+            )
+        response = backend.generate(
             model=model,
             messages=messages,
             options={"temperature": temperature},
-            stream=False,
         )
-        # Handle both dict and object (ChatResponse) response formats, mirroring
-        # CascadingInference._call_llm: newer ollama clients return an object
-        # exposing `.message.content`, older ones a dict. The previous dict-only
-        # `response.get(...)` raised AttributeError on the object form, which
-        # `_query_model` swallowed -> every consensus model query failed.
-        content = ""
-        if isinstance(response, dict):
-            content = response.get("message", {}).get("content", "") or ""
-        elif hasattr(response, "message"):
-            msg = response.message
-            if hasattr(msg, "content"):
-                content = msg.content or ""
-            elif isinstance(msg, dict):
-                content = msg.get("content", "") or ""
+        content = getattr(response, "content", "") or ""
         return content.strip()
 
     def _get_model_quality_tier(self, model_name: str) -> str:

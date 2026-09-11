@@ -67,7 +67,6 @@ LEDGER = {
     "opti_oignon/benchmark_judge.py": "3a4b1eaaba98b3f0f006822e66ed55c472f861b34a66635672a81c3a1a8c1bb7",
     "opti_oignon/benchmark_runner.py": "b0620fdcd46bfe709613af2a2adc297a91a3de251cadee5a071373bde3e0c993",
     "opti_oignon/cascading.py": "7ebd56407919f33f2773bce1825bdb5da0d69da7255d8410ba52e2319e650e2b",
-    "opti_oignon/consensus.py": "4b11eed10828546ab644e1e3ed4e319c256254c8e3670c0e064a9d09174e4802",
     "opti_oignon/humanizer.py": "5cf648492f279f4cee1f23ff4bf70861bfd8f02c2cc6d07b60ef3ac2ed5da084",
     "opti_oignon/memory/legacy.py": "a7f12990331096707028425d6257480be0cce2acc64148473bb691d639e04dd5",
     "opti_oignon/model_warmup.py": "a7954f8256dae5eac366425373b152cbca911bf329e764ec022d3723c9782581",
@@ -77,7 +76,6 @@ LEDGER = {
     "opti_oignon/self_correction.py": "87a6db34185a5f364ba27fb68d8cb757b5cb9c4240f8d796a37cb50afce50deb",
     "opti_oignon/semantic_cache.py": "edd88abf6bd9cc43822e2b6b89802c27fa17c13e3827b7c2934174259c9562e5",
     "opti_oignon/speculative.py": "37db6c66099db9164553a8c7c3f7db12fa8a4f110dbb691fb4f74fa47bf9f951",
-    "opti_oignon/verification.py": "b8f13ed3269c59079d74a916e895efc1de5f847c26449262075818ae99115124",
 }
 
 
