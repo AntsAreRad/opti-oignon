@@ -898,6 +898,7 @@ def build_llama_server_command(
     flash_attn: bool = False,
     type_k: str | None = None,
     type_v: str | None = None,
+    placement: Any = None,
 ) -> list[str]:
     """Materialise the llama-server argv from a SpeculativeConfig.
 
@@ -915,14 +916,29 @@ def build_llama_server_command(
     acceptance rates are host-verified per the runbook). A disabled
     config likewise emits the bare server command.
 
-    Validation is loud, never guessed: an empty model path or a config
-    whose validate() reports errors raises ValueError.
+    Placement: an optional placement.PlacementPlan contributes the layout
+    terms -- where the weights go, where the KV cache goes and in what
+    precision, which attention implementation, and any context extension.
+    A plan is optional and an empty one contributes nothing, so a caller
+    that passes none gets exactly the command it got before plans existed.
+    The plan's arguments are appended after the explicit keywords above and
+    before the draft quad, so the same plan always lands in the same place
+    and two runs are comparable by string equality.
+
+    Validation is loud, never guessed: an empty model path, a config whose
+    validate() reports errors, or a plan whose validate() reports errors
+    raises ValueError.
     """
     if not model_path or not str(model_path).strip():
         raise ValueError("model_path must be a non-empty path")
     errors = config.validate()
     if errors:
         raise ValueError("invalid SpeculativeConfig: " + "; ".join(errors))
+    placement_errors = placement.validate() if placement is not None else []
+    if placement_errors:
+        raise ValueError(
+            "invalid PlacementPlan: " + "; ".join(placement_errors)
+        )
 
     cmd: list[str] = [
         "llama-server",
@@ -938,6 +954,8 @@ def build_llama_server_command(
         cmd += ["--cache-type-k", str(type_k)]
     if type_v:
         cmd += ["--cache-type-v", str(type_v)]
+    if placement is not None:
+        cmd += placement.to_args()
     if config.enabled and config.draft_model:
         cmd += [
             "-md", str(config.draft_model),

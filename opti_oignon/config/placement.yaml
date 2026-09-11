@@ -1,0 +1,54 @@
+# Measured placement plans, one per model (RESOURCE hierarchy: VRAM, RAM, NVMe).
+#
+# This file describes HOW a model should be laid out when llama-server is
+# started. It does not start anything: the process is launched host-side and
+# consumed through inference_backend.LlamaServerBackend. What the repository
+# owns is the recipe, so that a placement can be run again and compared.
+#
+# A model with no entry under `models` uses `defaults` exactly. A model WITH an
+# entry refines the defaults: a key it does not mention keeps the default
+# value, so the common placement is written once and each model states only
+# where it differs.
+#
+# Every key is optional and every one of them defaults to saying nothing. A key
+# left out contributes no argument at all, so this file as shipped changes no
+# command. Fill it in on the host, where the card is.
+#
+# Keys, and the llama-server argument each becomes:
+#
+#   n_gpu_layers    -ngl N            layers placed on the card. -1 is not
+#                                     accepted here; state a count, or leave
+#                                     the key out to say nothing.
+#   override_tensor -ot EXPR          tensor routing, llama.cpp's own regular
+#                                     expression dialect, passed verbatim.
+#                                     The mixture-of-experts case that this
+#                                     whole file exists for looks like:
+#                                       "\\.ffn_.*_exps\\.=CPU"
+#                                     which keeps the experts in system RAM
+#                                     while attention and the KV cache stay on
+#                                     the card.
+#   n_cpu_moe       --n-cpu-moe N     the count form of the same intent, for
+#                                     builds that expose it.
+#   no_kv_offload   --no-kv-offload   keep the KV cache off the card.
+#   type_k          --cache-type-k T  KV key cache precision.
+#   type_v          --cache-type-v T  KV value cache precision.
+#                                     T is one of: f32, f16, bf16, q8_0, q5_0,
+#                                     q5_1, q4_0, q4_1, iq4_nl. An unrecognised
+#                                     value is REFUSED by name rather than
+#                                     quietly replaced by the default -- a
+#                                     recipe has no library to ask, so a typo
+#                                     must surface now and not at launch.
+#   flash_attn      --flash-attn      flash attention.
+#   rope_scaling    --rope-scaling M  context extension method: none, linear,
+#                                     or yarn.
+#   rope_scale      --rope-scale F    the extension factor.
+#   yarn_orig_ctx   --yarn-orig-ctx N the model's original training context.
+#                                     The factor is meaningless without it.
+#
+# Nothing in this file is measured. Which placement is actually faster is a
+# question only the host can answer, and it stays owed until it is answered
+# there.
+
+defaults: {}
+
+models: {}
