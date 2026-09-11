@@ -820,33 +820,55 @@ class UserPreferencesStore:
         # the configuration is read.
         self._db_path = db_path
         self._lock = threading.Lock()
-        self._init_db()
+        # The schema is built at the first connection, not here. A coding
+        # agent builds this store in its own constructor and the dependency
+        # module builds such an agent at module scope, so building it here
+        # opened a database on every import of the package.
+        self._schema_ready = False
+
+    def _connect(self):
+        """Open a connection, building the schema the first time.
+
+        Deliberately takes no lock: every caller already holds it. Taking it
+        again here would hang rather than fail, which is the worst way for a
+        suite to tell you, because it tells you last.
+        """
+        conn = _safe_connect(self._db_path)
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._create_schema(conn)
+        return conn
+
+    def _create_schema(self, conn) -> None:
+        """Build the schema on a connection the caller already holds."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision TEXT NOT NULL,
+                phase TEXT NOT NULL DEFAULT '',
+                context TEXT NOT NULL DEFAULT '',
+                timestamp REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS preference_summary (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
 
     def _init_db(self) -> None:
         """Initialize the SQLite database."""
         try:
             with self._lock:
-                conn = _safe_connect(self._db_path)
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS preferences (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        decision TEXT NOT NULL,
-                        phase TEXT NOT NULL DEFAULT '',
-                        context TEXT NOT NULL DEFAULT '',
-                        timestamp REAL NOT NULL
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS preference_summary (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL
-                    )
-                    """
-                )
-                conn.commit()
+                self._schema_ready = True
+                conn = self._connect()
+                self._create_schema(conn)
                 conn.close()
         except Exception as exc:
             logger.warning("Failed to init fingerprint DB: %s", exc)
@@ -861,7 +883,7 @@ class UserPreferencesStore:
         """
         try:
             with self._lock:
-                conn = _safe_connect(self._db_path)
+                conn = self._connect()
                 conn.execute(
                     "INSERT INTO preferences (decision, phase, context, timestamp) "
                     "VALUES (?, ?, ?, ?)",
@@ -880,7 +902,7 @@ class UserPreferencesStore:
         """
         try:
             with self._lock:
-                conn = _safe_connect(self._db_path)
+                conn = self._connect()
                 cursor = conn.execute(
                     "SELECT decision, COUNT(*) FROM preferences GROUP BY decision"
                 )
@@ -908,7 +930,7 @@ class UserPreferencesStore:
         """
         try:
             with self._lock:
-                conn = _safe_connect(self._db_path)
+                conn = self._connect()
                 cursor = conn.execute(
                     "SELECT phase, decision, COUNT(*) FROM preferences "
                     "WHERE phase != '' GROUP BY phase, decision"
@@ -931,7 +953,7 @@ class UserPreferencesStore:
         """Total number of recorded decisions."""
         try:
             with self._lock:
-                conn = _safe_connect(self._db_path)
+                conn = self._connect()
                 cursor = conn.execute("SELECT COUNT(*) FROM preferences")
                 count = cursor.fetchone()[0]
                 conn.close()

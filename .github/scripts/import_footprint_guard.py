@@ -57,24 +57,24 @@ _ROOT = _HERE.parent.parent.parent
 # time it was written. MAY ONLY SHRINK. Removing an entry is how the debt is
 # paid; adding one is how the guard is defeated.
 LEDGER = {
-    # Seven remain, and none yields to the pattern that paid the other
-    # thirteen. Two of the seven are half paid: their file has a second
-    # owner that still builds eagerly, and deferring THOSE is a decision
-    # about what a feature does at startup rather than a mechanical move. Four live under the data directory, which this guard may not
-    # read. One writes outside the tree. One is opened twice by two different
-    # owners. One has no connection helper to ensure anything in. And one --
-    # branches.db -- was deferred and then put back: its module-level
-    # availability flag is false only when construction RAISES, and
-    # construction raised because it opened this database. Deferring it lost
-    # a fail-secure property rather than merely moving a cost.
+    # One remains, and it is the one that does not yield to the pattern that
+    # paid the other nineteen. branches.db was deferred and then put back:
+    # the module-level availability flag for that feature is false only when
+    # construction RAISES, and construction raised because it opened this
+    # database. Deferring it lost a fail-secure property rather than merely
+    # moving a cost, so the open stays and the ledger carries it honestly.
+    #
+    # The last six each needed a decision rather than a rule. The signing
+    # secret was minted beside a schema build and does not touch the
+    # database, so only the build moved. The audit chain check now runs at
+    # the first connection, where someone is about to rely on what it
+    # checks, instead of in every process that imports the package. Builtin
+    # plugin registration is work, not setup, and belongs to the first
+    # caller who reads the records. Two stores kept no connection helper and
+    # got one, or got their three call sites named. One log holds its lock
+    # while asking for a connection, so its builder is handed one.
     "databases": frozenset({
-        "audit_chain.db",
         "branches.db",
-        "auth.db",
-        "fingerprint.db",
-        "humanizer_feedback.db",
-        "plugins.db",
-        "sandbox_audit.db",
     }),
     # PAID. The preference store's path was configured as a bare filename
     # and resolved against the caller's directory; it is now anchored on the

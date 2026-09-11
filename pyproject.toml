@@ -263,6 +263,16 @@ fail_under = 0
 # digest, and adding a contract to it would have broken the seal. Regenerating
 # a seal to quiet a guard is the habit the ratchet exists to break, so the
 # sealed suite stays byte-identical.
+# And five together, the last of this shape, because the last six databases
+# opened by an import were paid in one pass. Four of the five pinned a seam by
+# the MOMENT it was reached -- at import, because the store behind it opened
+# its database while constructing. That moment was the defect. Each property
+# they protect is re-asserted in full at the first use instead, in
+# tests/test_lazy_seam_supersession_contracts.py, together with the claim that
+# the import now reaches nothing: a contract that only moved its assertion
+# later would have let the eager open come back. The fifth, rg4, pinned WHICH
+# databases the guard ledger still carried while six were owed; the ledger is
+# now pinned entry by entry, beside the decisions that emptied it.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -276,4 +286,9 @@ addopts = """
     --deselect=tests/test_semantic_cache_fail_secure_contracts.py::test_d3_refusing_layer_leaves_the_import_and_singleton_alive
     --deselect=tests/test_coding_history_contracts.py::test_h5_construction_creates_schema_and_is_idempotent
     --deselect=tests/test_learned_router_integrity_contracts.py::test_l2_persistence_uses_safe_connect_and_parameterized_sql
+    --deselect=tests/test_auth_core_contracts.py::test_a1_load_touches_db_and_exposes_singletons
+    --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b35_the_import_opens_the_configured_path_anchored
+    --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b30_a_refused_import_does_not_raise_and_the_latch_stays_up
+    --deselect=tests/test_session_fingerprint_bounds_at_rest_contracts.py::test_fp1_preferences_persist_through_the_seam_parameterized
+    --deselect=tests/test_registry_schema_lazy_contracts.py::test_rg4_the_ledger_loses_the_one_with_a_single_owner
 """

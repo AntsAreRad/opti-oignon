@@ -182,7 +182,22 @@ class HumanizerFeedbackDB:
     def __init__(self, db_path: Path | None = None):
         self._db_path = db_path or (_DATA_DIR / "humanizer_feedback.db")
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        # The schema is built on first use, not here. This store is
+        # constructed at module scope, so building it here opened a database
+        # on every import of the package.
+        self._schema_ready = False
+
+    def _ensure_schema(self) -> None:
+        """Build the schema once, before the first method that needs it.
+
+        This class keeps no connection helper -- each method opens its own --
+        so there is no single seam to hang this on. The three public methods
+        call it instead, which is three named call sites rather than a seam
+        invented to have one.
+        """
+        if not self._schema_ready:
+            self._schema_ready = True
+            self._init_db()
 
     def _init_db(self) -> None:
         """Create tables if they do not exist."""
@@ -228,6 +243,7 @@ class HumanizerFeedbackDB:
         mode: str,
     ) -> bool:
         """Store an A/B comparison for later rating."""
+        self._ensure_schema()
         try:
             with _safe_connect(self._db_path, check_same_thread=False) as conn:
                 conn.execute(
@@ -260,6 +276,7 @@ class HumanizerFeedbackDB:
         """
         if winner not in ("humanized", "original", "tie"):
             return False
+        self._ensure_schema()
         try:
             with _safe_connect(self._db_path, check_same_thread=False) as conn:
                 # Verify comparison exists
@@ -283,6 +300,7 @@ class HumanizerFeedbackDB:
     def get_stats(self) -> FeedbackStats:
         """Compute aggregated feedback statistics."""
         stats = FeedbackStats()
+        self._ensure_schema()
         try:
             with _safe_connect(self._db_path, check_same_thread=False) as conn:
                 # Overall counts

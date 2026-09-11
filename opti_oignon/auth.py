@@ -282,7 +282,12 @@ class AuthManager:
         # one must not silently re-enable the authentication bypass).
         self._multi_user_latched = False
         self.db_path = self._resolve_db_path(db_path)
-        self._init_db()
+        # The schema is built at the first connection, not here. This manager
+        # is constructed at module scope, so building it here opened a
+        # database on every import of the package. The signing secret below
+        # stays where it is: it is generated into the configuration in
+        # memory and never touches the database, so the two are independent.
+        self._schema_ready = False
         self._ensure_jwt_secret()
         # Audit fix: pre-compute a dummy bcrypt hash for timing oracle
         # prevention in authenticate(). This ensures that failed lookups
@@ -400,6 +405,11 @@ class AuthManager:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
+        if not self._schema_ready:
+            # Set before the build, because the build asks for a connection
+            # through this same helper.
+            self._schema_ready = True
+            self._init_db()
         return conn
 
     def _init_db(self):

@@ -668,42 +668,63 @@ class AuditLog:
     def __init__(self, db_path: str):
         self._db_path = db_path
         self._lock = threading.Lock()
-        self._init_db()
+        # The schema is built at the first connection, not here. This log is
+        # constructed at module scope, so building it here opened a database
+        # on every import of the package.
+        self._schema_ready = False
 
     def _get_conn(self) -> sqlite3.Connection:
         """Get a SQLite connection.
 
         Audit fix: routes through get_encrypted_connection().
         """
-        return safe_connect(self._db_path)
+        conn = safe_connect(self._db_path)
+        if not self._schema_ready:
+            # Built on the connection just opened, without taking the lock:
+            # every caller of this helper already holds it.
+            self._schema_ready = True
+            self._create_schema(conn)
+        return conn
 
     def _init_db(self) -> None:
         """Create the audit table if it does not exist."""
         with self._lock:
+            self._schema_ready = True
             conn = self._get_conn()
             try:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS sandbox_audit (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        timestamp REAL NOT NULL,
-                        command TEXT NOT NULL,
-                        return_code INTEGER,
-                        blocked INTEGER DEFAULT 0,
-                        block_reason TEXT DEFAULT '',
-                        timed_out INTEGER DEFAULT 0,
-                        stdout_len INTEGER DEFAULT 0,
-                        stderr_len INTEGER DEFAULT 0,
-                        isolation_backend TEXT DEFAULT ''
-                    )
-                """)
-                conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_audit_session
-                    ON sandbox_audit(session_id)
-                """)
-                conn.commit()
+                self._create_schema(conn)
             finally:
                 conn.close()
+
+    def _create_schema(self, conn: sqlite3.Connection) -> None:
+        """Build the schema on a connection the caller already holds.
+
+        Deliberately takes no lock. Every method in this class takes the
+        instance lock and then asks for a connection; if building the schema
+        reacquired it, the first of them to run before the schema existed
+        would hang rather than fail -- the worst way for a suite to tell you,
+        because it tells you last.
+        """
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sandbox_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                command TEXT NOT NULL,
+                return_code INTEGER,
+                blocked INTEGER DEFAULT 0,
+                block_reason TEXT DEFAULT '',
+                timed_out INTEGER DEFAULT 0,
+                stdout_len INTEGER DEFAULT 0,
+                stderr_len INTEGER DEFAULT 0,
+                isolation_backend TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_session
+            ON sandbox_audit(session_id)
+        """)
+        conn.commit()
 
     def log_command(
         self,

@@ -142,13 +142,28 @@ class SignedAuditLog:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._db_path = str(db_path or (_DATA_DIR / _DB_NAME))
         self._lock = threading.Lock()
-        self._init_db()
-        self._check_integrity_on_init()
+        # Both the schema and the integrity check move to the first
+        # connection. This log is constructed at module scope, so the check
+        # ran in every process that imported the package, including tooling
+        # that will never read the log and where its warning reaches nobody.
+        # Where the log IS used the check still runs, once, immediately
+        # before the first caller relies on what it checks.
+        self._ready = False
 
     # -- DB helpers ----------------------------------------------------------
 
     def _get_conn(self) -> sqlite3.Connection:
         """Open a connection, preferring encrypted if available."""
+        if not self._ready:
+            # Set before the two calls below, because both reach this helper
+            # again -- the schema build directly, the integrity check through
+            # verify_chain().
+            self._ready = True
+            directory = os.path.dirname(self._db_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            self._init_db()
+            self._check_integrity_on_init()
         return safe_connect(self._db_path, check_same_thread=False)
 
     def _init_db(self) -> None:

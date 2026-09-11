@@ -231,11 +231,18 @@ class PluginRegistry:
         self,
         db_path: Path | str,
         plugins_dir: Path | str | None = None,
+        discover_builtins: bool = False,
     ) -> None:
         self._db_path = Path(db_path)
         self._plugins_dir = Path(plugins_dir) if plugins_dir else None
         self._plugin_map: dict[str, PluginRecord] = {}
         self._loaded = False
+        # Off by default, and on for the module-level registry alone, which
+        # is the only one that ran a discovery pass before. Registering
+        # builtins is work rather than setup, so it belongs to the first
+        # caller who consults the records, not to whoever imported the
+        # package. It runs once, in the same place the records are loaded.
+        self._discover_builtins = discover_builtins
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         # The schema is built at the first connection, not here. This store
         # is constructed at module scope, so building it here opened a
@@ -260,6 +267,8 @@ class PluginRegistry:
         if not self._loaded:
             self._loaded = True
             self._load_from_db()
+            if self._discover_builtins:
+                _discover_builtins(self)
         return self._plugin_map
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -711,10 +720,10 @@ try:
     _db = Path(_DATA_DIR) / "plugins.db"
     _pdir = Path(_DATA_DIR) / "plugins"
     _pdir.mkdir(parents=True, exist_ok=True)
-    plugin_registry = PluginRegistry(db_path=_db, plugins_dir=_pdir)
-
-    # Auto-register builtin plugins on first run
-    _discover_builtins(plugin_registry)
+    # Builtins are registered the first time the records are read, not here.
+    plugin_registry = PluginRegistry(
+        db_path=_db, plugins_dir=_pdir, discover_builtins=True,
+    )
 except Exception as _exc:
     logger.debug("PluginRegistry singleton init deferred: %s", _exc)
     plugin_registry = None  # type: ignore[assignment]
