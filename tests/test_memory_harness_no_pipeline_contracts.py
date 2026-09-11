@@ -14,6 +14,10 @@ every import of the package.
   * ZP3 -- the composer, the Core store and the receipts exist, are pure at
     module scope, and are imported by nothing else yet: wiring them into
     the chat path is the block's last session, not a side effect.
+  * ZP4 -- supersedes ZP2 once the gate exists: the harness is imported by
+    the onion's own modules only (the probes gate eviction, by design), and
+    still by nothing on the chat path -- not the executor, not the agent,
+    not the routes, not the package facade.
 
 Local-only (the public distribution ships no tests). Reads the tree; loads
 nothing.
@@ -32,7 +36,7 @@ from _isolation import REPO  # noqa: E402
 _PACKAGE = REPO / "opti_oignon"
 _HARNESS = ("probes", "drift", "baseline")
 _HARNESS_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _HARNESS}
-_ONION = ("composer", "core_store", "receipts")
+_ONION = ("composer", "core_store", "receipts", "peels")
 _ONION_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _ONION}
 _STDLIB_ONLY_AT_SCOPE = {"dataclasses", "re", "typing", "collections", "hashlib", "json", "math", "itertools", "logging"}
 
@@ -110,6 +114,30 @@ def test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet():
             ) or (name.startswith(".") and last in _ONION and "memory" in str(path)):
                 offenders.append(f"{path.relative_to(REPO)} imports {name}")
     assert offenders == [], f"the onion is not on the chat path yet. Found: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# ZP4 -- the harness is imported by the onion only
+# ---------------------------------------------------------------------------
+def test_zp4_the_harness_is_imported_by_the_onion_only_and_never_by_the_chat_path():
+    importers = {}
+    for path in sorted(_PACKAGE.rglob("*.py")):
+        if path in _HARNESS_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for name in _imports_of(tree):
+            bare = name.lstrip(".")
+            last = bare.split(".")[-1] if bare else ""
+            if (
+                bare.startswith("opti_oignon.memory.") and last in _HARNESS
+            ) or (name.startswith(".") and last in _HARNESS and "memory" in str(path)):
+                importers.setdefault(path, []).append(name)
+    assert len(importers) >= 1, "control: the gate imports the probes, so the census reads non-zero"
+    outside = {f"{p.relative_to(REPO)} imports {n}" for p, names in importers.items() if p not in _ONION_PATHS for n in names}
+    assert outside == set(), f"only the onion may import the harness. Found: {sorted(outside)}"
+    assert set(importers) <= _ONION_PATHS
+    facade = _PACKAGE / "memory" / "__init__.py"
+    assert facade not in importers, "the facade would pull the harness into every import of the package"
 
 
 if __name__ == "__main__":

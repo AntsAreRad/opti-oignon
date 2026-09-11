@@ -142,6 +142,15 @@ class Flesh:
         key = cellar.store(span)
         return ledger.append(make_receipt(span, key))
 
+    def evict_span(self, count, cellar, ledger):
+        """Move the oldest ``count`` turns to the Cellar as one span, under one receipt."""
+        count = int(count)
+        if count < 1 or not self._turns:
+            raise ValueError("a span of at least one turn is evicted, from a Flesh that has one")
+        span, self._turns = self._turns[:count], self._turns[count:]
+        key = cellar.store(span)
+        return ledger.append(make_receipt(span, key))
+
     def evict_until_fits(self, cap, estimate, cellar, ledger):
         """Evict from the oldest until the remainder fits ``cap``. Receipts, in order."""
         receipts = []

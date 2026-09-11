@@ -18,3 +18,15 @@ layers:
   peels: 3072       # retrieved episode summaries, cut to fit, whole items only
   flesh: 5120       # last turns verbatim; a turn leaves only with a receipt
   turn: 512         # the current turn; refused if over, never truncated
+
+# The eviction gate. A span leaves the flesh only once its peel answers the
+# recall probes drawn from the span, class by class. These two thresholds
+# are the design's PROPOSED defaults, not a calibration: on the fixtures a
+# single wrong entity or date in a four-turn span passes at 0.7. Calibrating
+# them on real conversations is a host measurement, still owed.
+gate:
+  decision_threshold: 0.9   # decision-class probes (polarity counts)
+  episodic_threshold: 0.7   # entity, number and date probes
+
+peels:
+  span_turns: 4             # turns evicted together into one leaf peel

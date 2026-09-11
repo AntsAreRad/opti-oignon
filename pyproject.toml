@@ -297,6 +297,13 @@ fail_under = 0
 # first. The file stays in the tree as the written specification; the
 # registry-funnel guard carries the module's seal until the debt is paid;
 # and these four lines come out the day it is.
+#
+# zp2 pinned that nothing in the package imports the memory harness, at a
+# moment when the harness was measurement only. The moment passed by design:
+# the probes gate eviction, so the peels module imports them. zp4 in the same
+# file keeps the live half of the property -- the harness reaches nothing on
+# the chat path and never the package facade -- and adds the census control
+# zp2 never had, so a silent zero cannot pass it.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -320,4 +327,5 @@ addopts = """
     --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te2_the_forced_decision_sends_its_schema_through_the_registry
     --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te3_the_streamed_final_answer_streams_through_the_registry
     --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te4_without_a_backend_each_head_degrades_and_never_reaches_the_client
+    --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp2_nothing_on_the_chat_path_imports_the_harness
 """

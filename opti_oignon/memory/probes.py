@@ -66,6 +66,10 @@ class Probe:
     turn_id: str
     key: frozenset = field(default_factory=frozenset)
     negated: bool = False
+    # How many negation tokens the decision sentence carries. A boolean was
+    # not enough: "will use Docker because the venue has no runtime" still
+    # reads as negated, and the inversion of "will not use Docker" passed.
+    negations: int = 0
 
 
 @dataclass
@@ -85,6 +89,10 @@ class ProbeResult:
         """
         total = self.passed + self.failed
         return None if total == 0 else self.passed / total
+
+
+def _negations(sentence):
+    return len(_NEGATION.findall(sentence))
 
 
 def _sentences(text):
@@ -137,6 +145,7 @@ def generate_probes(span):
                         turn_id,
                         key=key,
                         negated=bool(_NEGATION.search(sentence)),
+                        negations=_negations(sentence),
                     ))
     return probes
 
@@ -147,14 +156,16 @@ def answers(probe, text):
     Entities, numbers and dates are answered by presence of the exact token.
     A decision is answered by a sentence carrying enough of its content words
     with the same polarity: the same words with the opposite polarity is the
-    decision inverted, and that is a failure, not a match.
+    decision inverted, and that is a failure, not a match. Polarity is the
+    count of negation tokens, not their presence: one negation dropped from
+    a sentence that carried two is an inversion too.
     """
     if probe.kind == "decision":
         for sentence in _sentences(text):
             words = set(_tokens(sentence))
             coverage = len(probe.key & words) / len(probe.key)
             if coverage >= DECISION_COVERAGE:
-                if bool(_NEGATION.search(sentence)) == probe.negated:
+                if _negations(sentence) == probe.negations:
                     return True
         return False
     if probe.kind in ("date", "number"):
