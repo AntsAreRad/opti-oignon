@@ -103,6 +103,7 @@ nav:
       - Module Map: architecture/module-map.md
       - Data Flow: architecture/data-flow.md
       - Security Layers: architecture/security-layers.md
+      - Onion Memory: architecture/onion-memory.md
   - Project Notes:
       - Demo Scenarios: demo_scenarios.md
       - Branch Protection: BRANCH_PROTECTION.md

@@ -304,6 +304,12 @@ fail_under = 0
 # file keeps the live half of the property -- the harness reaches nothing on
 # the chat path and never the package facade -- and adds the census control
 # zp2 never had, so a silent zero cannot pass it.
+#
+# zp3 pinned that nothing imported the onion's modules while they were
+# unwired. The executor now imports the librarian behind a guarded import,
+# by design and switched off by default. zp5 in the same file pins the
+# narrower live property: the executor imports the librarian and nothing
+# else of the onion, and no other module imports any of it.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -328,4 +334,5 @@ addopts = """
     --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te3_the_streamed_final_answer_streams_through_the_registry
     --deselect=tests/test_tool_executor_through_registry_contracts.py::test_te4_without_a_backend_each_head_degrades_and_never_reaches_the_client
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp2_nothing_on_the_chat_path_imports_the_harness
+    --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet
 """

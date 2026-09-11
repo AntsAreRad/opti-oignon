@@ -30,3 +30,16 @@ gate:
 
 peels:
   span_turns: 4             # turns evicted together into one leaf peel
+
+# The switch. Off, the chat path keeps the working-memory block it has today
+# and the librarian is never asked; on, the librarian mirrors each saved
+# conversation, evicts through the gate off the interactive path, and its
+# block replaces today's when it has one. The maintainer turns it on.
+enabled: false
+
+librarian:
+  model: "qwen3:4b"        # placeholder until the host measurement picks one
+  keep_alive: "0"          # unloadable by default: released after every burst
+  min_new_turns: 8         # turns of growth before a curation fires
+  temperature: 0.1
+  num_predict: 256

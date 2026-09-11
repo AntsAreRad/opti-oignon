@@ -18,6 +18,10 @@ every import of the package.
     the onion's own modules only (the probes gate eviction, by design), and
     still by nothing on the chat path -- not the executor, not the agent,
     not the routes, not the package facade.
+  * ZP5 -- supersedes ZP3 once the executor is wired: the onion modules are
+    imported by one another and by the executor's guarded import of the
+    librarian, and by nothing else -- not the routes, not the agent, not
+    the package facade.
 
 Local-only (the public distribution ships no tests). Reads the tree; loads
 nothing.
@@ -36,7 +40,7 @@ from _isolation import REPO  # noqa: E402
 _PACKAGE = REPO / "opti_oignon"
 _HARNESS = ("probes", "drift", "baseline")
 _HARNESS_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _HARNESS}
-_ONION = ("composer", "core_store", "receipts", "peels")
+_ONION = ("composer", "core_store", "receipts", "peels", "librarian", "ledger_store")
 _ONION_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _ONION}
 _STDLIB_ONLY_AT_SCOPE = {"dataclasses", "re", "typing", "collections", "hashlib", "json", "math", "itertools", "logging"}
 
@@ -138,6 +142,40 @@ def test_zp4_the_harness_is_imported_by_the_onion_only_and_never_by_the_chat_pat
     assert set(importers) <= _ONION_PATHS
     facade = _PACKAGE / "memory" / "__init__.py"
     assert facade not in importers, "the facade would pull the harness into every import of the package"
+
+
+# ---------------------------------------------------------------------------
+# ZP5 -- the onion is imported by the executor's guarded import only
+# ---------------------------------------------------------------------------
+def test_zp5_the_onion_is_imported_by_the_executor_only_and_only_the_librarian():
+    allowed = _STDLIB_ONLY_AT_SCOPE | {"pathlib", "threading", "logging", "contextlib", "datetime"}
+    for path in sorted(_ONION_PATHS):
+        assert path.is_file(), f"{path.name} is part of the onion"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        top = _imports_of(ast.Module(body=[s for s in tree.body if isinstance(s, (ast.Import, ast.ImportFrom))], type_ignores=[]))
+        offenders = {n for n in top if n.split(".")[0] not in allowed and not n.startswith("__future__")}
+        assert offenders == set(), f"{path.name} imports only the standard library at module scope: {offenders}"
+    importers = {}
+    for path in sorted(_PACKAGE.rglob("*.py")):
+        if path in _ONION_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for name in _imports_of(tree):
+            bare = name.lstrip(".")
+            last = bare.split(".")[-1] if bare else ""
+            if (
+                bare.startswith("opti_oignon.memory.") and last in _ONION
+            ) or (
+                name.startswith(".") and last in _ONION
+                and (bare.startswith("memory.") or "memory" in str(path))
+            ):
+                importers.setdefault(path.relative_to(REPO).as_posix(), set()).add(last)
+    assert importers.get("opti_oignon/executor.py") == {"librarian"}, (
+        f"the executor imports the librarian and nothing else of the onion: {importers}"
+    )
+    assert set(importers) == {"opti_oignon/executor.py"}, f"no other module imports the onion: {importers}"
+    facade = (_PACKAGE / "memory" / "__init__.py").read_text(encoding="utf-8")
+    assert not any(f".{m} import" in facade or f"memory.{m}" in facade for m in _ONION), "the facade stays out of it"
 
 
 if __name__ == "__main__":

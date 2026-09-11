@@ -142,6 +142,19 @@ try:
 except Exception:
     _maybe_capture = None
 
+# The onion memory's librarian: asked for the memory block when the onion is
+# switched on in onion.yaml, and offered the saved conversation beside the
+# auto-capture. Off by default; absent, off, or failing, the path below runs
+# exactly as it does today.
+try:
+    from .memory.librarian import maybe_curate as _maybe_curate
+    from .memory.librarian import memory_block as _onion_memory_block
+    from .memory.librarian import onion_enabled as _onion_enabled
+except Exception:
+    _maybe_curate = None
+    _onion_memory_block = None
+    _onion_enabled = None
+
 # Intelligent sliding window (v1.4.0)
 try:
     from .context_window import sliding_window_manager, token_budget_manager
@@ -1251,7 +1264,9 @@ class Executor:
             logger.error(f"Error during summarization: {e}")
             return False
 
-    def _compose_memory_context(self, question: str | None = None) -> str:
+    def _compose_memory_context(
+        self, question: str | None = None, conversation_id: str | None = None
+    ) -> str:
         """The wrapped working-memory block, or an empty string.
 
         Builds the unified working block: the salient durable facts (always
@@ -1278,7 +1293,16 @@ class Executor:
         # the working block is composed from the store alone -- the legacy
         # bridge is gone.
         memory_block = ""
-        if DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
+        # The onion answers first when it is switched on and has a block for
+        # this conversation; otherwise the working block below stands.
+        if _onion_enabled is not None and _onion_memory_block is not None:
+            try:
+                if _onion_enabled():
+                    memory_block = _onion_memory_block(conversation_id, question) or ""
+            except Exception as e:
+                logger.debug(f"Onion memory block skipped: {e}")
+                memory_block = ""
+        if not memory_block and DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
             try:
                 memory_block = _build_memory_block(
                     question, max_tokens=500, mark_used=True
@@ -1310,7 +1334,9 @@ class Executor:
                 return wrapped
         return ""
 
-    def _inject_memory(self, system_prompt: str, question: str | None = None) -> str:
+    def _inject_memory(
+        self, system_prompt: str, question: str | None = None, conversation_id: str | None = None
+    ) -> str:
         """Append the memory block to the system prompt if available and enabled.
 
         Delegates the composition and the untrusted envelope to
@@ -1325,7 +1351,7 @@ class Executor:
         Returns:
             system prompt with memory section appended, or unchanged
         """
-        wrapped = self._compose_memory_context(question)
+        wrapped = self._compose_memory_context(question, conversation_id)
         if wrapped:
             return system_prompt + "\n\n" + wrapped
         return system_prompt
@@ -2038,11 +2064,11 @@ class Executor:
 
         # Step 2c: Inject memory facts (dual-layer memory)
         if _stable_prefix_active:
-            _mem_wrapped = self._compose_memory_context(refined_question)
+            _mem_wrapped = self._compose_memory_context(refined_question, conversation_id)
             if _mem_wrapped:
                 _volatile_parts.append("\n\n" + _mem_wrapped)
         else:
-            system_prompt = self._inject_memory(system_prompt, refined_question)
+            system_prompt = self._inject_memory(system_prompt, refined_question, conversation_id)
 
         # Check if context optimizer handles project injection
         _s123_optimizer_active = (
@@ -2840,6 +2866,18 @@ class Executor:
                     )
                 except Exception as _cap_err:
                     logger.debug(f"Auto-capture skipped: {_cap_err}")
+
+            # The librarian mirrors the saved conversation and curates off
+            # the interactive path, only when the onion is switched on.
+            if _maybe_curate is not None and _onion_enabled is not None:
+                try:
+                    if _onion_enabled():
+                        _maybe_curate(
+                            conversation_id,
+                            conversation_manager.get_context_messages(conversation_id),
+                        )
+                except Exception as _lib_err:
+                    logger.debug(f"Librarian skipped: {_lib_err}")
 
         # Step 6: Cache storage (exact + multi-turn)
         # Store the response in cache for successful requests (single AND multi-turn)

@@ -11,6 +11,15 @@ package costs.
 
 ### Added
 
+- Onion memory, behind `enabled: false` in `opti_oignon/config/onion.yaml`.
+  A bounded window -- Core, receipts, Peels, Flesh -- over an archive that is
+  the only source of every compression: a span leaves the window only once
+  its summary has answered the recall probes drawn from it, and only with a
+  receipt the model can see. Off, the chat path is unchanged; on, the
+  librarian curates off the interactive path through the inference registry
+  with the model released after every burst. The figures the contracts
+  produce are fixture readings and say so; `scripts/onion_runbook.py` takes
+  the measured ones on the host. Documented in `docs/architecture/onion-memory.md`.
 - `import_footprint_guard.py` observes the import in a subprocess, through an
   audit hook, and refuses any database, any file written into the caller's
   directory, or any heavy dependency that its ledger does not already carry.
