@@ -224,11 +224,15 @@ def get_acceptance_history(
     Returns a list of AcceptanceRecord dicts, oldest first, with
     per-request draft/accepted counts, acceptance rates, and speedups.
     """
+    from opti_oignon.speculative_decoding import round_or_none
+
     mgr = _get_manager()
     history = mgr.get_acceptance_history(last_n=last_n)
     rolling = mgr.get_rolling_acceptance_rate(window=10)
     return {
         "history": history,
         "count": len(history),
-        "rolling_acceptance_rate": round(rolling, 4),
+        # null, not 0.0, when no run has ever drafted a token: the endpoint
+        # must not be the one place that turns the unknown back into a zero.
+        "rolling_acceptance_rate": round_or_none(rolling, 4),
     }

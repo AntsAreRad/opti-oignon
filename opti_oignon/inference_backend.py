@@ -275,6 +275,41 @@ class StreamChunk:
         }
 
 
+# Constrained decoding travels as an engine option, beside temperature and
+# top_p, rather than as a new argument on the abstract interface: the schema
+# IS an engine option, every existing caller keeps working, and each backend
+# translates the one request into its own dialect instead of each caller
+# learning three.
+SCHEMA_OPTION = "schema"
+
+
+def _split_schema(options: dict | None) -> tuple[dict, dict | None]:
+    """Separate a constrained-decoding schema from the engine options.
+
+    Returns ``(options without the schema, the schema or None)``. The
+    caller's dict is copied, never mutated: taking the schema out in place
+    would silently disarm every later reuse of the same options.
+
+    A schema that is not an object is refused here rather than forwarded.
+    Each engine would ignore an unusable value in its own way -- and an
+    unconstrained answer that was supposed to be constrained is exactly the
+    kind of silence this repository treats as a defect.
+    """
+    opts = dict(options or {})
+    schema = opts.pop(SCHEMA_OPTION, None)
+    if schema is not None and not isinstance(schema, dict):
+        raise ValueError(
+            f"{SCHEMA_OPTION} must be a JSON schema object, got "
+            f"{type(schema).__name__}"
+        )
+    return opts, schema
+
+
+def _response_format(schema: dict) -> dict:
+    """The OpenAI-compatible spelling both llama.cpp surfaces accept."""
+    return {"type": "json_object", "schema": schema}
+
+
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
@@ -518,6 +553,11 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             raise RuntimeError("Ollama is not installed (pip install ollama)")
 
+        # Before the admission hook and before any telemetry: a malformed
+        # schema is a refusal, and a refusal must not leave a started request
+        # behind it.
+        engine_options, schema = _split_schema(options)
+
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
         _governor_admission(model, options)
@@ -529,15 +569,16 @@ class OllamaBackend(InferenceBackend):
 
         if images:
             messages = _inject_images(messages, images)
-
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": options or {},
+            "options": engine_options,
             "keep_alive": keep_alive,
         }
         if think:
             kwargs["think"] = True
+        if schema is not None:
+            kwargs["format"] = schema
 
         response = _ollama_module.chat(**kwargs)
 
@@ -591,15 +632,18 @@ class OllamaBackend(InferenceBackend):
         if images:
             messages = _inject_images(messages, images)
 
+        engine_options, schema = _split_schema(options)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": options or {},
+            "options": engine_options,
             "stream": True,
             "keep_alive": keep_alive,
         }
         if think:
             kwargs["think"] = True
+        if schema is not None:
+            kwargs["format"] = schema
 
         stream_iter = _ollama_module.chat(**kwargs)
 
@@ -848,19 +892,23 @@ class LlamaCppBackend(InferenceBackend):
         t0 = time.time()
 
         llm = self._get_or_load(model)
-        opts = options or {}
+        opts, schema = _split_schema(options)
         temperature = opts.get("temperature", 0.7)
 
         formatted = _format_messages_for_llama_cpp(messages)
 
+        completion_kwargs: dict[str, Any] = {
+            "messages": formatted,
+            "temperature": temperature,
+            "max_tokens": opts.get("num_predict", 2048),
+            "top_p": opts.get("top_p", 0.9),
+            "stream": False,
+        }
+        if schema is not None:
+            completion_kwargs["response_format"] = _response_format(schema)
+
         with self._lock_for(self._inference_locks, model):
-            result = llm.create_chat_completion(
-                messages=formatted,
-                temperature=temperature,
-                max_tokens=opts.get("num_predict", 2048),
-                top_p=opts.get("top_p", 0.9),
-                stream=False,
-            )
+            result = llm.create_chat_completion(**completion_kwargs)
 
         content = ""
         if result and "choices" in result and result["choices"]:
@@ -903,19 +951,23 @@ class LlamaCppBackend(InferenceBackend):
         token_count = 0
 
         llm = self._get_or_load(model)
-        opts = options or {}
+        opts, schema = _split_schema(options)
         temperature = opts.get("temperature", 0.7)
 
         formatted = _format_messages_for_llama_cpp(messages)
 
+        completion_kwargs: dict[str, Any] = {
+            "messages": formatted,
+            "temperature": temperature,
+            "max_tokens": opts.get("num_predict", 2048),
+            "top_p": opts.get("top_p", 0.9),
+            "stream": True,
+        }
+        if schema is not None:
+            completion_kwargs["response_format"] = _response_format(schema)
+
         with self._lock_for(self._inference_locks, model):
-            stream_iter = llm.create_chat_completion(
-                messages=formatted,
-                temperature=temperature,
-                max_tokens=opts.get("num_predict", 2048),
-                top_p=opts.get("top_p", 0.9),
-                stream=True,
-            )
+            stream_iter = llm.create_chat_completion(**completion_kwargs)
 
             for chunk in stream_iter:
                 delta = {}
@@ -1277,11 +1329,15 @@ class LlamaServerBackend(InferenceBackend):
         msgs = list(messages or [])
         if prompt is not None:
             msgs.append({"role": "user", "content": str(prompt)})
+        engine_options, schema = _split_schema(options)
+        options = engine_options
         payload: dict[str, Any] = {
             "model": model,
             "messages": msgs,
             "stream": False,
         }
+        if schema is not None:
+            payload["response_format"] = _response_format(schema)
         # ``cache_prompt`` is the server's prompt-KV reuse switch and
         # ``id_slot`` names the slot whose cache is reused: both are
         # forwarded verbatim when the caller sets them, never invented.
@@ -1323,11 +1379,15 @@ class LlamaServerBackend(InferenceBackend):
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""
+        engine_options, schema = _split_schema(options)
+        options = engine_options
         payload: dict[str, Any] = {
             "model": model,
             "messages": list(messages or []),
             "stream": True,
         }
+        if schema is not None:
+            payload["response_format"] = _response_format(schema)
         # Same forwarding contract as the non-streaming path: the
         # prompt-KV switch and the slot number ride only when the caller
         # set them.

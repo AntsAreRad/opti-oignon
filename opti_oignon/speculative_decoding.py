@@ -190,6 +190,45 @@ class AcceptanceRecord:
 _MAX_ACCEPTANCE_HISTORY = 200
 
 
+def _default_availability_probe() -> bool | None:
+    """Whether the backend speculative decoding needs is actually there.
+
+    Imported lazily and never at module scope: importing this module must
+    reach no backend. Returns None when the question cannot be answered --
+    the registry is unavailable, or it does not expose the backend at all --
+    because "I could not check" is not the same answer as "it is absent",
+    and reporting the first as the second would be the mirror of the defect
+    this replaces.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # pragma: no cover - import shape, not logic
+        logger.debug("Availability probe unavailable: %s", exc)
+        return None
+    try:
+        backend = get_backend_registry().get("llama_cpp")
+    except Exception as exc:
+        logger.debug("Availability probe could not reach the registry: %s", exc)
+        return None
+    if backend is None:
+        return False
+    try:
+        return bool(backend.health_check())
+    except Exception as exc:
+        logger.debug("Availability probe health check failed: %s", exc)
+        return None
+
+
+def round_or_none(value: float | None, digits: int) -> float | None:
+    """Round a number, or keep an unknown unknown.
+
+    Exists so that every place a rate crosses a boundary -- serialisation,
+    an API payload -- spells "never produced" the same way, instead of one
+    of them turning it back into a zero on the way out.
+    """
+    return None if value is None else round(value, digits)
+
+
 @dataclass
 class AcceptanceStats:
     """Tracks speculative decoding acceptance rate statistics."""
@@ -197,7 +236,8 @@ class AcceptanceStats:
     total_draft_tokens: int = 0
     accepted_tokens: int = 0
     total_runs: int = 0
-    last_acceptance_rate: float = 0.0
+    # None until a run has drafted something; see overall_acceptance_rate.
+    last_acceptance_rate: float | None = None
     last_speedup_factor: float = 1.0
     last_updated: float = 0.0
 
@@ -208,10 +248,18 @@ class AcceptanceStats:
     )
 
     @property
-    def overall_acceptance_rate(self) -> float:
-        """Overall acceptance rate across all runs."""
+    def overall_acceptance_rate(self) -> float | None:
+        """Overall acceptance rate, or None when nothing was ever drafted.
+
+        None and 0.0 are different answers and must stay different. 0.0 means
+        tokens were drafted and the target accepted none of them -- a real
+        result, and a damning one. None means speculative decoding was never
+        exercised, which is the state of this repository until a draft and a
+        target run together on the host. Spelling both as 0.0 reported the
+        second as the first on every request.
+        """
         if self.total_draft_tokens == 0:
-            return 0.0
+            return None
         return self.accepted_tokens / self.total_draft_tokens
 
     def record_run(
@@ -226,7 +274,7 @@ class AcceptanceStats:
         self.accepted_tokens += accepted
         self.total_runs += 1
         self.last_acceptance_rate = (
-            accepted / draft_tokens if draft_tokens > 0 else 0.0
+            accepted / draft_tokens if draft_tokens > 0 else None
         )
         self.last_speedup_factor = speedup
         self.last_updated = time.time()
@@ -256,32 +304,36 @@ class AcceptanceStats:
             records = records[-last_n:]
         return [r.to_dict() for r in records]
 
-    def get_rolling_acceptance_rate(self, last_n: int = 10) -> float:
-        """Calculate rolling acceptance rate over the last N runs.
+    def get_rolling_acceptance_rate(self, last_n: int = 10) -> float | None:
+        """Rolling acceptance rate over the last N runs, or None.
 
-        Returns 0.0 if no history is available.
+        Same rule as the overall rate: an empty window, or a window in which
+        nothing was drafted, has no rate to give and says so rather than
+        answering zero.
         """
         recent = list(self._history)[-last_n:] if self._history else []
         if not recent:
-            return 0.0
+            return None
         total_draft = sum(r.draft_tokens for r in recent)
         total_accepted = sum(r.accepted_tokens for r in recent)
         if total_draft == 0:
-            return 0.0
+            return None
         return total_accepted / total_draft
 
     def to_dict(self) -> dict:
-        """Serialize to dict."""
+        """Serialize to dict, keeping an unknown rate unknown."""
         return {
             "total_draft_tokens": self.total_draft_tokens,
             "accepted_tokens": self.accepted_tokens,
             "total_runs": self.total_runs,
-            "overall_acceptance_rate": round(self.overall_acceptance_rate, 4),
-            "last_acceptance_rate": round(self.last_acceptance_rate, 4),
+            "overall_acceptance_rate": round_or_none(
+                self.overall_acceptance_rate, 4
+            ),
+            "last_acceptance_rate": round_or_none(self.last_acceptance_rate, 4),
             "last_speedup_factor": round(self.last_speedup_factor, 2),
             "last_updated": self.last_updated,
             "history_size": len(self._history),
-            "rolling_acceptance_rate": round(
+            "rolling_acceptance_rate": round_or_none(
                 self.get_rolling_acceptance_rate(10), 4
             ),
         }
@@ -293,7 +345,10 @@ class AcceptanceStats:
             total_draft_tokens=data.get("total_draft_tokens", 0),
             accepted_tokens=data.get("accepted_tokens", 0),
             total_runs=data.get("total_runs", 0),
-            last_acceptance_rate=data.get("last_acceptance_rate", 0.0),
+            # A record written before the distinction existed carries 0.0,
+            # which is kept as stored: rewriting it to None here would invent
+            # an absence just as surely as the old code invented a zero.
+            last_acceptance_rate=data.get("last_acceptance_rate"),
             last_speedup_factor=data.get("last_speedup_factor", 1.0),
             last_updated=data.get("last_updated", 0.0),
         )
@@ -512,7 +567,20 @@ class SpeculativeDecodingManager:
     llama.cpp CLI flags, and tracks acceptance rate stats.
     """
 
-    def __init__(self, config_path: str | None = None, stats_path: str | None = None):
+    def __init__(
+        self,
+        config_path: str | None = None,
+        stats_path: str | None = None,
+        availability_probe: Any = None,
+    ):
+        # Injected in tests; the default asks the backend registry lazily, so
+        # importing this module still reaches no backend. A probe that cannot
+        # answer leaves availability unknown rather than asserting it.
+        self._availability_probe = (
+            availability_probe
+            if availability_probe is not None
+            else _default_availability_probe
+        )
         self._config = SpeculativeConfig()
         self._family_compat = dict(_DEFAULT_FAMILY_COMPAT)
         self._vram_budget_cfg: dict = {}
@@ -623,12 +691,32 @@ class SpeculativeDecodingManager:
             return SpeculativeConfig(**new_cfg.to_dict())
 
     def get_status(self) -> dict:
-        """Get full status including config, stats, and availability."""
+        """Get full status including config, stats, and availability.
+
+        ``available`` used to be the literal True, reported next to the name
+        of the backend it requires, and therefore true with no backend, no
+        model and no card. It is now whatever the probe can establish, and
+        None when the probe cannot establish anything; ``availability_basis``
+        says which of the two happened, so a consumer is never left guessing
+        whether True means "checked" or "assumed".
+        """
+        available = None
+        try:
+            available = self._availability_probe()
+        except Exception as exc:
+            logger.debug("Availability probe failed: %s", exc)
+            available = None
+        if available is not None:
+            available = bool(available)
+
         with self._lock:
             return {
                 "config": self._config.to_dict(),
                 "stats": self._stats.to_dict(),
-                "available": True,
+                "available": available,
+                "availability_basis": (
+                    "unknown" if available is None else "probe"
+                ),
                 "backend_required": "llama_cpp",
             }
 
