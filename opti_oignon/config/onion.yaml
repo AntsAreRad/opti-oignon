@@ -1,0 +1,20 @@
+# Onion memory -- window budget, in tokens
+# =========================================
+# The model always sees a small, bounded, deterministically assembled window.
+# The composer refuses a budget whose layer caps plus the generation reserve
+# exceed the window, so the numbers below must add up.
+#
+# Assembly order is fixed: core, receipts, peels, flesh, turn.
+
+# The whole window the model sees, generation reserve included.
+window: 12288
+
+# Headroom left for generation. Never assembled into.
+reserve: 2048
+
+layers:
+  core: 1024        # pinned invariants; never cut, refused if over
+  receipts: 512     # one line per evicted span, with its recall key
+  peels: 3072       # retrieved episode summaries, cut to fit, whole items only
+  flesh: 5120       # last turns verbatim; a turn leaves only with a receipt
+  turn: 512         # the current turn; refused if over, never truncated

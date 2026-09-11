@@ -11,6 +11,9 @@ every import of the package.
 
   * ZP1 -- the three harness modules exist and are pure at module scope.
   * ZP2 -- no module outside the harness imports a harness module.
+  * ZP3 -- the composer, the Core store and the receipts exist, are pure at
+    module scope, and are imported by nothing else yet: wiring them into
+    the chat path is the block's last session, not a side effect.
 
 Local-only (the public distribution ships no tests). Reads the tree; loads
 nothing.
@@ -29,6 +32,8 @@ from _isolation import REPO  # noqa: E402
 _PACKAGE = REPO / "opti_oignon"
 _HARNESS = ("probes", "drift", "baseline")
 _HARNESS_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _HARNESS}
+_ONION = ("composer", "core_store", "receipts")
+_ONION_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _ONION}
 _STDLIB_ONLY_AT_SCOPE = {"dataclasses", "re", "typing", "collections", "hashlib", "json", "math", "itertools", "logging"}
 
 
@@ -79,6 +84,32 @@ def test_zp2_nothing_on_the_chat_path_imports_the_harness():
         "the harness is measurement, not pipeline: nothing imports it yet. "
         f"Found: {offenders}"
     )
+
+
+# ---------------------------------------------------------------------------
+# ZP3 -- the onion modules exist, are pure at scope, and are not wired yet
+# ---------------------------------------------------------------------------
+def test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet():
+    allowed = _STDLIB_ONLY_AT_SCOPE | {"pathlib"}
+    for path in sorted(_ONION_PATHS):
+        assert path.is_file(), f"{path.name} is part of the onion"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        top = _imports_of(ast.Module(body=[s for s in tree.body if isinstance(s, (ast.Import, ast.ImportFrom))], type_ignores=[]))
+        offenders = {n for n in top if n.split(".")[0] not in allowed and not n.startswith("__future__")}
+        assert offenders == set(), f"{path.name} imports only the standard library at module scope: {offenders}"
+    offenders = []
+    for path in sorted(_PACKAGE.rglob("*.py")):
+        if path in _ONION_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for name in _imports_of(tree):
+            bare = name.lstrip(".")
+            last = bare.split(".")[-1] if bare else ""
+            if (
+                bare.startswith("opti_oignon.memory.") and last in _ONION
+            ) or (name.startswith(".") and last in _ONION and "memory" in str(path)):
+                offenders.append(f"{path.relative_to(REPO)} imports {name}")
+    assert offenders == [], f"the onion is not on the chat path yet. Found: {offenders}"
 
 
 if __name__ == "__main__":
