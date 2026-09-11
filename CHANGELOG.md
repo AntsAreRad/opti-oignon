@@ -18,6 +18,13 @@ package costs.
   The module count carries a ceiling because it is stable to the digit; wall
   time and resident memory are recorded and never enforced, because both move
   with the machine and a ceiling that moves with the machine forbids nothing.
+- `registry_funnel_guard.py` keeps every inference request inside the backend
+  registry, where admission, provenance, constrained decoding and the placement
+  recipe live. It counts direct calls to the client library on the syntax tree,
+  so prose never counts, in every spelling the library can be reached by. The
+  modules that still call directly are a sealed ledger that **may only
+  shrink**: an owed module that changes while still calling directly must
+  migrate, and a module nobody owes for is refused outright.
 - A static concordance check pairs the mobile bridge's declarations with its
   native entry points by name, arity and type. A type outside the agreed table
   is refused rather than mapped by default, and zero declarations on either
