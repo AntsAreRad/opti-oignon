@@ -98,6 +98,10 @@ MANIFEST_VERSION = 1
 SCHEME_PQC = "mldsa65"
 SCHEME_HMAC = "hmac-sha512"
 
+# The one benchmark provenance a seal will attest. The label itself is minted
+# by the tuner; this module only refuses to seal anything else.
+BENCHMARK_SOURCE_MEASURED = "measured"
+
 MODE_DAILY = "daily"
 MODE_BULBE = "bulbe"
 
@@ -596,13 +600,37 @@ def record_model(
     keys: SealKeys | None = None,
     signer: Callable[[bytes, bytes], bytes] | None = None,
     chunk_size: int = _CHUNK,
+    placement: dict[str, Any] | None = None,
+    benchmark: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Enrol (or re-pin) one model and re-seal the manifest.
+
+    ``placement`` and ``benchmark`` bind a layout recipe and a performance
+    record to the artefact under the same seal, so that either changing
+    without a re-seal is detectable and a placement can be reproduced from the
+    manifest alone. Both are optional and an entry recorded without them keeps
+    the shape it always had.
+
+    A benchmark is accepted only when its ``source`` is ``measured``. A
+    simulated or unknown figure is not a measurement of this artefact, and a
+    seal on it would turn an invented number into an attested one -- the exact
+    transformation the provenance label exists to prevent. The refusal happens
+    before the manifest is read, so a refused call writes nothing.
 
     Enrolment is an explicit act. Nothing here pins a model behind the user's
     back: the whole value of the pin is that somebody decided these bytes were
     the right ones.
     """
+    if benchmark is not None:
+        label = benchmark.get("source") if isinstance(benchmark, dict) else None
+        if label != BENCHMARK_SOURCE_MEASURED:
+            raise ProvenanceError(
+                "Refusing to seal a benchmark whose source is "
+                f"{label if label is not None else 'missing'!r}: only a "
+                f"{BENCHMARK_SOURCE_MEASURED!r} figure is a measurement of "
+                "this artefact"
+            )
+
     resolved = Path(model_path)
     digest = compute_digest(resolved, chunk_size=chunk_size)
 
@@ -614,11 +642,16 @@ def record_model(
 
     manifest = load_manifest(manifest_path) or {}
     entries = dict(manifest.get("entries") or {})
-    entries[resolved.name] = {
+    entry: dict[str, Any] = {
         "sha256": digest,
         "size": resolved.stat().st_size,
         "recorded_at": time.time(),
     }
+    if placement is not None:
+        entry["placement"] = dict(placement)
+    if benchmark is not None:
+        entry["benchmark"] = dict(benchmark)
+    entries[resolved.name] = entry
 
     payload = {"version": MANIFEST_VERSION, "entries": entries}
     sealed = dict(payload)

@@ -89,7 +89,11 @@ def _resolve_resource_governor() -> Any:
 
 
 def _governor_admission(model: str, options: dict | None) -> None:
-    """The internal hook at the four generate/stream heads.
+    """The internal hook at the six generate/stream heads.
+
+    Six, not four: the external llama-server backend was the one that talks
+    to a process the governor cannot see, and it was also the only one that
+    never asked before sending. It asks now.
 
     Additive and internal: generate/stream signatures DO NOT change. A
     funnel-held ticket (resource_governor.ticket_scope) stands the gate
@@ -1330,6 +1334,9 @@ class LlamaServerBackend(InferenceBackend):
         if prompt is not None:
             msgs.append({"role": "user", "content": str(prompt)})
         engine_options, schema = _split_schema(options)
+        # Admission before anything leaves. A refusal that arrives after the
+        # request has gone to the server is a log line, not a refusal.
+        _governor_admission(model, options)
         options = engine_options
         payload: dict[str, Any] = {
             "model": model,
@@ -1380,6 +1387,10 @@ class LlamaServerBackend(InferenceBackend):
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""
         engine_options, schema = _split_schema(options)
+        # Same gate as the whole-answer head, and for the same reason. A
+        # generator body runs at first iteration, so the caller's first
+        # ``next`` is where admission is decided.
+        _governor_admission(model, options)
         options = engine_options
         payload: dict[str, Any] = {
             "model": model,

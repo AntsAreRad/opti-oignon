@@ -1936,27 +1936,35 @@ class ResourceGovernor:
 
     def _read_s2(
         self, s1_names: set[str]
-    ) -> tuple[list[BackendResidentView], bool, bool]:
+    ) -> tuple[list[BackendResidentView], bool, bool, list[str]]:
         """The S2 read: backend-resident models not in the S1 view.
 
-        Returns (views, s2_answered, s3_used). Only backends exposing the
-        in-process ``_loaded_models`` dict idiom contribute entries; the
+        Returns (views, s2_answered, s3_used, unread). Only backends exposing
+        the in-process ``_loaded_models`` dict idiom contribute entries; the
         Ollama backend's loaded set IS the S1 view and is never double
-        counted.
+        counted. ``unread`` names every backend that exposes no such set, so
+        the snapshot can say where it did not look.
         """
         registry = self._resolve_registry()
         if registry is None:
-            return [], False, False
+            return [], False, False, []
         try:
             backends = list(registry.backends())
         except Exception as exc:
             logger.debug("S2 registry read failed: %s", exc)
-            return [], False, False
+            return [], False, False, []
         views: list[BackendResidentView] = []
         s3_used = False
+        unread: list[str] = []
         for backend in backends:
             resident = getattr(backend, "_loaded_models", None)
             if not isinstance(resident, dict):
+                # A backend the governor cannot read is NAMED, not skipped.
+                # Skipping it made "no resident models here" and "never
+                # looked here" the same snapshot, and an admission decided
+                # on that snapshot could be confidently wrong about a card
+                # the external server had already filled.
+                unread.append(str(getattr(backend, "name", "unknown")))
                 continue
             backend_name = str(getattr(backend, "name", "unknown"))
             for name in list(resident.keys()):
@@ -1984,7 +1992,7 @@ class ResourceGovernor:
                         basis=basis,
                     )
                 )
-        return views, True, s3_used
+        return views, True, s3_used, unread
 
     def _probe_capacity_gb(self) -> float | None:
         """Total VRAM in GiB from the probe, or None when it cannot say.
@@ -2015,13 +2023,16 @@ class ResourceGovernor:
             sources.append("S1")
             self._attribute_pending(loaded)
 
-        resident, s2_answered, s3_used = self._read_s2(
+        resident, s2_answered, s3_used, unread = self._read_s2(
             {view.name for view in loaded}
         )
         if s2_answered:
             sources.append("S2")
         if s3_used:
             sources.append("S3")
+        # Where the governor did NOT look is part of the provenance too.
+        for backend_name in unread:
+            sources.append(f"S2-unread:{backend_name}")
 
         configured = self._config.total_vram_gb
         # The probe is a fallback, not an override: an operator who wrote a
