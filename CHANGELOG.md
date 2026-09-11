@@ -46,6 +46,12 @@ package costs.
 
 ### Changed
 
+- Tool calls are schema-constrained. A forced tool decision travels as one
+  schema branch per tool -- the name as a constant, the tool's own parameter
+  schema for the arguments, closed to unknown keys -- so a constrained
+  sampler cannot produce a call the tool cannot take; the native and the
+  constrained schema come from one builder. At execution, an argument of the
+  wrong type is refused before the handler, named, and marked retryable.
 - The tool executor asks the inference registry at every head -- native tool
   decision, forced decision, streamed and single-shot final answer -- with
   tool schemas and decision schemas travelling as engine options, so the

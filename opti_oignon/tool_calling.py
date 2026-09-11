@@ -56,38 +56,84 @@ _JSON_TYPE = {
 }
 
 
+def _parameter_schema(tool) -> dict:
+    """The JSON schema of one tool's parameters, from its registry definition.
+
+    The one builder behind the native function-call schema and the
+    constrained decision schema, so the two can never disagree on a
+    parameter's type or on what is required.
+    """
+    properties: dict[str, dict] = {}
+    required: list[str] = []
+    for pname, pdef in getattr(tool, "parameters", {}).items():
+        ptype = _JSON_TYPE.get(getattr(pdef, "type", "string"), "string")
+        prop: dict[str, Any] = {
+            "type": ptype,
+            "description": getattr(pdef, "description", "") or "",
+        }
+        if ptype == "array":
+            prop["items"] = {"type": "string"}
+        properties[pname] = prop
+        if getattr(pdef, "required", True):
+            required.append(pname)
+    return {"type": "object", "properties": properties, "required": required}
+
+
 def native_tool_schemas(tools: list) -> list[dict]:
     """Build Ollama native function-call schemas from registry tool definitions."""
-    schemas = []
-    for tool in tools:
-        properties: dict[str, dict] = {}
-        required: list[str] = []
-        for pname, pdef in getattr(tool, "parameters", {}).items():
-            ptype = _JSON_TYPE.get(getattr(pdef, "type", "string"), "string")
-            prop: dict[str, Any] = {
-                "type": ptype,
-                "description": getattr(pdef, "description", "") or "",
-            }
-            if ptype == "array":
-                prop["items"] = {"type": "string"}
-            properties[pname] = prop
-            if getattr(pdef, "required", True):
-                required.append(pname)
-        schemas.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": getattr(tool, "description", "") or "",
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                    },
-                },
-            }
-        )
-    return schemas
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": getattr(tool, "description", "") or "",
+                "parameters": _parameter_schema(tool),
+            },
+        }
+        for tool in tools
+    ]
+
+
+# What each JSON type accepts from a Python value. A bool is not an integer
+# even though Python says it is: "true" as a count is exactly the kind of
+# call a handler cannot take. An integer is a number.
+_ACCEPTS = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v),
+    "object": lambda v: isinstance(v, dict),
+}
+
+
+def validate_arguments(tool, arguments) -> list[str]:
+    """Every way ``arguments`` fails the tool's parameter schema, or an empty list.
+
+    A missing required parameter and a value of the wrong type are each one
+    error naming the parameter and what was expected. Keys the schema does
+    not know are not reported here: the executor's resolve step drops them,
+    a tolerance older than this check. No coercion: a string that looks
+    like a number is still a string.
+    """
+    schema = _parameter_schema(tool)
+    if not isinstance(arguments, dict):
+        return [f"arguments: expected an object, got {type(arguments).__name__}"]
+    errors = []
+    for pname in schema["required"]:
+        if pname not in arguments:
+            errors.append(f"{pname}: required parameter is missing")
+    for pname, value in arguments.items():
+        prop = schema["properties"].get(pname)
+        if prop is None:
+            continue
+        expected = prop["type"]
+        if not _ACCEPTS.get(expected, lambda v: True)(value):
+            got = type(value).__name__
+            if expected == "array" and isinstance(value, list):
+                got = "array with a non-string item"
+            errors.append(f"{pname}: expected {expected}, got {got}")
+    return errors
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -146,6 +192,34 @@ def forced_decision_schema(tool_names: list[str]) -> dict:
         },
         "required": ["tool_name", "arguments"],
     }
+
+
+def constrained_decision_schema(tools: list) -> dict:
+    """A forced decision that cannot produce a call the tool cannot take.
+
+    One branch per tool: the tool's name as a constant and its own parameter
+    schema for the arguments, closed to unknown keys. Where
+    :func:`forced_decision_schema` only pins the name and leaves the
+    arguments free, this pins the shape of the call itself, so a sampler
+    constrained by it emits a structurally valid call or nothing.
+    """
+    tools = list(tools)
+    if not tools:
+        raise ValueError("constrained_decision_schema requires at least one tool")
+    branches = []
+    for tool in tools:
+        arguments = _parameter_schema(tool)
+        arguments["additionalProperties"] = False
+        branches.append({
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "const": tool.name},
+                "arguments": arguments,
+                "reasoning": {"type": "string"},
+            },
+            "required": ["tool_name", "arguments"],
+        })
+    return {"oneOf": branches}
 
 
 # ---------------------------------------------------------------------------

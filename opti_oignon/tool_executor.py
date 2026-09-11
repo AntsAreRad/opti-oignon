@@ -82,12 +82,14 @@ def _payload(response):
 # conditional-import style; the format= path stays the fallback if absent.
 try:
     from .tool_calling import (
+        constrained_decision_schema,
         forced_decision_schema,
         model_supports_native_tools,
         native_tool_schemas,
         parse_native_tool_calls,
         repair_arguments,
         transpile_intent,
+        validate_arguments,
     )
     ROBUST_TOOLCALLING_AVAILABLE = True
 except ImportError:
@@ -1066,6 +1068,7 @@ class ToolExecutor:
                 if force:
                     forced = self._enum_force_tool(
                         messages, model, [t.name for t in available],
+                        tools=available,
                     )
                     return [forced] if forced else []
                 # A capable model that called nothing is done. It usually
@@ -1199,13 +1202,21 @@ class ToolExecutor:
 
     def _enum_force_tool(
         self, messages: list[dict], model: str, tool_names: list[str],
+        tools: list | None = None,
     ) -> tuple[str, dict] | None:
-        """Force a tool selection via an enum-constrained schema.
+        """Force a tool selection via a constrained schema.
 
-        The schema's tool_name enum excludes "none", so the sampler cannot
-        decline -- a tool is guaranteed when the caller knows one is needed.
-        The schema travels as an engine option through the registry.
+        With the tool definitions in hand the schema is one branch per tool
+        -- the name as a constant, the tool's own parameter schema for the
+        arguments -- so the sampler cannot produce a call the tool cannot
+        take. With names only, the enum schema: it excludes "none", so the
+        sampler cannot decline, and leaves the arguments free. Either way
+        the schema travels as an engine option through the registry.
         """
+        schema = (
+            constrained_decision_schema(tools) if tools
+            else forced_decision_schema(tool_names)
+        )
         backend = _resolve_backend(model)
         if backend is None:
             logger.warning(
@@ -1216,7 +1227,7 @@ class ToolExecutor:
             response = backend.generate(
                 model=model,
                 messages=messages,
-                options={"temperature": 0.0, "schema": forced_decision_schema(tool_names)},
+                options={"temperature": 0.0, "schema": schema},
             )
             raw = response.content
             data = json.loads(raw)
@@ -1321,6 +1332,24 @@ class ToolExecutor:
                     result=(
                         f"Missing required parameter: {param_name}. "
                         f"Provide it and call the tool again."
+                    ),
+                    success=False,
+                    retryable=True,
+                    execution_time=time.time() - start_time,
+                    reasoning=reasoning,
+                )
+
+        # A structurally invalid call never reaches the handler: a value of
+        # the wrong type is refused by name, and the model may fix its call.
+        if ROBUST_TOOLCALLING_AVAILABLE:
+            errors = validate_arguments(tool, resolved_args)
+            if errors:
+                return ToolCallResult(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=(
+                        "Invalid argument(s): " + "; ".join(errors)
+                        + ". Fix the call and try again."
                     ),
                     success=False,
                     retryable=True,
