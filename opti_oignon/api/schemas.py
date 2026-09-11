@@ -2301,6 +2301,10 @@ class BenchmarkV2ModelScore(BaseModel):
     speed_avg: float = 0.0
     composite: float = 0.0
     questions_evaluated: int = 0
+    # A model the governor refused never ran. Without these two fields its
+    # zeros are indistinguishable from a model that ran and scored nothing.
+    not_admitted: bool = False
+    admission_reason: str = ""
 
 
 class BenchmarkV2QuestionResult(BaseModel):
@@ -2849,6 +2853,10 @@ class TunerProfileSchema(BaseModel):
     hardware_fingerprint: str = ""
     timestamp: float = 0.0
     all_results: list[dict] = Field(default_factory=list)
+    # Where the rates above came from: measured, estimated, simulated, or
+    # unknown. Defaults to unknown so a payload that says nothing about its
+    # provenance is never read as a measurement.
+    source: str = "unknown"
 
 
 class TunerResultsResponse(BaseModel):

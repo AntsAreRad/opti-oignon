@@ -215,6 +215,22 @@ _SIZE_STR_RE = re.compile(r"^([\d.]+)\s*(GB|MB|B)$", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 
 
+def _default_vram_probe() -> float:
+    """Total VRAM in MiB from the host collector, or ``-1.0`` when unknown.
+
+    Imported lazily and on demand: the collector spawns nvidia-smi, and
+    neither importing this module nor running on a host without a card may
+    pay for that. The negative sentinel is the collector's own, and it is
+    what distinguishes "no reading" from "a card with no memory".
+    """
+    try:
+        from opti_oignon.live_metrics import read_total_vram_mb
+    except Exception as exc:  # pragma: no cover - import shape, not logic
+        logger.debug("VRAM probe unavailable: %s", exc)
+        return -1.0
+    return read_total_vram_mb()
+
+
 def _read_available_ram_mb(meminfo_path: str | Path = "/proc/meminfo") -> float:
     """Return available system RAM in MB, or 0.0 when undeterminable.
 
@@ -1551,6 +1567,7 @@ class ResourceGovernor:
         registry: Any = _UNSET,
         clock: Callable[[], float] = time.monotonic,
         meminfo_path: str | Path = "/proc/meminfo",
+        vram_probe: Any = _UNSET,
     ):
         self._config = load_config(config_path)
         self._store = AdaptStore(db_path)
@@ -1561,6 +1578,12 @@ class ResourceGovernor:
         self._registry_override = registry
         self._clock = clock
         self._meminfo_path = meminfo_path
+        # Injected in tests; the default reads the host collector lazily, so
+        # importing the governor still spawns no subprocess and touches no
+        # device. Consulted only when no capacity is configured.
+        self._vram_probe = (
+            _default_vram_probe if vram_probe is _UNSET else vram_probe
+        )
         self._estimator = (
             _VRAMBudgetCalculator() if SPECULATIVE_AVAILABLE else None
         )
@@ -1963,6 +1986,26 @@ class ResourceGovernor:
                 )
         return views, True, s3_used
 
+    def _probe_capacity_gb(self) -> float | None:
+        """Total VRAM in GiB from the probe, or None when it cannot say.
+
+        Only a strictly positive reading becomes a capacity. The collector
+        reports -1.0 for anything it could not read, and a probe that raises
+        is an absent reading too: in both cases the capacity stays unknown,
+        which keeps the VRAM half fail-open. Turning either into 0.0 would
+        declare a card with no memory and refuse everything.
+        """
+        if self._vram_probe is None:
+            return None
+        try:
+            total_mb = float(self._vram_probe())
+        except Exception as exc:
+            logger.debug("VRAM probe failed: %s", exc)
+            return None
+        if total_mb <= 0.0:
+            return None
+        return total_mb / 1024.0
+
     def _build_snapshot(self) -> ResourceSnapshot:
         now = self._clock()
         sources: list[str] = []
@@ -1981,6 +2024,13 @@ class ResourceGovernor:
             sources.append("S3")
 
         configured = self._config.total_vram_gb
+        # The probe is a fallback, not an override: an operator who wrote a
+        # figure down is not overruled by a sensor, and on a configured host
+        # nvidia-smi is never spawned at all.
+        probed = None if configured is not None else self._probe_capacity_gb()
+        declared = configured if configured is not None else probed
+        declared_source = "config" if configured is not None else "probe"
+
         learned_ceiling = None
         try:
             learned_ceiling = self._store.get_learned_ceiling()
@@ -1988,15 +2038,17 @@ class ResourceGovernor:
             logger.debug("Learned ceiling read failed: %s", exc)
         if configured is not None:
             sources.append("S4-capacity-config")
+        elif probed is not None:
+            sources.append("S4-capacity-probe")
         if learned_ceiling is not None:
             sources.append("S4-capacity-learned")
 
-        if configured is not None and learned_ceiling is not None:
-            capacity: float | None = min(configured, learned_ceiling)
-            capacity_source = "config+learned"
-        elif configured is not None:
-            capacity = configured
-            capacity_source = "config"
+        if declared is not None and learned_ceiling is not None:
+            capacity: float | None = min(declared, learned_ceiling)
+            capacity_source = f"{declared_source}+learned"
+        elif declared is not None:
+            capacity = declared
+            capacity_source = declared_source
         elif learned_ceiling is not None:
             capacity = learned_ceiling
             capacity_source = "learned"

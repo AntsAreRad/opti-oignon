@@ -251,6 +251,11 @@ def get_run_results(run_id: str) -> dict:
             speed_avg=ms.get("speed_avg", 0.0),
             composite=ms.get("composite", 0.0),
             questions_evaluated=ms.get("questions_evaluated", 0),
+            # The store records a governor refusal; carry it across the
+            # boundary so the zeros below are readable as an absence of
+            # measurement rather than a measurement of zero.
+            not_admitted=bool(ms.get("not_admitted", False)),
+            admission_reason=ms.get("admission_reason", ""),
         )
 
     # Convert question results

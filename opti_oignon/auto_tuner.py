@@ -55,6 +55,40 @@ _DEFAULT_PARAM_SPACE: dict[str, list] = {
     "flash_attention": [True, False],
 }
 
+# Where a reported rate came from. Three benchmark paths produce rates and
+# they are not equally trustworthy: one reads counters the server reported,
+# one derives a token count from a character count and a prompt rate from a
+# constant multiple, and one invents both. Without a label they are
+# indistinguishable once stored, which is how a fabricated figure becomes a
+# measurement by the time someone reads it back.
+SOURCE_MEASURED = "measured"
+SOURCE_ESTIMATED = "estimated"
+SOURCE_SIMULATED = "simulated"
+SOURCE_UNKNOWN = "unknown"
+
+# Least trustworthy first. Aggregation keeps the weakest source present, so a
+# single invented trial cannot be laundered by measured neighbours, and a
+# label this module does not recognise is treated as unknown rather than
+# trusted.
+_SOURCE_RANK = {
+    SOURCE_UNKNOWN: 0,
+    SOURCE_SIMULATED: 1,
+    SOURCE_ESTIMATED: 2,
+    SOURCE_MEASURED: 3,
+}
+
+
+def weakest_source(sources) -> str:
+    """Return the least trustworthy source among ``sources``.
+
+    An empty collection measured nothing, so it is unknown rather than
+    measured: the absence of evidence never aggregates into evidence.
+    """
+    ranked = [s if s in _SOURCE_RANK else SOURCE_UNKNOWN for s in sources]
+    if not ranked:
+        return SOURCE_UNKNOWN
+    return min(ranked, key=lambda s: _SOURCE_RANK[s])
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -153,6 +187,9 @@ class BenchmarkResult:
     tokens_per_second_pp: float = 0.0  # Prompt processing speed
     total_time_ms: float = 0.0
     error: str = ""
+    # Defaults to unknown so a result built without saying where its rates
+    # came from cannot pass for a measurement.
+    source: str = SOURCE_UNKNOWN
 
     def to_dict(self) -> dict:
         """Serialize to dict."""
@@ -162,6 +199,7 @@ class BenchmarkResult:
             "tokens_per_second_pp": round(self.tokens_per_second_pp, 2),
             "total_time_ms": round(self.total_time_ms, 2),
             "error": self.error,
+            "source": self.source,
         }
 
 
@@ -179,6 +217,8 @@ class TunerProfile:
     hardware_fingerprint: str = ""
     timestamp: float = 0.0
     all_results: list[dict] = field(default_factory=list)
+    # The weakest provenance among the results this profile was built from.
+    source: str = SOURCE_UNKNOWN
 
     def to_dict(self) -> dict:
         """Serialize to dict."""
@@ -193,6 +233,7 @@ class TunerProfile:
             "hardware_fingerprint": self.hardware_fingerprint,
             "timestamp": self.timestamp,
             "all_results": self.all_results,
+            "source": self.source,
         }
 
     @classmethod
@@ -209,6 +250,9 @@ class TunerProfile:
             hardware_fingerprint=data.get("hardware_fingerprint", ""),
             timestamp=data.get("timestamp", 0.0),
             all_results=data.get("all_results", []),
+            # A record written before provenance existed carries no claim, so
+            # it rehydrates as unknown rather than being promoted.
+            source=data.get("source", SOURCE_UNKNOWN),
         )
 
 
@@ -671,6 +715,11 @@ class AutoTuner:
                 hardware_fingerprint=get_hardware_fingerprint(),
                 timestamp=time.time(),
                 all_results=[r.to_dict() for r in all_results],
+                # Every result that fed this profile, including the one it
+                # kept: the profile can claim no more than its weakest input.
+                source=weakest_source(
+                    [r.source for r in all_results] + [best.source]
+                ),
             )
 
             job.status = "completed"
@@ -758,6 +807,7 @@ class AutoTuner:
         tg_speeds: list[float] = []
         pp_speeds: list[float] = []
         total_times: list[float] = []
+        sources: list[str] = []
         last_error = ""
 
         for _ in range(trials):
@@ -769,6 +819,7 @@ class AutoTuner:
             tg_speeds.append(result.tokens_per_second_tg)
             pp_speeds.append(result.tokens_per_second_pp)
             total_times.append(result.total_time_ms)
+            sources.append(result.source)
 
         if not tg_speeds:
             return BenchmarkResult(
@@ -781,6 +832,8 @@ class AutoTuner:
             tokens_per_second_tg=sum(tg_speeds) / len(tg_speeds),
             tokens_per_second_pp=sum(pp_speeds) / len(pp_speeds),
             total_time_ms=sum(total_times) / len(total_times),
+            # An average is only as good as the weakest trial inside it.
+            source=weakest_source(sources),
         )
 
     def _check_cancelled(self) -> None:
@@ -1108,6 +1161,9 @@ def create_mock_benchmark_fn(
             tokens_per_second_tg=speed,
             tokens_per_second_pp=speed * 1.5,
             total_time_ms=elapsed,
+            # No inference happened. Both rates come from a formula and a
+            # random term, and the result says so.
+            source=SOURCE_SIMULATED,
         )
 
     return _mock_benchmark
@@ -1150,12 +1206,13 @@ def create_ollama_benchmark_fn(
         if "flash_attention" in params:
             options["flash_attn"] = bool(params["flash_attention"])
         if "ubatch_size" in params:
-            # Ollama does not expose ubatch directly but we include it
-            # in the options dict for backends that support it.
-            options["num_batch"] = min(
-                int(params.get("batch_size", 2048)),
-                int(params["ubatch_size"]),
-            )
+            # Ollama exposes no micro-batch option of its own, so it travels
+            # under its own key for backends that read one. It must not land
+            # on num_batch: the sweep always carries both keys, so writing
+            # min(batch, ubatch) there made every batch-size point send a
+            # byte-identical request, and the batch recommendation that
+            # compared them was reading run-to-run noise.
+            options["num_ubatch"] = int(params["ubatch_size"])
         options["num_predict"] = benchmark_tokens
 
         try:
@@ -1192,20 +1249,29 @@ def create_ollama_benchmark_fn(
             prompt_eval_duration_ns = data.get("prompt_eval_duration", 0)
 
             tg_speed = 0.0
-            if eval_duration_ns > 0 and eval_count > 0:
+            tg_counted = eval_duration_ns > 0 and eval_count > 0
+            if tg_counted:
                 tg_speed = eval_count / (eval_duration_ns / 1e9)
 
             pp_speed = 0.0
-            if prompt_eval_duration_ns > 0 and prompt_eval_count > 0:
+            pp_counted = prompt_eval_duration_ns > 0 and prompt_eval_count > 0
+            if pp_counted:
                 pp_speed = prompt_eval_count / (
                     prompt_eval_duration_ns / 1e9
                 )
 
+            # Measured only when both rates came from counters the server
+            # itself reported. A missing counter leaves a zero behind, and a
+            # zero that nobody measured is not a measurement of zero.
             return BenchmarkResult(
                 params=params,
                 tokens_per_second_tg=tg_speed,
                 tokens_per_second_pp=pp_speed,
                 total_time_ms=elapsed_ms,
+                source=(
+                    SOURCE_MEASURED if tg_counted and pp_counted
+                    else SOURCE_UNKNOWN
+                ),
             )
 
         except ImportError:
@@ -1276,6 +1342,11 @@ def create_llamacpp_benchmark_fn(
                 options["num_thread"] = int(params["threads"])
             if "batch_size" in params:
                 options["n_batch"] = int(params["batch_size"])
+            if "ubatch_size" in params:
+                # The mirror of the Ollama defect: without this the whole
+                # micro-batch axis left as one identical request, so the
+                # values the sweep compared were never actually different.
+                options["n_ubatch"] = int(params["ubatch_size"])
             if "flash_attention" in params:
                 options["flash_attn"] = bool(params["flash_attention"])
             options["num_predict"] = benchmark_tokens
@@ -1306,6 +1377,10 @@ def create_llamacpp_benchmark_fn(
             gen_time_s = elapsed_ms / 1000.0
 
             tg_speed = estimated_tokens / gen_time_s if gen_time_s > 0 else 0.0
+            # Both rates start as estimates and are only promoted below, when
+            # the backend turns out to have reported real counters.
+            tg_counted = False
+            pp_counted = False
 
             # Check for extra timing metadata from the backend.
             extra = {}
@@ -1319,16 +1394,25 @@ def create_llamacpp_benchmark_fn(
                 timings = extra["timings"]
                 if "predicted_per_second" in timings:
                     tg_speed = float(timings["predicted_per_second"])
+                    tg_counted = True
 
             pp_speed = tg_speed * 1.5  # Rough estimate for prompt processing.
             if "timings" in extra and "prompt_per_second" in extra["timings"]:
                 pp_speed = float(extra["timings"]["prompt_per_second"])
+                pp_counted = True
 
+            # A token count inferred from characters and a prompt rate taken
+            # as a constant multiple of another rate are estimates. They are
+            # measurements only when the backend reported both counters.
             return BenchmarkResult(
                 params=params,
                 tokens_per_second_tg=tg_speed,
                 tokens_per_second_pp=pp_speed,
                 total_time_ms=elapsed_ms,
+                source=(
+                    SOURCE_MEASURED if tg_counted and pp_counted
+                    else SOURCE_ESTIMATED
+                ),
             )
 
         except Exception as exc:

@@ -10,10 +10,14 @@
 # available regardless of this flag.
 enabled: true
 
-# Total VRAM capacity in GB. null means UNKNOWN: the VRAM half of
-# measurement reports disabled_capacity_unknown and any future admission
-# stays fail-open with a logged warning (spec Section 3.1). Set this to
-# the real card capacity on the host.
+# Total VRAM capacity in GB. A value here is authoritative and the host is
+# never probed for it. null means ASK THE HOST: the governor reads the total
+# from nvidia-smi through the live-metrics collector, and the snapshot reports
+# capacity_source as "probe" rather than "config". If that reading is also
+# unavailable -- no card, no nvidia-smi, a failed query -- the capacity stays
+# UNKNOWN, measurement reports disabled_capacity_unknown, and any future
+# admission stays fail-open with a logged warning (spec Section 3.1). Set this
+# explicitly to override the reading or to work on a host without nvidia-smi.
 total_vram_gb: null
 
 # Subtracted by the Bloc 1 fit math (spec Section 4.2); also the

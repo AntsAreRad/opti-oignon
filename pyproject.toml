@@ -273,6 +273,19 @@ fail_under = 0
 # later would have let the eager open come back. The fifth, rg4, pinned WHICH
 # databases the guard ledger still carried while six were owed; the ledger is
 # now pinned entry by entry, beside the decisions that emptied it.
+#
+# And v13, of a different shape from every one above: no seam moved and no
+# moment changed. It pinned that a partial score record is completed with
+# zeros and named after its key -- still true, and re-asserted -- by comparing
+# the whole payload against a closed field set. That spelling quietly made the
+# field set itself a contract, so widening the payload made it false without
+# touching the property it exists for. The widening was owed: a model the
+# governor refused never ran, and the store recorded that, but the boundary
+# dropped it, so the refusal reached a client as a row of zeros
+# indistinguishable from a model that ran and scored nothing. The replacement
+# is v40 in the same file, which pins gap-filling and naming field by field --
+# a spelling a later field cannot falsify -- and pins the refusal pair beside
+# them.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -291,4 +304,5 @@ addopts = """
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b30_a_refused_import_does_not_raise_and_the_latch_stays_up
     --deselect=tests/test_session_fingerprint_bounds_at_rest_contracts.py::test_fp1_preferences_persist_through_the_seam_parameterized
     --deselect=tests/test_registry_schema_lazy_contracts.py::test_rg4_the_ledger_loses_the_one_with_a_single_owner
+    --deselect=tests/test_routes_benchmark_v2_contracts.py::test_v13_results_fill_the_gaps_and_prefer_the_stored_identity
 """

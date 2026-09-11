@@ -1386,3 +1386,88 @@ def test_v38_test_poll_and_reset_pass_straight_through():
         assert trigger.calls[-1] == ("reset_snapshot", (), {})
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# A refusal is not a score of zero
+
+
+def test_v39_a_refused_model_reaches_the_client_as_refused():
+    """The runner records a governor refusal; the boundary must not drop it.
+
+    A model the governor refused never ran. Its zeros are the absence of a
+    measurement, not a measurement of zero -- and a client that receives only
+    the zeros cannot tell the two apart.
+    """
+    runner = _Recorder(ret={"get_results": {
+        "run_id": "r1",
+        "model_scores": {
+            "big:70b": {
+                "model": "big:70b",
+                "accuracy_avg": 0.0,
+                "composite": 0.0,
+                "questions_evaluated": 0,
+                "not_admitted": 1,
+                "admission_reason": "insufficient VRAM headroom",
+            },
+        },
+    }})
+    _, client, restore = _load(benchmark_runner=runner)
+    try:
+        resp = client.get(f"{_PREFIX}/results/r1")
+        body = resp.json()
+        assert resp.status_code == 200
+        score = body["model_scores"]["big:70b"]
+        assert score["not_admitted"] is True, (
+            "a model the governor refused says so at the API boundary"
+        )
+        assert score["admission_reason"] == "insufficient VRAM headroom", (
+            "the reason travels with the refusal instead of being dropped"
+        )
+        assert score["composite"] == 0.0, (
+            "the zeros still travel; what changes is that they are no longer "
+            "the only thing a client can see"
+        )
+    finally:
+        restore()
+
+
+def test_v40_a_partial_score_record_is_completed_and_named():
+    """Replacement for v13: the same property, field by field.
+
+    v13 pinned this by comparing the payload against a closed field set, so
+    every later field falsified it. The property was never the field set: it
+    is that a partial record is completed with zeros, that the score is named
+    after the key it was filed under rather than after anything inside it, and
+    that a record saying nothing about admission is not read as a refusal.
+    """
+    data = {
+        "run_id": "inner", "profile": "p",
+        "model_scores": {"a": {"accuracy_avg": 1.5}},
+        "question_results": {"a": [{"question_id": "q1"}]},
+    }
+    runner = _Recorder(ret={"get_results": data})
+    _, client, restore = _load(benchmark_runner=runner)
+    try:
+        resp = client.get(f"{_PREFIX}/results/outer")
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["run_id"] == "inner", "the stored identity wins over the path"
+        score = body["model_scores"]["a"]
+        assert score["model"] == "a", (
+            "the score is named after the key it was filed under"
+        )
+        assert score["accuracy_avg"] == 1.5, "the stored value survives"
+        assert score["code_avg"] == 0.0, "a missing axis is completed with zero"
+        assert score["structure_avg"] == 0.0, "a missing axis is completed with zero"
+        assert score["speed_avg"] == 0.0, "a missing axis is completed with zero"
+        assert score["composite"] == 0.0, "a missing axis is completed with zero"
+        assert score["questions_evaluated"] == 0, "a missing count completes to zero"
+        assert score["not_admitted"] is False, (
+            "a record that says nothing about admission is not read as a refusal"
+        )
+        assert score["admission_reason"] == "", (
+            "no refusal means no reason, rather than an invented one"
+        )
+    finally:
+        restore()

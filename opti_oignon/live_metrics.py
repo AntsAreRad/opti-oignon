@@ -178,6 +178,18 @@ def _query_gpu_metrics() -> dict:
     return result
 
 
+def read_total_vram_mb() -> float:
+    """Total VRAM in MiB, or ``-1.0`` when it cannot be read.
+
+    The public name for the one real VRAM reading in this package. The
+    negative sentinel is deliberate and is part of the contract: a host with
+    no NVIDIA card, no nvidia-smi, or a failed query is UNKNOWN, and a zero
+    would be a reading of a card with no memory. Callers must test for a
+    positive value rather than for truthiness.
+    """
+    return _query_gpu_metrics().get("gpu_memory_total_mb", -1.0)
+
+
 def _safe_float(val: str) -> float:
     """Parse a string to float, returning -1.0 on failure."""
     try:

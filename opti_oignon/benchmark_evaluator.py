@@ -369,9 +369,14 @@ def score_fuzzy(
                 best_score = ratio
                 best_match = exp
 
+    # The tolerance is a gate, not a decoration. Both branches used to return
+    # the same tuple, so a declared threshold changed nothing and a wrong
+    # answer kept whatever incidental overlap it had -- credit that entered
+    # accuracy_avg, and through it the composite, on every run. The best match
+    # is still named on a gated zero so the refusal can be read.
     if best_score >= tolerance:
         return best_score, best_match
-    return best_score, best_match
+    return 0.0, best_match
 
 
 def score_keyword(
