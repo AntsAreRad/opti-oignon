@@ -45,7 +45,7 @@
 	let checkingProxy = false;
 
 	// PII preview
-	let piiTestQuery = 'error at user@example.com on 192.168.1.1 in /home/leon/project';
+	let piiTestQuery = 'error at user@example.com on 192.168.1.1 in /home/user/project';
 	let piiPreview: PIISanitizePreviewResponse | null = null;
 	let previewingPII = false;
 

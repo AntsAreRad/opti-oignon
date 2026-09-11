@@ -1115,7 +1115,7 @@ Examples:
 
         print("\n--- Test 5: PII sanitization ---")
         preview = web_searcher.preview_sanitization(
-            "error on user@example.com at /home/leon/project"
+            "error on user@example.com at /home/user/project"
         )
         print(f"  Original: {preview['original']!r}")
         print(f"  Sanitized: {preview['sanitized']!r}")

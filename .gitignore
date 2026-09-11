@@ -136,3 +136,19 @@ CLAUDE.local.md
 !CLAUDE.md
 .claude/state/*
 !.claude/state/blades.md
+
+# Maintainer tooling and personal files: never part of the public tree.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.mcp.json
+.ripgreprc
+.idea
+.vscode
