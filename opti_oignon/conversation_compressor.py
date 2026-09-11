@@ -43,11 +43,15 @@ except ImportError:
     YAML_AVAILABLE = False
     logger.warning("PyYAML not available; using hardcoded defaults")
 
+# The client library's presence, kept for the hybrid strategy's cheap
+# pre-check. The request itself goes through the registry; no client is
+# imported here.
 try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
+    import importlib.util as _importlib_util
+    OLLAMA_AVAILABLE = _importlib_util.find_spec("ollama") is not None
+except Exception:  # noqa: BLE001 - presence is a fact, not a dependency
     OLLAMA_AVAILABLE = False
+if not OLLAMA_AVAILABLE:
     logger.warning("Ollama not available; LLM strategy will fall back to rule")
 
 try:
@@ -682,6 +686,26 @@ class ConversationCompressor:
         summary = "Earlier conversation summary:\n" + "\n".join(f"- {f}" for f in facts)
         return summary, "rule"
 
+    @staticmethod
+    def _resolve_backend(model: str):
+        """The registry's backend for ``model``, or None when there is none.
+
+        Imported lazily: the registry pulls the client library, and this
+        module must stay cheap to import. None is the honest answer when the
+        registry is unavailable or resolves nothing; the caller then takes
+        the rule-based path, which needs no model at all.
+        """
+        try:
+            from opti_oignon.inference_backend import get_backend_registry
+        except Exception as exc:  # noqa: BLE001 - absence is an answer here
+            logger.debug("Inference registry unavailable: %s", exc)
+            return None
+        try:
+            return get_backend_registry().resolve_backend(model)
+        except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+            logger.debug("Inference registry could not resolve %s: %s", model, exc)
+            return None
+
     def _compress_llm(
         self,
         messages: list[dict[str, str]],
@@ -698,13 +722,16 @@ class ConversationCompressor:
         Returns:
             Tuple of (summary_text, strategy_label).
         """
-        if not OLLAMA_AVAILABLE:
-            logger.debug("Ollama unavailable, falling back to rule strategy")
+        summary_model = self._config.get("llm_summary_model") or model
+        if not summary_model:
             summary, _ = self._compress_rule(messages)
             return summary, "rule_fallback"
 
-        summary_model = self._config.get("llm_summary_model") or model
-        if not summary_model:
+        # The request goes through the registry, where admission, placement
+        # and provenance live. No backend means the rule-based path.
+        backend = self._resolve_backend(summary_model)
+        if backend is None:
+            logger.debug("No inference backend registered, falling back to rule strategy")
             summary, _ = self._compress_rule(messages)
             return summary, "rule_fallback"
 
@@ -732,7 +759,7 @@ class ConversationCompressor:
 
         try:
             start = time.monotonic()
-            response = ollama.chat(
+            response = backend.generate(
                 model=summary_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -746,11 +773,7 @@ class ConversationCompressor:
             elapsed = time.monotonic() - start
             logger.debug(f"LLM compression completed in {elapsed:.2f}s using {summary_model}")
 
-            summary_text = ""
-            if hasattr(response, "message") and hasattr(response.message, "content"):
-                summary_text = response.message.content or ""
-            elif isinstance(response, dict):
-                summary_text = response.get("message", {}).get("content", "")
+            summary_text = response.content or ""
 
             if not summary_text.strip():
                 logger.warning("LLM returned empty summary, falling back to rule")

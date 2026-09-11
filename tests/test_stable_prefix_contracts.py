@@ -45,6 +45,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
 
 _OPTIMIZER = "opti_oignon.context_optimizer"
 _EXECUTOR = "opti_oignon.executor"
@@ -355,6 +356,9 @@ def _load_executor(*, flag_on, with_web=False, with_cache=False):
         "opti_oignon.memory.retrieval": retrieval,
         "opti_oignon.conversation": convmod,
     }
+    # The hub refuses when its window holds no registry; route the scripted
+    # client through one so the request still reaches it, as asserted.
+    seed_registry(seeded, scripted)
     if with_web:
         web = types.ModuleType("opti_oignon.web_search")
         web.web_search_engine = SimpleNamespace(

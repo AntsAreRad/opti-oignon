@@ -76,6 +76,23 @@ llama_cpp:
   n_batch: 512
 
 # -----------------------------------------------------------------------------
+# EXTERNAL LLAMA-SERVER
+# -----------------------------------------------------------------------------
+# The server process is launched host-side, from the command that
+# scripts/placement_recipe.py prints for a model's placement plan; this
+# repository never starts it. Presence of this section REGISTERS the backend;
+# whether it is available is the backend's own health check, asked at use
+# time, so a host that never launches the server loses nothing by leaving
+# the section in.
+# -----------------------------------------------------------------------------
+llama_server:
+  # Where the launched server listens
+  host: "http://127.0.0.1:8080"
+
+  # Seconds allowed for a health or slot query; generation waits longer
+  timeout_s: 5.0
+
+# -----------------------------------------------------------------------------
 # PER-MODEL BACKEND OVERRIDES
 # -----------------------------------------------------------------------------
 # Force specific models to use a specific backend, regardless of

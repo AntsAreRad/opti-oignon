@@ -19,10 +19,12 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+# The client library's presence, kept for callers that read the flag. The
+# request goes through the registry; no client is imported here.
 try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
+    import importlib.util as _importlib_util
+    OLLAMA_AVAILABLE = _importlib_util.find_spec("ollama") is not None
+except Exception:  # noqa: BLE001 - presence is a fact, not a dependency
     OLLAMA_AVAILABLE = False
 
 try:
@@ -34,6 +36,26 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T', bound=BaseModel)
+
+
+def _resolve_backend(model: str):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Structured output used to call the client library directly, which is
+    where the schema channel on the registry came from in the first place.
+    It goes through the registry now, and the schema travels as the engine
+    option the registry already understands.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
 def _message_field(response: Any, field: str) -> str:
@@ -113,13 +135,13 @@ class StructuredOutputEngine:
         Returns:
             StructuredResult with the validated Pydantic model or errors
         """
-        if not OLLAMA_AVAILABLE:
+        _model = model or self.default_model
+        backend = _resolve_backend(_model)
+        if backend is None:
             return StructuredResult(
                 success=False,
-                errors=["ollama non disponible"],
+                errors=["no inference backend is registered"],
             )
-
-        _model = model or self.default_model
         _max_retries = max_retries if max_retries is not None else self.max_retries
         _temperature = temperature if temperature is not None else self.default_temperature
 
@@ -139,21 +161,16 @@ class StructuredOutputEngine:
 
         for attempt in range(1, _max_retries + 1):
             try:
-                # Construire les kwargs pour ollama.chat
-                chat_kwargs = dict(
+                # Through the registry, with the schema as an engine option.
+                response = backend.generate(
                     model=_model,
                     messages=enhanced_messages,
-                    format=json_schema,
-                    options={"temperature": _temperature},
+                    options={"temperature": _temperature, "schema": json_schema},
+                    think=think,
                 )
-                if think:
-                    chat_kwargs["think"] = True
 
-                # Appel Ollama avec format= contraignant
-                response = ollama.chat(**chat_kwargs)
-
-                raw_content = _message_field(response, "content")
-                thinking_value = _message_field(response, "thinking")
+                raw_content = response.content or ""
+                thinking_value = response.thinking or ""
                 if thinking_value:
                     thinking_content = thinking_value
 

@@ -106,6 +106,16 @@ async def lifespan(app: FastAPI):
         logger.warning("boot: startup security checks unavailable", exc_info=True)
     if _boot_guard is not None:
         _boot_guard()
+    # Apply backends.yaml to the registry: hosts, model directories, the
+    # external server, the default backend. The initialiser was complete and
+    # never called, so the file was decoration on every launch path. Guarded:
+    # a configuration problem degrades to the registry's built-in defaults
+    # and a warning, never to a boot that does not happen.
+    try:
+        from opti_oignon.inference_backend import init_backends_from_config
+        init_backends_from_config()
+    except Exception:  # noqa: BLE001 - boot must not break on backend config
+        logger.warning("boot: backends.yaml could not be applied", exc_info=True)
     # Startup: singletons initialize on import; heavy deps lazy-loaded
     logger.info("Opti-Oignon API started")
     # Veilid sync auto-driver: armed only when explicitly opted in

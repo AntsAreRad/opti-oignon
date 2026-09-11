@@ -238,6 +238,24 @@ class ContextSummarizer:
         )
         return truncated
 
+    @staticmethod
+    def _resolve_backend(model: str):
+        """The registry's backend for ``model``, or None when there is none.
+
+        Imported lazily so this module stays cheap to import. None is the
+        honest answer when the registry is unavailable or resolves nothing.
+        """
+        try:
+            from opti_oignon.inference_backend import get_backend_registry
+        except Exception as exc:  # noqa: BLE001 - absence is an answer here
+            logger.debug("Inference registry unavailable: %s", exc)
+            return None
+        try:
+            return get_backend_registry().resolve_backend(model)
+        except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+            logger.debug("Inference registry could not resolve %s: %s", model, exc)
+            return None
+
     def summarize_messages(
         self,
         messages: list[dict[str, str]],
@@ -293,10 +311,17 @@ class ContextSummarizer:
             f"(~{input_tokens} tokens) -> model {summary_model}"
         )
 
+        # The request goes through the registry, where admission, placement
+        # and provenance live. No backend means no summary, as documented.
+        backend = self._resolve_backend(summary_model)
+        if backend is None:
+            logger.warning("No inference backend registered -- summarization impossible")
+            return None
+
         # Call model with timeout
         start_time = time.time()
         try:
-            response = ollama.chat(
+            response = backend.generate(
                 model=summary_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -317,7 +342,7 @@ class ContextSummarizer:
                     f"(timeout = {self.SUMMARY_TIMEOUT}s)"
                 )
 
-            summary = response["message"]["content"].strip()
+            summary = (response.content or "").strip()
 
             # Cleanup: strip the think tags if qwen3 is in think mode
             summary = self._clean_think_tags(summary)

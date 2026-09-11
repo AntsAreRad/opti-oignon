@@ -40,6 +40,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
 
 _EXECUTOR = "opti_oignon.executor"
 _WRAPPER = "opti_oignon.agent.untrusted_context"
@@ -125,6 +126,9 @@ def _load(*, block=_BLOCK, wrapper_absent=False):
     # plainly, and it is pure and standard-library only.
     targets["opti_oignon.context_dedup"] = source("context_dedup.py")
     targets[_EXECUTOR] = source("executor.py")
+    # The hub refuses when its window holds no registry; route the scripted
+    # client through one so the request still reaches it, as asserted.
+    seed_registry(seeded, scripted)
 
     had_ollama = "ollama" in sys.modules
     prev_ollama = sys.modules.get("ollama")

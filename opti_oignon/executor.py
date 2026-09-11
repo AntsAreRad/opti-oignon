@@ -33,8 +33,6 @@ import uuid
 from collections.abc import Callable, Generator
 from typing import Any, Optional
 
-import ollama
-
 from .config import config
 
 # Sentinel context fingerprint for execution paths that build no
@@ -45,8 +43,8 @@ from .config import config
 _CTX_FP_NOCTX = hashlib.sha256(b"opti-oignon:no-context").hexdigest()
 from .router import RoutingResult
 
-# Inference backend abstraction -- use backend when available,
-# fall back to direct ollama calls for backward compatibility.
+# Inference backend abstraction. Every request goes through the registry;
+# a registry with no backend is refused by name, never worked around.
 try:
     from .inference_backend import get_backend_registry
     INFERENCE_BACKEND_AVAILABLE = True
@@ -347,25 +345,6 @@ def _governor_release_ticket() -> None:
         _governor_clear_ticket()
     except Exception as e:
         logger.debug(f"Governor ticket clear failed open: {e}")
-
-
-def _native_think_kwargs(think: bool | None) -> dict:
-    """Ollama-native think kwargs, tri-state.
-
-    None means "do not steer": nothing is sent and the client call is
-    byte-identical to the historical one (a reasoning model keeps its
-    own default). True engages the native switch; False is the explicit
-    suppression a prompt-level tag cannot deliver -- the only way to
-    actually stop a thinking-by-default model (qwen3.x class) from
-    spending reasoning tokens. Callers merge the result into the client
-    kwargs; the streaming call-site maps its historical boolean
-    conservatively (truthy -> True, falsy -> None) because the live
-    behaviour of think=False across model families is host-verified,
-    never assumed in-container (INFERENCE_PERF_S259.md).
-    """
-    if think is None:
-        return {}
-    return {"think": bool(think)}
 
 
 def _governor_account_load(model: str, num_ctx: int | None) -> None:
@@ -1037,17 +1016,14 @@ class Executor:
                     logger.debug(f"Refined question: {refined[:100]}...")
                     return refined, None
 
-            # Fallback: direct ollama call
-            response = ollama.chat(
-                model=model,
-                messages=messages,
-                options=options,
-                keep_alive=ka,
+            # No backend: refuse by name. The direct client call that used to
+            # stand here could only run when the client library was absent,
+            # in which state it failed too -- and when it did run it took
+            # every guarantee the registry carries with it.
+            raise RuntimeError(
+                "no inference backend is registered in the registry; "
+                "refusing rather than calling the client behind it"
             )
-
-            refined = response["message"]["content"].strip()
-            logger.debug(f"Refined question: {refined[:100]}...")
-            return refined, None
 
         except Exception as e:
             logger.error(f"Refinement error: {e}")
@@ -2733,64 +2709,14 @@ class Executor:
                             chunk_queue.put(("timeout", None))
                             break
                 else:
-                    # Fallback: direct ollama.chat() call
-                    chat_kwargs = dict(
-                        model=routing.model,
-                        messages=messages,
-                        options=options,
-                        stream=True,
-                        keep_alive=ka,
+                    # No backend: refuse by name. The direct client stream
+                    # that stood here could only run when the client library
+                    # was absent, in which state it failed too -- and when it
+                    # ran it took admission, placement and provenance with it.
+                    raise RuntimeError(
+                        "no inference backend is registered in the registry; "
+                        "refusing rather than calling the client behind it"
                     )
-                    # The native think switch rides the tri-state
-                    # helper. The historical default is preserved exactly
-                    # (truthy -> {"think": True}, falsy -> nothing sent);
-                    # explicit suppression (False) is the helper's third
-                    # state, threaded end to end as a host-verified
-                    # follow-up per INFERENCE_PERF_S259.md.
-                    chat_kwargs.update(
-                        _native_think_kwargs(True if think else None)
-                    )
-                    # Embed images in the last user message
-                    if _vision_images:
-                        for msg in reversed(messages):
-                            if msg.get("role") == "user":
-                                msg["images"] = _vision_images
-                                break
-
-                    stream = ollama.chat(**chat_kwargs)
-
-                    for chunk in stream:
-                        if self._cancel_event.is_set():
-                            chunk_queue.put(("cancel", None))
-                            break
-
-                        # Handle thinking content in stream
-                        if think and "message" in chunk:
-                            msg = chunk["message"]
-                            thinking_text = ""
-                            content_text = ""
-
-                            if hasattr(msg, "thinking"):
-                                thinking_text = msg.thinking or ""
-                            elif isinstance(msg, dict) and "thinking" in msg:
-                                thinking_text = msg.get("thinking", "") or ""
-
-                            if hasattr(msg, "content"):
-                                content_text = msg.content or ""
-                            elif isinstance(msg, dict) and "content" in msg:
-                                content_text = msg.get("content", "") or ""
-
-                            if thinking_text:
-                                chunk_queue.put(("thinking", thinking_text))
-                            if content_text:
-                                chunk_queue.put(("chunk", content_text))
-                        elif "message" in chunk and "content" in chunk["message"]:
-                            content = chunk["message"]["content"]
-                            chunk_queue.put(("chunk", content))
-
-                        if time.time() - start_time > routing.timeout:
-                            chunk_queue.put(("timeout", None))
-                            break
 
             except Exception as e:
                 thread_result["error"] = str(e)
@@ -3427,14 +3353,11 @@ class Executor:
                         _governor_release_ticket()
                     return resp.content
 
-            # Fallback: direct ollama call
-            response = ollama.chat(
-                model=model,
-                messages=messages,
-                options=options,
-                keep_alive=ka,
+            # No backend: refuse by name, never call the client directly.
+            raise RuntimeError(
+                "no inference backend is registered in the registry; "
+                "refusing rather than calling the client behind it"
             )
-            return response["message"]["content"]
 
         except Exception as e:
             logger.error(f"Simple execution error: {e}")

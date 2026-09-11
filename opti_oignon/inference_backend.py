@@ -218,7 +218,10 @@ class BackendModelInfo:
 class ChatResponse:
     """Unified non-streaming chat response."""
 
-    __slots__ = ("content", "thinking", "model", "done", "total_duration", "extra")
+    __slots__ = (
+        "content", "thinking", "model", "done", "total_duration", "extra",
+        "tool_calls",
+    )
 
     def __init__(
         self,
@@ -228,6 +231,7 @@ class ChatResponse:
         done: bool = True,
         total_duration: int | None = None,
         extra: dict | None = None,
+        tool_calls: list | None = None,
     ):
         self.content = content
         self.thinking = thinking
@@ -235,6 +239,9 @@ class ChatResponse:
         self.done = done
         self.total_duration = total_duration
         self.extra = extra or {}
+        # The calls the model made, normalised to name and arguments. Empty
+        # when it made none -- an answer that called nothing says so.
+        self.tool_calls = list(tool_calls or [])
 
     def to_dict(self) -> dict:
         """Serialize to dictionary matching ollama response format."""
@@ -245,6 +252,13 @@ class ChatResponse:
         }
         if self.thinking:
             result["message"]["thinking"] = self.thinking
+        if self.tool_calls:
+            # The client's own shape, so parse_native_tool_calls keeps
+            # working unchanged on a response that came through the registry.
+            result["message"]["tool_calls"] = [
+                {"function": {"name": c["name"], "arguments": c["arguments"]}}
+                for c in self.tool_calls
+            ]
         if self.total_duration is not None:
             result["total_duration"] = self.total_duration
         return result
@@ -285,28 +299,70 @@ class StreamChunk:
 # translates the one request into its own dialect instead of each caller
 # learning three.
 SCHEMA_OPTION = "schema"
+# A tool list travels the same way, for the same reasons: native function
+# calling is what makes an agent's tool selection reliable, and it existed
+# only as a direct client call the registry never saw.
+TOOLS_OPTION = "tools"
 
 
-def _split_schema(options: dict | None) -> tuple[dict, dict | None]:
-    """Separate a constrained-decoding schema from the engine options.
+def _split_extras(
+    options: dict | None,
+) -> tuple[dict, dict | None, list | None]:
+    """Separate the schema and the tool list from the engine options.
 
-    Returns ``(options without the schema, the schema or None)``. The
-    caller's dict is copied, never mutated: taking the schema out in place
-    would silently disarm every later reuse of the same options.
+    Returns ``(options without either, the schema or None, the tools or
+    None)``. The caller's dict is copied, never mutated: taking either out in
+    place would silently disarm every later reuse of the same options.
 
-    A schema that is not an object is refused here rather than forwarded.
-    Each engine would ignore an unusable value in its own way -- and an
-    unconstrained answer that was supposed to be constrained is exactly the
-    kind of silence this repository treats as a defect.
+    A schema that is not an object, or a tool list that is not a list, is
+    refused here rather than forwarded. Each engine would ignore an unusable
+    value in its own way -- and an unconstrained answer that was supposed to
+    be constrained, or a model that was never offered the tools it was
+    supposed to choose from, is exactly the kind of silence this repository
+    treats as a defect.
     """
     opts = dict(options or {})
     schema = opts.pop(SCHEMA_OPTION, None)
+    tools = opts.pop(TOOLS_OPTION, None)
     if schema is not None and not isinstance(schema, dict):
         raise ValueError(
             f"{SCHEMA_OPTION} must be a JSON schema object, got "
             f"{type(schema).__name__}"
         )
-    return opts, schema
+    if tools is not None and not isinstance(tools, list):
+        raise ValueError(
+            f"{TOOLS_OPTION} must be a list of tool schemas, got "
+            f"{type(tools).__name__}"
+        )
+    return opts, schema, tools
+
+
+def _normalise_tool_calls(raw: Any) -> list[dict]:
+    """Every engine's tool-call shape, reduced to name and arguments.
+
+    The client library and the OpenAI-compatible surfaces both nest a
+    ``function`` with a ``name`` and ``arguments``; the latter delivers the
+    arguments as a JSON string, the former as a dict or an object. Anything
+    without a name is dropped, and arguments that do not parse to an object
+    become an empty one -- a call the model made is still reported, with the
+    arguments it managed to express.
+    """
+    calls: list[dict] = []
+    for call in raw or []:
+        fn = call.get("function") if isinstance(call, dict) else getattr(call, "function", None)
+        name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
+        if not name:
+            continue
+        args = fn.get("arguments") if isinstance(fn, dict) else getattr(fn, "arguments", None)
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (ValueError, TypeError):
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        calls.append({"name": str(name), "arguments": args})
+    return calls
 
 
 def _response_format(schema: dict) -> dict:
@@ -560,7 +616,7 @@ class OllamaBackend(InferenceBackend):
         # Before the admission hook and before any telemetry: a malformed
         # schema is a refusal, and a refusal must not leave a started request
         # behind it.
-        engine_options, schema = _split_schema(options)
+        engine_options, schema, tools = _split_extras(options)
 
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
@@ -583,11 +639,14 @@ class OllamaBackend(InferenceBackend):
             kwargs["think"] = True
         if schema is not None:
             kwargs["format"] = schema
+        if tools is not None:
+            kwargs["tools"] = tools
 
         response = _ollama_module.chat(**kwargs)
 
         msg = response.get("message", {}) if isinstance(response, dict) else getattr(response, "message", {})
         content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+        raw_calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
         thinking_text = msg.get("thinking", "") if isinstance(msg, dict) else getattr(msg, "thinking", "")
         total_dur = response.get("total_duration") if isinstance(response, dict) else getattr(response, "total_duration", None)
 
@@ -607,6 +666,7 @@ class OllamaBackend(InferenceBackend):
             thinking=thinking_text or None,
             model=model,
             total_duration=total_dur,
+            tool_calls=_normalise_tool_calls(raw_calls),
         )
 
     def stream(
@@ -636,7 +696,7 @@ class OllamaBackend(InferenceBackend):
         if images:
             messages = _inject_images(messages, images)
 
-        engine_options, schema = _split_schema(options)
+        engine_options, schema, tools = _split_extras(options)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -648,6 +708,8 @@ class OllamaBackend(InferenceBackend):
             kwargs["think"] = True
         if schema is not None:
             kwargs["format"] = schema
+        if tools is not None:
+            kwargs["tools"] = tools
 
         stream_iter = _ollama_module.chat(**kwargs)
 
@@ -896,7 +958,7 @@ class LlamaCppBackend(InferenceBackend):
         t0 = time.time()
 
         llm = self._get_or_load(model)
-        opts, schema = _split_schema(options)
+        opts, schema, tools = _split_extras(options)
         temperature = opts.get("temperature", 0.7)
 
         formatted = _format_messages_for_llama_cpp(messages)
@@ -910,14 +972,18 @@ class LlamaCppBackend(InferenceBackend):
         }
         if schema is not None:
             completion_kwargs["response_format"] = _response_format(schema)
+        if tools is not None:
+            completion_kwargs["tools"] = tools
 
         with self._lock_for(self._inference_locks, model):
             result = llm.create_chat_completion(**completion_kwargs)
 
         content = ""
+        raw_calls = None
         if result and "choices" in result and result["choices"]:
             msg = result["choices"][0].get("message", {})
             content = msg.get("content", "")
+            raw_calls = msg.get("tool_calls")
 
         # Telemetry end.
         if tel and rid:
@@ -933,6 +999,7 @@ class LlamaCppBackend(InferenceBackend):
         return ChatResponse(
             content=content,
             model=model,
+            tool_calls=_normalise_tool_calls(raw_calls),
         )
 
     def stream(
@@ -955,7 +1022,7 @@ class LlamaCppBackend(InferenceBackend):
         token_count = 0
 
         llm = self._get_or_load(model)
-        opts, schema = _split_schema(options)
+        opts, schema, tools = _split_extras(options)
         temperature = opts.get("temperature", 0.7)
 
         formatted = _format_messages_for_llama_cpp(messages)
@@ -969,6 +1036,8 @@ class LlamaCppBackend(InferenceBackend):
         }
         if schema is not None:
             completion_kwargs["response_format"] = _response_format(schema)
+        if tools is not None:
+            completion_kwargs["tools"] = tools
 
         with self._lock_for(self._inference_locks, model):
             stream_iter = llm.create_chat_completion(**completion_kwargs)
@@ -1333,7 +1402,7 @@ class LlamaServerBackend(InferenceBackend):
         msgs = list(messages or [])
         if prompt is not None:
             msgs.append({"role": "user", "content": str(prompt)})
-        engine_options, schema = _split_schema(options)
+        engine_options, schema, tools = _split_extras(options)
         # Admission before anything leaves. A refusal that arrives after the
         # request has gone to the server is a log line, not a refusal.
         _governor_admission(model, options)
@@ -1345,6 +1414,8 @@ class LlamaServerBackend(InferenceBackend):
         }
         if schema is not None:
             payload["response_format"] = _response_format(schema)
+        if tools is not None:
+            payload["tools"] = tools
         # ``cache_prompt`` is the server's prompt-KV reuse switch and
         # ``id_slot`` names the slot whose cache is reused: both are
         # forwarded verbatim when the caller sets them, never invented.
@@ -1364,16 +1435,18 @@ class LlamaServerBackend(InferenceBackend):
         )
         choices = data.get("choices") if isinstance(data, dict) else None
         content = ""
+        raw_calls = None
         if choices and isinstance(choices[0], dict):
-            content = str(
-                (choices[0].get("message") or {}).get("content") or ""
-            )
+            message = choices[0].get("message") or {}
+            content = str(message.get("content") or "")
+            raw_calls = message.get("tool_calls")
         return ChatResponse(
             content=content,
             model=str(data.get("model", model)) if isinstance(data, dict) else model,
             done=True,
             total_duration=int((time.time() - start) * 1e9),
             extra={"backend": self.name},
+            tool_calls=_normalise_tool_calls(raw_calls),
         )
 
     def stream(
@@ -1386,7 +1459,7 @@ class LlamaServerBackend(InferenceBackend):
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""
-        engine_options, schema = _split_schema(options)
+        engine_options, schema, tools = _split_extras(options)
         # Same gate as the whole-answer head, and for the same reason. A
         # generator body runs at first iteration, so the caller's first
         # ``next`` is where admission is decided.
@@ -1399,6 +1472,8 @@ class LlamaServerBackend(InferenceBackend):
         }
         if schema is not None:
             payload["response_format"] = _response_format(schema)
+        if tools is not None:
+            payload["tools"] = tools
         # Same forwarding contract as the non-streaming path: the
         # prompt-KV switch and the slot number ride only when the caller
         # set them.
@@ -1538,8 +1613,10 @@ class BackendRegistry:
         backend recognises the model the active backend is returned, so a
         single-backend deployment behaves exactly as before (backward
         compatible). Returns None only when there is no usable backend at all,
-        matching ``active`` -- the executor's existing ``if backend:`` guard then
-        falls through to its direct path.
+        matching ``active`` -- and a caller that receives None refuses the
+        request by name. Nothing falls through to the client behind the
+        registry's back; the executor used to, and the path it took could
+        only run in a state where the client was absent too.
 
         Resolutions are cached (model -> backend name); the whole cache is
         cleared on register/unregister (a topology change), a cache hit is
