@@ -38,6 +38,8 @@ CORE = frozenset({
     "opti_oignon.config",
     "opti_oignon.context_manager",
     "opti_oignon.conversation",
+    "opti_oignon.core_client",
+    "opti_oignon.core_daemon",
     "opti_oignon.db_encryption",
     "opti_oignon.db_utils",
     "opti_oignon.emergency_stop",

@@ -194,6 +194,40 @@ def status(ctx: click.Context) -> None:
 # =========================================================================
 
 @cli.group()
+def core() -> None:
+    """The resident core daemon: serve it, or ask whether it answers."""
+
+
+@core.command("serve")
+@click.option("--config", "config_path", default=None, help="Path to core.yaml (default: the package's)")
+def core_serve(config_path: str | None) -> None:
+    """Run the core daemon in the foreground on the loopback."""
+    from opti_oignon.core_daemon import CoreError, serve
+
+    try:
+        serve(config_path)
+    except CoreError as exc:
+        echo_error(str(exc))
+        sys.exit(2)
+
+
+@core.command("status")
+@click.option("--config", "config_path", default=None, help="Path to core.yaml (default: the package's)")
+def core_status(config_path: str | None) -> None:
+    """Ask the configured daemon for its health."""
+    from opti_oignon.core_client import RemoteCoreBackend
+    from opti_oignon.core_daemon import load_config
+
+    config = load_config(config_path)
+    remote = RemoteCoreBackend(config.base_url, token=config.token, timeout_s=min(config.timeout_s, 5.0))
+    if remote.health_check():
+        echo_success(f"core daemon answers at {config.base_url}")
+    else:
+        echo_error(f"no core daemon at {config.base_url} (enabled: {config.enabled})")
+        sys.exit(1)
+
+
+@cli.group()
 def backup() -> None:
     """Backup and restore configuration."""
     pass

@@ -11,6 +11,14 @@ package costs.
 
 ### Added
 
+- The core daemon (`oo core serve`): a resident loopback HTTP server over the
+  inference registry, standard library only, with health, models, generate,
+  stream as JSON lines, and a pack's admission ticket; off by default in
+  `core.yaml`. When enabled, `core_client.RemoteCoreBackend` is registered
+  in the calling process so the daemon serves its inference through the
+  registry -- admission, provenance and schema apply across the process
+  boundary. Refuses by name: non-loopback host, missing token, unknown
+  route, malformed body, model without a backend.
 - `core_boundary_guard.py` names the resident core module by module and holds
   the line the census drew: a core module that imports a module outside the
   core at module scope is refused unless the ledger already carries that

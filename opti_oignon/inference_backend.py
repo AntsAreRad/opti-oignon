@@ -1793,6 +1793,17 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
     if default_backend and registry.get(default_backend):
         registry.activate(default_backend)
 
+    # The core daemon, when core.yaml enables it: this process then asks the
+    # daemon for every request, through this registry, so the funnel crosses
+    # the process boundary. A malformed core configuration is reported, not
+    # silently replaced by a local backend.
+    try:
+        from opti_oignon.core_client import register_from_config as _register_core
+
+        _register_core(registry)
+    except Exception as exc:  # noqa: BLE001 - reported, the local backends stand
+        logger.warning("core daemon client not registered: %s", exc)
+
     return registry
 
 

@@ -54,3 +54,30 @@ Today every pack runs in the same process and reaches inference through
 the registry; the registry-funnel guard counts what still does not. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
+
+## The core daemon
+
+`opti_oignon/core_daemon.py` is the resident process, in Python first: a
+loopback HTTP server over the inference registry, in the standard library,
+importing only the core. Its routes are `GET /health`, `GET /models`,
+`POST /inference/generate`, `POST /inference/stream` (JSON lines) and
+`POST /admission` (a pack's ticket: the governor admits or refuses, in its
+own words). It binds the loopback and nothing else, requires the configured
+bearer token on every route but health, and refuses by name an unknown
+route, a body that is not JSON, a request without a model, a model no
+backend serves.
+
+`opti_oignon/core_client.py` is the other half: a registry backend that
+forwards every request to the daemon. When `core.yaml` enables the daemon,
+`init_backends_from_config` registers and activates it in the calling
+process, so that process -- the application first -- asks the daemon for
+inference and is admitted, labelled and schema-checked like a chat turn.
+The funnel crosses the process boundary.
+
+Run it with `oo core serve`; ask it with `oo core status`. Off by default.
+
+Owed to the host, never estimated: the daemon's resident memory at rest
+(`ps -o rss= -p <pid>` after `oo core serve`, against the 42 and 249 MiB
+the roadmap measured for a Python core floor and the application) and the
+latency of one turn across the boundary. The native daemon comes by
+strangling, behind this same surface.

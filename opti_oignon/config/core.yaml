@@ -1,0 +1,14 @@
+# Core daemon -- Opti-Oignon
+# ==========================
+# The resident core process: a loopback HTTP server over the inference
+# registry, so that every other process -- the application first -- asks it
+# for inference and is admitted, labelled and schema-checked exactly like a
+# chat turn. Off by default: the maintainer turns it on. The host must be the
+# loopback; the daemon refuses any other.
+
+core:
+  enabled: false
+  host: "127.0.0.1"
+  port: 7411
+  token: ""          # when set, every route but /health requires it as a bearer token
+  timeout_s: 30
