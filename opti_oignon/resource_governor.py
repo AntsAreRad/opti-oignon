@@ -165,9 +165,9 @@ except Exception:
     INFERENCE_BACKEND_AVAILABLE = False
 
 try:
-    # S3 reuse BY IMPORT: estimate_model_vram() reads the
+    # Reuse BY IMPORT: estimate_model_vram() reads the
     # _VRAM_PER_BILLION_PARAMS table in its home module. The table is not
-    # moved and not duplicated here (the s110 pins keep holding).
+    # moved and not duplicated here.
     from opti_oignon.speculative_decoding import (
         VRAMBudgetCalculator as _VRAMBudgetCalculator,
     )
