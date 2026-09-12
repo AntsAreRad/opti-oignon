@@ -163,3 +163,22 @@ def test_st4_the_guard_ledger_no_longer_carries_any_of_them():
         assert guard.LEDGER["databases"], "the ledger is empty"
     finally:
         restore()
+
+
+def test_st5_the_ledger_is_empty_and_still_read():
+    """Supersedes st4: its control asked the ledger to be
+    non-empty, and the ledger is empty since the package import opens nothing."""
+    guard, restore = _guard()
+    try:
+        for _module, _cls, _helper, database in STORES:
+            assert database not in guard.LEDGER["databases"], f"{database} no longer opens at import, so it must come off"
+        assert guard.LEDGER["databases"] == frozenset(), "the import opens no database: the ledger says so"
+        seen = {"databases": [], "files": [], "heavy": [], "threads": 1,
+                "modules": 85, "import_ms": 1.0, "rss_mib": 13.0}
+        # Proven capable: the ledger is empty because the debt is paid, not
+        # because the guard stopped reading it. An entry put back on it
+        # that the observation no longer reaches is reported stale.
+        guard.LEDGER = {**guard.LEDGER, "databases": frozenset({STORES[0][3]})}
+        assert STORES[0][3] in " ".join(guard.stale_entries(seen)), "the ledger is read against the observation"
+    finally:
+        restore()

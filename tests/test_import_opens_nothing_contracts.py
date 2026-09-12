@@ -48,6 +48,11 @@ One database stays, deliberately, and FN6 pins that it does.
   * FN5 -- the humanizer store builds its schema before it writes.
   * FN6 -- the one remaining entry is the one whose flag depends on the open.
   * FN7 -- the preference store builds its schema before it records.
+  * FN8 -- supersedes FN1: importing the package opens nothing at all, and
+    the probe shows it can see an open by importing, explicitly, the one
+    module that opens its database at its own import.
+  * FN9 -- supersedes FN6: the ledger carries no database, and the module
+    that kept its open-at-import for its flag still opens at ITS import.
 """
 
 import json
@@ -80,6 +85,11 @@ import opti_oignon  # noqa: F401
 at_import = sorted(set(opened))
 
 report = {{"at_import": at_import}}
+# Capability control for the empty case: the hook must see a database
+# when a module that opens one at its own import is imported explicitly.
+mark = len(opened)
+import opti_oignon.conversation_branches  # noqa: F401,E402
+report["on_module_import"] = sorted(set(opened[mark:]))
 
 # The audit chain is still verified -- at the first connection now.
 from opti_oignon.signed_audit_log import SignedAuditLog
@@ -288,6 +298,30 @@ def test_fn6_the_one_kept_entry_is_the_one_that_cannot_move():
         )
     finally:
         restore()
+
+
+def test_fn8_the_import_opens_nothing_and_the_probe_can_still_see_an_open():
+    seen = _probe()
+    guard, restore = _guard()
+    try:
+        assert seen["at_import"] == [], f"opened by importing the package: {seen['at_import']}"
+        assert guard.LEDGER["databases"] == frozenset(), "the ledger carries no database any more"
+        assert KEPT in seen["on_module_import"], (
+            "control: importing the module that opens its database at its own "
+            "import is seen by the hook, so an empty list at package import is "
+            "a measurement and not a blind probe"
+        )
+    finally:
+        restore()
+
+
+def test_fn9_the_kept_open_moved_with_its_module_not_with_the_package():
+    seen = _probe()
+    assert seen["on_module_import"] == [KEPT], (
+        "the flag-bearing module still opens exactly its own database when it "
+        "is imported; the package import simply no longer reaches it"
+    )
+    assert KEPT not in seen["at_import"]
 
 
 def test_fn7_the_preference_store_builds_before_it_records():

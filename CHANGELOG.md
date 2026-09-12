@@ -66,6 +66,14 @@ package costs.
 
 ### Changed
 
+- Importing `opti_oignon` no longer imports the API application. The package
+  facade exports the same names through a module `__getattr__`: each is
+  imported when first asked for, and names that are also submodule names
+  (`config`, `router`, `executor`, ...) still resolve to the exported object.
+  Measured on the import-footprint guard: 1634 modules, 2.1 s and 187 MiB at
+  import before; 85 modules, 1 ms and 13 MiB after, with no database opened
+  and no heavy dependency reached. The guard's ceiling drops from 1700 to
+  200 modules and its ledger of import-time debt is empty.
 - The coding agent reads its test verdict from the pytest summary instead
   of substrings: a passing run whose output mentions the word error passes,
   an error counts as a failure, and counts are recorded; a run with no

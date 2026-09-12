@@ -73,9 +73,11 @@ LEDGER = {
     # caller who reads the records. Two stores kept no connection helper and
     # got one, or got their three call sites named. One log holds its lock
     # while asking for a connection, so its builder is handed one.
-    "databases": frozenset({
-        "branches.db",
-    }),
+    # ...until the package facade stopped importing the API application:
+    # the module that opens branches.db at its own import is no longer
+    # reached by importing the package, so the entry left the ledger. The
+    # open still happens where that module is imported, by the same design.
+    "databases": frozenset(),
     # PAID. The preference store's path was configured as a bare filename
     # and resolved against the caller's directory; it is now anchored on the
     # package data directory. The ledger may only shrink, and this is what
@@ -85,17 +87,19 @@ LEDGER = {
     # dependency is located rather than imported, and the concrete names are
     # imported in the three methods that use them. That took 1181 modules and
     # 104 MiB off the import.
-    "heavy": frozenset({
-        "chromadb", "fastapi", "llama_cpp", "numpy", "pydantic",
-    }),
+    # Emptied with the facade: nothing heavy is reached by importing the
+    # package. Every one of the five is still imported by the module that
+    # needs it, when that module is.
+    "heavy": frozenset(),
 }
 
-# Above the 1633 measured -- stable to the digit across three readings -- and
-# close enough that a new subtree cannot hide under it. A ceiling set at the
-# measurement itself would fail on the first honest import. It was 2900 when
-# the guard shipped; the classifier's deferral took 1181 modules off, and a
-# ceiling left at the old figure would have stopped forbidding anything.
-MODULE_CEILING = 1700
+# Above the 85 measured once the package facade resolved its exports on
+# first access instead of importing the API application at import -- 1634
+# before, stable to the digit -- and far below that figure, so a facade that
+# went eager again would fail here. It was 2900 when the guard shipped and
+# 1700 after the classifier's deferral; a ceiling left at either would have
+# stopped forbidding anything.
+MODULE_CEILING = 200
 
 # The import must not start a thread. This one the tree already satisfies.
 THREAD_CEILING = 1

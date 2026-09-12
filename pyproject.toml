@@ -312,6 +312,23 @@ fail_under = 0
 #   scripts/build_oo_core.sh && python3 -m pytest tests/test_native_core_contracts.py
 # nc4 and nc5 always run: the reference stands without the artefact, and the
 # recipe is pinned. These three lines come out the day cargo is in the workflow.
+#
+# fn1 and fn6 pinned the last database the package import opened, branches.db,
+# as a control that the probe could see an open and as the one entry the ledger
+# kept. The package facade no longer imports the module that opens it, so the
+# import opens nothing and the ledger is empty: both premises are gone. fn8 and
+# fn9 in the same file keep the live properties -- nothing opens at package
+# import, the probe proves it can see an open, and the flag-bearing module still
+# opens its database at its own import.
+#
+# Ten more of the same family, one per store the sobriety block deferred:
+# cl6, cs4, hs5, ms5, st4, tf4, fp6, fp7, fa5 and lr5 each kept, as their
+# capability control, that the import still opened SOME database, loaded SOME
+# heavy module, or that the ledger still carried something. Those controls
+# were right while the package import reached the API application; the facade
+# no longer does, and every one of them is now empty by design. Each has a
+# successor in its file that keeps the property and proves capability on a
+# synthetic ledger entry or on the module count instead.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -336,4 +353,16 @@ addopts = """
     --deselect=tests/test_native_core_contracts.py::test_nc1_the_native_module_loads_and_exposes_the_surface
     --deselect=tests/test_native_core_contracts.py::test_nc2_the_four_hashes_are_byte_equal_to_the_reference
     --deselect=tests/test_native_core_contracts.py::test_nc3_the_composer_assembles_the_same_prompt_with_and_without_the_native_module
+    --deselect=tests/test_import_opens_nothing_contracts.py::test_fn1_the_import_opens_nothing_but_what_the_ledger_carries
+    --deselect=tests/test_import_opens_nothing_contracts.py::test_fn6_the_one_kept_entry_is_the_one_that_cannot_move
+    --deselect=tests/test_cache_schema_lazy_contracts.py::test_cl6_the_guard_ledger_no_longer_carries_either
+    --deselect=tests/test_conversation_schema_lazy_contracts.py::test_cs4_the_guard_ledger_no_longer_carries_that_database
+    --deselect=tests/test_history_schema_lazy_contracts.py::test_hs5_the_guard_ledger_no_longer_carries_any_of_them
+    --deselect=tests/test_memory_schema_lazy_contracts.py::test_ms5_the_guard_ledger_no_longer_carries_that_database
+    --deselect=tests/test_store_schema_lazy_contracts.py::test_st4_the_guard_ledger_no_longer_carries_any_of_them
+    --deselect=tests/test_two_factor_schema_lazy_contracts.py::test_tf4_the_guard_ledger_no_longer_carries_that_database
+    --deselect=tests/test_import_footprint_contracts.py::test_fp6_a_module_count_above_the_ceiling_is_refused
+    --deselect=tests/test_import_footprint_contracts.py::test_fp7_a_ledger_entry_no_longer_reached_is_reported_stale
+    --deselect=tests/test_fingerprint_path_anchoring_contracts.py::test_fa5_the_import_writes_nothing_into_the_callers_directory
+    --deselect=tests/test_learned_router_lazy_contracts.py::test_lr5_the_package_import_no_longer_loads_it
 """

@@ -23,235 +23,205 @@ Usage:
     # Or import components
     from opti_oignon import analyzer, router, executor
 
+Every name this package exports is imported when it is first asked for,
+not when the package is. Importing the package used to pull the API
+application and, through it, most of the tree; a name now costs exactly
+what it needs, and only the code that asks for it pays. The surface is the
+same: the names in ``__all__``, the availability flags, ``main()``.
+
 Author: Léon
 Version: see __version__.py
 License: MIT
 """
+
+import importlib
+import sys
+import types
+from pathlib import Path as _Path
 
 from .__version__ import __version__
 
 __author__ = "Léon"
 __license__ = "MIT"
 
-# Core components
-from .analyzer import AnalysisResult, analyze, analyzer
-from .config import CONFIG_DIR, DATA_DIR, config
-from .executor import execute, executor, get_prompt
-from .history import history
-from .presets import Preset, preset_manager
-from .router import RoutingResult, router
+# Exported name -> (module, attribute it is imported from). Read by
+# __getattr__ below on first access; nothing here imports anything.
+_EXPORTS = {
+    # Core components
+    "analyzer": (".analyzer", "analyzer"),
+    "analyze": (".analyzer", "analyze"),
+    "AnalysisResult": (".analyzer", "AnalysisResult"),
+    "config": (".config", "config"),
+    "DATA_DIR": (".config", "DATA_DIR"),
+    "CONFIG_DIR": (".config", "CONFIG_DIR"),
+    "executor": (".executor", "executor"),
+    "execute": (".executor", "execute"),
+    "get_prompt": (".executor", "get_prompt"),
+    "history": (".history", "history"),
+    "preset_manager": (".presets", "preset_manager"),
+    "Preset": (".presets", "Preset"),
+    "router": (".router", "router"),
+    "RoutingResult": (".router", "RoutingResult"),
+    # Pipeline manager
+    "get_pipeline_manager": (".pipeline_manager", "get_pipeline_manager"),
+    "Pipeline": (".pipeline_manager", "Pipeline"),
+    "PipelineStep": (".pipeline_manager", "PipelineStep"),
+    # Context summary
+    "context_summarizer": (".context_summary", "context_summarizer"),
+    "ContextSummarizer": (".context_summary", "ContextSummarizer"),
+    # Memory
+    "memory_manager": (".memory", "memory_manager"),
+    "MemoryManager": (".memory", "MemoryManager"),
+    "MemoryFact": (".memory", "MemoryFact"),
+    # Code executor
+    "code_executor": (".code_executor", "code_executor"),
+    "CodeExecutor": (".code_executor", "CodeExecutor"),
+    "CodeBlock": (".code_executor", "CodeBlock"),
+    "ExecutionResult": (".code_executor", "ExecutionResult"),
+    # Response cache
+    "response_cache": (".response_cache", "response_cache"),
+    "ResponseCache": (".response_cache", "ResponseCache"),
+    "CacheEntry": (".response_cache", "CacheEntry"),
+    "CacheStats": (".response_cache", "CacheStats"),
+    # Semantic cache
+    "semantic_cache": (".semantic_cache", "semantic_cache"),
+    "SemanticCache": (".semantic_cache", "SemanticCache"),
+    "SemanticMatch": (".semantic_cache", "SemanticMatch"),
+    "SemanticCacheStats": (".semantic_cache", "SemanticCacheStats"),
+    "cosine_similarity": (".semantic_cache", "cosine_similarity"),
+    # Lazy loader
+    "lazy_import": (".lazy_loader", "lazy_import"),
+    "LazyModule": (".lazy_loader", "LazyModule"),
+    "get_lazy_stats": (".lazy_loader", "get_lazy_stats"),
+    "preload": (".lazy_loader", "preload"),
+    # Model warmup
+    "model_warmup": (".model_warmup", "model_warmup"),
+    "ModelWarmup": (".model_warmup", "ModelWarmup"),
+    "WarmupResult": (".model_warmup", "WarmupResult"),
+    "WarmupStats": (".model_warmup", "WarmupStats"),
+    "LoadedModel": (".model_warmup", "LoadedModel"),
+    "MODEL_WARMUP_AVAILABLE": (".model_warmup", "MODEL_WARMUP_AVAILABLE"),
+    # Performance benchmark
+    "benchmark_runner": (".performance_benchmark", "benchmark_runner"),
+    "BenchmarkRunner": (".performance_benchmark", "BenchmarkRunner"),
+    "BenchmarkSuite": (".performance_benchmark", "BenchmarkSuite"),
+    "BenchmarkResultClass": (".performance_benchmark", "BenchmarkResult"),
+    "run_benchmarks": (".performance_benchmark", "run_all"),
+    "BENCHMARK_AVAILABLE": (".performance_benchmark", "BENCHMARK_AVAILABLE"),
+    # Inference backend
+    "InferenceBackend": (".inference_backend", "InferenceBackend"),
+    "BackendRegistry": (".inference_backend", "BackendRegistry"),
+    "get_backend_registry": (".inference_backend", "get_backend_registry"),
+    "init_backends_from_config": (".inference_backend", "init_backends_from_config"),
+    # Model manager
+    "ModelManager": (".model_manager", "ModelManager"),
+    "get_model_manager": (".model_manager", "get_model_manager"),
+    "init_model_manager": (".model_manager", "init_model_manager"),
+    "parse_gguf_header": (".model_manager", "parse_gguf_header"),
+    # FastAPI API
+    "api_app": (".api.app", "app"),
+    # Context optimizer
+    "ContextOptimizer": (".context_optimizer", "ContextOptimizer"),
+    "OptimizedContext": (".context_optimizer", "OptimizedContext"),
+    "OptimizationReport": (".context_optimizer", "OptimizationReport"),
+    "get_context_optimizer": (".context_optimizer", "get_optimizer"),
+    "init_context_optimizer": (".context_optimizer", "init_optimizer"),
+}
 
-# Pipeline Manager (new in 1.2.0)
-try:
-    from .pipeline_manager import (
-        Pipeline,
-        PipelineStep,
-        get_pipeline_manager,
-    )
-    PIPELINE_MANAGER_AVAILABLE = True
-except ImportError:
-    PIPELINE_MANAGER_AVAILABLE = False
-    get_pipeline_manager = None
-    Pipeline = None
-    PipelineStep = None
+# Availability flag -> the module whose import decides it. True when the
+# module imports, False when it does not; computed when asked, like the
+# guarded imports used to compute it at package import.
+_FLAGS = {
+    "PIPELINE_MANAGER_AVAILABLE": ".pipeline_manager",
+    "CONTEXT_SUMMARY_AVAILABLE": ".context_summary",
+    "MEMORY_AVAILABLE": ".memory",
+    "CODE_EXECUTOR_AVAILABLE": ".code_executor",
+    "RESPONSE_CACHE_AVAILABLE": ".response_cache",
+    "SEMANTIC_CACHE_AVAILABLE": ".semantic_cache",
+    "LAZY_LOADER_AVAILABLE": ".lazy_loader",
+    "INFERENCE_BACKEND_AVAILABLE": ".inference_backend",
+    "MODEL_MANAGER_AVAILABLE": ".model_manager",
+    "API_AVAILABLE": ".api.app",
+    "CONTEXT_OPTIMIZER_AVAILABLE": ".context_optimizer",
+}
 
-# The Gradio-era dynamic_pipeline_ui shim and the unwired
-# dynamic_planning module (DPL-01) are retired. Execution pipelines run via
-# opti_oignon.pipelines.PipelineRunner, wired into the chat path.
+# Names whose module may be absent: the guarded groups of the former
+# facade resolved them to None then. They still do.
+_OPTIONAL = {name for name, (module, _attr) in _EXPORTS.items() if module not in (
+    ".analyzer", ".config", ".executor", ".history", ".presets", ".router",
+)}
 
-# Context Summarization (v1.4.0 -- F2)
-try:
-    from .context_summary import ContextSummarizer, context_summarizer
-    CONTEXT_SUMMARY_AVAILABLE = True
-except ImportError:
-    CONTEXT_SUMMARY_AVAILABLE = False
-    context_summarizer = None
-    ContextSummarizer = None
 
-# Cross-Conversation Memory (v1.4.0 -- F1)
-try:
-    from .memory import MemoryFact, MemoryManager, memory_manager
-    MEMORY_AVAILABLE = True
-except ImportError:
-    MEMORY_AVAILABLE = False
-    memory_manager = None
-    MemoryManager = None
-    MemoryFact = None
+# Exported names that are also submodule names: ``config`` the object and
+# ``opti_oignon.config`` the module. Importing the submodule binds it on the
+# package, ahead of any accessor; the former facade overwrote that binding
+# with the object, and the module class below keeps doing so.
+_COLLIDING = frozenset(
+    name for name in _EXPORTS if (_Path(__file__).parent / f"{name}.py").exists()
+)
 
-# Code Execution (v1.4.0 -- F3)
-try:
-    from .code_executor import (
-        CodeBlock,
-        CodeExecutor,
-        ExecutionResult,
-        code_executor,
-    )
-    CODE_EXECUTOR_AVAILABLE = True
-except ImportError:
-    CODE_EXECUTOR_AVAILABLE = False
-    code_executor = None
-    CodeExecutor = None
-    CodeBlock = None
-    ExecutionResult = None
 
-# Response Cache
-try:
-    from .response_cache import (
-        CacheEntry,
-        CacheStats,
-        ResponseCache,
-        response_cache,
-    )
-    RESPONSE_CACHE_AVAILABLE = True
-except ImportError:
-    RESPONSE_CACHE_AVAILABLE = False
-    response_cache = None
-    ResponseCache = None
-    CacheEntry = None
-    CacheStats = None
+def _import(module):
+    return importlib.import_module(module, __name__)
 
-# Semantic Similarity Cache
-try:
-    from .semantic_cache import (
-        SemanticCache,
-        SemanticCacheStats,
-        SemanticMatch,
-        cosine_similarity,
-        semantic_cache,
-    )
-    SEMANTIC_CACHE_AVAILABLE = True
-except ImportError:
-    SEMANTIC_CACHE_AVAILABLE = False
-    semantic_cache = None
-    SemanticCache = None
-    SemanticMatch = None
-    SemanticCacheStats = None
 
-# Lazy Loader
-try:
-    from .lazy_loader import (
-        LazyModule,
-        get_lazy_stats,
-        lazy_import,
-        preload,
-    )
-    LAZY_LOADER_AVAILABLE = True
-except ImportError:
-    LAZY_LOADER_AVAILABLE = False
-    lazy_import = None
-    LazyModule = None
-    get_lazy_stats = None
+def _resolve(name):
+    """Import what ``name`` needs, bind the value on the package, return it."""
+    if name in _FLAGS:
+        try:
+            _import(_FLAGS[name])
+            value = True
+        except ImportError:
+            value = False
+    elif name in _EXPORTS:
+        module, attribute = _EXPORTS[name]
+        try:
+            value = getattr(_import(module), attribute)
+        except ImportError:
+            if name not in _OPTIONAL:
+                raise
+            value = None
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
-# Model Warm-up / Keepalive
-try:
-    from .model_warmup import (
-        MODEL_WARMUP_AVAILABLE,
-        LoadedModel,
-        ModelWarmup,
-        WarmupResult,
-        WarmupStats,
-        model_warmup,
-    )
-except ImportError:
-    MODEL_WARMUP_AVAILABLE = False
-    model_warmup = None
-    ModelWarmup = None
-    WarmupResult = None
-    WarmupStats = None
-    LoadedModel = None
 
-# Performance Benchmarks
-try:
-    from .performance_benchmark import (
-        BENCHMARK_AVAILABLE,
-        BenchmarkRunner,
-        BenchmarkSuite,
-        benchmark_runner,
-    )
-    from .performance_benchmark import (
-        BenchmarkResult as BenchmarkResultClass,
-    )
-    from .performance_benchmark import (
-        run_all as run_benchmarks,
-    )
-except ImportError:
-    BENCHMARK_AVAILABLE = False
-    benchmark_runner = None
-    BenchmarkRunner = None
-    BenchmarkResultClass = None
-    BenchmarkSuite = None
-    run_benchmarks = None
+class _Facade(types.ModuleType):
+    """The package's module type: exports resolve on first access.
 
-# Inference backend abstraction
-try:
-    from .inference_backend import (
-        BackendRegistry,
-        InferenceBackend,
-        get_backend_registry,
-        init_backends_from_config,
-    )
-    INFERENCE_BACKEND_AVAILABLE = True
-except ImportError:
-    INFERENCE_BACKEND_AVAILABLE = False
-    BackendRegistry = None
-    InferenceBackend = None
-    get_backend_registry = None
-    init_backends_from_config = None
+    ``__getattr__`` serves a name that is not bound yet. ``__getattribute__``
+    steps in for the colliding names only, when the binding found is the
+    submodule the import system put there rather than the exported object.
+    """
 
-# GGUF model manager
-try:
-    from .model_manager import (
-        ModelManager,
-        get_model_manager,
-        init_model_manager,
-        parse_gguf_header,
-    )
-    MODEL_MANAGER_AVAILABLE = True
-except ImportError:
-    MODEL_MANAGER_AVAILABLE = False
-    ModelManager = None
-    get_model_manager = None
-    init_model_manager = None
-    parse_gguf_header = None
+    def __getattribute__(self, name):
+        if name in _COLLIDING:
+            bound = types.ModuleType.__getattribute__(self, "__dict__").get(name)
+            if isinstance(bound, types.ModuleType):
+                return _resolve(name)
+        return types.ModuleType.__getattribute__(self, name)
 
-# FastAPI API
-try:
-    from .api.app import app as api_app
-    API_AVAILABLE = True
-except ImportError:
-    API_AVAILABLE = False
-    api_app = None
+    def __getattr__(self, name):
+        return _resolve(name)
 
-# Context Optimizer
-try:
-    from .context_optimizer import (
-        ContextOptimizer,
-        OptimizedContext,
-        OptimizationReport,
-        get_optimizer as get_context_optimizer,
-        init_optimizer as init_context_optimizer,
-    )
-    CONTEXT_OPTIMIZER_AVAILABLE = True
-except ImportError:
-    CONTEXT_OPTIMIZER_AVAILABLE = False
-    ContextOptimizer = None
-    OptimizedContext = None
-    OptimizationReport = None
-    get_context_optimizer = None
-    init_context_optimizer = None
+    def __dir__(self):
+        return sorted(set(types.ModuleType.__getattribute__(self, "__dict__")) | set(__all__))
+
+
+sys.modules[__name__].__class__ = _Facade
+
 
 # Convenience exports
 __all__ = [
-    # Version info
+    # Version
     "__version__",
     "__author__",
 
-    # Configuration
+    # Core
     "config",
     "DATA_DIR",
     "CONFIG_DIR",
-
-    # Core components
     "analyzer",
     "analyze",
     "AnalysisResult",
@@ -281,7 +251,7 @@ __all__ = [
     "MemoryManager",
     "MemoryFact",
 
-    # Code Execution
+    # Code Executor
     "CODE_EXECUTOR_AVAILABLE",
     "code_executor",
     "CodeExecutor",
@@ -309,7 +279,7 @@ __all__ = [
     "LazyModule",
     "get_lazy_stats",
 
-    # Model Warm-up
+    # Model Warmup
     "MODEL_WARMUP_AVAILABLE",
     "model_warmup",
     "ModelWarmup",
@@ -317,7 +287,7 @@ __all__ = [
     "WarmupStats",
     "LoadedModel",
 
-    # Performance Benchmarks
+    # Performance Benchmark
     "BENCHMARK_AVAILABLE",
     "benchmark_runner",
     "BenchmarkRunner",
@@ -325,14 +295,14 @@ __all__ = [
     "BenchmarkSuite",
     "run_benchmarks",
 
-    # Inference backend
+    # Inference Backend
     "INFERENCE_BACKEND_AVAILABLE",
     "InferenceBackend",
     "BackendRegistry",
     "get_backend_registry",
     "init_backends_from_config",
 
-    # GGUF model manager
+    # Model Manager
     "MODEL_MANAGER_AVAILABLE",
     "ModelManager",
     "get_model_manager",

@@ -122,3 +122,17 @@ def test_fa5_the_import_writes_nothing_into_the_callers_directory():
         assert seen["modules"] > 0 and seen["databases"], seen
     finally:
         restore()
+
+
+def test_fa6_the_import_writes_nothing_and_the_probe_still_counts_modules():
+    """Supersedes fa5: its control asked the probe for a database at import,
+    and the import opens none since the facade resolves its exports lazily."""
+    guard, restore = _guard()
+    try:
+        seen = guard.observe()
+        assert seen is not None, "the probe did not run, so nothing was measured"
+        assert seen["files"] == [], f"importing the package still writes into the caller's directory: {seen['files']}"
+        assert seen["databases"] == [], "and opens no database"
+        assert seen["modules"] >= 20, "proven capable: the probe counts the modules the interpreter loads"
+    finally:
+        restore()

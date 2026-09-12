@@ -202,3 +202,35 @@ def test_fp9_the_guard_is_shaped_like_its_neighbours():
     guarded = text.index('if __name__ == "__main__"')
     for call in re.finditer(r"^main\(", text, re.M):
         assert call.start() > guarded, "importing the guard must not run it"
+
+
+def test_fp11_a_count_above_the_ceiling_is_refused_and_the_ceiling_forbids_the_old_cost():
+    """Supersedes fp6: the ceiling used to be pinned above 1633, the cost of
+    an import that reached the API application; it now sits far below."""
+    guard, restore = _guard()
+    try:
+        seen = _observation(guard, modules=guard.MODULE_CEILING + 1)
+        reasons = guard.verdict(seen)
+        assert reasons and any("module" in one for one in reasons), reasons
+        at_ceiling = _observation(guard, modules=guard.MODULE_CEILING)
+        assert not any("module" in one for one in guard.verdict(at_ceiling)), "the ceiling itself passes"
+        assert guard.MODULE_CEILING < 1634, "below what the import cost before the facade resolved lazily, so that cost is forbidden"
+        assert guard.MODULE_CEILING >= 100, "above what an interpreter needs to import anything at all"
+    finally:
+        restore()
+
+
+def test_fp12_a_ledger_entry_no_longer_reached_is_reported_stale_on_a_synthetic_entry():
+    """Supersedes fp7: it took its victim from the ledger, and the ledger is
+    empty; the property is proven on an entry put on it for the purpose."""
+    guard, restore = _guard()
+    try:
+        assert guard.LEDGER["databases"] == frozenset(), "control: nothing to take from the ledger"
+        seen = _observation(guard)
+        guard.LEDGER = {**guard.LEDGER, "databases": frozenset({"paid.db"})}
+        seen["databases"] = sorted(set(seen["databases"]) - {"paid.db"})
+        assert "paid.db" in " ".join(guard.stale_entries(seen)), "a debt that has been paid must come off the ledger"
+        seen["databases"] = sorted(set(seen["databases"]) | {"paid.db"})
+        assert "paid.db" not in " ".join(guard.stale_entries(seen)), "an entry still reached is not stale"
+    finally:
+        restore()

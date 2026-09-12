@@ -146,3 +146,19 @@ def test_lr5_the_package_import_no_longer_loads_it():
         assert seen["heavy"], "the probe reported no heavy module at all"
     finally:
         restore()
+
+
+def test_lr6_the_package_import_loads_no_heavy_module_at_all():
+    """Supersedes lr5: its control asked the probe for a heavy module at
+    import, and there is none since the facade resolves its exports lazily."""
+    guard, restore = _guard()
+    try:
+        seen = guard.observe()
+        assert seen is not None, "the probe did not run; nothing was measured"
+        for name in ("sklearn", "pandas", "scipy"):
+            assert name not in seen["heavy"], f"{name} is still loaded by importing the package: {seen['heavy']}"
+            assert name not in guard.LEDGER["heavy"], f"{name} no longer loads, so it must come off the ledger too"
+        assert seen["heavy"] == [] and guard.LEDGER["heavy"] == frozenset()
+        assert seen["modules"] >= 20, "proven capable: the probe counts the modules the interpreter loads"
+    finally:
+        restore()
