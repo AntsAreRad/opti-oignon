@@ -41,8 +41,32 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import ollama
 import yaml
+
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+
+
+def _registry_model_names():
+    """Every model name the registry's backends list; empty without a registry."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+        registry = get_backend_registry()
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return []
+    names = []
+    for backend in registry.backends():
+        try:
+            names.extend(str(info.name) for info in backend.list_models())
+        except Exception:  # noqa: BLE001 - one backend down does not hide the rest
+            continue
+    return names
 
 # =============================================================================
 # CONFIGURATION
@@ -374,18 +398,23 @@ class ModelBenchmark:
         start_time = time.time()
 
         try:
-            # Ollama call
-            response = ollama.generate(
-                model=model,
-                prompt=prompt,
+            backend = _resolve_backend(model)
+            if backend is None:
+                raise RuntimeError(f"no inference backend in the registry for {model!r}")
+            # The task prompt travels as one user message; the benchmark
+            # timeout travels as an engine option and binds the transport.
+            response = backend.generate(
+                model,
+                [{"role": "user", "content": prompt}],
                 options={
                     "temperature": self.temperature,
                     "num_predict": 1000,
-                }
+                    "timeout": self.timeout,
+                },
             )
 
             elapsed = time.time() - start_time
-            response_text = response.get("response", "")
+            response_text = response.content or ""
 
             # Check if model refused
             if self._is_refusal(response_text):
@@ -1078,26 +1107,8 @@ class ModelBenchmark:
     # -------------------------------------------------------------------------
 
     def _get_available_models(self) -> list[str]:
-        """Get available Ollama models."""
-        try:
-            response = ollama.list()
-            models = []
-
-            if hasattr(response, 'models'):
-                for m in response.models:
-                    name = getattr(m, 'model', None) or getattr(m, 'name', None)
-                    if name:
-                        models.append(name)
-            elif isinstance(response, dict):
-                for m in response.get("models", []):
-                    name = m.get("model") or m.get("name", "")
-                    if name:
-                        models.append(name)
-
-            return models
-        except Exception as e:
-            print(f"[ERR] Ollama connection error: {e}")
-            return []
+        """Get available models from the registry's backends."""
+        return [name for name in _registry_model_names() if name]
 
 
 # =============================================================================

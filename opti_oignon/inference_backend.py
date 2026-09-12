@@ -89,11 +89,12 @@ def _resolve_resource_governor() -> Any:
 
 
 def _governor_admission(model: str, options: dict | None) -> None:
-    """The internal hook at the six generate/stream heads.
+    """The internal hook at the six generate/stream heads and the embedding head.
 
     Six, not four: the external llama-server backend was the one that talks
     to a process the governor cannot see, and it was also the only one that
-    never asked before sending. It asks now.
+    never asked before sending. It asks now. The Ollama embedding head asks
+    too: an embedding loads a model like any other request.
 
     Additive and internal: generate/stream signatures DO NOT change. A
     funnel-held ticket (resource_governor.ticket_scope) stands the gate
@@ -215,6 +216,83 @@ class BackendModelInfo:
         }
 
 
+class BackendLoadedModel:
+    """One model a backend reports as resident right now.
+
+    The five fields are the ones the warmup used to read from the client's
+    ``ps()``; ``None`` in any of them means the backend did not say, never
+    zero. ``size_vram`` is bytes.
+    """
+
+    __slots__ = ("name", "backend", "size_vram", "expires_at", "context_length", "digest")
+
+    def __init__(
+        self,
+        name: str,
+        backend: str,
+        size_vram: int | None = None,
+        expires_at: float | None = None,
+        context_length: int | None = None,
+        digest: str | None = None,
+    ):
+        self.name = name
+        self.backend = backend
+        self.size_vram = size_vram
+        self.expires_at = expires_at
+        self.context_length = context_length
+        self.digest = digest
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary."""
+        return {
+            "name": self.name,
+            "backend": self.backend,
+            "size_vram": self.size_vram,
+            "expires_at": self.expires_at,
+            "context_length": self.context_length,
+            "digest": self.digest,
+        }
+
+
+def _field(entry: Any, name: str, default: Any = None) -> Any:
+    """A field of a client entry in either of its shapes: mapping or object."""
+    if isinstance(entry, dict):
+        return entry.get(name, default)
+    return getattr(entry, name, default)
+
+
+def _loaded_model_from_ps(entry: Any, backend: str) -> BackendLoadedModel | None:
+    """One ``ps()`` entry as a loaded-model record, in either response form.
+
+    A name is taken from ``name`` then ``model``; an entry naming nothing is
+    skipped. ``size_vram`` is coerced through ``__int__`` (the client's
+    ``ByteSize``), ``expires_at`` from a datetime to a timestamp.
+    """
+    name = _field(entry, "name") or _field(entry, "model")
+    if not name:
+        return None
+    size_vram = _field(entry, "size_vram")
+    if size_vram is not None and hasattr(size_vram, "__int__"):
+        size_vram = int(size_vram)
+    expires_at = _field(entry, "expires_at")
+    if expires_at is not None:
+        if hasattr(expires_at, "timestamp"):
+            expires_at = expires_at.timestamp()
+        elif isinstance(expires_at, (int, float)):
+            expires_at = float(expires_at)
+        else:
+            expires_at = None
+    digest = _field(entry, "digest")
+    return BackendLoadedModel(
+        name=str(name),
+        backend=backend,
+        size_vram=size_vram,
+        expires_at=expires_at,
+        context_length=_field(entry, "context_length"),
+        digest=str(digest) if digest else None,
+    )
+
+
 class ChatResponse:
     """Unified non-streaming chat response."""
 
@@ -265,9 +343,16 @@ class ChatResponse:
 
 
 class StreamChunk:
-    """Unified streaming chunk."""
+    """Unified streaming chunk.
 
-    __slots__ = ("content", "thinking", "done", "model")
+    ``extra`` carries what the engine reported on this chunk and nothing
+    else: the final Ollama chunk names its token counts and durations, an
+    earlier chunk names nothing and carries an empty dict. A consumer that
+    counts tokens reads the reported count when there is one and knows,
+    from its absence, when it is only counting chunks.
+    """
+
+    __slots__ = ("content", "thinking", "done", "model", "extra")
 
     def __init__(
         self,
@@ -275,22 +360,44 @@ class StreamChunk:
         thinking: str = "",
         done: bool = False,
         model: str = "",
+        extra: dict | None = None,
     ):
         self.content = content
         self.thinking = thinking
         self.done = done
         self.model = model
+        self.extra = extra or {}
 
     def to_dict(self) -> dict:
         """Serialize to dictionary matching ollama chunk format."""
         msg: dict[str, Any] = {"role": "assistant", "content": self.content}
         if self.thinking:
             msg["thinking"] = self.thinking
-        return {
+        out = {
             "message": msg,
             "done": self.done,
             "model": self.model,
         }
+        out.update(self.extra)
+        return out
+
+
+# The counts and durations an engine reports beside its answer. Copied onto
+# ``extra`` when present, never defaulted: a missing count stays missing.
+_REPORTED_FIELDS = (
+    "eval_count", "prompt_eval_count", "total_duration", "load_duration",
+    "prompt_eval_duration", "eval_duration",
+)
+
+
+def _reported(entry: Any) -> dict:
+    """The reported fields present on a client response or chunk."""
+    out: dict[str, Any] = {}
+    for key in _REPORTED_FIELDS:
+        value = _field(entry, key)
+        if value is not None:
+            out[key] = value
+    return out
 
 
 # Constrained decoding travels as an engine option, beside temperature and
@@ -303,6 +410,28 @@ SCHEMA_OPTION = "schema"
 # calling is what makes an agent's tool selection reliable, and it existed
 # only as a direct client call the registry never saw.
 TOOLS_OPTION = "tools"
+# A request timeout travels the same way and is bound to the transport, never
+# forwarded to the engine: the modules that kept a client of their own did so
+# for a per-timeout client, and a hung model call that blocks a pipeline for
+# good is the defect that client existed to close.
+TIMEOUT_OPTION = "timeout"
+
+
+def _pop_timeout(engine_options: dict) -> tuple[dict, float | None]:
+    """Take the transport timeout out of the engine options.
+
+    Returns ``(options without it, seconds or None)``. A timeout that is not
+    a number is refused before anything leaves, like an unusable schema.
+    """
+    opts = dict(engine_options or {})
+    raw = opts.pop(TIMEOUT_OPTION, None)
+    if raw is None:
+        return opts, None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(
+            f"{TIMEOUT_OPTION} must be a number of seconds, got {type(raw).__name__}"
+        )
+    return opts, float(raw)
 
 
 def _split_extras(
@@ -450,6 +579,28 @@ class InferenceBackend(ABC):
         """
         ...
 
+    # The two heads below are defaulted, not abstract, and the default is the
+    # honest answer: a backend that has not been taught to observe its loaded
+    # set, or has no embedding endpoint, says so with ``None``. An empty list
+    # here would read as "nothing is loaded" where the truth is "nobody
+    # looked"; the governor and the warmup treat ``None`` as unknown.
+
+    def loaded_models(self) -> list[BackendLoadedModel] | None:
+        """The models this backend reports as resident right now.
+
+        ``None`` when the backend cannot say; an empty list only when it
+        looked and found nothing.
+        """
+        return None
+
+    def embed(self, model: str, text: str) -> list[float] | None:
+        """One embedding vector for ``text`` from ``model``.
+
+        ``None`` when this backend has no embedding endpoint. A backend that
+        has one and fails lets the failure propagate, as generate() does.
+        """
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Ollama backend
@@ -464,6 +615,20 @@ class OllamaBackend(InferenceBackend):
 
     def __init__(self, host: str = "http://localhost:11434"):
         self._host = host
+        # One client per requested timeout, built on first use and kept: the
+        # transport binding the benchmark and reasoning modules used to keep
+        # for themselves, now held here for every caller.
+        self._clients: dict[float, Any] = {}
+        self._clients_lock = threading.Lock()
+
+    def _client_for(self, timeout: float) -> Any:
+        """The cached client bound to ``timeout`` seconds."""
+        with self._clients_lock:
+            client = self._clients.get(timeout)
+            if client is None:
+                client = _ollama_module.Client(timeout=timeout)
+                self._clients[timeout] = client
+            return client
 
     @property
     def name(self) -> str:
@@ -496,33 +661,57 @@ class OllamaBackend(InferenceBackend):
 
         Returns the number of successful eviction requests.
         """
-        if not OLLAMA_AVAILABLE:
+        loaded = self.loaded_models()
+        if not loaded:
             return 0
-        try:
-            ps_response = _ollama_module.ps()
-        except Exception as exc:
-            logger.debug("Ollama ps failed during unload_all: %s", exc)
-            return 0
-        if isinstance(ps_response, dict):
-            raw_models = ps_response.get("models", []) or []
-        else:
-            raw_models = getattr(ps_response, "models", []) or []
         count = 0
-        for m in raw_models:
-            if isinstance(m, dict):
-                name = m.get("name") or m.get("model")
-            else:
-                name = getattr(m, "name", None) or getattr(m, "model", None)
-            if not name:
-                continue
+        for m in loaded:
             try:
-                _ollama_module.generate(model=name, keep_alive=0)
+                _ollama_module.generate(model=m.name, keep_alive=0)
                 count += 1
             except Exception as exc:
-                logger.warning("Ollama unload failed for %s: %s", name, exc)
+                logger.warning("Ollama unload failed for %s: %s", m.name, exc)
         if count:
             logger.info("Requested Ollama eviction for %d model(s)", count)
         return count
+
+    def loaded_models(self) -> list[BackendLoadedModel] | None:
+        """The loaded set through ``ps()``, both response forms.
+
+        ``None`` when the client is absent or ``ps()`` fails: an unknown,
+        not an empty set. The warmup used to read this from the client
+        itself and answer ``[]`` in both cases; the registry says which.
+        """
+        if not OLLAMA_AVAILABLE:
+            return None
+        try:
+            ps_response = _ollama_module.ps()
+        except Exception as exc:
+            logger.debug("Ollama ps failed: %s", exc)
+            return None
+        raw_models = _field(ps_response, "models") or []
+        out: list[BackendLoadedModel] = []
+        for entry in raw_models:
+            record = _loaded_model_from_ps(entry, self.name)
+            if record is not None:
+                out.append(record)
+        return out
+
+    def embed(self, model: str, text: str) -> list[float] | None:
+        """One vector through the client's ``embed``, after the governor.
+
+        ``None`` without the client or when the client answers no vector; a
+        client failure propagates. Admission is asked first: an embedding
+        loads a model like any other request.
+        """
+        if not OLLAMA_AVAILABLE:
+            return None
+        _governor_admission(model, None)
+        result = _ollama_module.embed(model=model, input=text)
+        vectors = _field(result, "embeddings") or []
+        if not vectors:
+            return None
+        return list(vectors[0])
 
     def unload_model(self, model_name: str) -> bool:
         """Evict ONE model from Ollama (the unload_all idiom
@@ -617,6 +806,7 @@ class OllamaBackend(InferenceBackend):
         # schema is a refusal, and a refusal must not leave a started request
         # behind it.
         engine_options, schema, tools = _split_extras(options)
+        engine_options, timeout = _pop_timeout(engine_options)
 
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
@@ -642,7 +832,8 @@ class OllamaBackend(InferenceBackend):
         if tools is not None:
             kwargs["tools"] = tools
 
-        response = _ollama_module.chat(**kwargs)
+        transport = _ollama_module if timeout is None else self._client_for(timeout)
+        response = transport.chat(**kwargs)
 
         msg = response.get("message", {}) if isinstance(response, dict) else getattr(response, "message", {})
         content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
@@ -666,6 +857,7 @@ class OllamaBackend(InferenceBackend):
             thinking=thinking_text or None,
             model=model,
             total_duration=total_dur,
+            extra=_reported(response),
             tool_calls=_normalise_tool_calls(raw_calls),
         )
 
@@ -697,6 +889,7 @@ class OllamaBackend(InferenceBackend):
             messages = _inject_images(messages, images)
 
         engine_options, schema, tools = _split_extras(options)
+        engine_options, timeout = _pop_timeout(engine_options)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -711,7 +904,8 @@ class OllamaBackend(InferenceBackend):
         if tools is not None:
             kwargs["tools"] = tools
 
-        stream_iter = _ollama_module.chat(**kwargs)
+        transport = _ollama_module if timeout is None else self._client_for(timeout)
+        stream_iter = transport.chat(**kwargs)
 
         for chunk in stream_iter:
             msg = chunk.get("message", {}) if isinstance(chunk, dict) else getattr(chunk, "message", {})
@@ -737,6 +931,7 @@ class OllamaBackend(InferenceBackend):
                 thinking=thinking_text,
                 done=bool(done),
                 model=model,
+                extra=_reported(chunk),
             )
 
         # Telemetry end.
@@ -1262,6 +1457,17 @@ class LlamaCppBackend(InferenceBackend):
         logger.info("Unloaded %d model(s)", count)
         return count
 
+    def loaded_models(self) -> list[BackendLoadedModel] | None:
+        """The in-process set: a known answer, empty when nothing is loaded.
+
+        VRAM size and expiry are not observed by this backend, so they stay
+        ``None`` rather than a zero that would read as measured.
+        """
+        return [
+            BackendLoadedModel(name=name, backend=self.name)
+            for name in list(self._loaded_models.keys())
+        ]
+
 
 # ---------------------------------------------------------------------------
 # llama-server backend: the external-process seam
@@ -1383,6 +1589,13 @@ class LlamaServerBackend(InferenceBackend):
             return []
         return data if isinstance(data, list) else []
 
+    def loaded_models(self) -> list[BackendLoadedModel] | None:
+        """Unknown, by name: the slot listing does not say which model is
+        resident and the model listing says what is served, not what is
+        loaded. A reachable server still answers ``None`` here, not ``[]``.
+        """
+        return None
+
     def generate(
         self,
         model: str,
@@ -1403,6 +1616,7 @@ class LlamaServerBackend(InferenceBackend):
         if prompt is not None:
             msgs.append({"role": "user", "content": str(prompt)})
         engine_options, schema, tools = _split_extras(options)
+        engine_options, timeout = _pop_timeout(engine_options)
         # Admission before anything leaves. A refusal that arrives after the
         # request has gone to the server is a log line, not a refusal.
         _governor_admission(model, options)
@@ -1431,7 +1645,8 @@ class LlamaServerBackend(InferenceBackend):
                 payload[key] = options[key]
         start = time.time()
         data = self._request(
-            "/v1/chat/completions", payload, timeout_s=max(self._timeout_s, 30.0)
+            "/v1/chat/completions", payload,
+            timeout_s=timeout if timeout is not None else max(self._timeout_s, 30.0),
         )
         choices = data.get("choices") if isinstance(data, dict) else None
         content = ""
@@ -1460,6 +1675,7 @@ class LlamaServerBackend(InferenceBackend):
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""
         engine_options, schema, tools = _split_extras(options)
+        engine_options, timeout = _pop_timeout(engine_options)
         # Same gate as the whole-answer head, and for the same reason. A
         # generator body runs at first iteration, so the caller's first
         # ``next`` is where admission is decided.
@@ -1496,7 +1712,9 @@ class LlamaServerBackend(InferenceBackend):
             },
         )
         try:
-            resp = urllib.request.urlopen(req, timeout=self._timeout_s)
+            resp = urllib.request.urlopen(
+                req, timeout=timeout if timeout is not None else self._timeout_s
+            )
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise RuntimeError(
                 f"llama-server unreachable at {self._host}: {exc}"

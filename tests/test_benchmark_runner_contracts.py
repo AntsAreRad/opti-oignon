@@ -47,14 +47,15 @@ pair with its model tag plus the very query seam the run used, and a judge
 crash is absorbed without failing the run. Retention cleanup runs only after
 completed runs, with the horizon read from the evaluator's profile data.
 
-The transport helper has exactly one all-zero shape, returned when the client
-library is absent; a client that breaks mid-stream keeps the elapsed time.
-The streaming arm measures first-token latency at the first content-bearing
-chunk, folds both chunk shapes, prefers the exact token count reported at the
-end of the stream over the chunk approximation, and caches one client per
-timeout. An empty generation zeroes every axis without consulting any
-evaluator, and a code question without a sandbox is zeroed the same silent
-way. Composites are renormalised over the axes actually evaluated.
+The transport helper has exactly one all-zero shape, returned when no
+backend is registered; a backend that breaks mid-stream keeps the elapsed
+time. The streaming arm asks the registry, measures first-token latency at
+the first content-bearing chunk, prefers the exact token count the engine
+reports on its final chunk over the chunk approximation, and sends the
+profile timeout along as the engine option that binds the transport. An
+empty generation zeroes every axis without consulting any evaluator, and a
+code question without a sandbox is zeroed the same silent way. Composites
+are renormalised over the axes actually evaluated.
 
 The store attaches filtered scores without narrowing the run selection when
 asked for one model's history, aggregates completed runs only, removes the
@@ -80,6 +81,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
 
 _TARGET = "opti_oignon.benchmark_runner"
 _TARGET_SOURCE = source("benchmark_runner.py")
@@ -274,14 +276,16 @@ def _judge_module(available=True):
     return module
 
 
-def _load(tmp, *, ollama=None, judge_available=True):
+def _load(tmp, *, ollama=None, judge_available=True, scripted=None):
     """Load the engine from source inside the shared window.
 
     The direct inference client is unreachable by default; a transport test
-    hands in its own stand-in instead. The governor, the backend registry and
-    the sandbox are declared unreachable and proven so; the first two are
-    resolved by the engine at call time, so a test seeds them straight into
-    the module cache for the duration of one call path.
+    hands in a scripted client instead, and the registry bridge lays a
+    backend over it. The governor, the backend registry and the sandbox are
+    declared unreachable and proven so; the first two are resolved by the
+    engine at call time, so a test seeds them straight into the module cache
+    for the duration of one call path. ``ollama`` is kept for the two
+    contracts that pinned the former direct transport and are deselected.
     """
     evaluator = _evaluator_module()
     seeds = {
@@ -289,7 +293,11 @@ def _load(tmp, *, ollama=None, judge_available=True):
         _EVALUATOR: evaluator,
         _JUDGE: _judge_module(available=judge_available),
     }
-    blocks = [_GOVERNOR, _BACKENDS, _SANDBOX]
+    blocks = [_GOVERNOR, _SANDBOX]
+    if scripted is None:
+        blocks.append(_BACKENDS)
+    else:
+        seed_registry(seeds, scripted)
     if ollama is None:
         blocks.append("ollama")
     else:
@@ -488,6 +496,28 @@ def _ollama_seed(client_class):
     module = ModuleType("ollama")
     module.Client = client_class
     return module
+
+
+class _ScriptedStream:
+    """A scripted client behind the registry bridge: a role-only preamble,
+    two content chunks and a final chunk carrying the reported count."""
+
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        return iter([
+            {"message": {"content": ""}},
+            {"message": {"content": "He"}},
+            {"message": {"content": "llo"}},
+            {"message": {"content": ""}, "done": True, "eval_count": 7},
+        ])
+
+
+class _ScriptedBreaking:
+    def chat(self, **kwargs):
+        raise RuntimeError("transport down")
 
 
 # ---------------------------------------------------------------------------
@@ -1255,6 +1285,51 @@ def test_r28_the_stream_arm_measures_first_content_and_caches_per_timeout(tmp_pa
         assert model == "m"
         assert messages == [{"role": "user", "content": "the prompt"}]
         assert options == {"num_predict": 33}
+    finally:
+        restore()
+
+
+def test_r31_the_transport_returns_the_all_zero_shape_only_when_no_backend_answers(tmp_path):
+    module, evaluator, restore = _load(tmp_path)
+    try:
+        # No registry reachable: the only all-zero answer the helper gives.
+        assert module._query_model("m", "p") == ("", 0.0, 0.0, 0)
+    finally:
+        restore()
+
+    module, evaluator, restore = _load(tmp_path, scripted=_ScriptedBreaking())
+    try:
+        # A backend that breaks mid-call keeps the elapsed time.
+        response, first_ms, total_ms, tokens = module._query_model("m", "p", timeout=2)
+        assert (response, first_ms, tokens) == ("", 0.0, 0)
+        assert total_ms > 0.0
+    finally:
+        restore()
+
+
+def test_r32_the_stream_arm_asks_the_registry_with_the_timeout_and_reads_the_reported_count(tmp_path):
+    scripted = _ScriptedStream()
+    module, evaluator, restore = _load(tmp_path, scripted=scripted)
+    try:
+        response, first_ms, total_ms, tokens = module._query_model(
+            "m", "the prompt", timeout=9, max_tokens=33,
+        )
+        # The role-only preamble did not start the clock; the joined content
+        # and the exact reported count did come through.
+        assert response == "Hello"
+        assert first_ms > 0.0
+        assert total_ms >= first_ms
+        assert tokens == 7
+        # The prompt, the budget and the timeout reached the client through
+        # the registry, the timeout bound to the transport and not among
+        # the engine options.
+        asked = scripted.calls[0]
+        assert asked["model"] == "m"
+        assert asked["messages"] == [{"role": "user", "content": "the prompt"}]
+        assert asked["options"] == {"num_predict": 33}
+        assert asked["timeout"] == 9 and asked["stream"] is True
+        module._query_model("m", "the prompt", timeout=4)
+        assert scripted.calls[1]["timeout"] == 4
     finally:
         restore()
 

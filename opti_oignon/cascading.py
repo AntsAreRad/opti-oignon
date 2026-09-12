@@ -39,12 +39,22 @@ except ImportError:
 # Ollama import
 # ---------------------------------------------------------------------------
 
-try:
-    import ollama as _ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama = None
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
+
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -390,19 +400,20 @@ class CascadingInference:
             LLM response text.
 
         Raises:
-            RuntimeError: If Ollama is unavailable or call fails.
+            RuntimeError: If no backend serves the tier's model or the call fails.
         """
-        if not OLLAMA_AVAILABLE or _ollama is None:
-            raise RuntimeError("Ollama is not available")
+        backend = _resolve_backend(tier.model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend in the registry for {tier.model!r}")
 
         system_prompt = (
             "You are a helpful assistant. Respond clearly and concisely."
         )
 
         try:
-            response = _ollama.chat(
-                model=tier.model,
-                messages=[
+            response = backend.generate(
+                tier.model,
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": query},
                 ],
@@ -412,16 +423,7 @@ class CascadingInference:
                 },
                 keep_alive="30m",
             )
-            # Handle both dict and object response formats
-            if isinstance(response, dict):
-                return response.get("message", {}).get("content", "")
-            if hasattr(response, "message"):
-                msg = response.message
-                if hasattr(msg, "content"):
-                    return msg.content or ""
-                if isinstance(msg, dict):
-                    return msg.get("content", "")
-            return ""
+            return response.content or ""
         except Exception as e:
             raise RuntimeError(f"LLM call failed for {tier.model}: {e}") from e
 

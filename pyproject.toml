@@ -313,6 +313,46 @@ fail_under = 0
 # nc4 and nc5 always run: the reference stands without the artefact, and the
 # recipe is pinned. These three lines come out the day cargo is in the workflow.
 #
+# r27 and r28 pinned the benchmark runner's former transport: a client
+# library the module imported itself, one client per timeout kept in a table
+# of its own, and an all-zero shape when the library was absent. The module
+# now asks the registry, the timeout travels as an engine option and binds
+# the transport at the backend, and the reported count arrives on the chunk.
+# r31 and r32 in the same file keep every property that survives -- the one
+# all-zero shape, the elapsed time on a break, first-content latency, the
+# reported count over the chunk count, the timeout reaching the transport --
+# and drop only the table the module no longer keeps.
+#
+# p6 pinned that both shapes of the client's reply -- mapping and object --
+# yield their content to the pre-cache warmer. The warmer no longer reads a
+# client reply: it asks the registry and reads the response's content, and
+# the shape-folding it pinned now lives in the backend. p9 in the same file
+# keeps the live property -- the warmer asks the registry for the query's
+# model with one user message and its configured budget, and stores what
+# comes back -- beside p7, which kept its own: no backend is a recorded
+# failure with a reason.
+#
+# rf1, rf5, rf6, rf7 and rf10 read the registry-funnel ledger for an owed
+# name: rf1 asserted the ledger was not empty, the other four took its first
+# entry as their fixture. The ledger is empty since the third convergence
+# block paid its last eleven modules, so each of them is red by construction
+# while its property still holds. rf11 to rf15 in the same file keep every
+# property on a synthetic ledger the contract writes itself, and rf16 pins
+# what an empty ledger newly needs: the guard refuses an estate it could
+# not scan, and its green names how many modules it read.
+#
+# cv8 kept, as its capability control, that the warmup still called the
+# client directly and that the counter saw it. The warmup asks the registry
+# now. cx9 in the third convergence suite keeps the property over all
+# eleven paid modules and proves the counter on a synthetic direct site and
+# a synthetic ps() read.
+#
+# r32 and r33 of the benchmark route suite pinned the client's absence by its
+# flag and by its message. The route asks the registry now and has no flag;
+# r35 and r36 in the same file keep both properties -- an empty installed
+# list, and a single test degraded to an error row with every field as it was
+# -- against a registry the window proves unreachable.
+#
 # fn1 and fn6 pinned the last database the package import opened, branches.db,
 # as a control that the probe could see an open and as the one entry the ledger
 # kept. The package facade no longer imports the module that opens it, so the
@@ -376,4 +416,15 @@ addopts = """
     --deselect=tests/test_learned_router_lazy_contracts.py::test_lr5_the_package_import_no_longer_loads_it
     --deselect=tests/test_self_correction_loop_contracts.py::test_c5_adversarial_fact_flags_are_capped_in_the_prompt
     --deselect=tests/test_agents_exec_surface_contracts.py::test_ox5_dynamic_step_calls_only_the_client_or_yields_a_marker
+    --deselect=tests/test_benchmark_runner_contracts.py::test_r27_the_transport_returns_empty_shapes_when_the_client_is_gone
+    --deselect=tests/test_benchmark_runner_contracts.py::test_r28_the_stream_arm_measures_first_content_and_caches_per_timeout
+    --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
+    --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list
+    --deselect=tests/test_routes_benchmark_contracts.py::test_r33_single_test_without_a_client_degrades_to_an_error_result
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf1_every_owed_name_carries_a_seal
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf5_an_owed_module_that_gained_a_line_is_a_broken_seal
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf6_paying_the_debt_is_not_a_violation_and_makes_the_entry_stale
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf7_an_owed_module_that_vanished_is_stale
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf10_the_probe_finds_the_debt_the_ledger_records
+    --deselect=tests/test_convergence_two_contracts.py::test_cv8_the_migrated_modules_carry_no_direct_site_and_the_owed_one_is_named
 """

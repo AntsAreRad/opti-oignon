@@ -7,7 +7,7 @@ Manage warm-up and keep-alive in VRAM for models Ollama.
 
 Ollama unloads models after ~5 min of inactivity by default.
 This module makes it possible to:
-- Check which models are loaded in VRAM (ollama.ps())
+- Check which models are loaded in VRAM (the registry's loaded-models head)
 - Warm up a model with a minimal request
 - Keep models loaded via a periodic keepalive thread
 - Integrate the keep_alive parameter into executor calls
@@ -52,13 +52,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Conditional ollama import
-try:
-    import ollama as _ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    _ollama = None  # type: ignore
-    OLLAMA_AVAILABLE = False
+def _resolve_backend(model: str | None = None) -> Any:
+    """The registry's backend for ``model``, or its active one without a
+    model; None when there is none.
+
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        registry = get_backend_registry()
+        return registry.resolve_backend(model) if model else registry.active
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
 # --- Dataclasses ---
@@ -213,72 +224,39 @@ class ModelWarmup:
             and self._keepalive_thread.is_alive()
         )
 
-    def get_loaded_models(self) -> list[LoadedModel]:
-        """Query Ollama for models currently loaded in VRAM.
+    def get_loaded_models(self) -> list[LoadedModel] | None:
+        """The models the registry's active backend reports as loaded.
 
         Returns:
-            List of LoadedModel with VRAM info, empty if Ollama unavailable
+            List of LoadedModel with VRAM info; ``None`` when nothing could
+            say -- no backend in the registry, or one that does not observe
+            its loaded set. An unknown announces itself: it is never an
+            empty list, which would read as "nothing is loaded".
         """
-        if not OLLAMA_AVAILABLE:
-            logger.debug("Ollama unavailable, no models loaded")
-            return []
-
+        backend = _resolve_backend()
+        if backend is None:
+            logger.debug("No inference backend in the registry, loaded set unknown")
+            return None
         try:
-            ps_response = _ollama.ps()
-            models = []
-
-            # Handle both dict and object (ProcessResponse) forms: a dict has
-            # .get, the object exposes .models. The previous unconditional
-            # ps_response.get(...) raised AttributeError on the object form
-            # (newer ollama clients) -> the outer except returned [] and the
-            # intended getattr fallback below was never reached, so
-            # is_model_loaded was always False and warmup never skipped.
-            if isinstance(ps_response, dict):
-                raw_models = ps_response.get("models", []) or []
-            else:
-                raw_models = getattr(ps_response, "models", []) or []
-
-            for m in raw_models:
-                # Handle dict or object
-                if isinstance(m, dict):
-                    name = m.get("name", m.get("model", "unknown"))
-                    size_vram = m.get("size_vram", 0)
-                    expires_at = m.get("expires_at", None)
-                    context_length = m.get("context_length", None)
-                    digest = m.get("digest", None)
-                else:
-                    name = getattr(m, "name", None) or getattr(m, "model", "unknown")
-                    size_vram = getattr(m, "size_vram", 0) or 0
-                    expires_at = getattr(m, "expires_at", None)
-                    context_length = getattr(m, "context_length", None)
-                    digest = getattr(m, "digest", None)
-
-                # Convert expires_at to timestamp if it is a datetime
-                expires_ts = None
-                if expires_at is not None:
-                    if hasattr(expires_at, "timestamp"):
-                        expires_ts = expires_at.timestamp()
-                    elif isinstance(expires_at, (int, float)):
-                        expires_ts = float(expires_at)
-
-                # Convert size_vram if it is a ByteSize object
-                if hasattr(size_vram, "__int__"):
-                    size_vram = int(size_vram)
-
-                models.append(LoadedModel(
-                    name=str(name),
-                    size_vram=size_vram,
-                    expires_at=expires_ts,
-                    context_length=context_length,
-                    digest=str(digest) if digest else None,
-                ))
-
-            logger.debug(f"{len(models)} models loaded in VRAM")
-            return models
-
+            records = backend.loaded_models()
         except Exception as e:
-            logger.warning(f"Erreur lors de ollama.ps(): {e}")
-            return []
+            logger.warning(f"Loaded-models read failed on {getattr(backend, 'name', '?')}: {e}")
+            return None
+        if records is None:
+            logger.debug("Backend %s does not observe its loaded set", getattr(backend, "name", "?"))
+            return None
+        models = [
+            LoadedModel(
+                name=str(r.name),
+                size_vram=int(r.size_vram or 0),
+                expires_at=r.expires_at,
+                context_length=r.context_length,
+                digest=r.digest or None,
+            )
+            for r in records
+        ]
+        logger.debug(f"{len(models)} models loaded in VRAM")
+        return models
 
     def is_model_loaded(self, model: str) -> bool:
         """Check if a specific model is currently loaded in VRAM.
@@ -289,7 +267,7 @@ class ModelWarmup:
         Returns:
             True if the model is loaded
         """
-        loaded = self.get_loaded_models()
+        loaded = self.get_loaded_models() or []
         return any(m.name == model for m in loaded)
 
     def warmup(
@@ -311,11 +289,12 @@ class ModelWarmup:
         Returns:
             WarmupResult with success status and timing
         """
-        if not OLLAMA_AVAILABLE:
+        backend = _resolve_backend(model)
+        if backend is None:
             return WarmupResult(
                 model=model,
                 success=False,
-                error="Ollama not available",
+                error="no inference backend in the registry",
             )
 
         # Check si already loaded
@@ -330,11 +309,13 @@ class ModelWarmup:
         # Send a minimal request to force loading
         start = time.time()
         try:
-            _ollama.generate(
-                model=model,
-                prompt=WARMUP_PROMPT,
+            # The warm-up prompt travels as one user message: the registry
+            # has chat heads only, and a single token is all that is asked.
+            backend.generate(
+                model,
+                [{"role": "user", "content": WARMUP_PROMPT}],
+                options={"num_predict": 1},
                 keep_alive=self._keep_alive,
-                options={"num_predict": 1},  # Generate a single token
             )
             duration = time.time() - start
 
@@ -403,7 +384,9 @@ class ModelWarmup:
     def send_keepalive(self, model: str) -> bool:
         """Send a keepalive ping to keep a model loaded in VRAM.
 
-        Uses ollama.generate with empty prompt and keep_alive parameter.
+        Asks the registry's backend with no messages and the keep_alive
+        parameter: the engine's documented way to renew a model's residency
+        without generating anything.
 
         Args:
             model: Model name to keep alive
@@ -411,15 +394,16 @@ class ModelWarmup:
         Returns:
             True if ping successful
         """
-        if not OLLAMA_AVAILABLE:
+        backend = _resolve_backend(model)
+        if backend is None:
             return False
 
         try:
-            _ollama.generate(
-                model=model,
-                prompt="",
-                keep_alive=self._keep_alive,
+            backend.generate(
+                model,
+                [],
                 options={"num_predict": 0},
+                keep_alive=self._keep_alive,
             )
             with self._lock:
                 self._total_keepalives += 1
@@ -584,9 +568,11 @@ class ModelWarmup:
         Returns:
             Dict with total_vram, model_count, and per-model details
         """
-        loaded = self.get_loaded_models()
+        known = self.get_loaded_models()
+        loaded = known or []
         total_vram = sum(m.size_vram for m in loaded)
         return {
+            "known": known is not None,
             "model_count": len(loaded),
             "total_vram_bytes": total_vram,
             "total_vram_gb": total_vram / (1024**3) if total_vram > 0 else 0.0,
@@ -607,10 +593,14 @@ class ModelWarmup:
             Multi-line text report
         """
         stats = self.get_stats()
-        loaded = self.get_loaded_models()
+        known = self.get_loaded_models()
+        loaded = known or []
 
         lines = ["Model Warmup Status:"]
-        lines.append(f"  Loaded in VRAM: {len(loaded)}")
+        if known is None:
+            lines.append("  Loaded in VRAM: unknown (no backend answered)")
+        else:
+            lines.append(f"  Loaded in VRAM: {len(loaded)}")
         for m in loaded:
             vram_gb = m.size_vram / (1024**3) if m.size_vram else 0.0
             lines.append(f"    {m.name} ({vram_gb:.1f} GB VRAM)")

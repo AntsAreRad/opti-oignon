@@ -11,6 +11,24 @@ package costs.
 
 ### Added
 
+- Two observation heads on the backend contract, defaulted rather than
+  abstract: `loaded_models()` answers the models a backend reports resident,
+  and `None` when it cannot say -- never an empty list, which would read as
+  "nothing loaded" where the truth is "nobody looked"; `embed(model, text)`
+  answers one vector, `None` when the backend has no embedding endpoint, and
+  asks the governor first. Ollama implements both through its client;
+  llama.cpp answers its in-process set; llama-server and the remote core
+  answer unknown by name. The warmup and the governor's S1 read now say
+  unknown instead of empty when nothing observed the loaded set.
+- A request timeout travels as the engine option `timeout` and binds the
+  transport -- a per-timeout client on Ollama, the request's own timeout on
+  llama-server -- and never reaches the engine; a timeout that is not a
+  number is refused before anything leaves. The counts an engine reports
+  beside its answer (`eval_count`, `prompt_eval_count`, the durations)
+  arrive on `extra` of the response and of the chunk that carries them, and
+  are absent rather than invented when nothing was reported. Both existed
+  only in the private clients the benchmark, judge and reasoning modules
+  kept for themselves.
 - `registry_clients.py`: the two clients the verification, note-action and
   agent routes now stand on, a one-shot text completion and a streamer in
   the agent loop's chunk shape, both sending their request through the
@@ -85,6 +103,24 @@ package costs.
 
 ### Changed
 
+- The last eleven modules ask the inference registry instead of the client
+  library, and the registry-funnel ledger is empty: the two benchmark
+  transports and the judge (streaming, timeout as an option, the reported
+  token count over the chunk count), the model warmup (loaded set through
+  the new head, warm-up as one user message and a single token, residency
+  renewed with no messages), the semantic cache's embedding, the cascade,
+  the humanizer's rewrite pass, the reasoning engine (available exactly
+  when the registry serves its default model, per-step timeout as an
+  option), the fine-tune comparison, the benchmark route and the routing
+  benchmark (model listings from the registry's backends). Each degrades
+  by name without a backend. Four of them sent a completion prompt; it
+  travels as one user message, the decision the previous block took once.
+- `registry_funnel_guard.py` counts a `ps()` read as a client site now that
+  the loaded set is a head on the contract, refuses an estate it could not
+  scan instead of printing a zero, and names how many modules it read when
+  it finds nothing owed. The runner, pre-cache and humanizer suites stand on
+  the shared window and the registry bridge; the humanizer suite leaves the
+  isolation-seal ledger.
 - Nine more modules ask the inference registry instead of the client library:
   self-correction (four completion calls), the dynamic planner and its step
   executor, the agent base (chat, stream and the model list), speculative

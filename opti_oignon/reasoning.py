@@ -36,38 +36,25 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
 
-# Import conditionnel d'Ollama
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
 
 
-def _reply_text(response: Any) -> str:
-    """Pull the assistant text from an ollama-style chat response.
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
 
-    Handles the dict shape and the object shape returned by newer
-    ollama-python (a ChatResponse is not subscriptable and has no .get), so
-    an object-form response no longer raises an AttributeError swallowed
-    into the strategy fallbacks. Mirrors memory/legacy._reply_text
-    (the dict-vs-object class).
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
     """
-    if response is None:
-        return ""
-    if isinstance(response, str):
-        return response
-    if isinstance(response, dict):
-        message = response.get("message") or {}
-        if isinstance(message, dict):
-            return str(message.get("content") or "")
-        return str(response.get("content") or "")
-    message = getattr(response, "message", None)
-    if message is not None:
-        return str(getattr(message, "content", "") or "")
-    return ""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
 # =============================================================================
@@ -291,9 +278,6 @@ class ReasoningEngine:
         self._config = config or ReasoningConfig()
         self._default_model = default_model
         self._last_result: ReasoningResult | None = None
-        # Per-timeout ollama clients so timeout_per_step is
-        # actually enforced on every call.
-        self._clients: dict[int, Any] = {}
 
     # ----------------------------------------------------------------
     # Proprietes
@@ -301,8 +285,8 @@ class ReasoningEngine:
 
     @property
     def available(self) -> bool:
-        """Indique si le moteur de raisonnement est operationnel."""
-        return OLLAMA_AVAILABLE
+        """True when the registry has a backend for the default model."""
+        return _resolve_backend(self._default_model) is not None
 
     @property
     def config(self) -> ReasoningConfig:
@@ -336,36 +320,26 @@ class ReasoningEngine:
         Returns:
             Texte de la reponse
         """
-        if not OLLAMA_AVAILABLE:
-            raise RuntimeError("Ollama non disponible")
-
         _model = model or self._default_model
         _timeout = timeout or self._config.timeout_per_step
 
-        try:
-            # Route through a timeout-bound client so
-            # timeout_per_step is enforced (it was computed but never used;
-            # a hung model call blocked the executor pipeline indefinitely).
-            client = self._get_client(_timeout)
-            response = client.chat(
-                model=_model,
-                messages=messages,
-                options={"temperature": temperature},
-            )
-            # Both-form parse (dict / object ollama-python).
-            content = _reply_text(response)
-            return content.strip()
-        except Exception as e:
-            logger.error(f"Erreur appel LLM ({_model}): {e}")
-            raise
+        backend = _resolve_backend(_model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend in the registry for {_model!r}")
 
-    def _get_client(self, timeout: int) -> Any:
-        """Return a cached ollama client bound to the given timeout (RSN-02)."""
-        client = self._clients.get(timeout)
-        if client is None:
-            client = ollama.Client(timeout=timeout)
-            self._clients[timeout] = client
-        return client
+        try:
+            # timeout_per_step travels as an engine option and binds the
+            # transport at the backend, so a hung model call still cannot
+            # block the executor pipeline indefinitely.
+            response = backend.generate(
+                _model,
+                messages,
+                options={"temperature": temperature, "timeout": _timeout},
+            )
+            return (response.content or "").strip()
+        except Exception as e:
+            logger.error(f"LLM call failed ({_model}): {e}")
+            raise
 
     def _parse_json_response(self, text: str) -> Any:
         """Parse une reponse JSON du LLM, avec nettoyage.

@@ -20,11 +20,10 @@ change to that arithmetic must surface as a red here, not slip through.
 
 Restrained by design. With warming disabled the run returns immediately
 with the total and zeroed counters and consults nothing. With no
-injected generator, no inference client and no model, a query fails
-gracefully with a recorded reason instead of raising. Both response
-shapes of the inference client -- the mapping form and the object form
--- yield their content, so a client library upgrade cannot silently turn
-every warm into a failure.
+injected generator, no backend in the registry and no model, a query
+fails gracefully with a recorded reason instead of raising. With a
+backend registered, the warmer asks it for the query's model with one
+user message and its configured budget, and stores what comes back.
 
 Loaded through the shared isolation window with the cache stood in by a
 counting seam and the inference client scripted or proven absent per
@@ -41,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
 
 _TARGET = "opti_oignon.pre_cache"
 
@@ -74,8 +74,10 @@ def _write_config(queries, **overrides):
     return path
 
 
-def _load(*, ollama=None):
-    """Load the real module; ``ollama`` seeds or (None) removes the client."""
+def _load(*, ollama=None, scripted=None):
+    """Load the real module; ``scripted`` seeds a registry over a scripted
+    client, and nothing seeds one otherwise. ``ollama`` is kept for the one
+    contract that pinned the former direct client and is deselected."""
     had = "ollama" in sys.modules
     prev = sys.modules.get("ollama")
     if ollama is None:
@@ -83,7 +85,10 @@ def _load(*, ollama=None):
     else:
         sys.modules["ollama"] = ollama
 
-    loaded, win_restore = isolate(targets={_TARGET: source("pre_cache.py")})
+    seeded = {}
+    if scripted is not None:
+        seed_registry(seeded, scripted)
+    loaded, win_restore = isolate(targets={_TARGET: source("pre_cache.py")}, seeded=seeded)
 
     def restore():
         win_restore()
@@ -267,6 +272,43 @@ def test_p6_mapping_and_object_client_responses_both_yield_content():
         bodies = {p["query"]: p["response"] for p in seam.puts}
         assert bodies["dict question"] == "FROM THE MAPPING"
         assert bodies["object question"] == "FROM THE OBJECT"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# p9 -- the warmer asks the registry for the query's model and stores the answer
+# ---------------------------------------------------------------------------
+
+class _Scripted:
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"message": {"content": "FROM THE REGISTRY " + kwargs["messages"][0]["content"]}}
+
+
+def test_p9_the_warmer_asks_the_registry_with_one_user_message_and_stores_the_answer():
+    scripted = _Scripted()
+    module, restore = _load(scripted=scripted)
+    try:
+        seam = _CacheSeam()
+        cfg = _write_config(
+            [_q("first question", model="m1"), _q("second question", model="m2")],
+            max_tokens=64, temperature=0.1,
+        )
+        warmer = module.PreCache(config_path=cfg, cache=seam)
+
+        result = warmer.warm_common_queries()
+
+        assert result.cached == 2 and result.failed == 0
+        bodies = {p["query"]: p["response"] for p in seam.puts}
+        assert bodies["first question"] == "FROM THE REGISTRY first question"
+        assert bodies["second question"] == "FROM THE REGISTRY second question"
+        assert [c["model"] for c in scripted.calls] == ["m1", "m2"]
+        assert scripted.calls[0]["messages"] == [{"role": "user", "content": "first question"}]
+        assert scripted.calls[0]["options"] == {"num_predict": 64, "temperature": 0.1}
     finally:
         restore()
 

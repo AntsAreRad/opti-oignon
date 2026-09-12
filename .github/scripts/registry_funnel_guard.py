@@ -9,8 +9,10 @@ library directly -- ``ollama.chat``, an alias of it, a name imported from it,
 or a client constructed from it -- gets none of that, and there is no log line
 to say so. When this guard was written, twenty-nine modules did exactly that,
 at fifty-one sites; four were paid in the same block -- the funnel itself, the
-two summarisers the memory block depends on, and structured output -- and the
-ledger below is what remains.
+two summarisers the memory block depends on, and structured output -- nine
+more in the next, and the last eleven in the third convergence block. The
+ledger below is empty, and it stays empty: a direct site anywhere outside the
+funnel is a violation by name.
 
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
 ratchet that only counts is a ratchet on the count. Every owed module carries
@@ -46,25 +48,19 @@ from pathlib import Path
 _PACKAGE_DIR = "opti_oignon"
 _FUNNEL = "opti_oignon/inference_backend.py"
 
-# What counts as reaching the client: a request method, or a client object
-# from which requests are made.
-_CLIENT_CALLS = frozenset({"chat", "generate", "embeddings", "embed"})
+# What counts as reaching the client: a request method, a read of the
+# engine's loaded set, or a client object from which requests are made.
+# ``ps`` joined the set when the loaded set became a head on the backend
+# contract: a module that reads it from the client bypasses that head.
+_CLIENT_CALLS = frozenset({"chat", "generate", "embeddings", "embed", "ps"})
 _CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
 
 # Debt that predates the funnel: repo-relative module -> sha256 of its text as
-# the debt was enumerated. MAY ONLY SHRINK, and no entry may move.
+# the debt was enumerated. MAY ONLY SHRINK, and no entry may move. It is
+# empty since the third convergence block paid the last eleven modules: a
+# direct site anywhere outside the funnel is now a violation by name, and
+# nothing may be added here to make one tolerable.
 LEDGER = {
-    "opti_oignon/api/routes_benchmark.py": "5e3900bea555ff38a5229357b294c0ee9a66026f9713a2c445baec74f0cf553a",
-    "opti_oignon/api/routes_fine_tune.py": "bb80ad1d5f20c92ba68945a3eb62d9de25bcd04ee6af881304859425eb7794c8",
-    "opti_oignon/benchmark_judge.py": "3a4b1eaaba98b3f0f006822e66ed55c472f861b34a66635672a81c3a1a8c1bb7",
-    "opti_oignon/benchmark_runner.py": "b0620fdcd46bfe709613af2a2adc297a91a3de251cadee5a071373bde3e0c993",
-    "opti_oignon/cascading.py": "7ebd56407919f33f2773bce1825bdb5da0d69da7255d8410ba52e2319e650e2b",
-    "opti_oignon/humanizer.py": "5cf648492f279f4cee1f23ff4bf70861bfd8f02c2cc6d07b60ef3ac2ed5da084",
-    "opti_oignon/model_warmup.py": "a7954f8256dae5eac366425373b152cbca911bf329e764ec022d3723c9782581",
-    "opti_oignon/pre_cache.py": "146f184dfd5317b53987efaad2f084f72fc2d29f6300bdf1b7148ff849a2d43a",
-    "opti_oignon/reasoning.py": "b629a2654f74e060c6a978d75a543d8da8aeaf5eda734c0e6d9feb732c9d5088",
-    "opti_oignon/routing/benchmark.py": "33e7f930ffe42d8b53e4deb794775f83898dbee3fc43c62e2e7177cae45b8301",
-    "opti_oignon/semantic_cache.py": "edd88abf6bd9cc43822e2b6b89802c27fa17c13e3827b7c2934174259c9562e5",
 }
 
 
@@ -173,6 +169,12 @@ def _estate(root):
 def main(argv):
     root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parents[2]
     files = _estate(root)
+    if not files:
+        # A guard that scanned nothing has proven nothing. The zero it would
+        # otherwise print is the silent kind this repository treats as a
+        # defect, so an empty estate is a refusal, not a pass.
+        print(f"Registry funnel: no Python module found under {root / _PACKAGE_DIR}; nothing was scanned.")
+        return 1
     violations = find_violations(files)
     broken = find_broken_seals(files)
     stale = find_stale_ledger_entries(files)
@@ -204,6 +206,17 @@ def main(argv):
         return 1
 
     seen = dict(files)
+    if not LEDGER:
+        # The green with its denominator: how many modules were read to find
+        # no direct site, so that a scan of the wrong tree cannot pass as a
+        # paid debt.
+        print(
+            f"Registry funnel OK: 0 module(s) owed, {len(files)} module(s) "
+            f"scanned and none reaches the client outside the funnel. The "
+            f"ledger is empty and sealed: it may only shrink, so a new direct "
+            f"site is a violation by name."
+        )
+        return 0
     sites = sum(count_sites(seen[name]) for name in LEDGER if name in seen)
     print(
         f"Registry funnel OK: {len(LEDGER)} module(s) owed, {sites} direct "

@@ -87,6 +87,15 @@ class RemoteCoreBackend(InferenceBackend):
         # every name so that, when it is active, every request crosses to it.
         return BackendModelInfo(name=model_name, backend=NAME)
 
+    def loaded_models(self):
+        # The daemon has no route for its loaded set yet, so the answer is
+        # unknown, said as such; a route is a decision, not a default.
+        return None
+
+    def embed(self, model, text):
+        # Embeddings do not cross the boundary yet, for the same reason.
+        return None
+
     @staticmethod
     def _payload(model, messages, options, keep_alive, think):
         return {"model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": bool(think)}

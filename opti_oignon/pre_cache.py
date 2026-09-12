@@ -26,13 +26,6 @@ logger = logging.getLogger(__name__)
 
 # Conditional imports
 try:
-    import ollama as _ollama_module
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama_module = None
-
-try:
     from opti_oignon.semantic_cache import semantic_cache as _semantic_cache
     SEMANTIC_CACHE_AVAILABLE = True
 except ImportError:
@@ -65,6 +58,24 @@ _DEFAULT_QUERIES = [
 # =============================================================================
 # DATA CLASSES
 # =============================================================================
+
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
+
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
+
 
 @dataclass
 class PreCacheResult:
@@ -184,12 +195,12 @@ class PreCache:
 
         For each configured query:
         1. Check if already in cache -> skip
-        2. Generate response via generate_fn or ollama.chat()
+        2. Generate response via generate_fn or the inference registry
         3. Store in semantic cache
 
         Args:
             generate_fn: Optional callable(query, model, task_type) -> str.
-                If None, uses ollama.chat() directly with default model.
+                If None, asks the registry's backend for the query's model.
 
         Returns:
             PreCacheResult with counts and timing.
@@ -224,25 +235,16 @@ class PreCache:
             try:
                 if generate_fn is not None:
                     response = generate_fn(query, model, task_type)
-                elif OLLAMA_AVAILABLE and model:
-                    resp = _ollama_module.chat(
-                        model=model,
-                        messages=[{"role": "user", "content": query}],
+                elif model and (backend := _resolve_backend(model)) is not None:
+                    resp = backend.generate(
+                        model,
+                        [{"role": "user", "content": query}],
                         options={
                             "num_predict": self._config.get("max_tokens", 256),
                             "temperature": self._config.get("temperature", 0.3),
                         },
                     )
-                    # Handle both dict-form and object-form
-                    # client responses. The previous dict-first .get() raised
-                    # AttributeError on object responses BEFORE the object
-                    # fallback below it could run (dead code) -- the
-                    # BMK-01/MEM-06 idiom applied here.
-                    if isinstance(resp, dict):
-                        response = (resp.get("message") or {}).get("content", "") or ""
-                    else:
-                        _msg = getattr(resp, "message", None)
-                        response = (getattr(_msg, "content", "") or "") if _msg is not None else ""
+                    response = resp.content or ""
                 else:
                     result.failed += 1
                     result.errors.append(f"No generator available for: {query[:50]}")

@@ -621,68 +621,45 @@ def _question_result_details(qr: Any) -> dict:
 # LLM query helper
 # ---------------------------------------------------------------------------
 
-# Per-timeout cached Ollama clients so the
-# profile timeout is actually enforced at the transport level; it was
-# previously accepted and silently ignored.
-_OLLAMA_CLIENTS: dict[int, Any] = {}
-_OLLAMA_CLIENTS_LOCK = threading.Lock()
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
 
-
-def _get_ollama_client(timeout: int) -> Any:
-    """Return a cached ollama.Client bound to the given timeout."""
-    import ollama
-    with _OLLAMA_CLIENTS_LOCK:
-        client = _OLLAMA_CLIENTS.get(timeout)
-        if client is None:
-            client = ollama.Client(timeout=timeout)
-            _OLLAMA_CLIENTS[timeout] = client
-        return client
-
-
-def _chunk_message_text(chunk: Any) -> str:
-    """Extract message content from a stream chunk (dict or object form).
-
-    The ollama client returns dicts in older versions and
-    typed objects in newer ones; handle both (MEM-06 idiom) instead of
-    the dict-only access that silently emptied every response.
+    Resolved at each query and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
     """
-    if isinstance(chunk, dict):
-        msg = chunk.get("message") or {}
-    else:
-        msg = getattr(chunk, "message", None)
-    if msg is None:
-        return ""
-    if isinstance(msg, dict):
-        return msg.get("content") or ""
-    return getattr(msg, "content", "") or ""
-
-
-def _chunk_eval_count(chunk: Any) -> int:
-    """Extract the exact eval_count from a final stream chunk, if present."""
-    if isinstance(chunk, dict):
-        val = chunk.get("eval_count")
-    else:
-        val = getattr(chunk, "eval_count", None)
     try:
-        return int(val) if val else 0
-    except (TypeError, ValueError):
-        return 0
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
-def _query_ollama(
+def _query_model(
     model: str,
     prompt: str,
     timeout: int = 45,
     max_tokens: int = 800,
 ) -> tuple[str, float, float, int]:
-    """Send a prompt to Ollama and return response with timing.
+    """Send a prompt through the registry and return the response with timing.
+
+    The request streams so first-content latency is measured; the profile
+    timeout travels as an engine option and binds the transport; the exact
+    token count is the one the engine reports on its final chunk, and the
+    chunk count only stands in when nothing was reported.
 
     Returns:
-        Tuple of (response_text, ttft_ms, total_time_ms, token_count).
+        Tuple of (response_text, ttft_ms, total_time_ms, token_count). The
+        all-zero shape means no backend answered: none is registered, or
+        the one that is broke before any content.
     """
-    try:
-        import ollama  # noqa: F401
-    except ImportError:
+    backend = _resolve_backend(model)
+    if backend is None:
+        logger.debug("No inference backend in the registry for %s", model)
         return "", 0.0, 0.0, 0
 
     start = time.time()
@@ -692,17 +669,13 @@ def _query_ollama(
     eval_count = 0
 
     try:
-        client = _get_ollama_client(timeout)
-        stream = client.chat(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-            options={
-                "num_predict": max_tokens,
-            },
+        stream = backend.stream(
+            model,
+            [{"role": "user", "content": prompt}],
+            options={"num_predict": max_tokens, "timeout": timeout},
         )
         for chunk in stream:
-            content = _chunk_message_text(chunk)
+            content = chunk.content or ""
             if content:
                 # TTFT measured at the first content-bearing
                 # chunk, not at a role-only preamble chunk.
@@ -710,17 +683,21 @@ def _query_ollama(
                     ttft = (time.time() - start) * 1000
                 chunks.append(content)
                 token_count += 1  # Approximate: 1 chunk ~ 1 token
-            ec = _chunk_eval_count(chunk)
+            reported = getattr(chunk, "extra", None) or {}
+            try:
+                ec = int(reported.get("eval_count") or 0)
+            except (TypeError, ValueError):
+                ec = 0
             if ec:
                 eval_count = ec
 
     except Exception as e:
-        logger.error("Ollama query failed for model %s: %s", model, e)
+        logger.error("Query failed for model %s: %s", model, e)
         return "", 0.0, (time.time() - start) * 1000, 0
 
     total_ms = (time.time() - start) * 1000
     response = "".join(chunks)
-    # Prefer the exact token count reported by Ollama in the
+    # Prefer the exact token count the engine reported on the
     # final chunk over the chunk-count approximation.
     if eval_count:
         token_count = eval_count
@@ -757,8 +734,9 @@ def _admit_benchmark_model(model: str) -> Any:
     admit or refuse, NEVER downsize (the governor enforces it through
     the absent ctx floor for this caller). None when the governor is
     absent or disabled. A positive admission expecting a load is
-    accounted here: the benchmark transport is a direct ollama call out
-    of the mechanical seam's reach, so the funnel is the closest seam.
+    accounted here, where the benchmark's own decision is taken; the
+    transport then passes the registry head, whose gate is the cached
+    backstop and stands down for a ticket this funnel holds.
     """
     governor_module = _resolve_resource_governor()
     if governor_module is None:
@@ -874,7 +852,7 @@ class BenchmarkRunner:
             profile: Profile name from benchmark_profiles.yaml.
             models: List of Ollama model names to benchmark.
             progress_callback: Optional callback for progress updates.
-            query_fn: Optional override for _query_ollama (for testing).
+            query_fn: Optional override for _query_model (for testing).
             use_judge: Whether to run LLM-as-Judge evaluation after metrics.
             judge_model: Model name to use as judge (required if use_judge).
             custom_weights: Optional custom weight overrides (accuracy, code,
@@ -1055,7 +1033,7 @@ class BenchmarkRunner:
         evict_between: bool = True,
     ) -> None:
         """Execute a benchmark run (runs in thread or synchronously)."""
-        qfn = query_fn or _query_ollama
+        qfn = query_fn or _query_model
         started_at = time.time()
 
         # Load profile config and questions

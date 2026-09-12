@@ -91,7 +91,6 @@ LEDGER = {
     "test_conversation_apply.py": "c7c8a334bade508df7315b430879d63bad189d735e42a85efd559b6b7fd8b79a",
     "test_fine_tune_export_escaping_contracts.py": "4e517c07b9668613e2ff9bc6350e6cf4c4f34b4f3b2914580c15612545870ca1",
     "test_fine_tune_tracker_persistence_contracts.py": "c0bfa1b28942941885e41a54ba2bcf237c49f3f75b96333ca2073ed3b2be0620",
-    "test_humanizer_preservation_contracts.py": "519fb96e53bf0378c413f238443d2b7a898c91a2e626329372f076c914f6e54d",
     "test_learned_router_integrity_contracts.py": "f2b9d5c6f854c164e97befcfc562c654925e79fa453eda9e1cc55aff4fb06650",
     "test_luks_detector_contracts.py": "0fc4c17ff2452edec9b3b6b6298174b8874a359a3629e24729285e31d6fbb9f0",
     "test_luks_no_false_positive_contracts.py": "441c0089d95371b86d134bcad6bbd08fe03d2f1228e791850a9abc701c917966",

@@ -35,13 +35,14 @@ from types import SimpleNamespace
 class _Chunk:
     """The shape the hub reads from a backend stream."""
 
-    __slots__ = ("content", "thinking", "done", "model")
+    __slots__ = ("content", "thinking", "done", "model", "extra")
 
-    def __init__(self, content="", thinking="", done=False, model=""):
+    def __init__(self, content="", thinking="", done=False, model="", extra=None):
         self.content = content
         self.thinking = thinking
         self.done = done
         self.model = model
+        self.extra = extra or {}
 
 
 def _normalise(raw_calls):
@@ -66,12 +67,13 @@ def _normalise(raw_calls):
 class _Reply:
     """The shape the hub and the tool executor read from a backend generate."""
 
-    def __init__(self, content, thinking=None, model="", raw_calls=None):
+    def __init__(self, content, thinking=None, model="", raw_calls=None, extra=None):
         self.content = content
         self.thinking = thinking
         self.model = model
         self.raw_calls = list(raw_calls or [])
         self.tool_calls = _normalise(self.raw_calls)
+        self.extra = extra or {}
 
     def to_dict(self):
         return {"message": {"content": self.content, "tool_calls": self.raw_calls}}
@@ -85,6 +87,21 @@ def _field(chunk, name):
     msg = _message(chunk)
     value = msg.get(name, "") if isinstance(msg, dict) else getattr(msg, name, "")
     return value or ""
+
+
+def _entry_field(entry, name):
+    """A top-level field of a client entry, mapping or object; ``None`` when absent."""
+    return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
+
+
+def _reported(entry):
+    """The counts a client reports on a reply or chunk, when it reports them."""
+    out = {}
+    for key in ("eval_count", "prompt_eval_count", "total_duration", "eval_duration"):
+        value = _entry_field(entry, key)
+        if value is not None:
+            out[key] = value
+    return out
 
 
 def _raw_calls(reply):
@@ -118,6 +135,40 @@ class ScriptedBackend:
     def slots(self):
         return []
 
+    def loaded_models(self):
+        """The scripted client's ``ps()`` as records, ``None`` without one."""
+        ps = getattr(self._scripted, "ps", None)
+        if not callable(ps):
+            return None
+        payload = ps()
+        models = payload.get("models", []) if isinstance(payload, dict) else getattr(payload, "models", [])
+        out = []
+        for m in models or []:
+            name = _entry_field(m, "name") or _entry_field(m, "model")
+            if not name:
+                continue
+            expires_at = _entry_field(m, "expires_at")
+            if expires_at is not None and hasattr(expires_at, "timestamp"):
+                expires_at = expires_at.timestamp()
+            size_vram = _entry_field(m, "size_vram")
+            out.append(SimpleNamespace(
+                name=str(name), backend=self.name,
+                size_vram=None if size_vram is None else int(size_vram),
+                expires_at=expires_at,
+                context_length=_entry_field(m, "context_length"),
+                digest=_entry_field(m, "digest"),
+            ))
+        return out
+
+    def embed(self, model, text):
+        """The scripted client's ``embed(model=, input=)`` first vector, ``None`` without one."""
+        embed = getattr(self._scripted, "embed", None)
+        if not callable(embed):
+            return None
+        result = embed(model=model, input=text)
+        vectors = _entry_field(result, "embeddings") or []
+        return list(vectors[0]) if vectors else None
+
     def list_models(self):
         """The scripted client's ``list()`` when it has one, as named entries."""
         listing = getattr(self._scripted, "list", None)
@@ -139,6 +190,7 @@ class ScriptedBackend:
         opts = None if options is None else dict(options)
         tools = opts.pop("tools", None) if opts else None
         schema = opts.pop("schema", None) if opts else None
+        timeout = opts.pop("timeout", None) if opts else None
         kwargs = dict(model=model, messages=messages, options=opts, keep_alive=keep_alive)
         if stream:
             kwargs["stream"] = True
@@ -146,6 +198,8 @@ class ScriptedBackend:
             kwargs["tools"] = tools
         if schema is not None:
             kwargs["format"] = schema
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if think:
             kwargs["think"] = True
         return kwargs
@@ -160,6 +214,7 @@ class ScriptedBackend:
                 thinking=_field(chunk, "thinking"),
                 done=done,
                 model=model,
+                extra=_reported(chunk),
             )
 
     def generate(self, model, messages, options=None, keep_alive="30m",
@@ -168,7 +223,7 @@ class ScriptedBackend:
         reply = self._scripted.chat(**kwargs)
         if isinstance(reply, dict) or hasattr(reply, "message"):
             return _Reply(_field(reply, "content"), _field(reply, "thinking") or None, model,
-                          raw_calls=_raw_calls(reply))
+                          raw_calls=_raw_calls(reply), extra=_reported(reply))
         # A scripted client that only knows how to stream: join the chunks.
         content = "".join(_field(c, "content") for c in reply)
         return _Reply(content, None, model)

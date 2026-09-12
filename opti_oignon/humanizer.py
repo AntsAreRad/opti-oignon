@@ -48,12 +48,22 @@ except ImportError:
 # Ollama import
 # ---------------------------------------------------------------------------
 
-try:
-    import ollama as _ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama = None
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
+
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -691,13 +701,14 @@ class HumanizerEngine:
 
         Returns rewritten text or None if LLM is unavailable.
         """
-        if not OLLAMA_AVAILABLE or _ollama is None:
-            logger.warning("Ollama unavailable, skipping LLM rewrite")
-            return None
-
         effective_model = model or self._config.rewrite_model
         if not effective_model:
             logger.warning("No rewrite model specified, skipping LLM rewrite")
+            return None
+
+        backend = _resolve_backend(effective_model)
+        if backend is None:
+            logger.warning("No inference backend in the registry, skipping LLM rewrite")
             return None
 
         effective_intensity = intensity or self._config.intensity
@@ -705,16 +716,14 @@ class HumanizerEngine:
         prompt = prompt_template.format(text=text)
 
         try:
-            response = _ollama.generate(
-                model=effective_model,
-                prompt=prompt,
+            # The rewrite prompt travels as one user message: the registry
+            # has chat heads only, and the rewrite models are chat models.
+            response = backend.generate(
+                effective_model,
+                [{"role": "user", "content": prompt}],
                 options={"temperature": 0.7, "num_predict": len(text) * 2},
             )
-            result = ""
-            if hasattr(response, "response"):
-                result = response.response
-            elif isinstance(response, dict):
-                result = response.get("response", "")
+            result = response.content or ""
             return result.strip() if result else None
         except Exception as e:
             logger.error("LLM rewrite failed: %s", e)

@@ -688,41 +688,25 @@ class BenchmarkJudge:
 
 
 # ---------------------------------------------------------------------------
-# Default query function (mirrors _query_ollama from benchmark_runner)
+# Default query function (mirrors the benchmark runner's transport)
 # ---------------------------------------------------------------------------
 
-# Per-timeout cached Ollama clients so
-# judge_timeout is actually enforced at the transport level.
-_JUDGE_CLIENTS: dict[int, Any] = {}
-_JUDGE_CLIENTS_LOCK = threading.Lock()
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
 
-
-def _get_judge_client(timeout: int) -> Any:
-    """Return a cached ollama.Client bound to the given timeout."""
-    import ollama
-    with _JUDGE_CLIENTS_LOCK:
-        client = _JUDGE_CLIENTS.get(timeout)
-        if client is None:
-            client = ollama.Client(timeout=timeout)
-            _JUDGE_CLIENTS[timeout] = client
-        return client
-
-
-def _judge_chunk_text(chunk: Any) -> str:
-    """Extract message content from a stream chunk (dict or object form).
-
-    Handle both client forms instead of the
-    dict-only access that silently emptied every judge response.
+    Resolved at each query and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
     """
-    if isinstance(chunk, dict):
-        msg = chunk.get("message") or {}
-    else:
-        msg = getattr(chunk, "message", None)
-    if msg is None:
-        return ""
-    if isinstance(msg, dict):
-        return msg.get("content") or ""
-    return getattr(msg, "content", "") or ""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
 def _query_judge(
@@ -731,44 +715,58 @@ def _query_judge(
     timeout: int = 60,
     max_tokens: int = 1024,
 ) -> tuple[str, float, float, int]:
-    """Send a prompt to Ollama for judge evaluation.
+    """Send a prompt through the registry for judge evaluation.
+
+    The judge timeout travels as an engine option and binds the transport;
+    the token count is the one the engine reports, and the chunk count only
+    stands in when nothing was reported.
 
     Returns:
-        Tuple of (response_text, ttft_ms, total_time_ms, token_count).
+        Tuple of (response_text, ttft_ms, total_time_ms, token_count); the
+        all-zero shape means no backend answered.
     """
-    try:
-        import ollama  # noqa: F401
-    except ImportError:
+    backend = _resolve_backend(model)
+    if backend is None:
+        logger.debug("No inference backend in the registry for %s", model)
         return "", 0.0, 0.0, 0
 
     start = time.time()
     ttft = 0.0
     chunks: list[str] = []
     token_count = 0
+    eval_count = 0
 
     try:
-        client = _get_judge_client(timeout)
-        stream = client.chat(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-            options={
-                "num_predict": max_tokens,
-            },
+        stream = backend.stream(
+            model,
+            [{"role": "user", "content": prompt}],
+            options={"num_predict": max_tokens, "timeout": timeout},
         )
         for chunk in stream:
-            content = _judge_chunk_text(chunk)
+            content = chunk.content or ""
             if content:
+                # TTFT measured at the first content-bearing
+                # chunk, not at a role-only preamble chunk.
                 if ttft == 0.0:
                     ttft = (time.time() - start) * 1000
                 chunks.append(content)
-                token_count += 1
+                token_count += 1  # Approximate: 1 chunk ~ 1 token
+            reported = getattr(chunk, "extra", None) or {}
+            try:
+                ec = int(reported.get("eval_count") or 0)
+            except (TypeError, ValueError):
+                ec = 0
+            if ec:
+                eval_count = ec
+
     except Exception as e:
-        logger.error("Judge query failed for model %s: %s", model, e)
+        logger.error("Query failed for model %s: %s", model, e)
         return "", 0.0, (time.time() - start) * 1000, 0
 
     total_ms = (time.time() - start) * 1000
     response = "".join(chunks)
+    if eval_count:
+        token_count = eval_count
     return response, ttft, total_ms, token_count
 
 

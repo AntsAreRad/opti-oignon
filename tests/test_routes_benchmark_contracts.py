@@ -219,7 +219,10 @@ def _load(*, store=None, stop=None, block_history=False, block_stop=False):
     Returns ``(module, client, store, stop, restore)``.
     """
     seeded = {}
-    blocked = ["ollama"]
+    # The client library and the inference registry are both declared
+    # unreachable and proven so: the route asks the registry now, so its
+    # absence is what the no-backend contracts manufacture.
+    blocked = ["ollama", "opti_oignon.inference_backend"]
 
     if block_history:
         blocked.append("opti_oignon.benchmark_history")
@@ -1039,6 +1042,42 @@ def test_r33_single_test_without_a_client_degrades_to_an_error_result():
             "and the elapsed time is nowhere near the budget"
         )
         assert "Ollama not available" in got["error_message"]
+        assert (got["score"], got["auto_score"]) == (0.0, 0.0)
+        assert got["response_preview"] == ""
+        assert got["keywords_found"] == [] and got["keywords_missing"] == ["k1"]
+        assert (got["model"], got["task"], got["task_name"], got["category"]) == (
+            "m", "t", "T", "code",
+        )
+        assert got["time_seconds"] >= 0
+    finally:
+        restore()
+
+
+def test_r35_no_registry_yields_an_empty_installed_list():
+    rb, _, _, _, restore = _load()
+    try:
+        assert rb._resolve_backend("m") is None, (
+            "the registry's absence is manufactured by the window, not assumed"
+        )
+        assert rb._get_installed_models() == []
+    finally:
+        restore()
+
+
+def test_r36_single_test_without_a_backend_degrades_to_an_error_result():
+    rb, _, _, _, restore = _load()
+    try:
+        task = {"prompt": "p", "expected_keywords": ["k1"], "max_expected_time": 5,
+                "category": "code", "name": "T"}
+        got = rb._execute_single_test(
+            model="m", task_id="t", task=task,
+            temperature=0.1, timeout=30, max_tokens=100, scoring_config={},
+        )
+        assert got["status"] == "error", (
+            "a missing backend is an error, not a timeout: the message names the "
+            "registry and the elapsed time is nowhere near the budget"
+        )
+        assert "registry" in got["error_message"]
         assert (got["score"], got["auto_score"]) == (0.0, 0.0)
         assert got["response_preview"] == ""
         assert got["keywords_found"] == [] and got["keywords_missing"] == ["k1"]

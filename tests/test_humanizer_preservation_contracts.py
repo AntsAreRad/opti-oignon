@@ -16,69 +16,56 @@ without pinning the learned word lists, rewrite wording, or intensity levels.
     string and the original is preserved on the result.
   * HZ3 -- rule-based transforms leave code segments byte-for-byte intact:
     fenced and inline code are masked before any transform and restored after.
+  * HZ4 -- the rewrite pass asks the registry's backend for the rewrite model
+    with the prompt as one user message and its options, and takes the answer
+    as the rewrite; with no backend registered it declines by returning None.
 
 Local-only (the public distribution ships no tests). Runs under pytest or the
-__main__ runner. Loading follows the sibling-harness idiom: the real module is
-loaded under a stand-in package, the model backend gate is forced closed, and
-the engine is built with an in-memory-style temporary feedback store so no
-inference backend and no sibling module are required.
+__main__ runner. The real module is loaded through the shared isolation
+window: the inference registry is unreachable unless a contract seeds one
+over a scripted client, and the engine is built with a temporary feedback
+store so no sibling module is required.
 """
 
-import importlib.util
 import sys
 import tempfile
 import traceback
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
+
+_TARGET = "opti_oignon.humanizer"
 
 
 # ---------------------------------------------------------------------------
 # Isolated loading (sibling-harness idiom)
 # ---------------------------------------------------------------------------
-def _load():
-    """Load the real humanizer under a stand-in package.
+def _load(scripted=None):
+    """Load the real humanizer through the shared isolation window.
 
     Returns (module, restore). The encrypted-connection helper import is
-    guarded in the module and falls back to plain sqlite here; the model
-    backend gate is forced closed per test.
+    guarded in the module and falls back to plain sqlite here. With
+    ``scripted`` a registry is seeded over that client; otherwise the
+    registry is unreachable and the rewrite pass has no backend.
     """
-    keys = ("opti_oignon", "opti_oignon.humanizer")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.humanizer", _OO / "humanizer.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.humanizer"] = mod
-    spec.loader.exec_module(mod)
-    pkg.humanizer = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    seeded = {}
+    if scripted is not None:
+        seed_registry(seeded, scripted)
+    loaded, restore = isolate(targets={_TARGET: source("humanizer.py")}, seeded=seeded)
+    return loaded[_TARGET], restore
 
 
 def _engine(mod, **overrides):
     """Build an engine with a deterministic config and a temporary store.
 
-    The model backend gate is forced closed so the rule path and its
-    fallbacks are what run. Built via __new__ to avoid touching on-disk
-    config; the feedback store is redirected to a temporary directory.
+    Built via __new__ to avoid touching on-disk config; the feedback store
+    is redirected to a temporary directory. Whether a backend exists is the
+    loader's business, so the rule path and its fallbacks are what run
+    unless a contract seeded one.
     """
-    mod.OLLAMA_AVAILABLE = False
-    mod._ollama = None
     eng = mod.HumanizerEngine.__new__(mod.HumanizerEngine)
     cfg = mod.HumanizerConfig(
         enabled=True,
@@ -162,6 +149,41 @@ def test_hz3_rule_transforms_preserve_code_segments():
 
 
 # ---------------------------------------------------------------------------
+# HZ4 -- the rewrite pass asks the registry, or declines by name
+# ---------------------------------------------------------------------------
+class _Scripted:
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"message": {"content": "  rewritten by the backend  "}}
+
+
+def test_hz4_the_rewrite_pass_asks_the_registry_with_one_user_message_or_declines():
+    scripted = _Scripted()
+    mod, restore = _load(scripted=scripted)
+    try:
+        eng = _engine(mod, rewrite_model="rewriter")
+        text = "You should utilize this approach."
+        assert eng._rewrite_with_llm(text) == "rewritten by the backend"
+        asked = scripted.calls[0]
+        assert asked["model"] == "rewriter"
+        assert len(asked["messages"]) == 1 and asked["messages"][0]["role"] == "user"
+        assert text in asked["messages"][0]["content"]
+        assert asked["options"] == {"temperature": 0.7, "num_predict": len(text) * 2}
+    finally:
+        restore()
+
+    mod, restore = _load()
+    try:
+        eng = _engine(mod, rewrite_model="rewriter")
+        assert eng._rewrite_with_llm("You should utilize this approach.") is None
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -169,6 +191,7 @@ def _run_all():
         ("HZ1 over-length input unchanged", test_hz1_over_max_length_input_returned_unchanged),
         ("HZ2 model down falls back to rules", test_hz2_model_unavailable_falls_back_to_rules),
         ("HZ3 rule transforms preserve code", test_hz3_rule_transforms_preserve_code_segments),
+        ("HZ4 rewrite asks the registry or declines", test_hz4_the_rewrite_pass_asks_the_registry_with_one_user_message_or_declines),
     ]
     passed = 0
     for label, fn in tests:

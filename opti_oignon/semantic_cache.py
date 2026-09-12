@@ -252,28 +252,49 @@ def _is_bulbe() -> bool:
         return False
 
 
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
+
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
+
+
 def _get_embedding(
     text: str, model: str = DEFAULT_EMBEDDING_MODEL
 ) -> list[float] | None:
-    """Generate an embedding via ollama.embed().
+    """Generate an embedding through the registry's backend.
 
     Args:
         text: Text to encode.
         model: Embedding model name.
 
     Returns:
-        Embedding vector or None on failure.
+        Embedding vector, or None when no backend serves the model, the
+        backend has no embedding endpoint, or the request failed.
     """
-    try:
-        import ollama
-
-        result = ollama.embed(model=model, input=text)
-        if result and "embeddings" in result and len(result["embeddings"]) > 0:
-            return result["embeddings"][0]
+    backend = _resolve_backend(model)
+    if backend is None:
+        logger.debug("No inference backend in the registry for %s", model)
         return None
+    try:
+        vector = backend.embed(model, text)
     except Exception as e:
         logger.debug("Embedding generation failed: %s", e)
         return None
+    if not vector:
+        return None
+    return list(vector)
 
 
 # =============================================================================

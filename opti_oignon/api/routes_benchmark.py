@@ -51,27 +51,43 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
 
-try:
-    import ollama as _ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+def _resolve_backend(model: str) -> Any:
+    """The registry's backend for ``model``, or None when there is none.
 
-# BMK-02: per-timeout cached Ollama clients so the request timeout is
-# enforced at the transport level (it previously only classified errors
-# after an unbounded blocking call).
-_V1_CLIENTS: dict[int, Any] = {}
-_V1_CLIENTS_LOCK = threading.Lock()
+    Resolved at each call and never cached: the registry is what a window
+    seeds, and an absent or broken registry is an absence, not an error.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
 
 
-def _get_v1_client(timeout: int) -> Any:
-    """Return a cached ollama.Client bound to the given timeout."""
-    with _V1_CLIENTS_LOCK:
-        client = _V1_CLIENTS.get(timeout)
-        if client is None:
-            client = _ollama.Client(timeout=timeout)
-            _V1_CLIENTS[timeout] = client
-        return client
+def _registry_model_names() -> list[str]:
+    """Every model name the registry's backends list; empty without a registry.
+
+    An installed-models listing, not a measurement: empty is what a caller
+    with nothing to offer shows, and the same answer as before the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+        registry = get_backend_registry()
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return []
+    names: list[str] = []
+    for backend in registry.backends():
+        try:
+            names.extend(str(info.name) for info in backend.list_models())
+        except Exception as exc:  # noqa: BLE001 - one backend down does not hide the rest
+            logger.debug("Backend %s could not list models: %s", getattr(backend, "name", "?"), exc)
+    return names
 
 # Config paths
 CONFIG_DIR = Path(__file__).parent.parent / "config"
@@ -127,18 +143,11 @@ def _save_models_config(config: dict[str, Any]) -> bool:
 
 
 def _get_installed_models() -> list[str]:
-    """Get list of installed Ollama models."""
-    if not OLLAMA_AVAILABLE:
-        return []
+    """Get list of installed models, from the registry's backends."""
     try:
-        response = _ollama.list()
-        if hasattr(response, "models"):
-            return [m.model for m in (response.models or [])]
-        if isinstance(response, dict):
-            return [m.get("name", "") for m in response.get("models", [])]
-        return []
+        return _registry_model_names()
     except Exception as e:
-        logger.debug("Cannot list Ollama models: %s", e)
+        logger.debug("Cannot list models: %s", e)
         return []
 
 
@@ -515,24 +524,24 @@ def _execute_single_test(
     start = time.time()
 
     try:
-        if not OLLAMA_AVAILABLE:
-            raise RuntimeError("Ollama not available")
+        backend = _resolve_backend(model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend in the registry for {model!r}")
 
-        response = _get_v1_client(timeout).generate(
-            model=model,
-            prompt=prompt,
+        # The task prompt travels as one user message; the request timeout
+        # travels as an engine option and binds the transport.
+        response = backend.generate(
+            model,
+            [{"role": "user", "content": prompt}],
             options={
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "timeout": timeout,
             },
         )
 
         elapsed = time.time() - start
-        response_text = ""
-        if isinstance(response, dict):
-            response_text = response.get("response", "")
-        elif hasattr(response, "response"):
-            response_text = response.response or ""
+        response_text = response.content or ""
 
         # Check for refusal
         if _is_refusal(response_text):

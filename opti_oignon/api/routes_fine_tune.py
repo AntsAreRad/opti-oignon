@@ -319,25 +319,27 @@ def get_comparison(comparison_id: str) -> dict:
 # =============================================================================
 
 def _get_inference_fn():
-    """Build an inference function using Ollama, or return None."""
+    """Build an inference function over the registry, or return None.
+
+    None when no backend is registered: the comparison then runs without
+    inference, as it did without the client. The function resolves the
+    backend per model at call time and refuses by name when none serves it.
+    """
     try:
-        import ollama
-
-        def _infer(model: str, prompt: str) -> str:
-            response = ollama.chat(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            if hasattr(response, "message"):
-                return response.message.content or ""
-            if isinstance(response, dict):
-                return response.get("message", {}).get("content", "")
-            return str(response)
-
-        return _infer
-    except ImportError:
-        logger.debug("Ollama not available for A/B comparison inference")
-        return None
+        from opti_oignon.inference_backend import get_backend_registry
+        registry = get_backend_registry()
     except Exception as exc:
-        logger.debug("Failed to create inference function: %s", exc)
+        logger.debug("Inference registry unavailable for A/B comparison: %s", exc)
         return None
+    if registry.active is None:
+        logger.debug("No inference backend registered for A/B comparison inference")
+        return None
+
+    def _infer(model: str, prompt: str) -> str:
+        backend = registry.resolve_backend(model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend in the registry for {model!r}")
+        response = backend.generate(model, [{"role": "user", "content": prompt}])
+        return response.content or ""
+
+    return _infer

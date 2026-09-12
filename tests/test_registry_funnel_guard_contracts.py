@@ -36,6 +36,22 @@ the process.
   * RF10 -- the probe is proven able to count: on the real tree it finds the
     debt the ledger records, and that debt is not zero.
 
+The ledger reached zero in the third convergence block. RF1, RF5, RF6, RF7
+and RF10 read the real ledger for an owed name and are deselected by name;
+their successors keep every property on a synthetic ledger, where the
+guard's helpers are exercised against entries the contract writes itself:
+
+  * RF11 -- the real ledger is empty, and a seal is a full digest.
+  * RF12 -- an owed module that gained a line while still calling directly
+    is a broken seal.
+  * RF13 -- paying the debt is the way out: the entry becomes stale.
+  * RF14 -- an owed module that vanished is stale.
+  * RF15 -- the probe is proven able to count on the real tree: the funnel
+    itself carries the calls, nothing outside it does, and a ``ps()`` read
+    counts as a site since the loaded set became a head.
+  * RF16 -- the entry point refuses an empty estate, and its green names
+    the number of modules it scanned.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -270,6 +286,98 @@ def test_rf10_the_probe_finds_the_debt_the_ledger_records():
             == guard.LEDGER[_an_owed_name(guard)], (
             "and the seal is taken on the same text the census reads"
         )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RF11-RF16 -- the same properties on a synthetic ledger, and the zero's
+# denominator
+# ---------------------------------------------------------------------------
+_PS = "import ollama as _o\n\ndef loaded():\n    return _o.ps()\n"
+
+
+def _with_ledger(guard, ledger):
+    guard.LEDGER = dict(ledger)
+
+
+def test_rf11_the_real_ledger_is_empty_and_a_seal_is_a_full_digest():
+    guard, restore = _load()
+    try:
+        assert guard.LEDGER == {}, "the debt is paid: nothing is owed"
+        seal = guard.digest(_DIRECT)
+        assert len(seal) == 64 and int(seal, 16) >= 0
+        assert seal == hashlib.sha256(_DIRECT.encode("utf-8")).hexdigest()
+    finally:
+        restore()
+
+
+def test_rf12_an_owed_module_that_gained_a_line_is_a_broken_seal():
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/owed.py"
+        _with_ledger(guard, {name: guard.digest(_DIRECT)})
+        assert guard.find_broken_seals([(name, _DIRECT)]) == []
+        grown = _DIRECT + "\nx = 1\n"
+        assert guard.find_broken_seals([(name, grown)]) == [name], (
+            "one more line while still calling directly breaks the seal"
+        )
+        assert name not in guard.find_violations([(name, grown)]), (
+            "an owed name is answered for by the seal, not the violation list"
+        )
+    finally:
+        restore()
+
+
+def test_rf13_paying_the_debt_is_not_a_violation_and_makes_the_entry_stale():
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/owed.py"
+        _with_ledger(guard, {name: guard.digest(_DIRECT)})
+        files = [(name, _ROUTED)]
+        assert guard.find_broken_seals(files) == []
+        assert guard.find_violations(files) == []
+        assert guard.find_stale_ledger_entries(files) == [name]
+    finally:
+        restore()
+
+
+def test_rf14_an_owed_module_that_vanished_is_stale():
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/owed.py"
+        _with_ledger(guard, {name: guard.digest(_DIRECT)})
+        assert guard.find_stale_ledger_entries([("opti_oignon/other.py", _ROUTED)]) == [name]
+    finally:
+        restore()
+
+
+def test_rf15_the_probe_counts_on_the_real_tree_and_a_ps_read_is_a_site():
+    guard, restore = _load()
+    try:
+        files = dict(_real_files())
+        assert guard.count_sites(files["opti_oignon/inference_backend.py"]) >= 4, (
+            "control: the funnel itself carries the calls, and the probe sees them"
+        )
+        outside = {name: guard.count_sites(text) for name, text in files.items() if name != "opti_oignon/inference_backend.py"}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+        assert guard.count_sites(_PS) == 1, "a ps() read bypasses the loaded-models head"
+        assert guard.count_sites(_DIRECT) == 1
+    finally:
+        restore()
+
+
+def test_rf16_the_entry_point_refuses_an_empty_estate_and_names_its_denominator(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        (tmp_path / "opti_oignon").mkdir()
+        assert guard.main(["guard", str(tmp_path)]) == 1, "an estate with nothing to scan is a refusal"
+        assert "nothing was scanned" in capsys.readouterr().out
+        assert guard.main(["guard", str(REPO)]) == 0
+        out = capsys.readouterr().out
+        scanned = len(_real_files())
+        assert f"{scanned} module(s) scanned" in out, out
+        assert "0 module(s) owed" in out
     finally:
         restore()
 
