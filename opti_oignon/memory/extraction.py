@@ -37,15 +37,34 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# Guarded model client. The same ollama client the rest of the inference path
-# uses; absent in the sandbox, where a chat_fn is injected instead.
-try:
-    import ollama
+# The model is asked through the inference registry, never through a client
+# of this module's own; the sandbox injects a chat_fn instead.
 
-    OLLAMA_AVAILABLE = True
-except Exception:  # ImportError in the sandbox
-    ollama = None  # type: ignore[assignment]
-    OLLAMA_AVAILABLE = False
+
+def _resolve_backend(model: str | None = None) -> Any:
+    """The registry's backend for ``model`` (the active one without), or None."""
+    try:
+        from ..inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("extraction: inference registry unavailable (%s)", exc)
+        return None
+    try:
+        registry = get_backend_registry()
+        return registry.resolve_backend(model) if model else registry.active
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("extraction: registry could not resolve %s (%s)", model, exc)
+        return None
+
+
+def _registry_chat(model: str, messages: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The registry's chat head in the shape a chat_fn answers: ``{"message": {"content": text}}``."""
+    backend = _resolve_backend(model)
+    if backend is None:
+        raise RuntimeError(
+            f"no inference backend is registered for {model!r}; refusing to call a client of this module's own"
+        )
+    response = backend.generate(model=model, messages=list(messages), options=dict(options or {}))
+    return {"message": {"content": str(getattr(response, "content", "") or "")}}
 
 # The six canonical categories, sourced from the canonical store so the two
 # never drift. Guarded with a local fallback for pure isolation (the runtime
@@ -284,9 +303,10 @@ class FactExtractor:
     def _get_chat_fn(self) -> Callable[..., Any] | None:
         if self._chat_fn is not None:
             return self._chat_fn
-        if OLLAMA_AVAILABLE and ollama is not None:
-            return ollama.chat
-        return None
+        if _resolve_backend() is None:
+            logger.debug("extraction: no inference backend registered; skipping the model pass")
+            return None
+        return _registry_chat
 
     def _resolve_model(self) -> str | None:
         if self._model:
@@ -294,18 +314,15 @@ class FactExtractor:
         now = time.time()
         if self._cached_model and (now - self._model_checked_at) < _MODEL_CACHE_TTL:
             return self._cached_model
-        if not OLLAMA_AVAILABLE or ollama is None:
+        backend = _resolve_backend()
+        if backend is None:
             return self._fallback_models[0] if self._fallback_models else None
         try:
-            listed = ollama.list()
             names: set[str] = set()
-            models = getattr(listed, "models", None)
-            if models is not None:
-                for m in models:
-                    names.add(getattr(m, "model", None) or str(m))
-            elif isinstance(listed, dict):
-                for m in listed.get("models", []):
-                    names.add(m.get("model") or m.get("name") or "")
+            for m in backend.list_models() or []:
+                name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
+                if name:
+                    names.add(str(name))
             for candidate in self._fallback_models:
                 if candidate in names:
                     self._cached_model = candidate

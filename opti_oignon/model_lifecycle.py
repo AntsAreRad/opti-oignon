@@ -52,7 +52,8 @@ PULL_STATUS_COMPLETE = "complete"
 PULL_STATUS_FAILED = "failed"
 PULL_STATUS_CANCELLED = "cancelled"
 
-# Conditional imports.
+# Conditional imports. The client module serves pull and delete only; the
+# catalogue is asked of the inference registry (see ``_registry_backend``).
 try:
     import ollama as _ollama_module
 
@@ -60,6 +61,31 @@ try:
 except ImportError:
     _ollama_module = None  # type: ignore[assignment]
     OLLAMA_AVAILABLE = False
+
+
+def _registry_backend(model: str | None = None) -> Any:
+    """The registry's backend for ``model`` (the active one without), or None."""
+    try:
+        from .registry_clients import backend_for
+
+        return backend_for(model)
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+
+
+def _details_of(info: Any) -> dict[str, Any]:
+    """The ``details`` mapping a client used to answer, rebuilt from a record's typed fields."""
+    details: dict[str, Any] = {}
+    for key in ("family", "parameter_size", "quantization_level"):
+        value = getattr(info, key, None)
+        if value:
+            details[key] = value
+    extra = getattr(info, "extra", None) or {}
+    families = extra.get("families") if isinstance(extra, dict) else None
+    if isinstance(families, list):
+        details["families"] = list(families)
+    return details
 
 try:
     import requests as _requests_lib
@@ -274,6 +300,7 @@ class ModelLifecycleManager:
         config_path: Path | None = None,
         aliases_path: Path | None = None,
         ollama_module: Any = None,
+        backend_resolver: Any = None,
     ) -> None:
         self._config = config or _load_config(config_path)
         self._lock = threading.RLock()
@@ -287,8 +314,11 @@ class ModelLifecycleManager:
         # Model aliases.
         self._aliases: dict[str, str] = _load_aliases(self._aliases_path)
 
-        # Allow injection for testing.
+        # The catalogue (listing, show, digest) is asked of the registry's
+        # backend; the client module below serves pull and delete only,
+        # which the backend contract has no head for. Both are injectable.
         self._ollama = ollama_module or _ollama_module
+        self._backend = backend_resolver or _registry_backend
 
         # Merge aliases from config (YAML takes lower priority than persisted).
         if self._config.enabled:
@@ -316,16 +346,15 @@ class ModelLifecycleManager:
     # ----- Model listing helpers -----
 
     def list_models(self) -> list[dict[str, Any]]:
-        """List locally available Ollama models with metadata."""
-        if not self._config.enabled or not self._ollama:
+        """List locally available models with metadata, through the registry."""
+        if not self._config.enabled:
+            return []
+        backend = self._backend(None)
+        if backend is None:
+            logger.debug("No inference backend is registered; no model to list")
             return []
         try:
-            response = self._ollama.list()
-            models_raw = []
-            if isinstance(response, dict):
-                models_raw = response.get("models", [])
-            elif hasattr(response, "models"):
-                models_raw = response.models or []
+            models_raw = backend.list_models() or []
 
             results: list[dict[str, Any]] = []
             for m in models_raw:
@@ -338,22 +367,26 @@ class ModelLifecycleManager:
             return []
 
     def get_model_info(self, model_name: str) -> dict[str, Any] | None:
-        """Get detailed info for a single model via ollama.show()."""
+        """Get detailed info for a single model through the registry's ``model_info``."""
         resolved = self.resolve_alias(model_name)
-        if not self._ollama:
+        backend = self._backend(resolved)
+        if backend is None:
+            logger.debug("No inference backend is registered; nothing to show %s with", resolved)
             return None
         try:
-            info = self._ollama.show(resolved)
-            if isinstance(info, dict):
-                return {
-                    "name": resolved,
-                    "modelfile": info.get("modelfile", ""),
-                    "parameters": info.get("parameters", ""),
-                    "template": info.get("template", ""),
-                    "details": info.get("details", {}),
-                    "model_info": info.get("model_info", {}),
-                }
-            return {"name": resolved, "raw": str(info)}
+            info = backend.model_info(resolved)
+            if info is None:
+                logger.warning("No backend describes model %s", resolved)
+                return None
+            extra = getattr(info, "extra", None) or {}
+            return {
+                "name": resolved,
+                "modelfile": extra.get("modelfile", ""),
+                "parameters": extra.get("parameters", ""),
+                "template": extra.get("template", ""),
+                "details": _details_of(info),
+                "model_info": extra.get("model_info", {}),
+            }
         except Exception as exc:
             logger.warning("Failed to show model %s: %s", resolved, exc)
             return None
@@ -594,17 +627,16 @@ class ModelLifecycleManager:
         return results
 
     def _get_local_digest(self, model_name: str) -> str:
-        """Get the digest of a locally installed model."""
-        if not self._ollama:
+        """Get the digest of a locally installed model, through the registry."""
+        backend = self._backend(model_name)
+        if backend is None:
             return ""
         try:
-            info = self._ollama.show(model_name)
-            if isinstance(info, dict):
-                # Digest can be in details or at top level.
-                details = info.get("details", {})
-                digest = info.get("digest", "") or details.get("digest", "")
-                return str(digest)
-            return getattr(info, "digest", "") or ""
+            info = backend.model_info(model_name)
+            if info is None:
+                return ""
+            extra = getattr(info, "extra", None) or {}
+            return str(extra.get("digest", "") or "") if isinstance(extra, dict) else ""
         except Exception:
             return ""
 
@@ -668,7 +700,7 @@ class ModelLifecycleManager:
 
     @staticmethod
     def _parse_model_entry(m: Any) -> dict[str, Any] | None:
-        """Parse an Ollama model list entry into a dict."""
+        """Parse a registry model record (or a mapping) into a dict."""
         if isinstance(m, dict):
             name = m.get("name", m.get("model", ""))
             size = m.get("size", 0)
@@ -677,10 +709,11 @@ class ModelLifecycleManager:
             details = m.get("details", {})
         else:
             name = getattr(m, "name", getattr(m, "model", ""))
-            size = getattr(m, "size", 0)
-            modified = getattr(m, "modified_at", "")
-            digest = getattr(m, "digest", "")
-            details = getattr(m, "details", {})
+            extra = getattr(m, "extra", None) or {}
+            size = extra.get("size_bytes", 0) if isinstance(extra, dict) else 0
+            modified = getattr(m, "modified_at", "") or ""
+            digest = extra.get("digest", "") if isinstance(extra, dict) else ""
+            details = _details_of(m)
 
         if not name:
             return None

@@ -167,6 +167,15 @@ def _provenance_guard(gguf_path: Path) -> None:
 # Data types
 # ---------------------------------------------------------------------------
 
+def _client_field(entry, name):
+    """A field of a client answer, mapping or object; ``None`` when absent."""
+    if entry is None:
+        return None
+    if isinstance(entry, dict):
+        return entry.get(name)
+    return getattr(entry, name, None)
+
+
 class BackendModelInfo:
     """Unified model information across backends."""
 
@@ -755,39 +764,62 @@ class OllamaBackend(InferenceBackend):
             return []
 
     def model_info(self, model_name: str) -> BackendModelInfo | None:
-        """Get model details via ollama.show()."""
+        """Get model details via ollama.show().
+
+        The typed fields stay as they were. What the client reports beyond
+        them travels in ``extra`` under its own name -- ``families``,
+        ``parameters`` (the modelfile parameter text), ``digest``,
+        ``template``, ``modelfile``, ``license`` and the raw ``model_info``
+        mapping -- and only when the client reported it: a caller that
+        used to read ``show()`` finds the same fields here, and never an
+        invented one. Both response forms are read, the mapping and the
+        ``ShowResponse`` object, whose mapping attribute is ``modelinfo``.
+        """
         if not OLLAMA_AVAILABLE:
             return None
         try:
             info = _ollama_module.show(model_name)
-            ctx_length = None
-            if isinstance(info, dict):
-                mi = info.get("model_info", {})
-                if isinstance(mi, dict):
-                    for k, v in mi.items():
-                        if "context_length" in k:
-                            ctx_length = int(v)
-                            break
-                details = info.get("details", {})
-                family = details.get("family") if isinstance(details, dict) else None
-                param_size = details.get("parameter_size") if isinstance(details, dict) else None
-                quant = details.get("quantization_level") if isinstance(details, dict) else None
-            else:
-                family = getattr(getattr(info, "details", None), "family", None)
-                param_size = getattr(getattr(info, "details", None), "parameter_size", None)
-                quant = getattr(getattr(info, "details", None), "quantization_level", None)
-
-            return BackendModelInfo(
-                name=model_name,
-                backend=self.name,
-                family=family,
-                parameter_size=param_size,
-                quantization_level=quant,
-                context_length=ctx_length,
-            )
         except Exception as exc:
             logger.debug("Ollama model_info(%s) failed: %s", model_name, exc)
             return None
+        return self._parse_ollama_show(model_name, info, self.name)
+
+    @staticmethod
+    def _parse_ollama_show(model_name: str, info, backend_name: str) -> BackendModelInfo:
+        """Fold a ``show()`` answer, mapping or object, into BackendModelInfo."""
+        mapping = _client_field(info, "model_info")
+        if not hasattr(mapping, "items"):
+            mapping = _client_field(info, "modelinfo")
+        if not hasattr(mapping, "items"):
+            mapping = {}
+        ctx_length = None
+        for key, value in mapping.items():
+            if "context_length" in str(key):
+                try:
+                    ctx_length = int(value)
+                except (TypeError, ValueError):
+                    ctx_length = None
+                break
+        details = _client_field(info, "details")
+        extra: dict = {}
+        families = _client_field(details, "families")
+        if isinstance(families, (list, tuple)):
+            extra["families"] = [str(f) for f in families]
+        for key in ("parameters", "digest", "template", "modelfile", "license"):
+            value = _client_field(info, key)
+            if value:
+                extra[key] = value
+        if mapping:
+            extra["model_info"] = dict(mapping)
+        return BackendModelInfo(
+            name=model_name,
+            backend=backend_name,
+            family=_client_field(details, "family"),
+            parameter_size=_client_field(details, "parameter_size"),
+            quantization_level=_client_field(details, "quantization_level"),
+            context_length=ctx_length,
+            extra=extra,
+        )
 
     def generate(
         self,
@@ -985,6 +1017,22 @@ class OllamaBackend(InferenceBackend):
             except (ValueError, TypeError):
                 size_str = str(size)
 
+        # What the client reports beyond the typed fields, under its own
+        # name and only when reported: the size in bytes the formatted
+        # ``size`` was made from, the digest, the family list.
+        extra: dict = {}
+        if size:
+            try:
+                extra["size_bytes"] = int(size)
+            except (ValueError, TypeError):
+                pass
+        digest = _client_field(model_data, "digest")
+        if digest:
+            extra["digest"] = str(digest)
+        families = _client_field(details, "families")
+        if isinstance(families, (list, tuple)):
+            extra["families"] = [str(f) for f in families]
+
         return BackendModelInfo(
             name=str(name),
             backend="ollama",
@@ -993,6 +1041,7 @@ class OllamaBackend(InferenceBackend):
             parameter_size=param_size,
             quantization_level=quant,
             modified_at=modified,
+            extra=extra,
         )
 
 

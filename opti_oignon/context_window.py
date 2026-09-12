@@ -211,31 +211,31 @@ class TokenBudgetManager:
         )
 
     def _fetch_ollama_context_window(self, model: str) -> int:
-        """Query Ollama for a model's context window size.
+        """Ask the registry's backend for a model's context window size.
 
-        Returns 0 if unavailable.
+        Returns 0 if unavailable: no backend registered, a model the
+        backend does not know, or one whose metadata carries no length.
         """
         try:
-            import ollama as _ollama
-            info = _ollama.show(model)
-            # Ollama returns modelinfo dict with various fields
-            if isinstance(info, dict):
-                # Try model_info.context_length first
-                model_info = info.get("model_info", {})
-                if isinstance(model_info, dict):
-                    for key, val in model_info.items():
-                        if "context_length" in key and isinstance(val, (int, float)):
-                            ctx = int(val)
-                            if ctx > 0:
-                                logger.info("Got context_window=%d for %s from Ollama API", ctx, model)
-                                # Cache it for next time
-                                self._profiles[model] = {
-                                    "context_window": ctx,
-                                    "generation_ratio": _DEFAULT_GENERATION_RATIO,
-                                }
-                                return ctx
+            from .registry_clients import describe_model
+
+            info = describe_model(model)
         except Exception as exc:
-            logger.debug("Ollama context query failed for %s: %s", model, exc)
+            logger.debug("Context query failed for %s: %s", model, exc)
+            return 0
+        if info is None:
+            logger.debug("No backend describes %s; context window unknown", model)
+            return 0
+        ctx = getattr(info, "context_length", None)
+        if isinstance(ctx, (int, float)) and int(ctx) > 0:
+            ctx = int(ctx)
+            logger.info("Got context_window=%d for %s from the registry", ctx, model)
+            # Cache it for next time
+            self._profiles[model] = {
+                "context_window": ctx,
+                "generation_ratio": _DEFAULT_GENERATION_RATIO,
+            }
+            return ctx
         return 0
 
     def add_profile(self, model: str, context_window: int, **kwargs):

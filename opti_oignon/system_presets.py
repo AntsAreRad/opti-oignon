@@ -176,31 +176,23 @@ def detect_ollama_models() -> list[ModelInfo]:
         List of ModelInfo with size and parameter data.
     """
     try:
-        import ollama
-        response = ollama.list()
+        from .registry_clients import installed_models
 
-        # Handle different ollama-python versions
-        if hasattr(response, "models"):
-            raw_models = response.models or []
-        elif isinstance(response, dict):
-            raw_models = response.get("models", [])
-        else:
-            raw_models = list(response) if response else []
+        raw_models = installed_models()
+        if raw_models is None:
+            logger.warning("No inference backend is registered; no model to detect")
+            return []
 
         models = []
         for m in raw_models:
-            # ollama-python < 0.4 uses .name, >= 0.4 uses .model
-            name = ""
-            if hasattr(m, "model") and m.model:
-                name = m.model
-            elif hasattr(m, "name") and m.name:
-                name = m.name
-            elif isinstance(m, dict):
-                name = m.get("model", "") or m.get("name", "")
+            name = getattr(m, "name", "") or (m.get("name", "") if isinstance(m, dict) else "")
             if not name:
                 continue
 
-            size = getattr(m, "size", 0) or (m.get("size", 0) if isinstance(m, dict) else 0)
+            extra = getattr(m, "extra", None) or {}
+            size = extra.get("size_bytes", 0) if isinstance(extra, dict) else 0
+            if not size and isinstance(m, dict):
+                size = m.get("size", 0)
 
             info = ModelInfo(
                 name=name,
@@ -213,11 +205,8 @@ def detect_ollama_models() -> list[ModelInfo]:
 
         return models
 
-    except ImportError:
-        logger.warning("ollama package not available for model detection")
-        return []
     except Exception as e:
-        logger.warning("Failed to detect Ollama models: %s", e)
+        logger.warning("Failed to detect models: %s", e)
         return []
 
 

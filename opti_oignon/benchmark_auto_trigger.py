@@ -12,7 +12,7 @@ Local machines have limited GPU/RAM -- unsolicited runs would degrade
 performance.
 
 Lifecycle:
-  1. Background polling thread checks ollama.list() at configurable interval
+  1. Background polling thread reads the registry's model listing at a configurable interval
   2. Compares current model set against last-known snapshot
   3. On new/updated model detection, triggers benchmark_runner.start_run
   4. Debounce cooldown prevents re-triggering within configurable window
@@ -359,6 +359,9 @@ class AutoTrigger:
                     digest = m.digest
                 elif isinstance(m, dict):
                     digest = m.get("digest", "")
+                extra = getattr(m, "extra", None)
+                if not digest and isinstance(extra, dict):
+                    digest = extra.get("digest", "")
 
                 if name:
                     models[name] = digest
@@ -697,16 +700,17 @@ class AutoTrigger:
 
 
 def _default_ollama_list() -> list:
-    """Default function to list Ollama models."""
+    """The active backend's model records, through the registry.
+
+    Empty when no backend is registered: the snapshot then sees no model,
+    which is what it saw when the client was absent.
+    """
     try:
-        import ollama
-        response = ollama.list()
-        if hasattr(response, "models"):
-            return response.models or []
-        if isinstance(response, dict):
-            return response.get("models", [])
-        return list(response) if response else []
-    except Exception:
+        from .registry_clients import installed_models
+
+        return installed_models() or []
+    except Exception as exc:
+        logger.debug("Model catalogue unavailable: %s", exc)
         return []
 
 

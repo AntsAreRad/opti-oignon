@@ -519,37 +519,34 @@ def cmd_info(args):
 
     if args.info_type == "models":
         try:
-            import ollama
-            models = ollama.list()
+            from .registry_clients import installed_models
 
-            # Handle both possible API response formats
-            if isinstance(models, dict):
-                model_list = models.get("models", [])
-            else:
-                model_list = getattr(models, 'models', models)
+            model_list = installed_models()
+            if model_list is None:
+                print("[ERR] No inference backend is registered: nothing to list")
+                print("      Make sure the configured backend is running: ollama serve")
+                sys.exit(1)
 
-            print("\n[MODELS] Available Ollama models:\n")
+            print("\n[MODELS] Available models:\n")
             print(f"{'Name':<35} {'Size':<12} {'Modified':<20}")
             print("-" * 70)
 
             for m in model_list:
-                if isinstance(m, dict):
-                    name = m.get("name", "?")
-                    size = m.get("size", 0)
-                    modified = m.get("modified_at", "?")[:10] if m.get("modified_at") else "?"
-                else:
-                    name = getattr(m, "name", getattr(m, "model", "?"))
-                    size = getattr(m, "size", 0)
-                    modified = str(getattr(m, "modified_at", "?"))[:10]
+                name = getattr(m, "name", "?")
+                extra = getattr(m, "extra", None) or {}
+                size = extra.get("size_bytes") if isinstance(extra, dict) else None
+                modified = str(getattr(m, "modified_at", None) or "?")[:10]
 
-                size_gb = f"{size / 1e9:.1f} GB" if size else "?"
+                size_gb = f"{size / 1e9:.1f} GB" if size else (getattr(m, "size", None) or "?")
                 print(f"{name:<35} {size_gb:<12} {modified:<20}")
 
             print(f"\nTotal: {len(model_list)} models")
 
+        except SystemExit:
+            raise
         except Exception as e:
-            print(f"[ERR] Ollama connection error: {e}")
-            print("      Make sure Ollama is running: ollama serve")
+            print(f"[ERR] Inference registry error: {e}")
+            print("      Make sure the configured backend is running: ollama serve")
             sys.exit(1)
 
     elif args.info_type == "stats":

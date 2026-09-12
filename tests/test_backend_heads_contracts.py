@@ -27,6 +27,18 @@ is "nobody looked".
   * BH6 -- the test bridge answers through the scripted client's ``ps`` and
     ``embed`` when it has them and ``None`` when it does not.
 
+The fourth convergence block sent the model catalogue through the two heads
+the contract already had, ``list_models`` and ``model_info``, and widened
+what they carry:
+
+  * BH7 -- Ollama's ``model_info`` reads both answer forms, the mapping and
+    the ``ShowResponse`` object whose mapping attribute is ``modelinfo``,
+    keeps the typed fields and carries in ``extra`` -- under its own name and
+    only when reported -- the family list, the parameter text, the digest,
+    the template, the modelfile, the license and the raw mapping; a list
+    entry carries the size in bytes, the digest and the family list the
+    same way; the bridge answers ``show`` when the scripted client has one.
+
 Local-only (the public distribution ships no tests). The backend module is
 loaded through the shared isolation window with every client faked.
 """
@@ -385,3 +397,85 @@ def test_bh6_the_bridge_answers_ps_and_embed_when_the_scripted_client_has_them()
     plain = ScriptedBackend(_ScriptedChatOnly())
     assert plain.loaded_models() is None
     assert plain.embed("emb", "hello") is None
+
+
+class _ShowDetails:
+    def __init__(self):
+        self.family = "qwen3"
+        self.families = ["qwen3", "clip"]
+        self.parameter_size = "8B"
+        self.quantization_level = "Q4"
+
+
+class _ShowObject:
+    """The typed ShowResponse: mapping under ``modelinfo``, no digest, a license."""
+
+    def __init__(self):
+        self.details = _ShowDetails()
+        self.modelinfo = {"qwen3.context_length": 40960}
+        self.parameters = ""
+        self.template = "T"
+        self.license = "MIT"
+
+
+_SHOW_MAPPING = {
+    "details": {"family": "llama", "families": ["llama", "clip"], "parameter_size": "7B", "quantization_level": "Q8"},
+    "model_info": {"llama.context_length": 4096},
+    "parameters": "num_ctx 8192",
+    "digest": "sha256:aa",
+    "template": "T",
+    "modelfile": "FROM x",
+}
+
+
+class _FakeCatalogue:
+    def __init__(self, show, models):
+        self.calls = []
+        self._show = show
+        self._models = models
+
+    def show(self, model):
+        self.calls.append(("show", model))
+        return self._show
+
+    def list(self):
+        self.calls.append(("list",))
+        return {"models": self._models}
+
+
+def test_bh7_model_info_and_the_listing_carry_what_the_client_reported_in_both_forms():
+    mod, restore = _open()
+    try:
+        fake = _FakeCatalogue(_SHOW_MAPPING, [{"model": "m", "size": 4_700_000_000, "digest": "sha256:zz",
+                                              "details": {"family": "llama", "families": ["llama"]}}])
+        backend = _ollama(mod, fake)
+        info = backend.model_info("m")
+        assert (info.family, info.parameter_size, info.quantization_level, info.context_length) == ("llama", "7B", "Q8", 4096)
+        assert info.extra == {
+            "families": ["llama", "clip"], "parameters": "num_ctx 8192", "digest": "sha256:aa",
+            "template": "T", "modelfile": "FROM x", "model_info": {"llama.context_length": 4096},
+        }, "every reported field under its own name, and nothing invented"
+        listed = backend.list_models()
+        assert [m.name for m in listed] == ["m"] and listed[0].size == "4.7GB"
+        assert listed[0].extra == {"size_bytes": 4_700_000_000, "digest": "sha256:zz", "families": ["llama"]}
+        assert fake.calls == [("show", "m"), ("list",)]
+
+        typed = _ollama(mod, _FakeCatalogue(_ShowObject(), []))
+        info = typed.model_info("m")
+        assert (info.family, info.parameter_size, info.quantization_level, info.context_length) == ("qwen3", "8B", "Q4", 40960), (
+            "the object form's mapping is read under modelinfo"
+        )
+        assert info.extra == {"families": ["qwen3", "clip"], "license": "MIT", "template": "T",
+                              "model_info": {"qwen3.context_length": 40960}}, (
+            "an empty parameter text and a missing digest are absent, not empty strings"
+        )
+        assert _ollama(mod, _FakeCatalogue(_SHOW_MAPPING, []), available=False).model_info("m") is None
+    finally:
+        restore()
+
+    bridge = ScriptedBackend(_FakeCatalogue(_SHOW_MAPPING, [{"model": "m", "size": 10, "digest": "sha256:q"}]))
+    shown = bridge.model_info("m")
+    assert shown.context_length == 4096 and shown.family == "llama"
+    assert shown.extra["families"] == ["llama", "clip"] and shown.extra["parameters"] == "num_ctx 8192"
+    assert bridge.list_models()[0].extra == {"size_bytes": 10, "digest": "sha256:q"}
+    assert ScriptedBackend(_ScriptedChatOnly()).model_info("m") == {"name": "m"}, "without show, the name alone"

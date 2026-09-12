@@ -143,7 +143,7 @@ class _CacheEntry:
 class PromptTokenBudgetManager:
     """Dynamic token budget allocation based on actual model context windows.
 
-    Queries ollama.show() for real context window sizes, caches results,
+    Asks the registry's model_info for real context window sizes, caches results,
     and falls back to YAML-configured or hardcoded defaults.
     """
 
@@ -218,7 +218,7 @@ class PromptTokenBudgetManager:
 
         Resolution order:
         1. Cached value (if TTL not expired)
-        2. ollama.show(model) live query
+        2. the registry's model_info(model) live query
         3. YAML fallback_context_windows (exact or prefix match)
         4. default_context_window (8192)
 
@@ -233,7 +233,7 @@ class PromptTokenBudgetManager:
         if cached is not None:
             return cached
 
-        # Try ollama.show()
+        # Try the registry's model_info
         live_value = self._query_ollama_show(model)
         if live_value is not None:
             self._set_cached(model, live_value)
@@ -254,7 +254,7 @@ class PromptTokenBudgetManager:
         return self._default_context_window
 
     def _query_ollama_show(self, model: str) -> int | None:
-        """Query ollama.show() for context window size.
+        """Ask the registry's model_info for the context window size.
 
         Handles both the legacy dict response and the
         typed ShowResponse of modern ollama-python clients. The object
@@ -269,31 +269,21 @@ class PromptTokenBudgetManager:
             Context window size, or None if unavailable.
         """
         try:
-            import ollama
-            info = ollama.show(model)
+            from .registry_clients import describe_model
 
-            # Normalize the relevant fields across response shapes
-            if isinstance(info, dict):
-                model_info = info.get("model_info", info.get("modelinfo", {}))
-                params_str = info.get("parameters", "")
-            else:
-                model_info = getattr(info, "model_info", None)
-                if model_info is None:
-                    model_info = getattr(info, "modelinfo", None)
-                if model_info is None:
-                    model_info = {}
-                params_str = getattr(info, "parameters", "") or ""
+            info = describe_model(model)
+            if info is None:
+                logger.debug(f"no backend describes {model}; context window unknown")
+                return None
 
-            # Mapping-like model info: look for a context_length key
-            if model_info is not None and hasattr(model_info, "items"):
-                for key, val in model_info.items():
-                    if "context_length" in str(key).lower():
-                        if isinstance(val, (int, float)) and val > 0:
-                            logger.debug(
-                                f"ollama.show({model}): "
-                                f"context_window={int(val)} via {key}"
-                            )
-                            return int(val)
+            # The typed field first, then the modelfile parameter text
+            # the backend carried in ``extra`` when the client reported it
+            ctx = getattr(info, "context_length", None)
+            if isinstance(ctx, (int, float)) and ctx > 0:
+                logger.debug(f"model_info({model}): context_window={int(ctx)}")
+                return int(ctx)
+            extra = getattr(info, "extra", None) or {}
+            params_str = extra.get("parameters", "") if isinstance(extra, dict) else ""
 
             # Parameters string: num_ctx line
             if isinstance(params_str, str) and "num_ctx" in params_str:
@@ -306,21 +296,18 @@ class PromptTokenBudgetManager:
                                 val = int(parts[-1])
                                 if val > 0:
                                     logger.debug(
-                                        f"ollama.show({model}): "
+                                        f"model_info({model}): "
                                         f"context_window={val} via parameters"
                                     )
                                     return val
                             except ValueError:
                                 pass
 
-            logger.debug(f"ollama.show({model}): no context_length found")
+            logger.debug(f"model_info({model}): no context_length found")
             return None
 
-        except ImportError:
-            logger.debug("ollama package not installed")
-            return None
         except Exception as e:
-            logger.debug(f"ollama.show({model}) failed: {e}")
+            logger.debug(f"model_info({model}) failed: {e}")
             return None
 
     def _match_fallback(self, model: str) -> int | None:

@@ -21,6 +21,7 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,25 @@ _DEFAULT_INJECT_FORMAT = (
 _DEFAULT_MAX_DESCRIPTION_TOKENS = 500
 _DEFAULT_DELEGATION_ENABLED = True
 
-try:
-    import ollama as _ollama_module
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    _ollama_module = None  # type: ignore[assignment]
-    OLLAMA_AVAILABLE = False
+
+def _resolve_backend(model: str | None = None):
+    """The registry's backend for ``model`` (the active one without), or None.
+
+    The vision model is asked through the inference registry: admitted by
+    the governor, served where the registry decides, never through a client
+    of this module's own.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Vision pipeline: inference registry unavailable (%s)", exc)
+        return None
+    try:
+        registry = get_backend_registry()
+        return registry.resolve_backend(model) if model else registry.active
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Vision pipeline: registry could not resolve %s (%s)", model, exc)
+        return None
 
 try:
     import yaml
@@ -67,18 +81,20 @@ class VisionPipeline:
     Args:
         vision_config: VisionConfig instance for model selection.
             Falls back to the module-level singleton when None.
-        ollama_module: Ollama client module (for testing injection).
+        backend_resolver: Callable taking a model name (or None) and
+            answering the backend to ask, or None. Defaults to the
+            inference registry; injected by tests.
         config_path: Path to vision.yaml for delegation settings.
     """
 
     def __init__(
         self,
         vision_config=None,
-        ollama_module=None,
+        backend_resolver: Callable[[str | None], Any] | None = None,
         config_path: Path | None = None,
     ) -> None:
         self._vision_config = vision_config or _default_vision_config
-        self._ollama = ollama_module or _ollama_module
+        self._backend = backend_resolver or _resolve_backend
         self._config_path = config_path or _CONFIG_FILE
 
         # Delegation settings (loaded from YAML)
@@ -141,24 +157,15 @@ class VisionPipeline:
     # -----------------------------------------------------------------
 
     def _list_available_models(self) -> list[str]:
-        """Retrieve available model names from Ollama."""
-        if self._ollama is None:
+        """Retrieve available model names from the registry's backend."""
+        backend = self._backend(None)
+        if backend is None:
+            logger.debug("Vision pipeline: no inference backend registered; no model to list")
             return []
         try:
-            response = self._ollama.list()
             models_list = []
-            if isinstance(response, dict):
-                raw = response.get("models", [])
-            elif hasattr(response, "models"):
-                raw = response.models or []
-            else:
-                raw = []
-            for m in raw:
-                name = ""
-                if isinstance(m, dict):
-                    name = m.get("model", "") or m.get("name", "")
-                elif hasattr(m, "model"):
-                    name = m.model or getattr(m, "name", "") or ""
+            for m in backend.list_models() or []:
+                name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
                 if name:
                     models_list.append(str(name))
             return models_list
@@ -246,13 +253,13 @@ class VisionPipeline:
         Returns:
             Text description of the image(s). Empty string on failure.
         """
-        if self._ollama is None:
-            logger.error("Ollama not available for vision delegation")
-            return ""
-
         model = vision_model or self._resolve_vision_model()
         if not model:
             logger.error("No vision model available for description")
+            return ""
+        backend = self._backend(model)
+        if backend is None:
+            logger.error("No inference backend is registered for %s; vision delegation refused", model)
             return ""
 
         # Build the description prompt
@@ -273,38 +280,14 @@ class VisionPipeline:
 
         try:
             start = time.monotonic()
-            response = self._ollama.chat(
+            response = backend.generate(
                 model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                        "images": image_data,
-                    }
-                ],
-                options={
-                    "num_predict": self._max_description_tokens,
-                },
-                stream=False,
+                messages=[{"role": "user", "content": prompt}],
+                images=list(image_data),
+                options={"num_predict": self._max_description_tokens},
             )
             elapsed = time.monotonic() - start
-
-            # Extract content from response
-            content = ""
-            if isinstance(response, dict):
-                msg = response.get("message", {})
-                if isinstance(msg, dict):
-                    content = msg.get("content", "")
-                elif hasattr(msg, "content"):
-                    content = msg.content or ""
-            elif hasattr(response, "message"):
-                msg = response.message
-                if hasattr(msg, "content"):
-                    content = msg.content or ""
-                elif isinstance(msg, dict):
-                    content = msg.get("content", "")
-
-            description = str(content).strip()
+            description = str(getattr(response, "content", "") or "").strip()
             logger.info(
                 "Vision delegation: %s described %d image(s) in %.1fs (%d chars)",
                 model, len(image_data), elapsed, len(description),

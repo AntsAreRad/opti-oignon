@@ -18,18 +18,67 @@ checkpoint_before_apply = True
 logger = logging.getLogger(__name__)
 
 
-def _resolve_backend(model):
-    """The registry's backend for ``model``, or None when there is none."""
+def _resolve_backend(model=None):
+    """The registry's backend for ``model``, the active one without, or None."""
     try:
         from opti_oignon.inference_backend import get_backend_registry
     except Exception as exc:  # noqa: BLE001 - absence is an answer here
         logger.debug("Inference registry unavailable: %s", exc)
         return None
     try:
-        return get_backend_registry().resolve_backend(model)
+        registry = get_backend_registry()
+        return registry.resolve_backend(model) if model else registry.active
     except Exception as exc:  # noqa: BLE001 - a broken registry is absence
         logger.debug("Inference registry could not resolve %s: %s", model, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# The model catalogue, through the registry
+# ---------------------------------------------------------------------------
+#
+# Twelve modules used to ask the client library which models are installed
+# and what a model is made of -- ``list()`` and ``show()`` -- and each folded
+# the client's two answer shapes on its own. The registry answers both on
+# the backend contract; these three read it so no module keeps a client for
+# the catalogue alone. The distinction that matters is kept on purpose:
+# ``None`` is "no backend is registered, nobody looked", an empty list is a
+# backend that looked and found nothing.
+
+def backend_for(model=None):
+    """The registry's backend for ``model``, the active one without, or None."""
+    return _resolve_backend(model)
+
+
+def installed_models():
+    """The active backend's model records, or None when no backend is registered."""
+    backend = _resolve_backend()
+    if backend is None:
+        logger.debug("No inference backend is registered; no model catalogue to read")
+        return None
+    return list(backend.list_models() or [])
+
+
+def installed_model_names():
+    """The names the active backend serves, or None when no backend is registered."""
+    records = installed_models()
+    if records is None:
+        return None
+    names = []
+    for record in records:
+        name = getattr(record, "name", None) or (record.get("name") if isinstance(record, dict) else None)
+        if name:
+            names.append(str(name))
+    return names
+
+
+def describe_model(model):
+    """The registry's ``model_info`` for ``model``: None when no backend is registered or none knows it."""
+    backend = _resolve_backend(model)
+    if backend is None:
+        logger.debug("No inference backend is registered; nothing to describe %s with", model)
+        return None
+    return backend.model_info(model)
 
 
 def _require_backend(model):

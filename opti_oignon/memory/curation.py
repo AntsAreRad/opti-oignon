@@ -42,14 +42,34 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# Guarded model client (the same ollama client the inference path uses).
-try:
-    import ollama
+# The model is asked through the inference registry, never through a client
+# of this module's own; the sandbox injects a chat_fn instead.
 
-    OLLAMA_AVAILABLE = True
-except Exception:
-    ollama = None  # type: ignore[assignment]
-    OLLAMA_AVAILABLE = False
+
+def _resolve_backend(model: str | None = None) -> Any:
+    """The registry's backend for ``model`` (the active one without), or None."""
+    try:
+        from ..inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("curation: inference registry unavailable (%s)", exc)
+        return None
+    try:
+        registry = get_backend_registry()
+        return registry.resolve_backend(model) if model else registry.active
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("curation: registry could not resolve %s (%s)", model, exc)
+        return None
+
+
+def _registry_chat(model: str, messages: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The registry's chat head in the shape a chat_fn answers: ``{"message": {"content": text}}``."""
+    backend = _resolve_backend(model)
+    if backend is None:
+        raise RuntimeError(
+            f"no inference backend is registered for {model!r}; refusing to call a client of this module's own"
+        )
+    response = backend.generate(model=model, messages=list(messages), options=dict(options or {}))
+    return {"message": {"content": str(getattr(response, "content", "") or "")}}
 
 # Jaccard helper, sourced from the dedup module so the threshold semantics match.
 # Guarded with a local fallback for pure isolation (the runtime tests preload
@@ -237,9 +257,10 @@ class MemoryCurator:
     def _get_chat_fn(self) -> Callable[..., Any] | None:
         if self._chat_fn is not None:
             return self._chat_fn
-        if OLLAMA_AVAILABLE and ollama is not None:
-            return ollama.chat
-        return None
+        if _resolve_backend() is None:
+            logger.debug("curation: no inference backend registered; skipping the model pass")
+            return None
+        return _registry_chat
 
     def _resolve_model(self) -> str | None:
         if self._model:

@@ -103,6 +103,30 @@ package costs.
 
 ### Changed
 
+- The model catalogue is read through the inference registry: sixteen
+  modules asked the client library which models are installed and what a
+  model is made of (`list()` and `show()`) at twenty-two sites, and the
+  registry-funnel census could not see three of them -- two modules that
+  bound the client module to an attribute at construction and asked
+  through the attribute, one with a `chat` carrying images, and two
+  request methods handed on uncalled. The census now follows the client
+  into a bound attribute or name, counts an uncalled reference, and counts
+  `list` and `show` beside the request methods; on the files as they were
+  it reads 22 sites in 16 modules, on the tree it reads 0 over 355. Model
+  management (`pull`, `delete`) has no head on the contract and is not
+  counted, by decision. The catalogue is the two heads the contract already
+  had: Ollama's `model_info` reads both answer forms and carries in `extra`,
+  only when reported, the family list, the parameter text, the digest, the
+  template, the modelfile, the license and the raw mapping; a list entry
+  carries the size in bytes, the digest and the family list the same way.
+  Three readers on `registry_clients.py` answer every module -- `None` when
+  no backend is registered, an empty list only when one looked and found
+  nothing. The vision pipeline describes through `generate` with the
+  images; the dependency layer's model listing asks the active backend and
+  no longer falls through to the client (the registry method it asked for
+  never existed, so the fall-through ran every time); the CLI listing
+  exits non-zero when no backend is registered instead of printing a
+  connection error.
 - The last eleven modules ask the inference registry instead of the client
   library, and the registry-funnel ledger is empty: the two benchmark
   transports and the judge (streaming, timeout as an option, the reported

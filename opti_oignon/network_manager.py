@@ -26,13 +26,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Conditional import of ollama
-try:
-    import ollama as _ollama_module
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama_module = None
+# Reachability and the installed-model check are asked of the inference
+# registry's backend; this module keeps no client of its own.
 
 
 # =============================================================================
@@ -236,16 +231,18 @@ class NetworkManager:
     # -----------------------------------------------------------------
 
     def check_ollama(self) -> bool:
-        """Check if Ollama API is reachable.
+        """Check if the inference backend is reachable.
 
         Returns:
-            True if Ollama responds to a list() call.
+            True if the registry's active backend answers its health check.
         """
-        if not OLLAMA_AVAILABLE:
-            return False
         try:
-            _ollama_module.list()
-            return True
+            from .registry_clients import backend_for
+
+            backend = backend_for()
+            if backend is None:
+                return False
+            return bool(backend.health_check())
         except Exception:
             return False
 
@@ -253,23 +250,13 @@ class NetworkManager:
         """Check if the embedding model is available.
 
         Returns:
-            True if the embedding model is found in Ollama's model list.
+            True if the embedding model is in the backend's model list.
         """
-        if not OLLAMA_AVAILABLE:
-            return False
         embedding_model = self._config.get("embedding_model", DEFAULT_EMBEDDING_MODEL)
         try:
-            response = _ollama_module.list()
-            models = []
-            if hasattr(response, "models"):
-                models = response.models or []
-            elif isinstance(response, dict):
-                models = response.get("models", [])
-            else:
-                models = list(response) if response else []
+            from .registry_clients import installed_model_names
 
-            for m in models:
-                name = getattr(m, "model", "") or (m.get("model", "") if isinstance(m, dict) else "")
+            for name in installed_model_names() or []:
                 # Match with or without tag
                 if name == embedding_model or name.startswith(f"{embedding_model}:"):
                     return True

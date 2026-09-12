@@ -688,38 +688,31 @@ except ImportError:
 
 
 def get_ollama_models() -> list:
-    """Retrieve the list of available Ollama models.
+    """Retrieve the model records the registry's active backend serves.
 
-    Uses the backend registry if available, otherwise falls back
-    to direct ollama library call.
+    Asked through the inference registry and nowhere else: this module
+    keeps no client of its own. The routes that read this iterate it, so
+    an absent registry, no active backend or a backend that answers
+    nothing all come back as an empty list, each logged by name.
 
     Returns:
-        List of model objects, or empty list if unavailable.
+        List of BackendModelInfo records, or empty list if unavailable.
     """
-    # Try backend abstraction first
-    if INFERENCE_BACKEND_AVAILABLE and get_backend_registry is not None:
-        try:
-            registry = get_backend_registry()
-            backend = registry.get_backend("ollama")
-            if backend is not None:
-                models = backend.list_models()
-                return models or []
-        except Exception as e:
-            logger.debug(f"Backend registry Ollama list failed: {e}")
-
-    # Fallback: direct ollama library call
+    if not INFERENCE_BACKEND_AVAILABLE or get_backend_registry is None:
+        logger.debug("Inference registry unavailable; no model to list")
+        return []
     try:
-        import ollama
-        response = ollama.list()
-        # ollama-python >= 0.4: ListResponse with .models attribute
-        if hasattr(response, "models"):
-            return response.models or []
-        # Older versions: dict with "models" key
-        if isinstance(response, dict):
-            return response.get("models", [])
-        return list(response) if response else []
+        backend = get_backend_registry().active
     except Exception as e:
-        logger.debug(f"Ollama unavailable: {e}")
+        logger.debug(f"Inference registry could not answer: {e}")
+        return []
+    if backend is None:
+        logger.debug("No inference backend is registered; no model to list")
+        return []
+    try:
+        return list(backend.list_models() or [])
+    except Exception as e:
+        logger.debug(f"Model listing failed on {getattr(backend, 'name', backend)}: {e}")
         return []
 
 

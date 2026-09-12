@@ -258,7 +258,7 @@ def update_task_scores(model_name: str, body: TaskScoresUpdate) -> dict:
 
 @router.post("/profiles/{model_name}/auto-detect")
 def auto_detect_model(model_name: str) -> dict:
-    """Auto-detect model capabilities via ollama.show()."""
+    """Auto-detect model capabilities through the registry's model_info."""
     if not PROFILE_AVAILABLE or profile_manager is None:
         raise HTTPException(status_code=503, detail="Profile manager not available")
 

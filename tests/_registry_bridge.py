@@ -116,7 +116,10 @@ class ScriptedBackend:
     The kwargs handed to the client are the ones the former direct call
     carried, so an assertion on ``scripted.calls[-1]["messages"]``,
     ``["options"]`` or ``"tools" in kw`` reads exactly what it always read.
-    ``images`` is accepted and not embedded: no suite on this bridge asserts
+    ``images`` is forwarded as given, only when given, so a suite that
+    asserts a vision payload reads it; before the vision pipeline went
+    through the registry no suite on this bridge did, and the kwargs of a
+    request without images are unchanged. It is not embedded: no suite
     vision payloads.
     """
 
@@ -130,7 +133,35 @@ class ScriptedBackend:
         return True
 
     def model_info(self, model):
-        return {"name": model}
+        """The scripted client's ``show(model)`` as a record when it has one; ``{"name": model}`` without."""
+        show = getattr(self._scripted, "show", None)
+        if not callable(show):
+            return {"name": model}
+        info = show(model)
+        details = _entry_field(info, "details") or {}
+        mapping = _entry_field(info, "model_info") or _entry_field(info, "modelinfo") or {}
+        ctx = None
+        for key, value in dict(mapping).items():
+            if "context_length" in str(key):
+                ctx = int(value)
+                break
+        extra = {}
+        families = _entry_field(details, "families")
+        if isinstance(families, (list, tuple)):
+            extra["families"] = [str(f) for f in families]
+        for key in ("parameters", "digest", "template", "modelfile", "license"):
+            value = _entry_field(info, key)
+            if value:
+                extra[key] = value
+        if mapping:
+            extra["model_info"] = dict(mapping)
+        return SimpleNamespace(
+            name=model, backend=self.name, size=None, modified_at=None, path=None,
+            family=_entry_field(details, "family"),
+            parameter_size=_entry_field(details, "parameter_size"),
+            quantization_level=_entry_field(details, "quantization_level"),
+            context_length=ctx, extra=extra,
+        )
 
     def slots(self):
         return []
@@ -182,7 +213,26 @@ class ScriptedBackend:
                 name = m.get("name", m.get("model", ""))
             else:
                 name = getattr(m, "name", getattr(m, "model", str(m)))
-            out.append(SimpleNamespace(name=name, backend=self.name))
+            details = _entry_field(m, "details") or {}
+            extra = {}
+            size = _entry_field(m, "size")
+            if size is not None:
+                extra["size_bytes"] = int(size)
+            digest = _entry_field(m, "digest")
+            if digest:
+                extra["digest"] = str(digest)
+            families = _entry_field(details, "families")
+            if isinstance(families, (list, tuple)):
+                extra["families"] = [str(f) for f in families]
+            out.append(SimpleNamespace(
+                name=name, backend=self.name, path=None,
+                size=None if size is None else str(size),
+                modified_at=_entry_field(m, "modified_at"),
+                family=_entry_field(details, "family"),
+                parameter_size=_entry_field(details, "parameter_size"),
+                quantization_level=_entry_field(details, "quantization_level"),
+                context_length=None, extra=extra,
+            ))
         return out
 
     @staticmethod
@@ -220,6 +270,8 @@ class ScriptedBackend:
     def generate(self, model, messages, options=None, keep_alive="30m",
                  think=False, images=None):
         kwargs = self._kwargs(model, messages, options, keep_alive, think, stream=False)
+        if images:
+            kwargs["images"] = list(images)
         reply = self._scripted.chat(**kwargs)
         if isinstance(reply, dict) or hasattr(reply, "message"):
             return _Reply(_field(reply, "content"), _field(reply, "thinking") or None, model,

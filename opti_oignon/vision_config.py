@@ -5,7 +5,7 @@ Vision model configuration manager.
 Handles selection and persistence of the vision model used for image
 analysis. Three detection strategies:
 
-1. **capabilities** -- Probes ollama.show() for each model and checks
+1. **capabilities** -- Reads the registry's model_info for each model and checks
    if details.families contains a vision family (e.g. "clip", "mllama").
    This catches models like qwen3.5 that handle images without having
    "vl" or "vision" in their name.
@@ -168,11 +168,11 @@ class VisionConfig:
         self._save()
 
     # -----------------------------------------------------------------
-    # Capability probing via ollama.show()
+    # Capability probing through the registry's model_info
     # -----------------------------------------------------------------
 
     def _probe_model_capabilities(self, model_name: str) -> bool:
-        """Check if a model has vision capabilities via ollama.show().
+        """Check if a model has vision capabilities through the registry's model_info.
 
         Looks for vision-related families (e.g. 'clip', 'mllama') in the
         model details returned by Ollama.
@@ -192,32 +192,20 @@ class VisionConfig:
 
         is_vision = False
         try:
-            import ollama
-            info = ollama.show(model_name)
+            from .registry_clients import describe_model
 
-            # Extract families from details
+            info = describe_model(model_name)
+
+            # The family list the backend carried, plus the single family
             families: list[str] = []
-            details = None
-            if hasattr(info, "details"):
-                details = info.details
-            elif isinstance(info, dict):
-                details = info.get("details")
-
-            if details is not None:
-                if isinstance(details, dict):
-                    fam = details.get("families", [])
-                    if isinstance(fam, list):
-                        families = [str(f).lower() for f in fam]
-                    single = details.get("family", "")
-                    if single and str(single).lower() not in families:
-                        families.append(str(single).lower())
-                else:
-                    fam = getattr(details, "families", None)
-                    if isinstance(fam, list):
-                        families = [str(f).lower() for f in fam]
-                    single = getattr(details, "family", "")
-                    if single and str(single).lower() not in families:
-                        families.append(str(single).lower())
+            if info is not None:
+                extra = getattr(info, "extra", None) or {}
+                fam = extra.get("families") if isinstance(extra, dict) else None
+                if isinstance(fam, list):
+                    families = [str(f).lower() for f in fam]
+                single = getattr(info, "family", "") or ""
+                if single and str(single).lower() not in families:
+                    families.append(str(single).lower())
 
             # Check against known vision families
             vision_fam_lower = [f.lower() for f in self._vision_families]

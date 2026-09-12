@@ -586,64 +586,43 @@ class ModelProfileManager:
             return False
 
     # -------------------------------------------------------------------------
-    # Auto-detection via ollama.show()
+    # Auto-detection through the registry's model_info
     # -------------------------------------------------------------------------
 
     def auto_detect(self, model_name: str) -> Optional["ModelProfile"]:
-        """Auto-detect model capabilities via ollama.show().
+        """Auto-detect model capabilities through the registry.
 
-        Queries Ollama for model metadata and creates/updates
-        a profile with detected context window, parameter count,
-        quantization, and family.
+        Asks the backend that serves the model for its metadata and
+        creates/updates a profile with detected context window, parameter
+        count, quantization, and family.
 
         Args:
-            model_name: Ollama model name (e.g. "qwen3:32b")
+            model_name: Model name (e.g. "qwen3:32b")
 
         Returns:
             Updated or new ModelProfile, or None on failure
         """
         try:
-            import ollama
-            info = ollama.show(model_name)
-        except ImportError:
-            logger.debug("Ollama not available for auto-detection")
-            return None
+            from .registry_clients import describe_model
+
+            info = describe_model(model_name)
         except Exception as e:
             logger.warning(f"Auto-detection failed for {model_name}: {e}")
             return None
+        if info is None:
+            logger.debug(f"No backend describes {model_name}; auto-detection has nothing to read")
+            return None
 
-        model_info = info if isinstance(info, dict) else {}
-        if hasattr(info, "modelinfo"):
-            model_info = info.modelinfo if isinstance(info.modelinfo, dict) else {}
-        elif hasattr(info, "model_info"):
-            model_info = info.model_info if isinstance(info.model_info, dict) else {}
-
-        details = {}
-        if hasattr(info, "details"):
-            details = info.details if isinstance(info.details, dict) else {}
-        elif isinstance(info, dict):
-            details = info.get("details", {})
-
-        # Context window detection
+        # Context window detection; the default stands in when the backend
+        # reports no length, as it did before.
         context_window = 32768
-        for key in model_info:
-            if "context" in key.lower() and "length" in key.lower():
-                try:
-                    context_window = int(model_info[key])
-                except (ValueError, TypeError):
-                    pass
+        detected = getattr(info, "context_length", None)
+        if isinstance(detected, int) and detected > 0:
+            context_window = detected
 
-        param_count = details.get("parameter_size") if isinstance(details, dict) else None
-        if param_count is None and hasattr(details, "parameter_size"):
-            param_count = getattr(details, "parameter_size", None)
-
-        quant = details.get("quantization_level") if isinstance(details, dict) else None
-        if quant is None and hasattr(details, "quantization_level"):
-            quant = getattr(details, "quantization_level", None)
-
-        family_val = details.get("family") if isinstance(details, dict) else None
-        if family_val is None and hasattr(details, "family"):
-            family_val = getattr(details, "family", None)
+        param_count = getattr(info, "parameter_size", None)
+        quant = getattr(info, "quantization_level", None)
+        family_val = getattr(info, "family", None)
 
         self._ensure_loaded()
         existing = self._profiles.get(model_name)

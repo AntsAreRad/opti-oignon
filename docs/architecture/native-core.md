@@ -50,8 +50,9 @@ protocol they will follow when the core becomes a resident process:
 - a pack does not open the core's databases; it receives what it needs
   from the core and returns a result under its ticket.
 
-Today every pack runs in the same process and reaches inference through
-the registry; the registry-funnel guard counts what still does not. The
+Today every pack runs in the same process and reaches inference and the
+model catalogue through the registry; the registry-funnel guard counts
+what still does not, whatever name the client travels under. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 

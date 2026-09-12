@@ -92,9 +92,13 @@ def _detect_mtp_support(model_name: str, family: str | None = None) -> bool:
 
 
 def _extract_model_info(model_data) -> ModelInfo:
-    """Extract model info from an ollama.list() response entry."""
-    # ollama-python >= 0.4: Model objects with .model attribute (not .name)
-    # ollama-python < 0.4 or dict: key "name" or "model"
+    """Extract model info from a registry model record.
+
+    The record is a BackendModelInfo: the typed fields are read directly
+    and the size in bytes from ``extra`` when the backend reported it,
+    the formatted size otherwise. A mapping is still folded for callers
+    that hand one in.
+    """
     if isinstance(model_data, dict):
         name = model_data.get("name", model_data.get("model", "unknown"))
         size = model_data.get("size")
@@ -104,15 +108,15 @@ def _extract_model_info(model_data) -> ModelInfo:
         param_size = details.get("parameter_size") if isinstance(details, dict) else None
         quant = details.get("quantization_level") if isinstance(details, dict) else None
     else:
-        # Model object: .model contains the name (not .name in recent versions)
-        name = getattr(model_data, "model", None) or getattr(model_data, "name", "unknown")
-        size = getattr(model_data, "size", None)
+        name = getattr(model_data, "name", None) or getattr(model_data, "model", "unknown")
+        extra = getattr(model_data, "extra", None)
+        size = extra.get("size_bytes") if isinstance(extra, dict) and extra.get("size_bytes") else None
+        if size is None:
+            size = getattr(model_data, "size", None)
         modified = getattr(model_data, "modified_at", None)
-        details = getattr(model_data, "details", None)
-        # details is an object with attributes, not a dict
-        family = getattr(details, "family", None) if details else None
-        param_size = getattr(details, "parameter_size", None) if details else None
-        quant = getattr(details, "quantization_level", None) if details else None
+        family = getattr(model_data, "family", None)
+        param_size = getattr(model_data, "parameter_size", None)
+        quant = getattr(model_data, "quantization_level", None)
 
     # Convert modified_at to string if it's a datetime object
     if modified and not isinstance(modified, str):

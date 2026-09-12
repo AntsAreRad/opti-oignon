@@ -52,6 +52,18 @@ guard's helpers are exercised against entries the contract writes itself:
   * RF16 -- the entry point refuses an empty estate, and its green names
     the number of modules it scanned.
 
+The fourth convergence block found a request the census could not see: a
+module that binds the client module to an attribute at construction and
+requests through the attribute. A receiver is not a disguise either:
+
+  * RF17 -- the census follows the client into a bound attribute and a
+    bound name, counts a reference to a request method that is handed on
+    uncalled, and on the real tree nothing outside the funnel carries one.
+  * RF18 -- a catalogue read, ``list()`` or ``show()``, is a site since the
+    catalogue became two heads on the backend contract; model management
+    (``pull``, ``delete``) is not, by decision; and on the real tree only
+    the funnel reads the catalogue from the client.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -73,6 +85,19 @@ _DIRECT = "import ollama\n\ndef ask():\n    return ollama.chat(model='m', messag
 _ALIASED = "import ollama as _o\n\ndef ask():\n    return _o.generate(model='m', prompt='p')\n"
 _BARE = "from ollama import chat\n\ndef ask():\n    return chat(model='m', messages=[])\n"
 _CLIENT = "import ollama\n\ndef ask():\n    return ollama.Client(host='h').chat(model='m', messages=[])\n"
+_ATTRIBUTE = (
+    "import ollama as _m\n\nclass P:\n    def __init__(self, m=None):\n"
+    "        self._c = m or _m\n\n    def ask(self):\n"
+    "        return self._c.chat(model='m', messages=[])\n"
+)
+_BOUND = (
+    "import ollama\n\ndef ask():\n    c = ollama.Client(host='h')\n"
+    "    return c.chat(model='m', messages=[])\n"
+)
+_UNCALLED = "import ollama\n\ndef pick():\n    return ollama.chat\n"
+_LIST = "import ollama\n\ndef names():\n    return [m.model for m in ollama.list().models]\n"
+_SHOW = "import ollama as _o\n\ndef ctx(m):\n    return _o.show(m).modelinfo\n"
+_PULL = "import ollama\n\ndef fetch(m):\n    ollama.pull(m)\n    ollama.delete(m)\n"
 _PROSE = '"""This module used to call ollama.chat directly."""\n\ndef ask():\n    return None\n'
 _ROUTED = (
     "from opti_oignon.inference_backend import get_backend_registry\n\n"
@@ -378,6 +403,45 @@ def test_rf16_the_entry_point_refuses_an_empty_estate_and_names_its_denominator(
         scanned = len(_real_files())
         assert f"{scanned} module(s) scanned" in out, out
         assert "0 module(s) owed" in out
+    finally:
+        restore()
+
+
+def test_rf17_the_census_follows_the_client_into_a_bound_receiver_and_an_uncalled_reference():
+    guard, restore = _load()
+    try:
+        assert guard.count_sites(_ATTRIBUTE) == 1, (
+            "a request through an attribute the client module was bound to is a site"
+        )
+        assert guard.count_sites(_BOUND) == 2, (
+            "a client bound to a name is a site, and a request through that name is another"
+        )
+        assert guard.count_sites(_UNCALLED) == 1, (
+            "a request method handed on uncalled is a route to the client"
+        )
+        assert guard.count_sites(_ROUTED) == 0
+        files = dict(_real_files())
+        outside = {name: guard.count_sites(text) for name, text in files.items() if name != "opti_oignon/inference_backend.py"}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+    finally:
+        restore()
+
+
+def test_rf18_a_catalogue_read_is_a_site_and_model_management_is_not():
+    guard, restore = _load()
+    try:
+        assert guard.count_sites(_LIST) == 1, "a list() read bypasses the list_models head"
+        assert guard.count_sites(_SHOW) == 1, "a show() read bypasses the model_info head"
+        assert guard.count_sites(_PULL) == 0, (
+            "pull and delete have no head on the contract and are not counted, by decision"
+        )
+        assert {"list", "show"} <= set(guard._CLIENT_CALLS)
+        files = dict(_real_files())
+        assert guard.count_sites(files["opti_oignon/inference_backend.py"]) >= 6, (
+            "control: the funnel reads the catalogue from the client, and the probe sees it"
+        )
+        outside = {name: guard.count_sites(text) for name, text in files.items() if name != "opti_oignon/inference_backend.py"}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
     finally:
         restore()
 

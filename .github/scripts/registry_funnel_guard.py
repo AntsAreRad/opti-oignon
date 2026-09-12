@@ -11,8 +11,11 @@ to say so. When this guard was written, twenty-nine modules did exactly that,
 at fifty-one sites; four were paid in the same block -- the funnel itself, the
 two summarisers the memory block depends on, and structured output -- nine
 more in the next, and the last eleven in the third convergence block. The
-ledger below is empty, and it stays empty: a direct site anywhere outside the
-funnel is a violation by name.
+fourth widened what "reaching the client" means -- a receiver the client
+module was bound to, a request method handed on uncalled, and the catalogue
+reads ``list`` and ``show`` -- and found twenty-two more sites in sixteen
+modules, all paid in that block. The ledger below is empty, and it stays
+empty: a direct site anywhere outside the funnel is a violation by name.
 
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
 ratchet that only counts is a ratchet on the count. Every owed module carries
@@ -49,10 +52,16 @@ _PACKAGE_DIR = "opti_oignon"
 _FUNNEL = "opti_oignon/inference_backend.py"
 
 # What counts as reaching the client: a request method, a read of the
-# engine's loaded set, or a client object from which requests are made.
-# ``ps`` joined the set when the loaded set became a head on the backend
-# contract: a module that reads it from the client bypasses that head.
-_CLIENT_CALLS = frozenset({"chat", "generate", "embeddings", "embed", "ps"})
+# engine's loaded set, a read of the model catalogue, or a client object
+# from which requests are made. ``ps`` joined the set when the loaded set
+# became a head on the backend contract; ``list`` and ``show`` joined it in
+# the fourth convergence block, when the catalogue went through
+# ``list_models`` and ``model_info``: a module that reads any of them from
+# the client bypasses the head that answers it. Model management --
+# ``pull``, ``delete``, ``copy``, ``create``, ``push`` -- has no head on the
+# contract and is not counted: whether it belongs in the funnel is a
+# decision the guard does not take on its own.
+_CLIENT_CALLS = frozenset({"chat", "generate", "embeddings", "embed", "ps", "list", "show"})
 _CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
 
 # Debt that predates the funnel: repo-relative module -> sha256 of its text as
@@ -69,14 +78,26 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _names_in(node):
+    """Every bare name read anywhere inside an expression."""
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
 def count_sites(text):
     """How many times the text reaches the client library directly.
 
-    Counted on the syntax tree: a call to a request method on the module or
-    any alias of it, a call to a request method imported by name from it, or
-    the construction of a client object from it. Prose never counts. A text
-    that does not parse is counted as zero here -- the syntax tier owns that
-    failure and reports it by name.
+    Counted on the syntax tree: a request method or a client class reached
+    on the module, on any alias of it, on a name or an attribute the module
+    was bound to, or imported by name from it. A reference counts whether or
+    not it is called: a request method handed on as a callable is a route to
+    the client. Prose never counts. A text that does not parse is counted as
+    zero here -- the syntax tier owns that failure and reports it by name.
+
+    Binding is followed one assignment at a time until nothing new binds:
+    ``self._c = injected or _ollama`` makes ``_c`` a client attribute, and
+    ``c = ollama.Client(host)`` makes ``c`` a client name. The receiver is
+    what the fourth convergence block found the census blind to, with a
+    ``chat`` request behind it.
     """
     try:
         tree = ast.parse(text)
@@ -95,19 +116,41 @@ def count_sites(text):
                     bare.add(alias.asname or alias.name)
     if not aliases and not bare:
         return 0
+    attrs = set()
+    grown = True
+    while grown:
+        grown = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            tainted = _names_in(value) & (aliases | bare)
+            if not tainted:
+                tainted = {
+                    n.attr for n in ast.walk(value)
+                    if isinstance(n, ast.Attribute) and n.attr in attrs
+                }
+            if not tainted:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases.add(target.id)
+                    grown = True
+                elif isinstance(target, ast.Attribute) and target.attr not in attrs:
+                    attrs.add(target.attr)
+                    grown = True
     n = 0
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id in aliases
-            and func.attr in _CLIENT_CALLS | _CLIENT_CLASSES
-        ):
-            n += 1
-        elif isinstance(func, ast.Name) and func.id in bare:
+        if isinstance(node, ast.Attribute) and node.attr in _CLIENT_CALLS | _CLIENT_CLASSES:
+            value = node.value
+            if isinstance(value, ast.Name) and value.id in aliases:
+                n += 1
+            elif isinstance(value, ast.Attribute) and value.attr in attrs:
+                n += 1
+        elif isinstance(node, ast.Name) and node.id in bare and isinstance(node.ctx, ast.Load):
             n += 1
     return n
 

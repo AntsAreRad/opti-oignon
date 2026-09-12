@@ -27,13 +27,19 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Conditional import of ollama
-try:
-    import ollama as _ollama_module
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama_module = None
+# Models are probed through the inference registry's backend; this module
+# keeps no client of its own.
+
+
+def _registry_backend(model: str | None = None) -> Any:
+    """The registry's backend for ``model`` (the active one without), or None."""
+    try:
+        from .registry_clients import backend_for
+
+        return backend_for(model)
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
 
 
 # Sentinel for distinguishing "not provided" from explicit None
@@ -138,7 +144,7 @@ class ModelHealthMonitor:
         auto_failover: bool = True,
         max_records: int | None = None,
         config_path: Path | None = None,
-        ollama_module: Any = _UNSET,
+        backend_resolver: Any = None,
     ):
         """Initialize the health monitor.
 
@@ -151,7 +157,8 @@ class ModelHealthMonitor:
             auto_failover: Whether to enable automatic failover in routing
             max_records: Maximum number of model records to keep
             config_path: Path to YAML config (None = default)
-            ollama_module: Ollama module for dependency injection (None = disable, _UNSET = auto)
+            backend_resolver: Callable taking a model name (or None) and answering
+                the backend to probe, or None; defaults to the inference registry
         """
         # Store constructor values before config load
         self._enabled = enabled
@@ -162,7 +169,7 @@ class ModelHealthMonitor:
         self._auto_failover = auto_failover
         self._max_records = max_records or DEFAULT_MAX_RECORDS
         self._config_path = config_path or _DEFAULT_CONFIG_PATH
-        self._ollama = _ollama_module if ollama_module is _UNSET else ollama_module
+        self._backend = backend_resolver or _registry_backend
 
         # Health records keyed by model name
         self._records: dict[str, ModelHealthRecord] = {}
@@ -333,13 +340,13 @@ class ModelHealthMonitor:
     def check_all(self) -> dict[str, ModelHealthRecord]:
         """Run health checks on all known models.
 
-        Discovers models via ollama.list() and checks each one.
+        Discovers models through the registry's backend and checks each one.
 
         Returns:
             Dict mapping model name to health record.
         """
-        if self._ollama is None:
-            logger.debug("Ollama not available, skipping health check")
+        if self._backend(None) is None:
+            logger.debug("No inference backend is registered, skipping health check")
             return dict(self._records)
 
         # Discover models
@@ -352,8 +359,8 @@ class ModelHealthMonitor:
     def check_model(self, model_name: str) -> ModelHealthRecord:
         """Run a health check on a single model.
 
-        Uses ollama.show() to verify model availability and
-        measures response latency.
+        Asks the registry's backend for the model's ``model_info`` to
+        verify availability and measures response latency.
 
         Args:
             model_name: Name of the Ollama model to check.
@@ -371,17 +378,18 @@ class ModelHealthMonitor:
         record.last_check = now
         record.check_count += 1
 
-        if self._ollama is None:
-            # No ollama module available
+        backend = self._backend(model_name)
+        if backend is None:
             record.consecutive_failures += 1
             record.error_count += 1
-            record.last_error = "Ollama module not available"
+            record.last_error = "No inference backend is registered"
             self._update_status(record)
             return record
 
         try:
             start = time.monotonic()
-            self._ollama.show(model_name)
+            if backend.model_info(model_name) is None:
+                raise RuntimeError(f"{model_name} is not served by backend {getattr(backend, 'name', backend)}")
             elapsed_ms = (time.monotonic() - start) * 1000
 
             # Success
@@ -417,34 +425,22 @@ class ModelHealthMonitor:
         # else: remains UNKNOWN or whatever it was
 
     def _discover_models(self) -> list[str]:
-        """Discover available models via ollama.list().
+        """Discover available models through the registry's backend.
 
         Returns:
-            List of model names.
+            List of model names; empty when no backend is registered.
         """
-        if self._ollama is None:
+        backend = self._backend(None)
+        if backend is None:
+            logger.debug("No inference backend is registered; no model to discover")
             return []
 
         try:
-            response = self._ollama.list()
-            # ollama-python >= 0.4: ListResponse with .models attribute
-            if hasattr(response, "models"):
-                models = response.models or []
-            elif isinstance(response, dict):
-                models = response.get("models", [])
-            else:
-                models = list(response) if response else []
-
             names = []
-            for m in models:
-                name = getattr(m, "model", None) or (m.get("model") if isinstance(m, dict) else None)
+            for m in backend.list_models() or []:
+                name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
                 if name:
-                    names.append(name)
-                else:
-                    # Fallback to name attribute
-                    n = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
-                    if n:
-                        names.append(n)
+                    names.append(str(name))
 
             return names
 
@@ -590,7 +586,7 @@ class ModelHealthMonitor:
             "auto_failover": self._auto_failover,
             "max_records": self._max_records,
             "tracked_models": len(self._records),
-            "ollama_available": self._ollama is not None,
+            "ollama_available": self._backend(None) is not None,
         }
 
     def reset(self):

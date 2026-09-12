@@ -24,13 +24,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Import Ollama -- needed to call the summary model
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    logger.warning("ollama unavailable -- context_summary disabled")
+# The summary model is asked through the inference registry, and so is the
+# list of installed models; this module keeps no client of its own.
 
 # Token estimation -- reuses context_manager if available
 try:
@@ -125,7 +120,8 @@ class ContextSummarizer:
     def _find_available_model(self) -> str | None:
         """Find a suitable model for summarization.
 
-        Checks cache first, then queries Ollama for available models.
+        Checks cache first, then asks the registry's active backend which
+        models are installed.
 
         Returns:
             Model name string, or None if no model available
@@ -135,21 +131,11 @@ class ContextSummarizer:
         if self._available_model and (now - self._model_checked_at) < self._model_cache_ttl:
             return self._available_model
 
-        if not OLLAMA_AVAILABLE:
-            return None
-
         try:
-            # List loaded/available models
-            models_response = ollama.list()
-            available_names = set()
-            if hasattr(models_response, "models"):
-                # Format ollama-python >= 0.3
-                for m in models_response.models:
-                    available_names.add(m.model if hasattr(m, "model") else str(m))
-            elif isinstance(models_response, dict) and "models" in models_response:
-                for m in models_response["models"]:
-                    name = m.get("model", m.get("name", ""))
-                    available_names.add(name)
+            available_names = self._installed_model_names()
+            if available_names is None:
+                logger.debug("No inference backend is registered; no summary model to pick")
+                return None
 
             # Search in order of preference
             for candidate in self.FALLBACK_MODELS:
@@ -239,6 +225,24 @@ class ContextSummarizer:
         return truncated
 
     @staticmethod
+    def _installed_model_names() -> set[str] | None:
+        """The names the registry's active backend serves; None without a backend."""
+        try:
+            from opti_oignon.inference_backend import get_backend_registry
+        except Exception as exc:  # noqa: BLE001 - absence is an answer here
+            logger.debug("Inference registry unavailable: %s", exc)
+            return None
+        backend = get_backend_registry().active
+        if backend is None:
+            return None
+        names: set[str] = set()
+        for record in backend.list_models() or []:
+            name = getattr(record, "name", None) or (record.get("name") if isinstance(record, dict) else None)
+            if name:
+                names.add(str(name))
+        return names
+
+    @staticmethod
     def _resolve_backend(model: str):
         """The registry's backend for ``model``, or None when there is none.
 
@@ -277,10 +281,6 @@ class ContextSummarizer:
         """
         if not messages:
             logger.warning("No messages to summarize")
-            return None
-
-        if not OLLAMA_AVAILABLE:
-            logger.warning("Ollama unavailable -- summarization impossible")
             return None
 
         # Model selection

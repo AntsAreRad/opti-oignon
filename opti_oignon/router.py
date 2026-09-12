@@ -19,8 +19,6 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-import ollama
-
 from .analyzer import AnalysisResult, TaskType
 from .config import config
 
@@ -156,18 +154,12 @@ class ModelRouter:
                 return self._available_models
 
         try:
-            response = ollama.list()
-            models = []
-            if hasattr(response, 'models'):
-                for m in response.models:
-                    name = getattr(m, 'model', None) or getattr(m, 'name', None)
-                    if name:
-                        models.append(name)
-            elif isinstance(response, dict):
-                for m in response.get("models", []):
-                    name = m.get("model") or m.get("name", "")
-                    if name:
-                        models.append(name)
+            from .registry_clients import installed_model_names
+
+            models = installed_model_names()
+            if models is None:
+                logger.debug("No inference backend is registered; keeping the last model list")
+                return self._available_models
 
             self._available_models = models
             self._last_check = time.time()
@@ -175,7 +167,7 @@ class ModelRouter:
             return models
 
         except Exception as e:
-            logger.error(f"Ollama model listing error: {e}")
+            logger.error(f"Model listing error: {e}")
             return self._available_models
 
     def is_model_available(self, model: str) -> bool:

@@ -33,10 +33,13 @@ the instance is gone. The two runner names, one per module, are kept distinct
 on purpose after an earlier shadowing, and each resolves through its own
 module with its own flag.
 
-The one function in the module consults the backend registry first and only
-falls through to the direct client when the registry yields no backend or
-raises; empty and missing answers are normalised to an empty list, and every
-answer shape of the direct client is folded to a plain list.
+The one function in the module used to consult the backend registry first
+and fall through to the direct client (d26 to d28, superseded by name). It
+asked the registry for a method it never had, so the fall-through ran every
+time; since the fourth convergence block it asks the registry's active
+backend and nothing else: an absent registry, no active backend, a backend
+that raises or answers nothing all come back as an empty list, and the
+client library is never reached (d31, d32).
 
 Everything the module reaches for is seeded or declared unreachable and proven
 so; the loader module is loaded REAL from its own source, first in the window,
@@ -168,6 +171,33 @@ class _Registry:
 class _RaisingRegistry:
     def get_backend(self, name):
         raise RuntimeError("registry down")
+
+    @property
+    def active(self):
+        raise RuntimeError("registry down")
+
+
+class _ActiveRegistry:
+    """The registry's real surface for the listing: an ``active`` backend, or None."""
+
+    def __init__(self, backend):
+        self.active = backend
+
+
+class _RaisingBackend:
+    def list_models(self):
+        raise RuntimeError("listing down")
+
+
+class _ForbiddenClient:
+    """A client whose listing is a failure by name: the function must not reach it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def list(self):
+        self.calls.append("list")
+        raise AssertionError("direct client list()")
 
 
 class _Backend:
@@ -661,6 +691,41 @@ def test_d28_every_direct_client_answer_shape_is_folded_to_a_plain_list():
             assert deps.get_ollama_models() == expected
         finally:
             restore()
+
+
+def test_d31_the_active_backend_answers_the_listing_and_empty_answers_become_lists():
+    for models, expected in ((["alpha"], ["alpha"]), ([], []), (None, [])):
+        client = _ForbiddenClient()
+        deps, restore = _load(
+            seeded={"opti_oignon.inference_backend": _inference_seed(_ActiveRegistry(_Backend(models)))},
+            ollama=_mod("ollama", list=client.list),
+        )
+        try:
+            assert deps.get_ollama_models() == expected
+            assert client.calls == [], "the client library was never reached"
+        finally:
+            restore()
+
+
+def test_d32_without_an_active_backend_or_with_a_failing_one_the_listing_is_empty_and_the_client_untouched():
+    for registry in (_ActiveRegistry(None), _ActiveRegistry(_RaisingBackend()), _RaisingRegistry()):
+        client = _ForbiddenClient()
+        deps, restore = _load(
+            seeded={"opti_oignon.inference_backend": _inference_seed(registry)},
+            ollama=_mod("ollama", list=client.list),
+        )
+        try:
+            assert deps.get_ollama_models() == []
+            assert client.calls == []
+        finally:
+            restore()
+    client = _ForbiddenClient()
+    deps, restore = _load(ollama=_mod("ollama", list=client.list))
+    try:
+        assert deps.get_ollama_models() == [], "no registry at all is an empty list"
+        assert client.calls == []
+    finally:
+        restore()
 
 
 # ---------------------------------------------------------------------------
