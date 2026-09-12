@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Shared clients over the inference registry for the routes that used to
+build a client of their own.
+
+Five routes built a one-shot client per request from the client library,
+some with a host of their own -- a bypass by construction: a request that
+picks its own host is admitted by no governor and labelled by nothing.
+These two clients keep the routes' surface -- a callable that answers a
+message list with text, a streamer the agent loop reads -- and send every
+request through the registry. The host argument is accepted for the
+former signature and unused: where a model is served is the registry's.
+"""
+
+import logging
+
+checkpoint_before_apply = True
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Inference registry unavailable: %s", exc)
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("Inference registry could not resolve %s: %s", model, exc)
+        return None
+
+
+def _require_backend(model):
+    backend = _resolve_backend(model)
+    if backend is None:
+        raise RuntimeError(
+            f"no inference backend is registered in the registry for {model!r}; "
+            "refusing rather than calling a client of its own"
+        )
+    return backend
+
+
+class OneShotChatClient:
+    """A callable over the registry: a message list in, the assistant's text out."""
+
+    def __init__(self, model, *, host=None):
+        self._model = model
+        self._host = host  # accepted for the former signature; the registry decides where
+
+    def __call__(self, messages):
+        backend = _require_backend(self._model)
+        response = backend.generate(model=self._model, messages=list(messages), options=None)
+        return str(getattr(response, "content", "") or "")
+
+
+class ModelStreamClient:
+    """A streamer over the registry in the loop's shape: one chunk per turn.
+
+    A turn is one ``generate`` with the tool schemas as an engine option,
+    handed back as ``{"message": {"content", "tool_calls"}}`` -- the client
+    shape the loop reads, tool calls as the backend delivered them.
+    """
+
+    def __init__(self, model, *, host=None):
+        self._model = model
+        self._host = host
+
+    def stream(self, messages, tools=None):
+        backend = _require_backend(self._model)
+        options = {"tools": list(tools)} if tools else None
+        response = backend.generate(model=self._model, messages=list(messages), options=options)
+        to_dict = getattr(response, "to_dict", None)
+        if callable(to_dict):
+            yield to_dict()
+            return
+        yield {"message": {
+            "content": getattr(response, "content", "") or "",
+            "tool_calls": list(getattr(response, "tool_calls", None) or []),
+        }}

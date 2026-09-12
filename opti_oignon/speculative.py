@@ -36,15 +36,25 @@ except ImportError:
     QUALITY_EVAL_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Ollama import
+# Inference registry
 # ---------------------------------------------------------------------------
 
-try:
-    import ollama as _ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    _ollama = None
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import; nothing here
+    reaches for the client behind the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -137,6 +147,9 @@ def _extract_message_content(response: Any) -> str:
     """
     if isinstance(response, dict):
         return response.get("message", {}).get("content", "") or ""
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content
     msg = getattr(response, "message", None)
     if msg is not None:
         if hasattr(msg, "content"):
@@ -346,10 +359,11 @@ class SpeculativeGenerator:
         Returns:
             Draft response text.
         """
-        if not OLLAMA_AVAILABLE or _ollama is None:
-            raise RuntimeError("Ollama is not available for draft generation")
+        backend = _resolve_backend(self._draft_model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend is registered in the registry for {self._draft_model!r} (draft)")
 
-        response = _ollama.chat(
+        response = backend.generate(
             model=self._draft_model,
             messages=[{"role": "user", "content": query}],
             options={
@@ -369,8 +383,9 @@ class SpeculativeGenerator:
         Returns:
             Verified response text.
         """
-        if not OLLAMA_AVAILABLE or _ollama is None:
-            raise RuntimeError("Ollama is not available for verification")
+        backend = _resolve_backend(self._verify_model)
+        if backend is None:
+            raise RuntimeError(f"no inference backend is registered in the registry for {self._verify_model!r} (verify)")
 
         verify_prompt = (
             f"User query: {query}\n\n"
@@ -380,7 +395,7 @@ class SpeculativeGenerator:
             "generate a better response."
         )
 
-        response = _ollama.chat(
+        response = backend.generate(
             model=self._verify_model,
             messages=[
                 {"role": "system", "content": _VERIFY_SYSTEM_PROMPT},

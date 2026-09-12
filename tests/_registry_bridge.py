@@ -118,6 +118,22 @@ class ScriptedBackend:
     def slots(self):
         return []
 
+    def list_models(self):
+        """The scripted client's ``list()`` when it has one, as named entries."""
+        listing = getattr(self._scripted, "list", None)
+        if not callable(listing):
+            return []
+        payload = listing()
+        models = payload.get("models", []) if isinstance(payload, dict) else getattr(payload, "models", [])
+        out = []
+        for m in models:
+            if isinstance(m, dict):
+                name = m.get("name", m.get("model", ""))
+            else:
+                name = getattr(m, "name", getattr(m, "model", str(m)))
+            out.append(SimpleNamespace(name=name, backend=self.name))
+        return out
+
     @staticmethod
     def _kwargs(model, messages, options, keep_alive, think, stream):
         opts = None if options is None else dict(options)

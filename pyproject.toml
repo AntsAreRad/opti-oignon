@@ -329,6 +329,15 @@ fail_under = 0
 # no longer does, and every one of them is now empty by design. Each has a
 # successor in its file that keeps the property and proves capability on a
 # synthetic ledger entry or on the module count instead.
+#
+# c5 and ox5 each pinned a seam that is gone. c5 read the correction prompt
+# off a client object the self-correction module used to hold; the module
+# now asks the inference registry, and c7 in the same file reads the same
+# prompt off the registry's request and keeps the cap of three. ox5 asserted
+# the dynamic pipeline's client flag, which left with the client; ox7 in the
+# same file keeps the live property: one request on the step model through
+# the registry, and a plain marker with zero requests when no backend serves
+# it.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -365,4 +374,6 @@ addopts = """
     --deselect=tests/test_import_footprint_contracts.py::test_fp7_a_ledger_entry_no_longer_reached_is_reported_stale
     --deselect=tests/test_fingerprint_path_anchoring_contracts.py::test_fa5_the_import_writes_nothing_into_the_callers_directory
     --deselect=tests/test_learned_router_lazy_contracts.py::test_lr5_the_package_import_no_longer_loads_it
+    --deselect=tests/test_self_correction_loop_contracts.py::test_c5_adversarial_fact_flags_are_capped_in_the_prompt
+    --deselect=tests/test_agents_exec_surface_contracts.py::test_ox5_dynamic_step_calls_only_the_client_or_yields_a_marker
 """

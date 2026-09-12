@@ -29,13 +29,22 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-# Import conditionnel d'ollama
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-    ollama = None
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import; nothing here
+    reaches for the client behind the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
+
 
 logger = logging.getLogger("DynamicPipeline")
 
@@ -360,10 +369,10 @@ JSON format:
         """
         start_time = time.time()
 
-        # Check Ollama availability
-        if not OLLAMA_AVAILABLE:
-            logger.warning("Ollama not available, using fallback plan")
-            return self._create_fallback_plan(user_prompt, "Ollama not available", time.time() - start_time)
+        backend = _resolve_backend(self.planning_model)
+        if backend is None:
+            logger.warning("no inference backend for the planning model, using fallback plan")
+            return self._create_fallback_plan(user_prompt, "no inference backend is registered", time.time() - start_time)
 
         # Prompt construction
         template = self.FAST_PLANNING_PROMPT if self.fast_mode else self.PLANNING_PROMPT
@@ -378,7 +387,7 @@ JSON format:
 
         for attempt in range(self.max_retries + 1):
             try:
-                response = ollama.chat(
+                response = backend.generate(
                     model=self.planning_model,
                     messages=[
                         {"role": "system", "content": "You are a pipeline planning assistant. Output only valid JSON."},
@@ -386,7 +395,7 @@ JSON format:
                     ],
                     options={"temperature": self.temperature},
                 )
-                raw_response = response.get("message", {}).get("content", "")
+                raw_response = getattr(response, "content", "") or ""
 
                 # Parse le JSON
                 plan_data = self._parse_plan_json(raw_response)
@@ -829,9 +838,9 @@ class DynamicPipelineExecutor:
     ) -> Generator[str, None, None]:
         """Execute an individual step."""
 
-        # Check Ollama availability
-        if not OLLAMA_AVAILABLE:
-            yield "[ERROR] Ollama not available for step execution"
+        backend = _resolve_backend(step.model)
+        if backend is None:
+            yield "[ERROR] no inference backend is registered for step execution"
             return
 
         # System prompt based on agent type
@@ -847,21 +856,19 @@ class DynamicPipelineExecutor:
 
         try:
             if stream:
-                response_stream = ollama.chat(
+                for chunk in backend.stream(
                     model=step.model,
                     messages=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
                     ],
                     options={"temperature": 0.4},
-                    stream=True,
-                )
-
-                for chunk in response_stream:
-                    if "message" in chunk and "content" in chunk["message"]:
-                        yield chunk["message"]["content"]
+                ):
+                    content = getattr(chunk, "content", "") or ""
+                    if content:
+                        yield content
             else:
-                response = ollama.chat(
+                response = backend.generate(
                     model=step.model,
                     messages=[
                         {"role": "system", "content": system},
@@ -869,7 +876,7 @@ class DynamicPipelineExecutor:
                     ],
                     options={"temperature": 0.4},
                 )
-                yield response.get("message", {}).get("content", "")
+                yield getattr(response, "content", "") or ""
 
         except Exception as e:
             logger.error(f"Step execution error: {e}")

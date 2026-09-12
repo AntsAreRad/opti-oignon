@@ -54,27 +54,17 @@ _CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
 # Debt that predates the funnel: repo-relative module -> sha256 of its text as
 # the debt was enumerated. MAY ONLY SHRINK, and no entry may move.
 LEDGER = {
-    "opti_oignon/agents/base.py": "adf1a32b6e7705aed2ddfe4d2a10dc0171f4d300cbeef785a2e028ff9ebde900",
-    "opti_oignon/agents/dynamic_pipeline.py": "6c6386143ecadff03a91f67e571704458dc558beea4680493973ae9e299f9af6",
-    "opti_oignon/api/routes_agent.py": "1728203013819d3aeaab2af3d160a038860c163275f13804022bb99e27fcf2b8",
-    "opti_oignon/api/routes_answer_verification.py": "e02e93ed50726d9a1eabfc525f5bac59b7d98f38429d5ef36b845fd292eac0ed",
     "opti_oignon/api/routes_benchmark.py": "5e3900bea555ff38a5229357b294c0ee9a66026f9713a2c445baec74f0cf553a",
-    "opti_oignon/api/routes_citation_verification.py": "3097310fe98d52a754df16799deb06713e419b46ef3c32a0dfc121a00ffc7ee5",
-    "opti_oignon/api/routes_claim_verification.py": "369fb16980f2daaaa258dcec55b60c511a23ea4a8cdc2fe522b3271120f5d8e9",
     "opti_oignon/api/routes_fine_tune.py": "bb80ad1d5f20c92ba68945a3eb62d9de25bcd04ee6af881304859425eb7794c8",
-    "opti_oignon/api/routes_note_actions.py": "9767920c8f68929dab8bbb8e642d426d0461bc5f0f5df3d723e1a11014b694a6",
     "opti_oignon/benchmark_judge.py": "3a4b1eaaba98b3f0f006822e66ed55c472f861b34a66635672a81c3a1a8c1bb7",
     "opti_oignon/benchmark_runner.py": "b0620fdcd46bfe709613af2a2adc297a91a3de251cadee5a071373bde3e0c993",
     "opti_oignon/cascading.py": "7ebd56407919f33f2773bce1825bdb5da0d69da7255d8410ba52e2319e650e2b",
     "opti_oignon/humanizer.py": "5cf648492f279f4cee1f23ff4bf70861bfd8f02c2cc6d07b60ef3ac2ed5da084",
-    "opti_oignon/memory/legacy.py": "a7f12990331096707028425d6257480be0cce2acc64148473bb691d639e04dd5",
     "opti_oignon/model_warmup.py": "a7954f8256dae5eac366425373b152cbca911bf329e764ec022d3723c9782581",
     "opti_oignon/pre_cache.py": "146f184dfd5317b53987efaad2f084f72fc2d29f6300bdf1b7148ff849a2d43a",
     "opti_oignon/reasoning.py": "b629a2654f74e060c6a978d75a543d8da8aeaf5eda734c0e6d9feb732c9d5088",
     "opti_oignon/routing/benchmark.py": "33e7f930ffe42d8b53e4deb794775f83898dbee3fc43c62e2e7177cae45b8301",
-    "opti_oignon/self_correction.py": "87a6db34185a5f364ba27fb68d8cb757b5cb9c4240f8d796a37cb50afce50deb",
     "opti_oignon/semantic_cache.py": "edd88abf6bd9cc43822e2b6b89802c27fa17c13e3827b7c2934174259c9562e5",
-    "opti_oignon/speculative.py": "37db6c66099db9164553a8c7c3f7db12fa8a4f110dbb691fb4f74fa47bf9f951",
 }
 
 

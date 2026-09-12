@@ -51,14 +51,35 @@ except ImportError:
     def _encrypt(v: str) -> str: return v  # type: ignore[misc]
     def _decrypt(v: str) -> str: return v  # type: ignore[misc]
 
-# Import Ollama -- needed for fact extraction
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
-
 from opti_oignon.db_utils import safe_connect
+
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import; nothing here
+    reaches for the client behind the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
+
+
+def _active_backend():
+    """The registry's active backend, or None: the one whose models are listed."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        return get_backend_registry().active
+    except Exception:  # noqa: BLE001
+        return None
 
 # Import conversation_manager to access messages
 try:
@@ -144,6 +165,9 @@ def _reply_text(response: Any) -> str:
         if isinstance(message, dict):
             return str(message.get("content") or "")
         return str(response.get("content") or "")
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content
     message = getattr(response, "message", None)
     if message is not None:
         return str(getattr(message, "content", "") or "")
@@ -701,22 +725,14 @@ class MemoryManager:
         ):
             return self._available_model
 
-        if not OLLAMA_AVAILABLE:
+        backend = _active_backend()
+        if backend is None:
             return None
 
         try:
-            models_response = ollama.list()
             available_names = set()
-
-            if hasattr(models_response, "models"):
-                for m in models_response.models:
-                    available_names.add(
-                        m.model if hasattr(m, "model") else str(m)
-                    )
-            elif isinstance(models_response, dict) and "models" in models_response:
-                for m in models_response["models"]:
-                    name = m.get("model", m.get("name", ""))
-                    available_names.add(name)
+            for m in backend.list_models():
+                available_names.add(str(getattr(m, "name", m)))
 
             # Search in order of preference
             for candidate in self.FALLBACK_MODELS:
@@ -889,8 +905,8 @@ class MemoryManager:
         Returns:
             Liste de {"fact": ..., "category": ...} dicts
         """
-        if not OLLAMA_AVAILABLE:
-            logger.warning("Ollama non disponible — extraction impossible")
+        if _active_backend() is None:
+            logger.warning("no inference backend is registered; extraction impossible")
             return []
 
         if not CONVERSATION_AVAILABLE or not conversation_manager:
@@ -932,7 +948,10 @@ class MemoryManager:
         # Appel LLM
         start_time = time.time()
         try:
-            response = ollama.chat(
+            backend = _resolve_backend(extraction_model)
+            if backend is None:
+                return []
+            response = backend.generate(
                 model=extraction_model,
                 messages=[
                     {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
@@ -986,7 +1005,7 @@ class MemoryManager:
         Returns:
             Liste de {"fact": ..., "category": ...} dicts
         """
-        if not OLLAMA_AVAILABLE:
+        if _active_backend() is None:
             return []
 
         if not messages or len(messages) < 2:
@@ -1007,7 +1026,10 @@ class MemoryManager:
 
         start_time = time.time()
         try:
-            response = ollama.chat(
+            backend = _resolve_backend(extraction_model)
+            if backend is None:
+                return []
+            response = backend.generate(
                 model=extraction_model,
                 messages=[
                     {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},

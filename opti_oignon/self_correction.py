@@ -45,12 +45,20 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
 
-# Import conditionnel d'Ollama
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import; nothing here
+    reaches for the client behind the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +79,10 @@ def _generate_text(result: Any) -> str:
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
-        return str(result.get("response") or "")
+        return str(result.get("response") or result.get("content") or "")
+    content = getattr(result, "content", None)
+    if isinstance(content, str):
+        return content
     return str(getattr(result, "response", "") or "")
 
 
@@ -596,8 +607,11 @@ class SelfCorrectionEngine:
 
     @property
     def available(self) -> bool:
-        """Indique si le moteur est operationnel."""
-        return OLLAMA_AVAILABLE
+        """Whether a backend can be resolved for the correction model."""
+        return self._backend_for(None) is not None
+
+    def _backend_for(self, model):
+        return _resolve_backend(model or self._config.correction_model or "qwen3:32b")
 
     # -----------------------------------------------------------------
     # Checks principaux
@@ -636,7 +650,7 @@ class SelfCorrectionEngine:
             user_message, response, instructions,
         )
 
-        if not use_llm or not OLLAMA_AVAILABLE:
+        if not use_llm or self._backend_for(model) is None:
             return heuristic_result
 
         # Verification LLM (plus precise mais plus lente)
@@ -663,7 +677,7 @@ class SelfCorrectionEngine:
         Returns:
             FactCheckResult avec les flags et confiance
         """
-        if not OLLAMA_AVAILABLE:
+        if self._backend_for(model) is None:
             return FactCheckResult(confidence=0.5)
 
         _model = model or self._config.correction_model or "qwen3:32b"
@@ -685,9 +699,9 @@ class SelfCorrectionEngine:
             prompt += f"\n\nOriginal context:\n{context[:1000]}"
 
         try:
-            result = ollama.generate(
+            result = self._backend_for(_model).generate(
                 model=_model,
-                prompt=prompt,
+                messages=[{"role": "user", "content": prompt}],
                 options={"temperature": 0.1, "num_predict": 1024},
             )
             text = _generate_text(result)
@@ -735,7 +749,7 @@ class SelfCorrectionEngine:
         # Toujours calculer les heuristiques
         heuristic = compute_heuristic_quality(user_message, response)
 
-        if not use_llm or not OLLAMA_AVAILABLE:
+        if not use_llm or self._backend_for(model) is None:
             return heuristic
 
         # Evaluation LLM pour affiner
@@ -800,7 +814,7 @@ class SelfCorrectionEngine:
             or quality_score < self._config.quality_threshold
         )
 
-        if not needs_correction or not use_llm or not OLLAMA_AVAILABLE:
+        if not needs_correction or not use_llm or self._backend_for(None) is None:
             duration = int((time.time() - start_time) * 1000)
             return SelfCorrectionResult(
                 original_response=response,
@@ -994,9 +1008,9 @@ class SelfCorrectionEngine:
         )
 
         try:
-            result = ollama.generate(
+            result = self._backend_for(_model).generate(
                 model=_model,
-                prompt=prompt,
+                messages=[{"role": "user", "content": prompt}],
                 options={"temperature": 0.1, "num_predict": 1024},
             )
             text = _generate_text(result)
@@ -1060,9 +1074,9 @@ class SelfCorrectionEngine:
         )
 
         try:
-            result = ollama.generate(
+            result = self._backend_for(_model).generate(
                 model=_model,
-                prompt=prompt,
+                messages=[{"role": "user", "content": prompt}],
                 options={"temperature": 0.1, "num_predict": 512},
             )
             text = _generate_text(result)
@@ -1111,7 +1125,8 @@ class SelfCorrectionEngine:
         Returns:
             Texte de la reponse corrigee, ou None si failed
         """
-        if not OLLAMA_AVAILABLE:
+        backend = self._backend_for(model)
+        if backend is None:
             return None
 
         # Construire le feedback
@@ -1150,9 +1165,9 @@ class SelfCorrectionEngine:
         )
 
         try:
-            result = ollama.generate(
+            result = backend.generate(
                 model=model,
-                prompt=prompt,
+                messages=[{"role": "user", "content": prompt}],
                 options={
                     "temperature": self._config.temperature,
                     "num_predict": 4096,

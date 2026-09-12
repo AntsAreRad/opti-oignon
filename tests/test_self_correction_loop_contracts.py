@@ -21,59 +21,69 @@ learned content of the critique or the heuristic scoring magnitudes.
     correction is produced and the generator is never invoked, however far the
     scores sit below the thresholds.
   * C5 -- adversarial flags are capped: no matter how many factual flags the
-    critique emits, at most three enter the correction prompt.
+    critique emits, at most three enter the correction prompt. Superseded:
+    it read the prompt off a client object the module no longer holds.
+  * C7 -- the same cap, read off the request the module now sends through
+    the inference registry: a single user message carrying at most three
+    of the flags, on the model that was asked for.
   * C6 -- scores are clamped: any model-returned score is bounded into the unit
     range and a non-numeric score falls to the caller default, so an
     out-of-range score can never wrongly satisfy or fail a threshold.
 
 Local-only (the public distribution ships no tests). Runs under pytest or the
-__main__ runner. Loading follows the sibling-harness idiom: the real module is
-loaded under a stand-in package, with the model backend faked per test so no
-inference backend is required.
+__main__ runner. The real module is loaded through the shared isolation
+window over the registry bridge: the inference registry holds one scripted
+backend, so the model path is open and every request it sends is recorded,
+while the generator is faked per test where a contract is about the loop.
 """
 
-import importlib.util
 import sys
 import traceback
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import seed_registry  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Isolated loading (sibling-harness idiom)
+# Isolated loading (shared window over the registry bridge)
 # ---------------------------------------------------------------------------
-def _load():
-    """Load the real self_correction module under a stand-in package.
+class _Scripted:
+    """The client behind the registry's one backend: replies fixed, calls kept."""
 
-    Returns (module, restore). The module is a leaf (stdlib plus optional
-    yaml/ollama), so nothing else is stubbed; the backend gate is opened and
-    the generator faked per test.
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"message": {"content": self.reply}}
+
+
+def _load_recording(reply="ok"):
+    """Load the real self_correction module over a registry with one backend.
+
+    Returns (module, client, restore). The module is a leaf, so nothing else
+    is seeded; the registry's backend answers ``reply`` and records every
+    request, which opens the model path for the loop contracts and lets C7
+    read what was sent.
     """
-    keys = ("opti_oignon", "opti_oignon.self_correction")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.self_correction", _OO / "self_correction.py",
+    client = _Scripted(reply)
+    seeded = {}
+    seed_registry(seeded, client)
+    loaded, restore = isolate(
+        targets={"opti_oignon.self_correction": source("self_correction.py")},
+        seeded=seeded,
+        packages=("opti_oignon",),
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.self_correction"] = mod
-    spec.loader.exec_module(mod)
-    pkg.self_correction = mod
+    return loaded["opti_oignon.self_correction"], client, restore
 
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
 
+def _load():
+    """Load the module with the model path open; returns (module, restore)."""
+    mod, _client, restore = _load_recording()
     return mod, restore
 
 
@@ -279,6 +289,35 @@ def test_c5_adversarial_fact_flags_are_capped_in_the_prompt():
 
 
 # ---------------------------------------------------------------------------
+# C7 -- adversarial flags are capped in the registry request
+# ---------------------------------------------------------------------------
+def test_c7_adversarial_fact_flags_are_capped_in_the_registry_request():
+    mod, client, restore = _load_recording("a corrected answer long enough to pass")
+    try:
+        engine = _engine(mod, 2)
+        flags = [
+            mod.FactualFlag(claim=f"CLAIMTOKEN{i}", concern="c", severity="high")
+            for i in range(10)
+        ]
+        facts = mod.FactCheckResult(flags=flags, flag_count=10)
+        out = engine._generate_correction("q", "resp", None, None, facts, "m")
+        assert out is not None, "the registry's backend must yield a correction"
+        assert len(client.calls) == 1, "one request, through the registry"
+        call = client.calls[0]
+        assert call["model"] == "m", "on the model that was asked for"
+        assert [m["role"] for m in call["messages"]] == ["user"], (
+            "the correction prompt travels as a single user message"
+        )
+        seen = call["messages"][0]["content"].count("CLAIMTOKEN")
+        assert seen == 3, (
+            "no matter how many flags an adversarial critique emits, at most "
+            "three may enter the correction request"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # C6 -- scores are clamped into the unit range
 # ---------------------------------------------------------------------------
 def test_c6_score_clamp_bounds_model_scores():
@@ -305,7 +344,7 @@ def _run_all():
         ("C2 worse correction never returned", test_c2_worse_correction_is_never_returned),
         ("C3 no-improvement preserves original", test_c3_unchanged_or_empty_correction_preserves_original),
         ("C4 no model path makes no correction", test_c4_no_model_path_makes_no_correction),
-        ("C5 adversarial flags capped in prompt", test_c5_adversarial_fact_flags_are_capped_in_the_prompt),
+        ("C7 adversarial flags capped in the registry request", test_c7_adversarial_fact_flags_are_capped_in_the_registry_request),
         ("C6 score clamp bounds model scores", test_c6_score_clamp_bounds_model_scores),
     ]
     passed = 0

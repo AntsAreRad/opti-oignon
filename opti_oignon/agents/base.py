@@ -24,8 +24,24 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import ollama
 import yaml
+
+
+def _resolve_backend(model):
+    """The registry's backend for ``model``, or None when there is none.
+
+    Imported lazily so this module stays cheap to import; nothing here
+    reaches for the client behind the registry.
+    """
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception:  # noqa: BLE001 - absence is an answer here
+        return None
+    try:
+        return get_backend_registry().resolve_backend(model)
+    except Exception:  # noqa: BLE001 - a broken registry is absence
+        return None
+
 
 # Logging configuration
 logger = logging.getLogger("MultiAgent")
@@ -270,8 +286,10 @@ class BaseAgent(ABC):
     def is_available(self, model: str) -> bool:
         """Check if a model is available on Ollama."""
         try:
-            models_list = ollama.list()
-            available = [m.get("name", m.get("model", "")) for m in models_list.get("models", [])]
+            backend = _resolve_backend(model)
+            if backend is None:
+                return False
+            available = [str(getattr(m, "name", m)) for m in backend.list_models()]
             # Normalize names (remove :latest if present)
             available_normalized = []
             for m in available:
@@ -353,13 +371,15 @@ class BaseAgent(ABC):
         token_count = 0
 
         try:
+            backend = _resolve_backend(model)
+            if backend is None:
+                raise RuntimeError(f"no inference backend is registered in the registry for {model!r}")
             if stream and on_token:
                 # Streaming mode
-                response_stream = ollama.chat(
+                response_stream = backend.stream(
                     model=model,
                     messages=messages,
                     options={"temperature": self.temperature},
-                    stream=True,
                 )
 
                 for chunk in response_stream:
@@ -367,8 +387,8 @@ class BaseAgent(ABC):
                         content += "\n[Cancelled]"
                         break
 
-                    if "message" in chunk and "content" in chunk["message"]:
-                        token = chunk["message"]["content"]
+                    token = getattr(chunk, "content", "") or ""
+                    if token:
                         content += token
                         token_count += 1
                         on_token(token)
@@ -379,12 +399,12 @@ class BaseAgent(ABC):
                         break
             else:
                 # Non-streaming mode
-                response = ollama.chat(
+                response = backend.generate(
                     model=model,
                     messages=messages,
                     options={"temperature": self.temperature},
                 )
-                content = response["message"]["content"]
+                content = getattr(response, "content", "") or ""
                 token_count = len(content.split())  # Approximation
 
         except Exception as e:
@@ -446,11 +466,13 @@ class BaseAgent(ABC):
         token_count = 0
 
         try:
-            response_stream = ollama.chat(
+            backend = _resolve_backend(model)
+            if backend is None:
+                raise RuntimeError(f"no inference backend is registered in the registry for {model!r}")
+            response_stream = backend.stream(
                 model=model,
                 messages=messages,
                 options={"temperature": self.temperature},
-                stream=True,
             )
 
             for chunk in response_stream:
@@ -459,8 +481,8 @@ class BaseAgent(ABC):
                     yield "\n[Cancelled]"
                     break
 
-                if "message" in chunk and "content" in chunk["message"]:
-                    token = chunk["message"]["content"]
+                token = getattr(chunk, "content", "") or ""
+                if token:
                     content += token
                     token_count += 1
                     yield token

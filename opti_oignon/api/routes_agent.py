@@ -495,11 +495,13 @@ def reset_run_manager() -> None:
 
 
 class _OllamaModelClient:
-    """Bridge an Ollama chat stream to the loop's ``stream(messages, tools)``.
+    """The model client a run is built over: the registry's stream client.
 
-    Ollama already yields chunks shaped as ``{"message": {"content", "tool_calls"}}``,
-    which is the loop's expected stream shape. The ``ollama`` import is lazy so
-    this module loads without it; resolution failure surfaces as a 503.
+    The name is kept for the resolver below. Each turn is one request
+    through the inference registry, tool schemas travelling as an engine
+    option, handed to the loop as ``{"message": {"content", "tool_calls"}}``
+    chunks, the shape it reads. The import is lazy so this module loads
+    without the registry, exactly as it loaded without the client before.
     """
 
     def __init__(self, model: str, *, host: str | None = None) -> None:
@@ -507,14 +509,9 @@ class _OllamaModelClient:
         self._host = host
 
     def stream(self, messages: list[dict[str, Any]], tools: Any = None):
-        import ollama
+        from opti_oignon.registry_clients import ModelStreamClient
 
-        client = ollama.Client(host=self._host) if self._host else ollama.Client()
-        kwargs: dict[str, Any] = {"model": self._model, "messages": messages, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
-        for chunk in client.chat(**kwargs):
-            yield chunk
+        yield from ModelStreamClient(self._model, host=self._host).stream(messages, tools)
 
 
 def _resolve_model_client(model: str | None) -> Any:

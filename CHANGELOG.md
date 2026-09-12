@@ -11,6 +11,11 @@ package costs.
 
 ### Added
 
+- `registry_clients.py`: the two clients the verification, note-action and
+  agent routes now stand on, a one-shot text completion and a streamer in
+  the agent loop's chunk shape, both sending their request through the
+  inference registry. The host argument of the former signature is accepted
+  and unused: where a model is served is the registry's to know.
 - The core daemon (`oo core serve`): a resident loopback HTTP server over the
   inference registry, standard library only, with health, models, generate,
   stream as JSON lines, and a pack's admission ticket; off by default in
@@ -80,6 +85,17 @@ package costs.
 
 ### Changed
 
+- Nine more modules ask the inference registry instead of the client library:
+  self-correction (four completion calls), the dynamic planner and its step
+  executor, the agent base (chat, stream and the model list), speculative
+  draft and verify, legacy fact extraction (two chats and the model list),
+  and the five routes that built a client per request, some with a host of
+  their own. Every one of those requests is now admitted, labelled and
+  schema-checked; a model no backend serves gets a refusal by name or the
+  documented degraded result (heuristic scores, the fallback plan, no facts,
+  an error marker), never a client call. The funnel guard's ledger goes from
+  21 modules and 36 direct sites to 11 and 12; `model_warmup` stays owed
+  because its process listing has no registry surface yet.
 - Importing `opti_oignon` no longer imports the API application. The package
   facade exports the same names through a module `__getattr__`: each is
   imported when first asked for, and names that are also submodule names

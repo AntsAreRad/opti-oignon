@@ -162,12 +162,14 @@ def _check() -> None:
 
 
 class _OneShotOllamaClient:
-    """A one-shot TEXT completion over the built messages, for ``_invoke_once``.
+    """The one-shot client this route builds per request: the registry's.
 
-    A plain callable that runs a non-streaming Ollama chat and returns the reply
-    text, which is exactly what the verification role's ``_invoke_once`` coerces.
-    The ``ollama`` import is lazy so this module loads without it; resolution
-    failure surfaces as the runner's clean fail-secure failure.
+    The name is kept for the resolver below. The call is one non-streaming
+    request through the inference registry, so admission, provenance and
+    schema apply to it, and the reply text is what ``_invoke_once`` coerces.
+    A host of its own is accepted and unused: where a model is served is the
+    registry's to know. The import is lazy so this module loads without the
+    registry, exactly as it loaded without the client before.
     """
 
     def __init__(self, model: str, *, host: str | None = None) -> None:
@@ -175,15 +177,9 @@ class _OneShotOllamaClient:
         self._host = host
 
     def __call__(self, messages: list[dict[str, Any]]) -> str:
-        import ollama
+        from opti_oignon.registry_clients import OneShotChatClient
 
-        client = ollama.Client(host=self._host) if self._host else ollama.Client()
-        resp = client.chat(model=self._model, messages=messages, stream=False)
-        try:
-            return str(resp["message"]["content"])
-        except (KeyError, TypeError, IndexError):
-            msg = getattr(resp, "message", None)
-            return str(getattr(msg, "content", "") if msg is not None else "")
+        return OneShotChatClient(self._model, host=self._host)(messages)
 
 
 def _resolve_one_shot_client(model: str | None) -> Any:

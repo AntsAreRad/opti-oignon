@@ -16,124 +16,71 @@ reads as off when unset). This suite pins that surface:
   * OX4 -- the enable switch is off when the configuration is empty or the
     flag is missing, and on only when explicitly set;
   * OX5 -- the dynamic step executor calls only the client when it is
-    available and yields a plain error marker (zero calls) when it is not;
+    available and yields a plain error marker (zero calls) when it is not.
+    Superseded: it read a client flag the module no longer holds;
+  * OX7 -- the same property over the registry: one request on the step
+    model through the registry's backend, and a plain error marker with
+    zero requests when no backend serves the step model;
   * OX6 -- planning degrades to exactly one bounded step (fallback plan,
     empty pipeline, unknown agent normalized) and the step prompt keeps
     only the last two previous outputs, each truncated.
 
-Loads the package modules in isolation under a stand-in package with a
-recording client stub; every ``opti_oignon.*`` entry plus the client entry
-is snapshotted and evicted first. A meta-path guard refuses any project
-submodule that was not seeded, so the load behaves identically whether or
-not the project is installed (an editable install resolves submodules by
-name and would otherwise bypass the stand-in package). Local-only. Runs
-under pytest or the __main__ runner.
+Loads the package modules through the shared isolation window over the
+registry bridge: the inference registry holds one backend whose client is a
+recording stub, so every request the agents send is seen, and a window
+without a backend proves the degraded path. Local-only. Runs under pytest
+or the __main__ runner.
 """
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_AGENTS = _REPO / "opti_oignon" / "agents"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+from _registry_bridge import StubRegistry, seed_registry  # noqa: E402
 
 
 class _ClientRecorder:
-    """Module-shaped stub for the model client; behavior injectable."""
+    """The client behind the registry's backend; behavior injectable."""
 
     def __init__(self):
-        self.module = types.ModuleType("ollama")
         self.calls = []
         self.chat_impl = lambda **kw: {"message": {"content": "stub-answer"}}
-        self.module.chat = self._chat
-        self.module.list = self._list
 
-    def _chat(self, **kwargs):
+    def chat(self, **kwargs):
         self.calls.append(("chat", kwargs))
         return self.chat_impl(**kwargs)
 
-    def _list(self, **kwargs):
+    def list(self, **kwargs):
         self.calls.append(("list", kwargs))
         return {"models": [{"name": "m1"}, {"name": "mX"}]}
 
 
-class _IsolationGuard:
-    """Refuse every project submodule the test did not seed.
+def _load(module_name, *, registry=True):
+    """Load one package module over the registry bridge.
 
-    A stand-in package whose ``__path__`` is empty isolates the tree only
-    while the parent path is the sole way to resolve a submodule. That
-    assumption breaks wherever the project is installed in editable mode:
-    such an install registers a finder that answers on the module NAME and
-    ignores the parent path, so a real submodule resolves behind the test's
-    back -- silently importing live code and reopening real databases. This
-    guard sits ahead of every finder and refuses the names that were not
-    seeded, so a load behaves identically whether the project is installed
-    or not.
+    With ``registry`` the registry holds one backend over the recording
+    client; without it the registry is empty, so no backend serves any
+    model. Returns ``(module, client, restore)``.
     """
-
-    _PREFIX = "opti_oignon."
-
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(self._PREFIX):
-            raise ModuleNotFoundError(
-                f"not seeded in the isolation window: {fullname}",
-                name=fullname,
-            )
-        return None
-
-
-def _load(module_name):
-    """Load one package module under a stand-in package with a client stub."""
-    keys = ["ollama"] + [
-        k
-        for k in list(sys.modules)
-        if k == "opti_oignon" or k.startswith("opti_oignon.")
-    ]
-    saved = {k: sys.modules[k] for k in keys if k in sys.modules}
-    for k in keys:
-        sys.modules.pop(k, None)
-
     client = _ClientRecorder()
-    sys.modules["ollama"] = client.module
-
-    root = types.ModuleType("opti_oignon")
-    root.__path__ = []
-    pkg = types.ModuleType("opti_oignon.agents")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = root
-    sys.modules["opti_oignon.agents"] = pkg
-    root.agents = pkg
-
-    guard = _IsolationGuard()
-    sys.meta_path.insert(0, guard)
-
-    def restore():
-        try:
-            sys.meta_path.remove(guard)
-        except ValueError:
-            pass
-        for k in list(sys.modules):
-            if k == "opti_oignon" or k.startswith("opti_oignon."):
-                del sys.modules[k]
-        sys.modules.pop("ollama", None)
-        for k, v in saved.items():
-            sys.modules[k] = v
-
+    seeded = {}
+    if registry:
+        seed_registry(seeded, client)
+    else:
+        empty = StubRegistry()
+        module = types.ModuleType("opti_oignon.inference_backend")
+        module.get_backend_registry = lambda: empty
+        seeded["opti_oignon.inference_backend"] = module
     full = f"opti_oignon.agents.{module_name}"
-    spec = importlib.util.spec_from_file_location(
-        full, _AGENTS / f"{module_name}.py",
+    loaded, restore = isolate(
+        targets={full: source("agents", f"{module_name}.py")},
+        seeded=seeded,
+        packages=("opti_oignon", "opti_oignon.agents"),
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[full] = mod
-    setattr(pkg, module_name, mod)
-    try:
-        spec.loader.exec_module(mod)
-    except BaseException:
-        restore()
-        raise
-
-    return mod, client, restore
+    return loaded[full], client, restore
 
 
 def _concrete_agent(mod, timeout=120):
@@ -296,6 +243,48 @@ def test_ox5_dynamic_step_calls_only_the_client_or_yields_a_marker():
         assert client.calls == [], (
             "an unavailable client must never be called"
         )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OX7 -- the dynamic step executor over the registry: one request, or a marker
+# ---------------------------------------------------------------------------
+def test_ox7_dynamic_step_asks_the_registry_once_or_yields_a_marker():
+    mod, client, restore = _load("dynamic_pipeline")
+    try:
+        executor = mod.DynamicPipelineExecutor()
+        step = mod.PipelineStep(
+            step_number=1,
+            agent_type="coder",
+            model="mX",
+            task_description="do it",
+            expected_output="result",
+        )
+        out = "".join(executor._execute_step(step, "prompt", stream=False))
+        assert out == "stub-answer"
+        chats = [kw for kind, kw in client.calls if kind == "chat"]
+        assert len(chats) == 1 and chats[0].get("model") == "mX", (
+            f"exactly one request on the step model through the registry, got {chats}"
+        )
+    finally:
+        restore()
+
+    mod, client, restore = _load("dynamic_pipeline", registry=False)
+    try:
+        executor = mod.DynamicPipelineExecutor()
+        step = mod.PipelineStep(
+            step_number=1,
+            agent_type="coder",
+            model="mX",
+            task_description="do it",
+            expected_output="result",
+        )
+        down = list(executor._execute_step(step, "prompt", stream=False))
+        assert down and down[0].startswith("[ERROR]"), (
+            f"a step model no backend serves must yield a plain marker, got {down}"
+        )
+        assert client.calls == [], "no backend, no request"
     finally:
         restore()
 
