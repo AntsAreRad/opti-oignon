@@ -11,6 +11,12 @@ package costs.
 
 ### Added
 
+- `scripts/core_census.py`: a static census of the package -- per module,
+  the project imports at module scope and inside functions, both transitive
+  closures, third-party imports outside the standard library, database
+  files named, direct client sites, and the map of every router the API
+  includes -- labelled `source: static`, refusing an empty tree. The
+  instrument the core/packs cut is measured with.
 - The onion memory's native core, `rust/oo_core`: the four integrity hashes
   and the window assembly in Rust behind the Python surface, loaded at the
   call and never at import, with Python as the reference and the fallback.
