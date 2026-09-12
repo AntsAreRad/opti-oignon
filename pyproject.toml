@@ -305,6 +305,13 @@ fail_under = 0
 # by design and switched off by default. zp5 in the same file pins the
 # narrower live property: the executor imports the librarian and nothing
 # else of the onion, and no other module imports any of it.
+#
+# nc1, nc2 and nc3 need the native core built: the Rust artefact the loader
+# finds in opti_oignon/native. The workflow carries no Rust toolchain yet, so
+# they are OWED there and run by name on the machine that builds it:
+#   scripts/build_oo_core.sh && python3 -m pytest tests/test_native_core_contracts.py
+# nc4 and nc5 always run: the reference stands without the artefact, and the
+# recipe is pinned. These three lines come out the day cargo is in the workflow.
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -326,4 +333,7 @@ addopts = """
     --deselect=tests/test_routes_benchmark_v2_contracts.py::test_v13_results_fill_the_gaps_and_prefer_the_stored_identity
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp2_nothing_on_the_chat_path_imports_the_harness
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet
+    --deselect=tests/test_native_core_contracts.py::test_nc1_the_native_module_loads_and_exposes_the_surface
+    --deselect=tests/test_native_core_contracts.py::test_nc2_the_four_hashes_are_byte_equal_to_the_reference
+    --deselect=tests/test_native_core_contracts.py::test_nc3_the_composer_assembles_the_same_prompt_with_and_without_the_native_module
 """

@@ -30,8 +30,23 @@ def _canonical(span):
     return json.dumps(list(span), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _native():
+    """The native core, or None: asked at the call, never at import."""
+    try:
+        from opti_oignon.native import load
+    except Exception:  # noqa: BLE001 - absence is the reference path
+        return None
+    return load()
+
+
 def span_key(span):
     """The recall key of a span: SHA-256 of its canonical JSON."""
+    core = _native()
+    if core is not None:
+        try:
+            return core.span_key(list(span))
+        except TypeError:
+            pass  # a value shape the core refuses: the reference formats it
     return hashlib.sha256(_canonical(span).encode("utf-8")).hexdigest()
 
 

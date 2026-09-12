@@ -33,8 +33,20 @@ class CoreIntegrityError(ValueError):
     """An entry's bytes no longer answer to its id."""
 
 
+def _native():
+    """The native core, or None: asked at the call, never at import."""
+    try:
+        from opti_oignon.native import load
+    except Exception:  # noqa: BLE001 - absence is the reference path
+        return None
+    return load()
+
+
 def entry_hash(text):
     """The id of an entry with this text: SHA-256 of its UTF-8 bytes."""
+    core = _native()
+    if core is not None:
+        return core.entry_hash(text)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 

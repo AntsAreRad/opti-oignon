@@ -70,3 +70,17 @@ script refuses to print a number it did not measure. The thresholds in
 `onion.yaml` are the design's proposed defaults; on the fixtures, a single
 wrong entity or date in a four-turn span passes at 0.7, and that finding is
 recorded as a contract until the calibration replaces the numbers.
+
+## The native core
+
+The integrity primitives -- the four hashes -- and the window assembly
+have a second implementation in Rust, `rust/oo_core`, built into
+`opti_oignon/native/` by `scripts/build_oo_core.sh` and never tracked.
+Python stays the reference and the fallback: the memory modules ask for
+the native core at the call, never at import, and run the reference path
+when it is absent. When it is present, every hash is byte-equal to the
+reference and every assembled prompt is field-equal, and the contracts
+that hold it to that run on every machine that builds it. The crate is
+pinned (exact `pyo3`, committed `Cargo.lock`) so the artefact is
+reproducible. Floats in a span are refused by the core and formatted by
+the reference; the memory stores none.

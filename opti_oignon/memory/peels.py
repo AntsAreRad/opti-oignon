@@ -60,12 +60,31 @@ def _canonical(spans):
     return json.dumps([list(s) for s in spans], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _native():
+    """The native core, or None: asked at the call, never at import."""
+    try:
+        from opti_oignon.native import load
+    except Exception:  # noqa: BLE001 - absence is the reference path
+        return None
+    return load()
+
+
 def source_digest(cellar, sources):
     """The digest of the spans behind ``sources``, read from the Cellar now."""
-    return hashlib.sha256(_canonical([cellar.get(k) for k in sources]).encode("utf-8")).hexdigest()
+    spans = [cellar.get(k) for k in sources]
+    core = _native()
+    if core is not None:
+        try:
+            return core.digest_spans(spans)
+        except TypeError:
+            pass  # a value shape the core refuses: the reference formats it
+    return hashlib.sha256(_canonical(spans).encode("utf-8")).hexdigest()
 
 
 def peel_id(text, sources):
+    core = _native()
+    if core is not None:
+        return core.peel_id(text, [str(s) for s in sources])
     return hashlib.sha256(json.dumps([text, list(sources)], ensure_ascii=False).encode("utf-8")).hexdigest()
 
 

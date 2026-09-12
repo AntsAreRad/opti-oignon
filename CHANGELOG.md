@@ -11,6 +11,12 @@ package costs.
 
 ### Added
 
+- The onion memory's native core, `rust/oo_core`: the four integrity hashes
+  and the window assembly in Rust behind the Python surface, loaded at the
+  call and never at import, with Python as the reference and the fallback.
+  Built by `scripts/build_oo_core.sh` from a pinned crate; the artefact is
+  never tracked. Contracts hold every hash byte-equal and every prompt
+  field-equal to the reference.
 - Inference-time compute (`opti_oignon/inference_compute.py`): N candidates
   for one prompt sampled through the inference registry under a budget of
   candidates and tokens (`inference_compute.yaml`), each verified -- tests run

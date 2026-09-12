@@ -143,12 +143,56 @@ def _refuse_over(layer, tokens, cap, why):
         raise BudgetError(f"{layer} is {tokens} tokens against a cap of {cap}: {why}")
 
 
+def _native_compose():
+    """The native assembly, or None: asked at the call, never at import."""
+    try:
+        from opti_oignon.native import load
+    except Exception:  # noqa: BLE001 - absence is the reference path
+        return None
+    core = load()
+    return getattr(core, "compose_segments", None) if core is not None else None
+
+
+def _compose_natively(assemble, core, ledger, cellar, retrieval, flesh, turn, budget):
+    """The same assembly through the native core; its refusals are the reference's words."""
+    core_text = core.text()
+    core_root = core.root()
+    turns = flesh.turns() if hasattr(flesh, "turns") else [dict(t) for t in flesh]
+    try:
+        segments, total, dropped = assemble(
+            core_text,
+            core_root,
+            ledger.digest(cellar),
+            [(str(p.text), str(p.provenance)) for p in retrieval],
+            [(str(t.get("text", "")), str(t.get("turn_id", "")), str(t.get("role", ""))) for t in turns],
+            turn,
+            (budget.window, budget.reserve, budget.core, budget.receipts, budget.peels, budget.flesh, budget.turn),
+        )
+    except ValueError as exc:
+        raise BudgetError(str(exc)) from None
+    return Prompt(
+        segments=tuple(Segment(layer, text, provenance, tokens, bearing) for layer, text, provenance, tokens, bearing in segments),
+        tokens=total,
+        core_root=core_root,
+        dropped_peels=dropped,
+    )
+
+
 def compose(*, core, ledger, cellar, retrieval, flesh, turn, budget, estimate=None):
-    """Assemble the window. Pure: same inputs, same prompt, inputs untouched."""
-    estimate = estimate or estimate_tokens
+    """Assemble the window. Pure: same inputs, same prompt, inputs untouched.
+
+    With the native core present and the default estimator, the assembly is
+    the core's; an injected estimator keeps the reference path, which is
+    the only one that can call it.
+    """
     errors = budget.validate()
     if errors:
         raise BudgetError("; ".join(errors))
+    if estimate is None:
+        assemble = _native_compose()
+        if assemble is not None:
+            return _compose_natively(assemble, core, ledger, cellar, retrieval, flesh, turn, budget)
+    estimate = estimate or estimate_tokens
     segments = []
 
     core_text = core.text()
