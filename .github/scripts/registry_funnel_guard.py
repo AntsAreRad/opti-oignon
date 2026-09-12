@@ -54,7 +54,6 @@ _CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
 # Debt that predates the funnel: repo-relative module -> sha256 of its text as
 # the debt was enumerated. MAY ONLY SHRINK, and no entry may move.
 LEDGER = {
-    "opti_oignon/agent_eval/runner.py": "77c1871e5c92a62ff7de021afafa70a2124dc32f351f974c5ff7dc0cd135e46b",
     "opti_oignon/agents/base.py": "adf1a32b6e7705aed2ddfe4d2a10dc0171f4d300cbeef785a2e028ff9ebde900",
     "opti_oignon/agents/dynamic_pipeline.py": "6c6386143ecadff03a91f67e571704458dc558beea4680493973ae9e299f9af6",
     "opti_oignon/api/routes_agent.py": "1728203013819d3aeaab2af3d160a038860c163275f13804022bb99e27fcf2b8",

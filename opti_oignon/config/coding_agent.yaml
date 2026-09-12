@@ -41,6 +41,9 @@ context_window_reserve: 2048
 # on the current model, auto-escalate to the next cascade tier.
 enable_cascading: true
 escalate_after_failures: 2
+# Fix candidates per attempt: 1 is the loop as it was; more means each
+# candidate is applied, tested and undone by its inverse when it fails.
+fix_candidates: 1
 
 # Per-step routing (experimental, opt-in)
 # When enabled, simple steps (bash, view) are routed to fast tier,

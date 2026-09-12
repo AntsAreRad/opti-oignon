@@ -54,6 +54,16 @@ package costs.
 
 ### Changed
 
+- The coding agent reads its test verdict from the pytest summary instead
+  of substrings: a passing run whose output mentions the word error passes,
+  an error counts as a failure, and counts are recorded; a run with no
+  summary is still treated as passed with a zero count. `fix_candidates` in
+  `coding_agent.yaml` (default 1, the loop as it was) lets each fix attempt
+  try several candidates, each applied, tested and undone by its inverse
+  when it fails, so the first that passes stays.
+- The agent-eval runner's chat client asks the inference registry for each
+  turn, tool schemas as an engine option; `OllamaChatClient` stays as an
+  alias of `RegistryChatClient`.
 - Tool calls are schema-constrained. A forced tool decision travels as one
   schema branch per tool -- the name as a constant, the tool's own parameter
   schema for the arguments, closed to unknown keys -- so a constrained

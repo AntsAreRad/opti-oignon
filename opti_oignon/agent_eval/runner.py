@@ -217,12 +217,15 @@ def _evict_loaded_models() -> int:
 # ---------------------------------------------------------------------------
 
 
-class OllamaChatClient:
-    """Bridge an Ollama chat stream to the loop's ``stream(messages, tools)``.
+class RegistryChatClient:
+    """Bridge one registry turn to the loop's ``stream(messages, tools)``.
 
-    Ollama yields chunks shaped as ``{"message": {"content", "tool_calls"}}``,
-    the loop's expected stream shape. The import is lazy so the module loads
-    without ollama installed.
+    Each turn is one ``generate`` through the inference registry, with the
+    tool schemas as an engine option, handed to the loop as a single chunk
+    in the shape it reads: ``{"message": {"content", "tool_calls"}}``. A
+    single chunk is a valid stream. With no backend the turn raises by
+    name; nothing here reaches for a client. ``host`` is accepted for the
+    former signature and unused: where a model is served is the registry's.
     """
 
     def __init__(self, model: str, *, host: str | None = None) -> None:
@@ -230,22 +233,41 @@ class OllamaChatClient:
         self._host = host
 
     def stream(self, messages: list[dict[str, Any]], tools: Any = None):
-        import ollama
-
-        client = ollama.Client(host=self._host) if self._host else ollama.Client()
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "stream": True,
-        }
+        try:
+            from opti_oignon.inference_backend import get_backend_registry
+        except Exception as exc:  # noqa: BLE001 - absence is an answer here
+            raise RuntimeError(
+                f"inference registry unavailable to the eval runner: {exc!r}"
+            ) from exc
+        backend = get_backend_registry().resolve_backend(self._model)
+        if backend is None:
+            raise RuntimeError(
+                f"no inference backend is registered in the registry for {self._model!r}"
+            )
+        options: dict[str, Any] = {}
         if tools:
-            kwargs["tools"] = tools
-        for chunk in client.chat(**kwargs):
-            yield chunk
+            options["tools"] = list(tools)
+        response = backend.generate(
+            model=self._model,
+            messages=messages,
+            options=options or None,
+        )
+        to_dict = getattr(response, "to_dict", None)
+        if callable(to_dict):
+            yield to_dict()
+            return
+        yield {"message": {
+            "content": getattr(response, "content", "") or "",
+            "tool_calls": list(getattr(response, "tool_calls", None) or []),
+        }}
+
+
+# The former name, kept for its importers: the client is the registry's now.
+OllamaChatClient = RegistryChatClient
 
 
 def _default_client_factory(model: str) -> Any:
-    return OllamaChatClient(model)
+    return RegistryChatClient(model)
 
 
 # ---------------------------------------------------------------------------
@@ -797,6 +819,7 @@ __all__ = [
     "FEATURE_AVAILABLE",
     "EvalRunner",
     "OllamaChatClient",
+    "RegistryChatClient",
     "get_eval_runner",
     "reset_eval_runner",
 ]

@@ -173,6 +173,10 @@ class CodingAgentConfig:
     # Cascading escalation in fix loop
     enable_cascading: bool = True
     escalate_after_failures: int = 2
+    # Fix candidates per attempt. One is the loop as it always was; more
+    # means each candidate is applied, tested, and undone by its inverse when
+    # it fails, so the next one starts from the same workspace.
+    fix_candidates: int = 1
     # Per-step routing: route simple steps to fast tier (experimental)
     per_step_routing: bool = False
 
@@ -203,6 +207,7 @@ def _load_config() -> CodingAgentConfig:
                 context_window_reserve=raw.get("context_window_reserve", 2048),
                 enable_cascading=raw.get("enable_cascading", True),
                 escalate_after_failures=raw.get("escalate_after_failures", 2),
+                fix_candidates=max(1, int(raw.get("fix_candidates", 1))),
                 per_step_routing=raw.get("per_step_routing", False),
             )
             # SECURITY: checkpoint_before_apply is ALWAYS True
@@ -1725,16 +1730,24 @@ class CodingAgent:
         try:
             output = self._session.bash(cmd, timeout=60)
             result.output = output
-            result.return_code = 0
-            # Parse pytest output for pass/fail
-            if "passed" in output.lower():
-                result.passed = True
-            if "failed" in output.lower() or "error" in output.lower():
-                result.passed = False
-                result.return_code = 1
-            if "no tests ran" in output.lower():
+            # The verdict is the pytest summary's, never a substring's: a
+            # passing run whose output mentions the word error is a passing
+            # run. A run with no summary at all -- no tests collected -- is
+            # kept as passed with a zero count: a tolerance older than this
+            # check, and reversing it changes what the loop does next.
+            from opti_oignon.inference_compute import parse_pytest_summary
+
+            summary = parse_pytest_summary(output)
+            if summary is None:
                 result.passed = True
                 result.test_count = 0
+                result.return_code = 0
+            else:
+                passed_count, failed_count, error_count = summary
+                result.test_count = passed_count + failed_count + error_count
+                result.failures = failed_count + error_count
+                result.passed = failed_count == 0 and error_count == 0
+                result.return_code = 0 if result.passed else 1
         except Exception as exc:
             error_str = str(exc)
             result.error = error_str
@@ -1819,29 +1832,14 @@ class CodingAgent:
             fix_prompt = self._build_fix_prompt(test_result)
 
             try:
-                response_text = self._llm_call(
-                    fix_prompt,
-                    system=_FIX_SYSTEM_PROMPT,
-                    model=current_model,
+                outcome = self._try_fix_candidates(
+                    fix_prompt, current_model, attempt,
                 )
-                fix_data = _parse_json_response(response_text)
-                fix_instructions = _build_fix_from_response(fix_data)
-
-                # Apply the fix
-                self._apply_fix(fix_instructions)
-
-                # Re-run tests
-                new_result = self.run_tests()
-                if new_result.passed:
-                    self._log(
-                        "fixing", "fix_succeeded",
-                        f"Fixed on attempt {attempt + 1}"
-                        + (f" (model: {current_model})" if current_model else ""),
-                    )
+                if outcome is True:
                     self._consecutive_fix_failures = 0
                     return True
 
-                test_result = new_result
+                test_result = outcome
                 self._consecutive_fix_failures += 1
 
                 # Check if we should escalate to a stronger model
@@ -1856,6 +1854,85 @@ class CodingAgent:
                 self._maybe_escalate(attempt)
 
         return False
+
+    def _try_fix_candidates(
+        self, fix_prompt: str, model: str | None, attempt: int,
+    ) -> "TestResult | bool":
+        """Ask for up to ``fix_candidates`` fixes; the first that passes stays.
+
+        Each candidate is applied and tested. When more than one candidate
+        is allowed, a failing candidate is undone by its inverse before the
+        next is tried, so every candidate starts from the same workspace.
+        With one candidate the loop is what it always was: the failed fix
+        stays and the next attempt builds on it. Returns True on a pass,
+        else the last test result.
+        """
+        candidates = max(1, int(getattr(self._config, "fix_candidates", 1)))
+        last: TestResult | None = None
+        for index in range(candidates):
+            response_text = self._llm_call(
+                fix_prompt,
+                system=_FIX_SYSTEM_PROMPT,
+                model=model,
+            )
+            fix_instructions = _build_fix_from_response(
+                _parse_json_response(response_text)
+            )
+            undo = self._undo_for(fix_instructions) if candidates > 1 else None
+            self._apply_fix(fix_instructions)
+            new_result = self.run_tests()
+            if new_result.passed:
+                self._log(
+                    "fixing", "fix_succeeded",
+                    f"Fixed on attempt {attempt + 1}"
+                    + (f", candidate {index + 1}" if candidates > 1 else "")
+                    + (f" (model: {model})" if model else ""),
+                )
+                return True
+            last = new_result
+            if undo is not None:
+                self._undo_fix(undo)
+                self._log(
+                    "fixing", "candidate_undone",
+                    f"candidate {index + 1} failed the tests and was undone: "
+                    f"{fix_instructions.get('file_path', '')}",
+                    success=False,
+                )
+        return last if last is not None else False
+
+    @staticmethod
+    def _clean_path(path: str) -> str:
+        if path.startswith("/workspace/"):
+            return path[len("/workspace/"):]
+        if path.startswith("/"):
+            return path[1:]
+        return path
+
+    def _undo_for(self, fix: dict[str, str]) -> tuple:
+        """The inverse of ``fix``, computed before the fix is applied."""
+        path = fix.get("file_path", "")
+        if fix.get("fix_type", "str_replace") == "create_file":
+            try:
+                original = self._read_raw(path)
+            except Exception:
+                return ("remove", path)
+            return ("restore", path, original)
+        return ("str_replace", path, fix.get("new_str", ""), fix.get("old_str", ""))
+
+    def _undo_fix(self, undo: tuple) -> None:
+        """Apply an inverse computed by :meth:`_undo_for`."""
+        import shlex
+
+        kind = undo[0]
+        if kind == "str_replace":
+            _kind, path, new_str, old_str = undo
+            self._session.str_replace(path, new_str, old_str)
+        elif kind == "restore":
+            _kind, path, original = undo
+            self._session.create_file(path, original)
+        else:
+            _kind, path = undo
+            self._session.bash(f"rm -f {shlex.quote(self._clean_path(path))}")
 
     def _maybe_escalate(self, current_attempt: int) -> None:
         """Check if fix failures warrant model escalation.
