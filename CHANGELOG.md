@@ -11,6 +11,12 @@ package costs.
 
 ### Added
 
+- `core_boundary_guard.py` names the resident core module by module and holds
+  the line the census drew: a core module that imports a module outside the
+  core at module scope is refused unless the ledger already carries that
+  leak; the ledger may only shrink; no core module reaches the inference
+  client directly, the registry excepted. Documented in
+  `docs/architecture/native-core.md`.
 - `scripts/core_census.py`: a static census of the package -- per module,
   the project imports at module scope and inside functions, both transitive
   closures, third-party imports outside the standard library, database

@@ -146,13 +146,9 @@ except Exception:  # pragma: no cover - exercised only on broken installs
 
     DB_UTILS_AVAILABLE = False
 
-try:
-    from opti_oignon.model_warmup import model_warmup as _default_warmup
-
-    MODEL_WARMUP_AVAILABLE = True
-except Exception:
-    _default_warmup = None
-    MODEL_WARMUP_AVAILABLE = False
+# The warmup seam and the VRAM estimator are Forge features the governor
+# builds in its constructor; they are imported there, so that importing the
+# governor costs neither of them (the core-boundary guard holds this).
 
 try:
     from opti_oignon.inference_backend import (
@@ -164,22 +160,32 @@ except Exception:
     _get_backend_registry = None
     INFERENCE_BACKEND_AVAILABLE = False
 
-try:
-    # Reuse BY IMPORT: estimate_model_vram() reads the
-    # _VRAM_PER_BILLION_PARAMS table in its home module. The table is not
-    # moved and not duplicated here.
-    from opti_oignon.speculative_decoding import (
-        VRAMBudgetCalculator as _VRAMBudgetCalculator,
-    )
-
-    SPECULATIVE_AVAILABLE = True
-except Exception:
-    _VRAMBudgetCalculator = None
-    SPECULATIVE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Paths and module constants
 # ---------------------------------------------------------------------------
+
+def _load_default_warmup():
+    """The warmup seam, imported when a governor is built; None when absent."""
+    try:
+        from opti_oignon.model_warmup import model_warmup
+    except Exception:  # noqa: BLE001 - absence is the documented fallback
+        return None
+    return model_warmup
+
+
+def _load_vram_estimator():
+    """The VRAM estimator, imported when a governor is built; None when absent.
+
+    Reuse BY IMPORT: estimate_model_vram() reads the _VRAM_PER_BILLION_PARAMS
+    table in its home module. The table is not moved and not duplicated here.
+    """
+    try:
+        from opti_oignon.speculative_decoding import VRAMBudgetCalculator
+    except Exception:  # noqa: BLE001 - absence is the documented fallback
+        return None
+    return VRAMBudgetCalculator()
+
 
 _CONFIG_DIR = Path(__file__).parent / "config"
 _DEFAULT_CONFIG_PATH = _CONFIG_DIR / "resource_governor.yaml"
@@ -1572,7 +1578,7 @@ class ResourceGovernor:
         self._config = load_config(config_path)
         self._store = AdaptStore(db_path)
         if warmup is _UNSET:
-            self._warmup = _default_warmup if MODEL_WARMUP_AVAILABLE else None
+            self._warmup = _load_default_warmup()
         else:
             self._warmup = warmup
         self._registry_override = registry
@@ -1584,9 +1590,7 @@ class ResourceGovernor:
         self._vram_probe = (
             _default_vram_probe if vram_probe is _UNSET else vram_probe
         )
-        self._estimator = (
-            _VRAMBudgetCalculator() if SPECULATIVE_AVAILABLE else None
-        )
+        self._estimator = _load_vram_estimator()
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._snapshot: ResourceSnapshot | None = None

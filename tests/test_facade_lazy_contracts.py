@@ -29,7 +29,6 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from _isolation import REPO  # noqa: E402
 
@@ -101,8 +100,11 @@ def test_lf2_every_export_resolves_when_asked_and_only_then():
 # LF3 -- the census agrees
 # ---------------------------------------------------------------------------
 def test_lf3_the_static_census_sees_a_facade_that_pulls_only_the_version():
-    import core_census
+    import importlib.util
 
+    spec = importlib.util.spec_from_file_location("core_census", REPO / "scripts" / "core_census.py")
+    core_census = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core_census)
     report = core_census.census(REPO / "opti_oignon")
     facade = report["modules"]["opti_oignon"]
     assert facade["closure_eager"] == ["opti_oignon.__version__"]

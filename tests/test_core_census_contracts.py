@@ -29,10 +29,15 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import core_census  # noqa: E402
 from _isolation import REPO  # noqa: E402
+
+_SCRIPTS_DIR = str(REPO / "scripts")
+sys.path.insert(0, _SCRIPTS_DIR)
+try:
+    import core_census  # noqa: E402
+finally:
+    sys.path.remove(_SCRIPTS_DIR)
 
 _PACKAGE = REPO / "opti_oignon"
 
