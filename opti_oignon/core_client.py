@@ -74,13 +74,17 @@ class RemoteCoreBackend(InferenceBackend):
             return False
 
     def list_models(self):
+        """The daemon's listing; ``None`` when it could not be read or the daemon does not know."""
         try:
             with self._request("/models") as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001 - no daemon, no models
+        except Exception as exc:  # noqa: BLE001 - no daemon, listing unknown
             logger.debug("core daemon models: %s", exc)
-            return []
-        return [BackendModelInfo(name=str(m.get("name", "")), backend=NAME) for m in payload.get("models", [])]
+            return None
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if models is None or payload.get("known") is False:
+            return None
+        return [BackendModelInfo(name=str(m.get("name", "")), backend=NAME) for m in models]
 
     def model_info(self, model_name):
         # The daemon's registry resolves the model; this backend recognises

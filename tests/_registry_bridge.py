@@ -201,10 +201,10 @@ class ScriptedBackend:
         return list(vectors[0]) if vectors else None
 
     def list_models(self):
-        """The scripted client's ``list()`` when it has one, as named entries."""
+        """The scripted client's ``list()`` as named entries; ``None`` without one."""
         listing = getattr(self._scripted, "list", None)
         if not callable(listing):
-            return []
+            return None
         payload = listing()
         models = payload.get("models", []) if isinstance(payload, dict) else getattr(payload, "models", [])
         out = []

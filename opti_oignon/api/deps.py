@@ -710,7 +710,11 @@ def get_ollama_models() -> list:
         logger.debug("No inference backend is registered; no model to list")
         return []
     try:
-        return list(backend.list_models() or [])
+        listed = backend.list_models()
+        if listed is None:
+            logger.debug(f"Backend {getattr(backend, 'name', backend)} could not list its models; answering an empty list by this route's contract")
+            return []
+        return list(listed)
     except Exception as e:
         logger.debug(f"Model listing failed on {getattr(backend, 'name', backend)}: {e}")
         return []

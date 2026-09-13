@@ -163,8 +163,12 @@ class VisionPipeline:
             logger.debug("Vision pipeline: no inference backend registered; no model to list")
             return []
         try:
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("Vision pipeline: the backend could not list its models; none to choose from")
+                return []
             models_list = []
-            for m in backend.list_models() or []:
+            for m in listed:
                 name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
                 if name:
                     models_list.append(str(name))

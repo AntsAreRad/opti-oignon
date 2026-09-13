@@ -15,6 +15,14 @@ reports itself unhealthy -- never raising -- when the daemon is absent.
   * RD3 -- the registry initialiser registers the remote backend only when
     the configuration enables it.
 
+The listing followed the unknown doctrine one block later: an absent daemon
+is not an empty catalogue.
+
+  * RD4 -- an absent daemon is unhealthy, a request is a refusal by name,
+    and the listing is unknown; through a live daemon the wire carries
+    unknown as a null listing with ``known`` false, and a known empty as
+    an empty listing with ``known`` true. Supersedes RD2 by name.
+
 Local-only (the public distribution ships no tests). The client and the
 daemon are loaded through the shared isolation window; the daemon runs in
 a thread on an ephemeral loopback port.
@@ -174,3 +182,43 @@ def test_rd3_the_registry_registers_the_remote_backend_only_when_enabled(tmp_pat
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ---------------------------------------------------------------------------
+# RD4 -- unknown crosses the wire
+# ---------------------------------------------------------------------------
+def test_rd4_an_absent_daemon_is_unknown_and_the_wire_carries_unknown_and_known_empty():
+    daemon, client, scripted, registry, restore = _open()
+    try:
+        server, base = _serve(daemon)
+        server.shutdown()
+        server.server_close()
+        remote = client.RemoteCoreBackend(base, timeout_s=1.0)
+        assert remote.health_check() is False
+        with pytest.raises(RuntimeError, match="core daemon"):
+            remote.generate("m", _MSGS)
+        with pytest.raises(RuntimeError, match="core daemon"):
+            list(remote.stream("m", _MSGS))
+        assert remote.list_models() is None, "no daemon is an unknown listing, not an empty one"
+        assert scripted.calls == []
+    finally:
+        restore()
+
+    daemon, client, scripted, registry, restore = _open()
+    try:
+        server, base = _serve(daemon)
+        try:
+            remote = client.RemoteCoreBackend(base, timeout_s=5.0)
+            scripted.list = lambda: {"models": []}
+            status, payload = daemon.CoreService().models()
+            assert (status, payload["models"], payload["known"]) == (200, [], True), "a known empty crosses as such"
+            assert remote.list_models() == []
+            del scripted.list
+            status, payload = daemon.CoreService().models()
+            assert (status, payload["models"], payload["known"]) == (200, None, False), "unknown crosses as null"
+            assert remote.list_models() is None
+        finally:
+            server.shutdown()
+            server.server_close()
+    finally:
+        restore()

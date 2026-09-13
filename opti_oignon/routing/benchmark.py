@@ -63,7 +63,7 @@ def _registry_model_names():
     names = []
     for backend in registry.backends():
         try:
-            names.extend(str(info.name) for info in backend.list_models())
+            names.extend(str(info.name) for info in backend.list_models() or [])
         except Exception:  # noqa: BLE001 - one backend down does not hide the rest
             continue
     return names

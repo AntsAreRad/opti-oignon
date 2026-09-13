@@ -206,11 +206,12 @@ def get_backend(name: str) -> dict:
         )
 
     healthy = False
-    model_count = 0
+    model_count: int | None = 0
     try:
         healthy = backend.health_check()
         if healthy:
-            model_count = len(backend.list_models())
+            listed = backend.list_models()
+            model_count = None if listed is None else len(listed)
     except Exception:
         pass
 

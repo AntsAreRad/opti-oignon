@@ -135,14 +135,23 @@ class CoreService:
         return 200, {"ok": True, "source": SOURCE, "backend": active}
 
     def models(self):
+        """The active backend's listing. ``known`` says whether anyone could
+        look: an unknown listing crosses the wire as ``null``, never as an
+        empty list."""
         try:
             backend = _registry().active
             if backend is None:
-                return 200, {"models": [], "source": SOURCE}
+                return 200, {"models": None, "known": False, "source": SOURCE}
             models = backend.list_models()
         except Exception as exc:  # noqa: BLE001
             return 503, {"error": f"models unavailable: {exc!r}"}
-        return 200, {"models": [m.to_dict() if hasattr(m, "to_dict") else {"name": getattr(m, "name", str(m))} for m in models], "source": SOURCE}
+        if models is None:
+            return 200, {"models": None, "known": False, "source": SOURCE}
+        return 200, {
+            "models": [m.to_dict() if hasattr(m, "to_dict") else {"name": getattr(m, "name", str(m))} for m in models],
+            "known": True,
+            "source": SOURCE,
+        }
 
     @staticmethod
     def _request(payload):

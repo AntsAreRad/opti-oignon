@@ -235,8 +235,12 @@ class ContextSummarizer:
         backend = get_backend_registry().active
         if backend is None:
             return None
+        listed = backend.list_models()
+        if listed is None:
+            logger.debug("The backend could not list its models; no summary model to pick")
+            return None
         names: set[str] = set()
-        for record in backend.list_models() or []:
+        for record in listed:
             name = getattr(record, "name", None) or (record.get("name") if isinstance(record, dict) else None)
             if name:
                 names.add(str(name))

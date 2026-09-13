@@ -2628,7 +2628,7 @@ class BackendStatusResponse(BaseModel):
     display_name: str = ""
     healthy: bool = False
     active: bool = False
-    model_count: int = 0
+    model_count: int | None = 0
 
 
 class BackendListResponse(BaseModel):

@@ -354,7 +354,10 @@ class ModelLifecycleManager:
             logger.debug("No inference backend is registered; no model to list")
             return []
         try:
-            models_raw = backend.list_models() or []
+            models_raw = backend.list_models()
+            if models_raw is None:
+                logger.debug("The backend could not list its models; the lifecycle listing is empty by its own contract")
+                return []
 
             results: list[dict[str, Any]] = []
             for m in models_raw:

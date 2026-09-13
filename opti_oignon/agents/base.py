@@ -289,7 +289,11 @@ class BaseAgent(ABC):
             backend = _resolve_backend(model)
             if backend is None:
                 return False
-            available = [str(getattr(m, "name", m)) for m in backend.list_models()]
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("The backend could not list its models; %s is not confirmed available", model)
+                return False
+            available = [str(getattr(m, "name", m)) for m in listed]
             # Normalize names (remove :latest if present)
             available_normalized = []
             for m in available:

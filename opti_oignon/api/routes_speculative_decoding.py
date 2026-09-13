@@ -58,6 +58,9 @@ def _get_llama_cpp_models() -> list[dict]:
         if backend is None:
             return []
         models = backend.list_models()
+        if models is None:
+            logger.debug("The llama.cpp backend could not list its models; answering an empty list")
+            return []
         result = []
         for m in models:
             info = m.to_dict() if hasattr(m, "to_dict") else {}

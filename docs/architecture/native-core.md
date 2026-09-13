@@ -66,7 +66,11 @@ importing only the core. Its routes are `GET /health`, `GET /models`,
 own words). It binds the loopback and nothing else, requires the configured
 bearer token on every route but health, and refuses by name an unknown
 route, a body that is not JSON, a request without a model, a model no
-backend serves.
+backend serves. The listing route says whether anyone could look: a
+backend that cannot read its catalogue crosses the wire as a null listing
+with `known` false, a backend that looked and found nothing as an empty
+listing with `known` true, and the client on the other side keeps the two
+apart.
 
 `opti_oignon/core_client.py` is the other half: a registry backend that
 forwards every request to the daemon. When `core.yaml` enables the daemon,

@@ -103,6 +103,25 @@ package costs.
 
 ### Changed
 
+- `list_models()` on the backend contract answers `None` when the backend
+  cannot say and an empty list only when it looked and found nothing, the
+  doctrine the two observation heads already carried. Every implementation
+  answered an empty list before: Ollama with the client absent or the call
+  failing, llama-server on a transport error or a body without a listing,
+  the remote core with the daemon down, llama.cpp with no configured
+  directory to scan (the production instance is built with none, so its
+  listing was a constant empty), the test bridge without a scripted
+  `list`. The daemon's `GET /models` carries unknown as a null listing
+  with `known` false and a known empty with `known` true; the remote core
+  reads it back. The registry's backend status reports an unknown count as
+  null rather than zero, and its aggregate listing skips a backend that
+  could not list without hiding the others. The shared catalogue readers
+  propagate unknown, so their "empty only when one looked" claim is now
+  true; the extraction falls to its first fallback model on an unknown
+  listing instead of scanning nothing, and the health monitor skips a
+  check it could not begin instead of marking nothing. Every other caller
+  names what it does with unknown in its own log line, and none iterates
+  a `None`.
 - The model catalogue is read through the inference registry: sixteen
   modules asked the client library which models are installed and what a
   model is made of (`list()` and `show()`) at twenty-two sites, and the
@@ -120,8 +139,10 @@ package costs.
   template, the modelfile, the license and the raw mapping; a list entry
   carries the size in bytes, the digest and the family list the same way.
   Three readers on `registry_clients.py` answer every module -- `None` when
-  no backend is registered, an empty list only when one looked and found
-  nothing. The vision pipeline describes through `generate` with the
+  no backend is registered or the registered one could not read its
+  listing, an empty list only when one looked and found nothing (the
+  second half of that sentence became true one block later, see below).
+  The vision pipeline describes through `generate` with the
   images; the dependency layer's model listing asks the active backend and
   no longer falls through to the client (the registry method it asked for
   never existed, so the fall-through ran every time); the CLI listing

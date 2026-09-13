@@ -45,6 +45,9 @@ found nothing.
     the registry while the client module it still holds is asked nothing.
   * CQ12 -- the summariser picks its model from the active backend's
     listing and has none without a backend.
+  * CQ13 -- CQ10 word for word, except that discovery without a backend
+    is unknown rather than empty, the doctrine the listing head gained one
+    block later (CQ10 is deselected by name).
 
 Local-only (the public distribution ships no tests). Every module is loaded
 through the shared isolation window over a scripted client that records
@@ -578,6 +581,48 @@ def test_cq12_the_summariser_picks_its_model_from_the_active_backend_listing():
     mod, restore = _window("context_summary.py", "opti_oignon.context_summary", empty=True, with_clients=False)
     try:
         assert mod.ContextSummarizer()._find_available_model() is None
+    finally:
+        restore()
+        undo()
+
+
+# ---------------------------------------------------------------------------
+# CQ13 -- CQ10 under the unknown doctrine
+# ---------------------------------------------------------------------------
+def test_cq13_the_health_monitor_probes_through_model_info_and_says_unknown_without_a_backend(tmp_path):
+    client, undo = _forbid_client()
+    scripted = _Scripted()
+    mod, restore = _window("model_health.py", "opti_oignon.model_health", scripted=scripted)
+    try:
+        monitor = mod.ModelHealthMonitor(config_path=tmp_path / "health.yaml")
+        assert monitor._discover_models() == ["qwen3:8b-q4", "llava:7b"]
+        record = monitor.check_model("qwen3:8b-q4")
+        assert record.consecutive_failures == 0 and record.last_error == "" and record.latency_ms >= 0
+        assert _reads(scripted, "show") == [("show", "qwen3:8b-q4")]
+        assert monitor.get_config()["ollama_available"] is True
+        assert client.calls == []
+    finally:
+        restore()
+
+    class _Unknown(_Scripted):
+        def show(self, model):
+            self.calls.append(("show", model))
+            raise RuntimeError("model not found")
+
+    mod, restore = _window("model_health.py", "opti_oignon.model_health", scripted=_Unknown())
+    try:
+        record = mod.ModelHealthMonitor(config_path=tmp_path / "health.yaml").check_model("ghost")
+        assert record.consecutive_failures == 1 and "model not found" in record.last_error
+    finally:
+        restore()
+
+    mod, restore = _window("model_health.py", "opti_oignon.model_health", empty=True)
+    try:
+        monitor = mod.ModelHealthMonitor(config_path=tmp_path / "health.yaml")
+        assert monitor._discover_models() is None, "no backend registered is unknown, not an empty discovery"
+        record = monitor.check_model("m")
+        assert record.last_error == "No inference backend is registered"
+        assert monitor.get_config()["ollama_available"] is False
     finally:
         restore()
         undo()

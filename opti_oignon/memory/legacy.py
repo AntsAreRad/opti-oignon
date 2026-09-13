@@ -730,8 +730,12 @@ class MemoryManager:
             return None
 
         try:
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("The backend could not list its models; no extraction model to pick")
+                return None
             available_names = set()
-            for m in backend.list_models():
+            for m in listed:
                 available_names.add(str(getattr(m, "name", m)))
 
             # Search in order of preference

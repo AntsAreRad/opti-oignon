@@ -42,8 +42,9 @@ def _resolve_backend(model=None):
 # the client's two answer shapes on its own. The registry answers both on
 # the backend contract; these three read it so no module keeps a client for
 # the catalogue alone. The distinction that matters is kept on purpose:
-# ``None`` is "no backend is registered, nobody looked", an empty list is a
-# backend that looked and found nothing.
+# ``None`` is "nobody looked" -- no backend is registered, or the one that
+# is could not read its listing -- and an empty list is a backend that
+# looked and found nothing.
 
 def backend_for(model=None):
     """The registry's backend for ``model``, the active one without, or None."""
@@ -51,16 +52,20 @@ def backend_for(model=None):
 
 
 def installed_models():
-    """The active backend's model records, or None when no backend is registered."""
+    """The active backend's model records; None when no backend is registered or it cannot say."""
     backend = _resolve_backend()
     if backend is None:
         logger.debug("No inference backend is registered; no model catalogue to read")
         return None
-    return list(backend.list_models() or [])
+    listed = backend.list_models()
+    if listed is None:
+        logger.debug("Backend %s could not read its model listing; catalogue unknown", getattr(backend, "name", backend))
+        return None
+    return list(listed)
 
 
 def installed_model_names():
-    """The names the active backend serves, or None when no backend is registered."""
+    """The names the active backend serves; None when no backend is registered or it cannot say."""
     records = installed_models()
     if records is None:
         return None

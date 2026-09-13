@@ -318,8 +318,12 @@ class FactExtractor:
         if backend is None:
             return self._fallback_models[0] if self._fallback_models else None
         try:
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("extraction: the backend could not list its models; using the first fallback")
+                return self._fallback_models[0] if self._fallback_models else None
             names: set[str] = set()
-            for m in backend.list_models() or []:
+            for m in listed:
                 name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
                 if name:
                     names.add(str(name))

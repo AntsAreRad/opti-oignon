@@ -537,8 +537,15 @@ class InferenceBackend(ABC):
         ...
 
     @abstractmethod
-    def list_models(self) -> list[BackendModelInfo]:
-        """List all models available through this backend."""
+    def list_models(self) -> list[BackendModelInfo] | None:
+        """List all models available through this backend.
+
+        ``None`` when the backend cannot say -- the client is absent, the
+        request failed, nothing could be scanned -- and an empty list only
+        when it looked and found nothing. The same doctrine as the two
+        observation heads below: an empty list here would read as "nothing
+        installed" where the truth is "nobody looked".
+        """
         ...
 
     @abstractmethod
@@ -741,10 +748,10 @@ class OllamaBackend(InferenceBackend):
             logger.warning("Ollama unload failed for %s: %s", model_name, exc)
             return False
 
-    def list_models(self) -> list[BackendModelInfo]:
-        """List Ollama models via ollama.list()."""
+    def list_models(self) -> list[BackendModelInfo] | None:
+        """List Ollama models via ollama.list(); ``None`` when nobody could look."""
         if not OLLAMA_AVAILABLE:
-            return []
+            return None
         try:
             response = _ollama_module.list()
             raw_models = []
@@ -760,8 +767,8 @@ class OllamaBackend(InferenceBackend):
                 results.append(self._parse_ollama_model(m))
             return results
         except Exception as exc:
-            logger.debug("Ollama list_models failed: %s", exc)
-            return []
+            logger.debug("Ollama list_models failed, listing unknown: %s", exc)
+            return None
 
     def model_info(self, model_name: str) -> BackendModelInfo | None:
         """Get model details via ollama.show().
@@ -1158,13 +1165,19 @@ class LlamaCppBackend(InferenceBackend):
         """Check if llama-cpp-python is importable."""
         return LLAMA_CPP_AVAILABLE
 
-    def list_models(self) -> list[BackendModelInfo]:
-        """Scan configured directories for .gguf files."""
+    def list_models(self) -> list[BackendModelInfo] | None:
+        """Scan configured directories for .gguf files.
+
+        ``None`` when no configured directory exists, because nothing was
+        scanned; an empty list only after a real scan that found nothing.
+        """
         results = []
         seen = set()
+        scanned = False
         for d in self._model_dirs:
             if not d.is_dir():
                 continue
+            scanned = True
             for gguf_path in sorted(d.glob("*.gguf")):
                 if gguf_path.name in seen:
                     continue
@@ -1172,6 +1185,9 @@ class LlamaCppBackend(InferenceBackend):
                 info = _parse_gguf_filename(gguf_path)
                 info.path = str(gguf_path)
                 results.append(info)
+        if not scanned:
+            logger.debug("llama.cpp list_models: no configured model directory exists, listing unknown")
+            return None
         return results
 
     def model_info(self, model_name: str) -> BackendModelInfo | None:
@@ -1600,14 +1616,19 @@ class LlamaServerBackend(InferenceBackend):
         except RuntimeError:
             return False
 
-    def list_models(self) -> list[BackendModelInfo]:
+    def list_models(self) -> list[BackendModelInfo] | None:
+        """The server's listing; ``None`` when it could not be read."""
         try:
             data = self._request("/v1/models")
-        except RuntimeError:
-            return []
+        except RuntimeError as exc:
+            logger.debug("llama-server list_models failed, listing unknown: %s", exc)
+            return None
         items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            logger.debug("llama-server list_models: the body carries no listing, listing unknown")
+            return None
         out: list[BackendModelInfo] = []
-        for item in items or []:
+        for item in items:
             if isinstance(item, dict) and item.get("id"):
                 out.append(
                     BackendModelInfo(
@@ -1619,7 +1640,7 @@ class LlamaServerBackend(InferenceBackend):
         return out
 
     def model_info(self, model_name: str) -> BackendModelInfo | None:
-        for info in self.list_models():
+        for info in self.list_models() or []:
             if info.name == model_name:
                 return info
         return None
@@ -1932,22 +1953,36 @@ class BackendRegistry:
                 healthy = b.health_check()
             except Exception:
                 pass
+            # An unknown listing is an unknown count, never zero: a healthy
+            # backend that could not list says so with None on the wire.
+            model_count: int | None = 0
+            if healthy:
+                listed = b.list_models()
+                model_count = None if listed is None else len(listed)
             result.append({
                 "name": b.name,
                 "display_name": b.display_name,
                 "healthy": healthy,
                 "active": b.name == self._active_name,
-                "model_count": len(b.list_models()) if healthy else 0,
+                "model_count": model_count,
             })
         return result
 
     def all_models(self) -> list[BackendModelInfo]:
-        """List models from all healthy backends."""
+        """List models from all healthy backends.
+
+        A backend whose listing is unknown contributes nothing and hides
+        nothing else; the aggregate is what could be read.
+        """
         models = []
         for b in self._backends.values():
             try:
                 if b.health_check():
-                    models.extend(b.list_models())
+                    listed = b.list_models()
+                    if listed is None:
+                        logger.debug("Backend %s could not list its models; skipped in the aggregate", b.name)
+                        continue
+                    models.extend(listed)
             except Exception:
                 continue
         return models

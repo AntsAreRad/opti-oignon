@@ -84,7 +84,11 @@ def _registry_model_names() -> list[str]:
     names: list[str] = []
     for backend in registry.backends():
         try:
-            names.extend(str(info.name) for info in backend.list_models())
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("Backend %s could not list its models; skipped", getattr(backend, "name", "?"))
+                continue
+            names.extend(str(info.name) for info in listed)
         except Exception as exc:  # noqa: BLE001 - one backend down does not hide the rest
             logger.debug("Backend %s could not list models: %s", getattr(backend, "name", "?"), exc)
     return names

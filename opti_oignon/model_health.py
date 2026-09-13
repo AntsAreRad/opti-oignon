@@ -349,8 +349,11 @@ class ModelHealthMonitor:
             logger.debug("No inference backend is registered, skipping health check")
             return dict(self._records)
 
-        # Discover models
+        # Discover models; an unknown listing checks nothing and marks nothing
         models = self._discover_models()
+        if models is None:
+            logger.debug("The backend could not list its models; health check skipped, records untouched")
+            return dict(self._records)
         for model_name in models:
             self.check_model(model_name)
 
@@ -424,20 +427,25 @@ class ModelHealthMonitor:
             record.status = ModelStatus.HEALTHY
         # else: remains UNKNOWN or whatever it was
 
-    def _discover_models(self) -> list[str]:
+    def _discover_models(self) -> list[str] | None:
         """Discover available models through the registry's backend.
 
         Returns:
-            List of model names; empty when no backend is registered.
+            List of model names; ``None`` when no backend is registered or
+            the backend could not read its listing.
         """
         backend = self._backend(None)
         if backend is None:
             logger.debug("No inference backend is registered; no model to discover")
-            return []
+            return None
 
         try:
+            listed = backend.list_models()
+            if listed is None:
+                logger.debug("The backend could not list its models; discovery unknown")
+                return None
             names = []
-            for m in backend.list_models() or []:
+            for m in listed:
                 name = getattr(m, "name", None) or (m.get("name") if isinstance(m, dict) else None)
                 if name:
                     names.append(str(name))
