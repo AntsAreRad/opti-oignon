@@ -26,6 +26,21 @@ dispatched through an injectable runner, and never raises into a turn.
   * LB7 -- the mirror is exact and idempotent: sequential turn ids, roles
     and text untouched, no duplicate on a second mirror.
 
+With a persistence path in ``onion.yaml`` the state goes through the onion
+store and comes back across a restart:
+
+  * LB8 -- the mirror and every accepted eviction are saved; after the
+    process forgets everything, the next sight of the conversation loads
+    the same state, the cursor included so nothing is mirrored twice, and
+    the memory block is the one from before.
+  * LB9 -- a store that refuses (the connection seam unreachable here)
+    leaves the state absent: no dispatch, no block, no file, and the
+    refusal is logged by name once; the same configuration without a path
+    keeps the onion in the process as before.
+  * LB10 -- the persistence section is read from the YAML with encryption
+    required by default, a relative path resolves under the data directory,
+    an absolute one stands, and an absent section means no store.
+
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the registry is blocked, so a
 summariser can only come from an injected resolver.
@@ -43,12 +58,14 @@ from _isolation import REPO, isolate, source  # noqa: E402
 
 _ONION_YAML = REPO / "opti_oignon" / "config" / "onion.yaml"
 _MODULES = ("probes", "core_store", "receipts", "composer", "peels", "librarian")
+_PERSISTED = _MODULES + ("onion_store",)
 
 
-def _open():
+def _open(*, persisted=False, seeded=None):
     loaded, restore = isolate(
-        targets={f"opti_oignon.memory.{m}": source("memory", f"{m}.py") for m in _MODULES},
-        blocked=("opti_oignon.inference_backend",),
+        targets={f"opti_oignon.memory.{m}": source("memory", f"{m}.py") for m in (_PERSISTED if persisted else _MODULES)},
+        blocked=("opti_oignon.inference_backend", "opti_oignon.db_utils"),
+        seeded=seeded,
         packages=("opti_oignon.memory",),
     )
     lib = loaded["opti_oignon.memory.librarian"]
@@ -294,6 +311,125 @@ def test_lb7_the_mirror_is_exact_and_idempotent():
         assert state.mirror([{"role": "user"}, {"role": "user", "content": ""}] + msgs) == 0, (
             "a shorter or malformed history never rewinds the mirror"
         )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB8 -- the state survives a restart through the store
+# ---------------------------------------------------------------------------
+def test_lb8_the_state_is_saved_and_comes_back_across_a_restart_with_its_cursor(tmp_path):
+    import sqlite3
+
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        core_store = loaded["opti_oignon.memory.core_store"]
+        composer = loaded["opti_oignon.memory.composer"]
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        path = tmp_path / "onion.db"
+        cfg = _config(lib, persist_path=str(path), require_encryption=False, min_new_turns=4)
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        store_mod.OnionStore(path, connect=lambda p: sqlite3.connect(str(p)), require_encryption=False)
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=lambda p: sqlite3.connect(str(p)), require_encryption=False)
+
+        def synchronous(cid):
+            state = lib.peek_state(cid, cfg)
+            while lib.curate(state, _faithful, gate=gate, budget=budget).evicted:
+                lib._save_state(cid, state, cfg)
+
+        assert lib.maybe_curate("c1", _messages(12), config=cfg, runner=synchronous) is True
+        state = lib.peek_state("c1", cfg)
+        state.core.add("The user is Alice.", actor=core_store.USER)
+        lib._save_state("c1", state, cfg)
+        assert len(state.tree.all()) >= 2, "control: the burst made peels"
+        before = lib.memory_block("c1", "service reviewed by alice", budget=budget, config=cfg)
+        assert before, "control: a block before the restart"
+        turns_before, seen_before = state.flesh.turns(), state.seen
+
+        lib.reset_librarian()
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=lambda p: sqlite3.connect(str(p)), require_encryption=False)
+        assert lib._states == {}, "control: the process forgot everything"
+        after = lib.memory_block("c1", "service reviewed by alice", budget=budget, config=cfg)
+        assert after == before, "the block after the restart is the block from before"
+        state = lib.peek_state("c1", cfg)
+        assert state.flesh.turns() == turns_before and state.seen == seen_before
+        assert state.mirror(_messages(12)) == 0, "the cursor came back: nothing is mirrored twice"
+        assert [e.text for e in state.core.active()] == ["The user is Alice."]
+        assert lib.maybe_curate("c1", _messages(12), config=cfg, runner=lambda cid: None) is False, (
+            "no growth since the save, no dispatch"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB9 -- a refusing store leaves the state absent, by name
+# ---------------------------------------------------------------------------
+def test_lb9_a_refusing_store_leaves_the_state_absent_and_says_so_once(tmp_path, caplog):
+    import logging
+
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        path = tmp_path / "refused.db"
+        cfg = _config(lib, persist_path=str(path))
+        fired = []
+        with caplog.at_level(logging.WARNING, logger="opti_oignon.memory.librarian"):
+            assert lib.maybe_curate("c1", _messages(8), config=cfg, runner=fired.append) is False
+            assert lib.maybe_curate("c1", _messages(8), config=cfg, runner=fired.append) is False
+            assert lib.memory_block("c1", "anything", config=cfg) == ""
+        assert fired == [] and lib._states == {}, "no state was fabricated in place of the refused one"
+        assert not path.exists(), "no file was created"
+        refusals = [r for r in caplog.records if "refused, not replaced" in r.getMessage() and "c1" in r.getMessage()]
+        assert len(refusals) == 1, "the refusal is logged by name, once per conversation"
+
+        plain = _config(lib, min_new_turns=4)
+        assert lib.maybe_curate("c2", _messages(4), config=plain, runner=fired.append) is True
+        assert fired == ["c2"] and lib.peek_state("c2", plain) is not None, "without a path the onion lives in the process"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB10 -- the persistence section
+# ---------------------------------------------------------------------------
+def test_lb10_the_persistence_section_is_read_with_encryption_required_by_default(tmp_path):
+    import types
+
+    import yaml
+
+    data_dir = tmp_path / "data"
+    config_mod = types.ModuleType("opti_oignon.config")
+    config_mod.DATA_DIR = data_dir
+    lib, loaded, restore = _open(seeded={"opti_oignon.config": config_mod})
+    try:
+        raw = yaml.safe_load(_ONION_YAML.read_text(encoding="utf-8"))
+        shipped = lib.load_config()
+        assert raw["persistence"] == {"path": "", "require_encryption": True}, "the shipped YAML: no path, encryption required"
+        assert shipped.persist_path == "" and shipped.require_encryption is True
+        assert lib.onion_store(shipped) is None, "no path, no store"
+
+        relative = dict(raw, persistence={"path": "onion.db"})
+        p = tmp_path / "relative.yaml"
+        p.write_text(yaml.safe_dump(relative), encoding="utf-8")
+        cfg = lib.load_config(p)
+        assert cfg.require_encryption is True, "required unless the file says otherwise"
+        assert lib._persistence_path(cfg) == data_dir / "onion.db", "a relative path resolves under the data directory"
+
+        absolute = dict(raw, persistence={"path": str(tmp_path / "abs.db"), "require_encryption": False})
+        p.write_text(yaml.safe_dump(absolute), encoding="utf-8")
+        cfg = lib.load_config(p)
+        assert lib._persistence_path(cfg) == tmp_path / "abs.db" and cfg.require_encryption is False
+
+        absent = {k: v for k, v in raw.items() if k != "persistence"}
+        p.write_text(yaml.safe_dump(absent), encoding="utf-8")
+        assert lib._persistence_path(lib.load_config(p)) is None, "an absent section is no store"
+
+        bad = dict(raw, persistence={"path": "x.db", "require_encryption": "yes"})
+        p.write_text(yaml.safe_dump(bad), encoding="utf-8")
+        with pytest.raises(lib.LibrarianError, match="require_encryption"):
+            lib.load_config(p)
     finally:
         restore()
 

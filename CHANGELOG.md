@@ -100,6 +100,22 @@ package costs.
   two: the third means the measurement did not run, and nothing downstream may
   read it as either a pass or a failure.
 - Unit tests for the wire envelopes, in the source set that needs no device.
+- The onion memory persists: `memory/onion_store.py` writes each
+  conversation's Core, Cellar, receipts, Peels, Flesh and mirror cursor
+  through the repository's connection seam, after every mirror and every
+  accepted eviction, and reads it back when the process next sees the
+  conversation. The read re-hashes every Core entry, Cellar span and Peel
+  against its saved id and the root over the four stores against the saved
+  root, and refuses by name the first row that no longer answers; a
+  conversation the file does not know is unknown, never an empty state,
+  and a refused one is logged by name and left absent rather than replaced
+  by a fresh one. The table holds conversation text, so a connection that
+  is not encrypted is refused by default (`persistence.require_encryption`
+  in `onion.yaml`), where the rest of the tree opens plaintext with a
+  warning outside Bulbe mode; the drift ledger gains the same refusal as an
+  opt-in. `persistence.path` is empty in the shipped file: the maintainer
+  sets it when switching the onion on. The Core has no pin surface yet, so
+  what persists of it is what the tests pin; that surface is its own block.
 
 ### Changed
 

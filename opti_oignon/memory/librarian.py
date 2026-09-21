@@ -14,10 +14,14 @@ digest and the Peels selected for the question, under the layer caps, every
 recalled segment framed as data with its provenance; the executor wraps the
 whole block as untrusted memory before it reaches the model.
 
-The state is per conversation and lives in this process; the encrypted
-persistence of Core and Cellar is the block's named debt. Off by default:
-the maintainer turns the onion on, and an unreadable configuration is off,
-not on.
+The state is per conversation. With a persistence path in ``onion.yaml``
+it is written through the onion store after every mirror and every
+accepted eviction and read back, re-hashed, when the process next sees the
+conversation; a store that refuses -- plaintext, a wrong key, an
+unreachable seam -- leaves the state absent and is said by name, never
+replaced by a fresh one. Without a path it lives in this process. Off by
+default: the maintainer turns the onion on, and an unreadable configuration
+is off, not on.
 """
 
 import logging
@@ -46,6 +50,8 @@ _SYSTEM_PROMPT = (
 _states = {}
 _watermark = {}
 _lock = threading.Lock()
+_store = {}
+_refused = set()
 
 
 class LibrarianError(ValueError):
@@ -60,9 +66,15 @@ class LibrarianConfig:
     min_new_turns: int
     temperature: float
     num_predict: int
+    persist_path: str = ""
+    require_encryption: bool = True
 
     def validate(self):
         errors = []
+        if not isinstance(self.persist_path, str):
+            errors.append(f"persistence.path: {self.persist_path!r} is not a string")
+        if not isinstance(self.require_encryption, bool):
+            errors.append(f"persistence.require_encryption: {self.require_encryption!r} is not a boolean")
         if not isinstance(self.model, str) or not self.model.strip():
             errors.append("model: empty")
         if not isinstance(self.keep_alive, str) or not self.keep_alive.strip():
@@ -85,6 +97,7 @@ def load_config(path=None):
 
     raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
     section = raw.get("librarian") or {}
+    persistence = raw.get("persistence") or {}
     try:
         config = LibrarianConfig(
             enabled=bool(raw.get("enabled", False)),
@@ -93,6 +106,8 @@ def load_config(path=None):
             min_new_turns=int(section["min_new_turns"]),
             temperature=float(section.get("temperature", 0.1)),
             num_predict=int(section.get("num_predict", 256)),
+            persist_path=str(persistence.get("path", "") or ""),
+            require_encryption=persistence.get("require_encryption", True),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise LibrarianError(f"onion librarian configuration is incomplete or malformed: {exc!r}") from exc
@@ -152,23 +167,111 @@ class OnionState:
         return added
 
 
-def state_for(conversation_id):
+def _persistence_path(config):
+    """The store's path from the configuration: absolute as given, relative under the data directory."""
+    if not config.persist_path:
+        return None
+    path = Path(config.persist_path)
+    if path.is_absolute():
+        return path
+    from ..config import DATA_DIR
+
+    return Path(DATA_DIR) / path
+
+
+def onion_store(config=None):
+    """The onion store for the configuration, built once, or None when no path is configured.
+
+    A store that cannot be built -- the seam unreachable, a plaintext
+    connection with encryption required, a key the file does not answer
+    to -- raises by name. Nothing here replaces it with an in-process state.
+    """
+    config = config or load_config()
+    path = _persistence_path(config)
+    if path is None:
+        return None
+    from .onion_store import OnionStore
+
+    key = (str(path), bool(config.require_encryption))
+    with _lock:
+        store = _store.get(key)
+    if store is not None:
+        return store
+    store = OnionStore(path, require_encryption=config.require_encryption)
+    with _lock:
+        _store.setdefault(key, store)
+        return _store[key]
+
+
+def _load_state(conversation_id, config):
+    """The persisted state of a conversation, None when the store does not know it.
+
+    Raises by name when the store refuses; the refusal is logged once per
+    conversation so a lost memory is never mistaken for a fresh one.
+    """
+    try:
+        store = onion_store(config)
+        if store is None:
+            return None
+        return store.load(conversation_id, OnionState())
+    except Exception as exc:
+        if conversation_id not in _refused:
+            _refused.add(conversation_id)
+            logger.warning("onion memory for %s refused, not replaced: %s", conversation_id, exc)
+        raise
+
+
+def state_for(conversation_id, config=None):
+    """The conversation's state: in memory, else loaded from the store, else new."""
+    with _lock:
+        state = _states.get(conversation_id)
+    if state is not None:
+        return state
+    loaded = _load_state(conversation_id, config or load_config())
     with _lock:
         state = _states.get(conversation_id)
         if state is None:
-            state = _states[conversation_id] = OnionState()
+            state = _states[conversation_id] = loaded if loaded is not None else OnionState()
+            if loaded is not None:
+                _watermark[conversation_id] = len(state.flesh.turns())
         return state
 
 
-def peek_state(conversation_id):
+def peek_state(conversation_id, config=None):
+    """The conversation's state if it exists, in memory or in the store; None when neither knows it."""
     with _lock:
-        return _states.get(conversation_id)
+        state = _states.get(conversation_id)
+    if state is not None:
+        return state
+    try:
+        config = config or load_config()
+    except Exception:  # noqa: BLE001 - no configuration, no store to ask
+        return None
+    if not config.persist_path:
+        return None
+    loaded = _load_state(conversation_id, config)
+    if loaded is None:
+        return None
+    with _lock:
+        state = _states.setdefault(conversation_id, loaded)
+        _watermark.setdefault(conversation_id, len(state.flesh.turns()))
+        return state
+
+
+def _save_state(conversation_id, state, config):
+    """Write the state through the store when one is configured; a failed write is said, not hidden."""
+    store = onion_store(config)
+    if store is None:
+        return None
+    return store.save(conversation_id, state)
 
 
 def reset_librarian():
     with _lock:
         _states.clear()
         _watermark.clear()
+        _store.clear()
+        _refused.clear()
 
 
 def _resolve_through_registry(model):
@@ -235,7 +338,7 @@ def _curation_burst(conversation_id):
     if summarize is None:
         logger.debug("librarian: no backend for %s, nothing curated", config.model)
         return 0
-    state = peek_state(conversation_id)
+    state = peek_state(conversation_id, config)
     if state is None:
         return 0
     steps = 0
@@ -244,6 +347,7 @@ def _curation_burst(conversation_id):
         if not outcome.evicted:
             break
         steps += 1
+        _save_state(conversation_id, state, config)
     return steps
 
 
@@ -265,8 +369,9 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
             return False
         if not conversation_id or not isinstance(messages, list) or not messages:
             return False
-        state = state_for(conversation_id)
-        state.mirror(messages)
+        state = state_for(conversation_id, config)
+        if state.mirror(messages):
+            _save_state(conversation_id, state, config)
         count = len(state.flesh.turns())
         with _lock:
             if count - _watermark.get(conversation_id, 0) < config.min_new_turns:
@@ -283,10 +388,15 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
         return False
 
 
-def memory_block(conversation_id, question=None, *, budget=None, gate=None):
-    """The onion's memory block for the conversation, or an empty string. Never raises."""
+def memory_block(conversation_id, question=None, *, budget=None, gate=None, config=None):
+    """The onion's memory block for the conversation, or an empty string. Never raises.
+
+    A conversation the process and the store do not know yields nothing;
+    a store that refuses the conversation yields nothing too, and the
+    refusal is logged by name where the empty string is not.
+    """
     try:
-        state = peek_state(conversation_id)
+        state = peek_state(conversation_id, config)
         if state is None:
             return ""
         from .composer import compose, load_budget

@@ -43,3 +43,14 @@ librarian:
   min_new_turns: 8         # turns of growth before a curation fires
   temperature: 0.1
   num_predict: 256
+
+# Persistence. With a path, every conversation's Core, Cellar, receipts,
+# Peels and Flesh are written after each mirror and each accepted eviction,
+# and read back -- re-hashed row by row against a root -- when the process
+# next sees the conversation. Empty: the onion lives in the process and a
+# restart starts it over. A relative path resolves under the data directory.
+# The table holds conversation text, so an unencrypted connection is a
+# refusal by name unless require_encryption is set to false here.
+persistence:
+  path: ""
+  require_encryption: true

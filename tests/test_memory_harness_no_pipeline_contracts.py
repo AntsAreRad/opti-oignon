@@ -40,7 +40,7 @@ from _isolation import REPO  # noqa: E402
 _PACKAGE = REPO / "opti_oignon"
 _HARNESS = ("probes", "drift", "baseline")
 _HARNESS_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _HARNESS}
-_ONION = ("composer", "core_store", "receipts", "peels", "librarian", "ledger_store")
+_ONION = ("composer", "core_store", "receipts", "peels", "librarian", "ledger_store", "onion_store")
 _ONION_PATHS = {_PACKAGE / "memory" / f"{m}.py" for m in _ONION}
 _STDLIB_ONLY_AT_SCOPE = {"dataclasses", "re", "typing", "collections", "hashlib", "json", "math", "itertools", "logging"}
 

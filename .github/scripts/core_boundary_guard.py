@@ -51,6 +51,7 @@ CORE = frozenset({
     "opti_oignon.memory.drift",
     "opti_oignon.memory.ledger_store",
     "opti_oignon.memory.librarian",
+    "opti_oignon.memory.onion_store",
     "opti_oignon.memory.peels",
     "opti_oignon.memory.probes",
     "opti_oignon.memory.receipts",

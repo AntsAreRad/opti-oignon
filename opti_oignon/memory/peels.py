@@ -20,8 +20,8 @@ layer for peels is a host decision (which store, which embedder, measured
 against the existing one) and nothing here claims it. The summariser is a
 seam: the librarian's model on the host, a recording fake in the
 contracts. The two metrics at the end are fixture readings and say so in
-their ``source`` field. Nothing on the chat path imports this module yet,
-and a contract on the tree says so.
+their ``source`` field. The executor reaches this module through the
+librarian and nothing else does; a contract on the tree says so.
 """
 
 import hashlib

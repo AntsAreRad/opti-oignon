@@ -48,6 +48,21 @@ idle. On the next turn, the librarian's block -- Core, receipts digest and
 the peels selected for the question -- replaces today's working-memory
 block when it has one, and today's block stands when it does not.
 
+With a persistence path in `onion.yaml`, the librarian writes each
+conversation's Core, Cellar, receipts, Peels and Flesh through
+`opti_oignon/memory/onion_store.py` after every mirror and every accepted
+eviction, and reads it back when the process next sees the conversation.
+The read proves what it loads: every Core entry, Cellar span and Peel is
+re-hashed against the id it was saved under, the root over the four
+stores is recomputed against the saved one, and the first row that no
+longer answers is refused by name. A conversation the file does not know
+is unknown, never an empty state. The table holds conversation text, so a
+connection that is not encrypted is refused unless the file allows it;
+the rest of the tree opens plaintext with a warning outside Bulbe mode,
+this store does not. Without a path the onion lives in the process and a
+restart starts it over. The root covers Core, Cellar, receipts and Peels;
+the drift ledger has its own table and its root is a later decision.
+
 ## Drift ledger
 
 `opti_oignon/memory/ledger_store.py` holds facts with provenance, kind and

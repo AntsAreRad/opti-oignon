@@ -13,10 +13,14 @@ read contradicts nothing here, and that absence is reported as an empty
 list, never as agreement.
 
 Connections go through the repository's ``safe_connect``, so the table is
-encrypted where the rest of the memory is, and a store built where that
-seam is unreachable refuses rather than writing plaintext. The migration
-from the canonical facts table is a mapping here; running it against a
-real data directory is a host step.
+encrypted where the rest of the memory is. A store built where that seam
+is unreachable refuses and creates no file. Where the seam is reachable
+but opens plaintext -- no SQLCipher or no key, outside Bulbe mode -- this
+store follows the seam and writes plaintext with the seam's warning,
+unless built with ``require_encryption=True``, which refuses by name; the
+onion store, which holds conversation text, requires it by default. The
+migration from the canonical facts table is a mapping here; running it
+against a real data directory is a host step.
 """
 
 import json
@@ -43,18 +47,30 @@ def _now():
 class LedgerStore:
     """Supersession-only facts with a contradiction census, on one SQLite file."""
 
-    def __init__(self, path, *, connect=None):
+    def __init__(self, path, *, connect=None, require_encryption=False):
         self._path = Path(path)
         if connect is None:
             from ..db_utils import safe_connect
 
             connect = safe_connect
         self._connect = connect
+        self._require_encryption = bool(require_encryption)
         self._lock = threading.Lock()
         self._init_db()
 
     def _conn(self):
-        return closing(self._connect(self._path))
+        conn = self._connect(self._path)
+        if self._require_encryption:
+            try:
+                encrypted = bool(conn.execute("PRAGMA cipher_version").fetchall())
+            except Exception:  # noqa: BLE001 - a client without the pragma is a plain one
+                encrypted = False
+            if not encrypted:
+                conn.close()
+                raise RuntimeError(
+                    f"the drift ledger at {self._path} would be written in plaintext; refused by request"
+                )
+        return closing(conn)
 
     def _init_db(self):
         with self._lock, self._conn() as conn:

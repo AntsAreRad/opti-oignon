@@ -11,10 +11,11 @@ appends the receipt in the same step. No dangling key: the digest re-checks
 every key against the Cellar before it renders a single line, and refuses by
 name rather than show the model a key that leads nowhere.
 
-The Cellar is the sole legal source of every later compression; here it is
-an in-memory, content-addressed archive with the same surface the encrypted
-one will have. The ledger appends and resolves; it never forgets. Nothing on
-the chat path imports this module yet, and a contract on the tree says so.
+The Cellar is the sole legal source of every later compression: an
+in-memory, content-addressed archive whose rows the onion store writes to
+its encrypted table and re-hashes on the way back. The ledger appends and
+resolves; it never forgets. The executor reaches this module through the
+librarian and nothing else does; a contract on the tree says so.
 """
 
 import hashlib
@@ -71,6 +72,10 @@ class Cellar:
 
     def has(self, key):
         return key in self._spans
+
+    def keys(self):
+        """Every key held, in insertion order."""
+        return list(self._spans)
 
     def get(self, key):
         return json.loads(_canonical(self._spans[key]))

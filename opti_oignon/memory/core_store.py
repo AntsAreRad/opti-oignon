@@ -14,9 +14,10 @@ no longer answer to its id is refused by name, never repaired.
 The root is the hash of the canonical text of the active set, in insertion
 order. The composer anchors every assembled prompt to it, so a prompt whose
 Core bytes differ from the registry's is detectable by anyone holding the
-root. This module keeps the store in memory; its physical table comes with
-the ledger's, in the block's last session. Nothing on the chat path imports
-it yet, and a contract on the tree says so.
+root. This module keeps the store in memory; the onion store writes its
+rows to the encrypted table and re-hashes every one on the way back. The
+executor reaches this module through the librarian and nothing else does;
+a contract on the tree says so.
 """
 
 import hashlib
