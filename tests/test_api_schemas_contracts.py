@@ -101,6 +101,13 @@ REQUIRED = {
     'NoteUpdateAppendRequest': ('update_blob_b64',),
     'NoteUpdateRecordSchema': ('id', 'note_id', 'seq', 'update_blob_b64'),
     'NoteActionRequest': ('action',),
+    'OnionCoreEntrySchema': ('id', 'text', 'status'),
+    'OnionPinRequest': ('text',),
+    'OnionPinResponse': ('conversation_id', 'id'),
+    'OnionRecallResponse': ('conversation_id', 'key'),
+    'OnionReceiptSchema': ('key', 'stub'),
+    'OnionStateResponse': ('conversation_id',),
+    'OnionSupersedeRequest': ('old_id', 'text'),
     'NoteActionResultSchema': ('action', 'ok'),
     'AttachmentSchema': ('id', 'note_id', 'kind'),
     'TranscriptionResultSchema': ('attachment_id', 'ok'),
@@ -754,5 +761,37 @@ def test_q32_factory_defaults_carry_their_exact_values():
         assert space.ubatch_size == [256, 512, 1024]
         assert space.threads == [2, 4, 6, 8]
         assert space.flash_attention == [True, False]
+    finally:
+        restore()
+
+
+def test_q33_window_holds_and_the_module_is_import_pure_at_330_models():
+    """q1 word for word, at the count the onion's user surface brought the
+    module to: seven schemas for the Core and the receipts of a conversation
+    (q1 is deselected by name; its literal was 323).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 330
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse", "OnionRecallResponse",
+            "OnionReceiptSchema", "OnionStateResponse", "OnionSupersedeRequest",
+        }, "the seven are the onion's user surface and nothing else"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
     finally:
         restore()

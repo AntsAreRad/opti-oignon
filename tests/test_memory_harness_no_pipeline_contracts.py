@@ -22,6 +22,10 @@ every import of the package.
     imported by one another and by the executor's guarded import of the
     librarian, and by nothing else -- not the routes, not the agent, not
     the package facade.
+  * ZP6 -- supersedes ZP5 once the user's surface exists: the onion is
+    imported by the executor's guarded import and by the memory routes'
+    handlers, both of them the librarian and nothing else; the model's
+    tools and the chat tool registry reach no onion module.
 
 Local-only (the public distribution ships no tests). Reads the tree; loads
 nothing.
@@ -180,3 +184,52 @@ def test_zp5_the_onion_is_imported_by_the_executor_only_and_only_the_librarian()
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ---------------------------------------------------------------------------
+# ZP6 -- the executor and the memory routes import the librarian, nothing else does
+# ---------------------------------------------------------------------------
+_USER_SURFACES = {"opti_oignon/executor.py", "opti_oignon/api/routes_memory.py"}
+_MODEL_TOOLS = ("agent/tools.py", "tool_registry.py", "tool_executor.py", "agent/loop.py")
+
+
+def test_zp6_the_executor_and_the_memory_routes_import_the_librarian_and_the_models_tools_reach_no_onion():
+    allowed = _STDLIB_ONLY_AT_SCOPE | {"pathlib", "threading", "logging", "contextlib", "datetime"}
+    for path in sorted(_ONION_PATHS):
+        assert path.is_file(), f"{path.name} is part of the onion"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        top = _imports_of(ast.Module(body=[s for s in tree.body if isinstance(s, (ast.Import, ast.ImportFrom))], type_ignores=[]))
+        offenders = {n for n in top if n.split(".")[0] not in allowed and not n.startswith("__future__")}
+        assert offenders == set(), f"{path.name} imports only the standard library at module scope: {offenders}"
+    importers = {}
+    for path in sorted(_PACKAGE.rglob("*.py")):
+        if path in _ONION_PATHS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for name in _imports_of(tree):
+            bare = name.lstrip(".")
+            last = bare.split(".")[-1] if bare else ""
+            if (
+                bare.startswith("opti_oignon.memory.") and last in _ONION
+            ) or (
+                name.startswith(".") and last in _ONION
+                and (bare.startswith("memory.") or "memory" in str(path))
+            ):
+                importers.setdefault(path.relative_to(REPO).as_posix(), set()).add(last)
+        # The spelling the census above cannot see: ``from ..memory import
+        # librarian`` names the onion module as the imported name, not as
+        # the module. The routes import it that way, inside their handlers.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[-1] == "memory":
+                for alias in node.names:
+                    if alias.name in _ONION:
+                        importers.setdefault(path.relative_to(REPO).as_posix(), set()).add(alias.name)
+    assert set(importers) == _USER_SURFACES, f"the two user surfaces import the onion, nothing else: {importers}"
+    assert all(v == {"librarian"} for v in importers.values()), f"and each imports the librarian only: {importers}"
+    for rel in _MODEL_TOOLS:
+        text = (_PACKAGE / rel).read_text(encoding="utf-8")
+        assert not any(m in text for m in ("core_store", "receipts", "librarian", "onion_store")), (
+            f"{rel} names no onion module: the model's tools have no path to the Core"
+        )
+    facade = (_PACKAGE / "memory" / "__init__.py").read_text(encoding="utf-8")
+    assert not any(f".{m} import" in facade or f"memory.{m}" in facade for m in _ONION), "the facade stays out of it"

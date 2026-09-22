@@ -100,6 +100,19 @@ package costs.
   two: the third means the measurement did not run, and nothing downstream may
   read it as either a pass or a failure.
 - Unit tests for the wire envelopes, in the source set that needs no device.
+- The user's surface on the onion Core: `GET /api/memory/onion/{conv}`
+  lists a conversation's Core entries and open receipts, `POST .../pin`
+  pins a statement as the user, `POST .../supersede` pins a successor and
+  links the old entry to it, `POST .../recall/{key}` hands the verbatim
+  span behind a receipt back and marks it resolved. The librarian carries
+  the five entry points and forwards the actor to the store, so only a
+  caller that says it is the user gets through; a pin that would push the
+  Core over its cap is refused before it lands, where before an over-cap
+  Core would have blanked the whole memory block at compose time in
+  silence (that refusal is now logged as a warning, by conversation). Every
+  mutation is saved through the onion store when one is configured. The
+  model's tools have no path to any of it; the no-pipeline contract now
+  names the two modules that import the librarian and checks the tools.
 - The onion memory persists: `memory/onion_store.py` writes each
   conversation's Core, Cellar, receipts, Peels, Flesh and mirror cursor
   through the repository's connection seam, after every mirror and every

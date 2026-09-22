@@ -258,6 +258,54 @@ class MemoryExtractResponse(BaseModel):
     facts_added: int = 0
 
 
+# -- Onion memory: the user's surface on the Core and the receipts --
+
+class OnionCoreEntrySchema(BaseModel):
+    """One pinned statement, addressed by its bytes."""
+    id: str
+    text: str
+    status: str
+    superseded_by: str | None = None
+
+
+class OnionReceiptSchema(BaseModel):
+    """One open eviction receipt: the stub the model sees and its recall key."""
+    key: str
+    stub: str
+    turn_ids: list[str] = []
+
+
+class OnionStateResponse(BaseModel):
+    """A conversation's Core and open receipts."""
+    conversation_id: str
+    core: list[OnionCoreEntrySchema] = []
+    receipts: list[OnionReceiptSchema] = []
+
+
+class OnionPinRequest(BaseModel):
+    """Pin a statement to the conversation's Core."""
+    text: str
+
+
+class OnionSupersedeRequest(BaseModel):
+    """Pin a statement as the successor of an existing entry."""
+    old_id: str
+    text: str
+
+
+class OnionPinResponse(BaseModel):
+    """The id the pinned bytes answer to."""
+    conversation_id: str
+    id: str
+
+
+class OnionRecallResponse(BaseModel):
+    """The verbatim span behind a receipt, now resolved."""
+    conversation_id: str
+    key: str
+    span: list[dict] = []
+
+
 # -- Memory store (two-tier MemoryStore) --
 
 class MemoryRecordSchema(BaseModel):

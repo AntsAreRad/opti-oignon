@@ -341,6 +341,20 @@ fail_under = 0
 # what an empty ledger newly needs: the guard refuses an estate it could
 # not scan, and its green names how many modules it read.
 #
+# q1 pinned the schema module's class count as a literal, 323. The onion's
+# user surface adds seven schemas; q33 in the same file keeps every other
+# assertion of q1 word for word at 330 and names the seven, so the next
+# surface that moves the count has to name what it adds too. The q26
+# required-field census is a snapshot map, not an assertion; it gained the
+# seven entries the way it gained every earlier one.
+#
+# zp5 pinned that the executor is the only module importing the onion. The
+# user's surface on the Core -- pin, supersede, recall -- is a memory route,
+# so the routes' handlers import the librarian too; zp6 in the same file
+# keeps every property of zp5 (stdlib only at module scope, the librarian
+# and nothing else, the facade out of it) over the two importers and pins
+# what the surface newly needs: the model's tools reach no onion module.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -450,6 +464,8 @@ addopts = """
     --deselect=tests/test_api_deps_contracts.py::test_d28_every_direct_client_answer_shape_is_folded_to_a_plain_list
     --deselect=tests/test_core_client_contracts.py::test_rd2_an_absent_daemon_is_unhealthy_and_a_request_is_a_refusal_by_name
     --deselect=tests/test_convergence_four_contracts.py::test_cq10_the_health_monitor_probes_through_model_info_and_names_the_backend
+    --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp5_the_onion_is_imported_by_the_executor_only_and_only_the_librarian
+    --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list
     --deselect=tests/test_routes_benchmark_contracts.py::test_r33_single_test_without_a_client_degrades_to_an_error_result

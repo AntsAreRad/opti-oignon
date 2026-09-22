@@ -41,6 +41,23 @@ store and comes back across a restart:
     required by default, a relative path resolves under the data directory,
     an absolute one stands, and an absent section means no store.
 
+The user's surface on the Core and the Cellar, the only path to either:
+
+  * LB11 -- a pin lands in the conversation's Core with the user as actor,
+    is content-addressed and idempotent, is read back by ``core_entries``,
+    and composes into the memory block; any other actor is refused by name
+    before the store is touched.
+  * LB12 -- a pin that would push the Core over its cap is refused by name
+    at pin time, before it lands, and the block it would have blanked is
+    still composed from what was there.
+  * LB13 -- a supersession links the old entry to the new one, the old text
+    stays, the block carries the successor only; superseding an unknown or
+    an already superseded entry is refused by name.
+  * LB14 -- a recall hands back the verbatim span behind an open receipt,
+    marks the receipt resolved so the digest no longer shows it, refuses
+    an unknown key by name, and every mutation of LB11-14 is saved through
+    the store when one is configured.
+
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the registry is blocked, so a
 summariser can only come from an injected resolver.
@@ -430,6 +447,125 @@ def test_lb10_the_persistence_section_is_read_with_encryption_required_by_defaul
         p.write_text(yaml.safe_dump(bad), encoding="utf-8")
         with pytest.raises(lib.LibrarianError, match="require_encryption"):
             lib.load_config(p)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB11 -- a pin is the user's, content-addressed, and composes
+# ---------------------------------------------------------------------------
+def test_lb11_a_pin_is_the_users_alone_content_addressed_and_composes_into_the_block():
+    lib, loaded, restore = _open()
+    try:
+        cfg = _config(lib)
+        budget = _small_budget(loaded)
+        entry_id = lib.pin("c1", "Answers cite their source.", actor="user", config=cfg)
+        assert lib.pin("c1", "Answers cite their source.", actor="user", config=cfg) == entry_id, "the same bytes are one entry"
+        entries = lib.core_entries("c1", config=cfg)
+        assert [(e.id, e.text, e.status) for e in entries] == [(entry_id, "Answers cite their source.", "active")]
+        block = lib.memory_block("c1", "anything", budget=budget, config=cfg)
+        assert "Answers cite their source." in block
+        for actor in ("model", "librarian", "", None):
+            with pytest.raises(PermissionError, match="explicit user action"):
+                lib.pin("c1", "The model pins.", actor=actor, config=cfg)
+        assert [e.text for e in lib.core_entries("c1", config=cfg)] == ["Answers cite their source."], "nothing landed"
+        with pytest.raises(ValueError, match="empty"):
+            lib.pin("c1", "   ", actor="user", config=cfg)
+        assert lib.core_entries("nobody", config=cfg) == [], "an unknown conversation has no entries, and none is created"
+        assert lib.peek_state("nobody", cfg) is None
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB12 -- the cap is checked at pin time
+# ---------------------------------------------------------------------------
+def test_lb12_a_pin_over_the_core_cap_is_refused_before_it_lands_and_the_block_survives():
+    lib, loaded, restore = _open()
+    try:
+        cfg = _config(lib)
+        budget = _small_budget(loaded)
+        lib.pin("c1", "Answers cite their source.", actor="user", config=cfg)
+        before = lib.memory_block("c1", "anything", budget=budget, config=cfg)
+        assert before, "control: a block before the oversized pin"
+        oversized = " ".join(["word"] * (budget.core * 2))
+        with pytest.raises(lib.LibrarianError, match="cap") as raised:
+            lib.pin("c1", oversized, actor="user", config=cfg, budget=budget)
+        assert str(budget.core) in str(raised.value), "the refusal names the cap"
+        assert [e.text for e in lib.core_entries("c1", config=cfg)] == ["Answers cite their source."], "nothing landed"
+        assert lib.memory_block("c1", "anything", budget=budget, config=cfg) == before, "the block is what it was, not blank"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB13 -- supersession
+# ---------------------------------------------------------------------------
+def test_lb13_a_supersession_links_old_to_new_and_the_block_carries_the_successor_only():
+    lib, loaded, restore = _open()
+    try:
+        cfg = _config(lib)
+        budget = _small_budget(loaded)
+        old_id = lib.pin("c1", "Answers are concise.", actor="user", config=cfg)
+        new_id = lib.supersede("c1", old_id, "Answers are concise and cite their source.", actor="user", config=cfg)
+        entries = {e.id: e for e in lib.core_entries("c1", config=cfg)}
+        assert entries[old_id].superseded_by == new_id and entries[old_id].text == "Answers are concise."
+        assert entries[new_id].status == "active"
+        block = lib.memory_block("c1", "anything", budget=budget, config=cfg)
+        assert "cite their source" in block and "Answers are concise.\n" not in block + "\n"
+        with pytest.raises(ValueError, match="already superseded"):
+            lib.supersede("c1", old_id, "A third text.", actor="user", config=cfg)
+        with pytest.raises(KeyError):
+            lib.supersede("c1", "0" * 64, "A third text.", actor="user", config=cfg)
+        with pytest.raises(PermissionError, match="explicit user action"):
+            lib.supersede("c1", new_id, "The model supersedes.", actor="model", config=cfg)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB14 -- recall, and every mutation saved
+# ---------------------------------------------------------------------------
+def test_lb14_a_recall_hands_back_the_span_marks_the_receipt_and_every_mutation_is_saved(tmp_path):
+    import sqlite3
+
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        path = tmp_path / "onion.db"
+        cfg = _config(lib, persist_path=str(path), require_encryption=False)
+        opener = lambda p: sqlite3.connect(str(p))  # noqa: E731
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=opener, require_encryption=False)
+
+        state = lib.state_for("c1", cfg)
+        state.mirror(_messages(12))
+        while lib.curate(state, _faithful, gate=gate, budget=budget).evicted:
+            pass
+        receipts = lib.open_receipts("c1", config=cfg)
+        assert len(receipts) >= 2, "control: open receipts to recall"
+        key = receipts[0].key
+        span = lib.recall("c1", key, config=cfg)
+        assert [t["turn_id"] for t in span] == list(receipts[0].turn_ids)
+        assert span[0]["text"].startswith("Turn 1:"), "the verbatim span, not a summary"
+        assert key not in [r.key for r in lib.open_receipts("c1", config=cfg)], "the receipt is resolved"
+        assert receipts[0].stub not in lib.memory_block("c1", "service", budget=budget, config=cfg), "the digest no longer shows it"
+        with pytest.raises(KeyError, match="not in the ledger"):
+            lib.recall("c1", "0" * 64, config=cfg)
+        just_recalled = store_mod.OnionStore(path, connect=opener, require_encryption=False).load("c1", lib.OnionState())
+        assert [r.resolved for r in just_recalled.ledger.all() if r.key == key] == [True], (
+            "the recall itself was saved, before any later mutation could save it"
+        )
+
+        entry_id = lib.pin("c1", "The user is Alice.", actor="user", config=cfg)
+        lib.supersede("c1", entry_id, "The user is Alice, in Lyon.", actor="user", config=cfg)
+        reader = store_mod.OnionStore(path, connect=opener, require_encryption=False)
+        fresh = reader.load("c1", lib.OnionState())
+        assert [e.text for e in fresh.core.active()] == ["The user is Alice, in Lyon."], "pin and supersession were saved"
+        assert [r.resolved for r in fresh.ledger.all()][0] is True, "the recall was saved"
     finally:
         restore()
 

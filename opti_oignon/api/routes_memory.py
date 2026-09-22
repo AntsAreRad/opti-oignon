@@ -17,6 +17,11 @@ from .schemas import (
     MemoryExtractResponse,
     MemoryFactSchema,
     MemoryRecordSchema,
+    OnionPinRequest,
+    OnionPinResponse,
+    OnionRecallResponse,
+    OnionStateResponse,
+    OnionSupersedeRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,6 +166,84 @@ def extract_facts(conv_id: str) -> dict:
             status_code=500,
             detail=f"Extraction failed: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# The onion's user surface: the Core and the receipts of one conversation.
+# The librarian is imported inside each handler, so the route module stays
+# importable where the onion is not, and the onion stays out of the module
+# scope of everything but the executor's guarded import.
+# ---------------------------------------------------------------------------
+
+def _onion():
+    """The librarian when the onion is switched on; 503 by name otherwise."""
+    try:
+        from ..memory import librarian
+    except Exception as exc:  # noqa: BLE001 - absence is an answer
+        raise HTTPException(status_code=503, detail=f"Onion memory not available: {exc}")
+    if not librarian.onion_enabled():
+        raise HTTPException(status_code=503, detail="Onion memory is switched off (onion.yaml: enabled)")
+    return librarian
+
+
+def _refused(exc):
+    """A refusal of the librarian or its stores, returned by name."""
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, KeyError):
+        return HTTPException(status_code=404, detail=str(exc).strip("'\""))
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=500, detail=f"Onion memory refused: {exc}")
+
+
+def _entry_schema(entry):
+    return {"id": entry.id, "text": entry.text, "status": entry.status, "superseded_by": entry.superseded_by}
+
+
+@router.get("/onion/{conv_id}", response_model=OnionStateResponse)
+def onion_state(conv_id: str) -> dict:
+    """The conversation's Core entries and open receipts."""
+    librarian = _onion()
+    try:
+        core = [_entry_schema(e) for e in librarian.core_entries(conv_id)]
+        receipts = [{"key": r.key, "stub": r.stub, "turn_ids": list(r.turn_ids)} for r in librarian.open_receipts(conv_id)]
+    except Exception as exc:  # noqa: BLE001 - a refusing store is an answer, by name
+        raise _refused(exc)
+    return OnionStateResponse(conversation_id=conv_id, core=core, receipts=receipts).model_dump()
+
+
+@router.post("/onion/{conv_id}/pin", response_model=OnionPinResponse)
+def onion_pin(conv_id: str, request: OnionPinRequest) -> dict:
+    """Pin a statement to the conversation's Core, as the user."""
+    librarian = _onion()
+    try:
+        entry_id = librarian.pin(conv_id, request.text, actor="user")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionPinResponse(conversation_id=conv_id, id=entry_id).model_dump()
+
+
+@router.post("/onion/{conv_id}/supersede", response_model=OnionPinResponse)
+def onion_supersede(conv_id: str, request: OnionSupersedeRequest) -> dict:
+    """Pin a statement as the successor of an existing Core entry, as the user."""
+    librarian = _onion()
+    try:
+        entry_id = librarian.supersede(conv_id, request.old_id, request.text, actor="user")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionPinResponse(conversation_id=conv_id, id=entry_id).model_dump()
+
+
+@router.post("/onion/{conv_id}/recall/{key}", response_model=OnionRecallResponse)
+def onion_recall(conv_id: str, key: str) -> dict:
+    """The verbatim span behind a receipt; the receipt is marked resolved."""
+    librarian = _onion()
+    try:
+        span = librarian.recall(conv_id, key)
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionRecallResponse(conversation_id=conv_id, key=key, span=[dict(t) for t in span]).model_dump()
 
 
 @router.post("/migrate")

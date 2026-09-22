@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The librarian: the loop that grows the onion memory behind the chat path.
 
-It does four things and nothing else. It mirrors a saved conversation into
+It does five things and nothing else. It mirrors a saved conversation into
 a Flesh, turn by turn, never rewinding. It evicts through the probe gate,
 one span at a time, with a summariser that asks the inference registry --
 never the client behind it -- with the keep-alive of ``onion.yaml`` so the
@@ -12,7 +12,13 @@ that defaults to a daemon thread, and it never raises into a turn. And it
 composes the memory block the executor places in the prompt: Core, receipts
 digest and the Peels selected for the question, under the layer caps, every
 recalled segment framed as data with its provenance; the executor wraps the
-whole block as untrusted memory before it reaches the model.
+whole block as untrusted memory before it reaches the model. And it is the
+user's one path to the Core and the Cellar: ``pin``, ``supersede`` and
+``recall`` take the conversation id, forward the actor to the store so
+that only a caller that says it is the user gets through, check the Core
+cap before a pin lands, and save through the onion store when one is
+configured. The model reaches none of this; a contract on the tree says
+which two modules import this one.
 
 The state is per conversation. With a persistence path in ``onion.yaml``
 it is written through the onion store after every mirror and every
@@ -412,6 +418,100 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
         if not any(s.text.strip() for s in kept):
             return ""
         return replace(prompt, segments=kept).render()
-    except Exception:  # noqa: BLE001 - a block that cannot be trusted is no block
-        logger.debug("onion memory block refused", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 - a block that cannot be trusted is no block
+        logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
         return ""
+
+
+# ---------------------------------------------------------------------------
+# The user's surface: pin, supersede, recall
+# ---------------------------------------------------------------------------
+
+def _existing_state(conversation_id, config):
+    """The conversation's state when the process or the store knows it; None otherwise."""
+    return peek_state(conversation_id, config)
+
+
+def core_entries(conversation_id, *, config=None):
+    """Every Core entry of the conversation, in pin order; empty for an unknown one, which is not created."""
+    state = _existing_state(conversation_id, config)
+    return [] if state is None else state.core.all()
+
+
+def open_receipts(conversation_id, *, config=None):
+    """The open receipts of the conversation, in eviction order."""
+    state = _existing_state(conversation_id, config)
+    return [] if state is None else state.ledger.open()
+
+
+def _core_would_fit(state, text, budget):
+    """Refuse by name a pin that would push the active Core over its cap."""
+    from .core_store import entry_hash
+
+    active = state.core.active()
+    if any(e.id == entry_hash(text) for e in active):
+        return
+    tokens = estimate_tokens("\n".join([e.text for e in active] + [text]))
+    if tokens > budget.core:
+        raise LibrarianError(
+            f"the pin would bring the Core to {tokens} tokens against a cap of {budget.core}: "
+            f"refused before it lands, because the composer never cuts the Core"
+        )
+
+
+def pin(conversation_id, text, *, actor, config=None, budget=None):
+    """Pin ``text`` to the conversation's Core as ``actor``; the store refuses any actor but the user.
+
+    The cap is checked here, before the store is touched: a Core over its
+    cap would blank the whole memory block at compose time.
+    """
+    from .composer import load_budget
+    from .core_store import CoreStore
+
+    CoreStore._require_user(actor)
+    config = config or load_config()
+    budget = budget or load_budget()
+    state = state_for(conversation_id, config)
+    _core_would_fit(state, text, budget)
+    entry_id = state.core.add(text, actor=actor)
+    _save_state(conversation_id, state, config)
+    return entry_id
+
+
+def supersede(conversation_id, old_id, text, *, actor, config=None, budget=None):
+    """Pin ``text`` as the successor of ``old_id``; the old text stays, linked."""
+    from .composer import load_budget
+    from .core_store import CoreStore
+
+    CoreStore._require_user(actor)
+    config = config or load_config()
+    budget = budget or load_budget()
+    state = state_for(conversation_id, config)
+    old = state.core.get(old_id)
+    if old.superseded_by:
+        raise ValueError(f"entry {old_id!r} is already superseded by {old.superseded_by!r}")
+    remaining = [e for e in state.core.active() if e.id != old_id]
+    tokens = estimate_tokens("\n".join([e.text for e in remaining] + [text]))
+    if tokens > budget.core:
+        raise LibrarianError(
+            f"the supersession would bring the Core to {tokens} tokens against a cap of {budget.core}: refused before it lands"
+        )
+    new_id = state.core.supersede(old_id, text, actor=actor)
+    _save_state(conversation_id, state, config)
+    return new_id
+
+
+def recall(conversation_id, key, *, config=None):
+    """The verbatim span behind a receipt, which is marked resolved; an unknown key is refused by name.
+
+    No actor gate: recall changes nothing in the Core, it hands data back,
+    and the design lets the model ask for it through a tool that is not
+    built yet.
+    """
+    config = config or load_config()
+    state = _existing_state(conversation_id, config)
+    if state is None:
+        raise KeyError(f"conversation {conversation_id!r} has no onion state")
+    span = state.ledger.resolve(key, state.cellar)
+    _save_state(conversation_id, state, config)
+    return span

@@ -48,6 +48,19 @@ idle. On the next turn, the librarian's block -- Core, receipts digest and
 the peels selected for the question -- replaces today's working-memory
 block when it has one, and today's block stands when it does not.
 
+The user's surface on the Core and the receipts is a memory route scoped
+to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
+Core entries and the open receipts, `POST .../pin` pins a statement as the
+user, `POST .../supersede` pins a successor and links the old entry to it,
+`POST .../recall/{key}` hands the verbatim span back and marks the receipt
+resolved. The route imports the librarian inside its handlers and passes
+the user as actor; the store refuses any other actor, and a pin that would
+push the Core over its cap is refused before it lands, because the
+composer never cuts the Core and would otherwise blank the whole block.
+The model's tools reach none of this; a contract on the tree names the
+two modules that import the librarian. Recall has no actor gate by design:
+it changes nothing in the Core, and the model's tool over it is not built.
+
 With a persistence path in `onion.yaml`, the librarian writes each
 conversation's Core, Cellar, receipts, Peels and Flesh through
 `opti_oignon/memory/onion_store.py` after every mirror and every accepted
