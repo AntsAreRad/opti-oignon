@@ -54,11 +54,11 @@ Today every pack runs in the same process and reaches inference and the
 model catalogue through the registry; the registry-funnel guard counts
 what still does not, whatever name the client travels under, and also a
 module that posts to the inference server's endpoint with an HTTP
-transport of its own. Five modules still do, sealed on a ledger that may
-only shrink: the RAG embedder (batches, where the registry embeds one text
-at a time), the red team's three entry points (their endpoint is checked
+transport of its own. Four modules still do, sealed on a ledger that may
+only shrink: the red team's three entry points (their endpoint is checked
 for loopback, the registry's host is not) and the launcher's liveness
-probe. The
+probe. Every embedding -- RAG, project context, memory recall -- goes
+through the registry's `embed` and `embed_many` heads. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 

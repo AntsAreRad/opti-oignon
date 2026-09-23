@@ -39,6 +39,19 @@ what they carry:
     entry carries the size in bytes, the digest and the family list the
     same way; the bridge answers ``show`` when the scripted client has one.
 
+Every embedding of the application went to the server through a raw HTTP
+embedder, one text or one batch at a time. The batch now has a head:
+
+  * BH8 -- ``embed_many`` answers ``None`` by default and on every backend
+    without an embedding endpoint; Ollama sends the whole batch through the
+    client's ``embed`` after one admission, in both answer forms, answers
+    an empty batch without asking, refuses by name an answer whose count
+    does not match the texts, and the governor's refusal stops the batch
+    before the client.
+  * BH9 -- both embedding heads take a timeout that binds the transport, a
+    client per timeout; without one the module-level client answers as
+    before.
+
 Local-only (the public distribution ships no tests). The backend module is
 loaded through the shared isolation window with every client faked.
 """
@@ -479,3 +492,96 @@ def test_bh7_model_info_and_the_listing_carry_what_the_client_reported_in_both_f
     assert shown.extra["families"] == ["llama", "clip"] and shown.extra["parameters"] == "num_ctx 8192"
     assert bridge.list_models()[0].extra == {"size_bytes": 10, "digest": "sha256:q"}
     assert ScriptedBackend(_ScriptedChatOnly()).model_info("m") == {"name": "m"}, "without show, the name alone"
+
+
+# ---------------------------------------------------------------------------
+# BH8 -- a batch of embeddings, one admission
+# ---------------------------------------------------------------------------
+def test_bh8_embed_many_is_none_by_default_and_ollama_embeds_a_batch_after_one_admission():
+    mod, restore = _open()
+    try:
+        class _Seven(mod.InferenceBackend):
+            name = "seven"
+            display_name = "seven"
+
+            def health_check(self):
+                return True
+
+            def list_models(self):
+                return []
+
+            def model_info(self, model_name):
+                return None
+
+            def generate(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+                raise AssertionError("not asked")
+
+            def stream(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+                raise AssertionError("not asked")
+
+        assert _Seven().embed_many("m", ["a", "b"]) is None
+        assert getattr(mod.InferenceBackend.embed_many, "__isabstractmethod__", False) is False
+        assert mod.LlamaCppBackend(model_dirs=[]).embed_many("one.gguf", ["a"]) is None
+
+        fake = _FakeOllama(embedding={"embeddings": [[0.1, 0.2], [0.3, 0.4]]})
+        assert _ollama(mod, fake).embed_many("emb", ["a", "b"]) == [[0.1, 0.2], [0.3, 0.4]]
+        assert fake.calls == [("embed", {"model": "emb", "input": ["a", "b"]})], "one request for the batch"
+        assert _ollama(mod, _FakeOllama(embedding=_EmbedObject([[0.5], [0.6]]))).embed_many("emb", ["a", "b"]) == [[0.5], [0.6]]
+
+        quiet = _FakeOllama(embedding={"embeddings": []})
+        assert _ollama(mod, quiet).embed_many("emb", []) == [] and quiet.calls == [], "an empty batch asks nothing"
+        assert _ollama(mod, _FakeOllama(), available=False).embed_many("emb", ["a"]) is None
+
+        short = _FakeOllama(embedding={"embeddings": [[0.1]]})
+        with pytest.raises(ValueError, match="1 vector.* 2 text"):
+            _ollama(mod, short).embed_many("emb", ["a", "b"])
+    finally:
+        restore()
+
+    governor = _governor(refuse=True)
+    mod, restore = _open(seeded={"opti_oignon.resource_governor": governor})
+    try:
+        fake = _FakeOllama(embedding={"embeddings": [[1.0], [2.0], [3.0]]})
+        with pytest.raises(governor.GovernorRefusal):
+            _ollama(mod, fake).embed_many("emb", ["a", "b", "c"])
+        assert governor.asked == [("emb", None)] and fake.calls == [], "refused before the client"
+    finally:
+        restore()
+
+    governor = _governor(refuse=False)
+    mod, restore = _open(seeded={"opti_oignon.resource_governor": governor})
+    try:
+        fake = _FakeOllama(embedding={"embeddings": [[1.0], [2.0], [3.0]]})
+        assert _ollama(mod, fake).embed_many("emb", ["a", "b", "c"]) == [[1.0], [2.0], [3.0]]
+        assert governor.asked == [("emb", None)], "one admission for the batch, not one per text"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# BH9 -- a timeout binds the embedding transport
+# ---------------------------------------------------------------------------
+class _FakeOllamaWithClients(_FakeOllama):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.clients = []
+
+    def Client(self, timeout=None):  # noqa: N802 - the client library's spelling
+        self.clients.append(timeout)
+        return self
+
+
+def test_bh9_both_embedding_heads_bind_a_timeout_to_the_transport():
+    mod, restore = _open()
+    try:
+        fake = _FakeOllamaWithClients(embedding={"embeddings": [[0.1], [0.2]]})
+        backend = _ollama(mod, fake)
+        assert backend.embed_many("emb", ["a", "b"], timeout=7.5) == [[0.1], [0.2]]
+        assert backend.embed("emb", "a", timeout=7.5) == [0.1]
+        assert fake.clients == [7.5], "one client per timeout, built once and kept"
+        assert backend.embed("emb", "a") == [0.1]
+        assert fake.clients == [7.5], "without a timeout the module-level client answers, as before"
+        assert [c[0] for c in fake.calls] == ["embed", "embed", "embed"]
+    finally:
+        restore()
+

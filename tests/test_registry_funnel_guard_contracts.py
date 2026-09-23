@@ -85,6 +85,17 @@ with the reason each needs a decision:
   * RF23 -- the entry point names the raw debt with its site count, and
     refuses an unowed raw site by name.
 
+The RAG embedder was the first raw debt paid, once the batch had a head on
+the backend contract. RF22 and RF23 named the five modules the widening
+found and are deselected by name; their successors keep every assertion
+over the four that remain:
+
+  * RF24 -- the raw ledger names exactly the four modules that still post,
+    each sealed and carrying a site, nothing outside it posts, and the
+    embedder posts no more.
+  * RF25 -- the entry point names the four with their site count, and
+    refuses an unowed raw site by name.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -565,6 +576,53 @@ def test_rf23_the_entry_point_names_the_raw_debt_and_refuses_an_unowed_raw_site(
         out = capsys.readouterr().out
         sites = sum(guard.count_raw_sites(t) for n, t in _real_files() if n in guard.RAW_LEDGER)
         assert f"{len(_RAW_OWED)} module(s) owed" in out and f"{sites} raw site(s)" in out, out
+        pkg = tmp_path / "opti_oignon"
+        pkg.mkdir()
+        (pkg / "poster.py").write_text(_RAW_REQUESTS, encoding="utf-8")
+        assert guard.main(["guard", str(tmp_path)]) == 1
+        refused = capsys.readouterr().out
+        assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused
+    finally:
+        restore()
+
+
+_RAW_OWED_AFTER_EMBEDDINGS = (
+    "opti_oignon/redteam/generator.py",
+    "opti_oignon/redteam/strategies.py",
+    "opti_oignon/redteam/targets.py",
+    "opti_oignon/ui.py",
+)
+
+
+def test_rf24_the_raw_ledger_names_the_four_modules_that_still_post():
+    guard, restore = _load()
+    try:
+        files = dict(_real_files())
+        assert sorted(guard.RAW_LEDGER) == sorted(_RAW_OWED_AFTER_EMBEDDINGS)
+        total = 0
+        for name in _RAW_OWED_AFTER_EMBEDDINGS:
+            assert guard.RAW_LEDGER[name] == hashlib.sha256(files[name].encode("utf-8")).hexdigest(), (
+                f"{name} is sealed on the text the census reads"
+            )
+            n = guard.count_raw_sites(files[name])
+            assert n > 0, f"{name} is owed for, so the census finds a site in it"
+            total += n
+        assert total >= 5, "the debt that remains, not zero"
+        outside = {n: guard.count_raw_sites(t) for n, t in files.items() if n not in guard.RAW_LEDGER}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+        assert guard.count_raw_sites(files["opti_oignon/project_triggers.py"]) == 0, "the paid module posts no more"
+        assert guard.count_raw_sites(files["opti_oignon/rag/embeddings.py"]) == 0, "the embedder posts no more"
+    finally:
+        restore()
+
+
+def test_rf25_the_entry_point_names_the_four_and_refuses_an_unowed_raw_site(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        assert guard.main(["guard", str(REPO)]) == 0
+        out = capsys.readouterr().out
+        sites = sum(guard.count_raw_sites(t) for n, t in _real_files() if n in guard.RAW_LEDGER)
+        assert f"{len(_RAW_OWED_AFTER_EMBEDDINGS)} module(s) owed" in out and f"{sites} raw site(s)" in out, out
         pkg = tmp_path / "opti_oignon"
         pkg.mkdir()
         (pkg / "poster.py").write_text(_RAW_REQUESTS, encoding="utf-8")

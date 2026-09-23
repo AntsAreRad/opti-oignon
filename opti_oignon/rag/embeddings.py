@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
-EMBEDDINGS - Ollama embedding interface
+EMBEDDINGS - embedding interface
 ===============================================
-Generate vector embeddings via Ollama.
+Generate vector embeddings through the inference registry.
 
 Supported models:
 - mxbai-embed-large (1024 dim, best quality)
 - nomic-embed-text (768 dim, faster)
 
 Auto-detects available embedding models if configured ones are missing.
-Falls back to legacy /api/embeddings endpoint for older Ollama versions.
+Every vector is asked of the registry's backend for the model -- one text
+through ``embed``, a batch through ``embed_many`` -- so each request is
+admitted by the governor like any other. Ollama versions without the
+``/api/embed`` endpoint are no longer served: the client the registry
+holds asks that endpoint only.
 """
 
 import logging
 import threading
 
 import numpy as np
-import requests
 from tqdm import tqdm
 
 from .config import EmbeddingConfig, get_config
@@ -24,108 +27,114 @@ from .config import EmbeddingConfig, get_config
 logger = logging.getLogger(__name__)
 
 
+def _backend_for(model: str):
+    """The registry's backend for ``model``, or None when there is no registry or no backend."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+
+        return get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - absence is an answer
+        logger.debug("inference registry unavailable to the embedder: %s", exc)
+        return None
+
+
 class OllamaEmbeddings:
     """
-    Client for generating embeddings via Ollama.
+    Client for generating embeddings through the inference registry.
 
     Usage:
         embedder = OllamaEmbeddings()
-        vectors = embedder.embed(["texte 1", "texte 2"])
+        vectors = embedder.embed(["text 1", "text 2"])
     """
 
     def __init__(self, config: EmbeddingConfig | None = None):
         """
-        Initialize the Ollama embedding client.
+        Initialize the embedding client.
 
         Args:
             config: Embedding configuration (optional)
         """
         self.config = config or get_config().embedding
-        self.url = f"{self.config.ollama_url}/api/embed"
         self._model_verified = False
-        self._use_legacy = False
 
     def _verify_model(self) -> bool:
-        """Verify that the embedding model is available in Ollama.
+        """Verify that the embedding model is in the registry's catalogue.
 
         Resolution order:
         1. Check configured model (exact match or base-name match)
         2. Check configured fast_model
         3. Auto-discover any available embedding model
-        Uses the exact full name from Ollama (including :tag) to avoid 400 errors.
+        Uses the full name the catalogue reports (including :tag). A
+        catalogue nobody could read verifies nothing.
         """
         if self._model_verified:
             return True
 
+        backend = _backend_for(self.config.model)
+        if backend is None:
+            logger.error("No backend in the inference registry serves embeddings")
+            return False
         try:
-            list_url = f"{self.config.ollama_url}/api/tags"
-            response = requests.get(list_url, timeout=10)
-            response.raise_for_status()
-
-            models = response.json().get("models", [])
-            if not models:
-                logger.error("No models available in Ollama")
-                return False
-
-            # Build lookup: base_name -> full_name (e.g. "mxbai-embed-large" -> "mxbai-embed-large:latest")
-            full_names = {}
-            for m in models:
-                full = m.get("name", "")
-                if not full:
-                    continue
-                base = full.split(":")[0]
-                full_names[base] = full
-                full_names[full] = full  # also map full name to itself
-
-            # 1. Try configured model
-            main_base = self.config.model.split(":")[0]
-            if main_base in full_names:
-                self.config.model = full_names[main_base]
-                self._model_verified = True
-                logger.info("Embedding model verified: %s", self.config.model)
-                return True
-
-            # 2. Try configured fast_model
-            fast_base = self.config.fast_model.split(":")[0]
-            if fast_base in full_names:
-                logger.warning(
-                    "Primary embedding model %s not found, using %s",
-                    main_base, self.config.fast_model,
-                )
-                self.config.model = full_names[fast_base]
-                self._model_verified = True
-                return True
-
-            # 3. Auto-discover any embedding model (name contains "embed")
-            embed_keywords = ("embed", "nomic", "bge", "minilm", "e5-")
-            for base_name, full_name in full_names.items():
-                lower = base_name.lower()
-                if any(kw in lower for kw in embed_keywords):
-                    logger.warning(
-                        "Auto-detected embedding model: %s (configured %s not found)",
-                        full_name, main_base,
-                    )
-                    self.config.model = full_name
-                    self._model_verified = True
-                    return True
-
-            available = list(full_names.keys())
-            logger.error(
-                "No embedding model found. Available models: %s. "
-                "Install one with: ollama pull %s",
-                available, main_base,
-            )
-            return False
-
-        except requests.exceptions.ConnectionError:
-            logger.error(
-                "Cannot connect to Ollama (%s). Make sure Ollama is running.",
-                self.config.ollama_url,
-            )
-            return False
+            models = backend.list_models()
         except Exception as e:
             logger.error("Model verification error: %s", e)
             return False
+        if models is None:
+            logger.error("The backend could not list its models: embedding model not verified")
+            return False
+        if not models:
+            logger.error("No models available to the backend")
+            return False
+
+        # Build lookup: base_name -> full_name (e.g. "mxbai-embed-large" -> "mxbai-embed-large:latest")
+        full_names = {}
+        for m in models:
+            full = getattr(m, "name", "") or ""
+            if not full:
+                continue
+            base = full.split(":")[0]
+            full_names[base] = full
+            full_names[full] = full  # also map full name to itself
+
+        # 1. Try configured model
+        main_base = self.config.model.split(":")[0]
+        if main_base in full_names:
+            self.config.model = full_names[main_base]
+            self._model_verified = True
+            logger.info("Embedding model verified: %s", self.config.model)
+            return True
+
+        # 2. Try configured fast_model
+        fast_base = self.config.fast_model.split(":")[0]
+        if fast_base in full_names:
+            logger.warning(
+                "Primary embedding model %s not found, using %s",
+                main_base, self.config.fast_model,
+            )
+            self.config.model = full_names[fast_base]
+            self._model_verified = True
+            return True
+
+        # 3. Auto-discover any embedding model (name contains "embed")
+        embed_keywords = ("embed", "nomic", "bge", "minilm", "e5-")
+        for base_name, full_name in full_names.items():
+            lower = base_name.lower()
+            if any(kw in lower for kw in embed_keywords):
+                logger.warning(
+                    "Auto-detected embedding model: %s (configured %s not found)",
+                    full_name, main_base,
+                )
+                self.config.model = full_name
+                self._model_verified = True
+                return True
+
+        available = list(full_names.keys())
+        logger.error(
+            "No embedding model found. Available models: %s. "
+            "Install one with: ollama pull %s",
+            available, main_base,
+        )
+        return False
 
     def embed_single(self, text: str) -> list[float] | None:
         """
@@ -139,91 +148,29 @@ class OllamaEmbeddings:
         """
         if not self._verify_model():
             return None
-
-        # RST-01: once switched to the legacy /api/embeddings endpoint, route
-        # single embeds through the legacy path. The legacy endpoint expects the
-        # "prompt" payload key and returns the singular "embedding" response key;
-        # the /api/embed code path below sends "input" and parses the plural
-        # "embeddings" key, so it would return None for a legacy 200 response
-        # (the 400-based re-route does not fire because legacy responds 200).
-        if self._use_legacy:
-            return self._embed_single_legacy(text)
-
+        backend = _backend_for(self.config.model)
+        if backend is None:
+            logger.error("No backend in the inference registry serves %s", self.config.model)
+            return None
         try:
-            payload = {
-                "model": self.config.model,
-                "input": text
-            }
-
-            response = requests.post(
-                self.url,
-                json=payload,
-                timeout=self.config.timeout
-            )
-
-            # Handle 400 by trying legacy /api/embeddings endpoint
-            if response.status_code == 400:
-                return self._embed_single_legacy(text)
-
-            response.raise_for_status()
-
-            result = response.json()
-            embeddings = result.get("embeddings", [])
-
-            if embeddings:
-                return embeddings[0]
-            else:
-                logger.warning("No embeddings returned")
-                return None
-
-        except requests.exceptions.Timeout:
-            logger.error("Embedding timeout (>%ds)", self.config.timeout)
-            return None
-        except requests.exceptions.RequestException as e:
-            logger.error("HTTP error during embedding: %s", e)
-            return None
+            vector = backend.embed(self.config.model, text, timeout=self.config.timeout)
         except Exception as e:
             logger.error("Embedding error: %s", e)
             return None
-
-    def _embed_single_legacy(self, text: str) -> list[float] | None:
-        """Fallback: use legacy /api/embeddings endpoint (older Ollama versions)."""
-        try:
-            legacy_url = f"{self.config.ollama_url}/api/embeddings"
-            payload = {
-                "model": self.config.model,
-                "prompt": text
-            }
-            response = requests.post(
-                legacy_url,
-                json=payload,
-                timeout=self.config.timeout,
-            )
-            response.raise_for_status()
-            result = response.json()
-            embedding = result.get("embedding", [])
-            if embedding:
-                # Switch to legacy endpoint for subsequent calls
-                self.url = legacy_url
-                self._use_legacy = True
-                logger.info("Switched to legacy /api/embeddings endpoint")
-                return embedding
+        if not vector:
+            logger.warning("No embeddings returned")
             return None
-        except Exception as e:
-            logger.error("Legacy embedding endpoint also failed: %s", e)
-            return None
+        return vector
 
     def embed_batch(self, texts: list[str]) -> list[list[float] | None]:
         """
-        Generate embeddings for a batch of texts.
-
-        Ollama supports native batching with the "input" parameter.
+        Generate embeddings for a batch of texts, in one request.
 
         Args:
             texts: List of texts to encode
 
         Returns:
-            List of embedding vectors
+            List of embedding vectors, one slot per text
         """
         if not self._verify_model():
             return [None] * len(texts)
@@ -231,53 +178,25 @@ class OllamaEmbeddings:
         if not texts:
             return []
 
-        # If we discovered we need legacy mode, use sequential
-        if self._use_legacy:
-            return self._embed_sequential(texts)
-
+        backend = _backend_for(self.config.model)
+        if backend is None:
+            logger.error("No backend in the inference registry serves %s", self.config.model)
+            return [None] * len(texts)
         try:
-            payload = {
-                "model": self.config.model,
-                "input": texts
-            }
-
-            response = requests.post(
-                self.url,
-                json=payload,
-                timeout=self.config.timeout * 2  # More time for batches
+            embeddings = backend.embed_many(
+                self.config.model, list(texts),
+                timeout=self.config.timeout * 2,  # More time for batches
             )
-
-            # Handle 400 by falling back to sequential (which tries legacy)
-            if response.status_code == 400:
-                logger.warning("Batch embed returned 400, falling back to sequential")
-                return self._embed_sequential(texts)
-
-            response.raise_for_status()
-
-            result = response.json()
-            embeddings = result.get("embeddings", [])
-
-            if len(embeddings) != len(texts):
-                logger.warning(
-                    "Embedding count mismatch: got %d, expected %d -- "
-                    "falling back to sequential to keep 1:1 alignment with inputs",
-                    len(embeddings), len(texts),
-                )
-                # RST-02: a mismatched-length list, returned as-is, is zipped
-                # against the inputs by the caller (rag_store._store_chunks),
-                # which truncates to the shortest and can pair a chunk with the
-                # wrong vector. Sequential embedding is length-preserving (one
-                # slot per input, None on failure), so alignment is guaranteed.
-                return self._embed_sequential(texts)
-
-            return embeddings
-
-        except requests.exceptions.Timeout:
-            logger.warning("Batch timeout, falling back to sequential")
-            return self._embed_sequential(texts)
         except Exception as e:
-            logger.error("Batch embed error, falling back to sequential: %s", e)
+            # RST-02: a misaligned answer is refused by the backend; embedding
+            # text by text is length-preserving (one slot per input, None on
+            # failure), so a chunk is never paired with another's vector.
+            logger.warning("Batch embed failed, falling back to sequential: %s", e)
             return self._embed_sequential(texts)
+        if embeddings is None:
+            logger.warning("The backend has no batch embedding endpoint, embedding text by text")
+            return self._embed_sequential(texts)
+        return embeddings
 
     def _embed_sequential(self, texts: list[str]) -> list[list[float] | None]:
         """Fallback: sequential embedding when batch fails."""
@@ -623,7 +542,7 @@ class BatchEmbeddingManager:
 
 def check_ollama_status() -> dict:
     """
-    Check Ollama status and embedding model availability.
+    Check the embedding backend and model availability, through the registry.
 
     Returns:
         Dictionary with status information
@@ -637,25 +556,25 @@ def check_ollama_status() -> dict:
         "error": None
     }
 
+    backend = _backend_for(config.model)
+    if backend is None:
+        status["error"] = "no backend in the inference registry serves embeddings"
+        return status
     try:
-        # Check Ollama is responding
-        response = requests.get(f"{config.ollama_url}/api/tags", timeout=5)
-        response.raise_for_status()
+        if not backend.health_check():
+            status["error"] = "the embedding backend does not answer. Run: ollama serve"
+            return status
         status["ollama_running"] = True
 
-        # List available models
-        models = response.json().get("models", [])
-        status["available_models"] = [m.get("name") for m in models]
+        models = backend.list_models()
+        if models is None:
+            status["error"] = "the backend could not list its models"
+            return status
+        status["available_models"] = [getattr(m, "name", "") for m in models]
 
         # Check embedding model
         model_base = config.model.split(":")[0]
-        for m in models:
-            if model_base in m.get("name", ""):
-                status["embedding_model_available"] = True
-                break
-
-    except requests.exceptions.ConnectionError:
-        status["error"] = "Ollama not reachable. Run: ollama serve"
+        status["embedding_model_available"] = any(model_base in name for name in status["available_models"])
     except Exception as e:
         status["error"] = str(e)
 

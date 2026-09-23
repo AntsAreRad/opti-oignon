@@ -96,8 +96,11 @@ class RemoteCoreBackend(InferenceBackend):
         # unknown, said as such; a route is a decision, not a default.
         return None
 
-    def embed(self, model, text):
+    def embed(self, model, text, timeout=None):
         # Embeddings do not cross the boundary yet, for the same reason.
+        return None
+
+    def embed_many(self, model, texts, timeout=None):
         return None
 
     @staticmethod

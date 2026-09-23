@@ -145,6 +145,18 @@ package costs.
 
 ### Changed
 
+- Every embedding goes through the inference registry. The embedder behind
+  the RAG store, the project context and the memory's semantic recall
+  posted to the server's embedding endpoints with its own HTTP transport;
+  it now asks the registry's backend, one text through `embed` and a batch
+  through `embed_many`, a new head on the backend contract: `None` where a
+  backend has no embedding endpoint, one admission per batch on Ollama, and
+  a refusal by name when the answer's count does not match the texts. Both
+  embedding heads take a timeout. A misaligned or failed batch is still
+  redone text by text. The model is verified against the registry's
+  catalogue, and a catalogue nobody could read verifies nothing. Ollama
+  versions without `/api/embed` are no longer served: the legacy
+  `/api/embeddings` fallback is gone.
 - The registry-funnel guard sees a request that never touches the client
   library: an endpoint of the inference server spelled in a module that
   imports an HTTP transport. It found six modules at nine sites. The

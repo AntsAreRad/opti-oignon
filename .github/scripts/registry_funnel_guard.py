@@ -20,9 +20,10 @@ empty: a direct site anywhere outside the funnel is a violation by name.
 A request that never touches the client library was still invisible: a
 module that posts to the inference server's endpoint with an HTTP transport
 of its own. The raw census counts those. It found six modules at nine
-sites; the project trigger detector was paid in the block that widened it,
-and the other five sit on RAW_LEDGER, a ledger of their own with the same
-seals and the same ratchet, each with the reason it needs a decision
+sites; the project trigger detector was paid in the block that widened it
+and the RAG embedder in the next, once the batch had a head on the backend
+contract. The other four sit on RAW_LEDGER, a ledger of their own with the
+same seals and the same ratchet, each with the reason it needs a decision
 before it can migrate.
 
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
@@ -96,13 +97,11 @@ _HTTP_TRANSPORTS = frozenset({"requests", "httpx", "urllib", "http", "aiohttp"})
 # Raw debt found when the census was widened: repo-relative module -> sha256
 # of its text. MAY ONLY SHRINK, and no entry may move. Each needs a decision
 # before it migrates:
-#   rag/embeddings.py -- batches of texts; the registry's embed head takes one.
 #   redteam/*.py -- the loopback check on the endpoint is a property the red
 #     team enforces; the registry's host is not checked for loopback.
 #   ui.py -- the launcher's liveness probe of the server, not an inference
 #     request; routing it would make the launcher build the registry.
 RAW_LEDGER = {
-    "opti_oignon/rag/embeddings.py": "038f28a1647a41f4b98c0b2be1dc29fbb8d63c6ec84809d86cf9279fbabe751b",
     "opti_oignon/redteam/generator.py": "372f1a0c03ccc4eec84659466aadd1664bc2d72b0e89a4fa974642238c132857",
     "opti_oignon/redteam/strategies.py": "b99971fac01012a6f875c768073d5e97754f6f2c75fbef3a599884f19cd166c6",
     "opti_oignon/redteam/targets.py": "92ad51877a824229e2cb36e41747ea6621c596870252f21e79438e6d284ba608",

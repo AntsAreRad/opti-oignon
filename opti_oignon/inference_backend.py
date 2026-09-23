@@ -609,11 +609,24 @@ class InferenceBackend(ABC):
         """
         return None
 
-    def embed(self, model: str, text: str) -> list[float] | None:
+    def embed(self, model: str, text: str, timeout: float | None = None) -> list[float] | None:
         """One embedding vector for ``text`` from ``model``.
 
         ``None`` when this backend has no embedding endpoint. A backend that
         has one and fails lets the failure propagate, as generate() does.
+        ``timeout`` binds the transport when given.
+        """
+        return None
+
+    def embed_many(
+        self, model: str, texts: list[str], timeout: float | None = None,
+    ) -> list[list[float]] | None:
+        """One vector per text, in order, from one request.
+
+        ``None`` when this backend has no embedding endpoint. An answer
+        whose count does not match the texts is refused by name rather than
+        handed on: a caller that zips vectors with texts would pair a text
+        with another's vector.
         """
         return None
 
@@ -713,7 +726,10 @@ class OllamaBackend(InferenceBackend):
                 out.append(record)
         return out
 
-    def embed(self, model: str, text: str) -> list[float] | None:
+    def _embed_client(self, timeout: float | None) -> Any:
+        return _ollama_module if timeout is None else self._client_for(float(timeout))
+
+    def embed(self, model: str, text: str, timeout: float | None = None) -> list[float] | None:
         """One vector through the client's ``embed``, after the governor.
 
         ``None`` without the client or when the client answers no vector; a
@@ -723,11 +739,30 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return None
         _governor_admission(model, None)
-        result = _ollama_module.embed(model=model, input=text)
+        result = self._embed_client(timeout).embed(model=model, input=text)
         vectors = _field(result, "embeddings") or []
         if not vectors:
             return None
         return list(vectors[0])
+
+    def embed_many(
+        self, model: str, texts: list[str], timeout: float | None = None,
+    ) -> list[list[float]] | None:
+        """The whole batch through one ``embed`` of the client, after one admission."""
+        if not OLLAMA_AVAILABLE:
+            return None
+        texts = list(texts)
+        if not texts:
+            return []
+        _governor_admission(model, None)
+        result = self._embed_client(timeout).embed(model=model, input=texts)
+        vectors = _field(result, "embeddings") or []
+        if len(vectors) != len(texts):
+            raise ValueError(
+                f"{model} answered {len(vectors)} vector(s) for {len(texts)} text(s): "
+                f"refused, so no text is paired with another's vector"
+            )
+        return [list(v) for v in vectors]
 
     def unload_model(self, model_name: str) -> bool:
         """Evict ONE model from Ollama (the unload_all idiom
