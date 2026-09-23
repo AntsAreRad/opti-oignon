@@ -28,8 +28,10 @@ default_backend: "ollama"
 # Python lib: pip install ollama
 # -----------------------------------------------------------------------------
 ollama:
-  # Ollama server address
-  host: "http://localhost:11434"
+  # Ollama server address. Every request goes here unless OLLAMA_HOST is
+  # set, which wins, as the client library documents. The value shipped is
+  # the library's own default, so nothing moves until someone changes it.
+  host: "http://127.0.0.1:11434"
 
   # Connection timeout in seconds
   timeout: 30

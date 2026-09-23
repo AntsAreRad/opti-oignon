@@ -109,6 +109,15 @@ four and are deselected by name:
     exempt module that posts is not a violation, the entry point names the
     exemption beside its empty ledger, and an unowed raw site is refused.
 
+Routing every Ollama head through one host-aware transport hid the funnel's
+own calls from the census: a request made on what a function returns was
+not seen, so a module that wrapped the client in a helper would have
+passed as clean.
+
+  * RF28 -- the census follows the client through a function or a method
+    that returns it: a request on its result is a site, and on the real
+    tree the funnel's heads are seen again while nothing outside it has one.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -689,6 +698,30 @@ def test_rf27_an_exemption_that_stops_posting_is_stale_and_the_entry_point_names
         assert guard.main(["guard", str(tmp_path)]) == 1
         refused = capsys.readouterr().out
         assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused
+    finally:
+        restore()
+
+
+_RETURNED = "import ollama\n\ndef _t():\n    return ollama\n\ndef ask():\n    return _t().chat(model='m', messages=[])\n"
+_RETURNED_METHOD = (
+    "import ollama as _o\n\nclass B:\n    def _transport(self, timeout=None):\n"
+    "        return _o if timeout is None else _o.Client(timeout=timeout)\n\n"
+    "    def names(self):\n        return self._transport().list()\n"
+)
+
+
+def test_rf28_the_census_follows_the_client_through_a_function_that_returns_it():
+    guard, restore = _load()
+    try:
+        assert guard.count_sites(_RETURNED) == 1, "a request on what a helper returns is a site"
+        assert guard.count_sites(_RETURNED_METHOD) == 2, "a method returning the client, and the client it builds"
+        assert guard.count_sites(_ROUTED) == 0
+        files = dict(_real_files())
+        assert guard.count_sites(files["opti_oignon/inference_backend.py"]) >= 9, (
+            "control: the funnel's heads, reached through its transport, are seen"
+        )
+        outside = {n: guard.count_sites(t) for n, t in files.items() if n != "opti_oignon/inference_backend.py"}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
     finally:
         restore()
 

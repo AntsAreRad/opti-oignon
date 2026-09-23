@@ -140,6 +140,11 @@ def count_sites(text):
     ``c = ollama.Client(host)`` makes ``c`` a client name. The receiver is
     what the fourth convergence block found the census blind to, with a
     ``chat`` request behind it.
+
+    A function or a method that returns the client -- or what another such
+    function returns -- is followed the same way: a request made on its
+    result is a site, and so is a name bound to its result. A helper is not
+    a disguise.
     """
     try:
         tree = ast.parse(text)
@@ -159,23 +164,46 @@ def count_sites(text):
     if not aliases and not bare:
         return 0
     attrs = set()
+    returners = set()
+
+    def _tainted(value):
+        if _names_in(value) & (aliases | bare):
+            return True
+        for n in ast.walk(value):
+            if isinstance(n, ast.Attribute) and n.attr in attrs:
+                return True
+            if _returns_client(n):
+                return True
+        return False
+
+    def _returns_client(node):
+        """A call to a function or a method that hands back the client."""
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        return (isinstance(func, ast.Name) and func.id in returners) or (
+            isinstance(func, ast.Attribute) and func.attr in returners
+        )
+
     grown = True
     while grown:
         grown = False
         for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name not in returners:
+                if any(
+                    isinstance(r, ast.Return) and r.value is not None and _tainted(r.value)
+                    for r in ast.walk(node)
+                ):
+                    returners.add(node.name)
+                    grown = True
+                continue
             if isinstance(node, ast.Assign):
                 targets, value = node.targets, node.value
             elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
                 targets, value = [node.target], node.value
             else:
                 continue
-            tainted = _names_in(value) & (aliases | bare)
-            if not tainted:
-                tainted = {
-                    n.attr for n in ast.walk(value)
-                    if isinstance(n, ast.Attribute) and n.attr in attrs
-                }
-            if not tainted:
+            if not _tainted(value):
                 continue
             for target in targets:
                 if isinstance(target, ast.Name) and target.id not in aliases:
@@ -191,6 +219,8 @@ def count_sites(text):
             if isinstance(value, ast.Name) and value.id in aliases:
                 n += 1
             elif isinstance(value, ast.Attribute) and value.attr in attrs:
+                n += 1
+            elif _returns_client(value):
                 n += 1
         elif isinstance(node, ast.Name) and node.id in bare and isinstance(node.ctx, ast.Load):
             n += 1

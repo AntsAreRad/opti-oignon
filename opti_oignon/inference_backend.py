@@ -664,22 +664,45 @@ class OllamaBackend(InferenceBackend):
     keeps working exactly as before.
     """
 
-    def __init__(self, host: str = "http://localhost:11434"):
+    def __init__(self, host: str | None = None):
+        # The host every request goes to, from ``backends.yaml`` through
+        # init_backends_from_config. ``OLLAMA_HOST`` wins when it is set, as
+        # the client library documents; with neither, the library resolves
+        # its own default, exactly as before this was read.
         self._host = host
-        # One client per requested timeout, built on first use and kept: the
+        # One client per host and timeout, built on first use and kept: the
         # transport binding the benchmark and reasoning modules used to keep
         # for themselves, now held here for every caller.
-        self._clients: dict[float, Any] = {}
+        self._clients: dict[tuple, Any] = {}
         self._clients_lock = threading.Lock()
 
-    def _client_for(self, timeout: float) -> Any:
-        """The cached client bound to ``timeout`` seconds."""
+    def _route_host(self) -> str | None:
+        """The host a request is sent to, or None to let the client resolve it."""
+        if os.environ.get("OLLAMA_HOST"):
+            return None
+        return self._host or None
+
+    def _transport(self, timeout: float | None = None) -> Any:
+        """The client every head asks: the module-level one when neither a host nor a timeout binds it."""
+        host = self._route_host()
+        if host is None and timeout is None:
+            return _ollama_module
+        key = (host, timeout)
         with self._clients_lock:
-            client = self._clients.get(timeout)
+            client = self._clients.get(key)
             if client is None:
-                client = _ollama_module.Client(timeout=timeout)
-                self._clients[timeout] = client
+                kwargs: dict[str, Any] = {}
+                if host is not None:
+                    kwargs["host"] = host
+                if timeout is not None:
+                    kwargs["timeout"] = timeout
+                client = _ollama_module.Client(**kwargs)
+                self._clients[key] = client
             return client
+
+    def _client_for(self, timeout: float) -> Any:
+        """The cached client bound to ``timeout`` seconds, on the routed host."""
+        return self._transport(float(timeout))
 
     @property
     def name(self) -> str:
@@ -694,7 +717,7 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return False
         try:
-            _ollama_module.list()
+            self._transport().list()
             return True
         except Exception:
             return False
@@ -718,7 +741,7 @@ class OllamaBackend(InferenceBackend):
         count = 0
         for m in loaded:
             try:
-                _ollama_module.generate(model=m.name, keep_alive=0)
+                self._transport().generate(model=m.name, keep_alive=0)
                 count += 1
             except Exception as exc:
                 logger.warning("Ollama unload failed for %s: %s", m.name, exc)
@@ -736,7 +759,7 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return None
         try:
-            ps_response = _ollama_module.ps()
+            ps_response = self._transport().ps()
         except Exception as exc:
             logger.debug("Ollama ps failed: %s", exc)
             return None
@@ -749,11 +772,10 @@ class OllamaBackend(InferenceBackend):
         return out
 
     def endpoint(self) -> str | None:
-        """Where the client library sends, resolved the way it resolves it.
+        """Where the requests go, resolved the way the client library resolves it.
 
-        The client is built without a host, so it reads ``OLLAMA_HOST``, or
-        its own default when that is unset. ``_host`` is written from
-        ``backends.yaml`` and read by no request, so it is not the answer.
+        ``OLLAMA_HOST`` when it is set, else the configured host, else the
+        library's own default -- the same order the requests follow.
         """
         if not OLLAMA_AVAILABLE:
             return None
@@ -761,12 +783,12 @@ class OllamaBackend(InferenceBackend):
         if parse is None:
             return None
         try:
-            return str(parse(os.environ.get("OLLAMA_HOST")))
+            return str(parse(os.environ.get("OLLAMA_HOST") or self._host or None))
         except Exception:  # noqa: BLE001 - an unreadable resolution is unknown
             return None
 
     def _embed_client(self, timeout: float | None) -> Any:
-        return _ollama_module if timeout is None else self._client_for(float(timeout))
+        return self._transport(None if timeout is None else float(timeout))
 
     def embed(self, model: str, text: str, timeout: float | None = None) -> list[float] | None:
         """One vector through the client's ``embed``, after the governor.
@@ -815,7 +837,7 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return False
         try:
-            _ollama_module.generate(model=model_name, keep_alive=0)
+            self._transport().generate(model=model_name, keep_alive=0)
             logger.info("Requested Ollama eviction for %s", model_name)
             return True
         except Exception as exc:
@@ -827,7 +849,7 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return None
         try:
-            response = _ollama_module.list()
+            response = self._transport().list()
             raw_models = []
             if hasattr(response, "models"):
                 raw_models = response.models or []
@@ -859,7 +881,7 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             return None
         try:
-            info = _ollama_module.show(model_name)
+            info = self._transport().show(model_name)
         except Exception as exc:
             logger.debug("Ollama model_info(%s) failed: %s", model_name, exc)
             return None
@@ -945,7 +967,7 @@ class OllamaBackend(InferenceBackend):
         if tools is not None:
             kwargs["tools"] = tools
 
-        transport = _ollama_module if timeout is None else self._client_for(timeout)
+        transport = self._transport(timeout)
         response = transport.chat(**kwargs)
 
         msg = response.get("message", {}) if isinstance(response, dict) else getattr(response, "message", {})
@@ -1017,7 +1039,7 @@ class OllamaBackend(InferenceBackend):
         if tools is not None:
             kwargs["tools"] = tools
 
-        transport = _ollama_module if timeout is None else self._client_for(timeout)
+        transport = self._transport(timeout)
         stream_iter = transport.chat(**kwargs)
 
         for chunk in stream_iter:
@@ -2125,8 +2147,9 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
     if ollama_cfg and OLLAMA_AVAILABLE:
         ollama_backend = registry.get("ollama")
         if ollama_backend and isinstance(ollama_backend, OllamaBackend):
-            host = ollama_cfg.get("host", "http://localhost:11434")
-            ollama_backend._host = host
+            # Absent host: the client resolves its own, as it did before the
+            # file's host was read at all.
+            ollama_backend._host = ollama_cfg.get("host") or None
 
     # Apply llama.cpp settings
     llama_cfg = cfg.get("llama_cpp", {})

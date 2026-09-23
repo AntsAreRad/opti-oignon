@@ -145,6 +145,21 @@ package costs.
 
 ### Changed
 
+- The Ollama `host` in `backends.yaml` is where the requests go. It was
+  written onto the backend and read by no request: every head asked a
+  client that resolved `OLLAMA_HOST` or the library's default. Every head --
+  health, listing, loaded set, model details, generate, stream, embeddings,
+  eviction -- now goes through one client for the configured host, unless
+  `OLLAMA_HOST` is set, which still wins; `endpoint()` follows the same
+  order. The shipped value changes from `http://localhost:11434` to
+  `http://127.0.0.1:11434`, the library's own default, so a machine that
+  sets neither sends exactly where it did; a file that names another host
+  now sends there.
+- The registry-funnel guard follows the client through a function or a
+  method that returns it: a request made on a helper's result is a site.
+  Routing the Ollama heads through one transport had hidden the funnel's
+  own calls from the census, and the same shape anywhere else would have
+  passed as clean.
 - The red team reaches its model through the inference registry, so every
   attack is admitted by the governor. Its loopback property moves to where
   the requests actually go: a new `endpoint()` head on the backend contract
@@ -155,10 +170,6 @@ package costs.
   whose endpoint is unknown or off the local host. Their URL arguments are
   still checked and no longer route anything. The launcher's liveness probe
   is exempt from the funnel guard by name, and the raw ledger is empty.
-- Known and not changed here: the Ollama `host` in `backends.yaml` is
-  written onto the backend and read by no request; the client resolves its
-  host from `OLLAMA_HOST`. Making the file's value effective changes where
-  requests go when the two differ, and is left to its own decision.
 - Every embedding goes through the inference registry. The embedder behind
   the RAG store, the project context and the memory's semantic recall
   posted to the server's embedding endpoints with its own HTTP transport;
