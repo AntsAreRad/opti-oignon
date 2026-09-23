@@ -355,6 +355,13 @@ fail_under = 0
 # and nothing else, the facade out of it) over the two importers and pins
 # what the surface newly needs: the model's tools reach no onion module.
 #
+# ax1, ax2 and np6 drove the tuner's Ollama benchmark through a stand-in
+# requests module, because the benchmark posted to the server's HTTP
+# endpoint itself and so skipped the governor's admission. It now asks the
+# registry's Ollama backend; ax4, ax5 and np11 in the same files keep every
+# assertion of the three word for word over a scripted backend, and np11
+# adds that a reply reporting no counters claims nothing.
+#
 # zp6 pinned the librarian's importers as exactly the executor and the
 # memory routes. The terminal chat session is a third user surface: its
 # /open, /close, /pin and /recall are the user's actions on the onion. zp7
@@ -473,6 +480,9 @@ addopts = """
     --deselect=tests/test_convergence_four_contracts.py::test_cq10_the_health_monitor_probes_through_model_info_and_names_the_backend
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp5_the_onion_is_imported_by_the_executor_only_and_only_the_librarian
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp6_the_executor_and_the_memory_routes_import_the_librarian_and_the_models_tools_reach_no_onion
+    --deselect=tests/test_tuner_sweep_axis_fidelity_contracts.py::test_ax1_the_batch_axis_varies_what_is_sent
+    --deselect=tests/test_tuner_sweep_axis_fidelity_contracts.py::test_ax2_the_micro_batch_does_not_overwrite_the_batch
+    --deselect=tests/test_tuner_number_provenance_contracts.py::test_np6_server_counters_are_labelled_measured
     --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list

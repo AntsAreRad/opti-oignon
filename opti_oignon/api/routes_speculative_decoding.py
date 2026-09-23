@@ -54,7 +54,7 @@ def _get_llama_cpp_models() -> list[dict]:
         return []
     try:
         registry = get_backend_registry()
-        backend = registry.get_backend("llama_cpp")
+        backend = registry.get("llama_cpp")
         if backend is None:
             return []
         models = backend.list_models()

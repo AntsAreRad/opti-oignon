@@ -145,6 +145,17 @@ package costs.
 
 ### Changed
 
+- The tuner reaches a real backend. Four call sites asked the registry for
+  `get_backend`, a method it does not have, inside broad handlers: every
+  tuning run fell to the simulated benchmark, the llama.cpp benchmark
+  answered "not available", and the speculative-decoding listing was always
+  empty. They now ask `get`. The Ollama benchmark no longer posts to the
+  server's HTTP endpoint itself: it asks the registry's Ollama backend, so
+  every sweep point is admitted by the governor, the request carries a
+  timeout, and a refusal comes back as a named error on that point. Rates
+  are read from the counters the backend reports and are labelled measured
+  only when both are present, as before. The `host` argument is accepted
+  and unused.
 - `list_models()` on the backend contract answers `None` when the backend
   cannot say and an empty list only when it looked and found nothing, the
   doctrine the two observation heads already carried. Every implementation

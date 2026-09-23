@@ -1173,23 +1173,43 @@ def create_mock_benchmark_fn(
 _BENCHMARK_PROMPT = "Explain the theory of general relativity in detail."
 
 
+def _registry_backend(name: str) -> Any:
+    """The registry's backend under ``name``, or None when there is no registry or no such backend."""
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+    except Exception as exc:  # noqa: BLE001 - absence is an answer
+        logger.debug("inference registry unavailable to the tuner: %s", exc)
+        return None
+    try:
+        return get_backend_registry().get(name)
+    except Exception as exc:  # noqa: BLE001 - a broken registry is absence
+        logger.debug("inference registry could not answer for %s: %s", name, exc)
+        return None
+
+
 def create_ollama_benchmark_fn(
     model_name: str,
     host: str = "http://localhost:11434",
     benchmark_tokens: int = 128,
+    backend: Any = None,
+    timeout_s: float = 120.0,
 ) -> Callable[[dict], BenchmarkResult]:
     """Create a benchmark function that measures real Ollama inference speed.
 
-    The returned callable accepts a parameter dict (with keys like
-    ``num_thread``, ``num_batch``, ``flash_attn``, etc.) and runs a
-    real generation request against the Ollama API. It measures prompt
-    eval speed and token generation speed from the Ollama response
-    metadata.
+    The returned callable maps the tuner's parameters to engine options
+    and asks the registry's Ollama backend for one generation, so every
+    sweep point is admitted by the governor like any other request. The
+    rates come from the counters the backend reports on ``extra``; a
+    reply without them is not a measurement.
 
     Args:
         model_name: Ollama model tag (e.g. "llama3:8b-instruct-q4_K_M").
-        host: Ollama API base URL.
+        host: Accepted for the former signature and unused: where the
+            model is served is the registry's to know.
         benchmark_tokens: Maximum tokens to generate per benchmark run.
+        backend: The registry's Ollama backend. If ``None``, the
+            registry is asked at call time.
+        timeout_s: Bound on one benchmark request.
 
     Returns:
         A ``Callable[[dict], BenchmarkResult]`` suitable for
@@ -1214,39 +1234,31 @@ def create_ollama_benchmark_fn(
             # compared them was reading run-to-run noise.
             options["num_ubatch"] = int(params["ubatch_size"])
         options["num_predict"] = benchmark_tokens
+        options["timeout"] = timeout_s
+
+        _backend = backend if backend is not None else _registry_backend("ollama")
+        if _backend is None:
+            return BenchmarkResult(
+                params=params,
+                error="no ollama backend in the inference registry: nothing was run",
+            )
 
         try:
-            import requests
-
-            url = f"{host.rstrip('/')}/api/chat"
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "user", "content": _BENCHMARK_PROMPT},
-                ],
-                "options": options,
-                "stream": False,
-            }
-
             start = time.time()
-            resp = requests.post(url, json=payload, timeout=120)
+            response = _backend.generate(
+                model=model_name,
+                messages=[{"role": "user", "content": _BENCHMARK_PROMPT}],
+                options=options,
+            )
             elapsed_ms = (time.time() - start) * 1000.0
 
-            if resp.status_code != 200:
-                return BenchmarkResult(
-                    params=params,
-                    error=f"Ollama returned HTTP {resp.status_code}: "
-                          f"{resp.text[:200]}",
-                )
-
-            data = resp.json()
-
-            # Extract timing from Ollama response metadata.
-            # Ollama returns durations in nanoseconds.
-            eval_count = data.get("eval_count", 0)
-            eval_duration_ns = data.get("eval_duration", 0)
-            prompt_eval_count = data.get("prompt_eval_count", 0)
-            prompt_eval_duration_ns = data.get("prompt_eval_duration", 0)
+            # The counters the engine reported, in nanoseconds; absent
+            # rather than zero when nothing was reported.
+            extra = getattr(response, "extra", None) or {}
+            eval_count = extra.get("eval_count") or 0
+            eval_duration_ns = extra.get("eval_duration") or 0
+            prompt_eval_count = extra.get("prompt_eval_count") or 0
+            prompt_eval_duration_ns = extra.get("prompt_eval_duration") or 0
 
             tg_speed = 0.0
             tg_counted = eval_duration_ns > 0 and eval_count > 0
@@ -1274,12 +1286,8 @@ def create_ollama_benchmark_fn(
                 ),
             )
 
-        except ImportError:
-            return BenchmarkResult(
-                params=params,
-                error="requests library not installed",
-            )
         except Exception as exc:
+            # A governor refusal arrives here too, in its own words.
             return BenchmarkResult(
                 params=params,
                 error=f"Ollama benchmark failed: {exc}",
@@ -1318,17 +1326,7 @@ def create_llamacpp_benchmark_fn(
             # Resolve backend lazily if not provided.
             _backend = backend
             if _backend is None:
-                try:
-                    from opti_oignon.inference_backend import (
-                        get_backend_registry,
-                    )
-                    registry = get_backend_registry()
-                    _backend = registry.get_backend("llama_cpp")
-                except Exception:
-                    return BenchmarkResult(
-                        params=params,
-                        error="llama.cpp backend not available",
-                    )
+                _backend = _registry_backend("llama_cpp")
 
             if _backend is None:
                 return BenchmarkResult(

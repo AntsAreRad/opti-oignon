@@ -20,6 +20,9 @@ comparison between them is a comparison of something.
   * AX2 -- a micro-batch value does not overwrite the batch value.
   * AX3 -- distinct micro-batch sizes reach the llama.cpp backend as distinct
     options, rather than collapsing to one.
+  * AX4 -- supersedes AX1 once the Ollama benchmark asks the registry: the
+    same property, read on the backend the benchmark is handed.
+  * AX5 -- supersedes AX2 the same way.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window, with the inference backend declared unreachable and proven so
@@ -207,6 +210,74 @@ def test_ax3_the_micro_batch_axis_varies_the_llamacpp_request():
         restore()
 
 
+class _ScriptedOllamaBackend:
+    """A registry backend that records the options it was handed and reports counters."""
+
+    def __init__(self):
+        self.options = []
+
+    def generate(self, model=None, messages=None, options=None, **kwargs):
+        self.options.append({k: v for k, v in (options or {}).items() if k != "timeout"})
+        return types.SimpleNamespace(content="stand-in reply", extra={
+            "eval_count": 128, "eval_duration": 4_000_000_000,
+            "prompt_eval_count": 32, "prompt_eval_duration": 500_000_000,
+        })
+
+
+# ---------------------------------------------------------------------------
+# AX4 -- distinct batch sizes leave as distinct requests, through the registry
+# ---------------------------------------------------------------------------
+def test_ax4_the_batch_axis_varies_what_the_backend_is_sent():
+    mod, restore = _open()
+    try:
+        points = _batch_axis(mod)
+        assert len({p["batch_size"] for p in points}) > 1, (
+            "the axis under test really does carry more than one value"
+        )
+        backend = _ScriptedOllamaBackend()
+        bench = mod.create_ollama_benchmark_fn("stand-in-model", backend=backend)
+        for params in points:
+            bench(params)
+        assert len(backend.options) == len(points), (
+            "every point reached the backend, so this is not vacuous"
+        )
+        sent = [opts.get("num_batch") for opts in backend.options]
+        assert len(set(sent)) == len(set(p["batch_size"] for p in points)), (
+            "as many distinct batch options leave as there are distinct batch "
+            "sizes: the axis varies the request rather than the record only"
+        )
+        assert sent == [p["batch_size"] for p in points], (
+            "each point sends its own batch size, unmodified"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# AX5 -- the micro-batch does not overwrite the batch, through the registry
+# ---------------------------------------------------------------------------
+def test_ax5_the_micro_batch_does_not_overwrite_the_batch_on_the_backend():
+    mod, restore = _open()
+    try:
+        backend = _ScriptedOllamaBackend()
+        bench = mod.create_ollama_benchmark_fn("stand-in-model", backend=backend)
+        bench({"batch_size": 4096, "ubatch_size": 256, "threads": 6})
+        assert len(backend.options) == 1, "the backend was exercised once"
+        opts = backend.options[0]
+        assert opts["num_batch"] == 4096, (
+            "the batch option is the batch size, not the smaller of the two"
+        )
+        assert opts["num_batch"] != 256, (
+            "a micro-batch never silently becomes the batch"
+        )
+        assert 256 in opts.values(), (
+            "the micro-batch is still carried for backends that read it, "
+            "rather than being dropped to protect the batch"
+        )
+    finally:
+        restore()
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -215,6 +286,8 @@ def _run_all():
         ("AX1 batch axis varies what is sent", test_ax1_the_batch_axis_varies_what_is_sent),
         ("AX2 micro-batch does not overwrite batch", test_ax2_the_micro_batch_does_not_overwrite_the_batch),
         ("AX3 micro-batch axis varies llama.cpp request", test_ax3_the_micro_batch_axis_varies_the_llamacpp_request),
+        ("AX4 batch axis varies what the backend is sent", test_ax4_the_batch_axis_varies_what_the_backend_is_sent),
+        ("AX5 micro-batch does not overwrite batch on the backend", test_ax5_the_micro_batch_does_not_overwrite_the_batch_on_the_backend),
     ]
     passed = 0
     for label, fn in tests:

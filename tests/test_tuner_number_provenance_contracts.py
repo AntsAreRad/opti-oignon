@@ -28,6 +28,9 @@ trip to disk and across the API boundary.
     simulated trial cannot be laundered by measured neighbours.
   * NP9 -- the API schema carries the label and defaults to claiming nothing.
   * NP10 -- the label survives the expression the results route actually uses.
+  * NP11 -- supersedes NP6 once the Ollama benchmark asks the registry: rates
+    taken from the counters the backend reports on ``extra`` are labelled
+    measured, and a reply that reports none claims nothing.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window, with the inference backend declared unreachable and proven
@@ -305,6 +308,54 @@ def test_np6_server_counters_are_labelled_measured():
 
 
 # ---------------------------------------------------------------------------
+# NP11 -- counters reported through the registry are labelled measured
+# ---------------------------------------------------------------------------
+class _ReportingBackend:
+    """A registry backend whose reply carries the counters it was given on ``extra``."""
+
+    def __init__(self, extra):
+        self._extra = extra
+        self.calls = []
+
+    def generate(self, model=None, messages=None, options=None, **kwargs):
+        self.calls.append({"model": model, "options": options})
+        return types.SimpleNamespace(content="stand-in reply", extra=dict(self._extra))
+
+
+def test_np11_counters_reported_through_the_registry_are_labelled_measured():
+    mod, _schemas, restore = _open()
+    try:
+        backend = _ReportingBackend({
+            "eval_count": 128,
+            "eval_duration": 4_000_000_000,
+            "prompt_eval_count": 32,
+            "prompt_eval_duration": 500_000_000,
+        })
+        bench = mod.create_ollama_benchmark_fn("stand-in-model", backend=backend)
+        result = bench({"threads": 6, "batch_size": 2048})
+        assert backend.calls, (
+            "the backend was actually exercised, so the label is not vacuous"
+        )
+        assert result.error == "", "the stand-in backend answered cleanly"
+        assert result.tokens_per_second_tg == 32.0, (
+            "the generation rate is the server's own counter, 128 over 4 s"
+        )
+        assert result.tokens_per_second_pp == 64.0, (
+            "the prompt rate is the server's own counter, 32 over 0.5 s"
+        )
+        assert result.source == mod.SOURCE_MEASURED, (
+            "rates read from counters the server reported are measured"
+        )
+        silent = mod.create_ollama_benchmark_fn("stand-in-model", backend=_ReportingBackend({}))
+        unreported = silent({"threads": 6, "batch_size": 2048})
+        assert unreported.source == mod.SOURCE_UNKNOWN, (
+            "a reply without counters is not a measurement of zero"
+        )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # NP7 -- a character estimate is labelled estimated, not measured
 # ---------------------------------------------------------------------------
 def test_np7_a_character_estimate_is_labelled_estimated():
@@ -432,6 +483,7 @@ def _run_all():
         ("NP8 mixed provenance takes the weakest", test_np8_mixed_provenance_aggregates_to_the_weakest),
         ("NP9 API schema defaults to no claim", test_np9_the_api_schema_defaults_to_no_claim),
         ("NP10 label survives the route expression", test_np10_the_label_survives_the_route_expression),
+        ("NP11 registry counters are measured", test_np11_counters_reported_through_the_registry_are_labelled_measured),
     ]
     passed = 0
     for label, fn in tests:

@@ -120,15 +120,15 @@ def _resolve_benchmark_fn(model_name: str):
             registry = get_backend_registry()
 
             # Check Ollama backend.
-            ollama_backend = registry.get_backend("ollama")
+            ollama_backend = registry.get("ollama")
             if ollama_backend is not None and ollama_backend.health_check():
                 logger.info(
                     "Tuner: using real Ollama benchmark for %s", model_name
                 )
-                return create_ollama_benchmark_fn(model_name)
+                return create_ollama_benchmark_fn(model_name, backend=ollama_backend)
 
             # Check llama.cpp backend.
-            llamacpp_backend = registry.get_backend("llama_cpp")
+            llamacpp_backend = registry.get("llama_cpp")
             if llamacpp_backend is not None and llamacpp_backend.health_check():
                 logger.info(
                     "Tuner: using real llama.cpp benchmark for %s",
