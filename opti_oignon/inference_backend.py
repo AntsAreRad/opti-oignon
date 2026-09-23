@@ -263,6 +263,19 @@ class BackendLoadedModel:
         }
 
 
+# What ``endpoint`` answers for a backend whose requests never leave the process.
+ENDPOINT_IN_PROCESS = "in-process"
+
+
+def _ollama_host_parser() -> Any:
+    """The client library's own resolution of its host, or None when it cannot be read."""
+    try:
+        from ollama._client import _parse_host
+    except Exception:  # noqa: BLE001 - an unreadable resolution is unknown
+        return None
+    return _parse_host
+
+
 def _field(entry: Any, name: str, default: Any = None) -> Any:
     """A field of a client entry in either of its shapes: mapping or object."""
     if isinstance(entry, dict):
@@ -630,6 +643,15 @@ class InferenceBackend(ABC):
         """
         return None
 
+    def endpoint(self) -> str | None:
+        """The base URL this backend's requests actually go to.
+
+        ``ENDPOINT_IN_PROCESS`` when they never leave the process, ``None``
+        when the backend cannot say -- never a configured value the
+        requests do not read.
+        """
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Ollama backend
@@ -725,6 +747,23 @@ class OllamaBackend(InferenceBackend):
             if record is not None:
                 out.append(record)
         return out
+
+    def endpoint(self) -> str | None:
+        """Where the client library sends, resolved the way it resolves it.
+
+        The client is built without a host, so it reads ``OLLAMA_HOST``, or
+        its own default when that is unset. ``_host`` is written from
+        ``backends.yaml`` and read by no request, so it is not the answer.
+        """
+        if not OLLAMA_AVAILABLE:
+            return None
+        parse = _ollama_host_parser()
+        if parse is None:
+            return None
+        try:
+            return str(parse(os.environ.get("OLLAMA_HOST")))
+        except Exception:  # noqa: BLE001 - an unreadable resolution is unknown
+            return None
 
     def _embed_client(self, timeout: float | None) -> Any:
         return _ollama_module if timeout is None else self._client_for(float(timeout))
@@ -1192,6 +1231,9 @@ class LlamaCppBackend(InferenceBackend):
     def name(self) -> str:
         return "llama_cpp"
 
+    def endpoint(self) -> str | None:
+        return ENDPOINT_IN_PROCESS
+
     @property
     def display_name(self) -> str:
         return "llama.cpp"
@@ -1604,6 +1646,9 @@ class LlamaServerBackend(InferenceBackend):
     @property
     def name(self) -> str:
         return "llama_server"
+
+    def endpoint(self) -> str | None:
+        return self._host
 
     @property
     def display_name(self) -> str:

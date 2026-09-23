@@ -145,6 +145,20 @@ package costs.
 
 ### Changed
 
+- The red team reaches its model through the inference registry, so every
+  attack is admitted by the governor. Its loopback property moves to where
+  the requests actually go: a new `endpoint()` head on the backend contract
+  answers the base URL a backend's requests reach -- Ollama's as its client
+  library resolves it from `OLLAMA_HOST`, llama.cpp in-process, llama-server
+  and the core daemon their own -- and the generator, the multilingual
+  strategy and the chat target refuse by name, before any request, a backend
+  whose endpoint is unknown or off the local host. Their URL arguments are
+  still checked and no longer route anything. The launcher's liveness probe
+  is exempt from the funnel guard by name, and the raw ledger is empty.
+- Known and not changed here: the Ollama `host` in `backends.yaml` is
+  written onto the backend and read by no request; the client resolves its
+  host from `OLLAMA_HOST`. Making the file's value effective changes where
+  requests go when the two differ, and is left to its own decision.
 - Every embedding goes through the inference registry. The embedder behind
   the RAG store, the project context and the memory's semantic recall
   posted to the server's embedding endpoints with its own HTTP transport;

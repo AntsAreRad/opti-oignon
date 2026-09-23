@@ -22,9 +22,10 @@ module that posts to the inference server's endpoint with an HTTP transport
 of its own. The raw census counts those. It found six modules at nine
 sites; the project trigger detector was paid in the block that widened it
 and the RAG embedder in the next, once the batch had a head on the backend
-contract. The other four sit on RAW_LEDGER, a ledger of their own with the
-same seals and the same ratchet, each with the reason it needs a decision
-before it can migrate.
+contract; the red team followed, its loopback check moved onto the
+backend's real endpoint. RAW_LEDGER, a ledger of its own with the same
+seals and the same ratchet, is empty. The launcher's liveness probe is
+exempt by name in RAW_EXEMPT, with its reason.
 
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
 ratchet that only counts is a ratchet on the count. Every owed module carries
@@ -95,17 +96,22 @@ _RAW_ENDPOINTS = (
 _HTTP_TRANSPORTS = frozenset({"requests", "httpx", "urllib", "http", "aiohttp"})
 
 # Raw debt found when the census was widened: repo-relative module -> sha256
-# of its text. MAY ONLY SHRINK, and no entry may move. Each needs a decision
-# before it migrates:
-#   redteam/*.py -- the loopback check on the endpoint is a property the red
-#     team enforces; the registry's host is not checked for loopback.
-#   ui.py -- the launcher's liveness probe of the server, not an inference
-#     request; routing it would make the launcher build the registry.
+# of its text. MAY ONLY SHRINK, and no entry may move. Empty since the red
+# team went through the registry with its loopback check on the backend's
+# real endpoint.
 RAW_LEDGER = {
-    "opti_oignon/redteam/generator.py": "372f1a0c03ccc4eec84659466aadd1664bc2d72b0e89a4fa974642238c132857",
-    "opti_oignon/redteam/strategies.py": "b99971fac01012a6f875c768073d5e97754f6f2c75fbef3a599884f19cd166c6",
-    "opti_oignon/redteam/targets.py": "92ad51877a824229e2cb36e41747ea6621c596870252f21e79438e6d284ba608",
-    "opti_oignon/ui.py": "fd8d934c128b4cf5b72e4c862bd2c6eea78c454f45cf0cc7f953650061645308",
+}
+
+# Modules that spell an endpoint and are not requests to the model, each
+# with its reason. An exemption is a decision taken by name, never a place
+# to put a module that should migrate; one whose module no longer posts is
+# stale and must come off.
+RAW_EXEMPT = {
+    "opti_oignon/ui.py": (
+        "the launcher's liveness probe asks whether the server process "
+        "answers before it starts the application; that is not an inference "
+        "request, and routing it would make the launcher build the registry"
+    ),
 }
 
 
@@ -233,8 +239,14 @@ def count_raw_sites(text):
 
 
 def posts_raw(name, text):
-    """True when the module posts to the inference server itself and is not the funnel."""
-    return name != _FUNNEL and count_raw_sites(text) > 0
+    """True when the module posts to the inference server itself, is not the funnel, and is not exempt."""
+    return name != _FUNNEL and name not in RAW_EXEMPT and count_raw_sites(text) > 0
+
+
+def find_stale_raw_exemptions(files):
+    """Exempt names that no longer spell a site, or that vanished."""
+    seen = dict(files)
+    return sorted(name for name in RAW_EXEMPT if name not in seen or count_raw_sites(seen[name]) == 0)
 
 
 def find_raw_violations(files):
@@ -326,6 +338,7 @@ def main(argv):
     raw_violations = find_raw_violations(files)
     raw_broken = find_raw_broken_seals(files)
     raw_stale = find_stale_raw_entries(files)
+    raw_exempt_stale = find_stale_raw_exemptions(files)
 
     if violations:
         print("Registry-funnel violations -- these modules reach the client")
@@ -369,15 +382,23 @@ def main(argv):
         for name in raw_stale:
             print(f"  {name}")
 
-    if violations or broken or stale or raw_violations or raw_broken or raw_stale:
+    if raw_exempt_stale:
+        print("Stale raw exemptions -- these no longer spell an endpoint, or")
+        print("vanished; remove them from RAW_EXEMPT:")
+        for name in raw_exempt_stale:
+            print(f"  {name}")
+
+    if violations or broken or stale or raw_violations or raw_broken or raw_stale or raw_exempt_stale:
         return 1
 
     seen = dict(files)
     raw_sites = sum(count_raw_sites(seen[name]) for name in RAW_LEDGER if name in seen)
+    exempt = ", ".join(sorted(RAW_EXEMPT)) or "none"
     print(
         f"Raw HTTP: {len(RAW_LEDGER)} module(s) owed, {raw_sites} raw site(s) "
-        f"between them, none outside the raw ledger. It is sealed: it may only "
-        f"shrink, and an owed module that changes must migrate."
+        f"between them, none outside the raw ledger; {len(RAW_EXEMPT)} exempt "
+        f"by name ({exempt}). It is sealed: it may only shrink, and an owed "
+        f"module that changes must migrate."
     )
     if not LEDGER:
         # The green with its denominator: how many modules were read to find

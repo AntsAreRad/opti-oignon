@@ -367,6 +367,11 @@ fail_under = 0
 # rf25 in the same file keep every assertion of the two over the four and
 # add that the embedder posts no more.
 #
+# rf24 and rf25 named the four modules left on the raw ledger. The red team
+# now asks the registry, its loopback check on the backend's endpoint, and
+# the launcher's probe is exempt by name; rf26 and rf27 in the same file
+# keep the properties over an empty ledger and pin the exemption.
+#
 # zp6 pinned the librarian's importers as exactly the executor and the
 # memory routes. The terminal chat session is a third user surface: its
 # /open, /close, /pin and /recall are the user's actions on the onion. zp7
@@ -490,6 +495,8 @@ addopts = """
     --deselect=tests/test_tuner_number_provenance_contracts.py::test_np6_server_counters_are_labelled_measured
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf22_on_the_real_tree_the_raw_ledger_names_exactly_the_modules_that_post
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf23_the_entry_point_names_the_raw_debt_and_refuses_an_unowed_raw_site
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf24_the_raw_ledger_names_the_four_modules_that_still_post
+    --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf25_the_entry_point_names_the_four_and_refuses_an_unowed_raw_site
     --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list

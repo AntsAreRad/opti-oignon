@@ -54,11 +54,13 @@ Today every pack runs in the same process and reaches inference and the
 model catalogue through the registry; the registry-funnel guard counts
 what still does not, whatever name the client travels under, and also a
 module that posts to the inference server's endpoint with an HTTP
-transport of its own. Four modules still do, sealed on a ledger that may
-only shrink: the red team's three entry points (their endpoint is checked
-for loopback, the registry's host is not) and the launcher's liveness
-probe. Every embedding -- RAG, project context, memory recall -- goes
-through the registry's `embed` and `embed_many` heads. The
+transport of its own. None does: every embedding -- RAG, project
+context, memory recall -- goes through the registry's `embed` and
+`embed_many` heads, and the red team reaches its model through the
+registry too, refusing any backend whose `endpoint` -- where its requests
+actually go -- is not on the local host. The launcher's liveness probe is
+the one exemption, by name: asking whether a process answers is not an
+inference request. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 

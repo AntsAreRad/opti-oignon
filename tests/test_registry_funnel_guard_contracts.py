@@ -96,6 +96,19 @@ over the four that remain:
   * RF25 -- the entry point names the four with their site count, and
     refuses an unowed raw site by name.
 
+The red team's three entry points went through the registry next, with the
+loopback property moved onto the backend's real endpoint, and the
+launcher's liveness probe was exempted by name, by decision: probing that
+a process answers is not an inference request. RF24 and RF25 named the
+four and are deselected by name:
+
+  * RF26 -- the raw ledger is empty; the one exemption is the launcher,
+    with its reason, and it still spells a site, so the exemption is not
+    decoration; nothing else posts, the red team included.
+  * RF27 -- an exempt module that stops posting is a stale exemption, an
+    exempt module that posts is not a violation, the entry point names the
+    exemption beside its empty ledger, and an unowed raw site is refused.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -626,6 +639,53 @@ def test_rf25_the_entry_point_names_the_four_and_refuses_an_unowed_raw_site(tmp_
         pkg = tmp_path / "opti_oignon"
         pkg.mkdir()
         (pkg / "poster.py").write_text(_RAW_REQUESTS, encoding="utf-8")
+        assert guard.main(["guard", str(tmp_path)]) == 1
+        refused = capsys.readouterr().out
+        assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused
+    finally:
+        restore()
+
+
+def test_rf26_the_raw_ledger_is_empty_and_the_launcher_is_the_one_named_exemption():
+    guard, restore = _load()
+    try:
+        files = dict(_real_files())
+        assert guard.RAW_LEDGER == {}, "the raw debt is paid"
+        assert sorted(guard.RAW_EXEMPT) == ["opti_oignon/ui.py"]
+        reason = guard.RAW_EXEMPT["opti_oignon/ui.py"]
+        assert isinstance(reason, str) and "not an inference request" in reason, "an exemption carries its reason"
+        assert guard.count_raw_sites(files["opti_oignon/ui.py"]) > 0, (
+            "control: the exempted module still spells a site, so the exemption is not decoration"
+        )
+        outside = {n: guard.count_raw_sites(t) for n, t in files.items() if n not in guard.RAW_EXEMPT}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+        for name in ("opti_oignon/redteam/generator.py", "opti_oignon/redteam/strategies.py", "opti_oignon/redteam/targets.py"):
+            assert guard.count_raw_sites(files[name]) == 0, f"{name} posts no more"
+    finally:
+        restore()
+
+
+def test_rf27_an_exemption_that_stops_posting_is_stale_and_the_entry_point_names_it(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/probe.py"
+        guard.RAW_EXEMPT = {name: "a liveness probe, not an inference request"}
+        assert guard.find_raw_violations([(name, _RAW_URLLIB)]) == [], "an exempt module that posts is not a violation"
+        assert guard.find_stale_raw_exemptions([(name, _RAW_URLLIB)]) == []
+        assert guard.find_stale_raw_exemptions([(name, _ROUTED)]) == [name], "an exemption that no longer posts is stale"
+        assert guard.find_stale_raw_exemptions([]) == [name], "and so is one whose module vanished"
+    finally:
+        restore()
+
+    guard, restore = _load()
+    try:
+        assert guard.main(["guard", str(REPO)]) == 0
+        out = capsys.readouterr().out
+        assert "0 module(s) owed" in out and "1 exempt" in out and "opti_oignon/ui.py" in out, out
+        pkg = tmp_path / "opti_oignon"
+        pkg.mkdir()
+        (pkg / "poster.py").write_text(_RAW_REQUESTS, encoding="utf-8")
+        (pkg / "ui.py").write_text(_RAW_URLLIB, encoding="utf-8")
         assert guard.main(["guard", str(tmp_path)]) == 1
         refused = capsys.readouterr().out
         assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused

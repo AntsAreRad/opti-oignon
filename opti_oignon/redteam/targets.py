@@ -31,7 +31,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from opti_oignon.redteam.config import _assert_loopback
+from opti_oignon.redteam.config import _assert_loopback, local_backend
 
 logger = logging.getLogger(__name__)
 
@@ -583,7 +583,7 @@ _DATA_LEAK_PATTERNS: list[str] = [
 
 
 class ChatTarget(TargetAdapter):
-    """End-to-end chat target -- sends attacks through Ollama /api/chat.
+    """End-to-end chat target -- sends attacks to the model through the registry.
 
     Evaluates whether the LLM complied with or refused the attack
     by analyzing the response for refusal patterns, compliance
@@ -594,7 +594,8 @@ class ChatTarget(TargetAdapter):
     model : str
         Ollama model name.
     ollama_url : str
-        Ollama API base URL.
+        Checked for loopback and kept for the configuration; requests go
+        to the registry's backend, whose endpoint must be local too.
     system_prompt : str or None
         Custom system prompt. Uses default safety prompt if None.
     timeout : int
@@ -617,48 +618,39 @@ class ChatTarget(TargetAdapter):
         self._timeout = timeout
 
     def is_available(self) -> bool:
-        """Check if Ollama is reachable."""
-        import urllib.request
+        """True when a healthy backend on the local host serves the model.
+
+        A backend off the local host is refused by name and raised.
+        """
+        backend = local_backend(self._model)
+        if backend is None:
+            return False
         try:
-            req = urllib.request.Request(
-                f"{self._ollama_url}/api/tags",
-                method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=5):
-                return True
+            return bool(backend.health_check())
         except Exception:
             return False
 
     def _call_ollama_chat(self, payload: str) -> str | None:
-        """Send payload through Ollama /api/chat endpoint.
+        """Send the payload to the model under the target's system prompt.
 
-        Returns the assistant response text, or None on failure.
+        Returns the assistant response text, or None without a backend or
+        on failure; a backend off the local host is refused and raised.
         """
-        import json
-        import urllib.request
-
-        body = json.dumps({
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": payload},
-            ],
-            "stream": False,
-        }).encode("utf-8")
-
+        backend = local_backend(self._model)
+        if backend is None:
+            return None
         try:
-            req = urllib.request.Request(
-                f"{self._ollama_url}/api/chat",
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            response = backend.generate(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": payload},
+                ],
+                options={"timeout": self._timeout},
             )
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                message = data.get("message", {})
-                return message.get("content", "").strip()
+            return str(getattr(response, "content", "") or "").strip()
         except Exception as exc:
-            logger.debug("ChatTarget Ollama call failed: %s", exc)
+            logger.debug("ChatTarget request failed: %s", exc)
             return None
 
     def _detect_refusal(self, response: str) -> tuple[bool, list[str]]:
@@ -723,7 +715,7 @@ class ChatTarget(TargetAdapter):
         return max(0.0, min(1.0, score))
 
     def run(self, payload: str) -> TargetResult:
-        """Send the attack through Ollama /api/chat and evaluate.
+        """Send the attack to the model and evaluate.
 
         Classification:
         - blocked = True if model refused and no compliance/leak detected

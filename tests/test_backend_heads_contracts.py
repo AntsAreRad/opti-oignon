@@ -52,6 +52,17 @@ embedder, one text or one batch at a time. The batch now has a head:
     client per timeout; without one the module-level client answers as
     before.
 
+A caller that must know where its requests go -- the red team talks only to
+a model on the local host -- could not ask the registry. Ollama's host in
+``backends.yaml`` is written onto the backend and never read by a request:
+
+  * BH10 -- ``endpoint`` answers where a backend's requests actually go:
+    ``None`` by default (unknown), Ollama's host as its client library
+    resolves it from ``OLLAMA_HOST`` and never the stored host, ``None``
+    when that cannot be read, llama.cpp in-process, llama-server its host,
+    the remote core its base URL; and the library resolves an unset host
+    to the loopback and a bare address to that address.
+
 Local-only (the public distribution ships no tests). The backend module is
 loaded through the shared isolation window with every client faked.
 """
@@ -584,4 +595,75 @@ def test_bh9_both_embedding_heads_bind_a_timeout_to_the_transport():
         assert [c[0] for c in fake.calls] == ["embed", "embed", "embed"]
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# BH10 -- where a backend's requests actually go
+# ---------------------------------------------------------------------------
+def test_bh10_endpoint_answers_where_the_requests_go_and_never_the_decorative_host(monkeypatch):
+    mod, restore = _open()
+    try:
+        class _Seven(mod.InferenceBackend):
+            name = "seven"
+            display_name = "seven"
+
+            def health_check(self):
+                return True
+
+            def list_models(self):
+                return []
+
+            def model_info(self, model_name):
+                return None
+
+            def generate(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+                raise AssertionError("not asked")
+
+            def stream(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+                raise AssertionError("not asked")
+
+        assert _Seven().endpoint() is None, "unknown by default"
+        assert getattr(mod.InferenceBackend.endpoint, "__isabstractmethod__", False) is False
+
+        seen = []
+        mod.OLLAMA_AVAILABLE = True
+        mod._ollama_host_parser = lambda: (lambda host: seen.append(host) or "http://10.1.2.3:11434")
+        monkeypatch.setenv("OLLAMA_HOST", "10.1.2.3")
+        ollama = mod.OllamaBackend()
+        ollama._host = "http://127.0.0.1:11434"
+        assert ollama.endpoint() == "http://10.1.2.3:11434", "where the client sends, not the stored host"
+        assert seen == ["10.1.2.3"], "resolved from the variable the client library reads"
+        mod._ollama_host_parser = lambda: None
+        assert ollama.endpoint() is None, "a resolution that cannot be read is unknown"
+        mod.OLLAMA_AVAILABLE = False
+        assert mod.OllamaBackend().endpoint() is None
+
+        assert mod.LlamaCppBackend(model_dirs=[]).endpoint() == mod.ENDPOINT_IN_PROCESS
+        assert mod.LlamaServerBackend(host="http://127.0.0.1:8080/").endpoint() == "http://127.0.0.1:8080"
+    finally:
+        restore()
+
+    class _Base:
+        pass
+
+    seeded_backend = types.ModuleType(_BACKEND)
+    seeded_backend.get_backend_registry = lambda: None
+    seeded_backend.InferenceBackend = _Base
+    seeded_backend.ChatResponse = object
+    seeded_backend.StreamChunk = object
+    seeded_backend.BackendModelInfo = object
+    loaded, restore = isolate(
+        targets={"opti_oignon.core_client": source("core_client.py")},
+        seeded={_BACKEND: seeded_backend},
+        packages=("opti_oignon",),
+    )
+    try:
+        remote = loaded["opti_oignon.core_client"].RemoteCoreBackend("http://127.0.0.1:7411/")
+        assert remote.endpoint() == "http://127.0.0.1:7411"
+    finally:
+        restore()
+
+    client = pytest.importorskip("ollama._client")
+    assert client._parse_host(None) == "http://127.0.0.1:11434", "the library's default is the loopback"
+    assert client._parse_host("10.0.0.5:11434") == "http://10.0.0.5:11434"
 

@@ -49,6 +49,38 @@ def _assert_loopback(url: str) -> None:
         )
 
 
+def local_backend(model: str) -> Any:
+    """The registry's backend for ``model``, provided its requests stay on the local host.
+
+    ``None`` when there is no registry or no backend: the caller's own
+    fallback applies. A backend whose endpoint is unknown, or not on the
+    local host, is refused with ValueError before any request, and the
+    refusal is meant to be raised, not swallowed. The URL arguments the
+    entry points still take are checked too, but they route nothing: the
+    backend's endpoint is where the requests go.
+    """
+    try:
+        from opti_oignon.inference_backend import ENDPOINT_IN_PROCESS, get_backend_registry
+
+        backend = get_backend_registry().resolve_backend(model)
+    except Exception as exc:  # noqa: BLE001 - no registry is no backend
+        logger.debug("inference registry unavailable to the red team: %s", exc)
+        return None
+    if backend is None:
+        return None
+    endpoint_of = getattr(backend, "endpoint", None)
+    endpoint = endpoint_of() if callable(endpoint_of) else None
+    if endpoint == ENDPOINT_IN_PROCESS:
+        return backend
+    if endpoint is None:
+        raise ValueError(
+            f"the backend serving {model!r} cannot say where its requests go: "
+            "refused, the red team talks only to a model on the local host (endpoint unknown)"
+        )
+    _assert_loopback(endpoint)
+    return backend
+
+
 @dataclass
 class SchedulerConfig:
     """Configuration for automated security scheduling."""

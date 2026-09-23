@@ -103,6 +103,9 @@ class RemoteCoreBackend(InferenceBackend):
     def embed_many(self, model, texts, timeout=None):
         return None
 
+    def endpoint(self):
+        return self.base_url
+
     @staticmethod
     def _payload(model, messages, options, keep_alive, think):
         return {"model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": bool(think)}

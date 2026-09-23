@@ -8,7 +8,7 @@ Falls back to curated seed lists when Ollama is unavailable.
 
 Features:
 - System prompt templates for each of 8 attack categories
-- Ollama /api/generate integration (100% local)
+- Generation through the inference registry, on a local backend only
 - Seed list fallback from data/redteam_seeds.json
 - Deduplication (exact + normalized)
 - Quality filtering (min length, coherence)
@@ -25,12 +25,11 @@ import hashlib
 import json
 import logging
 import re
-import urllib.request
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from opti_oignon.redteam.config import _assert_loopback
+from opti_oignon.redteam.config import _assert_loopback, local_backend
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +137,8 @@ class AttackGenerator:
     model : str
         Ollama model name.
     ollama_url : str
-        Ollama API base URL.
+        Checked for loopback and kept for the configuration; requests go
+        to the registry's backend, whose endpoint must be local too.
     seed_file : str or Path or None
         Path to seed JSON file. Uses default if None.
     seed_fallback : bool
@@ -254,35 +254,26 @@ class AttackGenerator:
     # ------------------------------------------------------------------
 
     def _call_ollama(self, system_prompt: str, user_prompt: str = "") -> str | None:
-        """Call Ollama /api/generate and return the response text.
+        """Ask the registry's backend for the model, on the local host only.
 
-        Returns None on any failure.
+        Returns None without a backend or on any failure of the request; a
+        backend off the local host is refused by name and raised.
         """
         prompt = f"{system_prompt}\n\n{user_prompt}" if user_prompt else system_prompt
 
-        body = json.dumps({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 1.0,
-                "top_p": 0.95,
-                "num_predict": 512,
-            },
-        }).encode("utf-8")
-
+        backend = local_backend(self.model)
+        if backend is None:
+            logger.debug("No backend in the registry serves %s", self.model)
+            return None
         try:
-            req = urllib.request.Request(
-                f"{self.ollama_url}/api/generate",
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            response = backend.generate(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 1.0, "top_p": 0.95, "num_predict": 512, "timeout": 60},
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("response", "").strip()
+            return str(getattr(response, "content", "") or "").strip()
         except Exception as exc:
-            logger.debug("Ollama call failed: %s", exc)
+            logger.debug("Attack generation failed: %s", exc)
             return None
 
     # ------------------------------------------------------------------
