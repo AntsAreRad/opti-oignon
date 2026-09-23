@@ -145,6 +145,15 @@ package costs.
 
 ### Changed
 
+- The registry-funnel guard sees a request that never touches the client
+  library: an endpoint of the inference server spelled in a module that
+  imports an HTTP transport. It found six modules at nine sites. The
+  project trigger detector's third level now asks the registry, with its
+  half-second budget as the request timeout; the other five are sealed on
+  a raw ledger that may only shrink, each waiting on a decision -- the RAG
+  embedder sends batches, the red team enforces a loopback endpoint the
+  registry does not check, the launcher's probe is not inference.
+  `level3_ollama_url` in `projects.yaml` is no longer read.
 - The tuner reaches a real backend. Four call sites asked the registry for
   `get_backend`, a method it does not have, inside broad handlers: every
   tuning run fell to the simulated benchmark, the llama.cpp benchmark

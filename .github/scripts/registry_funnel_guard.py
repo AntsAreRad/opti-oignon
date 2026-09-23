@@ -17,6 +17,14 @@ reads ``list`` and ``show`` -- and found twenty-two more sites in sixteen
 modules, all paid in that block. The ledger below is empty, and it stays
 empty: a direct site anywhere outside the funnel is a violation by name.
 
+A request that never touches the client library was still invisible: a
+module that posts to the inference server's endpoint with an HTTP transport
+of its own. The raw census counts those. It found six modules at nine
+sites; the project trigger detector was paid in the block that widened it,
+and the other five sit on RAW_LEDGER, a ledger of their own with the same
+seals and the same ratchet, each with the reason it needs a decision
+before it can migrate.
+
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
 ratchet that only counts is a ratchet on the count. Every owed module carries
 the digest of its text as the debt was enumerated. An owed module that changes
@@ -70,6 +78,35 @@ _CLIENT_CLASSES = frozenset({"Client", "AsyncClient"})
 # direct site anywhere outside the funnel is now a violation by name, and
 # nothing may be added here to make one tolerable.
 LEDGER = {
+}
+
+
+# What counts as posting to the inference server without the client: a
+# string literal ending with one of its request, catalogue or loaded-set
+# endpoints, in a module that imports an HTTP transport. Model management
+# endpoints are left out by the same decision as the client's methods. A
+# module without a transport cannot send what it spells, and the
+# application's own routes share these paths: they are not requests.
+_RAW_ENDPOINTS = (
+    "/api/chat", "/api/generate", "/api/embed", "/api/embeddings",
+    "/api/tags", "/api/ps", "/api/show",
+)
+_HTTP_TRANSPORTS = frozenset({"requests", "httpx", "urllib", "http", "aiohttp"})
+
+# Raw debt found when the census was widened: repo-relative module -> sha256
+# of its text. MAY ONLY SHRINK, and no entry may move. Each needs a decision
+# before it migrates:
+#   rag/embeddings.py -- batches of texts; the registry's embed head takes one.
+#   redteam/*.py -- the loopback check on the endpoint is a property the red
+#     team enforces; the registry's host is not checked for loopback.
+#   ui.py -- the launcher's liveness probe of the server, not an inference
+#     request; routing it would make the launcher build the registry.
+RAW_LEDGER = {
+    "opti_oignon/rag/embeddings.py": "038f28a1647a41f4b98c0b2be1dc29fbb8d63c6ec84809d86cf9279fbabe751b",
+    "opti_oignon/redteam/generator.py": "372f1a0c03ccc4eec84659466aadd1664bc2d72b0e89a4fa974642238c132857",
+    "opti_oignon/redteam/strategies.py": "b99971fac01012a6f875c768073d5e97754f6f2c75fbef3a599884f19cd166c6",
+    "opti_oignon/redteam/targets.py": "92ad51877a824229e2cb36e41747ea6621c596870252f21e79438e6d284ba608",
+    "opti_oignon/ui.py": "fd8d934c128b4cf5b72e4c862bd2c6eea78c454f45cf0cc7f953650061645308",
 }
 
 
@@ -155,6 +192,72 @@ def count_sites(text):
     return n
 
 
+def _docstring_nodes(tree):
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                out.add(id(body[0].value))
+    return out
+
+
+def count_raw_sites(text):
+    """How many endpoint literals of the inference server a module with an HTTP transport spells.
+
+    Counted on the syntax tree: every string constant, the pieces of an
+    f-string included, whose path ends with one of the endpoints. A
+    docstring is prose and never counts; a module that imports no HTTP
+    transport cannot post and counts zero. A text that does not parse
+    counts zero; the syntax tier owns that failure.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return 0
+    transports = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            transports.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            transports.add(node.module.split(".")[0])
+    if not transports & _HTTP_TRANSPORTS:
+        return 0
+    prose = _docstring_nodes(tree)
+    n = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose:
+            path = node.value.split("?")[0].rstrip("/")
+            if path.endswith(_RAW_ENDPOINTS):
+                n += 1
+    return n
+
+
+def posts_raw(name, text):
+    """True when the module posts to the inference server itself and is not the funnel."""
+    return name != _FUNNEL and count_raw_sites(text) > 0
+
+
+def find_raw_violations(files):
+    """Modules that post raw and that the raw ledger does not owe for."""
+    return sorted(name for name, text in files if posts_raw(name, text) and name not in RAW_LEDGER)
+
+
+def find_raw_broken_seals(files):
+    """Raw-owed modules whose bytes moved while they still post."""
+    seen = dict(files)
+    return sorted(
+        name for name, sealed in RAW_LEDGER.items()
+        if name in seen and posts_raw(name, seen[name]) and digest(seen[name]) != sealed
+    )
+
+
+def find_stale_raw_entries(files):
+    """Raw ledger names that no longer post, or that vanished."""
+    seen = dict(files)
+    return sorted(name for name in RAW_LEDGER if name not in seen or not posts_raw(name, seen[name]))
+
+
 def calls_directly(name, text):
     """True when the module reaches the client and is not the funnel itself."""
     return name != _FUNNEL and count_sites(text) > 0
@@ -221,6 +324,9 @@ def main(argv):
     violations = find_violations(files)
     broken = find_broken_seals(files)
     stale = find_stale_ledger_entries(files)
+    raw_violations = find_raw_violations(files)
+    raw_broken = find_raw_broken_seals(files)
+    raw_stale = find_stale_raw_entries(files)
 
     if violations:
         print("Registry-funnel violations -- these modules reach the client")
@@ -245,10 +351,35 @@ def main(argv):
         for name in stale:
             print(f"  {name}")
 
-    if violations or broken or stale:
+    if raw_violations:
+        print("Raw HTTP violations -- these modules post to the inference")
+        print("server's endpoint with a transport of their own:")
+        for name in raw_violations:
+            print(f"  {name}")
+        print()
+        print("A request posted around the registry gets none of its")
+        print("guarantees. Route it through the registry.")
+    if raw_broken:
+        print("Broken raw seals -- the raw ledger owes for these modules and")
+        print("their bytes have moved while they still post:")
+        for name in raw_broken:
+            print(f"  {name}")
+    if raw_stale:
+        print("Stale raw ledger entries -- paid or vanished; remove them from")
+        print("RAW_LEDGER:")
+        for name in raw_stale:
+            print(f"  {name}")
+
+    if violations or broken or stale or raw_violations or raw_broken or raw_stale:
         return 1
 
     seen = dict(files)
+    raw_sites = sum(count_raw_sites(seen[name]) for name in RAW_LEDGER if name in seen)
+    print(
+        f"Raw HTTP: {len(RAW_LEDGER)} module(s) owed, {raw_sites} raw site(s) "
+        f"between them, none outside the raw ledger. It is sealed: it may only "
+        f"shrink, and an owed module that changes must migrate."
+    )
     if not LEDGER:
         # The green with its denominator: how many modules were read to find
         # no direct site, so that a scan of the wrong tree cannot pass as a

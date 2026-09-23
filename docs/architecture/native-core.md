@@ -52,7 +52,13 @@ protocol they will follow when the core becomes a resident process:
 
 Today every pack runs in the same process and reaches inference and the
 model catalogue through the registry; the registry-funnel guard counts
-what still does not, whatever name the client travels under. The
+what still does not, whatever name the client travels under, and also a
+module that posts to the inference server's endpoint with an HTTP
+transport of its own. Five modules still do, sealed on a ledger that may
+only shrink: the RAG embedder (batches, where the registry embeds one text
+at a time), the red team's three entry points (their endpoint is checked
+for loopback, the registry's host is not) and the launcher's liveness
+probe. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 

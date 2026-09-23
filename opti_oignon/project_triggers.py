@@ -45,13 +45,6 @@ except ImportError:
     PROJECTS_AVAILABLE = False
     project_store = None
 
-# Executor for LLM classification (Level 3)
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -372,8 +365,9 @@ class ProjectTriggerDetector:
     ) -> bool | None:
         """Ask the LLM whether the query is project-relevant.
 
-        Uses a direct Ollama API call with a strict timeout to stay
-        within the 500ms budget.
+        Asks the inference registry's backend for the configured model,
+        with the level's budget as the request timeout, so the
+        classification is admitted like any other request.
 
         Args:
             query: The user query.
@@ -382,9 +376,6 @@ class ProjectTriggerDetector:
         Returns:
             True if relevant, False if not, None if classification failed.
         """
-        if not REQUESTS_AVAILABLE:
-            return None
-
         if self._store is None:
             return None
 
@@ -419,27 +410,28 @@ class ProjectTriggerDetector:
             # Fallback: try to detect an available model
             model = "qwen3:32b"
 
-        # Make the Ollama API call with strict timeout
+        # Ask the registry's backend for the model, within the level's budget.
         timeout_ms = self._config.get("level3_timeout_ms", 500)
         timeout_s = max(timeout_ms / 1000, 0.5)
-        ollama_url = self._config.get("level3_ollama_url", "http://localhost:11434")
 
         try:
-            response = requests.post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.0,
-                        "num_predict": 5,
-                    },
-                },
-                timeout=timeout_s,
+            from opti_oignon.inference_backend import get_backend_registry
+
+            backend = get_backend_registry().resolve_backend(model)
+        except Exception as e:
+            logger.debug("L3 LLM classification has no registry: %s", e)
+            return None
+        if backend is None:
+            logger.debug("L3 LLM classification: no backend serves %s", model)
+            return None
+
+        try:
+            response = backend.generate(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.0, "num_predict": 5, "timeout": timeout_s},
             )
-            response.raise_for_status()
-            answer = response.json().get("response", "").strip().upper()
+            answer = str(getattr(response, "content", "") or "").strip().upper()
 
             has_yes = bool(_L3_YES_RE.search(answer))
             has_no = bool(_L3_NO_RE.search(answer))
@@ -450,7 +442,7 @@ class ProjectTriggerDetector:
             logger.debug("L3 ambiguous answer: '%s'", answer)
             return None
 
-        except requests.exceptions.Timeout:
+        except TimeoutError:
             logger.debug("L3 LLM classification timed out (%dms)", timeout_ms)
             return None
         except Exception as e:

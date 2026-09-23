@@ -64,6 +64,27 @@ requests through the attribute. A receiver is not a disguise either:
     (``pull``, ``delete``) is not, by decision; and on the real tree only
     the funnel reads the catalogue from the client.
 
+The census could not see a request that never touches the client library
+at all: a module that posts to the inference server's endpoint with its own
+HTTP transport. Six modules did, at nine sites; one was paid in the block
+that widened the census, the other five are sealed on a ledger of their own
+with the reason each needs a decision:
+
+  * RF19 -- a raw site is an endpoint literal of the inference server, in a
+    string or an f-string, in a module that imports an HTTP transport; the
+    application's own route, a docstring, a model-management endpoint and
+    a path that only begins with an endpoint are not; the two censuses do
+    not count each other's sites.
+  * RF20 -- a raw site nobody owes for is a violation; an owed module that
+    has not moved is tolerated, and one that grew while still posting is a
+    broken seal.
+  * RF21 -- paying the raw debt makes the entry stale, and so does vanishing.
+  * RF22 -- on the real tree the raw ledger names exactly the modules that
+    post, each sealed on its current text and each carrying a site, and
+    nothing outside it posts.
+  * RF23 -- the entry point names the raw debt with its site count, and
+    refuses an unowed raw site by name.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
@@ -442,6 +463,114 @@ def test_rf18_a_catalogue_read_is_a_site_and_model_management_is_not():
         )
         outside = {name: guard.count_sites(text) for name, text in files.items() if name != "opti_oignon/inference_backend.py"}
         assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RF19-RF23 -- raw HTTP to the inference server
+# ---------------------------------------------------------------------------
+_RAW_REQUESTS = "import requests\n\ndef ask(url):\n    return requests.post(f'{url}/api/generate', json={})\n"
+_RAW_URLLIB = (
+    "def up():\n    import urllib.request\n"
+    "    return urllib.request.urlopen('http://localhost:11434/api/tags')\n"
+)
+_RAW_ROUTE = "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n@router.post('/api/chat')\ndef chat():\n    return {}\n"
+_RAW_PROSE = 'import requests\n\ndef f():\n    """Posts to /api/chat"""\n    return requests.get("https://example.org")\n'
+_RAW_PULL = "import requests\n\ndef fetch(u):\n    return requests.post(u + '/api/pull', json={})\n"
+_RAW_APP = "import httpx\n\ndef s(u):\n    return httpx.get(f'{u}/api/chat/stream')\n"
+_RAW_OWED = (
+    "opti_oignon/rag/embeddings.py",
+    "opti_oignon/redteam/generator.py",
+    "opti_oignon/redteam/strategies.py",
+    "opti_oignon/redteam/targets.py",
+    "opti_oignon/ui.py",
+)
+
+
+def _with_raw_ledger(guard, ledger):
+    guard.RAW_LEDGER = dict(ledger)
+
+
+def test_rf19_a_raw_site_is_an_endpoint_literal_in_a_module_with_an_http_transport():
+    guard, restore = _load()
+    try:
+        assert guard.count_raw_sites(_RAW_REQUESTS) == 1, "an f-string endpoint behind requests is a site"
+        assert guard.count_raw_sites(_RAW_URLLIB) == 1, "a transport imported inside a function counts too"
+        assert guard.count_raw_sites(_RAW_ROUTE) == 0, "the application's own route is not a request"
+        assert guard.count_raw_sites(_RAW_PROSE) == 0, "a docstring is prose"
+        assert guard.count_raw_sites(_RAW_PULL) == 0, "model management is not counted, by the same decision as the client"
+        assert guard.count_raw_sites(_RAW_APP) == 0, "a path that only begins with an endpoint is another route"
+        assert guard.count_sites(_RAW_REQUESTS) == 0 and guard.count_raw_sites(_DIRECT) == 0, (
+            "the two censuses do not count each other's sites"
+        )
+    finally:
+        restore()
+
+
+def test_rf20_an_unowed_raw_site_is_a_violation_and_a_grown_owed_one_a_broken_seal():
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/poster.py"
+        _with_raw_ledger(guard, {})
+        assert guard.find_raw_violations([(name, _RAW_REQUESTS)]) == [name]
+        _with_raw_ledger(guard, {name: guard.digest(_RAW_REQUESTS)})
+        assert guard.find_raw_violations([(name, _RAW_REQUESTS)]) == []
+        assert guard.find_raw_broken_seals([(name, _RAW_REQUESTS)]) == [], "an owed module that has not moved is tolerated"
+        grown = _RAW_REQUESTS + "\nx = 1\n"
+        assert guard.find_raw_broken_seals([(name, grown)]) == [name], "one more line while still posting breaks the seal"
+        assert guard.find_raw_violations([(name, grown)]) == [], "an owed name is answered for by its seal"
+    finally:
+        restore()
+
+
+def test_rf21_paying_or_losing_raw_debt_makes_the_entry_stale():
+    guard, restore = _load()
+    try:
+        name = "opti_oignon/poster.py"
+        _with_raw_ledger(guard, {name: guard.digest(_RAW_REQUESTS)})
+        assert guard.find_stale_raw_entries([(name, _ROUTED)]) == [name], "paid"
+        assert guard.find_raw_broken_seals([(name, _ROUTED)]) == []
+        assert guard.find_stale_raw_entries([("opti_oignon/other.py", _ROUTED)]) == [name], "vanished"
+        assert guard.find_stale_raw_entries([(name, _RAW_REQUESTS)]) == []
+    finally:
+        restore()
+
+
+def test_rf22_on_the_real_tree_the_raw_ledger_names_exactly_the_modules_that_post():
+    guard, restore = _load()
+    try:
+        files = dict(_real_files())
+        assert sorted(guard.RAW_LEDGER) == sorted(_RAW_OWED)
+        total = 0
+        for name in _RAW_OWED:
+            assert guard.RAW_LEDGER[name] == hashlib.sha256(files[name].encode("utf-8")).hexdigest(), (
+                f"{name} is sealed on the text the census reads"
+            )
+            n = guard.count_raw_sites(files[name])
+            assert n > 0, f"{name} is owed for, so the census finds a site in it"
+            total += n
+        assert total >= 9, "the debt the widening found, not zero"
+        outside = {n: guard.count_raw_sites(t) for n, t in files.items() if n not in guard.RAW_LEDGER}
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+        assert guard.count_raw_sites(files["opti_oignon/project_triggers.py"]) == 0, "the paid module posts no more"
+    finally:
+        restore()
+
+
+def test_rf23_the_entry_point_names_the_raw_debt_and_refuses_an_unowed_raw_site(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        assert guard.main(["guard", str(REPO)]) == 0
+        out = capsys.readouterr().out
+        sites = sum(guard.count_raw_sites(t) for n, t in _real_files() if n in guard.RAW_LEDGER)
+        assert f"{len(_RAW_OWED)} module(s) owed" in out and f"{sites} raw site(s)" in out, out
+        pkg = tmp_path / "opti_oignon"
+        pkg.mkdir()
+        (pkg / "poster.py").write_text(_RAW_REQUESTS, encoding="utf-8")
+        assert guard.main(["guard", str(tmp_path)]) == 1
+        refused = capsys.readouterr().out
+        assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused
     finally:
         restore()
 

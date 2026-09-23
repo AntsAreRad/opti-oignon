@@ -137,7 +137,9 @@ projects:
     level3_model: ""
     # Level 3: timeout in milliseconds (hard limit)
     level3_timeout_ms: 500
-    # Level 3: Ollama API URL
+    # Level 3: no longer read -- the classification asks the inference
+    # registry, which knows where the model is served. Kept so an existing
+    # file still parses the way it did.
     level3_ollama_url: "http://localhost:11434"
 
   # ==========================================================================
