@@ -113,6 +113,19 @@ package costs.
   mutation is saved through the onion store when one is configured. The
   model's tools have no path to any of it; the no-pipeline contract now
   names the two modules that import the librarian and checks the tools.
+- `oo chat`: an interactive session in the calling process, one line per
+  turn through the executor and the inference registry, with `/open`,
+  `/close`, `/pin`, `/recall`, `/skill`, `/help` and `/quit`; the stream
+  goes to stdout and every refusal to stderr by name. The librarian gains
+  `close_onion`, which evicts the whole Flesh through the gate
+  synchronously, stops at the first refused span and names it, then saves
+  and returns the receipts digest and the Core root, and `open_onion`,
+  which finds a saved conversation again or refuses by name. `/skill` puts
+  a published skill's body into the turn's system prompt; a draft, an
+  unknown name and an ambiguous one are refused. The session is
+  in-process, so it opens the local conversation store, onion state and
+  skill root: it keeps the registry funnel, not the separate-process pack
+  protocol. The CLI reference now documents `oo core` too.
 - The onion memory persists: `memory/onion_store.py` writes each
   conversation's Core, Cellar, receipts, Peels, Flesh and mirror cursor
   through the repository's connection seam, after every mirror and every

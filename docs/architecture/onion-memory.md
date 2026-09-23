@@ -58,7 +58,8 @@ the user as actor; the store refuses any other actor, and a pin that would
 push the Core over its cap is refused before it lands, because the
 composer never cuts the Core and would otherwise blank the whole block.
 The model's tools reach none of this; a contract on the tree names the
-two modules that import the librarian. Recall has no actor gate by design:
+three modules that import the librarian -- the executor, the memory
+routes and the terminal chat session. Recall has no actor gate by design:
 it changes nothing in the Core, and the model's tool over it is not built.
 
 With a persistence path in `onion.yaml`, the librarian writes each
@@ -75,6 +76,18 @@ the rest of the tree opens plaintext with a warning outside Bulbe mode,
 this store does not. Without a path the onion lives in the process and a
 restart starts it over. The root covers Core, Cellar, receipts and Peels;
 the drift ledger has its own table and its root is a later decision.
+
+Two verbs work on a whole conversation, and `oo chat` gives them to the
+user as `/close` and `/open`. Closing runs the gate synchronously over
+the entire Flesh, whatever its cap, one span at a time: every span the
+gate accepts leaves with its receipt and its peel, the first it refuses
+stays verbatim and is named with the probes that failed, and there is no
+override. The state is saved, and the receipts digest and the Core root
+it leaves are returned. Opening finds a saved conversation again through
+the store and composes its block; a conversation the store does not hold,
+or a configuration without a persistence path, is refused by name, and a
+store that refuses the conversation is raised by name where the memory
+block would have answered empty.
 
 ## Drift ledger
 

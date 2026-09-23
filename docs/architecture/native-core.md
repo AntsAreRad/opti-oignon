@@ -56,6 +56,14 @@ what still does not, whatever name the client travels under. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 
+The terminal chat session (`oo chat`) is not a pack in this sense, and is
+not presented as one. It runs in the calling process: the conversation
+store, the onion state and the skill root it opens are local to it. What
+it does satisfy is the funnel -- every request goes through the registry,
+to the daemon when `core.yaml` enables it, and the session holds no
+inference client of its own. A pack does not open the core's databases;
+the session does, so the separate-process protocol above is still owed.
+
 ## The core daemon
 
 `opti_oignon/core_daemon.py` is the resident process, in Python first: a

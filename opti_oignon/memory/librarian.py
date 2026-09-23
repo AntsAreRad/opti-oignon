@@ -17,7 +17,11 @@ user's one path to the Core and the Cellar: ``pin``, ``supersede`` and
 ``recall`` take the conversation id, forward the actor to the store so
 that only a caller that says it is the user gets through, check the Core
 cap before a pin lands, and save through the onion store when one is
-configured. The model reaches none of this; a contract on the tree says
+configured. Two verbs work on a whole conversation: ``close_onion`` evicts
+the entire Flesh through the gate, synchronously, stops at the first span
+the gate refuses and names it, and saves; ``open_onion`` finds a persisted
+conversation again and refuses by name one the store does not hold. The
+model reaches none of this; a contract on the tree says
 which two modules import this one.
 
 The state is per conversation. With a persistence path in ``onion.yaml``
@@ -394,6 +398,23 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
         return False
 
 
+def _compose_block(state, question, budget):
+    """Core, receipts digest and the Peels for ``question`` under the caps; raises what the composer refuses."""
+    from .composer import compose, load_budget
+    from .peels import select_peels
+
+    budget = budget or load_budget()
+    retrieval = select_peels(state.tree, question or "", budget.peels)
+    prompt = compose(
+        core=state.core, ledger=state.ledger, cellar=state.cellar,
+        retrieval=retrieval, flesh=[], turn="", budget=budget,
+    )
+    kept = tuple(s for s in prompt.segments if s.layer != "turn")
+    if not any(s.text.strip() for s in kept):
+        return ""
+    return replace(prompt, segments=kept).render()
+
+
 def memory_block(conversation_id, question=None, *, budget=None, gate=None, config=None):
     """The onion's memory block for the conversation, or an empty string. Never raises.
 
@@ -405,19 +426,7 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
         state = peek_state(conversation_id, config)
         if state is None:
             return ""
-        from .composer import compose, load_budget
-        from .peels import select_peels
-
-        budget = budget or load_budget()
-        retrieval = select_peels(state.tree, question or "", budget.peels)
-        prompt = compose(
-            core=state.core, ledger=state.ledger, cellar=state.cellar,
-            retrieval=retrieval, flesh=[], turn="", budget=budget,
-        )
-        kept = tuple(s for s in prompt.segments if s.layer != "turn")
-        if not any(s.text.strip() for s in kept):
-            return ""
-        return replace(prompt, segments=kept).render()
+        return _compose_block(state, question, budget)
     except Exception as exc:  # noqa: BLE001 - a block that cannot be trusted is no block
         logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
         return ""
@@ -515,3 +524,105 @@ def recall(conversation_id, key, *, config=None):
     span = state.ledger.resolve(key, state.cellar)
     _save_state(conversation_id, state, config)
     return span
+
+
+# ---------------------------------------------------------------------------
+# The user's two verbs on a whole conversation: close and open
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Closing:
+    """What a close did: spans evicted, the refusal that stopped it, what it leaves."""
+
+    conversation_id: str
+    evicted: int
+    remaining: int
+    refusal: object
+    digest: str
+    core_root: str
+    saved: bool
+
+
+@dataclass(frozen=True)
+class Opening:
+    """A persisted conversation found again: its block, digest and root."""
+
+    conversation_id: str
+    block: str
+    digest: str
+    core_root: str
+    flesh_turns: int
+    peels: int
+
+
+def close_onion(conversation_id, *, config=None, summarize=None, gate=None):
+    """Evict the whole Flesh through the gate, synchronously, then save.
+
+    Unlike a curation burst this ignores the Flesh cap: it runs until the
+    Flesh is empty or the gate refuses a span. A refused span stays in the
+    Flesh verbatim and the refusal, with its failed probes, is returned;
+    there is no override. Every accepted span is saved, the refused
+    remainder with it, before the digest and the Core root are read.
+    """
+    from .peels import evict_gated, load_gate
+
+    config = config or load_config()
+    state = _existing_state(conversation_id, config)
+    if state is None:
+        raise LibrarianError(f"conversation {conversation_id!r} has no onion state: nothing to close")
+    if summarize is None:
+        summarize = registry_summarizer(config)
+    if summarize is None:
+        raise LibrarianError(
+            f"no backend serves the librarian model {config.model!r}: nothing was evicted, and no other path is tried"
+        )
+    gate = gate or load_gate()
+    evicted = 0
+    refusal = None
+    try:
+        while state.flesh.turns():
+            outcome = evict_gated(
+                flesh=state.flesh, cellar=state.cellar, ledger=state.ledger,
+                tree=state.tree, gate=gate, summarize=summarize,
+            )
+            if not outcome.evicted:
+                refusal = outcome.reason
+                break
+            evicted += 1
+    finally:
+        saved = _save_state(conversation_id, state, config) is not None
+    remaining = len(state.flesh.turns())
+    with _lock:
+        _watermark[conversation_id] = remaining
+    return Closing(
+        conversation_id=conversation_id, evicted=evicted, remaining=remaining, refusal=refusal,
+        digest=state.ledger.digest(state.cellar), core_root=state.core.root(), saved=saved,
+    )
+
+
+def open_onion(conversation_id, question=None, *, config=None, budget=None):
+    """The persisted state of a conversation and its block; refused by name when nothing is persisted.
+
+    Only the store answers here: a state that lives in this process alone
+    is not an open conversation, and a fresh state is never presented as
+    the old one. A store that refuses the conversation raises by name, and
+    a Core the composer refuses raises too, where ``memory_block`` would
+    answer with an empty block.
+    """
+    config = config or load_config()
+    store = onion_store(config)
+    if store is None:
+        raise LibrarianError("no persistence path in onion.yaml: nothing survives the process, so nothing can be opened")
+    if str(conversation_id) not in store.conversations():
+        raise LibrarianError(f"conversation {conversation_id!r} has nothing persisted: nothing to open")
+    state = peek_state(conversation_id, config)
+    if state is None:
+        raise LibrarianError(f"conversation {conversation_id!r} has nothing persisted: nothing to open")
+    return Opening(
+        conversation_id=conversation_id,
+        block=_compose_block(state, question, budget),
+        digest=state.ledger.digest(state.cellar),
+        core_root=state.core.root(),
+        flesh_turns=len(state.flesh.turns()),
+        peels=len(state.tree.all()),
+    )

@@ -58,6 +58,24 @@ The user's surface on the Core and the Cellar, the only path to either:
     an unknown key by name, and every mutation of LB11-14 is saved through
     the store when one is configured.
 
+The user's two verbs on a whole conversation, closing it and opening it
+again:
+
+  * LB15 -- a close empties the Flesh through the gate whatever its cap,
+    one receipt per span, and returns the receipts digest and the Core
+    root of what it leaves; an unknown conversation and a missing
+    summariser are refused by name, and nothing is created.
+  * LB16 -- a span the gate refuses stops the close where it stands: the
+    accepted spans stay evicted, the refused span stays verbatim in the
+    Flesh, and the refusal names the probes that failed. No override.
+  * LB17 -- a close is saved through the store, the refused remainder
+    included, and says that it was.
+  * LB18 -- an open after a restart returns the persisted state's block,
+    digest and root exactly as they were; a conversation the store does
+    not hold, and a configuration without a persistence path, are refused
+    by name; a store that refuses the conversation is raised by name,
+    never answered with an empty block.
+
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the registry is blocked, so a
 summariser can only come from an injected resolver.
@@ -566,6 +584,160 @@ def test_lb14_a_recall_hands_back_the_span_marks_the_receipt_and_every_mutation_
         fresh = reader.load("c1", lib.OnionState())
         assert [e.text for e in fresh.core.active()] == ["The user is Alice, in Lyon."], "pin and supersession were saved"
         assert [r.resolved for r in fresh.ledger.all()][0] is True, "the recall was saved"
+    finally:
+        restore()
+
+
+def _sqlite_store(lib, loaded, path):
+    import sqlite3
+
+    store_mod = loaded["opti_oignon.memory.onion_store"]
+    opener = lambda p: sqlite3.connect(str(p))  # noqa: E731
+    lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=opener, require_encryption=False)
+    return lambda: store_mod.OnionStore(path, connect=opener, require_encryption=False)
+
+
+def _faithful_then_blank(accepted):
+    calls = []
+
+    def summarize(turns):
+        calls.append(turns)
+        return _faithful(turns) if len(calls) <= accepted else "nothing of note"
+
+    return summarize
+
+
+# ---------------------------------------------------------------------------
+# LB15 -- a close empties the Flesh through the gate
+# ---------------------------------------------------------------------------
+def test_lb15_a_close_empties_the_flesh_through_the_gate_and_returns_digest_and_root():
+    lib, loaded, restore = _open()
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        roomy = composer.Budget(window=20000, reserve=200, core=300, receipts=300, peels=800, flesh=18000, turn=400)
+        cfg = _config(lib)
+        lib.pin("c1", "The user is called Alice.", actor="user", config=cfg)
+        state = lib.state_for("c1", cfg)
+        state.mirror(_messages(6))
+        assert "fits" in lib.curate(state, _faithful, gate=gate, budget=roomy).reason, (
+            "control: under its cap the Flesh is not curated, so what empties it below is the close"
+        )
+
+        closing = lib.close_onion("c1", config=cfg, summarize=_faithful, gate=gate)
+        assert closing.evicted == 3 and closing.remaining == 0 and closing.refusal is None
+        assert state.flesh.turns() == [], "every turn left the Flesh"
+        assert len(state.ledger.open()) == 3 and len(state.tree.all()) == 3, "one receipt and one peel per span"
+        assert closing.digest == state.ledger.digest(state.cellar) and len(closing.digest.splitlines()) == 3
+        assert closing.core_root == state.core.root(), "the root of the Core it leaves"
+        assert closing.saved is False, "no path, nothing saved, and it says so"
+
+        with pytest.raises(lib.LibrarianError, match="no onion state"):
+            lib.close_onion("nobody", config=cfg, summarize=_faithful, gate=gate)
+        assert lib.peek_state("nobody", cfg) is None, "refusing did not create one"
+
+        other = lib.state_for("c2", cfg)
+        other.mirror(_messages(4))
+        with pytest.raises(lib.LibrarianError, match="no backend serves"):
+            lib.close_onion("c2", config=cfg, gate=gate)
+        assert len(other.flesh.turns()) == 4, "without a summariser nothing moved"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB16 -- a refused span stops the close, named
+# ---------------------------------------------------------------------------
+def test_lb16_a_refused_span_stops_the_close_and_stays_verbatim_with_its_failures_named():
+    lib, loaded, restore = _open()
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        cfg = _config(lib)
+        state = lib.state_for("c1", cfg)
+        state.mirror(_messages(6))
+        closing = lib.close_onion("c1", config=cfg, summarize=_faithful_then_blank(1), gate=gate)
+        assert closing.evicted == 1 and closing.remaining == 4
+        assert closing.refusal and "failed:" in closing.refusal, "the refusal names the probes that failed"
+        assert "@t0003" in closing.refusal, "and the turns they were drawn from"
+        assert [t["turn_id"] for t in state.flesh.turns()] == ["t0003", "t0004", "t0005", "t0006"]
+        assert state.flesh.turns()[0]["text"].startswith("Turn 3:"), "the refused span is verbatim"
+        assert [r.turn_ids for r in state.ledger.open()] == [("t0001", "t0002")], "the accepted span stays evicted"
+        assert closing.digest == state.ledger.digest(state.cellar)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB17 -- a close is saved
+# ---------------------------------------------------------------------------
+def test_lb17_a_close_is_saved_through_the_store_with_its_refused_remainder(tmp_path):
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        path = tmp_path / "onion.db"
+        cfg = _config(lib, persist_path=str(path), require_encryption=False)
+        reader = _sqlite_store(lib, loaded, path)
+        lib.state_for("c1", cfg).mirror(_messages(6))
+        closing = lib.close_onion("c1", config=cfg, summarize=_faithful_then_blank(2), gate=gate)
+        assert closing.saved is True and closing.evicted == 2 and closing.remaining == 2
+        fresh = reader().load("c1", lib.OnionState())
+        assert fresh is not None, "the close wrote the conversation"
+        assert [t["turn_id"] for t in fresh.flesh.turns()] == ["t0005", "t0006"], "the refused remainder was saved"
+        assert len(fresh.ledger.open()) == 2 and len(fresh.tree.all()) == 2
+        assert fresh.seen == 6, "the cursor too, so nothing is mirrored twice"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# LB18 -- an open returns the persisted state, or a named refusal
+# ---------------------------------------------------------------------------
+def test_lb18_an_open_after_a_restart_returns_the_persisted_block_or_refuses_by_name(tmp_path):
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+        path = tmp_path / "onion.db"
+        cfg = _config(lib, persist_path=str(path), require_encryption=False)
+        _sqlite_store(lib, loaded, path)
+        lib.pin("c1", "The user is called Alice.", actor="user", config=cfg)
+        lib.state_for("c1", cfg).mirror(_messages(6))
+        closing = lib.close_onion("c1", config=cfg, summarize=_faithful, gate=gate)
+        before = lib.memory_block("c1", "service 3", budget=budget, config=cfg)
+        assert before and "The user is called Alice." in before, "control: a block to find again"
+
+        lib.reset_librarian()
+        _sqlite_store(lib, loaded, path)
+        opening = lib.open_onion("c1", "service 3", config=cfg, budget=budget)
+        assert opening.block == before, "the block the conversation had, byte for byte"
+        assert opening.core_root == closing.core_root and opening.digest == closing.digest
+        assert opening.flesh_turns == 0 and opening.peels == 3
+
+        with pytest.raises(lib.LibrarianError, match="nothing persisted"):
+            lib.open_onion("nobody", config=cfg, budget=budget)
+        lib.state_for("fresh", cfg)
+        with pytest.raises(lib.LibrarianError, match="nothing persisted"):
+            lib.open_onion("fresh", config=cfg, budget=budget)
+        with pytest.raises(lib.LibrarianError, match="no persistence path"):
+            lib.open_onion("c1", config=_config(lib), budget=budget)
+
+        import sqlite3
+
+        with sqlite3.connect(str(path)) as conn:
+            conn.execute("UPDATE onion_core SET text = 'The user is called Mallory.' WHERE conversation = 'c1'")
+        lib.reset_librarian()
+        _sqlite_store(lib, loaded, path)
+        assert lib.memory_block("c1", "service 3", budget=budget, config=cfg) == "", "control: the block is blanked"
+        lib.reset_librarian()
+        _sqlite_store(lib, loaded, path)
+        with pytest.raises(store_mod.OnionIntegrityError, match="refused, not repaired"):
+            lib.open_onion("c1", config=cfg, budget=budget)
     finally:
         restore()
 

@@ -3,10 +3,14 @@
 CLI entry point -- Opti-Oignon.
 
 Click-based command-line interface that talks to a running Opti-Oignon
-backend.  Installed as the ``oo`` console script.
+backend.  Installed as the ``oo`` console script.  Two commands run in
+this process instead: ``oo chat``, the interactive session, and ``oo
+core``, the resident core daemon.
 
 Usage examples::
 
+    oo chat
+    oo chat -m llama3 --conversation 3f2a...
     oo ask "Summarise this dataset"
     oo ask -m llama3 "Explain PCA"
     cat data.csv | oo ask --pipe "Analyse this"
@@ -17,6 +21,9 @@ Usage examples::
     oo backup import backup.json --strategy merge
     oo rag ingest paper.pdf --collection ecology
     oo rag query "What is BCI?" --collection ecology
+    oo redteam run
+    oo core serve
+    oo core status
     oo config
     oo config set api_url http://remote:8001
 """
@@ -190,7 +197,77 @@ def status(ctx: click.Context) -> None:
 
 
 # =========================================================================
-# oo backup (group)
+# oo chat
+# =========================================================================
+
+def _default_chat_session(model: str | None, conversation_id: str | None):
+    """The in-process session: the registry configured from backends.yaml, then the session over it."""
+    from opti_oignon.inference_backend import init_backends_from_config
+
+    from .session import ChatSession
+
+    init_backends_from_config()
+    return ChatSession(model=model, conversation_id=conversation_id)
+
+
+@cli.command()
+@click.option("-m", "--model", default=None, help="Force a model instead of routing.")
+@click.option("--conversation", "conversation_id", default=None,
+              help="Continue an existing conversation by id.")
+@click.pass_context
+def chat(ctx: click.Context, model: str | None, conversation_id: str | None) -> None:
+    """Chat in this process, one line per turn; /help lists the commands.
+
+    Unlike ``oo ask`` this does not talk to the API server: the executor,
+    the conversation store, the onion memory and the skill registry run
+    here, and inference goes through the registry (the core daemon when
+    core.yaml enables it). Every refusal is printed to stderr by name.
+    """
+    cfg = _get_config(ctx)
+    factory = (ctx.obj or {}).get("chat_session") or _default_chat_session
+    try:
+        session = factory(model, conversation_id)
+    except Exception as exc:  # noqa: BLE001 - a session that cannot start is said
+        echo_error(f"the chat session could not start: {exc}", color=cfg.color)
+        sys.exit(2)
+    stdin = click.get_text_stream("stdin")
+    interactive = stdin.isatty()
+    click.echo("oo chat -- /help lists the commands, /quit ends the session", err=True)
+    try:
+        while True:
+            if interactive:
+                click.echo("> ", nl=False, err=True)
+            line = stdin.readline()
+            if not line:
+                break
+            streamed = ended = False
+            for event in session.handle(line):
+                if event.kind == "token":
+                    click.echo(event.text, nl=False)
+                    streamed = True
+                elif event.kind == "thinking":
+                    click.echo(event.text, nl=False, err=True)
+                elif event.kind == "refusal":
+                    if streamed:
+                        click.echo()
+                        streamed = False
+                    echo_error(event.text, color=cfg.color)
+                elif event.kind == "quit":
+                    ended = True
+                else:
+                    click.echo(event.text)
+            if streamed:
+                click.echo()
+            if ended:
+                break
+    except KeyboardInterrupt:
+        click.echo("", err=True)
+        echo_error("interrupted", color=cfg.color)
+        sys.exit(130)
+
+
+# =========================================================================
+# oo core (group)
 # =========================================================================
 
 @cli.group()
@@ -226,6 +303,10 @@ def core_status(config_path: str | None) -> None:
         echo_error(f"no core daemon at {config.base_url} (enabled: {config.enabled})")
         sys.exit(1)
 
+
+# =========================================================================
+# oo backup (group)
+# =========================================================================
 
 @cli.group()
 def backup() -> None:

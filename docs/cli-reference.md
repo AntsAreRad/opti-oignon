@@ -3,8 +3,10 @@
 ## Overview
 
 The `oo` command-line tool is a companion for interacting with a
-running Opti-Oignon backend from the terminal. It communicates via the
-HTTP API and never imports heavy backend dependencies.
+running Opti-Oignon backend from the terminal. Most commands communicate
+via the HTTP API and never import heavy backend dependencies. Two run in
+the calling process instead: `oo chat`, the interactive session, and
+`oo core`, the resident core daemon.
 
 Install: `pip install -e ".[all]"` registers the `oo` console script.
 
@@ -36,6 +38,49 @@ oo ask -f prompt.txt
 | `-m, --model MODEL` | Force a specific model |
 | `-f, --file PATH` | Read prompt from file |
 | `--pipe` | Read stdin as additional context |
+
+### oo chat
+
+An interactive session, one line per turn, run in this process: the
+executor, the conversation store, the onion memory and the skill registry
+are the local ones, and inference goes through the inference registry
+configured from `backends.yaml` -- the core daemon when `core.yaml`
+enables it, never a client of the session's own. It does not need the API
+server.
+
+```bash
+oo chat
+oo chat -m llama3
+oo chat --conversation <conversation-id>
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --model MODEL` | Force a specific model instead of routing |
+| `--conversation ID` | Continue an existing conversation |
+
+A line that does not start with `/` is a turn. A line that does is a
+command, and every command is a user action:
+
+| Command | Description |
+|---------|-------------|
+| `/open ID` | Find a persisted onion again and continue that conversation |
+| `/close` | Evict the whole Flesh through the gate, save, and end the conversation |
+| `/pin TEXT` | Pin a statement to the conversation's Core, as the user |
+| `/recall KEY` | Show the verbatim span behind a receipt; this marks the receipt resolved |
+| `/skill NAME ARGS` | Run `ARGS` as a turn with a published skill as the system suffix |
+| `/help` | List the commands |
+| `/quit` | End the session |
+
+The answer streams to stdout; every refusal goes to stderr with its
+reason. The onion commands are refused while `onion.yaml` has the onion
+switched off, and `/open` is refused when no persistence path is set or
+the conversation was never saved. `/close` never overrides the gate: a
+span it refuses stays verbatim in the Flesh and the refusal names the
+probes that failed. `/skill` takes `name` or `category/name`; a draft, an
+unknown name, or a name published in two categories is refused, and only
+a published skill -- human-approved, and named by the user on purpose --
+reaches the system prompt.
 
 ### oo models
 
@@ -139,6 +184,22 @@ Report options:
 | `--format {text,json}` | Output format (default: text) |
 | `--id ID` | Specific report ID |
 | `--last` | Use the most recent report |
+
+### oo core
+
+Serve the resident core daemon, or ask whether it answers. Both read
+`core.yaml`; see the architecture page on the core and the packs.
+
+```bash
+oo core serve                      # run the daemon in the foreground
+oo core status                     # exit 0 when it answers, 1 otherwise
+oo core serve --config path/to/core.yaml
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `serve` | Run the core daemon on the loopback |
+| `status` | Ask the configured daemon for its health |
 
 ### oo config
 

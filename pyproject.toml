@@ -355,6 +355,13 @@ fail_under = 0
 # and nothing else, the facade out of it) over the two importers and pins
 # what the surface newly needs: the model's tools reach no onion module.
 #
+# zp6 pinned the librarian's importers as exactly the executor and the
+# memory routes. The terminal chat session is a third user surface: its
+# /open, /close, /pin and /recall are the user's actions on the onion. zp7
+# in the same file keeps every property of zp6 over the three importers and
+# pins what the new surface needs: the routes and the session reach the
+# librarian inside a function, never at module scope.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -465,6 +472,7 @@ addopts = """
     --deselect=tests/test_core_client_contracts.py::test_rd2_an_absent_daemon_is_unhealthy_and_a_request_is_a_refusal_by_name
     --deselect=tests/test_convergence_four_contracts.py::test_cq10_the_health_monitor_probes_through_model_info_and_names_the_backend
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp5_the_onion_is_imported_by_the_executor_only_and_only_the_librarian
+    --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp6_the_executor_and_the_memory_routes_import_the_librarian_and_the_models_tools_reach_no_onion
     --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list
