@@ -145,6 +145,19 @@ package costs.
 
 ### Changed
 
+- [SECURITY] In Bulbe mode every Ollama request stays on the machine. Now
+  that `backends.yaml` or `OLLAMA_HOST` can point the backend anywhere, a
+  request whose endpoint is off the machine -- or whose endpoint cannot be
+  read -- is refused by name at every head before any client is asked, so
+  the backend fails its health check and is never resolved. Localhost, the
+  loopback addresses and the unspecified address count as this machine.
+  Only Daily mode lifts the gate; an unreadable mode is Bulbe. llama-server
+  carries no such gate yet, and the registry's docstring no longer claims
+  one.
+- `ollama.timeout` in `backends.yaml` is read: it bounds the connection to
+  Ollama and never a read, so a long generation is not cut off; a request's
+  own timeout still binds the whole request. A value that is not a positive
+  number leaves the connection unbounded and says so in the log.
 - The Ollama `host` in `backends.yaml` is where the requests go. It was
   written onto the backend and read by no request: every head asked a
   client that resolved `OLLAMA_HOST` or the library's default. Every head --

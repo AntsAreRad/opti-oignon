@@ -372,6 +372,10 @@ fail_under = 0
 # the launcher's probe is exempt by name; rf26 and rf27 in the same file
 # keep the properties over an empty ledger and pin the exemption.
 #
+# oh2 to oh5 routed Ollama to a host off the machine in an isolation window,
+# where the security mode reads as Bulbe. Bulbe now refuses that, so oh6 to
+# oh9 in the same file keep every assertion of the four in Daily mode.
+#
 # zp6 pinned the librarian's importers as exactly the executor and the
 # memory routes. The terminal chat session is a third user surface: its
 # /open, /close, /pin and /recall are the user's actions on the onion. zp7
@@ -497,6 +501,10 @@ addopts = """
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf23_the_entry_point_names_the_raw_debt_and_refuses_an_unowed_raw_site
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf24_the_raw_ledger_names_the_four_modules_that_still_post
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf25_the_entry_point_names_the_four_and_refuses_an_unowed_raw_site
+    --deselect=tests/test_ollama_host_contracts.py::test_oh2_a_configured_host_routes_every_head_through_one_client
+    --deselect=tests/test_ollama_host_contracts.py::test_oh3_the_environment_variable_wins_over_the_configured_host
+    --deselect=tests/test_ollama_host_contracts.py::test_oh4_one_client_per_host_and_timeout_built_once
+    --deselect=tests/test_ollama_host_contracts.py::test_oh5_the_endpoint_follows_the_host_and_the_file_reaches_the_backend
     --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list

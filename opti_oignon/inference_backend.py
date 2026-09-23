@@ -131,6 +131,40 @@ def _provenance_mode() -> str:
         return "bulbe"
 
 
+def _live_mode() -> str:
+    """The live security mode for a request leaving the process; Bulbe when it cannot be read."""
+    return _provenance_mode()
+
+
+def _is_on_this_machine(url: str) -> bool:
+    """True when ``url`` addresses this machine: localhost, a loopback or an unspecified address.
+
+    No name is resolved: a host name other than ``localhost`` is treated as
+    elsewhere, so the check itself never reaches the network. An
+    unspecified address (``0.0.0.0``, ``::``) cannot route off the machine
+    as a destination; it is what a server bound to every interface is
+    usually reached by from the same host.
+    """
+    from ipaddress import ip_address
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").strip()
+    if host == "localhost":
+        return True
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
+
+
+def _connect_only_timeout(seconds: float) -> Any:
+    """A transport timeout that bounds the connection and leaves reads unbounded."""
+    import httpx
+
+    return httpx.Timeout(None, connect=float(seconds))
+
+
 def _provenance_guard(gguf_path: Path) -> None:
     """Verify the model's pinned digest before its bytes reach llama.cpp.
 
@@ -664,12 +698,16 @@ class OllamaBackend(InferenceBackend):
     keeps working exactly as before.
     """
 
-    def __init__(self, host: str | None = None):
+    def __init__(self, host: str | None = None, connect_timeout: float | None = None):
         # The host every request goes to, from ``backends.yaml`` through
         # init_backends_from_config. ``OLLAMA_HOST`` wins when it is set, as
         # the client library documents; with neither, the library resolves
         # its own default, exactly as before this was read.
         self._host = host
+        # ``ollama.timeout`` of the same file: it bounds the connection and
+        # never a read, so a long generation is not cut off. A request's own
+        # timeout still binds the whole request.
+        self._connect_timeout = connect_timeout
         # One client per host and timeout, built on first use and kept: the
         # transport binding the benchmark and reasoning modules used to keep
         # for themselves, now held here for every caller.
@@ -682,12 +720,40 @@ class OllamaBackend(InferenceBackend):
             return None
         return self._host or None
 
+    def _bulbe_refusal(self) -> str | None:
+        """Why a request may not leave, or None. Only Daily lets it go off the machine."""
+        if _live_mode() == "daily":
+            return None
+        endpoint = self.endpoint()
+        if endpoint is None:
+            return (
+                "Bulbe mode: Ollama cannot say where its requests would go, "
+                "so none leaves"
+            )
+        if not _is_on_this_machine(endpoint):
+            return (
+                f"Bulbe mode: Ollama requests stay on this machine; refusing "
+                f"{endpoint} (set in backends.yaml or OLLAMA_HOST)"
+            )
+        return None
+
     def _transport(self, timeout: float | None = None) -> Any:
-        """The client every head asks: the module-level one when neither a host nor a timeout binds it."""
+        """The client every head asks: the module-level one when nothing binds it.
+
+        Bulbe mode is asked first: a request whose endpoint is off the
+        machine, or unknown, is refused by name before any client is asked
+        or built.
+        """
+        refusal = self._bulbe_refusal()
+        if refusal:
+            raise RuntimeError(refusal)
         host = self._route_host()
-        if host is None and timeout is None:
+        connect = None
+        if timeout is None and self._connect_timeout is not None:
+            connect = float(self._connect_timeout)
+        if host is None and timeout is None and connect is None:
             return _ollama_module
-        key = (host, timeout)
+        key = (host, timeout, connect)
         with self._clients_lock:
             client = self._clients.get(key)
             if client is None:
@@ -696,6 +762,8 @@ class OllamaBackend(InferenceBackend):
                     kwargs["host"] = host
                 if timeout is not None:
                     kwargs["timeout"] = timeout
+                elif connect is not None:
+                    kwargs["timeout"] = _connect_only_timeout(connect)
                 client = _ollama_module.Client(**kwargs)
                 self._clients[key] = client
             return client
@@ -2015,7 +2083,9 @@ class BackendRegistry:
         is not pinned to the fallback -- a later pull may make a backend
         recognise it). ``model_info`` may hit the network for Ollama or the
         filesystem for llama.cpp, so the cache removes that cost on the hot path.
-        In Bulbe an HTTP backend fails ``health_check`` and is never resolved.
+        In Bulbe an Ollama backend whose endpoint is off the machine, or
+        unknown, fails ``health_check`` and is never resolved; llama-server
+        carries no such gate yet.
         """
         cached_name = self._route_cache.get(model)
         if cached_name is not None:
@@ -2150,6 +2220,17 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
             # Absent host: the client resolves its own, as it did before the
             # file's host was read at all.
             ollama_backend._host = ollama_cfg.get("host") or None
+            timeout = ollama_cfg.get("timeout")
+            if timeout is None:
+                ollama_backend._connect_timeout = None
+            elif isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0:
+                ollama_backend._connect_timeout = float(timeout)
+            else:
+                ollama_backend._connect_timeout = None
+                logger.warning(
+                    "backends.yaml ollama.timeout %r is not a positive number of seconds: "
+                    "the connection is left unbounded", timeout,
+                )
 
     # Apply llama.cpp settings
     llama_cfg = cfg.get("llama_cpp", {})
