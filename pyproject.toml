@@ -307,11 +307,10 @@ fail_under = 0
 # else of the onion, and no other module imports any of it.
 #
 # nc1, nc2 and nc3 need the native core built: the Rust artefact the loader
-# finds in opti_oignon/native. The workflow carries no Rust toolchain yet, so
-# they are OWED there and run by name on the machine that builds it:
-#   scripts/build_oo_core.sh && python3 -m pytest tests/test_native_core_contracts.py
-# nc4 and nc5 always run: the reference stands without the artefact, and the
-# recipe is pinned. These three lines come out the day cargo is in the workflow.
+# finds in opti_oignon/native. They were deselected here while no workflow had
+# cargo; the native-core job now builds the crate from its lock file and runs
+# them, so they are no longer deselected. A machine that runs the full sweep
+# builds the artefact once first: bash scripts/build_oo_core.sh
 #
 # r27 and r28 pinned the benchmark runner's former transport: a client
 # library the module imported itself, one client per timeout kept in a table
@@ -468,9 +467,6 @@ addopts = """
     --deselect=tests/test_routes_benchmark_v2_contracts.py::test_v13_results_fill_the_gaps_and_prefer_the_stored_identity
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp2_nothing_on_the_chat_path_imports_the_harness
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp3_the_onion_modules_exist_and_nothing_imports_them_yet
-    --deselect=tests/test_native_core_contracts.py::test_nc1_the_native_module_loads_and_exposes_the_surface
-    --deselect=tests/test_native_core_contracts.py::test_nc2_the_four_hashes_are_byte_equal_to_the_reference
-    --deselect=tests/test_native_core_contracts.py::test_nc3_the_composer_assembles_the_same_prompt_with_and_without_the_native_module
     --deselect=tests/test_import_opens_nothing_contracts.py::test_fn1_the_import_opens_nothing_but_what_the_ledger_carries
     --deselect=tests/test_import_opens_nothing_contracts.py::test_fn6_the_one_kept_entry_is_the_one_that_cannot_move
     --deselect=tests/test_cache_schema_lazy_contracts.py::test_cl6_the_guard_ledger_no_longer_carries_either
