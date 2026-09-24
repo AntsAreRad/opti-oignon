@@ -7,6 +7,7 @@
 #   isolation     - the test windows, under both install layouts, plus
 #                   the seal, published-prose, summary-fidelity and
 #                   red-team guards
+#   native-core   - build the Rust native core from its lock file, run its contracts
 #   typecheck     - mypy on key modules (baseline gate)
 #   frontend      - svelte-check (TypeScript, baseline) + eslint
 #   install       - build the distribution, install it in a fresh venv, smoke
@@ -206,6 +207,35 @@ jobs:
             tests/test_bind_guard_mode_failsecure_contracts.py \
             tests/test_security_mode_yaml_failsecure_contracts.py \
             tests/test_published_prose_guard_contracts.py
+
+  # -------------------------------------------------------------------
+  # Native core -- build the Rust crate from its committed lock file and
+  # prove the native path against the Python reference. nc1-nc3 need the
+  # built artefact; pyproject.toml deselects them for machines without
+  # cargo, so this job runs the whole file by name with that list cleared.
+  # -------------------------------------------------------------------
+  native-core:
+    name: Native core (Rust build + contracts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Set up the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install test dependencies
+        run: pip install pytest pyyaml -c constraints.txt
+
+      - name: Build the native core from the pinned crate
+        run: bash scripts/build_oo_core.sh
+
+      - name: Native-core contracts (native path against the reference)
+        run: python -m pytest -q -o addopts="" tests/test_native_core_contracts.py
 
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
