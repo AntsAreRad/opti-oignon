@@ -100,7 +100,6 @@ LEDGER = {
     "test_model_provenance_contracts.py": "c6322f55667dc27828b6fef85e183e8896893c009658666deadaa262bb6c12c3",
     "test_note_update_store_contracts.py": "96120eb74ba29182a3fc6facb89a294b5d691befd7a2dd0f2250f20ba7e604e6",
     "test_notes_apply.py": "251d946f234944e1bbd650258ed47ebf486ae6f933ca7d6a30ca4caf9bf5ecc3",
-    "test_notes_send_half_contracts.py": "9d7d64109e70af093d8d7cd3ad7c92e8abac5c603f4780046d72413e060eda30",
     "test_pipeline_persistence.py": "8e3dcbea2f716195f6a9e550ce683337a0375dbf0e4ac99ff7778ca9542f2c30",
     "test_plugin_allowlist_contracts.py": "d5b5bb21b9b197e368db89f269959b99b88802cc2a14569b916563d4e8a14554",
     "test_plugin_discovery_paths_contracts.py": "f6f0dd7a2535aade4105d868e649105f09be3c63c81cb50d939ad5d3f8ebf293",

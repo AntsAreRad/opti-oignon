@@ -21,56 +21,43 @@ module-level ``_sync_publish_note`` (the same monkeypatch the receive suites
 use to stub it), so the producer's own veilid availability is irrelevant -- we
 assert only that the WRITE seam invoked it, and with which coordinates.
 
+The store loads through the shared isolation window, where the sync package
+is proven unreachable: a write made before the spy is installed takes the
+hook's documented no-op, instead of journalling into the real change feed
+through a real sync package that an earlier suite left in the module cache.
+
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sqlite3
 import sys
 import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 def _load():
-    keys = ("opti_oignon", "opti_oignon.notes", "opti_oignon.db_utils",
-            "opti_oignon.user_isolation", "opti_oignon.notes.notes_store")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    notes_pkg = types.ModuleType("opti_oignon.notes")
-    notes_pkg.__path__ = []
-    sys.modules["opti_oignon.notes"] = notes_pkg
-
     db = types.ModuleType("opti_oignon.db_utils")
     db.safe_connect = lambda path, **kw: sqlite3.connect(
         path, check_same_thread=kw.get("check_same_thread", False))
-    sys.modules["opti_oignon.db_utils"] = db
 
     ui = types.ModuleType("opti_oignon.user_isolation")
     ui.DEFAULT_LOCAL_USER = "local"
     ui.effective_user_id = lambda user_id, single_user_mode=True: (
         "local" if (single_user_mode or user_id is None) else user_id)
-    sys.modules["opti_oignon.user_isolation"] = ui
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.notes.notes_store", _OO / "notes" / "notes_store.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.notes.notes_store"] = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-    return mod, restore
+    loaded, restore = isolate(
+        targets={"opti_oignon.notes.notes_store": source("notes", "notes_store.py")},
+        # The publish hook's first import: unreachable, so nothing is journalled.
+        blocked=("opti_oignon.veilid.guard",),
+        seeded={"opti_oignon.db_utils": db, "opti_oignon.user_isolation": ui},
+        packages=("opti_oignon.notes",),
+    )
+    return loaded["opti_oignon.notes.notes_store"], restore
 
 
 def _spy(mod):

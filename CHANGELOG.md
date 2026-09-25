@@ -453,6 +453,16 @@ package costs.
 
 ### Fixed
 
+- The notes send-half suite let the store's real sync publish hook run in
+  a full sweep: its creates happen before the spy is installed, and once
+  the note-update suites before it had left the real sync package in the
+  module cache, the hook resolved the master key, the device signing key,
+  the change feed and the peer store, and journalled a note record, signed
+  with the device key where one exists.
+  The data firewall has kept those paths off the real places since it
+  landed; the suite now also loads through the shared isolation window,
+  with the sync package proven unreachable, so the hook takes the no-op it
+  documents for a flat-loaded store. One more seal debt is paid.
 - The two chat routes suites cleared the routes module's conditional
   imports so that "their absence selects the inert branches", and behind
   their stand-in package those imports resolved by name anyway: the chat
