@@ -20,7 +20,9 @@ checkpoint_before_apply = True
 _HERE = Path(__file__).resolve().parent
 LAWS = ("fixture", "v0_1")
 FOUNDERS = ("fixture", "v1")
-TABLES = ("sine_q15_v1",)
+TABLES = ("phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1")
+PHON_TABLES = ("phon_v1",)
+TABOO_TABLES = ("taboo_fixture_v1", "taboo_v1")
 
 
 def _read(path):
@@ -56,10 +58,15 @@ def founders(name):
     return wire.parse(founders_bytes(name), lenient=True)
 
 
-def table(name):
+def table_bytes(name):
+    """The raw bytes of table file ``name``; ``KeyError`` for a table this engine does not carry."""
     if name not in TABLES:
         raise KeyError(name)
-    return _read(_HERE.joinpath("tables", f"{name}.json"))
+    return _HERE.joinpath("tables", f"{name}.json").read_bytes()
+
+
+def table(name):
+    return wire.parse(table_bytes(name), lenient=True)
 
 
 def sine():

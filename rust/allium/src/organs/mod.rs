@@ -9,3 +9,4 @@
 
 pub mod compile;
 pub mod genome;
+pub mod phon;

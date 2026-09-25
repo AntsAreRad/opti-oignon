@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _isolation import isolate, source  # noqa: E402
 
 REFERENCE = ("wire", "fx", "rng", "lawfiles")
-ORGANS = ("genome", "compile", "bounds")
+ORGANS = ("genome", "compile", "bounds", "phon")
 PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref", "opti_oignon.allium.ref.organs")
 
 

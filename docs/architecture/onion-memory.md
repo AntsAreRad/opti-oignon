@@ -169,3 +169,12 @@ hostile input, accepted inside the law's bounds or refused by name. The
 laws and founder pools under `opti_oignon/allium/laws/` are written by
 `scripts/allium_author_genome.py`; `scripts/allium_greenhouse.py` reports on
 a cohort of founders without simulating a day.
+
+The second organ is the phonology: eight operations read a being's
+language block from its genome, decode the sounds it can make, judge
+whether forms are sayable, coin forms for concepts, give its first sound,
+derive its 2048-form word list and check forms against a taboo list kept
+as SHA-256 digests only. `scripts/allium_author_phon.py` writes the
+phonology table and the fixture's witness digests;
+`scripts/allium_taboo_digest.py` turns the owner's word list, read from
+outside the repository, into the full law's digests.

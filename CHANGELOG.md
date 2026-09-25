@@ -11,6 +11,28 @@ package costs.
 
 ### Added
 
+- The componion's phonology, in both engines. A being's language starts
+  from sixty-three bytes of its genome: which of twenty-seven sounds it can
+  make (with floors every language keeps: the corner vowels, a stop, a
+  nasal, six consonants), how it builds syllables, how long its words run.
+  Eight operations: the table as the engine read it, the language block of
+  a genome (or of a seed alone), the phonology a block decodes to, whether
+  forms are sayable and where their syllables split, coinages for concepts
+  with a sound-symbolic bias (small and sharp things lean to i, e, s and
+  voiceless stops; large and round ones to o, u, m and l), the being's first
+  sound, a list of 2048 sayable six-letter forms per block with six of them
+  carrying the first 66 bits of any digest, and a taboo check. The taboo
+  list holds SHA-256 digests only, matched on whole forms and on every
+  substring of three to eight letters; a rejected candidate is reported by
+  its digest, never spelled, and the work charged does not depend on what
+  the list holds. The full law's list is empty until its owner supplies
+  one through `scripts/allium_taboo_digest.py`, which reads the words from
+  outside the repository, keeps only their digests and refuses a list that
+  would leave a block without its short word list. The fixture law carries
+  three witness digests the contracts derive from the generator itself, so
+  no word is written in the tree. Both laws pin their phonology and taboo
+  tables by digest.
+
 - The componion's genome, in both engines. A genome is diploid: pairs of
   chromosomes of fixed 16-byte records whose order is itself data, since a
   gene's promoter is the run of regulatory records just before it. Sixteen

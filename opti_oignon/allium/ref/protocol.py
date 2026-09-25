@@ -20,6 +20,18 @@ Operations of the chassis:
 * ``genome_corner``  -- a genome at a corner of the law's box.
 * ``genome_decode``  -- a genome checked against its law: record counts.
 * ``genome_compile`` -- a genome's compiled tables and their digest.
+* ``phon_table``       -- the phonology table as the engine parsed it, with a
+  byte classifier, for an exhaustive comparison of the two engines.
+* ``phon_lex``         -- a being's language block, from its genome or,
+  as a fallback, from its seed alone.
+* ``phon_inventory``   -- the phonology each block decodes to.
+* ``phon_licit``       -- whether forms are sayable, and their syllables.
+* ``phon_invent``      -- coinages for concepts, rejected candidates shown
+  only by their digest.
+* ``phon_first_sound`` -- a being's first sound.
+* ``phon_sas``         -- the 2048-form word list of a block, and six words
+  per digest (or digests back from six words).
+* ``phon_taboo``       -- whether strings touch the taboo list.
 
 The genome operations read the embedded law and pool files, validated once
 per process and remembered by the SHA-256 of the file bytes; ``decode`` and
@@ -31,7 +43,7 @@ import hashlib
 from .. import fx, lawfiles, rng, wire
 from ..wire import Refused
 from .organs import compile as organ_compile
-from .organs import genome
+from .organs import genome, phon
 
 checkpoint_before_apply = True
 
@@ -47,7 +59,8 @@ LIMITS = {
     "steps": fx.STEPS_MAX,
 }
 OPS = ("bulk", "echo", "engine", "fact_id", "fx", "genome_compile", "genome_corner", "genome_decode",
-       "genome_found", "law", "rng")
+       "genome_found", "law", "phon_first_sound", "phon_invent", "phon_inventory", "phon_lex", "phon_licit",
+       "phon_sas", "phon_table", "phon_taboo", "rng")
 RNG_KINDS = ("below", "key", "noise", "stream", "unit")
 _HEX = "0123456789abcdef"
 
@@ -75,23 +88,35 @@ def _fields(request, required, optional=()):
             raise Refused("bad_request", "fields")
 
 
+# The parsed value and canonical digest of each embedded file, by the SHA-256 of its bytes.
+_FILES = {}
+
+
+def _file(data):
+    key = hashlib.sha256(data).hexdigest()
+    if key not in _FILES:
+        value = wire.parse(data, lenient=True)
+        _FILES[key] = (value, lawfiles.digest(value))
+    return _FILES[key]
+
+
 def _engine():
     laws = {}
     for name in lawfiles.LAWS:
-        law = lawfiles.law(name)
+        law, digest = _file(lawfiles.law_bytes(name))
         laws[name] = {
-            "digest": lawfiles.digest(law),
+            "digest": digest,
             "provisional": law["provisional"],
             "version": law["version"],
         }
     tables = {}
     for name in lawfiles.TABLES:
-        tables[name] = lawfiles.digest(lawfiles.table(name))
+        tables[name] = _file(lawfiles.table_bytes(name))[1]
     founders = {}
     for name in lawfiles.FOUNDERS:
-        founders[name] = lawfiles.digest(lawfiles.founders(name))
+        founders[name] = _file(lawfiles.founders_bytes(name))[1]
     return {
-        "domains": list(genome.DOMAINS),
+        "domains": sorted(genome.DOMAINS + phon.DOMAINS),
         "engine": ENGINE_VERSION,
         "founders": founders,
         "genome_schema": genome.SCHEMA,
@@ -380,6 +405,312 @@ def _op_genome_compile(request):
     return {"sha256": organ_compile.tables_digest(tables), "tables": tables, "work": work}
 
 
+# ---------------------------------------------------------------------------
+# Phonology
+# ---------------------------------------------------------------------------
+
+class _Lang:
+    __slots__ = ("table", "taboo_value", "taboo", "phon_digest", "taboo_digest")
+
+
+_LANGS = {}
+_PIN_KEYS = ["name", "sha256"]
+
+
+def _pin(lang, key, names, detail):
+    pin = lang.get(key)
+    if not isinstance(pin, dict) or sorted(pin) != _PIN_KEYS or pin["name"] not in names:
+        raise Refused("unknown_law", detail)
+    value, digest = _file(lawfiles.table_bytes(pin["name"]))
+    if pin["sha256"] != digest:
+        raise Refused("unknown_law", detail)
+    return pin["name"], value, digest
+
+
+def _phon_law(request):
+    """The phonology and taboo tables the requested law pins, checked; refused by name when unsound."""
+    name = request["law"]
+    if not isinstance(name, str) or name not in lawfiles.LAWS:
+        raise Refused("unknown_law", "law")
+    law_data = lawfiles.law_bytes(name)
+    law, _digest = _file(law_data)
+    lang = law.get("lang")
+    if not isinstance(lang, dict) or sorted(lang) != ["phon", "taboo"]:
+        raise Refused("unknown_law", "phon digest")
+    phon_name, phon_value, phon_digest = _pin(lang, "phon", lawfiles.PHON_TABLES, "phon digest")
+    key = hashlib.sha256(law_data + lawfiles.table_bytes(phon_name)).hexdigest()
+    if phon.validate_table(phon_value):
+        raise Refused("unknown_law", "phon table")
+    taboo_name, taboo_value, taboo_digest = _pin(lang, "taboo", lawfiles.TABOO_TABLES, "taboo digest")
+    key = hashlib.sha256(key.encode("ascii") + lawfiles.table_bytes(taboo_name)).hexdigest()
+    if key not in _LANGS:
+        table = phon.Table(phon_value)
+        if phon.validate_taboo(taboo_value, table):
+            _LANGS[key] = None
+        else:
+            ctx = _Lang()
+            ctx.table = table
+            ctx.taboo_value = taboo_value
+            ctx.taboo = [tuple(entry) for entry in taboo_value["entries"]]
+            ctx.phon_digest = phon_digest
+            ctx.taboo_digest = taboo_digest
+            _LANGS[key] = ctx
+    ctx = _LANGS[key]
+    if ctx is None:
+        raise Refused("unknown_law", "taboo table")
+    return ctx
+
+
+def _lex(value, table):
+    if not isinstance(value, str) or len(value) != 2 * phon.LEX_BYTES or not genome.is_genome_hex(value):
+        raise Refused("bad_request", "lex")
+    block = bytes.fromhex(value)
+    if not phon.lex_ok(block, table):
+        raise Refused("bad_request", "lex")
+    return block
+
+
+def _seed(value):
+    if not _is_hex(value, 64):
+        raise Refused("bad_request", "seed")
+    return bytes.fromhex(value)
+
+
+def _inventory(value):
+    if not _is_int(value) or not 0 <= value < (1 << phon.WEIGHTS) or not value & 0x1F or not value >> 5:
+        raise Refused("bad_request", "inventory")
+    return value
+
+
+def _taboo_extra(request, table):
+    if "taboo_extra" not in request:
+        return []
+    extra = request["taboo_extra"]
+    if not isinstance(extra, list):
+        raise Refused("bad_request", "taboo")
+    if len(extra) > table.taboo_extra_max:
+        raise Refused("limit", "taboo")
+    for entry in extra:
+        if not phon.taboo_pair(entry):
+            raise Refused("bad_request", "taboo")
+    return [tuple(entry) for entry in extra]
+
+
+def _list(request, key, detail=None):
+    value = request[key]
+    if not isinstance(value, list):
+        raise Refused("bad_request", detail or key)
+    if len(value) > LIMITS["items"]:
+        raise Refused("limit", "items")
+    return value
+
+
+def _forms(value, name, table):
+    if not isinstance(value, list):
+        raise Refused("bad_request", name)
+    if len(value) > table.anchored_max:
+        raise Refused("limit", name)
+    for form in value:
+        if not isinstance(form, str) or phon.FORM.fullmatch(form) is None:
+            raise Refused("bad_request", name)
+    return value
+
+
+def _op_phon_table(request):
+    _fields(request, ("law", "op", "v"))
+    ctx = _phon_law(request)
+    table = ctx.table
+    value = table.value
+    classify = [table.index.get(chr(byte), -1) for byte in range(256)]
+    lengths = sorted({entry[0]: True for entry in ctx.taboo})
+    return {
+        "alphabet": value["alphabet"],
+        "anchored_max": table.anchored_max,
+        "anchored_total_max": table.anchored_total_max,
+        "bias": [list(row) for row in table.bias],
+        "classify": wire.pack_bulk("i8", classify),
+        "features": [list(row) for row in table.features],
+        "first_sound_exclude": list(table.first_exclude),
+        "floor_consonants": value["floor_consonants"],
+        "floor_vowels": list(value["floor_vowels"]),
+        "fold": [list(entry) for entry in value["fold"]],
+        "form_max": value["form_max"],
+        "invent_tries": value["invent_tries"],
+        "lex_box": [list(pair) for pair in table.lex_box],
+        "phon": ctx.phon_digest,
+        "potential_min": table.potential_min,
+        "sas": dict(value["sas"]),
+        "shown_max": value["shown_max"],
+        "taboo": {"entries": len(ctx.taboo), "lengths": lengths, "sha256": ctx.taboo_digest},
+        "taboo_extra_max": table.taboo_extra_max,
+        "taboo_max": table.taboo_max,
+        "taboo_window": list(value["taboo_window"]),
+        "templates": [list(t) for t in value["templates"]],
+        "work": phon.WEIGHTS + 256,
+    }
+
+
+def _op_phon_lex(request):
+    _fields(request, ("law", "op", "v"), ("genome", "seed"))
+    if ("genome" in request) == ("seed" in request):
+        raise Refused("bad_request", "fields")
+    ctx = _phon_law(request)
+    if "genome" in request:
+        law, lawview, digest = _genome_law(request)
+        data = _genome_bytes(request, lawview)
+        tables, work = organ_compile.compile_genome(data, law, lawview, digest)
+        block = phon.lex_from_tables(tables)
+        if not phon.lex_ok(block, ctx.table):
+            raise Refused("engine_panic", "lex block")
+        return {"lex": block.hex(), "source": "genome", "work": work + phon.LEX_BYTES}
+    block, draws = phon.fallback_lex(_seed(request["seed"]), ctx.table)
+    return {"lex": block.hex(), "source": "seed", "work": draws}
+
+
+def _op_phon_inventory(request):
+    _fields(request, ("law", "lex", "op", "v"))
+    ctx = _phon_law(request)
+    blocks = [_lex(value, ctx.table) for value in _list(request, "lex")]
+    out = [phon.phonology_value(phon.decode(block, ctx.table)) for block in blocks]
+    return {"out": out, "work": phon.LEX_BYTES * len(blocks)}
+
+
+def _op_phon_licit(request):
+    _fields(request, ("forms", "law", "lex", "op", "v"), ("inventory",))
+    ctx = _phon_law(request)
+    block = _lex(request["lex"], ctx.table)
+    inventory = _inventory(request["inventory"]) if "inventory" in request else None
+    forms = _list(request, "forms")
+    for form in forms:
+        if not isinstance(form, str):
+            raise Refused("bad_request", "forms")
+    ph = phon.decode(block, ctx.table, inventory)
+    out = []
+    work = phon.LEX_BYTES
+    for form in forms:
+        reason, syllables, splits = phon.licit(form, ph)
+        out.append({"reason": reason} if reason else {"splits": splits, "syllables": syllables})
+        work += len(form) + 1
+    return {"out": out, "work": work}
+
+
+_CASE_KEYS = ("anchored", "coin", "concept", "epoch", "lex", "others", "seed", "signs", "syllables")
+
+
+def _op_phon_invent(request):
+    _fields(request, ("cases", "law", "op", "v"), ("budget", "taboo_extra"))
+    ctx = _phon_law(request)
+    table = ctx.table
+    budget = request.get("budget")
+    if budget is not None and (not _is_int(budget) or budget < 0):
+        raise Refused("bad_request", "budget")
+    extra = _taboo_extra(request, table)
+    cases = _list(request, "cases")
+    checked = []
+    lists = 0
+    for case in cases:
+        if not isinstance(case, dict) or any(k not in case for k in _CASE_KEYS) \
+                or any(k not in _CASE_KEYS and k != "inventory" for k in case):
+            raise Refused("bad_request", "case fields")
+        block = _lex(case["lex"], table)
+        seed = _seed(case["seed"])
+        for key, high in (("concept", wire.MAX_INT), ("coin", wire.MAX_INT)):
+            if not _is_int(case[key]) or not 0 <= case[key] <= high:
+                raise Refused("bad_request", key)
+        signs = case["signs"]
+        if not isinstance(signs, list) or len(signs) != 4 or any(not _is_int(s) or s not in (-1, 0, 1) for s in signs):
+            raise Refused("bad_request", "signs")
+        if not _is_int(case["epoch"]) or not 0 <= case["epoch"] <= (1 << 32) - 1:
+            raise Refused("bad_request", "epoch")
+        if not _is_int(case["syllables"]) or not 0 <= case["syllables"] <= 3:
+            raise Refused("bad_request", "syllables")
+        inventory = _inventory(case["inventory"]) if "inventory" in case else None
+        anchored = _forms(case["anchored"], "anchored", table)
+        others = _forms(case["others"], "others", table)
+        lists += len(anchored) + len(others)
+        if lists > table.anchored_total_max:
+            raise Refused("limit", "lists")
+        checked.append((block, seed, case, inventory, anchored, others))
+    taboo = phon.taboo_set(ctx.taboo, extra)
+    out = []
+    work = 0
+    for block, seed, case, inventory, anchored, others in checked:
+        ph = phon.decode(block, table, inventory)
+        result, cost = phon.invent_case(ph, seed, case["concept"], case["coin"], case["signs"], case["epoch"],
+                                        case["syllables"], anchored, others, taboo)
+        work += cost
+        if budget is not None and work > budget:
+            raise Refused("budget", "phon invent")
+        out.append(result)
+    return {"out": out, "work": work}
+
+
+def _op_phon_first_sound(request):
+    _fields(request, ("cases", "law", "op", "v"))
+    ctx = _phon_law(request)
+    checked = []
+    for case in _list(request, "cases"):
+        if not isinstance(case, dict) or sorted(case) != ["lex", "seed"]:
+            raise Refused("bad_request", "case fields")
+        checked.append((_lex(case["lex"], ctx.table), _seed(case["seed"])))
+    out = []
+    work = 0
+    for block, seed in checked:
+        p, draws = phon.first_sound(seed, phon.decode(block, ctx.table))
+        out.append(p)
+        work += phon.LEX_BYTES + draws
+    return {"out": out, "symbols": "".join(phon.ALPHABET[p] for p in out), "work": work}
+
+
+def _op_phon_sas(request):
+    _fields(request, ("law", "lex", "op", "v"), ("digests", "phrases", "taboo_extra"))
+    ctx = _phon_law(request)
+    block = _lex(request["lex"], ctx.table)
+    extra = _taboo_extra(request, ctx.table)
+    digests = None
+    if "digests" in request:
+        digests = _list(request, "digests")
+        for digest in digests:
+            if not _is_hex(digest, 64):
+                raise Refused("bad_request", "digests")
+    phrases = None
+    if "phrases" in request:
+        phrases = _list(request, "phrases")
+        for phrase in phrases:
+            if not isinstance(phrase, list) or len(phrase) != 6 \
+                    or any(not isinstance(w, str) or phon.FORM.fullmatch(w) is None for w in phrase):
+                raise Refused("bad_request", "phrases")
+    words, candidates, work = phon.sas_list(phon.decode(block, ctx.table), phon.taboo_set(ctx.taboo, extra))
+    out = {"candidates": candidates, "list": words, "sha256": hashlib.sha256(wire.emit(words)).hexdigest()}
+    if digests is not None:
+        indices = [phon.sas_indices(bytes.fromhex(digest))[0] for digest in digests]
+        out["indices"] = indices
+        out["words"] = [[words[i] for i in row] for row in indices]
+        work += 6 * len(digests)
+    if phrases is not None:
+        positions = {word: i for i, word in enumerate(words)}
+        out["parsed"] = [phon.sas_parse(phrase, positions) for phrase in phrases]
+        work += 6 * len(phrases)
+    out["work"] = work
+    return out
+
+
+def _op_phon_taboo(request):
+    _fields(request, ("law", "op", "strings", "v"), ("taboo_extra",))
+    ctx = _phon_law(request)
+    extra = _taboo_extra(request, ctx.table)
+    strings = _list(request, "strings")
+    for text in strings:
+        if not isinstance(text, str) or phon.SHOWN.fullmatch(text) is None:
+            raise Refused("bad_request", "strings")
+    taboo = phon.taboo_set(ctx.taboo, extra)
+    out = [phon.taboo_hit(text, taboo) for text in strings]
+    work = 0
+    for text in strings:
+        work += phon.taboo_work(len(text))
+    return {"out": out, "work": work}
+
+
 _HANDLERS = {
     "bulk": _op_bulk,
     "echo": _op_echo,
@@ -391,6 +722,14 @@ _HANDLERS = {
     "genome_decode": _op_genome_decode,
     "genome_found": _op_genome_found,
     "law": _op_law,
+    "phon_first_sound": _op_phon_first_sound,
+    "phon_invent": _op_phon_invent,
+    "phon_inventory": _op_phon_inventory,
+    "phon_lex": _op_phon_lex,
+    "phon_licit": _op_phon_licit,
+    "phon_sas": _op_phon_sas,
+    "phon_table": _op_phon_table,
+    "phon_taboo": _op_phon_taboo,
     "rng": _op_rng,
 }
 

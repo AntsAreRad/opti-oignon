@@ -76,6 +76,13 @@ class Stream:
     def __init__(self, seed, domain, index=0):
         self.state = int.from_bytes(key(seed, domain, (index,))[:8], "big")
 
+    @classmethod
+    def from_key(cls, k):
+        """The stream seeded by a key already derived: ``Stream(s, d, i) == from_key(key(s, d, (i,)))``."""
+        stream = cls.__new__(cls)
+        stream.state = int.from_bytes(bytes(k)[:8], "big")
+        return stream
+
     def next_u64(self):
         self.state = (self.state + GOLDEN) & M64
         return mix(self.state)

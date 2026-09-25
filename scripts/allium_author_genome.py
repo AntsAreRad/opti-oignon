@@ -11,6 +11,10 @@ Writes, under ``opti_oignon/allium/laws/``:
 * ``founders_fixture.json`` and ``founders_v1.json`` -- the founder allele
   pools each law pins by digest.
 
+Each law also pins, by name and digest, the phonology table and the taboo
+table it speaks with; ``scripts/allium_author_phon.py`` writes those tables
+and runs first.
+
 The engines read the written files, never this script. The script is the
 authoring tool: a contract runs it in-process and checks that it reproduces
 all four files byte for byte, so a hand edit to a law or a pool without the
@@ -578,11 +582,17 @@ def _sine_digest():
     return _digest(wire.parse(text, lenient=True))
 
 
-def law(name, loci, pairs, founders_name, founders_value):
+def _table_digest(name):
+    return _digest(wire.parse(TABLES_DIR.joinpath(f"{name}.json").read_bytes(), lenient=True))
+
+
+def law(name, loci, pairs, founders_name, founders_value, taboo_name):
     value = {
         "decays": DECAYS,
         "founders": {"name": founders_name, "sha256": _digest(founders_value)},
         "genome": genome_section(loci, pairs),
+        "lang": {"phon": {"name": "phon_v1", "sha256": _table_digest("phon_v1")},
+                 "taboo": {"name": taboo_name, "sha256": _table_digest(taboo_name)}},
         "name": name,
         "provisional": True,
         "quiescent_in_dormancy": [],
@@ -627,8 +637,8 @@ def author():
     fixture_pool = pool("fixture", FIXTURE_LOCI, lambda locus, entry: FIXTURE_POOL[locus.ident])
     v1_pool = pool("v1", V0_1_LOCI, _v1_alleles)
     laws = {
-        "fixture.json": law("fixture", FIXTURE_LOCI, 1, "fixture", fixture_pool),
-        "v0_1.json": law("v0_1", V0_1_LOCI, 8, "v1", v1_pool),
+        "fixture.json": law("fixture", FIXTURE_LOCI, 1, "fixture", fixture_pool, "taboo_fixture_v1"),
+        "v0_1.json": law("v0_1", V0_1_LOCI, 8, "v1", v1_pool, "taboo_v1"),
     }
     files = {name: render(value) + "\n" for name, value in laws.items()}
     files["founders_fixture.json"] = render(fixture_pool) + "\n"

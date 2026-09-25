@@ -55,7 +55,12 @@ pub struct Stream {
 
 impl Stream {
     pub fn new(seed: &[u8; 32], domain: &str, index: u64) -> Stream {
-        Stream { state: first_word(&key(seed, domain, &[index])) }
+        Stream::from_key(&key(seed, domain, &[index]))
+    }
+
+    /// The stream seeded by a key already derived: `new(s, d, i)` is `from_key(&key(s, d, &[i]))`.
+    pub fn from_key(k: &[u8; 32]) -> Stream {
+        Stream { state: first_word(k) }
     }
 
     pub fn next_u64(&mut self) -> u64 {

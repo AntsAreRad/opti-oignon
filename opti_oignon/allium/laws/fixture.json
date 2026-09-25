@@ -605,6 +605,10 @@
     "mm_intermediate_max": {"ceiling": "i64", "max_raw": 34359738368, "premise": "c in [0, CMAX]", "proof": "CMAX*65536 = 524288*65536 = 34359738368"},
     "promoter_term_max": {"ceiling": "i32", "max_raw": 524288, "premise": "act in [0, ONE]", "proof": "W*16 = 32768*16 = 524288"}
   },
+  "lang": {
+    "phon": {"name": "phon_v1", "sha256": "f37615023470f74cbce378b38e0f8379deb58c3ff176a45e9a86d8e7321cf200"},
+    "taboo": {"name": "taboo_fixture_v1", "sha256": "89e92d722f268a0665bf640ea94b01ae0264e9b581398dc55e779794bc9f3a31"}
+  },
   "name": "fixture",
   "provisional": true,
   "quiescent_in_dormancy": [],

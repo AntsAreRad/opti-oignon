@@ -19,10 +19,19 @@ pub const FOUNDERS: [(&str, &str); 2] = [
     ("v1", include_str!("../../../opti_oignon/allium/laws/founders_v1.json")),
 ];
 
-pub const TABLES: [(&str, &str); 1] = [(
-    "sine_q15_v1",
-    include_str!("../../../opti_oignon/allium/tables/sine_q15_v1.json"),
-)];
+/// Every table the engine carries, in the order the reference lists them.
+pub const TABLES: [(&str, &str); 4] = [
+    ("phon_v1", include_str!("../../../opti_oignon/allium/tables/phon_v1.json")),
+    ("sine_q15_v1", include_str!("../../../opti_oignon/allium/tables/sine_q15_v1.json")),
+    ("taboo_fixture_v1", include_str!("../../../opti_oignon/allium/tables/taboo_fixture_v1.json")),
+    ("taboo_v1", include_str!("../../../opti_oignon/allium/tables/taboo_v1.json")),
+];
+
+/// The tables a law's `lang.phon` pin may name.
+pub const PHON_TABLES: [&str; 1] = ["phon_v1"];
+
+/// The tables a law's `lang.taboo` pin may name.
+pub const TABOO_TABLES: [&str; 2] = ["taboo_fixture_v1", "taboo_v1"];
 
 pub fn parse_file(text: &str) -> Result<Value, Refused> {
     ocj::parse(text.as_bytes(), true)

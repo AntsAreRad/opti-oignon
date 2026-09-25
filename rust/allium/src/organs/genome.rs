@@ -1332,6 +1332,11 @@ impl CountingStream {
         CountingStream { stream: rng::Stream::new(seed, domain, index), draws: 0 }
     }
 
+    /// The counting stream seeded by a key already derived, its counter at zero.
+    pub fn from_key(k: &[u8; 32]) -> CountingStream {
+        CountingStream { stream: rng::Stream::from_key(k), draws: 0 }
+    }
+
     pub fn next_u64(&mut self) -> Option<u64> {
         self.draws = self.draws.checked_add(1)?;
         Some(self.stream.next_u64())

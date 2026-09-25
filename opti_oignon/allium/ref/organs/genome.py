@@ -808,6 +808,12 @@ class CountingStream(rng.Stream):
         super().__init__(seed, domain, index)
         self.draws = 0
 
+    @classmethod
+    def from_key(cls, k):
+        stream = super().from_key(k)
+        stream.draws = 0
+        return stream
+
     def next_u64(self):
         self.draws += 1
         return super().next_u64()
