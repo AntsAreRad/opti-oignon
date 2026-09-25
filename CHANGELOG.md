@@ -11,6 +11,18 @@ package costs.
 
 ### Added
 
+- [SECURITY] The sync gate shows what it lets in. The live approval of a
+  received skill now leads with the name it lands under and the SHA-256 of
+  its text -- the prompt cuts every value to 60 characters, so they come
+  first -- and the pending list carries both, still never a body. The text
+  itself is read on demand, one record at a time, through
+  `GET /api/sync/deferred/review`: exactly as it would land, from an
+  envelope that still decodes against its content hash, and refused by name
+  for anything else; the sync panel's "Show text" loads it before you
+  approve. The digest shown is the one `/adopt` asks for once the skill has
+  landed. The skills API says, for every published skill, whether it was
+  written here, received and adopted, or received and never adopted, and
+  the skills panel marks the last.
 - `scripts/drift_ab.py`, the host command for drift with the onion against
   drift without it: one scripted conversation whose facts change on known
   turns, two arms that differ only by the onion's block (same model, same

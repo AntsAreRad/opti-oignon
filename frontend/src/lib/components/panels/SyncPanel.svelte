@@ -55,6 +55,7 @@
 		listDeferredRecords,
 		approveDeferredRecord,
 		refuseDeferredRecord,
+		reviewDeferredRecord,
 		shortRoutingKey,
 		type SyncStatus,
 		type SyncPeer,
@@ -97,6 +98,10 @@
 	let deferredError: string | null = null;
 	let republishing = false;
 	let busyDeferred: string | null = null;
+	// One held record's text, loaded on demand so the human reads what they are
+	// about to let in; the list itself never carries a record body.
+	let reviewedText: Record<string, string> = {};
+	let reviewingDeferred: string | null = null;
 
 	$: bulbeDisabled = status?.bulbe_disabled ?? false;
 	$: veilidAvailable = status?.veilid_available ?? false;
@@ -175,6 +180,25 @@
 			toastError(e instanceof Error ? e.message : 'Failed to refuse record');
 		} finally {
 			busyDeferred = null;
+		}
+	}
+
+	async function toggleReview(d: DeferredRecord) {
+		const key = deferredKey(d);
+		if (key in reviewedText) {
+			const rest = { ...reviewedText };
+			delete rest[key];
+			reviewedText = rest;
+			return;
+		}
+		reviewingDeferred = key;
+		try {
+			const review = await reviewDeferredRecord(d.kind, d.record_id);
+			reviewedText = { ...reviewedText, [key]: review.text };
+		} catch (e) {
+			toastError(e instanceof Error ? e.message : 'Failed to read record');
+		} finally {
+			reviewingDeferred = null;
 		}
 	}
 
@@ -538,7 +562,13 @@
 						<div class="pending-main">
 							<Icon name="file-lock-2" />
 							<div class="pending-meta">
-								<span class="peer-name">{d.kind}: {d.record_id}</span>
+								<span class="peer-name">{d.kind}: {d.skill ?? d.record_id}</span>
+								{#if d.digest}
+									<span class="peer-sub">
+										<Icon name="fingerprint" size="sm" />
+										text sha256 {d.digest.slice(0, 16)}
+									</span>
+								{/if}
 								<span class="peer-sub">
 									<Icon name="smartphone" size="sm" />
 									from {d.origin_device}
@@ -554,6 +584,16 @@
 							</div>
 						</div>
 						<div class="pending-actions">
+							{#if d.kind === 'skill'}
+								<Button
+									variant="secondary"
+									on:click={() => toggleReview(d)}
+									disabled={reviewingDeferred === deferredKey(d)}
+								>
+									<Icon name="file-text" />
+									{deferredKey(d) in reviewedText ? 'Hide text' : 'Show text'}
+								</Button>
+							{/if}
 							<Button
 								variant="primary"
 								on:click={() => approveDeferred(d)}
@@ -574,6 +614,9 @@
 							</Button>
 						</div>
 					</div>
+					{#if deferredKey(d) in reviewedText}
+						<pre class="deferred-text">{reviewedText[deferredKey(d)]}</pre>
+					{/if}
 				</Card>
 			{/each}
 		</div>
@@ -866,6 +909,20 @@
 		display: flex;
 		gap: var(--oo-space-2);
 		flex-wrap: wrap;
+	}
+	.deferred-text {
+		margin: var(--oo-space-3) 0 0;
+		padding: var(--oo-space-2) var(--oo-space-3);
+		max-height: 24rem;
+		overflow: auto;
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-sm);
+		color: var(--oo-fg-primary);
+		background: var(--oo-bg-base);
+		border: 1px solid var(--oo-bd-default);
+		border-radius: var(--oo-radius-md);
 	}
 	.confirm-code {
 		font-family: var(--oo-font-mono);

@@ -14,6 +14,7 @@ codes. The contract the eventual sync panel consumes:
 - ``POST /api/sync/pairing/pending/{peer_id}/confirm`` -> activate a pending pairing
 - ``POST /api/sync/pairing/pending/{peer_id}/reject``  -> remove a pending pairing
 - ``GET  /api/sync/deferred``                    -> pending content approvals (SYN-05)
+- ``GET  /api/sync/deferred/review``             -> one pending record's text, for review
 - ``POST /api/sync/deferred/approve``            -> apply a deferred record through the seam
 - ``POST /api/sync/deferred/refuse``             -> remove a deferred record; nothing applies
 
@@ -549,9 +550,38 @@ def set_device_class_payload(
 # any mode (only the wire round that fills the ledger is Daily-gated).
 
 
+class NothingToReview(Exception):
+    """A held record has no text a human can read before deciding on it."""
+
+
+def _entry_record(entry: Any) -> Any:
+    """The record a deferred entry holds, decoded and hash-checked, or ``None``."""
+    envelope = getattr(entry, "envelope", None)
+    if not isinstance(envelope, dict) or not envelope:
+        return None
+    try:
+        from opti_oignon.veilid.records import decode_record
+    except Exception:  # pragma: no cover - the veilid package absent
+        return None
+    return decode_record(envelope)
+
+
+def _described(record: Any) -> dict[str, Any]:
+    """What may be shown of a held record in a list: for a skill, its name and digest."""
+    if record is None:
+        return {}
+    try:
+        from opti_oignon.veilid.review import describe
+
+        return describe(record.kind.value, record.payload)
+    except Exception:  # noqa: BLE001 - a record that cannot be described shows its provenance
+        return {}
+
+
 def deferred_entry_to_dict(entry: Any) -> dict[str, Any]:
-    """Serialise a deferred entry's provenance for the wire (no record body)."""
-    return {
+    """Serialise a deferred entry for the wire: its provenance and, for a skill,
+    the name it lands under and the digest of its text -- never a record body."""
+    data = {
         "kind": str(getattr(entry, "kind", "")),
         "record_id": str(getattr(entry, "record_id", "")),
         "origin_device": str(getattr(entry, "origin_device", "")),
@@ -560,6 +590,35 @@ def deferred_entry_to_dict(entry: Any) -> dict[str, Any]:
         "deferred_at": str(getattr(entry, "deferred_at", "")),
         "last_offered_at": str(getattr(entry, "last_offered_at", "")),
     }
+    data.update(_described(_entry_record(entry)))
+    return data
+
+
+def deferred_review_payload(engine: Any, kind: str, record_id: str) -> dict[str, Any]:
+    """One held record's text, for a human to read before approving it.
+
+    The entry's provenance and description, plus ``text``: the text exactly
+    as it would land. Only a record held in the ledger, whose envelope still
+    decodes against its content hash, and that carries a text -- a skill --
+    can be read; a key the ledger does not hold raises ``DeferredNotFound``,
+    anything else ``NothingToReview``, by name.
+    """
+    entry = next(
+        (e for e in engine.list_deferred()
+         if str(getattr(e, "kind", "")) == kind and str(getattr(e, "record_id", "")) == record_id),
+        None,
+    )
+    if entry is None:
+        raise DeferredNotFound(f"no pending record {kind}/{record_id}")
+    record = _entry_record(entry)
+    if record is None:
+        raise NothingToReview(f"{kind} {record_id}: the stored record no longer decodes, approval would refuse it")
+    from opti_oignon.veilid.review import review_text
+
+    text = review_text(record.kind.value, record.payload)
+    if text is None:
+        raise NothingToReview(f"a {kind} record carries no text to review")
+    return {**deferred_entry_to_dict(entry), "text": text}
 
 
 def deferred_list_payload(engine: Any) -> dict[str, Any]:
@@ -1201,7 +1260,8 @@ try:
 
     @router.get("/deferred")
     def sync_deferred_list() -> dict[str, Any]:
-        """The pending content approvals (SYN-05): provenance only, no bodies.
+        """The pending content approvals (SYN-05): provenance, and for a skill
+        the name it lands under and the digest of its text -- never a body.
 
         Sensitive records the round quarantined instead of applying, awaiting
         the human's approve/refuse. Local-disk read, permitted in any mode.
@@ -1213,6 +1273,35 @@ try:
             logger.exception("deferred list failed")
             raise HTTPException(
                 status_code=500, detail="Failed to list deferred records"
+            )
+
+    @router.get("/deferred/review")
+    def sync_deferred_review(kind: str = "", record_id: str = "") -> dict[str, Any]:
+        """One pending record's text, for a human to read before approving it.
+
+        Query: ``kind`` and ``record_id``; 400 when either is missing, 404 for
+        a key the ledger does not hold, 409 when the stored record no longer
+        decodes or carries no text -- only a skill has one. The pending list
+        never carries a body: this is where a human reads what they are about
+        to let in. Local-disk read, permitted in any mode.
+        """
+        engine = _resolve_engine()
+        if not kind or not record_id:
+            raise HTTPException(
+                status_code=400, detail="kind and record_id are required"
+            )
+        try:
+            return deferred_review_payload(engine, kind, record_id)
+        except DeferredNotFound:
+            raise HTTPException(
+                status_code=404, detail="No pending record for that key"
+            )
+        except NothingToReview as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except Exception:  # pragma: no cover - the read is defensive
+            logger.exception("deferred review failed")
+            raise HTTPException(
+                status_code=500, detail="Failed to read deferred record"
             )
 
     @router.post("/deferred/approve")

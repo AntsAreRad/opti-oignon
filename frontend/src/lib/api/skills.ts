@@ -29,6 +29,13 @@ export interface Skill {
 	updated_at: string;
 	/** The full SKILL.md body; present when a single skill is fetched. */
 	body?: string;
+	/**
+	 * For a published skill, what its bytes are to this device: written here
+	 * (`local`), received from a paired device and adopted here (`adopted`),
+	 * or received and never adopted (`unadopted`) -- `/skill` in `oo chat`
+	 * refuses those until `/adopt` has shown them.
+	 */
+	sync_state?: 'local' | 'adopted' | 'unadopted';
 }
 
 /** The registry index payload. */

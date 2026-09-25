@@ -180,6 +180,11 @@
 							<span class="skill-badge skill-badge-{skill.status}">
 								{skill.status === 'draft' ? 'Draft - awaiting approval' : 'Published'}
 							</span>
+							{#if skill.sync_state === 'unadopted'}
+								<span class="skill-badge skill-badge-received">
+									From a paired device - not adopted here
+								</span>
+							{/if}
 						</div>
 						<div class="skill-actions">
 							{#if isDraft(skill)}
@@ -305,6 +310,10 @@
 	.skill-badge-published {
 		color: var(--oo-fg-success);
 		background: var(--oo-success-bg);
+	}
+	.skill-badge-received {
+		color: var(--oo-fg-warning);
+		background: var(--oo-warning-bg);
 	}
 	.skill-actions {
 		display: flex;

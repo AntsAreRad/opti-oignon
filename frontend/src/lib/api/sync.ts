@@ -109,9 +109,11 @@ export interface RoundResult {
 /**
  * One pending content approval (SYN-05), mirroring
  * routes_sync.deferred_entry_to_dict: a sensitive record the round quarantined
- * instead of applying. Provenance only -- the record body never reaches the
- * panel; on approval it enters the local set through the engine's
- * verify -> gate -> apply seam against the CURRENT trust state.
+ * instead of applying. Provenance, and for a skill the name it lands under and
+ * the SHA-256 of its text -- the record body never rides the list; one
+ * record's text is read on demand with reviewDeferredRecord. On approval it
+ * enters the local set through the engine's verify -> gate -> apply seam
+ * against the CURRENT trust state.
  */
 export interface DeferredRecord {
 	kind: string;
@@ -121,6 +123,16 @@ export interface DeferredRecord {
 	clock: number;
 	deferred_at: string;
 	last_offered_at: string;
+	/** For a skill: the category/name it lands under. */
+	skill?: string;
+	/** For a skill: the SHA-256 of its text, the digest `/adopt` asks for. */
+	digest?: string;
+}
+
+/** One pending record with its text, mirroring routes_sync.deferred_review_payload. */
+export interface DeferredReview extends DeferredRecord {
+	/** The text exactly as it would land. */
+	text: string;
 }
 
 /** The outcome of approving a deferred record, mirroring engine.approve_deferred. */
@@ -277,6 +289,16 @@ export async function listDeferredRecords(): Promise<{
 	count: number;
 }> {
 	return apiGet<{ deferred: DeferredRecord[]; count: number }>(`${BASE}/deferred`);
+}
+
+/**
+ * One pending record's text, for reading before approving it. Only a skill has
+ * one; the server answers 404 for a key it does not hold and 409 for a record
+ * that no longer decodes or carries no text. Any mode.
+ */
+export async function reviewDeferredRecord(kind: string, recordId: string): Promise<DeferredReview> {
+	const query = `kind=${encodeURIComponent(kind)}&record_id=${encodeURIComponent(recordId)}`;
+	return apiGet<DeferredReview>(`${BASE}/deferred/review?${query}`);
 }
 
 /**

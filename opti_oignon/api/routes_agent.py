@@ -591,18 +591,29 @@ class SkillNotFound(Exception):
     """A requested skill (published or draft) does not exist in the registry."""
 
 
-def _skill_payload(skill: Any, *, with_body: bool = False) -> dict[str, Any]:
-    """Serialise a skill for the wire: metadata, plus the body on a single view."""
+def _skill_payload(skill: Any, *, with_body: bool = False, registry: Any = None) -> dict[str, Any]:
+    """Serialise a skill for the wire: metadata, plus the body on a single view.
+
+    A published skill also says what its bytes are to this device --
+    ``local``, ``adopted``, or ``unadopted`` when it arrived from a paired
+    device and was never shown and adopted here -- when the registry can say.
+    """
     data = dict(skill.to_dict())
     if with_body:
         data["body"] = skill.body
+    sync_state = getattr(registry, "sync_state", None)
+    if sync_state is not None and data.get("status") == "published":
+        try:
+            data["sync_state"] = sync_state(skill.name, skill.category)
+        except Exception:  # noqa: BLE001 - a state that cannot be read is left out
+            logger.debug("skill sync state unreadable for %s/%s", skill.category, skill.name, exc_info=True)
     return data
 
 
 def skills_list_payload(registry: Any, *, include_drafts: bool = True) -> dict[str, Any]:
     """The registry index payload: published skills, plus drafts by default."""
     skills = registry.list(include_drafts=include_drafts)
-    return {"skills": [_skill_payload(s) for s in skills]}
+    return {"skills": [_skill_payload(s, registry=registry) for s in skills]}
 
 
 def skill_view_payload(registry: Any, category: str, name: str) -> dict[str, Any]:
@@ -612,7 +623,7 @@ def skill_view_payload(registry: Any, category: str, name: str) -> dict[str, Any
         skill = registry.get(name, category, draft=True)
     if skill is None:
         raise SkillNotFound(f"{category}/{name}")
-    return _skill_payload(skill, with_body=True)
+    return _skill_payload(skill, with_body=True, registry=registry)
 
 
 def skill_publish_payload(registry: Any, category: str, name: str) -> dict[str, Any]:

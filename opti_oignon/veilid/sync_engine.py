@@ -102,6 +102,7 @@ from opti_oignon.veilid.records import (
     decode_record,
     new_record,
 )
+from opti_oignon.veilid.review import gate_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -1545,12 +1546,11 @@ class SyncEngine:
                     if outcome == OFFER_REPLACED:
                         deferred += 1
                     continue
-            gate_args = {
-                "peer_id": peer_id,
-                "kind": r.kind.value,
-                "id": r.record_id,
-                "device": r.device,
-            }
+            # The skill's name and the digest of its text come first, so the
+            # prompt's truncated summary still shows which text is let in.
+            gate_args = gate_arguments(
+                r.kind.value, r.payload, peer_id=peer_id, record_id=r.record_id, device=r.device
+            )
             if self._approve(
                 conversation_id=conversation_id,
                 label="sync_apply:" + r.kind.value,
