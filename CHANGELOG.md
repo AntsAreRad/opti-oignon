@@ -453,6 +453,16 @@ package costs.
 
 ### Fixed
 
+- The two chat routes suites cleared the routes module's conditional
+  imports so that "their absence selects the inert branches", and behind
+  their stand-in package those imports resolved by name anyway: the chat
+  retry suite loaded 93 real modules -- the executor, the configuration,
+  the conversation store, the encryption modules, the emergency stop --
+  and the quick sandbox suite 97, so the active branches ran. Both now
+  load through the shared isolation window, where each conditional import
+  takes its inert branch as the harness said, and they no longer evict a
+  real fastapi or pydantic from the cache on the way out. Two more seal
+  debts are paid.
 - The two agentic suites ran on the real executor stack: behind their
   stand-in package the classifier suite loaded 82 real modules and the
   summary alignment suite 84. The classifier's fallback check -- the

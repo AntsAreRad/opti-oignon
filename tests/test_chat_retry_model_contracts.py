@@ -22,23 +22,26 @@ the recovery chain of the retry request:
     message is re-sent verbatim.
 
 Local-only (the public distribution ships no tests). Runs under pytest or
-directly via the __main__ runner. The chat routes module is loaded in
-isolation: the app dependency container and the auth layer are replaced
-by stand-ins, the schemas module is the real one, and fastapi/pydantic
-are the real packages when installed (minimal stand-ins otherwise). The
-websocket endpoint itself is driven end to end with a fake socket; the
-streaming layer is replaced by a spy that captures the rebuilt request.
+directly via the __main__ runner. The chat routes module is loaded through
+the shared isolation window: the app dependency container and the auth
+layer are replaced by stand-ins, the schemas module is the real one, no
+other project module is reachable, and fastapi/pydantic are the real
+packages when installed (minimal stand-ins otherwise). The websocket
+endpoint itself is driven end to end with a fake socket; the streaming
+layer is replaced by a spy that captures the rebuilt request.
 """
 
 import asyncio
-import importlib.util
 import sys
 import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_ABSENT = object()
 
 
 # ---------------------------------------------------------------------------
@@ -172,47 +175,44 @@ class FakeWebSocket:
 # ---------------------------------------------------------------------------
 # Isolated loading
 # ---------------------------------------------------------------------------
-def _load():
-    keys = (
-        "fastapi", "fastapi.responses", "pydantic",
-        "opti_oignon", "opti_oignon.api", "opti_oignon.api.deps",
-        "opti_oignon.api.schemas", "opti_oignon.api.routes_auth",
-        "opti_oignon.api.routes_chat",
-        # Conditional imports of the chat routes module: cleared so a warm
-        # interpreter (full-suite run) cannot leak the real modules into
-        # this isolated load -- their absence selects the inert branches.
-        "opti_oignon.tool_executor", "opti_oignon.emergency_stop",
-        "opti_oignon.pipelines", "opti_oignon.agentic_executor",
-        "opti_oignon.consensus", "opti_oignon.plugin_hooks",
-        "opti_oignon.quick_sandbox", "opti_oignon.tool_registry",
-        "opti_oignon.sandbox_workspace", "opti_oignon.tool_call_approval",
-        "opti_oignon.security_mode", "opti_oignon.sse_backpressure",
-        "opti_oignon.chat_coding_agent",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-    for key in keys:
-        if key.startswith("opti_oignon"):
-            sys.modules.pop(key, None)
+def _shim_missing_packages():
+    """Stand in for fastapi and pydantic only where they are not installed.
 
+    They are not project modules, so the window does not hold them: what is
+    put here is taken back by ``_put_back``, and a real package stays.
+    """
+    shims = {}
     try:
         import fastapi  # noqa: F401
         import fastapi.responses  # noqa: F401
     except ImportError:
         shim = _fastapi_shim()
-        sys.modules["fastapi"] = shim
-        sys.modules["fastapi.responses"] = shim.responses
+        shims["fastapi"] = shim
+        shims["fastapi.responses"] = shim.responses
     try:
         import pydantic  # noqa: F401
     except ImportError:
-        sys.modules["pydantic"] = _pydantic_shim()
+        shims["pydantic"] = _pydantic_shim()
+    saved = {name: sys.modules.get(name, _ABSENT) for name in shims}
+    sys.modules.update(shims)
+    return saved
 
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    api_pkg = types.ModuleType("opti_oignon.api")
-    api_pkg.__path__ = []
-    sys.modules["opti_oignon.api"] = api_pkg
-    pkg.api = api_pkg
+
+def _put_back(saved):
+    for name, module in saved.items():
+        if module is _ABSENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+
+
+def _load():
+    """The chat routes module in the shared window, beside stand-in seams.
+
+    No other project module is reachable, so each conditional import of the
+    routes module takes its inert branch.
+    """
+    saved = _shim_missing_packages()
 
     deps = types.ModuleType("opti_oignon.api.deps")
     deps.ANALYZER_AVAILABLE = False
@@ -225,18 +225,6 @@ def _load():
     deps.executor = None
     deps.preset_manager = None
     deps.router = None
-    sys.modules["opti_oignon.api.deps"] = deps
-    api_pkg.deps = deps
-
-    def _real(dotted: str, path: Path):
-        spec = importlib.util.spec_from_file_location(dotted, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[dotted] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    schemas = _real("opti_oignon.api.schemas", _OO / "api" / "schemas.py")
-    api_pkg.schemas = schemas
 
     auth = types.ModuleType("opti_oignon.api.routes_auth")
 
@@ -244,20 +232,25 @@ def _load():
         return {"username": "local"}
 
     auth.authenticate_websocket = authenticate_websocket
-    sys.modules["opti_oignon.api.routes_auth"] = auth
-    api_pkg.routes_auth = auth
 
-    rc = _real("opti_oignon.api.routes_chat", _OO / "api" / "routes_chat.py")
-    api_pkg.routes_chat = rc
+    try:
+        loaded, close_window = isolate(
+            targets={
+                "opti_oignon.api.schemas": source("api", "schemas.py"),
+                "opti_oignon.api.routes_chat": source("api", "routes_chat.py"),
+            },
+            seeded={"opti_oignon.api.deps": deps, "opti_oignon.api.routes_auth": auth},
+            packages=("opti_oignon.api",),
+        )
+    except BaseException:
+        _put_back(saved)
+        raise
 
     def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
+        close_window()
+        _put_back(saved)
 
-    return rc, schemas, restore
+    return loaded["opti_oignon.api.routes_chat"], loaded["opti_oignon.api.schemas"], restore
 
 
 def _run_retry(rc, manager, payload):
