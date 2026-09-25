@@ -66,10 +66,12 @@ PY
 t2() {
   head_ "t2  guards"
   n=0
+  # Each guard runs with the data places mirrored from HEAD, as CI sees them:
+  # a guard that imports the application opens the stores it declares.
   for g in .github/scripts/*_guard.py; do
     [ -e "$g" ] || continue
     n=$((n+1))
-    if out=$(python3 "$g" 2>&1); then pass "$(basename "$g")"
+    if out=$(python3 tests/_guard_mirrored.py "$g" 2>&1); then pass "$(basename "$g")"
     else fail "$(basename "$g") -> $(printf '%s' "$out" | tail -1 | cut -c1-140)"; fi
   done
   [ "$n" -gt 0 ] || skip "no guard found under .github/scripts/"

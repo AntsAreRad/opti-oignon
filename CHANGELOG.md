@@ -453,6 +453,16 @@ package costs.
 
 ### Fixed
 
+- The local ladder's guard tier ran each guard on the maintainer's tree. A
+  guard that imports the application -- the published-prose guard builds
+  the OpenAPI schema from it -- runs its module-level singletons, and those
+  opened the real stores: the branch store with the master key, the project
+  vector store, the presets. `tests/_guard_mirrored.py` runs a guard in its
+  own process as a direct run would, under the test session's data
+  firewall with a fresh mirror seeded from HEAD, and the tier goes through
+  it: locally, the guards see what CI sees. A child process a guard starts
+  is not covered, on purpose, since the import footprint guard measures in a
+  fresh interpreter.
 - The two measurement guards wrote into the data places on every run --
   in CI, in their harness contracts, and in the local ladder, where no
   firewall covers them. The summary fidelity guard's needle sweep builds
