@@ -25,11 +25,18 @@ rate of 0.0 when there were no probes to score has invented a measurement.
     its probe, whether the negation is formal (ne ... pas) or familiar.
   * RP10 -- a typographic apostrophe negates as the ASCII one does.
   * RP11 -- French function words are neither entities nor decision words.
+  * RP12 -- a French name is drawn whatever its accents, at its head or
+    inside it, and a summary that swaps it fails its probe.
+  * RP13 -- a French decision keeps its words whole in its key.
+  * RP14 -- on ASCII text the expressions that read French draw and score
+    exactly what the ASCII expressions did, over a deterministic corpus.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window; the module is pure and reaches nothing.
 """
 
+import random
+import re
 import sys
 from pathlib import Path
 
@@ -261,6 +268,84 @@ def test_rp11_french_function_words_are_neither_entities_nor_decision_words():
     finally:
         restore()
 
+
+
+# ---------------------------------------------------------------------------
+# RP12 -- French names, whatever their accents
+# ---------------------------------------------------------------------------
+def test_rp12_a_french_name_is_drawn_whatever_its_accents_and_swapping_it_fails():
+    mod, restore = _open()
+    try:
+        text = "Nous avons invit\u00e9 \u00c9lodie, H\u00e9l\u00e8ne et Chlo\u00e9 \u00e0 la revue avec Bob."
+        drawn = mod.generate_probes([{"turn_id": "t1", "text": text}])
+        names = {p.answer for p in drawn if p.kind == "entity"}
+        assert names == {"\u00c9lodie", "H\u00e9l\u00e8ne", "Chlo\u00e9", "Bob"}, names
+        assert mod.score(drawn, text).failed == 0, "the source answers its own probes"
+        for name, other in (("\u00c9lodie", "\u00c9mile"), ("H\u00e9l\u00e8ne", "H\u00e9lo\u00efse"), ("Chlo\u00e9", "Chlo\u00eb")):
+            failures = mod.score(drawn, text.replace(name, other)).failures
+            assert [p.answer for p in failures if p.kind == "entity"] == [name], (name, failures)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RP13 -- French words stay whole in a decision key
+# ---------------------------------------------------------------------------
+def test_rp13_a_french_decision_keeps_its_words_whole_in_its_key():
+    mod, restore = _open()
+    try:
+        text = "Chlo\u00e9 et Andr\u00e9 ont d\u00e9cid\u00e9 que Z\u00f6e m\u00e8ne la d\u00e9mo \u00e0 Lyon."
+        drawn = mod.generate_probes([{"turn_id": "t1", "text": text}])
+        decision = next(p for p in drawn if p.kind == "decision")
+        assert {"chlo\u00e9", "andr\u00e9", "d\u00e9cid\u00e9", "z\u00f6e", "m\u00e8ne", "d\u00e9mo", "lyon"} <= decision.key, decision.key
+        assert not decision.key & {"\u00e0", "e", "m", "mo", "cid", "chlo", "andr", "z"}, decision.key
+        assert {p.answer for p in drawn if p.kind == "entity"} == {"Chlo\u00e9", "Andr\u00e9", "Z\u00f6e", "Lyon"}
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RP14 -- ASCII text draws and scores as it did
+# ---------------------------------------------------------------------------
+# The expressions the module held for names and words before it read French.
+_ASCII_NAME = r"\b[A-Z][a-zA-Z]+\b"
+_ASCII_WORD = r"[a-z0-9]+"
+_ASCII_PIECES = (
+    "Alice", "McDonald", "USA", "iPhone", "OpenAI", "A", "x", "b2", "C_d", "Docker2", "e-F", "Gh",
+    "We decided", " will ", "not", "no", "agreed", "Bob", "the", "The", " ", "  ", ".", "!", "?", "-",
+    "_", "1", "42", "2024-03-15", "'", "can't", "\t", "\n",
+)
+
+
+def test_rp14_on_ascii_text_the_expressions_that_read_french_draw_and_score_as_before():
+    mod, restore = _open()
+    try:
+        rng = random.Random(14)
+        texts = [_text(_SPAN)] + [
+            "".join(rng.choice(_ASCII_PIECES) for _ in range(rng.randint(1, 30))) for _ in range(2000)
+        ]
+        spans = [[{"turn_id": f"t{i}", "text": text}] for i, text in enumerate(texts)]
+        candidates = [(text, rng.choice(texts), text.lower()) for text in texts]
+
+        def run():
+            drawn = [mod.generate_probes(span) for span in spans]
+            scored = [[mod.score(probes, c) for c in cands] for probes, cands in zip(drawn, candidates)]
+            return drawn, scored
+
+        now = run()
+        saved = mod._WORD, mod._CAPITALISED
+        mod._WORD, mod._CAPITALISED = re.compile(_ASCII_WORD), re.compile(_ASCII_NAME)
+        try:
+            before = run()
+        finally:
+            mod._WORD, mod._CAPITALISED = saved
+        assert now[0] == before[0], "the same probes, in the same order"
+        assert now[1] == before[1], "the same verdicts on every candidate"
+        entities = sum(p.kind == "entity" for probes in now[0] for p in probes)
+        decisions = sum(p.kind == "decision" for probes in now[0] for p in probes)
+        assert entities >= 1500 and decisions >= 1200, (entities, decisions)
+    finally:
+        restore()
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

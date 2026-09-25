@@ -38,12 +38,15 @@ the artefact itself is never tracked.
     that holds the old one keeps its bytes, and no staging file is left.
   * NC12 -- the build script checks the artefact of its own tree, whatever
     directory it is run from.
+  * NC13 -- the native probes draw French names and keep French words whole
+    as the reference does, and every accepted code point at the head of a
+    name is a capital for the core exactly when Python calls it one.
 
-NC1 to NC3 and NC6 to NC10 need the built artefact: the CI job that carries
-a Rust toolchain builds it and runs this file by name, and a local sweep
-needs ``scripts/build_oo_core.sh`` run once. NC4, NC5, NC11 and NC12 always
-run: the last two drive a copy of the script with a stand-in cargo and a
-stand-in loader.
+NC1 to NC3, NC6 to NC10 and NC13 need the built artefact: the CI job that
+carries a Rust toolchain builds it and runs this file by name, and a local
+sweep needs ``scripts/build_oo_core.sh`` run once. NC4, NC5, NC11 and NC12
+always run: the last two drive a copy of the script with a stand-in cargo
+and a stand-in loader.
 
 Local-only (the public distribution ships no tests).
 """
@@ -693,6 +696,49 @@ def test_nc12_the_build_script_checks_its_own_trees_artefact_from_any_directory(
     run = subprocess.run(["bash", str(script)], cwd=elsewhere, env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip().splitlines()[-1] == "oo_core new artefact", run.stdout
+
+
+# ---------------------------------------------------------------------------
+# NC13 -- French names and whole French words, natively
+# ---------------------------------------------------------------------------
+_NAMES = (
+    "Nous avons invit\u00e9 \u00c9lodie, H\u00e9l\u00e8ne et Chlo\u00e9 \u00e0 la revue avec Bob.",
+    "Chlo\u00e9 et Andr\u00e9 ont d\u00e9cid\u00e9 que Z\u00f6e m\u00e8ne la d\u00e9mo \u00e0 Lyon.",
+    "\u00c9T\u00c9 comme \u00c7a, \u0152dipe et \u0178vonne ; \u00c0 bient\u00f4t, \u00d8ystein ! O\u00f9 ? L\u00e0. D\u00e9j\u00e0.",
+    "Km\u00b2 et \u00b5Service, \u00aaBc, O\u2019Neil, d\u2019Artagnan et Mc\u00c9lodie d\u00e9cideront le 2026-09-24.",
+)
+
+
+def test_nc13_the_native_probes_draw_french_names_and_whole_words_as_the_reference():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        accented = 0
+        for text in _NAMES:
+            span = [{"turn_id": "t1", "text": text}]
+            drawn = probes.generate_probes(span)
+            assert drawn == _reference(probes, probes.generate_probes, span), f"probe for probe on {text!r}"
+            accented += sum(1 for p in drawn if p.kind == "entity" and not p.answer.isascii())
+            for candidate in (text, text.replace("\u00e9", "e"), text.lower(), ""):
+                assert probes.score(drawn, candidate) == _reference(probes, probes.score, drawn, candidate), candidate
+        assert accented >= 6, "names with accents are drawn"
+        capitals = 0
+        for c in _in_scope():
+            text = f"{c}bc {c}. x{c}y {c}Abc"
+            span = [{"turn_id": "t1", "text": text}]
+            drawn = probes.generate_probes(span)
+            assert drawn == _reference(probes, probes.generate_probes, span), f"U+{ord(c):04X}"
+            assert probes.score(drawn, text.lower()) == _reference(probes, probes.score, drawn, text.lower())
+            capitals += c.isupper()
+        assert capitals >= 100, "the scope holds the capitals of ASCII, Latin-1 and Latin Extended-A"
+        assert counting.calls["probe_generate"] == counting.answered["probe_generate"] == len(_NAMES) + len(_in_scope())
+        assert counting.calls["probe_score"] == counting.answered["probe_score"] == 4 * len(_NAMES) + len(_in_scope())
+    finally:
+        restore()
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

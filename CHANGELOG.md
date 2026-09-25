@@ -199,6 +199,15 @@ package costs.
 
 ### Changed
 
+- The onion's eviction gate reads French names and whole French words. A
+  name was a run of ASCII letters opened by an ASCII capital, so a name
+  carrying an accent -- at its head or inside it, as Elodie, Helene and
+  Chloe are written in French -- was never drawn, and a summary that
+  swapped one passed its entity probes; a word stopped at an accented
+  letter, so a French decision key was made of fragments. A name is now a
+  run of letters opened by any capital and a word a run of letters and
+  digits; on ASCII text both draw exactly what they drew before. The native
+  core reads the same, with the same capitals as Python.
 - The onion's eviction gate reads French. A decision written in French --
   "nous avons convenu", "on va", "il faut", "doit" and their kin -- is drawn
   as a decision probe, and negation counts "ne", the elided "n'", "pas",

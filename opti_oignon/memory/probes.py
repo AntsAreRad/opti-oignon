@@ -33,8 +33,15 @@ checkpoint_before_apply = True
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _NUMBER = re.compile(r"(?<![\w-])\d+(?:[.,]\d+)?(?![\w-])")
-_WORD = re.compile(r"[a-z0-9]+")
-_CAPITALISED = re.compile(r"\b[A-Z][a-zA-Z]+\b")
+# A word is a run of letters and digits, accents included, so that a French
+# word stays whole; on ASCII text it is exactly ``[a-z0-9]+``.
+_WORD = re.compile(r"[^\W_]+")
+# A name is a run of two letters or more between word boundaries whose first
+# letter is a capital -- any capital, so that a name carrying an accent, at
+# its head or inside it, is a name. The expression reads the run; the capital
+# is checked on the match. On ASCII text this draws exactly what
+# ``\b[A-Z][a-zA-Z]+\b`` drew.
+_CAPITALISED = re.compile(r"\b[^\W\d_]{2,}\b")
 # English and French. Both halves of "ne ... pas" count, so that "ne ... plus"
 # and the familiar form without "ne" are negations too; a summary that writes
 # the other form fails its decision probe, and the verbatim stays -- the safe
@@ -70,6 +77,7 @@ _NOT_ENTITIES = frozenset({
     "le", "la", "les", "un", "une", "des", "du", "nous", "vous", "il", "elle",
     "ils", "elles", "je", "tu", "ce", "cet", "cette", "ces", "mais", "et", "ou",
     "donc", "alors", "si", "quand", "puis", "ensuite", "oui", "non",
+    "o\u00f9", "l\u00e0", "\u00e7a", "d\u00e9j\u00e0", "apr\u00e8s", "tr\u00e8s", "\u00e9t\u00e9",
 })
 
 _STOPWORDS = frozenset({
@@ -82,6 +90,7 @@ _STOPWORDS = frozenset({
     "elle", "ils", "elles", "je", "tu", "ce", "cet", "cette", "ces", "que", "qui",
     "est", "sont", "ont", "avons", "avez", "ai", "ne", "pas", "jamais", "rien",
     "aucun", "aucune", "l", "d", "n", "s", "c", "j", "qu",
+    "\u00e0", "o\u00f9", "l\u00e0", "\u00e7a", "d\u00e9j\u00e0", "apr\u00e8s", "tr\u00e8s", "\u00e9t\u00e9",
 })
 
 # The share of a decision's content words a sentence must carry to count as
@@ -249,7 +258,7 @@ def generate_probes(span):
                     seen.add(("number", number))
                     probes.append(Probe("number", _QUESTIONS["number"].format(turn_id), number, turn_id))
             for name in _CAPITALISED.findall(sentence):
-                if name.lower() in _NOT_ENTITIES or ("entity", name) in seen:
+                if not name[0].isupper() or name.lower() in _NOT_ENTITIES or ("entity", name) in seen:
                     continue
                 seen.add(("entity", name))
                 probes.append(Probe("entity", _QUESTIONS["entity"].format(turn_id), name, turn_id))

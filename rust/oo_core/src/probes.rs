@@ -27,8 +27,8 @@ const PATTERNS: [(&str, u32); 8] = [
     (r"(?<=[.!?])\s+", 32),
     (r"\b\d{4}-\d{2}-\d{2}\b", 32),
     (r"(?<![\w-])\d+(?:[.,]\d+)?(?![\w-])", 32),
-    (r"[a-z0-9]+", 32),
-    (r"\b[A-Z][a-zA-Z]+\b", 32),
+    (r"[^\W_]+", 32),
+    (r"\b[^\W\d_]{2,}\b", 32),
     (r"\b(not|never|no|cannot|ne|pas|jamais|rien|aucun|aucune)\b|n['\u2019]t\b|\bn['\u2019](?=\w)", 34),
     (r"(?<![\w-])", 0),
     (r"(?![\w-])", 0),
@@ -87,6 +87,17 @@ fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
 
+/// `[^\W\d_]`: a word character that is neither a digit nor the underscore.
+fn is_letter(c: char) -> bool {
+    is_word(c) && !is_digit(c) && c != '_'
+}
+
+/// Python's `str.isupper()` on one accepted code point: the Unicode
+/// Uppercase property, which is what both languages read.
+fn is_capital(c: char) -> bool {
+    c.is_uppercase()
+}
+
 /// `\b` at `i`: a word character on one side only. An empty text has none.
 fn boundary(s: &[char], i: usize) -> bool {
     if s.is_empty() {
@@ -143,13 +154,14 @@ fn sentences(text: &[char]) -> Vec<&[char]> {
     out
 }
 
-/// `[a-z0-9]+` over `text.lower()`.
+/// `[^\W_]+` over `text.lower()`: runs of word characters, the underscore
+/// excepted.
 fn tokens(text: &[char]) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     for &c in text {
         for lowered in c.to_lowercase() {
-            if lowered.is_ascii_lowercase() || lowered.is_ascii_digit() {
+            if is_word(lowered) && lowered != '_' {
                 current.push(lowered);
             } else if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
@@ -237,18 +249,22 @@ fn numbers(s: &[char]) -> Vec<String> {
     out
 }
 
-/// `\b[A-Z][a-zA-Z]+\b`: only the whole run of letters can end on a boundary.
-fn capitalised(s: &[char]) -> Vec<String> {
+/// `\b[^\W\d_]{2,}\b`, then the reference's filter: the first letter is a
+/// capital. Only the whole run of letters can end on a boundary, and a
+/// match the filter drops still consumes its run, as `findall` does.
+fn names(s: &[char]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < s.len() {
-        if s[i].is_ascii_uppercase() && boundary(s, i) {
+        if is_letter(s[i]) && boundary(s, i) {
             let mut end = i + 1;
-            while end < s.len() && s[end].is_ascii_alphabetic() {
+            while end < s.len() && is_letter(s[end]) {
                 end += 1;
             }
             if end > i + 1 && boundary(s, end) {
-                out.push(s[i..end].iter().collect());
+                if is_capital(s[i]) {
+                    out.push(s[i..end].iter().collect());
+                }
                 i = end;
                 continue;
             }
@@ -384,8 +400,9 @@ pub fn probe_generate(
                     out.push((index, "number".into(), number, Vec::new(), 0));
                 }
             }
-            for name in capitalised(sentence) {
-                if not_entities.contains(&name.to_ascii_lowercase()) || !seen.insert(("entity", name.clone())) {
+            for name in names(sentence) {
+                let lowered: String = name.chars().flat_map(char::to_lowercase).collect();
+                if not_entities.contains(&lowered) || !seen.insert(("entity", name.clone())) {
                     continue;
                 }
                 out.push((index, "entity".into(), name, Vec::new(), 0));
