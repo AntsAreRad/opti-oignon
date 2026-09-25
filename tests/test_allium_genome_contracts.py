@@ -46,6 +46,14 @@ are -- and compiled into flat tables each time it is needed.
   * GN14 -- one locus per beard trait code, trait 15 free, each beard locus
     last on its pair; a law or a genome without a beard locus reads as the
     cream beard with no red and no moustache, never as an invented colour.
+  * GN15 -- the eight continuous body loci read by absolute cuts: one locus
+    per code, every allele on the lattice, no genotype of either law crosses
+    a cut under its widest jitter (and a wider jitter does), every level
+    reachable with rarer extremes, a missing locus read as its default.
+  * GN16 -- real founders read their body levels from their own alleles: the
+    level of each compiled value is the level of its alleles' mean (and a
+    jitter wider than the lattice breaks that), and the greenhouse counts the
+    levels at the frequencies the pool implies.
 
 Local-only. The modules load through the shared isolation window; GN10
 and GN12 also need the native artefact that ``scripts/build_oo_core.sh`` builds.
@@ -90,6 +98,8 @@ BUDGET_S = {
     "test_gn12_the_greenhouse_draws_beards_and_moustaches_at_the_pools_frequencies": 2.0,
     "test_gn13_the_beard_loci_move_no_other_record_or_table": 2.0,
     "test_gn14_one_locus_per_beard_trait_each_last_on_its_pair_and_absence_reads_as_cream": 2.0,
+    "test_gn15_the_body_loci_read_by_absolute_cuts_that_no_jitter_crosses": 2.0,
+    "test_gn16_founders_read_their_body_levels_from_their_own_alleles": 2.0,
 }
 
 
@@ -1051,6 +1061,171 @@ def test_gn14_one_locus_per_beard_trait_each_last_on_its_pair_and_absence_reads_
     for code in (22, 23, 24):
         with_moustache = next(s for s, r in zip(shapes, readings) if r["moustache"])
         assert greenhouse.beard_potential({k: v for k, v in with_moustache.items() if k != code})["moustache"] is None
+
+
+# ---------------------------------------------------------------------------
+# GN15, GN16 -- the eight continuous body loci, read by absolute cuts
+# ---------------------------------------------------------------------------
+BODY_CODES = (0, 1, 3, 5, 6, 7, 10, 11)
+BODY_CLASS_OF = {0: "hw", 1: "hb", 3: "hh", 5: "flop", 6: "eye", 7: "turn", 10: "stripe", 11: "speckle"}
+BODY_CLASS_COUNTS = {"hw": 5, "hb": 6, "hh": 4, "flop": 7, "eye": 2, "turn": 4, "stripe": 2, "speckle": 4}
+BODY_KEYS = {0: ("hw",), 1: ("hb",), 3: ("hh",), 5: ("flop",), 6: ("eye",), 7: ("side", "gaze"),
+             10: ("strong",), 11: ("speck", "dry")}
+BODY_DEFAULTS = {"dry": False, "eye": 2, "flop": 3, "gaze": 0, "hb": 10, "hh": 9, "hw": 7, "side": 1,
+                 "speck": 0, "strong": False}
+
+
+def _body_loci(law):
+    out = {}
+    for entry in law["genome"]["loci"]:
+        if entry["kind"] == "shape" and _trait_of(entry) in BODY_CODES:
+            value_box = next((o for o in entry["box"] if o["field"] == "value"), {"lo": 0, "hi": 65535})
+            out[entry["id"]] = (_trait_of(entry), value_box["lo"], value_box["hi"])
+    return out
+
+
+def _body_class(greenhouse, code, value):
+    return greenhouse.body_classes(greenhouse.body_levels({code: value}))[BODY_CLASS_OF[code]]
+
+
+def _crossings(greenhouse, law, pool):
+    """Genotypes (and lone alleles) whose class moves anywhere inside the jitter; also the check count."""
+    loci = _body_loci(law)
+    crossed = checked = 0
+    for entry in pool["loci"]:
+        if entry["locus"] not in loci:
+            continue
+        code, lo_box, hi_box = loci[entry["locus"]]
+        alleles = [(a["body"][1], a["window"][1]) for a in entry["alleles"]]
+        pairs = [(x, y) for x in alleles for y in alleles] + [(x, x) for x in alleles]
+        for (va, wa), (vb, wb) in pairs:
+            nominal = _body_class(greenhouse, code, (va + vb) // 2)
+            low = (max(va - wa, lo_box) + max(vb - wb, lo_box)) // 2
+            high = (min(va + wa, hi_box) + min(vb + wb, hi_box)) // 2
+            classes = {_body_class(greenhouse, code, low), _body_class(greenhouse, code, high)}
+            crossed += classes != {nominal}
+            checked += 1
+    return crossed, checked
+
+
+def _body_shares(greenhouse, law, pool):
+    """Exact share of each (class name, index), from the pool's nominal genotype means."""
+    from fractions import Fraction
+    loci = _body_loci(law)
+    shares = {}
+    for entry in pool["loci"]:
+        if entry["locus"] not in loci:
+            continue
+        code = loci[entry["locus"]][0]
+        total = sum(a["freq"] for a in entry["alleles"])
+        for x in entry["alleles"]:
+            for y in entry["alleles"]:
+                key = (BODY_CLASS_OF[code], _body_class(greenhouse, code, (x["body"][1] + y["body"][1]) // 2))
+                shares[key] = shares.get(key, 0) + Fraction(x["freq"] * y["freq"], total * total)
+    return shares
+
+
+def _widened(pool, loci, window):
+    value = copy.deepcopy(pool)
+    for entry in value["loci"]:
+        if entry["locus"] in loci:
+            for allele in entry["alleles"]:
+                allele["window"][1] = window
+    return value
+
+
+def test_gn15_the_body_loci_read_by_absolute_cuts_that_no_jitter_crosses(ref, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    greenhouse = _load_script("allium_greenhouse.py", "_gn15_greenhouse")
+    law, fixture = ref.lawfiles.law("v0_1"), ref.lawfiles.law("fixture")
+    pool, fixture_pool = ref.lawfiles.founders("v1"), ref.lawfiles.founders("fixture")
+    codes = [code for code, _lo, _hi in _body_loci(law).values()]
+    assert sorted(codes) == sorted(BODY_CODES), "one locus per body code in the full law"
+    assert sorted(code for code, _lo, _hi in _body_loci(fixture).values()) == [0]
+    for entry in pool["loci"]:
+        if entry["locus"] in _body_loci(law):
+            for allele in entry["alleles"]:
+                assert allele["body"][1] % 8192 == 0 and allele["window"][1] < 2048, (entry["locus"], allele)
+    for law_value, pool_value in ((law, pool), (fixture, fixture_pool)):
+        crossed, checked = _crossings(greenhouse, law_value, pool_value)
+        assert crossed == 0 and checked >= 6, (law_value["name"], crossed, checked)
+    crossed, _checked = _crossings(greenhouse, law, _widened(pool, _body_loci(law), 2048))
+    assert crossed > 0, "a jitter as wide as half a step crosses a cut"
+    shares = _body_shares(greenhouse, law, pool)
+    for name, count in BODY_CLASS_COUNTS.items():
+        present = sorted(index for (trait, index), p in shares.items() if trait == name and p > 0)
+        assert present == list(range(count)), (name, present)
+        if count >= 3:
+            ends = (shares[(name, 0)], shares[(name, count - 1)])
+            assert all(__import__("fractions").Fraction(3, 100) <= p <= __import__("fractions").Fraction(15, 100)
+                       for p in ends), (name, ends)
+            largest = max(range(count), key=lambda i: shares[(name, i)])
+            assert largest not in (0, count - 1), (name, largest)
+    assert greenhouse.body_levels({}) == BODY_DEFAULTS
+    view, alleles = ref.genome.view(law), ref.pool(law)
+    for i in range(4):
+        data, _chosen, _work = ref.genome.found(ref.rng.key(bytes(32), "test.gn15", (i,)), view, alleles)
+        shape = greenhouse.shape_traits(ref.tables(data, law, view))
+        full = greenhouse.body_levels(shape)
+        for code in BODY_CODES:
+            partial = greenhouse.body_levels({k: v for k, v in shape.items() if k != code})
+            moved = {key for key in full if full[key] != partial[key]}
+            assert moved <= set(BODY_KEYS[code]), (code, moved)
+            assert all(partial[key] == BODY_DEFAULTS[key] for key in BODY_KEYS[code]), (code, partial)
+    assert list(tmp_path.iterdir()) == []
+
+
+def _mismatches(ref, greenhouse, law, pool_value, count, domain):
+    """Founders whose compiled body value reads another class than its two alleles' nominal mean."""
+    view = ref.genome.view(law)
+    alleles = ref.genome.pool_alleles(pool_value)
+    digest = ref.lawfiles.digest(law)
+    loci = _body_loci(law)
+    order = []
+    for pair in range(view.pairs):
+        for h in range(ref.genome.PLOIDY):
+            order.extend((ident, h) for ident in view.chromosomes[pair])
+    wrong = seen = 0
+    for i in range(count):
+        data, chosen, _work = ref.genome.found(ref.rng.key(bytes(32), domain, (i,)), view, alleles)
+        picked = {}
+        for (ident, _h), index in zip(order, chosen):
+            picked.setdefault(ident, []).append(alleles[ident][index]["body"][1])
+        tables, _work = ref.compile.compile_genome(data, law, view, digest)
+        shape = greenhouse.shape_traits(tables)
+        for ident, (code, _lo, _hi) in loci.items():
+            values = picked[ident]
+            nominal = sum(values) // len(values)
+            wrong += _body_class(greenhouse, code, shape[code]) != _body_class(greenhouse, code, nominal)
+            seen += 1
+    return wrong, seen
+
+
+def test_gn16_founders_read_their_body_levels_from_their_own_alleles(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    loaded, restore = open_allium(native=True)
+    try:
+        native_module(loaded)
+        engine = loaded["opti_oignon.allium.engine"]
+        engine.reset()
+        assert engine.native_in_use(), "the greenhouse cohort is counted on the native engine"
+        ref = Ref(loaded)
+        greenhouse = _load_script("allium_greenhouse.py", "_gn16_greenhouse")
+        law, pool = ref.lawfiles.law("v0_1"), ref.lawfiles.founders("v1")
+        wrong, seen = _mismatches(ref, greenhouse, law, pool, 24, "test.gn16")
+        assert wrong == 0 and seen == 24 * 8, (wrong, seen)
+        wrong, _seen = _mismatches(ref, greenhouse, law, _widened(pool, _body_loci(law), 3072), 12, "test.gn16.wide")
+        assert wrong > 0, "a jitter wider than the lattice moves founders off their alleles' level"
+        n = 48
+        report = greenhouse.report("v0_1", n, bytes(range(32)), native=True)["body_potential"]
+        shares = _body_shares(greenhouse, law, pool)
+        for name, counts in report.items():
+            assert sum(counts) == n and len(counts) == BODY_CLASS_COUNTS[name], (name, counts)
+            for index, observed in enumerate(counts):
+                assert _within(observed, n, shares.get((name, index), 0)), (name, index, observed)
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        restore()
 
 
 if __name__ == "__main__":

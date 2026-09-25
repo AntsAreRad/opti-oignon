@@ -168,8 +168,8 @@ seed and the law are -- and a genome received from elsewhere is decoded as
 hostile input, accepted inside the law's bounds or refused by name. The
 laws and founder pools under `opti_oignon/allium/laws/` are written by
 `scripts/allium_author_genome.py`; `scripts/allium_greenhouse.py` reports on
-a cohort of founders without simulating a day, including the adult beard and
-moustache each founder's genes allow.
+a cohort of founders without simulating a day, including the body levels and
+the adult beard and moustache each founder's genes allow.
 
 The second organ is the phonology: eight operations read a being's
 language block from its genome, decode the sounds it can make, judge

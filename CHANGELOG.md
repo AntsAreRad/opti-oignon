@@ -11,6 +11,19 @@ package costs.
 
 ### Added
 
+- The componion's body is read from its own genes. The eight continuous
+  shape loci of the full law (bulb width and height, hat height, leaf
+  stiffness, eye spacing, lean and gaze, skin lines, speckles) get alleles
+  on a lattice of multiples of 8192, so a genotype compiles to an exact
+  step and the greenhouse reads each trait through fixed cuts halfway
+  between steps: every level is reachable, the middle levels are the
+  common ones, and no founder's look depends on another founder. Wide eyes
+  are dominant and strong skin lines recessive; a missing locus reads as
+  its default and never as a mark. The founder window is unchanged, and no
+  genotype of either law can cross a cut under it. Only the full law's
+  pool moves; the fixture law was already on the lattice and stays byte
+  for byte.
+
 - The componion's beard and moustache genes, in the full law. Thirteen shape
   loci, each placed after every other locus of its pair so that no founder
   draw and no promoter moves: four additive melanin loci and a red locus

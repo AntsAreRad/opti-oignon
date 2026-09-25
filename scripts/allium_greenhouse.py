@@ -7,7 +7,8 @@ Founds ``count`` genomes from seeds keyed on one root, decodes and compiles
 each, and prints one canonical JSON object: how often each allele was
 drawn against the pool's frequencies, the spread of a few parameters, the
 colour classes the pigment loci allow, and how many of the genomes are
-distinct, and the adult beard and moustache each genome allows. It
+distinct, the body levels and the adult beard and moustache each genome
+allows. It
 simulates no day; it writes nothing anywhere; its numbers are
 ``"source": "static"`` -- properties of the law and the pool, not of a life.
 
@@ -42,6 +43,29 @@ BEARD_CLASSES = ("platinum", "cream", "golden", "honey", "light_chestnut", "ches
 RED_SHADES = ("venetian", "copper", "red", "auburn")
 FORMS = ("brush", "straight", "droopy", "curled")
 
+# The body's continuous SHAPE trait codes, and how they read. A value is first
+# rounded to its genotype step s = (value + 2048) >> 12: every allele is a
+# multiple of 8192, so a genotype compiles to 4096 * (ka + kb) give or take the
+# founder window, and s is ka + kb under any window below 2048. The cuts count
+# on s, as MEL_CUTS count on the summed melanin; in value terms a cut c sits at
+# 4096 * c - 2048, halfway between two steps.
+T_RADIUS, T_HEIGHT, T_NECK, T_STIFFNESS = 0, 1, 3, 5
+T_BREATH, T_TURN, T_STRIPE, T_SPECKLE = 6, 7, 10, 11
+HW_CUTS = (7, 8, 9, 10)               # bulb half-width 5 + count
+HB_CUTS = (5, 6, 7, 8, 9)             # bulb rows 8 + count
+HH_CUTS = (7, 9, 11)                  # hat rows 7 + count
+STIFFNESS_CUTS = (5, 6, 7, 8, 9, 10)  # stiffness 0..6; the tip bends 6 - stiffness
+EYE_CUT = 9                           # one wide allele sets the eyes 6 px apart
+TURN_CUTS = (7, 9, 11)                # left and gaze, left, right, right and gaze
+STRIPE_CUT = 10                       # strong skin lines need two striped alleles
+FLECK_CUTS = (7, 10)                  # 0, 1 or 2 flecks
+DRY_CUT = 9                           # a dry hat tip
+TURNS = ((-1, -1), (-1, 0), (1, 0), (1, 1))                 # (side, gaze) by turn class
+SPECKLES = ((0, False), (1, False), (1, True), (2, True))   # (flecks, dry) by speckle class
+BODY_DEFAULTS = {"dry": False, "eye": 2, "flop": 3, "gaze": 0, "hb": 10, "hh": 9, "hw": 7, "side": 1,
+                 "speck": 0, "strong": False}
+BODY_CLASSES = {"eye": 2, "flop": 7, "hb": 6, "hh": 4, "hw": 5, "speckle": 4, "stripe": 2, "turn": 4}
+
 
 def _column(tables, table, name):
     return wire.unpack_bulk(tables[table][name])[1]
@@ -68,6 +92,51 @@ def shape_traits(tables):
     """The compiled SHAPE rows as ``{trait: value}``."""
     rows = _column(tables["reserved"], "shape", "fields")
     return {rows[k]: rows[k + 1] for k in range(0, len(rows), 3)}
+
+
+def _step(value):
+    return (value + 2048) >> 12
+
+
+def _count(cuts, step):
+    return sum(1 for cut in cuts if step >= cut)
+
+
+def body_levels(shape):
+    """The body's genetic display levels, each from its own compiled value by absolute cuts.
+
+    No level depends on another genome: the sketch that ranked founders against
+    each other is gone. A missing locus reads as the stated default -- the
+    modal size, close-set eyes, leaning right without a gaze shift -- and never
+    as a mark: no strong lines, no fleck, no dry tip.
+    """
+    out = dict(BODY_DEFAULTS)
+    if T_RADIUS in shape:
+        out["hw"] = 5 + _count(HW_CUTS, _step(shape[T_RADIUS]))
+    if T_HEIGHT in shape:
+        out["hb"] = 8 + _count(HB_CUTS, _step(shape[T_HEIGHT]))
+    if T_NECK in shape:
+        out["hh"] = 7 + _count(HH_CUTS, _step(shape[T_NECK]))
+    if T_STIFFNESS in shape:
+        out["flop"] = 6 - _count(STIFFNESS_CUTS, _step(shape[T_STIFFNESS]))
+    if T_BREATH in shape:
+        out["eye"] = 3 if _step(shape[T_BREATH]) >= EYE_CUT else 2
+    if T_TURN in shape:
+        out["side"], out["gaze"] = TURNS[_count(TURN_CUTS, _step(shape[T_TURN]))]
+    if T_STRIPE in shape:
+        out["strong"] = _step(shape[T_STRIPE]) >= STRIPE_CUT
+    if T_SPECKLE in shape:
+        step = _step(shape[T_SPECKLE])
+        out["speck"] = _count(FLECK_CUTS, step)
+        out["dry"] = step >= DRY_CUT
+    return out
+
+
+def body_classes(levels):
+    """Each body trait's class index, for counting."""
+    return {"eye": levels["eye"] - 2, "flop": levels["flop"], "hb": levels["hb"] - 8, "hh": levels["hh"] - 7,
+            "hw": levels["hw"] - 5, "speckle": SPECKLES.index((levels["speck"], levels["dry"])),
+            "stripe": 1 if levels["strong"] else 0, "turn": TURNS.index((levels["side"], levels["gaze"]))}
 
 
 def beard_potential(shape):
@@ -143,6 +212,7 @@ def report(law_name, count, root, pool=None, native=False):
     sizes = {1: 0, 2: 0, 3: 0}
     thick = 0
     greys = []
+    body = {name: [0] * size for name, size in BODY_CLASSES.items()}
     size = 0
     for i in range(count):
         seed = rng.key(root, COHORT_DOMAIN, (i,))
@@ -167,7 +237,10 @@ def report(law_name, count, root, pool=None, native=False):
             vu_req.append(vern[3])
         pig = dict(zip(_column(tables, "pig", "class"), _column(tables, "pig", "allele")))
         colours[_colour(pig)] += 1
-        beard = beard_potential(shape_traits(tables))
+        shape = shape_traits(tables)
+        for name, index in body_classes(body_levels(shape)).items():
+            body[name][index] += 1
+        beard = beard_potential(shape)
         beards[beard["colour"]] += 1
         glints += beard["glints"]
         moustache = beard["moustache"]
@@ -180,6 +253,7 @@ def report(law_name, count, root, pool=None, native=False):
     out = {
         "beard_potential": {"colour": beards, "moustache": moustaches, "red_glints": glints,
                             "sizes": [sizes[1], sizes[2], sizes[3]], "thick": thick},
+        "body_potential": body,
         "clock_deg": _spread(clock),
         "colour_potential": colours,
         "compile_work": {"max": max(works), "min": min(works)},

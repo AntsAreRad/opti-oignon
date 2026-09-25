@@ -26,7 +26,8 @@ writes nothing and exits 1 when a file on disk differs.
 The v1 pool follows a rule rather than a list: a base allele ``a`` from the
 kind's defaults, and an allele ``b`` that moves one field by an eighth of
 its box, with named exceptions for the loci whose alleles mean something
-(clock period, photoperiod, colour, resistance, transposons, loads).
+(clock period, photoperiod, colour, resistance, transposons, loads, beard,
+body shape levels).
 """
 
 import argparse
@@ -151,6 +152,29 @@ BEARD_ALLELES = {
     "shape_grey_onset": (("early", 1, 730, 30), ("mid", 2, 1095, 30), ("late", 1, 1825, 30)),
     "shape_grey_span": (("fast", 1, 1095, 60), ("mid", 2, 2190, 60), ("slow", 1, 3650, 60)),
     "shape_grey_ceiling": (("full", 4, 256, 0), ("retained", 1, 96, 0)),
+}
+
+# The eight continuous body shape loci: every allele sits on the lattice
+# value = 8192 * k, so a genotype compiles to 4096 * (ka + kb) and a lone
+# allele to its homozygote's value. The greenhouse reads a value by rounding
+# it to that step and counting cuts that sit halfway between two steps, so
+# each genotype stays 2048 from its nearest cut, twice the founder window.
+BODY_WINDOW = 1024
+BODY_ALLELES = {
+    "shape_bulb_radius": (("slim", 1, 24576, BODY_WINDOW), ("round", 1, 32768, BODY_WINDOW),
+                          ("broad", 1, 40960, BODY_WINDOW)),
+    "shape_bulb_height": (("squat", 3, 16384, BODY_WINDOW), ("mid", 4, 24576, BODY_WINDOW),
+                          ("tall", 4, 32768, BODY_WINDOW), ("towering", 1, 40960, BODY_WINDOW)),
+    "shape_neck": (("short", 3, 24576, BODY_WINDOW), ("mid", 4, 32768, BODY_WINDOW),
+                   ("long", 3, 49152, BODY_WINDOW)),
+    "shape_leaf_stiffness": (("limp", 1, 16384, BODY_WINDOW), ("soft", 1, 24576, BODY_WINDOW),
+                             ("firm", 1, 32768, BODY_WINDOW), ("stiff", 1, 40960, BODY_WINDOW)),
+    "shape_breath_base": (("close", 7, 32768, BODY_WINDOW), ("wide", 3, 40960, BODY_WINDOW)),
+    "shape_turn_speed": (("slow", 3, 24576, BODY_WINDOW), ("steady", 4, 32768, BODY_WINDOW),
+                         ("quick", 3, 49152, BODY_WINDOW)),
+    "shape_stripe": (("plain", 3, 32768, BODY_WINDOW), ("striped", 7, 40960, BODY_WINDOW)),
+    "shape_speckle": (("clean", 3, 24576, BODY_WINDOW), ("freckled", 2, 32768, BODY_WINDOW),
+                      ("weathered", 3, 40960, BODY_WINDOW)),
 }
 
 
@@ -490,7 +514,6 @@ DEFAULTS = {
     "morph": {"threshold": (1024, 64), "rate": (8192, 256), "angle": (64, 2)},
     "plast": {"A": (16, 2), "Aneg": (0, 0), "B": (0, 0), "C": (0, 0), "D": (0, 0), "LR": (6, 0),
               "TAU_X": (3, 0), "TAU_Y": (3, 0), "TAU_E": (4, 0)},
-    "shape": {"value": (32768, 1024)},
 }
 TEMP_DEFAULTS = {
     "homeo": {"weight": (256, 16), "base": (16384, 256)},
@@ -593,10 +616,10 @@ def _v1_alleles(locus, entry):
                 ("c", 1, [18, 1, 3, 120, 35, 4, 85, 360], window)]
     if kind == "lex":
         return _lex_alleles(fields["offset"], 3, 1)
-    if name in BEARD_ALLELES:
+    table = BEARD_ALLELES if name in BEARD_ALLELES else BODY_ALLELES if name in BODY_ALLELES else None
+    if table is not None:
         trait = fields["trait"]
-        return [(label, freq, [trait, value, 0], [0, window, 0])
-                for label, freq, value, window in BEARD_ALLELES[name]]
+        return [(label, freq, [trait, value, 0], [0, window, 0]) for label, freq, value, window in table[name]]
     return _rule_alleles(locus, entry)
 
 
