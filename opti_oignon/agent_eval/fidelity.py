@@ -348,13 +348,18 @@ def run_needle_sweep(
     """Plant the nonce at every declared depth and size; count recoveries.
 
     The store is a real conversation database created under ``store_path``
-    and used for nothing else; the shipped data tree is never touched.
+    and used for nothing else. It is built off sync: the sync engine is the
+    process's, and a store that journals would put every planted
+    conversation into the device's change feed. So the shipped data tree is
+    never touched.
     """
     from opti_oignon.conversation import ConversationManager
 
     store_path = Path(store_path)
     store_path.mkdir(parents=True, exist_ok=True)
-    manager = ConversationManager(db_path=store_path / "needle_store.db")
+    manager = ConversationManager(
+        db_path=store_path / "needle_store.db", publish_to_sync=False
+    )
 
     cases: list[NeedleCase] = []
     for size in sizes:

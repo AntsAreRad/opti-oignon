@@ -453,6 +453,18 @@ package costs.
 
 ### Fixed
 
+- The two measurement guards wrote into the data places on every run --
+  in CI, in their harness contracts, and in the local ladder, where no
+  firewall covers them. The summary fidelity guard's needle sweep builds
+  its conversation store in a temporary directory, but the store journals
+  every save through the process's sync engine, whose feed and key are
+  the device's: 162 conversation records a run, signed with the device
+  key where one exists. The red-team guard's RAG probe ran the sanitizer
+  with its audit on: 4 rows of attack text a run in the injection audit.
+  `ConversationManager` now takes `publish_to_sync` (default unchanged),
+  the needle sweep builds its store with it off, and the probe runs the
+  shipped defense configuration with the audit alone switched off, the
+  verdict being computed before the audit is written.
 - The notes send-half suite let the store's real sync publish hook run in
   a full sweep: its creates happen before the spy is installed, and once
   the note-update suites before it had left the real sync package in the

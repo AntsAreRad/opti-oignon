@@ -235,11 +235,19 @@ def probe_rag_sanitizer(
     """Run the payload through the shipped RAG chunk sanitizer.
 
     The payload arrives as a retrieved chunk would, and the observation
-    reports whether the sanitizer flagged it as an injection attempt.
+    reports whether the sanitizer flagged it as an injection attempt. The
+    sanitizer runs on its shipped configuration with the audit alone
+    switched off: the audit is the record of real retrieval, written after
+    the verdict, and a measurement's attack text does not belong in it.
     """
-    from opti_oignon.rag_sanitizer import RAGSanitizer
+    from opti_oignon.rag_sanitizer import (
+        RAGSanitizer,
+        load_injection_defense_config,
+    )
 
-    result = RAGSanitizer().sanitize_chunk(
+    config = load_injection_defense_config()
+    config["audit"] = {**config.get("audit", {}), "enabled": False}
+    result = RAGSanitizer(config).sanitize_chunk(
         payload, chunk_id="redteam", source="redteam", collection="redteam"
     )
     return DefenseObservation(

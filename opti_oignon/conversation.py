@@ -288,13 +288,18 @@ class ConversationManager:
         messages = manager.get_context_messages(conv.id)
     """
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None, *, publish_to_sync: bool = True):
         """Initialize the manager.
 
         Args:
             db_path: Chemin vers la base SQLite (default: DATA_DIR/conversations.db)
+            publish_to_sync: whether saves are journalled for sync. A store
+                that is not the user's -- a throwaway measurement store --
+                passes False: the sync engine is the process's, so its
+                records would otherwise enter the device's change feed.
         """
         self._db_path = db_path or (DATA_DIR / "conversations.db")
+        self._publish_to_sync = publish_to_sync
         self._lock = threading.Lock()
         # The schema is built at the first connection, not here. This manager
         # is constructed at module scope and the package imports this module,
@@ -303,6 +308,16 @@ class ConversationManager:
         # refusal could not be handled by any caller.
         self._schema_ready = False
         logger.info(f"ConversationManager ready: {self._db_path}")
+
+    def _publish(
+        self,
+        conv_id: str,
+        payload_fn: Callable[[], dict[str, Any] | None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Journal a change for sync, unless this store was built not to."""
+        if self._publish_to_sync:
+            _sync_publish_conversation(conv_id, payload_fn, **kwargs)
 
     # -----------------------------------------------------------------------
     # Connexion et schema
@@ -524,7 +539,7 @@ class ConversationManager:
                 # Domain commit first, then the sync publish
                 # (best-effort; a snapshot or journalling failure never breaks
                 # the save -- the hook builds the snapshot inside its guard).
-                _sync_publish_conversation(
+                self._publish(
                     conv_id,
                     lambda: self._sync_snapshot(conn, conv_id),
                     updated_at=now,
@@ -652,7 +667,7 @@ class ConversationManager:
                     logger.debug(f"Conversation supprimee: {conv_id}")
                     # A domain delete publishes a tombstone so the
                     # deletion converges on peers (empty payload, deleted=True).
-                    _sync_publish_conversation(
+                    self._publish(
                         conv_id,
                         deleted=True,
                         updated_at=datetime.now().isoformat(),
@@ -687,7 +702,7 @@ class ConversationManager:
                 if renamed:
                     logger.debug(f"Conversation renommee: {conv_id} -> {new_title}")
                     # A rename is synced state; publish the new state.
-                    _sync_publish_conversation(
+                    self._publish(
                         conv_id,
                         lambda: self._sync_snapshot(conn, conv_id),
                         updated_at=now,
@@ -768,7 +783,7 @@ class ConversationManager:
                 updated = cursor.rowcount > 0
                 if updated:
                     # Metadata is synced state; publish the new state.
-                    _sync_publish_conversation(
+                    self._publish(
                         conv_id,
                         lambda: self._sync_snapshot(conn, conv_id),
                         updated_at=now,
@@ -973,7 +988,7 @@ class ConversationManager:
                 # (best-effort; the hook builds the full-state snapshot inside
                 # its guard, on this already-open connection, and only when
                 # sync is available -- the save never pays otherwise).
-                _sync_publish_conversation(
+                self._publish(
                     conv_id,
                     lambda: self._sync_snapshot(conn, conv_id),
                     updated_at=now,
@@ -1495,7 +1510,7 @@ class ConversationManager:
                 logger.debug(f"Dernier message supprime: id={row['id']} conv={conv_id[:8]}")
                 # A retry-delete is an edit of the conversation,
                 # not a deletion of it; publish the reduced full state.
-                _sync_publish_conversation(
+                self._publish(
                     conv_id,
                     lambda: self._sync_snapshot(conn, conv_id),
                     updated_at=datetime.now().isoformat(),
