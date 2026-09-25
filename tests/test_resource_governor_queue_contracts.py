@@ -29,7 +29,10 @@ container-isolable after S281, each mutation-proven red-before-green:
     * P3 (control) an absent model returns None -- never "too large" (3.1).
 
 Isolation follows the S280/S281 idiom, re-declared here so this file is fully
-self-contained. The conditional-grant path reads ``self._warmup.keep_alive`` and
+self-contained: each contract opens the shared isolation window of
+``tests/_isolation.py`` on the on-disk source, with a seeded ``db_utils`` and
+every other project module unreachable, and closes it after. The
+conditional-grant path reads ``self._warmup.keep_alive`` and
 a real ``time.time()`` for idle derivation; rather than patch the clock, an
 injected fake warmup (keep_alive "10m") plus a loaded view whose ``expires_at``
 is epoch 0 makes the derived idle time dwarf any sub-second drift in ``now``, so
@@ -39,49 +42,64 @@ pre-injected snapshot and read the enqueue back from the ring.
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sqlite3
 import sys
 import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
-_RG_SRC = _OO / "resource_governor.py"
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_RG = "opti_oignon.resource_governor"
 _GIB = 1024 ** 3
+# The two seams the governor resolves at the call: unreachable when the window
+# opens unless a contract seeds one, and put back as found when it closes.
+_SEAMS = ("opti_oignon.context_manager", "opti_oignon.emergency_stop")
+_CLOSERS = []
 
 
-def _install_base_stubs():
-    """Seed the minimal ``opti_oignon`` package + db_utils (notes idiom)."""
-    if not isinstance(sys.modules.get("opti_oignon"), types.ModuleType) or (
-        getattr(sys.modules.get("opti_oignon"), "__file__", "x") is not None
-    ):
-        pkg = types.ModuleType("opti_oignon")
-        pkg.__path__ = []
-        sys.modules["opti_oignon"] = pkg
-    if "opti_oignon.db_utils" not in sys.modules:
-        db = types.ModuleType("opti_oignon.db_utils")
-        db.safe_connect = lambda p, **kw: sqlite3.connect(
-            str(p), check_same_thread=kw.get("check_same_thread", False)
-        )
-        sys.modules["opti_oignon.db_utils"] = db
+def _db_utils():
+    """A db_utils stand-in whose safe_connect is plain sqlite (notes idiom)."""
+    db = types.ModuleType("opti_oignon.db_utils")
+    db.safe_connect = lambda p, **kw: sqlite3.connect(
+        str(p), check_same_thread=kw.get("check_same_thread", False)
+    )
+    return db
 
 
 def _load_rg():
-    """Load resource_governor.py in isolation (idempotent; shares the cached
-    module with the sibling companions when several run in one process)."""
-    _install_base_stubs()
-    cached = sys.modules.get("opti_oignon.resource_governor")
-    if cached is not None:
-        return cached
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.resource_governor", _RG_SRC
+    """Load resource_governor.py in the shared window, closed after the contract."""
+    loaded, restore = isolate(
+        targets={_RG: source("resource_governor.py")},
+        blocked=_SEAMS,
+        seeded={"opti_oignon.db_utils": _db_utils()},
     )
-    rg = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.resource_governor"] = rg
-    spec.loader.exec_module(rg)
-    return rg
+    _CLOSERS.append(restore)
+    return loaded[_RG]
+
+
+def _close_windows():
+    """Close every window the contract opened, the last one first."""
+    while _CLOSERS:
+        _CLOSERS.pop()()
+
+
+def _project_modules():
+    """Every project entry of the module cache, by identity."""
+    return {k: v for k, v in sys.modules.items() if k == "opti_oignon" or k.startswith("opti_oignon.")}
+
+
+@pytest.fixture(autouse=True)
+def _project_modules_left_as_found():
+    """No contract here may leave a project module changed in the cache."""
+    before = _project_modules()
+    yield
+    _close_windows()
+    assert _project_modules() == before, "every project module is left as the contract found it"
 
 
 class _FakeClock:
@@ -321,5 +339,7 @@ if __name__ == "__main__":
             failures += 1
             print(f"FAIL {t.__name__}")
             traceback.print_exc()
+        finally:
+            _close_windows()
     print(f"\n{len(tests) - failures} passed, {failures} failed")
     sys.exit(1 if failures else 0)

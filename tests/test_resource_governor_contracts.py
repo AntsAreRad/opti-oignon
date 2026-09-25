@@ -7,13 +7,14 @@ and the optional runtime limits applier -- and ships with no test today. This
 companion pins the highest-value security contracts across the three families,
 each mutation-proven red-before-green.
 
-The module's top-level imports are stdlib + ``yaml`` only, so it loads in
-isolation through ``spec_from_file_location`` with the stubbed ``db_utils``
-idiom the sibling suites use. Every external dependency the admission path
-reaches (the Ollama warmup, the backend registry, the emergency-stop flag, the
-ModelLimits clamp) is resolved through ``sys.modules`` first with a fail-open
-fallback, so a hand-built snapshot plus an injected clock drive ``admit`` fully
-deterministically -- no warmup or registry read happens.
+The module's top-level imports are stdlib + ``yaml`` only, so it loads in the
+shared isolation window (``tests/_isolation.py``) with a seeded ``db_utils``:
+one window per contract, closed after it, and no project module left behind.
+Every other project module is unreachable there, so every external dependency
+the admission path reaches (the Ollama warmup, the backend registry, the
+emergency-stop flag, the ModelLimits clamp) takes its fail-open fallback unless
+the contract seeds it, and a hand-built snapshot plus an injected clock drive
+``admit`` fully deterministically -- no warmup or registry read happens.
 
 Contracts pinned (spec RESOURCE_GOVERNOR_SPEC.md Sections 4-6):
 
@@ -47,7 +48,6 @@ under the mutation harness too.
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import json
 import sqlite3
 import subprocess
@@ -57,40 +57,43 @@ import textwrap
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
-_RG_SRC = _OO / "resource_governor.py"
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_RG = "opti_oignon.resource_governor"
+# The two seams the governor resolves at the call: unreachable when the window
+# opens unless a contract seeds one, and put back as found when it closes.
+_SEAMS = ("opti_oignon.context_manager", "opti_oignon.emergency_stop")
+_CLOSERS = []
 
 
-def _install_base_stubs():
-    """Seed the minimal ``opti_oignon`` package + db_utils (notes idiom)."""
-    if not isinstance(sys.modules.get("opti_oignon"), types.ModuleType) or (
-        getattr(sys.modules.get("opti_oignon"), "__file__", "x") is not None
-    ):
-        pkg = types.ModuleType("opti_oignon")
-        pkg.__path__ = []
-        sys.modules["opti_oignon"] = pkg
-    if "opti_oignon.db_utils" not in sys.modules:
-        db = types.ModuleType("opti_oignon.db_utils")
-        db.safe_connect = lambda p, **kw: sqlite3.connect(
-            str(p), check_same_thread=kw.get("check_same_thread", False)
-        )
-        sys.modules["opti_oignon.db_utils"] = db
+def _db_utils():
+    """A db_utils stand-in whose safe_connect is plain sqlite (notes idiom)."""
+    db = types.ModuleType("opti_oignon.db_utils")
+    db.safe_connect = lambda p, **kw: sqlite3.connect(
+        str(p), check_same_thread=kw.get("check_same_thread", False)
+    )
+    return db
 
 
 def _load_rg():
-    """Load resource_governor.py in isolation (idempotent)."""
-    _install_base_stubs()
-    cached = sys.modules.get("opti_oignon.resource_governor")
-    if cached is not None:
-        return cached
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.resource_governor", _RG_SRC
+    """Load resource_governor.py in the shared window, closed after the contract."""
+    loaded, restore = isolate(
+        targets={_RG: source("resource_governor.py")},
+        blocked=_SEAMS,
+        seeded={"opti_oignon.db_utils": _db_utils()},
     )
-    rg = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.resource_governor"] = rg
-    spec.loader.exec_module(rg)
-    return rg
+    _CLOSERS.append(restore)
+    return loaded[_RG]
+
+
+def _close_windows():
+    """Close every window the contract opened, the last one first."""
+    while _CLOSERS:
+        _CLOSERS.pop()()
 
 
 def _seed_estop(stopped: bool):
@@ -109,6 +112,20 @@ def _seed_estop(stopped: bool):
 def _clear_estop():
     """Remove the estop stub so the resolver fails open to None (no stop)."""
     sys.modules.pop("opti_oignon.emergency_stop", None)
+
+
+def _project_modules():
+    """Every project entry of the module cache, by identity."""
+    return {k: v for k, v in sys.modules.items() if k == "opti_oignon" or k.startswith("opti_oignon.")}
+
+
+@pytest.fixture(autouse=True)
+def _project_modules_left_as_found():
+    """No contract here may leave a project module changed in the cache."""
+    before = _project_modules()
+    yield
+    _close_windows()
+    assert _project_modules() == before, "every project module is left as the contract found it"
 
 
 class _FakeClock:
@@ -295,18 +312,16 @@ def test_c7_estop_refusal_never_enters_refusal_window():
 
 _CHILD_PREAMBLE = textwrap.dedent(
     """
-    import importlib.util, json, sqlite3, sys, types, resource
-    _OO = {oo!r}
-    pkg = types.ModuleType("opti_oignon"); pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
+    import json, resource, sqlite3, sys, types
+    sys.path.insert(0, {tests!r})
+    from _isolation import isolate, source
     db = types.ModuleType("opti_oignon.db_utils")
     db.safe_connect = lambda p, **k: sqlite3.connect(str(p))
-    sys.modules["opti_oignon.db_utils"] = db
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.resource_governor", _OO + "/resource_governor.py")
-    rg = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.resource_governor"] = rg
-    spec.loader.exec_module(rg)
+    loaded, _restore = isolate(
+        targets={{"opti_oignon.resource_governor": source("resource_governor.py")}},
+        seeded={{"opti_oignon.db_utils": db}},
+    )
+    rg = loaded["opti_oignon.resource_governor"]
     """
 )
 
@@ -314,7 +329,7 @@ _CHILD_PREAMBLE = textwrap.dedent(
 def _run_child(body: str) -> dict:
     """Run a child interpreter that imports the on-disk source and prints a
     single JSON result line; return the parsed dict."""
-    script = _CHILD_PREAMBLE.format(oo=str(_OO)) + textwrap.dedent(body)
+    script = _CHILD_PREAMBLE.format(tests=str(Path(__file__).resolve().parent)) + textwrap.dedent(body)
     proc = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -404,5 +419,7 @@ if __name__ == "__main__":
             failures += 1
             print(f"FAIL {t.__name__}")
             traceback.print_exc()
+        finally:
+            _close_windows()
     print(f"\n{len(tests) - failures} passed, {failures} failed")
     sys.exit(1 if failures else 0)

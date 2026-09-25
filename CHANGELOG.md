@@ -422,6 +422,13 @@ package costs.
   routing suites through the shared isolation window, paying their seal
   debt -- and each carries a teardown check that fails a contract leaving
   either one altered.
+- The three resource-governor suites left a new stand-in `opti_oignon`
+  package behind after each of their 24 in-process contracts, and under an
+  editable install they ran beside the real emergency stop, backend
+  registry and VRAM estimator, loaded by name behind their stand-in rather
+  than kept out. They now load the governor through the shared isolation
+  window, one window per contract, and a teardown check fails any contract
+  that leaves a project module changed; three seal debts are paid.
 - [SECURITY] `/skill` in `oo chat` put the text of a skill received from a
   paired device into the system prompt, as an instruction. The device's
   sync gate had let the record through on its provenance -- peer, device,
