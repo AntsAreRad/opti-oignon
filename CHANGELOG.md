@@ -453,6 +453,11 @@ package costs.
 
 ### Fixed
 
+- A vision request through the core daemon was answered blind: the remote
+  core client took a request's images and never put them on the wire, and
+  the daemon had no field for them. The client now sends them as given, the
+  daemon hands them to its backend on both heads, and images that are not a
+  list of base64 strings are refused by name before any backend is asked.
 - The local ladder's guard tier ran each guard on the maintainer's tree. A
   guard that imports the application -- the published-prose guard builds
   the OpenAPI schema from it -- runs its module-level singletons, and those

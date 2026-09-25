@@ -167,9 +167,13 @@ class CoreService:
         if options is not None and not isinstance(options, dict):
             return None, (400, {"error": "options: must be an object"})
         think = payload.get("think")
+        images = payload.get("images")
+        if images is not None and not (isinstance(images, list) and all(isinstance(i, str) for i in images)):
+            return None, (400, {"error": "images: must be a list of base64 strings"})
         return dict(
             model=model, messages=messages, options=options,
             keep_alive=str(payload.get("keep_alive", "30m")), think=None if think is None else bool(think),
+            images=images or None,
         ), None
 
     def _backend(self, model):

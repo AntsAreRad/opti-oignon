@@ -23,6 +23,13 @@ is not an empty catalogue.
     unknown as a null listing with ``known`` false, and a known empty as
     an empty listing with ``known`` true. Supersedes RD2 by name.
 
+A request's images crossed nowhere: the client took them and never sent
+them, so a vision request through the daemon was answered as if it had no
+image.
+
+  * RD5 -- images ride the wire on both heads and reach the daemon's
+    backend as sent; a request without images reaches it with none.
+
 Local-only (the public distribution ships no tests). The client and the
 daemon are loaded through the shared isolation window; the daemon runs in
 a thread on an ephemeral loopback port.
@@ -220,5 +227,46 @@ def test_rd4_an_absent_daemon_is_unknown_and_the_wire_carries_unknown_and_known_
         finally:
             server.shutdown()
             server.server_close()
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RD5 -- images ride the wire, on both heads
+# ---------------------------------------------------------------------------
+class _Seeing:
+    """A backend that records the images each of its heads receives."""
+
+    name = "seeing"
+
+    def __init__(self):
+        self.seen = []
+
+    def generate(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
+        self.seen.append(("generate", images))
+        return _Response("seen", model=model)
+
+    def stream(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
+        self.seen.append(("stream", images))
+        yield _Chunk(content="seen", done=True, model=model)
+
+
+def test_rd5_images_ride_the_wire_to_the_daemons_backend_on_both_heads():
+    daemon, client, scripted, registry, restore = _open()
+    try:
+        seeing = _Seeing()
+        registry.register(seeing)
+        registry.activate(seeing.name)
+        server, base = _serve(daemon)
+        picture = ["aGVsbG8="]
+        try:
+            remote = client.RemoteCoreBackend(base, timeout_s=5.0)
+            assert remote.generate("m", _MSGS, images=picture).content == "seen"
+            assert [chunk.content for chunk in remote.stream("m", _MSGS, images=picture)] == ["seen"]
+            remote.generate("m", _MSGS)
+        finally:
+            server.shutdown()
+            server.server_close()
+        assert seeing.seen == [("generate", picture), ("stream", picture), ("generate", None)], seeing.seen
     finally:
         restore()

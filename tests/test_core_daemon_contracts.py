@@ -20,6 +20,8 @@ missing backend and a missing token are each a refusal by name.
     is not JSON, 503 when no backend serves the model.
   * DM6 -- a configured token is required on every route but health, and
     the configuration refuses a non-loopback host.
+  * DM7 -- images reach the backend as sent, and images that are not a
+    list of strings are refused by name before any backend is asked.
 
 Local-only (the public distribution ships no tests). The daemon module is
 loaded through the shared isolation window over a scripted registry; each
@@ -264,6 +266,28 @@ def test_dm6_a_configured_token_is_required_and_a_non_loopback_host_is_refused()
         finally:
             server.shutdown()
         assert len(scripted.calls) == 1, "only the authorised request reached a model"
+    finally:
+        restore()
+
+
+
+# ---------------------------------------------------------------------------
+# DM7 -- images are carried, or refused by name
+# ---------------------------------------------------------------------------
+def test_dm7_images_reach_the_backend_and_malformed_images_are_refused_by_name():
+    mod, scripted, registry, restore = _open()
+    try:
+        server, base = _serve(mod)
+        picture = ["aGVsbG8="]
+        try:
+            status, _ = _post(base + "/inference/generate", {"model": "m", "messages": _MSGS, "images": picture})
+            assert status == 200
+            for bad in ("aGVsbG8=", [1, 2], {"a": "b"}, ["aGVsbG8=", None]):
+                status, body = _post(base + "/inference/generate", {"model": "m", "messages": _MSGS, "images": bad})
+                assert status == 400 and "images" in body, (bad, status, body)
+        finally:
+            server.shutdown()
+        assert len(scripted.calls) == 1 and scripted.calls[0].get("images") == picture, scripted.calls
     finally:
         restore()
 

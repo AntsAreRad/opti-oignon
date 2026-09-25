@@ -107,12 +107,16 @@ class RemoteCoreBackend(InferenceBackend):
         return self.base_url
 
     @staticmethod
-    def _payload(model, messages, options, keep_alive, think):
+    def _payload(model, messages, options, keep_alive, think, images=None):
         think = think if think is None else bool(think)
-        return {"model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": think}
+        return {
+            "model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": think,
+            # The images travel as given (base64 strings); left out, the model would answer blind.
+            "images": list(images) if images else None,
+        }
 
     def generate(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
-        with self._request("/inference/generate", self._payload(model, messages, options, keep_alive, think)) as resp:
+        with self._request("/inference/generate", self._payload(model, messages, options, keep_alive, think, images)) as resp:
             wire = json.loads(resp.read().decode("utf-8"))
         return ChatResponse(
             content=wire.get("content", "") or "",
@@ -125,7 +129,7 @@ class RemoteCoreBackend(InferenceBackend):
         )
 
     def stream(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
-        with self._request("/inference/stream", self._payload(model, messages, options, keep_alive, think)) as resp:
+        with self._request("/inference/stream", self._payload(model, messages, options, keep_alive, think, images)) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()
                 if not line:

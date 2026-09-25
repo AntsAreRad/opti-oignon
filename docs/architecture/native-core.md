@@ -81,15 +81,17 @@ importing only the core. Its routes are `GET /health`, `GET /models`,
 `POST /admission` (a pack's ticket: the governor admits or refuses, in its
 own words). It binds the loopback and nothing else, requires the configured
 bearer token on every route but health, and refuses by name an unknown
-route, a body that is not JSON, a request without a model, a model no
-backend serves. The listing route says whether anyone could look: a
+route, a body that is not JSON, a request without a model, images that are
+not a list of base64 strings, a model no backend serves. The listing route
+says whether anyone could look: a
 backend that cannot read its catalogue crosses the wire as a null listing
 with `known` false, a backend that looked and found nothing as an empty
 listing with `known` true, and the client on the other side keeps the two
 apart.
 
 `opti_oignon/core_client.py` is the other half: a registry backend that
-forwards every request to the daemon. When `core.yaml` enables the daemon,
+forwards every request to the daemon, a request's images included. When
+`core.yaml` enables the daemon,
 `init_backends_from_config` registers and activates it in the calling
 process, so that process -- the application first -- asks the daemon for
 inference and is admitted, labelled and schema-checked like a chat turn.
