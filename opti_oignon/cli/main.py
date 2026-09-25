@@ -35,7 +35,19 @@ from pathlib import Path
 import click
 
 from .client import CLIClientError, OOClient
-from .config import ANIMATION_RANGES, CLIConfig, load_config, parse_animation_ms, parse_switch
+from .config import (
+    ANIMATION_RANGES,
+    VALID_OUTPUT_FORMATS,
+    CLIConfig,
+    ConfigFileError,
+    default_settings,
+    load_config,
+    parse_animation_ms,
+    parse_switch,
+    parse_timeout,
+    read_file,
+    write_file,
+)
 from .output import (
     Spinner,
     echo_error,
@@ -54,6 +66,20 @@ def _get_client(ctx: click.Context) -> OOClient:
 def _get_config(ctx: click.Context) -> CLIConfig:
     """Retrieve the CLIConfig from the Click context."""
     return ctx.obj["config"]
+
+
+def _waiting(ctx: click.Context, message: str, call):
+    """Answer ``call()`` from behind a spinner.
+
+    A client error stops the spinner and erases its line before the error
+    is written, so the message never lands inside the spinner's line.
+    """
+    try:
+        with Spinner(message, enabled=_get_config(ctx).color):
+            return call()
+    except CLIClientError as exc:
+        echo_error(str(exc))
+        ctx.exit(1)
 
 
 # =========================================================================
@@ -112,14 +138,8 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
     effective_model = model or cfg.default_model
 
     if json_out:
-        # Non-streaming: collect full response, print as JSON
-        with Spinner("Generating", enabled=cfg.color and not json_out):
-            try:
-                full = client.stream_chat(text, model=effective_model)
-            except CLIClientError as exc:
-                echo_error(str(exc))
-                ctx.exit(1)
-                return
+        # Non-streaming: the spinner is on stderr, the JSON alone on stdout
+        full = _waiting(ctx, "Generating", lambda: client.stream_chat(text, model=effective_model))
         click.echo(json.dumps({"model": effective_model or "router",
                                 "prompt": text, "response": full}, indent=2))
         return
@@ -167,13 +187,7 @@ def models(ctx: click.Context) -> None:
     """List available models with status information."""
     client = _get_client(ctx)
     cfg = _get_config(ctx)
-    with Spinner("Fetching models", enabled=cfg.color):
-        try:
-            data = client.get("/api/models")
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    data = _waiting(ctx, "Fetching models", lambda: client.get("/api/models"))
     model_list = data.get("models", [])
     if not model_list:
         click.echo("No models found.")
@@ -192,13 +206,7 @@ def status(ctx: click.Context) -> None:
     """Show system health and backend status."""
     client = _get_client(ctx)
     cfg = _get_config(ctx)
-    with Spinner("Checking status", enabled=cfg.color):
-        try:
-            data = client.get("/api/health/dashboard")
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    data = _waiting(ctx, "Checking status", lambda: client.get("/api/health/dashboard"))
     output = format_status(data, color=cfg.color)
     click.echo(output)
 
@@ -370,15 +378,8 @@ def backup() -> None:
 def backup_export(ctx: click.Context, output_path: str | None) -> None:
     """Export configuration backup to a JSON file."""
     client = _get_client(ctx)
-    cfg = _get_config(ctx)
     dest = output_path or "opti-oignon-backup.json"
-    with Spinner("Exporting backup", enabled=cfg.color):
-        try:
-            data = client.get("/api/backup/export")
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    data = _waiting(ctx, "Exporting backup", lambda: client.get("/api/backup/export"))
     Path(dest).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     echo_success(f"Backup saved to {dest}")
 
@@ -391,7 +392,6 @@ def backup_export(ctx: click.Context, output_path: str | None) -> None:
 def backup_import(ctx: click.Context, input_path: str, strategy: str) -> None:
     """Import configuration from a backup JSON file."""
     client = _get_client(ctx)
-    cfg = _get_config(ctx)
     try:
         raw = json.loads(Path(input_path).read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -399,15 +399,9 @@ def backup_import(ctx: click.Context, input_path: str, strategy: str) -> None:
         ctx.exit(1)
         return
 
-    with Spinner("Importing backup", enabled=cfg.color):
-        try:
-            result = client.post("/api/backup/import", json_body={
-                "backup": raw, "strategy": strategy,
-            })
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    result = _waiting(ctx, "Importing backup", lambda: client.post("/api/backup/import", json_body={
+        "backup": raw, "strategy": strategy,
+    }))
     changes = result.get("changes_applied", 0) if isinstance(result, dict) else "?"
     echo_success(f"Backup imported ({strategy}). Changes applied: {changes}")
 
@@ -429,18 +423,11 @@ def rag() -> None:
 def rag_ingest(ctx: click.Context, filepath: str, collection: str) -> None:
     """Ingest a file into the RAG knowledge base."""
     client = _get_client(ctx)
-    cfg = _get_config(ctx)
-    with Spinner(f"Ingesting {Path(filepath).name}", enabled=cfg.color):
-        try:
-            result = client.post_file(
-                "/api/rag/ingest",
-                filepath=filepath,
-                extra_fields={"collection": collection},
-            )
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    result = _waiting(ctx, f"Ingesting {Path(filepath).name}", lambda: client.post_file(
+        "/api/rag/ingest",
+        filepath=filepath,
+        extra_fields={"collection": collection},
+    ))
     doc_id = result.get("doc_id", "?") if isinstance(result, dict) else "?"
     chunks = result.get("chunk_count", "?") if isinstance(result, dict) else "?"
     echo_success(f"Ingested {Path(filepath).name} -> doc_id={doc_id}, chunks={chunks}")
@@ -454,17 +441,10 @@ def rag_ingest(ctx: click.Context, filepath: str, collection: str) -> None:
 def rag_query(ctx: click.Context, question: str, collection: str, n_results: int) -> None:
     """Query the RAG knowledge base."""
     client = _get_client(ctx)
-    cfg = _get_config(ctx)
-    with Spinner("Querying knowledge base", enabled=cfg.color):
-        try:
-            data = client.post("/api/rag/query", json_body={
-                "query": question, "collection": collection,
-                "n_results": n_results,
-            })
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    data = _waiting(ctx, "Querying knowledge base", lambda: client.post("/api/rag/query", json_body={
+        "query": question, "collection": collection,
+        "n_results": n_results,
+    }))
     results = data.get("results", []) if isinstance(data, dict) else []
     if not results:
         click.echo("No results found.")
@@ -512,13 +492,7 @@ def redteam_run(ctx: click.Context, quick: bool,
     if targets:
         body["targets"] = list(targets)
 
-    with Spinner("Launching campaign", enabled=cfg.color):
-        try:
-            result = client.post("/api/security/redteam/run", json_body=body)
-        except CLIClientError as exc:
-            echo_error(str(exc))
-            ctx.exit(1)
-            return
+    result = _waiting(ctx, "Launching campaign", lambda: client.post("/api/security/redteam/run", json_body=body))
 
     echo_success("Campaign started.")
     click.echo(f"  Categories: {result.get('config', {}).get('categories', '?')}")
@@ -782,49 +756,49 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
         oo config set animations false
         oo config set animation_interval_ms 200
     """
-    cfg = _get_config(ctx)
     allowed = {"api_url", "default_model", "output_format", "color", "timeout",
                "animations", *ANIMATION_RANGES}
     if key not in allowed:
         echo_error(f"Unknown config key '{key}'. Valid keys: {', '.join(sorted(allowed))}")
         ctx.exit(1)
         return
-    if key == "animations":
-        switch = parse_switch(value)
-        if switch is None:
-            echo_error("animations must be true or false (also yes/no, on/off, 1/0)")
-            ctx.exit(1)
-            return
-        cfg.animations = switch
+    if key in ("animations", "color"):
+        parsed = parse_switch(value)
+        problem = f"{key} must be true or false (also yes/no, on/off, 1/0)"
     elif key in ANIMATION_RANGES:
         parsed = parse_animation_ms(key, value)
-        if parsed is None:
-            low, high, _ = ANIMATION_RANGES[key]
-            echo_error(f"{key} must be a whole number of milliseconds between {low} and {high}")
-            ctx.exit(1)
-            return
-        setattr(cfg, key, parsed)
-    elif key == "color":
-        setattr(cfg, key, value.lower() in ("true", "1", "yes"))
+        low, high, _ = ANIMATION_RANGES[key]
+        problem = f"{key} must be a whole number of milliseconds between {low} and {high}"
     elif key == "timeout":
-        try:
-            setattr(cfg, key, int(value))
-        except ValueError:
-            echo_error("timeout must be an integer")
-            ctx.exit(1)
-            return
+        parsed = parse_timeout(value)
+        problem = "timeout must be a positive whole number of seconds"
+    elif key == "output_format":
+        parsed = value if value in VALID_OUTPUT_FORMATS else None
+        problem = f"output_format must be one of {', '.join(VALID_OUTPUT_FORMATS)}"
     else:
-        setattr(cfg, key, value)
-    saved = cfg.save()
-    echo_success(f"{key} = {getattr(cfg, key)} (saved to {saved})")
+        parsed, problem = value, ""
+    if parsed is None:
+        echo_error(problem)
+        ctx.exit(1)
+        return
+    # The file, not the run: an override of this run (NO_COLOR, --no-color,
+    # --api-url, OO_API_URL) is never written.
+    try:
+        settings = read_file()
+    except ConfigFileError as exc:
+        echo_error(f"{exc}; nothing was written (oo config reset starts it over)")
+        ctx.exit(1)
+        return
+    settings[key] = parsed
+    saved = write_file(settings)
+    echo_success(f"{key} = {parsed} (saved to {saved})")
 
 
 @config_cmd.command("reset")
 @click.pass_context
 def config_reset(ctx: click.Context) -> None:
     """Reset CLI configuration to defaults."""
-    cfg = CLIConfig()
-    saved = cfg.save()
+    saved = write_file(default_settings())
     echo_success(f"Configuration reset to defaults (saved to {saved})")
 
 

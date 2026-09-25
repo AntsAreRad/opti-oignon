@@ -236,9 +236,17 @@ oo config reset                    # reset to defaults
 | `animation_delay_ms` | `400` | Wait before the first frame, 100 to 5000 |
 | `animation_stop_ms` | `100` | Longest the chat waits to erase a frame, 10 to 1000 |
 
-`oo config set` refuses an animation value outside its range by name and
-leaves the file as it was. In the file, an animation value that cannot be
-read falls back to its own default, and an unreadable `animations` is off.
+`oo config set` refuses by name a value it cannot read -- an animation
+value outside its range, a switch that is not true or false (yes/no,
+on/off and 1/0 are read too), a timeout that is not a positive whole
+number of seconds, an output format it does not know -- and leaves the
+file as it was; it refuses as well to edit a file that is not a mapping of
+settings. It writes what the file already holds plus the key it was given:
+`NO_COLOR`, `--no-color`, `--api-url` and `OO_API_URL` change a run, never
+the file, and `oo config reset` writes the defaults whatever the
+environment says. In the file, every key is read alone: a value that
+cannot be read falls back to its own default and leaves the others as
+they are, and an unreadable `animations` is off.
 
 | Subcommand | Description |
 |------------|-------------|

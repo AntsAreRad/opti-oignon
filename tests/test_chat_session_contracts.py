@@ -388,9 +388,12 @@ def test_ch5_the_session_imports_nothing_from_the_package_at_load():
 # ---------------------------------------------------------------------------
 # CH6 -- oo chat through the click runner
 # ---------------------------------------------------------------------------
-def test_ch6_oo_chat_drives_the_session_over_stdin_and_prints_refusals_to_stderr(tmp_path):
+def test_ch6_oo_chat_drives_the_session_over_stdin_and_prints_refusals_to_stderr(tmp_path, monkeypatch):
     from click.testing import CliRunner
 
+    # The CLI reads its configuration from the test's own directory, never
+    # from the user's: the config module resolves its path when it loads.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     loaded, scripted, conversations, restore = _load(cli=True)
     try:
         off, *_ = _onion_seam(loaded, tmp_path, enabled=False)

@@ -11,6 +11,9 @@ package costs.
 
 ### Added
 
+- `oo ask --json-out` shows its "Generating" spinner on stderr while it
+  waits, as every other waiting command does; stdout is still exactly the
+  JSON document. The spinner was there and could never turn on.
 - The eviction gate's recall probes -- drawn from a span, scored against a
   candidate summary -- have a native implementation in `oo_core`, used
   when the artefact is built. It answers exactly as the Python reference
@@ -369,6 +372,19 @@ package costs.
 
 ### Fixed
 
+- `oo config set` wrote the configuration of the run, not the file: a
+  transient `NO_COLOR`, `--no-color`, `--api-url` or `OO_API_URL` ended up
+  saved, along with every default the user never chose, and `oo config
+  reset` saved `color: false` under `NO_COLOR`. It now writes what the file
+  holds plus the key it was given, refuses by name a colour, timeout or
+  output format it cannot read, and refuses to edit a file that is not a
+  mapping instead of overwriting it.
+- `color: "false"` in `cli.yaml` read as true, and one unreadable value --
+  a timeout of `abc`, say -- reset the whole file to its defaults. Every key
+  is now read alone and falls back to its own default.
+- An error printed while a spinner turned landed inside the spinner's
+  line. The eight commands that wait behind a spinner now stop it and erase
+  its line before they say why they failed.
 - The browser specs no longer race the first-run dialog. The helper waited a
   fixed budget for it to appear and, when the budget ran out first, returned as
   though there were nothing to dismiss; the dialog then opened over the page and

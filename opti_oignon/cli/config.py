@@ -18,12 +18,19 @@ Supported keys
 - ``animation_delay_ms``    : Wait before the first frame, 100 to 5000 (default ``400``)
 - ``animation_stop_ms``     : Longest the chat waits to erase a frame, 10 to 1000 (default ``100``)
 
-An animation value that cannot be read falls back to its own default and
-leaves every other setting as it is; an unreadable ``animations`` is off.
+Every key is read alone: a value that cannot be read falls back to its own
+default and leaves every other setting as it is, and an unreadable
+``animations`` is off.
+
+The file is only what the user wrote. ``NO_COLOR``, ``--no-color``,
+``--api-url`` and ``OO_API_URL`` change the configuration a run uses and
+never the file: ``oo config set`` edits the file itself through
+:func:`read_file` and :func:`write_file`, and ``oo config reset`` writes
+:func:`default_settings`.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 import yaml
@@ -57,6 +64,19 @@ def parse_switch(value) -> bool | None:
     if text in _SWITCH_OFF:
         return False
     return None
+
+
+def parse_timeout(value) -> int | None:
+    """A positive whole number of seconds; None for anything else, a boolean included."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, float):
+        value = int(value)
+    if not isinstance(value, int) or value < 1:
+        return None
+    return value
 
 
 def parse_animation_ms(key: str, value) -> int | None:
@@ -122,34 +142,90 @@ class CLIConfig:
         return data
 
     def save(self, path: Path | None = None) -> Path:
-        """Write current configuration to *path* (default CONFIG_FILE)."""
-        dest = path or CONFIG_FILE
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(self.to_dict(), fh, default_flow_style=False, sort_keys=False)
-        return dest
+        """Write this configuration, the run's overrides included, to *path* (default CONFIG_FILE)."""
+        return write_file(self.to_dict(), path)
+
+
+class ConfigFileError(ValueError):
+    """The configuration file exists and cannot be read as a mapping of settings."""
+
+
+def default_settings() -> dict:
+    """The defaults as the file holds them, whatever the run's environment says."""
+    return {f.name: f.default for f in fields(CLIConfig) if f.default is not None}
+
+
+def read_file(path: Path | None = None) -> dict:
+    """What the file itself holds: an empty mapping when it is absent or empty.
+
+    Raises :class:`ConfigFileError` when the file exists and is not a YAML
+    mapping, so that an edit never overwrites a file it could not read.
+    """
+    src = path or CONFIG_FILE
+    if not src.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(src.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ConfigFileError(f"{src} cannot be read: {exc}") from exc
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigFileError(f"{src} is not a mapping of settings")
+    return raw
+
+
+def write_file(settings: dict, path: Path | None = None) -> Path:
+    """Write *settings* as the file (default CONFIG_FILE), in the order given."""
+    dest = path or CONFIG_FILE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(settings, fh, default_flow_style=False, sort_keys=False)
+    return dest
 
 
 def load_config(path: Path | None = None) -> CLIConfig:
-    """Load CLI configuration, falling back to defaults if the file is absent."""
+    """Load CLI configuration, falling back to defaults if the file is absent.
+
+    Every key is read alone: a value that cannot be read keeps its default
+    and leaves the others as they are. Only a file that is not a mapping at
+    all falls back to the defaults as a whole.
+    """
     src = path or CONFIG_FILE
     if not src.exists():
         return CLIConfig()
     try:
         with open(src, encoding="utf-8") as fh:
             raw = yaml.safe_load(fh)
-        if not isinstance(raw, dict):
-            return CLIConfig()
-        return CLIConfig(
-            api_url=str(raw.get("api_url", DEFAULT_API_URL)),
-            default_model=raw.get("default_model"),
-            output_format=str(raw.get("output_format", "text")),
-            color=bool(raw.get("color", True)),
-            timeout=int(raw.get("timeout", DEFAULT_TIMEOUT)),
-            **_animation_settings(raw),
-        )
     except Exception:
         return CLIConfig()
+    if not isinstance(raw, dict):
+        return CLIConfig()
+    return CLIConfig(**_file_settings(raw))
+
+
+def _file_settings(raw: dict) -> dict:
+    """The keys of a loaded file, each read alone; never raises."""
+    out = {}
+    url = raw.get("api_url")
+    if isinstance(url, str) and url:
+        out["api_url"] = url
+    model = raw.get("default_model")
+    if isinstance(model, str) and model:
+        out["default_model"] = model
+    output_format = raw.get("output_format")
+    if isinstance(output_format, str):
+        out["output_format"] = output_format
+    if "color" in raw:
+        switch = parse_switch(raw["color"])
+        if switch is not None:
+            out["color"] = switch
+    if "timeout" in raw:
+        timeout = parse_timeout(raw["timeout"])
+        if timeout is not None:
+            out["timeout"] = timeout
+    out.update(_animation_settings(raw))
+    return out
 
 
 def _animation_settings(raw: dict) -> dict:
