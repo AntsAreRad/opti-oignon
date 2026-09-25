@@ -217,6 +217,20 @@ package costs.
 
 ### Changed
 
+- `think=False` now reaches Ollama. The registry declared `think: bool =
+  False` and sent `think` only when it was true, so a model that thinks by
+  default thought whatever the caller said -- through the agentic pipelines
+  that pass `think=False` (direct, web search, the fallbacks), and through
+  the drift A/B and the librarian, whose small token budgets went to the
+  thinking. `think` now has three states: None, the new default, sends
+  nothing and leaves the model to its own way, as every caller that says
+  nothing had before; True is sent as before; False is sent to a model
+  whose capabilities, as Ollama reports them, include thinking, and to no
+  other, so a model that cannot think never receives the switch. The
+  capabilities are read once per model. The pipelines that say
+  `think=False` stop thinking on a model that declares it; the drift A/B
+  and the librarian's summariser ask for no thinking; the remote core
+  carries the three states over its wire.
 - The onion's eviction gate reads French names and whole French words. A
   name was a run of ASCII letters opened by an ASCII capital, so a name
   carrying an accent -- at its head or inside it, as Elodie, Helene and

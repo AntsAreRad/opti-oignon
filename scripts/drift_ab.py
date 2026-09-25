@@ -323,7 +323,7 @@ _TRIAL = [{"role": "user", "content": "Reply with one word."}]
 def _try_pair(backend, model, librarian_backend, config):
     """Why the pair cannot run together, or None: one minimal request each, in the run's order."""
     try:
-        backend.generate(model=model, messages=_TRIAL, options={"temperature": 0.0, "num_predict": 1})
+        backend.generate(model=model, messages=_TRIAL, options={"temperature": 0.0, "num_predict": 1}, think=False)
     except Exception as exc:  # noqa: BLE001 - reported by name, nothing measured
         return f"the answering model {model!r} could not answer ({exc!r})"
     try:
@@ -332,6 +332,7 @@ def _try_pair(backend, model, librarian_backend, config):
             messages=_TRIAL,
             options={"temperature": config.temperature, "num_predict": 1},
             keep_alive=config.keep_alive,
+            think=False,
         )
     except Exception as exc:  # noqa: BLE001 - reported by name, nothing measured
         return f"the librarian's model {config.model!r} could not answer beside {model!r} ({exc!r})"
@@ -383,7 +384,9 @@ def main(argv=None, *, resolve=None):
         return 2
 
     def ask(messages):
-        response = backend.generate(model=model, messages=messages, options={"temperature": 0.0, "seed": 0, "num_predict": 128})
+        response = backend.generate(
+            model=model, messages=messages, options={"temperature": 0.0, "seed": 0, "num_predict": 128}, think=False,
+        )
         return str(getattr(response, "content", "") or "")
 
     def wrap(block):

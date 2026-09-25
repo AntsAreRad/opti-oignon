@@ -166,9 +166,10 @@ class CoreService:
         options = payload.get("options")
         if options is not None and not isinstance(options, dict):
             return None, (400, {"error": "options: must be an object"})
+        think = payload.get("think")
         return dict(
             model=model, messages=messages, options=options,
-            keep_alive=str(payload.get("keep_alive", "30m")), think=bool(payload.get("think", False)),
+            keep_alive=str(payload.get("keep_alive", "30m")), think=None if think is None else bool(think),
         ), None
 
     def _backend(self, model):

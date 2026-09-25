@@ -623,7 +623,7 @@ class InferenceBackend(ABC):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming inference.
@@ -634,7 +634,9 @@ class InferenceBackend(ABC):
                       [{"role": "user", "content": "..."}].
             options: Engine options (temperature, top_p, etc.).
             keep_alive: Keep-alive duration (Ollama-specific, ignored by others).
-            think: Enable thinking/chain-of-thought output.
+            think: True asks for thinking, False asks for none, and None -- the
+                default -- leaves the model to its own way. A backend that
+                cannot switch thinking ignores it.
             images: Optional base64-encoded images for vision models.
 
         Returns:
@@ -649,7 +651,7 @@ class InferenceBackend(ABC):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference.
@@ -729,6 +731,40 @@ class OllamaBackend(InferenceBackend):
         # for themselves, now held here for every caller.
         self._clients: dict[tuple, Any] = {}
         self._clients_lock = threading.Lock()
+        # Whether each model declares the thinking capability, read once.
+        self._thinking: dict[str, bool] = {}
+
+    def _declares_thinking(self, model: str) -> bool:
+        """Whether Ollama lists ``thinking`` among the model's capabilities.
+
+        Read once per model and kept. A model whose capabilities cannot be
+        read counts as not declaring it, which leaves its requests exactly
+        as they were.
+        """
+        known = self._thinking.get(model)
+        if known is None:
+            try:
+                capabilities = _client_field(self._transport().show(model), "capabilities")
+                known = isinstance(capabilities, (list, tuple)) and "thinking" in [str(c) for c in capabilities]
+            except Exception as exc:  # noqa: BLE001 - an unreadable capability is not a declared one
+                logger.debug("Ollama capabilities of %s unreadable: %s", model, exc)
+                known = False
+            self._thinking[model] = known
+        return known
+
+    def _think_flag(self, model: str, think: bool | None) -> bool | None:
+        """What the request tells Ollama about thinking, or None to say nothing.
+
+        True is sent as asked. False is sent only to a model that declares it
+        can think: that is the model that would otherwise think against the
+        caller's word, and a model that cannot think never receives the
+        switch. None -- the default -- leaves every model to its own way.
+        """
+        if think:
+            return True
+        if think is False and self._declares_thinking(model):
+            return False
+        return None
 
     def _route_host(self) -> str | None:
         """The host a request is sent to, or None to let the client resolve it."""
@@ -1001,7 +1037,7 @@ class OllamaBackend(InferenceBackend):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming chat via ollama.chat()."""
@@ -1031,8 +1067,9 @@ class OllamaBackend(InferenceBackend):
             "options": engine_options,
             "keep_alive": keep_alive,
         }
-        if think:
-            kwargs["think"] = True
+        flag = self._think_flag(model, think)
+        if flag is not None:
+            kwargs["think"] = flag
         if schema is not None:
             kwargs["format"] = schema
         if tools is not None:
@@ -1073,7 +1110,7 @@ class OllamaBackend(InferenceBackend):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat via ollama.chat(stream=True)."""
@@ -1103,8 +1140,9 @@ class OllamaBackend(InferenceBackend):
             "stream": True,
             "keep_alive": keep_alive,
         }
-        if think:
-            kwargs["think"] = True
+        flag = self._think_flag(model, think)
+        if flag is not None:
+            kwargs["think"] = flag
         if schema is not None:
             kwargs["format"] = schema
         if tools is not None:
@@ -1376,7 +1414,7 @@ class LlamaCppBackend(InferenceBackend):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> ChatResponse:
         """Non-streaming inference via llama-cpp-python."""
@@ -1439,7 +1477,7 @@ class LlamaCppBackend(InferenceBackend):
         messages: list[dict],
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference via llama-cpp-python."""
@@ -1854,7 +1892,7 @@ class LlamaServerBackend(InferenceBackend):
         messages: list[dict] | None = None,
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
         prompt: str | None = None,
     ) -> ChatResponse:
@@ -1925,7 +1963,7 @@ class LlamaServerBackend(InferenceBackend):
         messages: list[dict] | None = None,
         options: dict | None = None,
         keep_alive: str = "30m",
-        think: bool = False,
+        think: bool | None = None,
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
         """Streaming chat through the server's SSE channel."""

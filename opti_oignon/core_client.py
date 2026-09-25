@@ -108,9 +108,10 @@ class RemoteCoreBackend(InferenceBackend):
 
     @staticmethod
     def _payload(model, messages, options, keep_alive, think):
-        return {"model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": bool(think)}
+        think = think if think is None else bool(think)
+        return {"model": model, "messages": messages, "options": options, "keep_alive": keep_alive, "think": think}
 
-    def generate(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+    def generate(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
         with self._request("/inference/generate", self._payload(model, messages, options, keep_alive, think)) as resp:
             wire = json.loads(resp.read().decode("utf-8"))
         return ChatResponse(
@@ -123,7 +124,7 @@ class RemoteCoreBackend(InferenceBackend):
             tool_calls=list(wire.get("tool_calls") or []),
         )
 
-    def stream(self, model, messages, options=None, keep_alive="30m", think=False, images=None):
+    def stream(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
         with self._request("/inference/stream", self._payload(model, messages, options, keep_alive, think)) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()

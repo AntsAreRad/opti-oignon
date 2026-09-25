@@ -319,6 +319,7 @@ def registry_summarizer(config, resolve=None):
             ],
             options={"temperature": config.temperature, "num_predict": config.num_predict},
             keep_alive=config.keep_alive,
+            think=False,
         )
         return str(getattr(response, "content", "") or "")
 
