@@ -125,3 +125,15 @@ that hold it to that run on every machine that builds it. The crate is
 pinned (exact `pyo3`, committed `Cargo.lock`) so the artefact is
 reproducible. Floats in a span are refused by the core and formatted by
 the reference; the memory stores none.
+
+The recall probes of the eviction gate -- drawn from a span, then scored
+against a candidate summary -- have a native implementation too. The
+reference is a set of Python regular expressions over Unicode classes; the
+core reproduces them as hand-written scanners, and only for text whose
+every code point it classes exactly as Python does: ASCII, Latin-1, Latin
+Extended-A but the dotted capital I, General Punctuation and the euro
+sign, which covers English and French. Any other code point sends the call
+to the reference. The expressions travel with every call and the core
+refuses any it does not reproduce, so a change to them on the Python side
+takes effect at once, on the reference path, until the core is taught it.
+The rates, the thresholds and the gate's wording stay in Python.

@@ -19,17 +19,30 @@ the artefact itself is never tracked.
     onion module reaches for it at import.
   * NC5 -- the recipe is pinned: the crate, its lock, the build script and
     the ignore rule are in the tree, and the loader does not load at import.
+  * NC6 -- the native probe generator draws, probe for probe, what the
+    reference draws, and the Python surface goes through it.
+  * NC7 -- the native scorer fails the probes the reference fails, in the
+    same order; a probe shape it does not take goes to the reference,
+    which raises what it raises.
+  * NC8 -- the probes' scope is exact: every code point the core accepts
+    is classed as Python classes it, the accepted set holds ASCII and
+    French, and a text carrying any other code point is refused by the
+    core and answered by the reference.
+  * NC9 -- a regular expression the core does not implement sends the call
+    to the reference: the patterns travel with every call.
 
-NC1 to NC3 need the built artefact; they are deselected by name in the
-canonical selection until the CI workflow carries a Rust toolchain, and run
-by name on the machine that builds it. NC4 and NC5 always run.
+NC1 to NC3 and NC6 to NC9 need the built artefact: the CI job that carries
+a Rust toolchain builds it and runs this file by name, and a local sweep
+needs ``scripts/build_oo_core.sh`` run once. NC4 and NC5 always run.
 
 Local-only (the public distribution ships no tests).
 """
 
 import ast
+import collections
 import hashlib
 import json
+import random
 import re
 import sys
 from pathlib import Path
@@ -230,6 +243,311 @@ def test_nc5_the_recipe_is_pinned_and_the_loader_loads_nothing_at_import():
         assert "opti_oignon.native.oo_core" not in sys.modules, "importing the loader loads no artefact"
         assert loaded["opti_oignon.native"]._loaded is loaded["opti_oignon.native"]._UNSET, "nothing asked, nothing loaded"
         assert hasattr(loaded["opti_oignon.native"], "load") and hasattr(loaded["opti_oignon.native"], "available")
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# The recall probes, natively (NC6 to NC9)
+# ---------------------------------------------------------------------------
+# The scope the native probes claim: ASCII, Latin-1 Supplement, Latin
+# Extended-A without the dotted capital I (it lowercases to an ASCII "i"
+# and a combining dot), General Punctuation and the euro sign.
+_SCOPE = ((0x00, 0x12F), (0x131, 0x17F), (0x2000, 0x206F), (0x20AC, 0x20AC))
+
+# French letters and typography, as escapes: e acute and grave, a grave,
+# c cedilla, o circumflex, the oe ligature in both cases, the capital E
+# acute, the guillemets, the typographic apostrophe and quotes, the
+# ellipsis, the em and en dashes, the euro sign, the two no-break spaces.
+_FRENCH = "\u00e9\u00e8\u00e0\u00e7\u00f4\u0153\u0152\u00c9\u00ab\u00bb\u2019\u201c\u201d\u2026\u2014\u2013\u20ac\u00a0\u202f"
+
+_EDGE = (
+    "We decided on 2026-09-24 to ship. Alice will not use Docker! Bob can't come? Carol never agreed.",
+    "The budget is 1,200.50 euros, 3.14abc is not a number, -5 and x-7 and 7- are not, 12,5% is.",
+    "Version 2.0.1 ships; 1.2.3.4 splits; 10.5, 20,5. And 3. Then 4.",
+    "NOT this. Never that! No way? CANNOT be. Cannot't. don't won't isn't. no-one. not_now. n't",
+    "We will meet at Harvest-HQ with McDonald and USA reps; A B Cd EFg hIJ.",
+    "Nous avons d\u00e9cid\u00e9 le 2026-09-24 : \u00c9lodie viendra \u00e0 Paris, pas \u00e0 Lyon. On a dit 12\u202f000 \u20ac.",
+    "\u00ab L\u00e9on \u00bb a dit : on n\u2019utilisera pas Docker\u2026 \u2014 le 24/09, \u00e0 7 h 30. \u0152uvre, c\u0153ur, \u00c9T\u00c9, \u00c7a.",
+    "Tabs\tand\nnewlines. Here!\u00a0Next.\u2003Em-space? \u2028Line-sep.\u205fMath.  Double.\x1cSeparated.",
+    "x2026-09-24 2026-09-24x 2026-09-24- -2026-09-24 2026-9-24 20260-09-24 2026-09-245 2026-09-24.",
+    "Numbers: 0 00 007 1e5 1_000 \u00bd \u00b23 3\u00b2 \u00b9 5\u00bd 1.5.6 ,5 5, .5 5. 1,2,3 4-5 -6 7-",
+    "The plan to ship must be agreed. We shall see. I chose red. They agreed not to, and never will not.",
+    "We decided not to go and never looked back. We will not, cannot, and don't.",
+    "",
+    "   ",
+    "Single",
+    "A.B.C. D. E! F? G",
+)
+
+_PIECES = (
+    "1", "12", "2026", "09", "-", ".", ",", " ", "  ", "\t", "\n", "\u00a0", "\u2009", "!", "?", "'", "\u2019",
+    "not", "Not", "NEVER", "no", "cannot", "n't", "will ", "decided", "agreed", "must", "plan to", "shall",
+    "Alice", "McD", "A", "b", "x", "_", "the", "The", "We", "Harvest", "2026-09-24", "3.14", "1,000",
+    "\u00e9", "\u00c9", "\u00df", "\u00b2", "\u00bd", "\u0153", "\u2026", "\u2014", "\u20ac", "\u00b5", "\u00aa",
+)
+
+
+def _in_scope():
+    return [chr(cp) for lo, hi in _SCOPE for cp in range(lo, hi + 1)]
+
+
+def _generated(count, seed):
+    rng = random.Random(seed)
+    return ["".join(rng.choice(_PIECES) for _ in range(rng.randint(1, 40))) for _ in range(count)]
+
+
+def _around(c):
+    """Texts that put one code point where each class decision of the probes is taken."""
+    return (
+        f"A{c}12{c}B. x{c}Yz{c}.{c}Next{c}sentence{c}not{c}here{c}2026-01-02{c}end",
+        f"{c}Abc {c}9 not{c} {c}never can't{c} 1{c}2 3.{c}4 5,{c}6 7{c}.8",
+        f"We decided{c}to use Kafka. Will{c}not. {c}No{c}. Mc{c}Donald 2026-01-0{c}3 {c}ot ca{c}not n{c}t",
+        f"{c}",
+        f"Z{c}Z{c}.{c}{c}? {c}! 7-{c} {c}-7 {c}2026-03-04{c} We will {c}",
+    )
+
+
+def _spans(texts, size=3):
+    return [
+        [{"turn_id": f"t{i + j:04d}", "role": "user", "text": text} for j, text in enumerate(texts[i:i + size])]
+        for i in range(0, len(texts), size)
+    ]
+
+
+def _runs(points):
+    runs = []
+    for cp in points:
+        if runs and cp == runs[-1][1] + 1:
+            runs[-1][1] = cp
+        else:
+            runs.append([cp, cp])
+    return runs
+
+
+def _probe_window():
+    targets = {
+        "opti_oignon.memory.probes": source("memory", "probes.py"),
+        "opti_oignon.memory.baseline": source("memory", "baseline.py"),
+        "opti_oignon.native": source("native", "__init__.py"),
+    }
+    return isolate(targets=targets, packages=("opti_oignon.memory",))
+
+
+def _baseline_texts(loaded):
+    return [t["content"] for corpus in loaded["opti_oignon.memory.baseline"].CORPORA.values() for t in corpus.turns]
+
+
+class _Counting:
+    """The native core behind a counter, so a contract sees the surface go through it."""
+
+    _COUNTED = ("probe_generate", "probe_score")
+
+    def __init__(self, core):
+        self.core = core
+        self.calls = collections.Counter()
+        self.answered = collections.Counter()
+
+    def __getattr__(self, name):
+        target = getattr(self.core, name)
+        if name not in self._COUNTED:
+            return target
+
+        def counted(*args, **kwargs):
+            self.calls[name] += 1
+            result = target(*args, **kwargs)
+            if result is not None:
+                self.answered[name] += 1
+            return result
+
+        return counted
+
+
+def _reference(probes, fn, *args):
+    """``fn`` with the native core out of reach: the reference path."""
+    saved = probes._native
+    probes._native = lambda: None
+    try:
+        return fn(*args)
+    finally:
+        probes._native = saved
+
+
+# ---------------------------------------------------------------------------
+# NC6 -- the generator draws what the reference draws
+# ---------------------------------------------------------------------------
+def test_nc6_the_native_probe_generator_draws_what_the_reference_draws():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        corpus = _baseline_texts(loaded) + list(_EDGE) + [t for c in _in_scope() for t in _around(c)] + _generated(1200, seed=20260924)
+        spans = _spans(corpus)
+        kinds = collections.Counter()
+        for span in spans:
+            drawn = probes.generate_probes(span)
+            assert drawn == _reference(probes, probes.generate_probes, span), f"probe for probe on {span!r}"
+            kinds.update(p.kind for p in drawn)
+            kinds.update(f"negations={p.negations}" for p in drawn if p.kind == "decision")
+        assert counting.calls["probe_generate"] == counting.answered["probe_generate"] == len(spans), (
+            "every span went through the core, and the core answered every one"
+        )
+        for kind in ("date", "number", "entity", "decision", "negations=0", "negations=1", "negations=2"):
+            assert kinds[kind] >= 1, f"the corpus draws {kind}: an equivalence over nothing proves nothing"
+        assert probes.generate_probes([]) == [] and counting.answered["probe_generate"] == len(spans) + 1
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# NC7 -- the scorer fails what the reference fails
+# ---------------------------------------------------------------------------
+def test_nc7_the_native_scorer_fails_the_probes_the_reference_fails():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        rng = random.Random(20260925)
+        texts = _baseline_texts(loaded) + list(_EDGE) + _generated(300, seed=7)
+        verdicts = collections.Counter()
+        scored = 0
+        for span in _spans(texts):
+            drawn = _reference(probes, probes.generate_probes, span)
+            source_text = " ".join(t["text"] for t in span)
+            lossy = " ".join(w for w in source_text.split(" ") if rng.random() > 0.3)
+            inverted = source_text.replace(" not ", " ").replace("will ", "will not ")
+            for candidate in (source_text, lossy, inverted, rng.choice(texts), ""):
+                got = probes.score(drawn, candidate)
+                assert got == _reference(probes, probes.score, drawn, candidate), f"scoring {candidate!r}"
+                verdicts.update((p.kind, p in got.failures) for p in drawn)
+                scored += 1
+        Probe = probes.Probe
+        hand = [
+            Probe("entity", "q", "Alice", "t1"),
+            Probe("entity", "q", "ALICE", "t1"),
+            Probe("entity", "q", "", "t1"),
+            Probe("entity", "q", "\u00c9lodie", "t1"),
+            Probe("number", "q", "1,200.50", "t1"),
+            Probe("number", "q", "", "t1"),
+            Probe("date", "q", "2026-09-24", "t1"),
+            Probe("date", "q", "1.5", "t1"),
+            Probe("custom", "q", "docker", "t1"),
+            Probe("decision", "q", "x", "t1", key=frozenset({"docker", "use"}), negated=True, negations=1),
+            Probe("decision", "q", "x", "t1", key=frozenset({"docker", "use"}), negations=0),
+            Probe("decision", "q", "x", "t1", key=frozenset({"Docker"}), negations=0),
+            Probe("decision", "q", "x", "t1", key=frozenset({"ship", "docker", "alice", "use"}), negations=True),
+        ]
+        for candidate in _EDGE + ("Alice will not use Docker.", "alice uses docker, 1,200.50 on 2026-09-24", "Use Docker. Not docker use. Never."):
+            got = probes.score(hand, candidate)
+            assert got == _reference(probes, probes.score, hand, candidate), f"hand-built probes on {candidate!r}"
+            scored += 1
+        assert counting.calls["probe_score"] == counting.answered["probe_score"] == scored, (
+            "every scoring went through the core, and the core answered every one"
+        )
+        for kind in ("date", "number", "entity", "decision"):
+            assert verdicts[(kind, True)] >= 1 and verdicts[(kind, False)] >= 1, f"{kind} probes both pass and fail in the corpus"
+        answered = counting.answered["probe_score"]
+        for shape, raised in (
+            (Probe("decision", "q", "x", "t1", key=frozenset(), negations=0), ZeroDivisionError),
+            (Probe("decision", "q", "x", "t1", key=["docker"], negations=0), TypeError),
+            (Probe("entity", "q", None, "t1"), AttributeError),
+        ):
+            with pytest.raises(raised):
+                probes.score([shape], "One sentence.")
+        assert counting.answered["probe_score"] == answered, "a probe shape the core does not take never reaches it"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# NC8 -- the scope is exact
+# ---------------------------------------------------------------------------
+def test_nc8_the_probes_scope_is_exact_and_everything_outside_it_goes_to_the_reference():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        table = core.probe_text_classes()
+        accepted = {row[0] for row in table}
+        assert {ord(c) for c in _in_scope()} <= accepted, "ASCII, Latin-1, Latin Extended-A but the dotted I, General Punctuation, the euro"
+        assert {ord(c) for c in _FRENCH} <= accepted, "French letters and typography take the native path"
+        for cp, space, word, digit, lower in table:
+            c = chr(cp)
+            assert space == (re.fullmatch(r"\s", c) is not None), f"U+{cp:04X} whitespace"
+            assert space == (c.strip() == ""), f"U+{cp:04X} strip"
+            assert word == (re.fullmatch(r"\w", c) is not None), f"U+{cp:04X} word"
+            assert digit == (re.fullmatch(r"\d", c) is not None), f"U+{cp:04X} digit"
+            assert lower == c.lower(), f"U+{cp:04X} lowercase"
+            for letter in "notevrca":
+                expected = c.isascii() and c.lower() == letter
+                assert (re.fullmatch(letter, c, re.IGNORECASE) is not None) == expected, f"U+{cp:04X} against {letter}, ignoring case"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        runs = _runs(sorted(accepted))
+        outside = {lo - 1 for lo, _ in runs if lo > 0} | {hi + 1 for _, hi in runs if hi < 0x10FFFF}
+        outside |= {0x130, 0x212A, 0x3000, 0x1F9C5, 0x10FFFF}
+        outside = sorted(cp for cp in outside - accepted if not 0xD800 <= cp <= 0xDFFF)
+        assert {0x130, 0x212A, 0x3000} <= set(outside), "the dotted I, the Kelvin sign and the ideographic space stay outside"
+        for cp in outside:
+            text = f"Alice will not use 12 on 2026-09-24 {chr(cp)}K. The {chr(cp)}Kelvin agreed."
+            span = [{"turn_id": "t1", "text": text}]
+            before = dict(counting.answered)
+            drawn = probes.generate_probes(span)
+            assert drawn == _reference(probes, probes.generate_probes, span), f"U+{cp:04X}: the reference answers"
+            assert probes.score(drawn, text) == _reference(probes, probes.score, drawn, text), f"U+{cp:04X}: the reference scores"
+            assert dict(counting.answered) == before, f"U+{cp:04X}: the core refuses what it cannot class"
+        assert counting.calls["probe_generate"] == counting.calls["probe_score"] == len(outside), "the core was asked each time"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# NC9 -- the patterns travel with the call
+# ---------------------------------------------------------------------------
+def test_nc9_a_pattern_the_core_does_not_implement_sends_the_call_to_the_reference():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        text = "Alice will ship without Docker on 2026-09-24. Bob counted 12 hours."
+        span = [{"turn_id": "t1", "text": text}]
+        drawn = probes.generate_probes(span)
+        probes.score(drawn, text)
+        assert counting.answered["probe_generate"] == counting.answered["probe_score"] == 1, "control: the core answers the module's own patterns"
+        variants = []
+        for name in ("_SENTENCE_SPLIT", "_DATE", "_NUMBER", "_WORD", "_CAPITALISED", "_NEGATION"):
+            original = getattr(probes, name)
+            variants.append((name, re.compile(original.pattern + "(?:)", original.flags)))
+            variants.append((name, re.compile(original.pattern, original.flags ^ re.IGNORECASE)))
+        for name in ("_ANSWER_BEFORE", "_ANSWER_AFTER"):
+            variants.append((name, getattr(probes, name) + "(?:)"))
+        for name, altered in variants:
+            original = getattr(probes, name)
+            setattr(probes, name, altered)
+            try:
+                answered = dict(counting.answered)
+                assert probes.generate_probes(span) == _reference(probes, probes.generate_probes, span), name
+                assert probes.score(drawn, text) == _reference(probes, probes.score, drawn, text), name
+                assert dict(counting.answered) == answered, f"{name} altered: the core refuses a pattern it does not implement"
+            finally:
+                setattr(probes, name, original)
+        saved = probes._NEGATION
+        probes._NEGATION = re.compile(saved.pattern.replace("cannot", "cannot|without"), saved.flags)
+        try:
+            assert [p.negations for p in probes.generate_probes(span) if p.kind == "decision"] == [1], "the changed pattern takes effect"
+        finally:
+            probes._NEGATION = saved
+        assert [p.negations for p in drawn if p.kind == "decision"] == [0], "control: the module's own pattern does not count it"
     finally:
         restore()
 

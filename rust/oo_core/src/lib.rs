@@ -13,13 +13,18 @@
 //! Known divergence, recorded: the token estimate splits on Unicode
 //! `White_Space`; Python's `str.split()` also treats the four information
 //! separators U+001C..U+001F as whitespace. No memory text carries them.
+//!
+//! The recall probes of the eviction gate live in `probes`: they answer
+//! only for text they class exactly as Python does, and refuse the rest.
+
+mod probes;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.2.0";
 
 fn escape_into(out: &mut String, text: &str) {
     out.push('"');
@@ -263,5 +268,8 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(digest_spans, m)?)?;
     m.add_function(wrap_pyfunction!(peel_id, m)?)?;
     m.add_function(wrap_pyfunction!(compose_segments, m)?)?;
+    m.add_function(wrap_pyfunction!(probes::probe_generate, m)?)?;
+    m.add_function(wrap_pyfunction!(probes::probe_score, m)?)?;
+    m.add_function(wrap_pyfunction!(probes::probe_text_classes, m)?)?;
     Ok(())
 }

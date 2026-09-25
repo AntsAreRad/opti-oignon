@@ -11,6 +11,15 @@ package costs.
 
 ### Added
 
+- The eviction gate's recall probes -- drawn from a span, scored against a
+  candidate summary -- have a native implementation in `oo_core`, used
+  when the artefact is built. It answers exactly as the Python reference
+  or not at all: only for text whose every code point it classes as Python
+  does (ASCII, Latin-1, Latin Extended-A but U+0130, General Punctuation,
+  the euro sign: English and French), and only for the module's regular
+  expressions as they are written, which travel with each call. Anything
+  else is scanned by the reference. The gate's rates, thresholds and
+  messages stay in Python.
 - `oo chat` animates the waits you really sit through, in one line of ASCII
   on stderr: an onion that breathes from Enter to the first answer, sprouts
   once the executor's keepalive says the request is with the model, sheds
