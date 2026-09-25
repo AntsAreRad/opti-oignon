@@ -35,8 +35,15 @@ from pathlib import Path
 import click
 
 from .client import CLIClientError, OOClient
-from .config import CLIConfig, load_config
-from .output import Spinner, echo_error, echo_success, format_models_table, format_status
+from .config import ANIMATION_RANGES, CLIConfig, load_config, parse_animation_ms, parse_switch
+from .output import (
+    Spinner,
+    echo_error,
+    echo_success,
+    format_models_table,
+    format_status,
+    make_wait_line,
+)
 
 
 def _get_client(ctx: click.Context) -> OOClient:
@@ -200,6 +207,18 @@ def status(ctx: click.Context) -> None:
 # oo chat
 # =========================================================================
 
+def _wait_kind(line: str) -> str:
+    """Which wait a line starts: /close and /open have their own frames, anything else waits."""
+    text = line.strip()
+    if text.startswith("/"):
+        name = text[1:].partition(" ")[0]
+        if name == "close":
+            return "closing"
+        if name == "open":
+            return "opening"
+    return "waiting"
+
+
 def _default_chat_session(model: str | None, conversation_id: str | None):
     """The in-process session: the registry configured from backends.yaml, then the session over it."""
     from opti_oignon.inference_backend import init_backends_from_config
@@ -232,6 +251,9 @@ def chat(ctx: click.Context, model: str | None, conversation_id: str | None) -> 
         sys.exit(2)
     stdin = click.get_text_stream("stdin")
     interactive = stdin.isatty()
+    # The wait animation: stderr only, erased before any output, None when
+    # any switch says no. The seams are the contracts' way in.
+    waiter = make_wait_line(cfg, **((ctx.obj or {}).get("wait_seams") or {}))
     click.echo("oo chat -- /help lists the commands, /quit ends the session", err=True)
     try:
         while True:
@@ -240,27 +262,55 @@ def chat(ctx: click.Context, model: str | None, conversation_id: str | None) -> 
             line = stdin.readline()
             if not line:
                 break
-            streamed = ended = False
-            for event in session.handle(line):
-                if event.kind == "token":
-                    click.echo(event.text, nl=False)
-                    streamed = True
-                elif event.kind == "thinking":
-                    click.echo(event.text, nl=False, err=True)
-                elif event.kind == "refusal":
-                    if streamed:
-                        click.echo()
-                        streamed = False
-                    echo_error(event.text, color=cfg.color)
-                elif event.kind == "quit":
-                    ended = True
-                else:
-                    click.echo(event.text)
+            streamed = ended = answered = False
+            # A line cut off by the end of input arms nothing.
+            armed = waiter is not None and line.endswith("\n") and bool(line.strip())
+            kind = _wait_kind(line)
+            origin = waiter.now() if armed else 0.0
+            if armed:
+                waiter.arm(kind, origin)
+            try:
+                for event in session.handle(line):
+                    if armed:
+                        # An empty token is the executor's keepalive: the
+                        # request is with the model. Anything else is about to
+                        # be shown, so the line is erased first.
+                        if event.kind == "token" and event.text == "":
+                            waiter.request()
+                        else:
+                            waiter.stop()
+                    if event.kind == "token":
+                        click.echo(event.text, nl=False)
+                        streamed = True
+                        answered = answered or bool(event.text)
+                    elif event.kind == "thinking":
+                        click.echo(event.text, nl=False, err=True)
+                        answered = answered or bool(event.text)
+                    elif event.kind == "refusal":
+                        if streamed:
+                            click.echo()
+                            streamed = False
+                        echo_error(event.text, color=cfg.color)
+                    elif event.kind == "quit":
+                        ended = True
+                        if waiter is not None:
+                            waiter.bye()
+                    else:
+                        click.echo(event.text)
+                    # A status line before the answer: the wait goes on,
+                    # counted from the same Enter.
+                    if armed and not answered and event.kind not in ("token", "thinking", "quit"):
+                        waiter.arm(kind, origin)
+            finally:
+                if waiter is not None:
+                    waiter.stop()
             if streamed:
                 click.echo()
             if ended:
                 break
     except KeyboardInterrupt:
+        if waiter is not None:
+            waiter.stop()
         click.echo("", err=True)
         echo_error("interrupted", color=cfg.color)
         sys.exit(130)
@@ -729,14 +779,32 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
         oo config set api_url http://remote:8001
         oo config set default_model llama3
         oo config set output_format json
+        oo config set animations false
+        oo config set animation_interval_ms 200
     """
     cfg = _get_config(ctx)
-    allowed = {"api_url", "default_model", "output_format", "color", "timeout"}
+    allowed = {"api_url", "default_model", "output_format", "color", "timeout",
+               "animations", *ANIMATION_RANGES}
     if key not in allowed:
         echo_error(f"Unknown config key '{key}'. Valid keys: {', '.join(sorted(allowed))}")
         ctx.exit(1)
         return
-    if key == "color":
+    if key == "animations":
+        switch = parse_switch(value)
+        if switch is None:
+            echo_error("animations must be true or false (also yes/no, on/off, 1/0)")
+            ctx.exit(1)
+            return
+        cfg.animations = switch
+    elif key in ANIMATION_RANGES:
+        parsed = parse_animation_ms(key, value)
+        if parsed is None:
+            low, high, _ = ANIMATION_RANGES[key]
+            echo_error(f"{key} must be a whole number of milliseconds between {low} and {high}")
+            ctx.exit(1)
+            return
+        setattr(cfg, key, parsed)
+    elif key == "color":
         setattr(cfg, key, value.lower() in ("true", "1", "yes"))
     elif key == "timeout":
         try:

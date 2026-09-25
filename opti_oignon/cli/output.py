@@ -2,14 +2,17 @@
 """
 Output formatting utilities -- Opti-Oignon CLI.
 
-Provides coloured terminal output, spinner animations, and
-human-friendly formatters for model lists, status dashboards,
-and error messages.  Respects ``NO_COLOR`` / ``--no-color``.
+Provides coloured terminal output, spinner animations, the wait
+animation of ``oo chat``, and human-friendly formatters for model lists,
+status dashboards, and error messages.  Respects ``NO_COLOR`` /
+``--no-color``.
 """
 
 import itertools
+import os
 import sys
 import threading
+import time
 from typing import Any
 
 # -- ANSI colour helpers ---------------------------------------------------
@@ -67,6 +70,252 @@ def _safe_echo():
             dest = sys.stderr if err else sys.stdout
             print(msg, file=dest)
         return _fallback
+
+
+# -- Wait line ---------------------------------------------------------------
+#
+# One line of ASCII art on stderr while the user really waits in ``oo chat``:
+# from Enter to the first visible answer, and during /close and /open. It is
+# erased before anything else is shown, never touches stdout, and writes no
+# escape sequence and no newline -- only carriage returns and printable
+# ASCII -- so an interrupted or killed process leaves no hidden cursor and
+# no colour behind. The art is content, not configuration: the frames stay
+# here, where the ASCII and width contracts can hold them.
+
+WAIT_WIDTH = 32
+
+# Thirteen columns each; the core ``@`` stays in the same column while the
+# layers grow, shrink, fall or sprout around it.
+WAIT_FRAMES = {
+    "waiting": (
+        "     @       ",
+        "    (@)      ",
+        "   ((@))     ",
+        "  (((@)))    ",
+        "   ((@))     ",
+        "    (-)      ",
+    ),
+    # The first five grow once, then the last four sway.
+    "requested": (
+        "  (((@)))    ",
+        "  (((@)))_   ",
+        "  (((@)))_.  ",
+        "  (((@)))_v  ",
+        "  (((@)))_\\|/",
+        "  (((@)))_||/",
+        "  (((@)))_\\|/",
+        "  (((@)))_\\||",
+    ),
+    # Peels drop onto a pile and the core stays; the loop visibly starts
+    # over, so it claims no progress it cannot measure.
+    "closing": (
+        "  (((@)))    ",
+        "   ((@)) )   ",
+        "   ((@))    _",
+        "    (@)  )  _",
+        "    (@)    __",
+        "     @   ) __",
+        "     @    ___",
+    ),
+    "opening": (
+        "     @       ",
+        "    (@)      ",
+        "   ((@))     ",
+        "  (((@)))    ",
+        "  (((@)))    ",
+    ),
+}
+
+_REQUESTED_GROWTH = 4
+WAIT_CLEAR = "\r" + " " * WAIT_WIDTH + "\r"
+WAIT_BYE = "  (@)/  bye\n"
+_ELAPSED_CAP = 9999
+
+
+def _wait_art(kind: str, index: int) -> str:
+    frames = WAIT_FRAMES[kind]
+    index = max(int(index), 0)
+    if kind == "requested":
+        if index < _REQUESTED_GROWTH:
+            return frames[index]
+        loop = frames[_REQUESTED_GROWTH:]
+        return loop[(index - _REQUESTED_GROWTH) % len(loop)]
+    return frames[index % len(frames)]
+
+
+def render_wait_line(kind: str, index: int, elapsed_s: float) -> str:
+    """The 32 columns of one frame: the label, the whole seconds since Enter, the art."""
+    seconds = min(max(int(elapsed_s), 0), _ELAPSED_CAP)
+    return f"  {kind:<9} {seconds:>4}s  {_wait_art(kind, index)}"
+
+
+def wait_enabled(cfg: Any, stream: Any, env: Any) -> bool:
+    """True only when every switch allows the animation and the stream is a terminal."""
+    if not getattr(cfg, "animations", False) or not getattr(cfg, "color", False):
+        return False
+    if "NO_COLOR" in env:
+        return False
+    if str(env.get("TERM", "") or "").strip().lower() == "dumb":
+        return False
+    try:
+        return bool(stream.isatty())
+    except Exception:  # noqa: BLE001 - a stream that cannot say is not a terminal
+        return False
+
+
+def _stream_columns(stream: Any) -> int:
+    try:
+        return int(os.get_terminal_size(stream.fileno()).columns)
+    except Exception:  # noqa: BLE001 - an unreadable width draws nothing
+        return 0
+
+
+class WaitLine:
+    """The wait animation of ``oo chat``: armed after Enter, stopped before any output.
+
+    ``arm`` starts one wait and its daemon frame thread; ``request`` turns a
+    plain wait into the sprout once the executor says the request is with
+    the model; ``stop`` is final for that wait, returns within ``stop_ms``
+    even if a write is stalled, and after it returns nothing more is drawn;
+    ``bye`` writes the one-line farewell. A write that fails switches the
+    waiter off for the rest of the session instead of raising.
+    """
+
+    def __init__(self, stream: Any, *, clock: Any, columns: Any, interval_ms: int,
+                 delay_ms: int, stop_ms: int, thread_factory: Any = threading.Thread) -> None:
+        self._stream = stream
+        self._clock = clock
+        self._columns = columns
+        self._interval = interval_ms / 1000.0
+        self._delay = delay_ms / 1000.0
+        self._stop_s = stop_ms / 1000.0
+        self._thread_factory = thread_factory
+        self._lock = threading.Lock()
+        self._gen = 0
+        self._kind = "waiting"
+        self._armed_at: float | None = None
+        self._origin = 0.0
+        self._phase_at: float | None = None
+        self._stopped = True
+        self._stop_event: threading.Event | None = None
+        self._drawn = False
+        self._last: str | None = None
+        self._off = False
+
+    def now(self) -> float:
+        return self._clock()
+
+    def arm(self, kind: str, origin: float) -> None:
+        """Start a wait of ``kind``; the elapsed seconds count from ``origin``."""
+        if self._off:
+            return
+        if not self._lock.acquire(timeout=self._stop_s):
+            return
+        try:
+            self._gen += 1
+            gen = self._gen
+            self._kind = kind
+            self._armed_at = self._clock()
+            self._origin = origin
+            self._phase_at = None
+            self._stopped = False
+            self._last = None
+            event = self._stop_event = threading.Event()
+        finally:
+            self._lock.release()
+        thread = self._thread_factory(target=self._run, args=(gen, event), name="oo-wait", daemon=True)
+        thread.start()
+
+    def request(self) -> None:
+        """The executor's keepalive: the request is with the model, so the wait becomes the sprout."""
+        if self._kind == "waiting" and self._phase_at is None and not self._stopped:
+            self._phase_at = self._clock()
+
+    def tick(self, now: float | None = None) -> bool:
+        """Draw the frame due at ``now`` if it differs from the one on screen."""
+        return self._tick(self._gen, now)
+
+    def _run(self, gen: int, event: threading.Event) -> None:
+        while not event.is_set():
+            self._tick(gen)
+            event.wait(self._interval)
+
+    def _tick(self, gen: int, now: float | None = None) -> bool:
+        with self._lock:
+            if self._off or self._stopped or gen != self._gen or self._armed_at is None:
+                return False
+            now = self._clock() if now is None else now
+            start = self._armed_at + self._delay
+            if now < start:
+                return False
+            try:
+                columns = int(self._columns())
+            except Exception:  # noqa: BLE001 - an unreadable width draws nothing
+                columns = 0
+            if columns <= WAIT_WIDTH:
+                return False
+            if self._phase_at is not None:
+                kind = "requested"
+                index = int((now - max(self._phase_at, start)) // self._interval)
+            else:
+                kind = self._kind
+                index = int((now - start) // self._interval)
+            line = render_wait_line(kind, index, now - self._origin)
+            if line == self._last:
+                return False
+            if not self._write("\r" + line):
+                return False
+            self._last = line
+            self._drawn = True
+            return True
+
+    def stop(self) -> None:
+        """End the current wait: clear the line if one was drawn, within the stop bound."""
+        self._stopped = True
+        event = self._stop_event
+        if event is not None:
+            event.set()
+        if not self._lock.acquire(timeout=self._stop_s):
+            return
+        try:
+            if self._drawn and not self._off:
+                self._write(WAIT_CLEAR)
+            self._drawn = False
+            self._last = None
+        finally:
+            self._lock.release()
+
+    def bye(self) -> None:
+        """The one-line farewell after /quit."""
+        if not self._off:
+            self._write(WAIT_BYE)
+
+    def _write(self, text: str) -> bool:
+        try:
+            self._stream.write(text)
+            self._stream.flush()
+            return True
+        except OSError:
+            self._off = True
+            return False
+
+
+def make_wait_line(cfg: Any, *, stream: Any = None, clock: Any = None, columns: Any = None,
+                   env: Any = None, thread_factory: Any = None) -> "WaitLine | None":
+    """The waiter for ``oo chat``, or None when any switch says no animation."""
+    stream = sys.stderr if stream is None else stream
+    env = os.environ if env is None else env
+    if not wait_enabled(cfg, stream, env):
+        return None
+    return WaitLine(
+        stream,
+        clock=clock or time.monotonic,
+        columns=columns or (lambda: _stream_columns(stream)),
+        interval_ms=int(getattr(cfg, "animation_interval_ms", 150)),
+        delay_ms=int(getattr(cfg, "animation_delay_ms", 400)),
+        stop_ms=int(getattr(cfg, "animation_stop_ms", 100)),
+        thread_factory=thread_factory or threading.Thread,
+    )
 
 
 # -- Spinner ---------------------------------------------------------------

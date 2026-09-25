@@ -11,6 +11,19 @@ package costs.
 
 ### Added
 
+- `oo chat` animates the waits you really sit through, in one line of ASCII
+  on stderr: an onion that breathes from Enter to the first answer, sprouts
+  once the executor's keepalive says the request is with the model, sheds
+  its peels during `/close` and regrows during `/open`, and waves goodbye
+  on `/quit`. Nothing shows before `animation_delay_ms`; the line is erased
+  before any output, so stdout is byte-identical with or without it; no
+  escape sequence is written, so Ctrl-C or a kill leaves the terminal
+  clean, and Ctrl-C still exits 130. It is off when stderr is not a
+  terminal, with `NO_COLOR`, `--no-color`, `TERM=dumb`, a terminal of 32
+  columns or fewer, or `animations: false`. Four keys in `cli.yaml`
+  (`animations`, `animation_interval_ms`, `animation_delay_ms`,
+  `animation_stop_ms`), settable with `oo config set`; a bad value falls
+  back alone instead of resetting the whole file.
 - Two observation heads on the backend contract, defaulted rather than
   abstract: `loaded_models()` answers the models a backend reports resident,
   and `None` when it cannot say -- never an empty list, which would read as

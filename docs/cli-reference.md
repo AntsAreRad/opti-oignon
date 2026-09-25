@@ -82,6 +82,17 @@ unknown name, or a name published in two categories is refused, and only
 a published skill -- human-approved, and named by the user on purpose --
 reaches the system prompt.
 
+While you wait, one line of ASCII art on stderr shows it: an onion that
+breathes from Enter until the first answer, sprouts once the executor
+reports the request is with the model, sheds its peels during `/close` and
+regrows during `/open`. It appears only after `animation_delay_ms`, is
+erased before anything else is printed, never touches stdout -- so
+`oo chat < in > out` gives the same `out` with or without it -- and writes
+no escape sequence, so an interrupted session leaves the terminal as it
+was. It is off when stderr is not a terminal, with `NO_COLOR` or
+`--no-color`, with `TERM=dumb`, on a terminal of 32 columns or fewer, and
+with `animations: false`. `/quit` answers with a one-line goodbye.
+
 ### oo models
 
 List all models available in the connected Ollama instance.
@@ -208,9 +219,26 @@ View and modify CLI configuration.
 ```bash
 oo config                          # show current config
 oo config set api_url http://remote:8000
-oo config set bulbe_mode true
+oo config set animations false
+oo config set animation_interval_ms 200
 oo config reset                    # reset to defaults
 ```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `api_url` | `http://localhost:8001` | Backend API URL |
+| `default_model` | (none) | Model to use when `-m` is not given |
+| `output_format` | `text` | `text`, `json` or `markdown` |
+| `color` | `true` | Colour output; `NO_COLOR` and `--no-color` turn it off |
+| `timeout` | `120` | HTTP request timeout in seconds |
+| `animations` | `true` | The wait animation of `oo chat` |
+| `animation_interval_ms` | `150` | Time between two frames, 50 to 1000 |
+| `animation_delay_ms` | `400` | Wait before the first frame, 100 to 5000 |
+| `animation_stop_ms` | `100` | Longest the chat waits to erase a frame, 10 to 1000 |
+
+`oo config set` refuses an animation value outside its range by name and
+leaves the file as it was. In the file, an animation value that cannot be
+read falls back to its own default, and an unreadable `animations` is off.
 
 | Subcommand | Description |
 |------------|-------------|
