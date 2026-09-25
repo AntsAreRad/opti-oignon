@@ -372,6 +372,17 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] `/skill` in `oo chat` put the text of a skill received from a
+  paired device into the system prompt, as an instruction. The device's
+  sync gate had let the record through on its provenance -- peer, device,
+  the category/name it lands under -- without ever showing its text, so a
+  compromised peer could swap the text of a skill you know by name. A
+  skill applied from sync now carries a device-local mark, and
+  `/skill` runs only bytes adopted on this device: `/adopt NAME` shows the
+  text with its digest, `/adopt NAME DIGEST` adopts those bytes and no
+  others, and a new version asks again. Writing a whole skill on this
+  device adopts it; an edit of unadopted bytes does not; a mark that cannot
+  be read adopts nothing.
 - `oo config set` wrote the configuration of the run, not the file: a
   transient `NO_COLOR`, `--no-color`, `--api-url` or `OO_API_URL` ended up
   saved, along with every default the user never chose, and `oo config

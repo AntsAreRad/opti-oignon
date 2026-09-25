@@ -69,6 +69,7 @@ command, and every command is a user action:
 | `/pin TEXT` | Pin a statement to the conversation's Core, as the user |
 | `/recall KEY` | Show the verbatim span behind a receipt; this marks the receipt resolved |
 | `/skill NAME ARGS` | Run `ARGS` as a turn with a published skill as the system suffix |
+| `/adopt NAME [DIGEST]` | Show a skill received from a paired device with its digest; with the digest, adopt exactly those bytes |
 | `/help` | List the commands |
 | `/quit` | End the session |
 
@@ -81,6 +82,16 @@ probes that failed. `/skill` takes `name` or `category/name`; a draft, an
 unknown name, or a name published in two categories is refused, and only
 a published skill -- human-approved, and named by the user on purpose --
 reaches the system prompt.
+
+A skill received from a paired device is published once this device's
+sync gate lets the record through, and that gate shows its provenance,
+not its text. So `/skill` refuses the bytes of a received skill until they
+are adopted here: `/adopt NAME` prints the text exactly as it is on disk
+with its digest, and `/adopt NAME DIGEST` (twelve hex characters or more)
+adopts those bytes and no others. A new version received later is refused
+again until it is adopted; writing the whole skill on this device adopts
+what it writes, while an edit of bytes never adopted leaves them
+unadopted.
 
 While you wait, one line of ASCII art on stderr shows it: an onion that
 breathes from Enter until the first answer, sprouts once the executor

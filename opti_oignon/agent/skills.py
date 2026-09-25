@@ -39,6 +39,18 @@ sidecar is device-local telemetry and journals nothing; usage numbers never
 ride a payload. Best-effort and mode-free: a journalling failure never breaks
 the write, and only the wire is Daily-gated downstream at the engine/guard.
 
+Sync origin: the engine's human gate lets a received skill through on its
+provenance -- peer, device, the category/name it lands under -- and never
+shows its text. So a skill applied from sync gets an ``_origin.json`` mark beside
+it, device-local and never journalled, holding the SHA-256 of the bytes
+adopted on this device, none at first. Once a skill carries the mark, only
+adopted bytes count (:meth:`SkillRegistry.sync_state`): bytes are adopted by
+naming their digest after being shown (:meth:`SkillRegistry.adopt_synced`),
+or by a local write that supplies the whole text (a new skill, a published
+draft); an edit of unadopted bytes stays unadopted, and a mark that cannot
+be read adopts nothing. ``oo chat``'s ``/skill``, the one path that puts a
+skill's body in a system prompt, runs only adopted or local bytes.
+
 Importlib-isolatable: the default root is resolved from ``config.DATA_DIR``
 lazily and guarded (falling back to a per-user data directory), and the audit
 hook imports ``signed_audit_log`` lazily, so this module loads and is exercised
@@ -48,6 +60,7 @@ registry has a ``reset_skill_registry()`` and an injectable root for tests.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -88,6 +101,14 @@ BODY_SECTIONS: tuple[str, ...] = (
 SKILL_FILENAME = "SKILL.md"
 USAGE_FILENAME = "_usage.json"
 VERSIONS_DIR = ".versions"
+ORIGIN_FILENAME = "_origin.json"
+
+# What the bytes of a published skill are to this device (see sync_state).
+SYNC_LOCAL = "local"
+SYNC_ADOPTED = "adopted"
+SYNC_UNADOPTED = "unadopted"
+# The shortest digest prefix that names bytes for adoption.
+ADOPT_DIGEST_MIN = 12
 DRAFTS_DIR = ".drafts"
 
 # Directory names never treated as a category when scanning the registry.
@@ -603,13 +624,14 @@ class SkillRegistry:
         except Exception:  # pragma: no cover - archival is best-effort
             logger.debug("skill version archive failed", exc_info=True)
 
-    def _write(self, skill: Skill, *, draft: bool) -> Skill:
+    def _write(self, skill: Skill, *, draft: bool, adopt: bool = True) -> Skill:
         path = self._skill_path(skill.category, skill.name, draft=draft)
         if path is None:
             raise ValueError("refusing to write skill outside the registry root")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(skill.to_markdown(), encoding="utf-8")
         if not draft:
+            self._note_local_write(path, adopt=adopt)
             # The completed file write IS the domain commit
             # for this file store; publish the new full state after it. The
             # payload closes over the skill already in hand (zero extra
@@ -695,6 +717,8 @@ class SkillRegistry:
             return None
         cat = _safe_segment(category, "general")
         nm = _safe_segment(name, "untitled-skill")
+        # An edit of bytes never adopted here does not adopt them.
+        adopt = self.sync_state(nm, cat) != SYNC_UNADOPTED
         self._archive(cat, nm, existing)
         new = Skill(
             name=nm,
@@ -706,7 +730,7 @@ class SkillRegistry:
             created_at=existing.created_at or _now(),
             updated_at=_now(),
         )
-        self._write(new, draft=False)
+        self._write(new, draft=False, adopt=adopt)
         _audit("edit", name=nm, category=cat, version=new.version)
         return new
 
@@ -817,8 +841,11 @@ class SkillRegistry:
         the skills directory (it either lands as a sanitised subdirectory of
         the root or is refused). The nested identity must agree with the record
         key (``_skill_sync_key``) or the apply is refused (integrity). Only
-        ``SKILL.md`` is touched, so the device-local ``_usage.json`` and the
-        ``.versions/`` audit are preserved across an update.
+        ``SKILL.md`` and its ``_origin.json`` mark are touched, so the
+        device-local ``_usage.json`` and the ``.versions/`` audit are
+        preserved across an update. The mark is written first: a skill that
+        cannot be marked as received is not written, and the bytes land
+        unadopted until they are shown and adopted here.
 
         A ``deleted`` record unlinks the published skill (and its usage
         sidecar); the ``.versions`` history is device-local audit and is left
@@ -855,11 +882,119 @@ class SkillRegistry:
             if not isinstance(markdown, str) or not markdown:
                 return False
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(markdown, encoding="utf-8")
+            origin = path.parent / ORIGIN_FILENAME
+            if not origin.exists():
+                self._write_origin(origin, [])
+            path.write_bytes(markdown.encode("utf-8"))
             return True
         except Exception:
             logger.debug("skill apply failed for %s", record_id, exc_info=True)
             return False
+
+    # Sync origin (device-local; the bytes adopted here for a received skill)
+
+    def _origin_path(self, name: str, category: str) -> Path | None:
+        d = self._skill_dir(category, name, draft=False)
+        if not self._within_root(d):
+            return None
+        return d / ORIGIN_FILENAME
+
+    @staticmethod
+    def _read_origin(origin: Path) -> list[str] | None:
+        """The digests a mark records as adopted, or None when it cannot be read."""
+        try:
+            data = json.loads(origin.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(data, dict) or data.get("origin") != "sync":
+            return None
+        adopted = data.get("adopted")
+        if not isinstance(adopted, list) or not all(isinstance(d, str) for d in adopted):
+            return None
+        return list(adopted)
+
+    @staticmethod
+    def _write_origin(origin: Path, adopted: list[str]) -> None:
+        origin.parent.mkdir(parents=True, exist_ok=True)
+        origin.write_text(
+            json.dumps({"origin": "sync", "adopted": sorted(set(adopted))}, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    def _note_local_write(self, path: Path, *, adopt: bool) -> None:
+        """Adopt what a local write left, for a skill that once arrived by sync."""
+        origin = path.parent / ORIGIN_FILENAME
+        if not adopt or not origin.exists():
+            return
+        try:
+            adopted = self._read_origin(origin) or []
+            self._write_origin(origin, adopted + [hashlib.sha256(path.read_bytes()).hexdigest()])
+        except Exception:  # the bytes stay unadopted: closed, not open
+            logger.debug("skill origin update failed", exc_info=True)
+
+    def raw_text(self, name: str, category: str) -> str:
+        """The published SKILL.md as it is on disk, or an empty string."""
+        path = self._skill_path(category, name, draft=False)
+        if path is None or not path.is_file():
+            return ""
+        try:
+            return path.read_bytes().decode("utf-8")
+        except Exception:
+            return ""
+
+    def current_digest(self, name: str, category: str) -> str | None:
+        """The SHA-256 of the published SKILL.md bytes on disk now, or None."""
+        path = self._skill_path(category, name, draft=False)
+        if path is None or not path.is_file():
+            return None
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except Exception:
+            return None
+
+    def sync_state(self, name: str, category: str) -> str:
+        """What the published skill's bytes are to this device.
+
+        ``SYNC_LOCAL`` when the skill never arrived by sync here. Once it
+        has, only bytes adopted here count: ``SYNC_ADOPTED`` when the bytes
+        on disk are, ``SYNC_UNADOPTED`` otherwise -- a mark that cannot be
+        read adopts nothing, and a path this registry cannot place is
+        answered unadopted, never local.
+        """
+        origin = self._origin_path(name, category)
+        if origin is None:
+            return SYNC_UNADOPTED
+        if not origin.exists():
+            return SYNC_LOCAL
+        adopted = self._read_origin(origin)
+        digest = self.current_digest(name, category)
+        if adopted is None or digest is None or digest not in adopted:
+            return SYNC_UNADOPTED
+        return SYNC_ADOPTED
+
+    def adopt_synced(self, name: str, category: str, digest_prefix: str) -> str | None:
+        """Adopt the bytes on disk of a skill received by sync, named by their digest.
+
+        ``digest_prefix`` is at least ``ADOPT_DIGEST_MIN`` hex characters of
+        the SHA-256 of the bytes on disk now; the full digest is recorded
+        and returned. None when there is nothing to adopt (a local skill,
+        bytes already adopted, no skill) or when the prefix does not name
+        the bytes on disk now.
+        """
+        prefix = str(digest_prefix or "").strip().lower()
+        if len(prefix) < ADOPT_DIGEST_MIN or self.sync_state(name, category) != SYNC_UNADOPTED:
+            return None
+        digest = self.current_digest(name, category)
+        origin = self._origin_path(name, category)
+        if digest is None or origin is None or not digest.startswith(prefix):
+            return None
+        try:
+            self._write_origin(origin, (self._read_origin(origin) or []) + [digest])
+        except Exception:
+            logger.debug("skill adoption write failed", exc_info=True)
+            return None
+        _audit("adopt_synced", name=name, category=category, digest=digest)
+        return digest
 
     # Usage sidecar (written separately; never rewrites SKILL.md)
 

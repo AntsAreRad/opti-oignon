@@ -13,15 +13,19 @@ A line that starts with a slash is a user action:
   /pin TEXT         pin a statement to the conversation's Core, as the user
   /recall KEY       show the verbatim span behind a receipt, which marks it resolved
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
+  /adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes
   /help             list the commands
   /quit             end the session
 
 Every refusal is an event carrying its reason by name; nothing here
 raises into the loop that prints. The onion commands are refused while
-the onion is switched off. A draft or an unknown skill is refused; a
-published skill is human-approved text the user names on purpose, so its
-body rides the turn's system prompt, where the skills the agent consults
-on its own stay wrapped as untrusted data.
+the onion is switched off. A draft or an unknown skill is refused. A
+published skill written on this device is text the user names on purpose,
+so its body rides the turn's system prompt, where the skills the agent
+consults on its own stay wrapped as untrusted data. A skill received from
+a paired device is different: the sync gate let it through on its
+provenance, without showing its text, so ``/skill`` refuses its bytes
+until ``/adopt`` has shown them here and the user has named their digest.
 
 Executor, router, analyser, librarian, skill registry and the
 conversation factory are seams, resolved lazily when not injected; the
@@ -45,6 +49,7 @@ HELP = (
     "/pin TEXT         pin a statement to the conversation's Core, as the user\n"
     "/recall KEY       show the verbatim span behind a receipt (this marks the receipt resolved)\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
+    "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
     "/help             list the commands\n"
     "/quit             end the session"
 )
@@ -156,6 +161,7 @@ class ChatSession:
             "pin": self._pin,
             "recall": self._recall,
             "skill": self._skill,
+            "adopt": self._adopt,
             "help": self._help,
             "quit": self._quit,
         }.get(name)
@@ -248,11 +254,46 @@ class ChatSession:
         if not ref:
             raise _Refused("/skill needs a skill name and a request")
         skill = self._published_skill(ref)
+        state = self._skills_seam().sync_state(skill.name, skill.category)
+        if state not in ("local", "adopted"):
+            where = f"{skill.category}/{skill.name}"
+            raise _Refused(
+                f"skill {where} arrived from a paired device and these bytes were never adopted here: "
+                f"/adopt {where} shows them"
+            )
         if not args:
             raise _Refused(f"/skill {ref} needs a request to run the skill on")
         suffix = f"\n\nApply the skill {skill.name} ({skill.category}) v{skill.version}:\n{skill.body.strip()}"
         yield _info(f"skill {skill.category}/{skill.name} v{skill.version}")
         yield from self._turn(args, suffix=suffix)
+
+    def _adopt(self, rest):
+        ref, _, digest = rest.partition(" ")
+        digest = digest.strip()
+        if not ref:
+            raise _Refused("/adopt needs a skill name")
+        skill = self._published_skill(ref)
+        registry = self._skills_seam()
+        where = f"{skill.category}/{skill.name}"
+        state = registry.sync_state(skill.name, skill.category)
+        if state == "local":
+            yield _info(f"skill {where} was written on this device: there is nothing to adopt")
+            return
+        if state == "adopted":
+            yield _info(f"skill {where}: these bytes are already adopted on this device")
+            return
+        if not digest:
+            current = registry.current_digest(skill.name, skill.category)
+            if current is None:
+                raise _Refused(f"skill {where} cannot be read from disk")
+            yield _info(f"skill {where} arrived from a paired device; its text, as it is on disk:\n"
+                        f"{registry.raw_text(skill.name, skill.category)}")
+            yield _info(f"digest {current[:16]}: /adopt {where} {current[:16]} adopts exactly these bytes")
+            return
+        adopted = registry.adopt_synced(skill.name, skill.category, digest)
+        if adopted is None:
+            raise _Refused(f"the digest {digest} does not name the bytes of {where} on disk now: /adopt {where} shows them again")
+        yield _info(f"adopted {where} ({adopted[:16]}): /skill runs it now")
 
     def _published_skill(self, ref):
         registry = self._skills_seam()
