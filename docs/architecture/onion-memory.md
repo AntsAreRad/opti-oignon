@@ -112,6 +112,18 @@ script refuses to print a number it did not measure. The thresholds in
 wrong entity or date in a four-turn span passes at 0.7, and that finding is
 recorded as a contract until the calibration replaces the numbers.
 
+Drift against a no-onion baseline has a host command of its own,
+`scripts/drift_ab.py`. It runs one scripted conversation -- facts stated,
+replaced on known turns, and asked about long after the history window has
+dropped them -- through two arms that differ the way the chat path does:
+the same system prompt, history window and model, and in one arm the
+onion's block, wrapped as untrusted data. The librarian runs in process
+with persistence off, so neither arm reads or writes the data directory.
+Each arm gets contradictions per 1000 turns against the facts holding at
+each turn, the sentences that agree with them, and the sentences the
+templates cannot decide, which are left to a model judge and never counted
+as agreement.
+
 ## The native core
 
 The integrity primitives -- the four hashes -- and the window assembly

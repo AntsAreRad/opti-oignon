@@ -11,6 +11,14 @@ package costs.
 
 ### Added
 
+- `scripts/drift_ab.py`, the host command for drift with the onion against
+  drift without it: one scripted conversation whose facts change on known
+  turns, two arms that differ only by the onion's block (same model, same
+  history window, the librarian in process with persistence off), and per
+  arm the contradictions per 1000 turns against the facts holding at each
+  turn, the agreements, and what the deterministic templates could not
+  decide. It prints no number without a backend. The measurement itself is
+  the host's to take.
 - `oo ask --json-out` shows its "Generating" spinner on stderr while it
   waits, as every other waiting command does; stdout is still exactly the
   JSON document. The spinner was there and could never turn on.
