@@ -22,44 +22,32 @@ properties on the real storage engine:
   * CS7 -- a failing sync layer never breaks the write: the fact lands even
     when the availability probe or the publish chain raises.
 
-Loads the canonical module in isolation with a stubbed sync guard so the
-publish hook resolves deterministically. Local-only. Runs under pytest or
-the __main__ runner.
+The canonical module is loaded through the shared isolation window with a
+stubbed sync guard, so the publish hook resolves deterministically. The
+owner-scoping module is loaded from its source, and the encryption module is
+proven unreachable, so the store runs its plain SQLite path: the real engine,
+and never a key. The sync modules CS7 neutralises are declared, so the window
+puts them back. Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sys
 import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_MEMORY = _REPO / "opti_oignon" / "memory"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_STORE = "opti_oignon.memory.canonical_store"
 
 
 def _load(guard_available=False, guard_calls=None):
-    """Load the canonical module under a stand-in package with a sync stub.
+    """Load the canonical module in the shared window with a sync stub.
 
-    Every ``opti_oignon.*`` entry is snapshotted and evicted first so a
-    previously imported real module cannot leak into the isolation window
-    through the hook's lazy import, then restored afterwards. The stubbed
-    guard answers the availability probe deterministically and can record
-    how often it was consulted.
+    The stubbed guard answers the availability probe deterministically and
+    can record how often it was consulted.
     """
-    saved = {
-        k: sys.modules[k]
-        for k in list(sys.modules)
-        if k == "opti_oignon" or k.startswith("opti_oignon.")
-    }
-    for k in saved:
-        del sys.modules[k]
-
-    root = types.ModuleType("opti_oignon")
-    root.__path__ = []
-    memory = types.ModuleType("opti_oignon.memory")
-    memory.__path__ = []
-    veilid = types.ModuleType("opti_oignon.veilid")
-    veilid.__path__ = []
     guard = types.ModuleType("opti_oignon.veilid.guard")
     calls = guard_calls if guard_calls is not None else []
 
@@ -68,26 +56,20 @@ def _load(guard_available=False, guard_calls=None):
         return guard_available
 
     guard.veilid_available = veilid_available
-    sys.modules["opti_oignon"] = root
-    sys.modules["opti_oignon.memory"] = memory
-    sys.modules["opti_oignon.veilid"] = veilid
-    sys.modules["opti_oignon.veilid.guard"] = guard
-
-    full = "opti_oignon.memory.canonical_store"
-    spec = importlib.util.spec_from_file_location(full, _MEMORY / "canonical_store.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[full] = mod
-    memory.canonical_store = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k in list(sys.modules):
-            if k == "opti_oignon" or k.startswith("opti_oignon."):
-                del sys.modules[k]
-        for k, v in saved.items():
-            sys.modules[k] = v
-
-    return mod, restore
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.user_isolation": source("user_isolation.py"),
+            _STORE: source("memory", "canonical_store.py"),
+        },
+        blocked=(
+            "opti_oignon.db_encryption",
+            "opti_oignon.veilid.records",
+            "opti_oignon.veilid.sync_engine",
+        ),
+        seeded={"opti_oignon.veilid.guard": guard},
+        packages=("opti_oignon.memory", "opti_oignon.veilid"),
+    )
+    return loaded[_STORE], restore
 
 
 _HOSTILE = "'; DROP TABLE memory_facts; --"

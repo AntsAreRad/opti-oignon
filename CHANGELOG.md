@@ -453,6 +453,14 @@ package costs.
 
 ### Fixed
 
+- Two sealed memory suites resolved real project modules by name behind
+  their stand-in package. The canonical store's SQL hygiene suite ran the
+  real encryption stack -- on a machine with a key, that key -- where the
+  store's own path in isolation is plain SQLite, and the dual-layer suite
+  ran the real context window where the retriever keeps its own estimate.
+  Both now load through the shared isolation window, with what they need
+  declared and the encryption module proven unreachable; two seal debts are
+  paid.
 - With no vector signal -- no embedding model, or the backend down -- the
   memory recall ranked facts on keywords and category alone and gave every
   one a vector similarity of 0.0, the value of a fact the vector layer
