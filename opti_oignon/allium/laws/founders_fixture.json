@@ -1,0 +1,213 @@
+{
+  "loci": [
+    {
+      "alleles": [
+        {"body": [0, 14, 256, 0], "freq": 3, "name": "slow", "window": [0, 0, 32, 0]},
+        {"body": [0, 14, 512, 0], "freq": 1, "name": "quick", "window": [0, 0, 32, 0]}
+      ],
+      "locus": 0
+    },
+    {
+      "alleles": [
+        {"body": [16, 4096, 8192, 4, 1], "freq": 3, "name": "steep", "window": [0, 0, 0, 0, 0]},
+        {"body": [16, 4096, 8192, 3, 1], "freq": 1, "name": "soft", "window": [0, 0, 0, 0, 0]}
+      ],
+      "locus": 1
+    },
+    {
+      "alleles": [
+        {"body": [14, 49152, 4681, -8192, 16384], "freq": 1, "name": "early", "window": [0, 512, 64, 0, 0]},
+        {"body": [14, 49152, 4096, -8192, 16384], "freq": 2, "name": "mid", "window": [0, 512, 64, 0, 0]},
+        {"body": [14, 49152, 3641, -8192, 16384], "freq": 1, "name": "late", "window": [0, 512, 64, 0, 0]}
+      ],
+      "locus": 2
+    },
+    {
+      "alleles": [
+        {"body": [14, 4096, 8192, 4, 1], "freq": 3, "name": "steep", "window": [0, 0, 0, 0, 0]},
+        {"body": [14, 4096, 8192, 3, 1], "freq": 1, "name": "soft", "window": [0, 0, 0, 0, 0]}
+      ],
+      "locus": 3
+    },
+    {
+      "alleles": [
+        {"body": [15, 49152, 4681, -8192, 16384], "freq": 1, "name": "early", "window": [0, 512, 64, 0, 0]},
+        {"body": [15, 49152, 4096, -8192, 16384], "freq": 2, "name": "mid", "window": [0, 512, 64, 0, 0]},
+        {"body": [15, 49152, 3641, -8192, 16384], "freq": 1, "name": "late", "window": [0, 512, 64, 0, 0]}
+      ],
+      "locus": 4
+    },
+    {
+      "alleles": [
+        {"body": [15, 4096, 8192, 4, 1], "freq": 3, "name": "steep", "window": [0, 0, 0, 0, 0]},
+        {"body": [15, 4096, 8192, 3, 1], "freq": 1, "name": "soft", "window": [0, 0, 0, 0, 0]}
+      ],
+      "locus": 5
+    },
+    {
+      "alleles": [
+        {"body": [16, 49152, 4681, -8192, 16384], "freq": 1, "name": "early", "window": [0, 512, 64, 0, 0]},
+        {"body": [16, 49152, 4096, -8192, 16384], "freq": 2, "name": "mid", "window": [0, 512, 64, 0, 0]},
+        {"body": [16, 49152, 3641, -8192, 16384], "freq": 1, "name": "late", "window": [0, 512, 64, 0, 0]}
+      ],
+      "locus": 6
+    },
+    {
+      "alleles": [
+        {"body": [0, 5, 2, 255, 16384, 2048, 49152], "freq": 3, "name": "common", "window": [0, 0, 0, 0, 512, 128, 512]},
+        {"body": [0, 5, 2, 255, 20480, 2048, 49152], "freq": 1, "name": "rich", "window": [0, 0, 0, 0, 512, 128, 512]}
+      ],
+      "locus": 7
+    },
+    {
+      "alleles": [
+        {"body": [0, 2, 1024, 1, 8192, 64], "freq": 3, "name": "common", "window": [0, 0, 64, 0, 256, 2]},
+        {"body": [0, 2, 1024, 1, 10240, 64], "freq": 1, "name": "fast", "window": [0, 0, 64, 0, 256, 2]}
+      ],
+      "locus": 8
+    },
+    {
+      "alleles": [
+        {"body": [0, 32768, 4096], "freq": 1, "name": "resistant", "window": [0, 1024, 256]},
+        {"body": [0, 0, 0], "freq": 1, "name": "null", "window": [0, 0, 0]}
+      ],
+      "locus": 9
+    },
+    {
+      "alleles": [
+        {"body": [2, 1], "freq": 1, "name": "red", "window": [0, 0]},
+        {"body": [2, 0], "freq": 1, "name": "yellow", "window": [0, 0]}
+      ],
+      "locus": 10
+    },
+    {
+      "alleles": [
+        {"body": [0, 16, 0, 0, 0, 0, 6, 3, 3, 4, 0, 0], "freq": 3, "name": "slow", "window": [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
+        {"body": [0, 24, 0, 0, 0, 0, 5, 3, 3, 4, 0, 0], "freq": 1, "name": "keen", "window": [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
+      ],
+      "locus": 11
+    },
+    {
+      "alleles": [
+        {"body": [255, 128, 0, 2, 4096], "freq": 1, "name": "calm", "window": [0, 16, 0, 0, 256]},
+        {"body": [255, 64, 0, 1, 8192], "freq": 1, "name": "curious", "window": [0, 16, 0, 0, 256]}
+      ],
+      "locus": 12
+    },
+    {
+      "alleles": [
+        {"body": [0, 160, 160, 160, 160, 160, 160, 160, 160, 160], "freq": 1, "name": "full", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]},
+        {"body": [0, 96, 96, 96, 96, 96, 96, 96, 96, 96], "freq": 1, "name": "spare", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]}
+      ],
+      "locus": 13
+    },
+    {
+      "alleles": [
+        {"body": [0, 32768, 0], "freq": 1, "name": "round", "window": [0, 1024, 0]},
+        {"body": [0, 40960, 0], "freq": 1, "name": "broad", "window": [0, 1024, 0]}
+      ],
+      "locus": 14
+    },
+    {
+      "alleles": [
+        {"body": [14, 1, 2, 90, 30, 3, 60, 300], "freq": 1, "name": "temperate", "window": [2, 0, 0, 10, 4, 0, 10, 30]},
+        {"body": [10, 2, 1, 60, 25, 2, 40, 240], "freq": 1, "name": "quick", "window": [2, 0, 0, 10, 4, 0, 10, 30]}
+      ],
+      "locus": 15
+    },
+    {
+      "alleles": [
+        {"body": [5, 256, 256, 256, 256], "freq": 1, "name": "evening", "window": [0, 32, 32, 32, 32]},
+        {"body": [5, 512, 512, 512, 512], "freq": 1, "name": "sensitive", "window": [0, 32, 32, 32, 32]}
+      ],
+      "locus": 16
+    },
+    {
+      "alleles": [
+        {"body": [512, 0], "freq": 1, "name": "active", "window": [64, 0]},
+        {"body": [0, 0], "freq": 3, "name": "silent", "window": [0, 0]}
+      ],
+      "locus": 17
+    },
+    {
+      "alleles": [
+        {"body": [7, 0], "freq": 7, "name": "clean", "window": [0, 0]},
+        {"body": [7, 16384], "freq": 1, "name": "loaded", "window": [0, 1024]}
+      ],
+      "locus": 18
+    },
+    {
+      "alleles": [
+        {"body": [9, 160, 160, 160, 160, 160, 160, 160, 160, 160], "freq": 1, "name": "a", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]},
+        {"body": [9, 96, 96, 96, 96, 96, 96, 96, 96, 96], "freq": 1, "name": "b", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]}
+      ],
+      "locus": 19
+    },
+    {
+      "alleles": [
+        {"body": [18, 160, 160, 160, 160, 160, 160, 160, 160, 160], "freq": 1, "name": "a", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]},
+        {"body": [18, 96, 96, 96, 96, 96, 96, 96, 96, 96], "freq": 1, "name": "b", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]}
+      ],
+      "locus": 20
+    },
+    {
+      "alleles": [
+        {"body": [27, 32, 128, 16, 64, 8, 8, 64, 128, 32], "freq": 1, "name": "a", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]},
+        {"body": [27, 64, 128, 32, 32, 0, 0, 96, 96, 64], "freq": 1, "name": "b", "window": [0, 32, 32, 32, 32, 32, 32, 32, 32, 32]}
+      ],
+      "locus": 21
+    },
+    {
+      "alleles": [
+        {"body": [36, 128, 128, 128, 128, 128, 128, 60, 128, 128], "freq": 1, "name": "a", "window": [0, 16, 16, 16, 16, 16, 16, 16, 16, 16]},
+        {"body": [36, 96, 96, 96, 96, 96, 96, 90, 160, 160], "freq": 1, "name": "b", "window": [0, 16, 16, 16, 16, 16, 16, 16, 16, 16]}
+      ],
+      "locus": 22
+    },
+    {
+      "alleles": [
+        {"body": [45, 1, 1, 3, 0, 1, 0, 0, 1, 2], "freq": 1, "name": "a", "window": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
+        {"body": [45, 2, 0, 1, 1, 0, 1, 1, 0, 4], "freq": 1, "name": "b", "window": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
+      ],
+      "locus": 23
+    },
+    {
+      "alleles": [
+        {"body": [54, 0, 0, 128, 0, 0, 0, 0, 0, 0], "freq": 1, "name": "a", "window": [0, 0, 0, 16, 0, 0, 0, 0, 0, 0]},
+        {"body": [54, 1, 1, 128, 0, 0, 0, 0, 0, 0], "freq": 1, "name": "b", "window": [0, 0, 0, 16, 0, 0, 0, 0, 0, 0]}
+      ],
+      "locus": 24
+    },
+    {
+      "alleles": [
+        {"body": [0, 0], "freq": 3, "name": "coloured", "window": [0, 0]},
+        {"body": [0, 1], "freq": 1, "name": "inhibitor", "window": [0, 0]}
+      ],
+      "locus": 25
+    },
+    {
+      "alleles": [
+        {"body": [1, 1], "freq": 3, "name": "c_on", "window": [0, 0]},
+        {"body": [1, 0], "freq": 1, "name": "c_off", "window": [0, 0]}
+      ],
+      "locus": 26
+    },
+    {
+      "alleles": [
+        {"body": [3, 1], "freq": 1, "name": "golden", "window": [0, 0]},
+        {"body": [3, 0], "freq": 1, "name": "shallot", "window": [0, 0]}
+      ],
+      "locus": 27
+    },
+    {
+      "alleles": [
+        {"body": [0, 0], "freq": 1, "name": "a", "window": [0, 256]},
+        {"body": [0, 4096], "freq": 1, "name": "b", "window": [0, 256]}
+      ],
+      "locus": 28
+    }
+  ],
+  "name": "fixture",
+  "schema": 1,
+  "version": 1
+}

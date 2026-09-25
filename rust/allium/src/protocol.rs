@@ -3,7 +3,12 @@
 //! `call` answers every request with the bytes the reference answers, and
 //! the order of the checks is part of that: it decides which refusal a
 //! request with several defects gets.
+//!
+//! The genome operations read the embedded law and pool files, parsed and
+//! validated at every call (the reference remembers them per process; the
+//! answers are the same). `decode` and `compile` never read the pool.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -13,6 +18,8 @@ use sha2::{Digest, Sha256};
 use crate::fx::{self, Work};
 use crate::laws;
 use crate::ocj::{self, obj, refused, s, Refused, Value};
+use crate::organs::compile as organ_compile;
+use crate::organs::genome::{self, View};
 use crate::rng;
 
 pub const ENGINE_VERSION: &str = "0.1.0";
@@ -23,7 +30,19 @@ const LIMIT_INPUT: usize = 1 << 20;
 const LIMIT_ITEMS: usize = 100_000;
 const LIMIT_STATE: usize = 1 << 19;
 
-const OPS: [&str; 7] = ["bulk", "echo", "engine", "fact_id", "fx", "law", "rng"];
+const OPS: [&str; 11] = [
+    "bulk",
+    "echo",
+    "engine",
+    "fact_id",
+    "fx",
+    "genome_compile",
+    "genome_corner",
+    "genome_decode",
+    "genome_found",
+    "law",
+    "rng",
+];
 const RNG_KINDS: [&str; 5] = ["below", "key", "noise", "stream", "unit"];
 const FACT_FIELDS: [&str; 7] = ["being", "body", "kind", "laws", "origin", "oseq", "t"];
 
@@ -96,9 +115,17 @@ fn engine() -> Answer {
         let table = laws::parse_file(text)?;
         table_members.push((String::from(name), Value::Str(ocj::hex(&laws::digest(&table)?))));
     }
+    let mut founder_members = Vec::new();
+    for (name, text) in laws::FOUNDERS {
+        let pool = laws::parse_file(text)?;
+        founder_members.push((String::from(name), Value::Str(ocj::hex(&laws::digest(&pool)?))));
+    }
     let limit = |n: usize| Value::Int(i64::try_from(n).unwrap_or(i64::MAX));
     Ok(obj(vec![
+        (String::from("domains"), Value::Arr(genome::DOMAINS.iter().map(|domain| s(domain)).collect())),
         (String::from("engine"), s(ENGINE_VERSION)),
+        (String::from("founders"), obj(founder_members)),
+        (String::from("genome_schema"), Value::Int(genome::SCHEMA)),
         (String::from("laws"), obj(law_members)),
         (
             String::from("limits"),
@@ -417,6 +444,134 @@ fn op_law(request: &Value) -> Answer {
     ]))
 }
 
+/// The requested law and its codec view; refused by name when unsound.
+fn genome_law(request: &Value) -> Result<(Value, View), Refused> {
+    let file = match text(request.get("law")).and_then(laws::law) {
+        Some(file) => file,
+        None => return Err(bad("unknown_law", "law")),
+    };
+    let law = laws::parse_file(file)?;
+    if !genome::validate_law(&law).is_empty() {
+        return Err(bad("unknown_law", "genome law"));
+    }
+    let lawview = genome::view(&law).ok_or_else(|| bad("unknown_law", "genome law"))?;
+    Ok((law, lawview))
+}
+
+/// The law's founder pool, checked against the law's pin, then validated.
+fn genome_pool(law: &Value, lawview: &View) -> Result<BTreeMap<i64, Vec<genome::Allele>>, Refused> {
+    let pin = match law.get("founders") {
+        Some(pin @ Value::Obj(_)) => pin,
+        _ => return Err(bad("unknown_law", "founders digest")),
+    };
+    let file = match text(pin.get("name")).and_then(laws::founders) {
+        Some(file) => file,
+        None => return Err(bad("unknown_law", "founders digest")),
+    };
+    let pool = laws::parse_file(file)?;
+    let digest = ocj::hex(&laws::digest(&pool)?);
+    if text(pin.get("sha256")) != Some(digest.as_str()) {
+        return Err(bad("unknown_law", "founders digest"));
+    }
+    if !genome::validate_pool(law, lawview, &pool).is_empty() {
+        return Err(bad("unknown_law", "founders"));
+    }
+    genome::pool_alleles(&pool).ok_or_else(|| bad("unknown_law", "founders"))
+}
+
+fn genome_bytes(request: &Value, lawview: &View) -> Result<Vec<u8>, Refused> {
+    let hex = match request.get("genome") {
+        Some(Value::Str(hex)) => hex,
+        _ => return Err(bad("bad_request", "genome hex")),
+    };
+    if let Some(cap) = lawview.max_bytes.checked_mul(2) {
+        if hex.len() > cap {
+            return Err(bad("limit", "genome size"));
+        }
+    }
+    if !genome::is_genome_hex(hex) {
+        return Err(bad("bad_request", "genome hex"));
+    }
+    ocj::from_hex(hex).ok_or_else(|| bad("bad_request", "genome hex"))
+}
+
+fn count(n: u64, detail: &str) -> Result<Value, Refused> {
+    i64::try_from(n).map(Value::Int).map_err(|_| bad("engine_panic", detail))
+}
+
+fn op_genome_found(request: &Value) -> Answer {
+    fields(request, &["law", "op", "seed", "v"], &[])?;
+    let (law, lawview) = genome_law(request)?;
+    let alleles = genome_pool(&law, &lawview)?;
+    let seed_text = match text(request.get("seed")) {
+        Some(seed) if ocj::is_hex(seed, 64) => seed,
+        _ => return Err(bad("bad_request", "seed")),
+    };
+    let seed = ocj::from_hex(seed_text)
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+        .ok_or_else(|| bad("bad_request", "seed"))?;
+    let (data, chosen, work) = genome::found(&seed, &lawview, &alleles)?;
+    let chosen: Vec<Value> = chosen.into_iter().map(Value::Int).collect();
+    Ok(obj(vec![
+        (String::from("alleles"), Value::Str(ocj::pack_bulk("u8", &chosen)?)),
+        (String::from("genome"), Value::Str(ocj::hex(&data))),
+        (String::from("sha256"), Value::Str(genome::sha256_hex(&data))),
+        (String::from("work"), count(work, "genome found")?),
+    ]))
+}
+
+fn op_genome_corner(request: &Value) -> Answer {
+    fields(request, &["corner", "law", "op", "v"], &[])?;
+    let (_, lawview) = genome_law(request)?;
+    let k = match int(request.get("corner")) {
+        Some(k) if (0..=genome::CORNER_MAX).contains(&k) => k,
+        _ => return Err(bad("bad_request", "corner")),
+    };
+    let (data, work) = genome::corner(k, &lawview)?;
+    Ok(obj(vec![
+        (String::from("genome"), Value::Str(ocj::hex(&data))),
+        (String::from("sha256"), Value::Str(genome::sha256_hex(&data))),
+        (String::from("work"), count(work, "genome corner")?),
+    ]))
+}
+
+fn op_genome_decode(request: &Value) -> Answer {
+    fields(request, &["genome", "law", "op", "v"], &[])?;
+    let (_, lawview) = genome_law(request)?;
+    let data = genome_bytes(request, &lawview)?;
+    let chromosomes = genome::decode(&data, &lawview)?;
+    let mut records: u64 = 0;
+    let mut counts = Vec::with_capacity(chromosomes.len());
+    for chrom in &chromosomes {
+        let n = u64::try_from(chrom.len()).map_err(|_| bad("engine_panic", "genome decode"))?;
+        counts.push(count(n, "genome decode")?);
+        records = records.checked_add(n).ok_or_else(|| bad("engine_panic", "genome decode"))?;
+    }
+    let work = genome::blocks(data.len())
+        .and_then(|blocks| blocks.checked_add(records))
+        .ok_or_else(|| bad("engine_panic", "genome decode"))?;
+    Ok(obj(vec![
+        (String::from("chromosomes"), Value::Arr(counts)),
+        (String::from("sha256"), Value::Str(genome::sha256_hex(&data))),
+        (String::from("work"), count(work, "genome decode")?),
+    ]))
+}
+
+fn op_genome_compile(request: &Value) -> Answer {
+    fields(request, &["genome", "law", "op", "v"], &[])?;
+    let (law, lawview) = genome_law(request)?;
+    let data = genome_bytes(request, &lawview)?;
+    // Only the tables carry the law's digest; the other operations never compute it.
+    let digest = ocj::hex(&laws::digest(&law)?);
+    let (tables, work) = organ_compile::compile_genome(&data, &lawview, &digest)?;
+    let tables_digest = genome::sha256_hex(&ocj::emit(&tables)?);
+    Ok(obj(vec![
+        (String::from("sha256"), Value::Str(tables_digest)),
+        (String::from("tables"), tables),
+        (String::from("work"), count(work, "genome compile")?),
+    ]))
+}
+
 fn answer(data: &[u8]) -> Answer {
     if data.len() > LIMIT_INPUT {
         return Err(bad("limit", "input size"));
@@ -444,8 +599,13 @@ fn answer(data: &[u8]) -> Answer {
         }
         "fact_id" => op_fact_id(&request),
         "fx" => op_fx(&request),
+        "genome_compile" => op_genome_compile(&request),
+        "genome_corner" => op_genome_corner(&request),
+        "genome_decode" => op_genome_decode(&request),
+        "genome_found" => op_genome_found(&request),
         "law" => op_law(&request),
-        _ => op_rng(&request),
+        "rng" => op_rng(&request),
+        _ => Err(bad("unknown_op", "op")),
     }
 }
 

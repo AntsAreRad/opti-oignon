@@ -16,12 +16,22 @@ Operations of the chassis:
 * ``bulk``    -- a compact integer array packed or unpacked.
 * ``fact_id`` -- the identity of a fact: body digest and event id.
 * ``law``     -- a law file's name, version, provisional flag and digest.
+* ``genome_found``   -- a founder genome from a 32-byte seed and a law.
+* ``genome_corner``  -- a genome at a corner of the law's box.
+* ``genome_decode``  -- a genome checked against its law: record counts.
+* ``genome_compile`` -- a genome's compiled tables and their digest.
+
+The genome operations read the embedded law and pool files, validated once
+per process and remembered by the SHA-256 of the file bytes; ``decode`` and
+``compile`` never read the pool. Parsing a law is outside ``work``.
 """
 
 import hashlib
 
 from .. import fx, lawfiles, rng, wire
 from ..wire import Refused
+from .organs import compile as organ_compile
+from .organs import genome
 
 checkpoint_before_apply = True
 
@@ -36,7 +46,8 @@ LIMITS = {
     "state": 1 << 19,
     "steps": fx.STEPS_MAX,
 }
-OPS = ("bulk", "echo", "engine", "fact_id", "fx", "law", "rng")
+OPS = ("bulk", "echo", "engine", "fact_id", "fx", "genome_compile", "genome_corner", "genome_decode",
+       "genome_found", "law", "rng")
 RNG_KINDS = ("below", "key", "noise", "stream", "unit")
 _HEX = "0123456789abcdef"
 
@@ -76,8 +87,14 @@ def _engine():
     tables = {}
     for name in lawfiles.TABLES:
         tables[name] = lawfiles.digest(lawfiles.table(name))
+    founders = {}
+    for name in lawfiles.FOUNDERS:
+        founders[name] = lawfiles.digest(lawfiles.founders(name))
     return {
+        "domains": list(genome.DOMAINS),
         "engine": ENGINE_VERSION,
+        "founders": founders,
+        "genome_schema": genome.SCHEMA,
         "laws": laws,
         "limits": dict(LIMITS),
         "ops": list(OPS),
@@ -266,12 +283,113 @@ def _op_law(request):
     }
 
 
+# Per-process memory of the genome laws and pools, by the SHA-256 of their file bytes.
+_LAWS = {}
+_POOLS = {}
+
+
+def _genome_law(request):
+    """The requested law, its codec view and its digest; refused by name when unsound."""
+    name = request["law"]
+    if not isinstance(name, str) or name not in lawfiles.LAWS:
+        raise Refused("unknown_law", "law")
+    data = lawfiles.law_bytes(name)
+    key = hashlib.sha256(data).hexdigest()
+    if key not in _LAWS:
+        law = wire.parse(data, lenient=True)
+        sound = not genome.validate_law(law)
+        _LAWS[key] = (law, genome.view(law) if sound else None, lawfiles.digest(law))
+    law, lawview, digest = _LAWS[key]
+    if lawview is None:
+        raise Refused("unknown_law", "genome law")
+    return law, lawview, digest
+
+
+def _genome_pool(law):
+    pin = law.get("founders")
+    if not isinstance(pin, dict) or pin.get("name") not in lawfiles.FOUNDERS:
+        raise Refused("unknown_law", "founders digest")
+    data = lawfiles.founders_bytes(pin["name"])
+    key = hashlib.sha256(data).hexdigest()
+    if key not in _POOLS:
+        pool = wire.parse(data, lenient=True)
+        _POOLS[key] = (pool, lawfiles.digest(pool))
+    pool, digest = _POOLS[key]
+    if pin.get("sha256") != digest:
+        raise Refused("unknown_law", "founders digest")
+    checked = (key, lawfiles.digest(law))
+    if checked not in _POOLS:
+        _POOLS[checked] = genome.pool_alleles(pool) if not genome.validate_pool(law, pool) else None
+    alleles = _POOLS[checked]
+    if alleles is None:
+        raise Refused("unknown_law", "founders")
+    return alleles
+
+
+def _genome_bytes(request, lawview):
+    text = request["genome"]
+    if not isinstance(text, str):
+        raise Refused("bad_request", "genome hex")
+    if len(text) > 2 * lawview.max_bytes:
+        raise Refused("limit", "genome size")
+    if not genome.is_genome_hex(text):
+        raise Refused("bad_request", "genome hex")
+    return bytes.fromhex(text)
+
+
+def _op_genome_found(request):
+    _fields(request, ("law", "op", "seed", "v"))
+    law, lawview, _ = _genome_law(request)
+    alleles = _genome_pool(law)
+    seed = request["seed"]
+    if not _is_hex(seed, 64):
+        raise Refused("bad_request", "seed")
+    data, chosen, work = genome.found(bytes.fromhex(seed), lawview, alleles)
+    return {"alleles": wire.pack_bulk("u8", chosen), "genome": data.hex(), "sha256": genome.sha256(data),
+            "work": work}
+
+
+def _op_genome_corner(request):
+    _fields(request, ("corner", "law", "op", "v"))
+    _, lawview, _ = _genome_law(request)
+    k = request["corner"]
+    if not _is_int(k) or not 0 <= k <= genome.CORNER_MAX:
+        raise Refused("bad_request", "corner")
+    data, work = genome.corner(k, lawview)
+    return {"genome": data.hex(), "sha256": genome.sha256(data), "work": work}
+
+
+def _op_genome_decode(request):
+    _fields(request, ("genome", "law", "op", "v"))
+    _, lawview, _ = _genome_law(request)
+    data = _genome_bytes(request, lawview)
+    value = genome.decode(data, lawview)
+    records = 0
+    counts = []
+    for chrom in value["chromosomes"]:
+        counts.append(len(chrom))
+        records += len(chrom)
+    return {"chromosomes": counts, "sha256": genome.sha256(data), "work": (len(data) + 63) // 64 + records}
+
+
+def _op_genome_compile(request):
+    _fields(request, ("genome", "law", "op", "v"))
+    law, lawview, digest = _genome_law(request)
+    data = _genome_bytes(request, lawview)
+    tables, work = organ_compile.compile_genome(data, law, lawview, digest)
+    return {"sha256": organ_compile.tables_digest(tables), "tables": tables, "work": work}
+
+
 _HANDLERS = {
     "bulk": _op_bulk,
     "echo": _op_echo,
     "engine": lambda request: (_fields(request, ("op", "v")), _engine())[1],
     "fact_id": _op_fact_id,
     "fx": _op_fx,
+    "genome_compile": _op_genome_compile,
+    "genome_corner": _op_genome_corner,
+    "genome_decode": _op_genome_decode,
+    "genome_found": _op_genome_found,
     "law": _op_law,
     "rng": _op_rng,
 }

@@ -1,8 +1,8 @@
 """The law and table files both engines read: one source each, pinned by digest.
 
-Law files (``laws/<name>.json``) and table files (``tables/<name>.json``)
-are indented on disk, one entry per line, so a change to them reads as a
-diff; their digest is the SHA-256 of their canonical OCJ re-emission, so the
+Law files (``laws/<name>.json``), founder pools (``laws/founders_<name>.json``)
+and table files (``tables/<name>.json``) are indented on disk, one entry per
+line, so a change to them reads as a diff; their digest is the SHA-256 of their canonical OCJ re-emission, so the
 indentation never counts. The Rust twin embeds the very same files at build
 time; the handshake compares the digests, and a native core built from other
 files is not used.
@@ -18,7 +18,8 @@ from . import wire
 checkpoint_before_apply = True
 
 _HERE = Path(__file__).resolve().parent
-LAWS = ("fixture",)
+LAWS = ("fixture", "v0_1")
+FOUNDERS = ("fixture", "v1")
 TABLES = ("sine_q15_v1",)
 
 
@@ -31,11 +32,28 @@ def digest(value):
     return hashlib.sha256(wire.emit(value)).hexdigest()
 
 
-def law(name):
-    """The parsed law file ``name``; ``KeyError`` for a law this engine does not carry."""
+def law_bytes(name):
+    """The raw bytes of law file ``name``; ``KeyError`` for a law this engine does not carry."""
     if name not in LAWS:
         raise KeyError(name)
-    return _read(_HERE.joinpath("laws", f"{name}.json"))
+    return _HERE.joinpath("laws", f"{name}.json").read_bytes()
+
+
+def law(name):
+    """The parsed law file ``name``; ``KeyError`` for a law this engine does not carry."""
+    return wire.parse(law_bytes(name), lenient=True)
+
+
+def founders_bytes(name):
+    """The raw bytes of founder pool ``name``; ``KeyError`` for a pool this engine does not carry."""
+    if name not in FOUNDERS:
+        raise KeyError(name)
+    return _HERE.joinpath("laws", f"founders_{name}.json").read_bytes()
+
+
+def founders(name):
+    """The parsed founder pool ``name``."""
+    return wire.parse(founders_bytes(name), lenient=True)
 
 
 def table(name):

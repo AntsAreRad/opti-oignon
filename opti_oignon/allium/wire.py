@@ -23,6 +23,8 @@ the refusal; both engines scan in the same order, so they refuse with the
 same code and the same detail.
 """
 
+import re
+
 checkpoint_before_apply = True
 
 MAX_INT = (1 << 53) - 1
@@ -44,6 +46,11 @@ REFUSALS = (
 )
 
 _WS_LENIENT = (0x20, 0x09, 0x0A, 0x0D)
+# Inside a string, the bytes that end a plain run: the quote, the backslash, and the
+# whitespace only a lenient file lets through. Everything else already passed the pre-pass.
+_STRING_SPECIAL = re.compile(rb'["\\\t\n\r]')
+# A string that emits as itself: printable ASCII with neither the quote nor the backslash.
+_STRING_PLAIN = re.compile(r'[ -!#-\[\]-~]*')
 
 # Compact integer arrays: "<type>:<lowercase hex>", little-endian two's complement.
 BULK_TYPES = {
@@ -184,6 +191,11 @@ class _Parser:
         self.pos += 1
         chars = []
         while True:
+            found = _STRING_SPECIAL.search(self.data, self.pos)
+            end = found.start() if found else len(self.data)
+            if end > self.pos:
+                chars.append(self.data[self.pos:end].decode("ascii"))
+                self.pos = end
             byte = self.peek()
             if byte == -1:
                 raise Refused("non_canonical", f"unterminated string at {self.pos}")
@@ -267,6 +279,10 @@ def _emit(value, depth, out):
         out.append(str(value))
     elif isinstance(value, float):
         raise Refused("float", "a float has no canonical form")
+    elif isinstance(value, str) and _STRING_PLAIN.fullmatch(value):
+        out.append('"')
+        out.append(value)
+        out.append('"')
     elif isinstance(value, str):
         out.append('"')
         for char in value:

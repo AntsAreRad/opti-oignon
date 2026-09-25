@@ -15,12 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _isolation import isolate, source  # noqa: E402
 
 REFERENCE = ("wire", "fx", "rng", "lawfiles")
-PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref")
+ORGANS = ("genome", "compile", "bounds")
+PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref", "opti_oignon.allium.ref.organs")
 
 
 def open_allium(*, native=True, seeded=None):
     """Load the reference, the seam and (when asked) the native loader; ``(loaded, restore)``."""
     targets = {f"opti_oignon.allium.{name}": source("allium", f"{name}.py") for name in REFERENCE}
+    # The organs before the protocol: it imports them when it is executed.
+    for name in ORGANS:
+        targets[f"opti_oignon.allium.ref.organs.{name}"] = source("allium", "ref", "organs", f"{name}.py")
     targets["opti_oignon.allium.ref.protocol"] = source("allium", "ref", "protocol.py")
     targets["opti_oignon.allium.engine"] = source("allium", "engine.py")
     if native:

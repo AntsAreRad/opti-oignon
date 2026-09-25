@@ -28,6 +28,10 @@ no unsafe code, nothing but ASCII, and no internal planning vocabulary.
   * AN9 -- the engine forbids unsafe code and denies arithmetic with side
     effects; ``cargo clippy`` enforces the second, and the ladder runs it
     (owed where clippy is not installed).
+  * AN10 -- the organs, which read a genome a peer may have sent, hold no
+    construct that can panic: no unwrap, no expect, no panic or unreachable
+    macro, no ``abs`` (which panics on the signed minimum) and no indexing;
+    their module denies the matching lints.
 
 Local-only (the public distribution ships no tests). The modules load
 through the shared isolation window.
@@ -67,6 +71,7 @@ BUDGET_S = {
     "test_an7_the_golden_vectors_are_the_same_under_two_string_hash_seeds": 2.0,
     "test_an8_the_committed_golden_vectors_are_hexadecimal_and_clean": 2.0,
     "test_an9_the_engine_forbids_unsafe_code_and_denies_side_effect_arithmetic": 2.0,
+    "test_an10_the_organs_hold_no_construct_that_can_panic_and_deny_them": 2.0,
 }
 
 
@@ -381,6 +386,37 @@ def test_an9_the_engine_forbids_unsafe_code_and_denies_side_effect_arithmetic():
     ladder = (REPO / "scripts" / "ladder.sh").read_text(encoding="ascii")
     assert "cargo clippy" in ladder and "rust/allium" in ladder, "the ladder runs clippy over the engine"
     assert "OWED" in ladder, "clippy missing is owed, never a pass"
+
+
+# ---------------------------------------------------------------------------
+# AN10 -- the organs cannot panic on hostile input
+# ---------------------------------------------------------------------------
+_ORGAN_BANS = (
+    ("unwrap", r"\.unwrap\(\)"),
+    ("expect", r"\.expect\("),
+    ("panic", r"panic!"),
+    ("unreachable", r"unreachable!"),
+    ("abs", r"\.abs\(\)"),
+    ("indexing", r"[A-Za-z0-9_)\]]\["),
+)
+_ORGAN_DENY = "#![deny(clippy::indexing_slicing, clippy::unwrap_used, clippy::expect_used, clippy::panic)]"
+
+
+def _organ_findings(text):
+    return [name for name, pattern in _ORGAN_BANS if re.search(pattern, text)]
+
+
+def test_an10_the_organs_hold_no_construct_that_can_panic_and_deny_them():
+    organs = ENGINE_SRC / "organs"
+    files = sorted(organs.glob("*.rs"))
+    assert len(files) >= 3, files
+    for path in files:
+        assert _organ_findings(path.read_text(encoding="ascii")) == [], path.name
+    assert _ORGAN_DENY in (organs / "mod.rs").read_text(encoding="ascii")
+    lib = (ENGINE_SRC / "lib.rs").read_text(encoding="ascii")
+    assert "pub mod organs;" in lib
+    canary = "a.unwrap() b.expect(1) panic!() unreachable!() x.abs() values[0]"
+    assert _organ_findings(canary) == [name for name, _ in _ORGAN_BANS], "every ban can fire"
 
 
 if __name__ == "__main__":

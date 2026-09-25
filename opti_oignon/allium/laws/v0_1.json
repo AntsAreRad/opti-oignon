@@ -1,0 +1,2090 @@
+{
+  "decays": {
+    "tag": {"kind": "lazy", "length": 256, "tau": 3},
+    "trace": {"kind": "iter", "tau": 2}
+  },
+  "founders": {"name": "v1", "sha256": "cf55890bfddc1cf49124b09f7f6b925cae80e95f20c0d0c229ea0a32c0d14b85"},
+  "genome": {
+    "chromosomes": [
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      [256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277],
+      [512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539],
+      [768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784],
+      [1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1046, 1047],
+      [1280, 1281, 1282, 1283, 1284, 1285, 1286, 1287, 1288, 1289, 1290, 1291, 1292, 1293, 1294, 1295, 1296, 1297, 1298, 1299, 1300, 1301, 1302, 1303],
+      [1536, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 1544, 1545, 1546, 1547, 1548, 1549, 1550],
+      [1792, 1793, 1794, 1795, 1796, 1797, 1798, 1799, 1800, 1801, 1802, 1803, 1804, 1805, 1806, 1807, 1808, 1809, 1810]
+    ],
+    "kinds": [
+      {
+        "code": 1,
+        "fields": [
+          {"hi": 63, "lo": 0, "name": "out"},
+          {"hi": 65535, "lo": 0, "name": "prod"},
+          {"hi": 65535, "lo": 0, "name": "deg"},
+          {"hi": 32767, "lo": -32768, "name": "bias"},
+          {"hi": 65535, "lo": 0, "name": "rate"}
+        ],
+        "name": "tf"
+      },
+      {
+        "code": 2,
+        "fields": [
+          {"hi": 63, "lo": 0, "name": "src"},
+          {"hi": 32767, "lo": -32768, "name": "w"},
+          {"hi": 65535, "lo": 512, "name": "K"},
+          {"hi": 4, "lo": 1, "name": "n"},
+          {"hi": 1, "lo": 0, "name": "mode"}
+        ],
+        "name": "cis"
+      },
+      {
+        "code": 3,
+        "fields": [
+          {"hi": 255, "lo": 0, "name": "s1"},
+          {"hi": 255, "lo": 0, "name": "s2"},
+          {"hi": 255, "lo": 0, "name": "p1"},
+          {"hi": 255, "lo": 0, "name": "p2"},
+          {"hi": 65535, "lo": 0, "name": "kcat"},
+          {"hi": 65535, "lo": 512, "name": "Km"},
+          {"hi": 65535, "lo": 0, "name": "yield"}
+        ],
+        "name": "enz"
+      },
+      {
+        "code": 4,
+        "fields": [
+          {"hi": 10, "lo": 0, "name": "channel"},
+          {"hi": 63, "lo": 0, "name": "species"},
+          {"hi": 32767, "lo": -32768, "name": "gain"},
+          {"hi": 65535, "lo": 0, "name": "threshold"}
+        ],
+        "name": "rec"
+      },
+      {
+        "code": 5,
+        "fields": [
+          {"hi": 15, "lo": 0, "name": "pred"},
+          {"hi": 63, "lo": 0, "name": "guard"},
+          {"hi": 65535, "lo": 0, "name": "threshold"},
+          {"hi": 15, "lo": 0, "name": "succ"},
+          {"hi": 65535, "lo": 0, "name": "rate"},
+          {"hi": 127, "lo": -128, "name": "angle"}
+        ],
+        "name": "morph"
+      },
+      {
+        "code": 6,
+        "fields": [
+          {"hi": 1, "lo": 0, "name": "class"},
+          {"hi": 65535, "lo": 0, "name": "strength"},
+          {"hi": 65535, "lo": 0, "name": "cost"}
+        ],
+        "name": "imm"
+      },
+      {
+        "code": 7,
+        "fields": [
+          {"hi": 3, "lo": 0, "name": "class"},
+          {"hi": 1, "lo": 0, "name": "allele"}
+        ],
+        "name": "pig"
+      },
+      {
+        "code": 8,
+        "fields": [
+          {"hi": 6, "lo": 0, "name": "class"},
+          {"hi": 127, "lo": -128, "name": "A"},
+          {"hi": 127, "lo": -128, "name": "Aneg"},
+          {"hi": 127, "lo": -128, "name": "B"},
+          {"hi": 127, "lo": -128, "name": "C"},
+          {"hi": 127, "lo": -128, "name": "D"},
+          {"hi": 15, "lo": 0, "name": "LR"},
+          {"hi": 15, "lo": 1, "name": "TAU_X"},
+          {"hi": 15, "lo": 1, "name": "TAU_Y"},
+          {"hi": 15, "lo": 1, "name": "TAU_E"},
+          {"hi": 7, "lo": 0, "name": "M_SEL"},
+          {"hi": 1, "lo": 0, "name": "M_SIGN"}
+        ],
+        "name": "plast"
+      },
+      {
+        "code": 9,
+        "fields": [
+          {"hi": 255, "lo": 0, "name": "channel"},
+          {"hi": 32767, "lo": -32768, "name": "weight"},
+          {"hi": 32767, "lo": -32768, "name": "base"},
+          {"hi": 255, "lo": 0, "name": "habituation"},
+          {"hi": 65535, "lo": 0, "name": "curiosity"}
+        ],
+        "name": "temp"
+      },
+      {
+        "code": 10,
+        "fields": [
+          {"hi": 54, "lo": 0, "name": "offset"},
+          {"hi": 255, "lo": 0, "name": "d0"},
+          {"hi": 255, "lo": 0, "name": "d1"},
+          {"hi": 255, "lo": 0, "name": "d2"},
+          {"hi": 255, "lo": 0, "name": "d3"},
+          {"hi": 255, "lo": 0, "name": "d4"},
+          {"hi": 255, "lo": 0, "name": "d5"},
+          {"hi": 255, "lo": 0, "name": "d6"},
+          {"hi": 255, "lo": 0, "name": "d7"},
+          {"hi": 255, "lo": 0, "name": "d8"}
+        ],
+        "name": "lex"
+      },
+      {
+        "code": 11,
+        "fields": [
+          {"hi": 15, "lo": 0, "name": "trait"},
+          {"hi": 65535, "lo": 0, "name": "value"},
+          {"hi": 65535, "lo": 0, "name": "window"}
+        ],
+        "name": "shape"
+      },
+      {
+        "code": 12,
+        "fields": [
+          {"hi": 21, "lo": 7, "name": "D_enter"},
+          {"hi": 2, "lo": 1, "name": "v_cold"},
+          {"hi": 3, "lo": 1, "name": "v_dorm"},
+          {"hi": 120, "lo": 45, "name": "VU_req"},
+          {"hi": 40, "lo": 20, "name": "stalk_days"},
+          {"hi": 4, "lo": 2, "name": "offsets"},
+          {"hi": 90, "lo": 30, "name": "rest_days"},
+          {"hi": 420, "lo": 180, "name": "a_min"}
+        ],
+        "name": "vern"
+      },
+      {
+        "code": 13,
+        "fields": [
+          {"hi": 5, "lo": 0, "name": "block"},
+          {"hi": 32767, "lo": -32768, "name": "shift0"},
+          {"hi": 32767, "lo": -32768, "name": "shift1"},
+          {"hi": 32767, "lo": -32768, "name": "shift2"},
+          {"hi": 32767, "lo": -32768, "name": "shift3"}
+        ],
+        "name": "prc"
+      },
+      {
+        "code": 14,
+        "fields": [
+          {"hi": 65535, "lo": 0, "name": "activity"},
+          {"hi": 255, "lo": 0, "name": "target_bias"}
+        ],
+        "name": "te"
+      },
+      {
+        "code": 15,
+        "fields": [
+          {"hi": 63, "lo": 0, "name": "target"},
+          {"hi": 65535, "lo": 0, "name": "effect"}
+        ],
+        "name": "load"
+      },
+      {
+        "code": 16,
+        "fields": [
+          {"hi": 63, "lo": 0, "name": "param"},
+          {"hi": 32767, "lo": -32768, "name": "value"}
+        ],
+        "name": "brain"
+      }
+    ],
+    "loci": [
+      {
+        "box": [
+          {"field": "channel", "hi": 0, "lo": 0},
+          {"field": "species", "hi": 14, "lo": 14},
+          {"field": "gain", "hi": 512, "lo": 256},
+          {"field": "threshold", "hi": 0, "lo": 0}
+        ],
+        "flags": 4,
+        "id": 0,
+        "kind": "rec",
+        "name": "rec_clock_light",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "src", "hi": 16, "lo": 16},
+          {"field": "w", "hi": 4096, "lo": 4096},
+          {"field": "K", "hi": 8192, "lo": 8192},
+          {"field": "n", "hi": 4, "lo": 3},
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 1,
+        "kind": "cis",
+        "name": "cis_clock_m_by_e",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 14, "lo": 14},
+          {"field": "prod", "hi": 58256, "lo": 18724},
+          {"field": "deg", "hi": 4681, "lo": 3641},
+          {"field": "bias", "hi": -8192, "lo": -8192},
+          {"field": "rate", "hi": 16384, "lo": 16384}
+        ],
+        "flags": 13,
+        "id": 2,
+        "kind": "tf",
+        "name": "clock_m",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "src", "hi": 14, "lo": 14},
+          {"field": "w", "hi": 4096, "lo": 4096},
+          {"field": "K", "hi": 8192, "lo": 8192},
+          {"field": "n", "hi": 4, "lo": 3},
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 3,
+        "kind": "cis",
+        "name": "cis_clock_d_by_m",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 15, "lo": 15},
+          {"field": "prod", "hi": 58256, "lo": 18724},
+          {"field": "deg", "hi": 4681, "lo": 3641},
+          {"field": "bias", "hi": -8192, "lo": -8192},
+          {"field": "rate", "hi": 16384, "lo": 16384}
+        ],
+        "flags": 13,
+        "id": 4,
+        "kind": "tf",
+        "name": "clock_d",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "src", "hi": 15, "lo": 15},
+          {"field": "w", "hi": 4096, "lo": 4096},
+          {"field": "K", "hi": 8192, "lo": 8192},
+          {"field": "n", "hi": 4, "lo": 3},
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 5,
+        "kind": "cis",
+        "name": "cis_clock_e_by_d",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 16, "lo": 16},
+          {"field": "prod", "hi": 58256, "lo": 18724},
+          {"field": "deg", "hi": 4681, "lo": 3641},
+          {"field": "bias", "hi": -8192, "lo": -8192},
+          {"field": "rate", "hi": 16384, "lo": 16384}
+        ],
+        "flags": 13,
+        "id": 6,
+        "kind": "tf",
+        "name": "clock_e",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 0, "lo": 0},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 7,
+        "kind": "prc",
+        "name": "prc_0",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 1, "lo": 1},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 8,
+        "kind": "prc",
+        "name": "prc_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 2, "lo": 2},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 9,
+        "kind": "prc",
+        "name": "prc_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 3, "lo": 3},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 10,
+        "kind": "prc",
+        "name": "prc_3",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 4, "lo": 4},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 11,
+        "kind": "prc",
+        "name": "prc_4",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "block", "hi": 5, "lo": 5},
+          {"field": "shift0", "hi": 2048, "lo": -2048},
+          {"field": "shift1", "hi": 2048, "lo": -2048},
+          {"field": "shift2", "hi": 2048, "lo": -2048},
+          {"field": "shift3", "hi": 2048, "lo": -2048}
+        ],
+        "flags": 1,
+        "id": 12,
+        "kind": "prc",
+        "name": "prc_5",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 256,
+        "kind": "cis",
+        "name": "cis_dormancy_keeper_by_aba",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 257,
+        "kind": "cis",
+        "name": "cis_dormancy_keeper_by_gibberellin",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 22, "lo": 22}
+        ],
+        "flags": 13,
+        "id": 258,
+        "kind": "tf",
+        "name": "dormancy_keeper",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 259,
+        "kind": "cis",
+        "name": "cis_age_timer_by_structure",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 21, "lo": 21}
+        ],
+        "flags": 13,
+        "id": 260,
+        "kind": "tf",
+        "name": "age_timer",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 10, "lo": 10},
+          {"field": "species", "hi": 17, "lo": 17},
+          {"field": "threshold", "hi": 40960, "lo": 30037}
+        ],
+        "flags": 5,
+        "id": 261,
+        "kind": "rec",
+        "name": "rec_photoperiod",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 262,
+        "kind": "cis",
+        "name": "cis_bulb_signal_by_bulb_block",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 17, "lo": 17}
+        ],
+        "flags": 13,
+        "id": 263,
+        "kind": "tf",
+        "name": "bulb_signal",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 264,
+        "kind": "cis",
+        "name": "cis_bulb_block_by_gibberellin",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 265,
+        "kind": "cis",
+        "name": "cis_bulb_block_by_sugar",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 18, "lo": 18}
+        ],
+        "flags": 13,
+        "id": 266,
+        "kind": "tf",
+        "name": "bulb_block",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 267,
+        "kind": "cis",
+        "name": "cis_flower_signal_by_age_timer",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 268,
+        "kind": "cis",
+        "name": "cis_flower_signal_by_cold_repressor",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 19, "lo": 19}
+        ],
+        "flags": 13,
+        "id": 269,
+        "kind": "tf",
+        "name": "flower_signal",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 270,
+        "kind": "cis",
+        "name": "cis_cold_repressor_by_dormancy_keeper",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 271,
+        "kind": "cis",
+        "name": "cis_cold_repressor_by_temperature",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 20, "lo": 20}
+        ],
+        "flags": 13,
+        "id": 272,
+        "kind": "tf",
+        "name": "cold_repressor",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 273,
+        "kind": "cis",
+        "name": "cis_senescence_by_age_timer",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 274,
+        "kind": "cis",
+        "name": "cis_senescence_by_ethylene",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 275,
+        "kind": "cis",
+        "name": "cis_senescence_by_cytokinin",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 23, "lo": 23}
+        ],
+        "flags": 13,
+        "id": 276,
+        "kind": "tf",
+        "name": "senescence",
+        "stages": 2047
+      },
+      {"box": [], "flags": 5, "id": 277, "kind": "vern", "name": "vern", "stages": 2047},
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 512,
+        "kind": "cis",
+        "name": "cis_auxin_by_sugar",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 513,
+        "kind": "cis",
+        "name": "cis_auxin_by_cytokinin",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 7, "lo": 7}
+        ],
+        "flags": 13,
+        "id": 514,
+        "kind": "tf",
+        "name": "auxin_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 7, "lo": 7},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 515,
+        "kind": "enz",
+        "name": "auxin_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 516,
+        "kind": "cis",
+        "name": "cis_cytokinin_by_nitrogen",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 517,
+        "kind": "cis",
+        "name": "cis_cytokinin_by_auxin",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 8, "lo": 8}
+        ],
+        "flags": 13,
+        "id": 518,
+        "kind": "tf",
+        "name": "cytokinin_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 8, "lo": 8},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 519,
+        "kind": "enz",
+        "name": "cytokinin_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 520,
+        "kind": "cis",
+        "name": "cis_gibberellin_by_sugar",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 521,
+        "kind": "cis",
+        "name": "cis_gibberellin_by_aba",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 9, "lo": 9}
+        ],
+        "flags": 13,
+        "id": 522,
+        "kind": "tf",
+        "name": "gibberellin_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 9, "lo": 9},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 523,
+        "kind": "enz",
+        "name": "gibberellin_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 524,
+        "kind": "cis",
+        "name": "cis_aba_by_dormancy_keeper",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 525,
+        "kind": "cis",
+        "name": "cis_aba_by_water",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 10, "lo": 10}
+        ],
+        "flags": 29,
+        "id": 526,
+        "kind": "tf",
+        "name": "aba_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 10, "lo": 10},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 527,
+        "kind": "enz",
+        "name": "aba_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 528,
+        "kind": "cis",
+        "name": "cis_ethylene_by_damage",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 529,
+        "kind": "cis",
+        "name": "cis_ethylene_by_senescence",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 11, "lo": 11}
+        ],
+        "flags": 29,
+        "id": 530,
+        "kind": "tf",
+        "name": "ethylene_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 11, "lo": 11},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 531,
+        "kind": "enz",
+        "name": "ethylene_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 532,
+        "kind": "cis",
+        "name": "cis_salicylate_by_pest_recognition",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 533,
+        "kind": "cis",
+        "name": "cis_salicylate_by_jasmonate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 12, "lo": 12}
+        ],
+        "flags": 29,
+        "id": 534,
+        "kind": "tf",
+        "name": "salicylate_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 12, "lo": 12},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 535,
+        "kind": "enz",
+        "name": "salicylate_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 12,
+        "id": 536,
+        "kind": "cis",
+        "name": "cis_jasmonate_by_damage",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 537,
+        "kind": "cis",
+        "name": "cis_jasmonate_by_salicylate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "out", "hi": 13, "lo": 13}
+        ],
+        "flags": 29,
+        "id": 538,
+        "kind": "tf",
+        "name": "jasmonate_synth",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 13, "lo": 13},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 539,
+        "kind": "enz",
+        "name": "jasmonate_catab",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 0, "lo": 0},
+          {"field": "s2", "hi": 5, "lo": 5},
+          {"field": "p1", "hi": 2, "lo": 2},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 768,
+        "kind": "enz",
+        "name": "enz_photosynthesis",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 2, "lo": 2},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 255, "lo": 255},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 769,
+        "kind": "enz",
+        "name": "enz_respiration",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 2, "lo": 2},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 3, "lo": 3},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 770,
+        "kind": "enz",
+        "name": "enz_fructan_synth_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 2, "lo": 2},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 3, "lo": 3},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 8,
+        "id": 771,
+        "kind": "enz",
+        "name": "enz_fructan_synth_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 3, "lo": 3},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 2, "lo": 2},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 772,
+        "kind": "enz",
+        "name": "enz_fructan_hydrolysis",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 255, "lo": 255},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 6, "lo": 6},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 773,
+        "kind": "enz",
+        "name": "enz_n_uptake",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "s1", "hi": 255, "lo": 255},
+          {"field": "s2", "hi": 255, "lo": 255},
+          {"field": "p1", "hi": 5, "lo": 5},
+          {"field": "p2", "hi": 255, "lo": 255}
+        ],
+        "flags": 12,
+        "id": 774,
+        "kind": "enz",
+        "name": "enz_water_uptake",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 0, "lo": 0},
+          {"field": "species", "hi": 0, "lo": 0}
+        ],
+        "flags": 4,
+        "id": 775,
+        "kind": "rec",
+        "name": "rec_sun",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 1, "lo": 1},
+          {"field": "species", "hi": 1, "lo": 1}
+        ],
+        "flags": 0,
+        "id": 776,
+        "kind": "rec",
+        "name": "rec_lamp",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 2, "lo": 2},
+          {"field": "species", "hi": 32, "lo": 32}
+        ],
+        "flags": 4,
+        "id": 777,
+        "kind": "rec",
+        "name": "rec_water",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 3, "lo": 3},
+          {"field": "species", "hi": 30, "lo": 30}
+        ],
+        "flags": 4,
+        "id": 778,
+        "kind": "rec",
+        "name": "rec_temperature",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 4, "lo": 4},
+          {"field": "species", "hi": 29, "lo": 29}
+        ],
+        "flags": 0,
+        "id": 779,
+        "kind": "rec",
+        "name": "rec_touch",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 5, "lo": 5},
+          {"field": "species", "hi": 31, "lo": 31}
+        ],
+        "flags": 16,
+        "id": 780,
+        "kind": "rec",
+        "name": "rec_pest_a",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 6, "lo": 6},
+          {"field": "species", "hi": 31, "lo": 31}
+        ],
+        "flags": 16,
+        "id": 781,
+        "kind": "rec",
+        "name": "rec_pest_b",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 7, "lo": 7},
+          {"field": "species", "hi": 33, "lo": 33},
+          {"field": "gain", "hi": 6144, "lo": 2048}
+        ],
+        "flags": 1,
+        "id": 782,
+        "kind": "rec",
+        "name": "rec_phy_rfr",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 8, "lo": 8},
+          {"field": "species", "hi": 34, "lo": 34},
+          {"field": "gain", "hi": 6144, "lo": 2048}
+        ],
+        "flags": 1,
+        "id": 783,
+        "kind": "rec",
+        "name": "rec_blue",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 9, "lo": 9},
+          {"field": "species", "hi": 35, "lo": 35},
+          {"field": "gain", "hi": 6144, "lo": 2048}
+        ],
+        "flags": 1,
+        "id": 784,
+        "kind": "rec",
+        "name": "rec_uv",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 8,
+        "id": 1024,
+        "kind": "cis",
+        "name": "cis_imm_r0_by_salicylate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 0, "lo": 0}
+        ],
+        "flags": 24,
+        "id": 1025,
+        "kind": "imm",
+        "name": "imm_r0",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 8,
+        "id": 1026,
+        "kind": "cis",
+        "name": "cis_imm_r1_by_salicylate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 0, "lo": 0}
+        ],
+        "flags": 24,
+        "id": 1027,
+        "kind": "imm",
+        "name": "imm_r1",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 8,
+        "id": 1028,
+        "kind": "cis",
+        "name": "cis_imm_r2_by_jasmonate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 1, "lo": 1}
+        ],
+        "flags": 24,
+        "id": 1029,
+        "kind": "imm",
+        "name": "imm_r2",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "mode", "hi": 0, "lo": 0}
+        ],
+        "flags": 8,
+        "id": 1030,
+        "kind": "cis",
+        "name": "cis_imm_r3_by_jasmonate",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 1, "lo": 1}
+        ],
+        "flags": 24,
+        "id": 1031,
+        "kind": "imm",
+        "name": "imm_r3",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 0, "lo": 0}
+        ],
+        "flags": 0,
+        "id": 1032,
+        "kind": "pig",
+        "name": "pig_i",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 1, "lo": 1}
+        ],
+        "flags": 0,
+        "id": 1033,
+        "kind": "pig",
+        "name": "pig_c",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 2, "lo": 2}
+        ],
+        "flags": 0,
+        "id": 1034,
+        "kind": "pig",
+        "name": "pig_r",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 3, "lo": 3}
+        ],
+        "flags": 0,
+        "id": 1035,
+        "kind": "pig",
+        "name": "pig_g",
+        "stages": 2047
+      },
+      {"box": [], "flags": 16, "id": 1036, "kind": "te", "name": "te_0", "stages": 2047},
+      {"box": [], "flags": 16, "id": 1037, "kind": "te", "name": "te_1", "stages": 2047},
+      {"box": [], "flags": 16, "id": 1038, "kind": "te", "name": "te_2", "stages": 2047},
+      {"box": [], "flags": 16, "id": 1039, "kind": "te", "name": "te_3", "stages": 2047},
+      {
+        "box": [
+          {"field": "target", "hi": 6, "lo": 6}
+        ],
+        "flags": 2,
+        "id": 1040,
+        "kind": "load",
+        "name": "load_0",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 7, "lo": 7}
+        ],
+        "flags": 2,
+        "id": 1041,
+        "kind": "load",
+        "name": "load_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 8, "lo": 8}
+        ],
+        "flags": 2,
+        "id": 1042,
+        "kind": "load",
+        "name": "load_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 9, "lo": 9}
+        ],
+        "flags": 2,
+        "id": 1043,
+        "kind": "load",
+        "name": "load_3",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 10, "lo": 10}
+        ],
+        "flags": 2,
+        "id": 1044,
+        "kind": "load",
+        "name": "load_4",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 11, "lo": 11}
+        ],
+        "flags": 2,
+        "id": 1045,
+        "kind": "load",
+        "name": "load_5",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 14, "lo": 14}
+        ],
+        "flags": 2,
+        "id": 1046,
+        "kind": "load",
+        "name": "load_6",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "target", "hi": 17, "lo": 17}
+        ],
+        "flags": 2,
+        "id": 1047,
+        "kind": "load",
+        "name": "load_7",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 0, "lo": 0},
+          {"field": "guard", "hi": 2, "lo": 2},
+          {"field": "succ", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 1280,
+        "kind": "morph",
+        "name": "morph_leaf_init",
+        "stages": 1052
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 1, "lo": 1},
+          {"field": "guard", "hi": 9, "lo": 9},
+          {"field": "succ", "hi": 1, "lo": 1}
+        ],
+        "flags": 12,
+        "id": 1281,
+        "kind": "morph",
+        "name": "morph_leaf_elong",
+        "stages": 1052
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 2, "lo": 2},
+          {"field": "guard", "hi": 3, "lo": 3},
+          {"field": "succ", "hi": 2, "lo": 2}
+        ],
+        "flags": 12,
+        "id": 1282,
+        "kind": "morph",
+        "name": "morph_sheath_fill",
+        "stages": 1072
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 1, "lo": 1},
+          {"field": "guard", "hi": 17, "lo": 17},
+          {"field": "succ", "hi": 3, "lo": 3}
+        ],
+        "flags": 12,
+        "id": 1283,
+        "kind": "morph",
+        "name": "morph_scale_corr",
+        "stages": 1072
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 0, "lo": 0},
+          {"field": "guard", "hi": 7, "lo": 7},
+          {"field": "succ", "hi": 4, "lo": 4}
+        ],
+        "flags": 12,
+        "id": 1284,
+        "kind": "morph",
+        "name": "morph_root_init",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 5, "lo": 5},
+          {"field": "guard", "hi": 2, "lo": 2},
+          {"field": "succ", "hi": 5, "lo": 5}
+        ],
+        "flags": 12,
+        "id": 1285,
+        "kind": "morph",
+        "name": "morph_root_tip",
+        "stages": 2046
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 0, "lo": 0},
+          {"field": "guard", "hi": 19, "lo": 19},
+          {"field": "succ", "hi": 6, "lo": 6}
+        ],
+        "flags": 8,
+        "id": 1286,
+        "kind": "morph",
+        "name": "morph_bolting",
+        "stages": 128
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 1, "lo": 1},
+          {"field": "guard", "hi": 23, "lo": 23},
+          {"field": "succ", "hi": 1, "lo": 1}
+        ],
+        "flags": 8,
+        "id": 1287,
+        "kind": "morph",
+        "name": "morph_fall_over",
+        "stages": 32
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 3, "lo": 3},
+          {"field": "guard", "hi": 10, "lo": 10},
+          {"field": "succ", "hi": 8, "lo": 8}
+        ],
+        "flags": 8,
+        "id": 1288,
+        "kind": "morph",
+        "name": "morph_tunic_dry",
+        "stages": 96
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 6, "lo": 6},
+          {"field": "guard", "hi": 19, "lo": 19},
+          {"field": "succ", "hi": 7, "lo": 7}
+        ],
+        "flags": 8,
+        "id": 1289,
+        "kind": "morph",
+        "name": "morph_umbel_open",
+        "stages": 256
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 7, "lo": 7},
+          {"field": "guard", "hi": 3, "lo": 3},
+          {"field": "succ", "hi": 9, "lo": 9}
+        ],
+        "flags": 8,
+        "id": 1290,
+        "kind": "morph",
+        "name": "morph_bulbil",
+        "stages": 1536
+      },
+      {
+        "box": [
+          {"field": "pred", "hi": 3, "lo": 3},
+          {"field": "guard", "hi": 3, "lo": 3},
+          {"field": "succ", "hi": 10, "lo": 10}
+        ],
+        "flags": 8,
+        "id": 1291,
+        "kind": "morph",
+        "name": "morph_offset",
+        "stages": 1024
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 0, "lo": 0},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1292,
+        "kind": "shape",
+        "name": "shape_bulb_radius",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 1, "lo": 1},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1293,
+        "kind": "shape",
+        "name": "shape_bulb_height",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 2, "lo": 2},
+          {"field": "value", "hi": 3, "lo": 1},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1294,
+        "kind": "shape",
+        "name": "shape_taper",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 3, "lo": 3},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1295,
+        "kind": "shape",
+        "name": "shape_neck",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 4, "lo": 4},
+          {"field": "value", "hi": 16, "lo": 0},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1296,
+        "kind": "shape",
+        "name": "shape_meridians",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 5, "lo": 5},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1297,
+        "kind": "shape",
+        "name": "shape_leaf_stiffness",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 6, "lo": 6},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1298,
+        "kind": "shape",
+        "name": "shape_breath_base",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 7, "lo": 7},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1299,
+        "kind": "shape",
+        "name": "shape_turn_speed",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 8, "lo": 8},
+          {"field": "value", "hi": 2, "lo": 0},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1300,
+        "kind": "shape",
+        "name": "shape_ramp_offset",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 9, "lo": 9},
+          {"field": "value", "hi": 1, "lo": 0},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1301,
+        "kind": "shape",
+        "name": "shape_leaf_tint",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 10, "lo": 10},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1302,
+        "kind": "shape",
+        "name": "shape_stripe",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "trait", "hi": 11, "lo": 11},
+          {"field": "window", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1303,
+        "kind": "shape",
+        "name": "shape_speckle",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 0, "lo": 0},
+          {"field": "M_SEL", "hi": 0, "lo": 0},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1536,
+        "kind": "plast",
+        "name": "plast_relay_cortex",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 1, "lo": 1},
+          {"field": "M_SEL", "hi": 0, "lo": 0},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1537,
+        "kind": "plast",
+        "name": "plast_cortex_cortex",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 2, "lo": 2},
+          {"field": "M_SEL", "hi": 1, "lo": 1},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1538,
+        "kind": "plast",
+        "name": "plast_cortex_go",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 3, "lo": 3},
+          {"field": "M_SEL", "hi": 1, "lo": 1},
+          {"field": "M_SIGN", "hi": 1, "lo": 1}
+        ],
+        "flags": 5,
+        "id": 1539,
+        "kind": "plast",
+        "name": "plast_cortex_nogo",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 4, "lo": 4},
+          {"field": "M_SEL", "hi": 1, "lo": 1},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1540,
+        "kind": "plast",
+        "name": "plast_cortex_critic",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 5, "lo": 5},
+          {"field": "M_SEL", "hi": 2, "lo": 2},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1541,
+        "kind": "plast",
+        "name": "plast_cortex_prediction",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "class", "hi": 6, "lo": 6},
+          {"field": "M_SEL", "hi": 3, "lo": 3},
+          {"field": "M_SIGN", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1542,
+        "kind": "plast",
+        "name": "plast_hippo_cortex",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 0, "lo": 0},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1543,
+        "kind": "temp",
+        "name": "temp_homeo_0",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 1, "lo": 1},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1544,
+        "kind": "temp",
+        "name": "temp_homeo_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 2, "lo": 2},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1545,
+        "kind": "temp",
+        "name": "temp_homeo_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 3, "lo": 3},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1546,
+        "kind": "temp",
+        "name": "temp_homeo_3",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 4, "lo": 4},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1547,
+        "kind": "temp",
+        "name": "temp_homeo_4",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 5, "lo": 5},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1548,
+        "kind": "temp",
+        "name": "temp_homeo_5",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 6, "lo": 6},
+          {"field": "habituation", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1549,
+        "kind": "temp",
+        "name": "temp_homeo_6",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 255, "lo": 255},
+          {"field": "base", "hi": 0, "lo": 0}
+        ],
+        "flags": 17,
+        "id": 1550,
+        "kind": "temp",
+        "name": "temp_curiosity",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 0, "lo": 0}
+        ],
+        "flags": 5,
+        "id": 1792,
+        "kind": "lex",
+        "name": "lex_0",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 9, "lo": 9}
+        ],
+        "flags": 5,
+        "id": 1793,
+        "kind": "lex",
+        "name": "lex_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 18, "lo": 18}
+        ],
+        "flags": 5,
+        "id": 1794,
+        "kind": "lex",
+        "name": "lex_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 27, "lo": 27}
+        ],
+        "flags": 5,
+        "id": 1795,
+        "kind": "lex",
+        "name": "lex_3",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 36, "lo": 36},
+          {"field": "d6", "hi": 255, "lo": 1}
+        ],
+        "flags": 5,
+        "id": 1796,
+        "kind": "lex",
+        "name": "lex_4",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 45, "lo": 45},
+          {"field": "d0", "hi": 2, "lo": 1},
+          {"field": "d1", "hi": 1, "lo": 0},
+          {"field": "d2", "hi": 127, "lo": 0},
+          {"field": "d3", "hi": 1, "lo": 0},
+          {"field": "d4", "hi": 2, "lo": 0},
+          {"field": "d5", "hi": 2, "lo": 0},
+          {"field": "d6", "hi": 1, "lo": 0},
+          {"field": "d7", "hi": 4, "lo": 0},
+          {"field": "d8", "hi": 4, "lo": 0}
+        ],
+        "flags": 4,
+        "id": 1797,
+        "kind": "lex",
+        "name": "lex_5",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "offset", "hi": 54, "lo": 54},
+          {"field": "d0", "hi": 1, "lo": 0},
+          {"field": "d1", "hi": 1, "lo": 0},
+          {"field": "d3", "hi": 0, "lo": 0},
+          {"field": "d4", "hi": 0, "lo": 0},
+          {"field": "d5", "hi": 0, "lo": 0},
+          {"field": "d6", "hi": 0, "lo": 0},
+          {"field": "d7", "hi": 0, "lo": 0},
+          {"field": "d8", "hi": 0, "lo": 0}
+        ],
+        "flags": 4,
+        "id": 1798,
+        "kind": "lex",
+        "name": "lex_6",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 16, "lo": 16},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1799,
+        "kind": "temp",
+        "name": "temp_social_0",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 17, "lo": 17},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1800,
+        "kind": "temp",
+        "name": "temp_social_1",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 18, "lo": 18},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1801,
+        "kind": "temp",
+        "name": "temp_social_2",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 19, "lo": 19},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1802,
+        "kind": "temp",
+        "name": "temp_social_3",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 20, "lo": 20},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1803,
+        "kind": "temp",
+        "name": "temp_social_4",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 21, "lo": 21},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1804,
+        "kind": "temp",
+        "name": "temp_social_5",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 22, "lo": 22},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1805,
+        "kind": "temp",
+        "name": "temp_social_6",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 23, "lo": 23},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1806,
+        "kind": "temp",
+        "name": "temp_social_7",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 24, "lo": 24},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1807,
+        "kind": "temp",
+        "name": "temp_social_8",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 25, "lo": 25},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1808,
+        "kind": "temp",
+        "name": "temp_social_9",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 26, "lo": 26},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1809,
+        "kind": "temp",
+        "name": "temp_social_10",
+        "stages": 2047
+      },
+      {
+        "box": [
+          {"field": "channel", "hi": 27, "lo": 27},
+          {"field": "weight", "hi": 0, "lo": 0},
+          {"field": "curiosity", "hi": 0, "lo": 0}
+        ],
+        "flags": 1,
+        "id": 1810,
+        "kind": "temp",
+        "name": "temp_social_11",
+        "stages": 2047
+      }
+    ],
+    "max_bytes": 5224,
+    "max_promoter": 8,
+    "max_records": 64,
+    "pairs": 8,
+    "schema": 1,
+    "species": [
+      {"class": "input", "code": 0, "deg": 0, "name": "sun"},
+      {"class": "token", "code": 1, "deg": 4096, "name": "lamp"},
+      {"class": "conserved", "code": 2, "deg": 0, "name": "sugar"},
+      {"class": "conserved", "code": 3, "deg": 0, "name": "fructan"},
+      {"class": "conserved", "code": 4, "deg": 0, "name": "structure"},
+      {"class": "conserved", "code": 5, "deg": 0, "name": "water"},
+      {"class": "open", "code": 6, "deg": 4096, "name": "nitrogen"},
+      {"class": "open", "code": 7, "deg": 4096, "name": "auxin"},
+      {"class": "open", "code": 8, "deg": 4096, "name": "cytokinin"},
+      {"class": "open", "code": 9, "deg": 4096, "name": "gibberellin"},
+      {"class": "open", "code": 10, "deg": 4096, "name": "aba"},
+      {"class": "open", "code": 11, "deg": 4096, "name": "ethylene"},
+      {"class": "open", "code": 12, "deg": 4096, "name": "salicylate"},
+      {"class": "open", "code": 13, "deg": 4096, "name": "jasmonate"},
+      {"class": "open", "code": 14, "deg": 4096, "name": "clock_m"},
+      {"class": "open", "code": 15, "deg": 4096, "name": "clock_d"},
+      {"class": "open", "code": 16, "deg": 4096, "name": "clock_e"},
+      {"class": "open", "code": 17, "deg": 4096, "name": "bulb_signal"},
+      {"class": "open", "code": 18, "deg": 4096, "name": "bulb_block"},
+      {"class": "open", "code": 19, "deg": 4096, "name": "flower_signal"},
+      {"class": "open", "code": 20, "deg": 4096, "name": "cold_repressor"},
+      {"class": "open", "code": 21, "deg": 4096, "name": "age_timer"},
+      {"class": "open", "code": 22, "deg": 4096, "name": "dormancy_keeper"},
+      {"class": "open", "code": 23, "deg": 4096, "name": "senescence"},
+      {"class": "open", "code": 24, "deg": 4096, "name": "ros"},
+      {"class": "open", "code": 25, "deg": 4096, "name": "damage"},
+      {"class": "open", "code": 26, "deg": 4096, "name": "sleep_pressure"},
+      {"class": "open", "code": 27, "deg": 4096, "name": "anthocyanin"},
+      {"class": "open", "code": 28, "deg": 4096, "name": "quercetin"},
+      {"class": "input", "code": 29, "deg": 0, "name": "touch"},
+      {"class": "input", "code": 30, "deg": 0, "name": "temperature"},
+      {"class": "input", "code": 31, "deg": 0, "name": "pest_recognition"},
+      {"class": "open", "code": 32, "deg": 4096, "name": "water_signal"},
+      {"class": "token", "code": 33, "deg": 4096, "name": "m_rfr"},
+      {"class": "token", "code": 34, "deg": 4096, "name": "m_blue"},
+      {"class": "token", "code": 35, "deg": 4096, "name": "m_uv"},
+      {"class": "free", "code": 36, "deg": 4096, "name": "free_36"},
+      {"class": "free", "code": 37, "deg": 4096, "name": "free_37"},
+      {"class": "free", "code": 38, "deg": 4096, "name": "free_38"},
+      {"class": "free", "code": 39, "deg": 4096, "name": "free_39"},
+      {"class": "free", "code": 40, "deg": 4096, "name": "free_40"},
+      {"class": "free", "code": 41, "deg": 4096, "name": "free_41"},
+      {"class": "free", "code": 42, "deg": 4096, "name": "free_42"},
+      {"class": "free", "code": 43, "deg": 4096, "name": "free_43"},
+      {"class": "free", "code": 44, "deg": 4096, "name": "free_44"},
+      {"class": "free", "code": 45, "deg": 4096, "name": "free_45"},
+      {"class": "free", "code": 46, "deg": 4096, "name": "free_46"},
+      {"class": "free", "code": 47, "deg": 4096, "name": "free_47"},
+      {"class": "free", "code": 48, "deg": 4096, "name": "free_48"},
+      {"class": "free", "code": 49, "deg": 4096, "name": "free_49"},
+      {"class": "free", "code": 50, "deg": 4096, "name": "free_50"},
+      {"class": "free", "code": 51, "deg": 4096, "name": "free_51"},
+      {"class": "free", "code": 52, "deg": 4096, "name": "free_52"},
+      {"class": "free", "code": 53, "deg": 4096, "name": "free_53"},
+      {"class": "free", "code": 54, "deg": 4096, "name": "free_54"},
+      {"class": "free", "code": 55, "deg": 4096, "name": "free_55"},
+      {"class": "free", "code": 56, "deg": 4096, "name": "free_56"},
+      {"class": "free", "code": 57, "deg": 4096, "name": "free_57"},
+      {"class": "free", "code": 58, "deg": 4096, "name": "free_58"},
+      {"class": "free", "code": 59, "deg": 4096, "name": "free_59"},
+      {"class": "free", "code": 60, "deg": 4096, "name": "free_60"},
+      {"class": "free", "code": 61, "deg": 4096, "name": "free_61"},
+      {"class": "free", "code": 62, "deg": 4096, "name": "free_62"},
+      {"class": "free", "code": 63, "deg": 4096, "name": "free_63"}
+    ],
+    "stages": 11
+  },
+  "genome_bounds": {
+    "activation_max": {"ceiling": "i32", "max_raw": 7864320, "premise": "act in [0, ONE]", "proof": "B*16 + E*W*16 = 32768*16 + 14*32768*16 = 7864320"},
+    "edges_per_gene_max": {"ceiling": "count", "max_raw": 14, "premise": "none", "proof": "min(2*max_promoter, cis_on_pair_max) = min(2*8, 14) = 14"},
+    "gain_max": {"ceiling": "i32", "max_raw": 524288, "premise": "none", "proof": "G*16 = 32768*16 = 524288"},
+    "hill_den_max": {"ceiling": "i32", "max_raw": 536854528, "premise": "c in [0, CMAX]", "proof": "pow_raw(k_max, 4) + hill_pow_max = 268419072 + 268435456 = 536854528"},
+    "hill_intermediate_max": {"ceiling": "i64", "max_raw": 17592186044416, "premise": "c in [0, CMAX]", "proof": "max(33554432*524288, 268435456*65536) = 17592186044416"},
+    "hill_k_floor": {"ceiling": "ge1", "max_raw": 1, "premise": "none", "proof": "pow_raw(k_min, n_max) = pow_raw(4096, 4) = 1"},
+    "hill_pow_max": {"ceiling": "i32", "max_raw": 268435456, "premise": "c in [0, CMAX]", "proof": "pow_raw(CMAX, 4) = pow_raw(524288, 4) = 268435456"},
+    "k_max": {"ceiling": "le_cmax", "max_raw": 524280, "premise": "none", "proof": "max(K hi, Km hi)*8 = 65535*8 = 524280"},
+    "k_min": {"ceiling": "ge1", "max_raw": 4096, "premise": "none", "proof": "min(K lo, Km lo)*8 = 512*8 = 4096"},
+    "mm_intermediate_max": {"ceiling": "i64", "max_raw": 34359738368, "premise": "c in [0, CMAX]", "proof": "CMAX*65536 = 524288*65536 = 34359738368"},
+    "promoter_term_max": {"ceiling": "i32", "max_raw": 524288, "premise": "act in [0, ONE]", "proof": "W*16 = 32768*16 = 524288"}
+  },
+  "name": "v0_1",
+  "provisional": true,
+  "quiescent_in_dormancy": [],
+  "stock_bounds": {
+    "fructan": {"enz_readers": 1, "enz_writers": 2, "flow_max_raw": 196605, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(2+1)*65535 = 196605"},
+    "structure": {"enz_readers": 0, "enz_writers": 0, "flow_max_raw": 0, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(0+0)*65535 = 0"},
+    "sugar": {"enz_readers": 3, "enz_writers": 2, "flow_max_raw": 327675, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(2+3)*65535 = 327675"},
+    "water": {"enz_readers": 1, "enz_writers": 1, "flow_max_raw": 131070, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(1+1)*65535 = 131070"}
+  },
+  "tables": {"sine_q15": "52db0b0fbb426044cae83338a941d7a900dca26bcbf19df6680e6b1814659396"},
+  "version": 0
+}

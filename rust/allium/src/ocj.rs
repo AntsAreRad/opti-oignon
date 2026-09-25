@@ -374,6 +374,16 @@ fn emit_into(value: &Value, depth: usize, out: &mut Vec<u8>) -> Result<(), Refus
             if depth.saturating_add(1) > MAX_DEPTH {
                 return Err(refused("limit", String::from("depth")));
             }
+            // Parsed objects are ordered and `obj` sorts, so keys out of order
+            // are an engine defect; emitting them would diverge from the
+            // reference, which sorts, in silence.
+            for pair in members.windows(2) {
+                if let [(before, _), (after, _)] = pair {
+                    if before.as_bytes() >= after.as_bytes() {
+                        return Err(refused("engine_panic", String::from("object order")));
+                    }
+                }
+            }
             out.push(b'{');
             for (index, (key, item)) in members.iter().enumerate() {
                 if index > 0 {

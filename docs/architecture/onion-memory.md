@@ -160,3 +160,12 @@ and table files both engines read) must equal the reference's; an
 artefact built from other files is not used, and that is said once. The
 crate is `no_std`, holds no float and no hashed map, and releases the GIL
 for the length of a call.
+
+The engine's first organ is the genome: four operations found a genome
+from a seed and a law, build one at a corner of the law's bounds, decode
+one, and compile one into flat tables. A genome is never stored -- the
+seed and the law are -- and a genome received from elsewhere is decoded as
+hostile input, accepted inside the law's bounds or refused by name. The
+laws and founder pools under `opti_oignon/allium/laws/` are written by
+`scripts/allium_author_genome.py`; `scripts/allium_greenhouse.py` reports on
+a cohort of founders without simulating a day.

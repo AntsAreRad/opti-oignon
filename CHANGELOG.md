@@ -11,6 +11,32 @@ package costs.
 
 ### Added
 
+- The companion's genome, in both engines. A genome is diploid: pairs of
+  chromosomes of fixed 16-byte records whose order is itself data, since a
+  gene's promoter is the run of regulatory records just before it. Sixteen
+  kinds of gene are laid out, seven of them reserved for the brain, the
+  language, the shape, the clock and the cold that later work will read;
+  their layout and bounds are fixed now so that a genome written today
+  stays valid. Two laws carry it: a small fixture law (one pair, 29 loci)
+  for the contracts, and a first provisional full law (eight pairs, 162
+  loci, 5224 bytes a genome). A genome is never stored: it is founded from
+  a 32-byte seed and the law's founder pool, one keyed stream per locus and
+  homolog so that a change at one locus moves no other, and compiled on
+  demand into flat tables -- dominance by each locus's mode, promoters as
+  edges, a decay per species, units converted. The decoder takes a genome
+  as hostile input: it accepts inside the law's box or refuses by name with
+  the existing codes, and a field that could carry the token light into the
+  being's chemistry is refused. Each law records the bound analysis of the
+  factors a genome can supply, recomputed by contract. An authoring script
+  writes both laws and both pools from one table, and a greenhouse script
+  reports on a cohort of founders without simulating a day. The Rust twin
+  answers the four new operations byte for byte as the reference does, over
+  some 1700 requests per run; its genome code denies unwrap, expect, panic,
+  indexing and ``abs``. The reference codec now reads and writes a plain
+  string in one step rather than character by character, with the same
+  refusals at the same positions: the equivalence contracts had run past
+  their time budget on it.
+
 - The chassis of the companion's engine, `opti_oignon/allium` and
   `rust/allium`: a being that will be a pure function of its facts needs
   two engines that cannot disagree, so every piece is written twice, a
