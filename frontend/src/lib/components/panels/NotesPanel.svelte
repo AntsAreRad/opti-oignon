@@ -195,7 +195,7 @@
 	// display is kept at server truth, never advanced to a state the backend
 	// rejected. The eventual remote echo is a no-op by Yjs idempotence. The
 	// Y.Doc that produces the opaque update blobs is the host-assured half (the
-	// live editor walk in NOTES_EDITOR_E2E_S265.md); this seam is the wiring it
+	// live editor walk, a check run on the machine); this seam is the wiring it
 	// drives.
 	let editorBusy = false;
 	let offlineQueue: string[] = [];

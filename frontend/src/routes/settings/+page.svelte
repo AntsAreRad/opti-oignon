@@ -176,7 +176,7 @@
 				{ id: 'model-assignment', title: 'Model assignment', description: 'Map task types to specific models.', synonyms: ['assign', 'task type', 'mapping'], panel: 'ModelAssignment' },
 				{ id: 'routing', title: 'Smart routing', description: 'Learned router that picks a model per request.', synonyms: ['router', 'routing strategy', 'learned'], panel: 'LearnedRouterPanel' },
 				{ id: 'cascading', title: 'Cascading', description: 'Escalate from small to large models on demand.', synonyms: ['cascade', 'escalation'], panel: 'CascadingPanel' },
-				{ id: 'speculative', title: 'Speculative execution', description: 'Draft / verify generation (S70) and llama.cpp native decoding.', synonyms: ['speculative', 'draft', 'verify', 'convergence', 'llama.cpp', 'draft model', 'vram', 'decoding', 'generation'], panel: 'SpeculativeSettings' },
+				{ id: 'speculative', title: 'Speculative execution', description: 'Draft / verify generation and llama.cpp native decoding.', synonyms: ['speculative', 'draft', 'verify', 'convergence', 'llama.cpp', 'draft model', 'vram', 'decoding', 'generation'], panel: 'SpeculativeSettings' },
 				{ id: 'vision', title: 'Vision model', description: 'Model used for image-bearing requests.', synonyms: ['image', 'multimodal', 'vlm'], panel: 'VisionModelSelector' }
 			]
 		},

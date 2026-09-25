@@ -202,7 +202,7 @@
 	<div class="flex items-center justify-between">
 		<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
 			Learned Router
-			<span class="ml-2 text-xs font-normal" style="color: var(--oo-fg-tertiary);">S67 · ML-based routing</span>
+			<span class="ml-2 text-xs font-normal" style="color: var(--oo-fg-tertiary);">ML-based routing</span>
 		</h2>
 		<button
 			on:click={load}

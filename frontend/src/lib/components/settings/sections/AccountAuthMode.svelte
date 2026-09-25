@@ -4,7 +4,7 @@
 
   Surfaces the single-user / multi-user choice that was previously made once
   in the onboarding overlay and then echoed inside the legacy settings page
-  (s109). Now editable from its resolved settings location (spec 5.7:
+  earlier. Now editable from its resolved settings location (spec 5.7:
   onboarding choices appear in their settings location, editable). Applies
   immediately with a toast.
 -->
