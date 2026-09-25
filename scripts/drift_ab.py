@@ -36,8 +36,13 @@ Run on the host, never in CI::
 Without a backend for the answering model or for the librarian's, or when
 the backend lists either model as not installed, it asks nothing, names
 the models the backend does serve, prints nothing that looks like a result
-and exits 2. A request that fails once the run has started ends the run the
-same way: a half-run is not a measurement.
+and exits 2. Before the first turn it then tries the pair in the run's
+order -- one minimal request to the answering model, then one to the
+librarian's while the first is still loaded, which is the run's peak -- so
+a pair that cannot run together, the governor refusing to load the second
+model beside the first, is refused in seconds and not after the plain arm.
+A request that fails once the run has started ends the run the same way: a
+half-run is not a measurement.
 """
 
 import argparse
@@ -312,6 +317,27 @@ def _unserved(name, backend):
     return f"{name!r} is not installed (the backend serves: {', '.join(sorted(names)) or 'no model'})"
 
 
+_TRIAL = [{"role": "user", "content": "Reply with one word."}]
+
+
+def _try_pair(backend, model, librarian_backend, config):
+    """Why the pair cannot run together, or None: one minimal request each, in the run's order."""
+    try:
+        backend.generate(model=model, messages=_TRIAL, options={"temperature": 0.0, "num_predict": 1})
+    except Exception as exc:  # noqa: BLE001 - reported by name, nothing measured
+        return f"the answering model {model!r} could not answer ({exc!r})"
+    try:
+        librarian_backend.generate(
+            model=config.model,
+            messages=_TRIAL,
+            options={"temperature": config.temperature, "num_predict": 1},
+            keep_alive=config.keep_alive,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported by name, nothing measured
+        return f"the librarian's model {config.model!r} could not answer beside {model!r} ({exc!r})"
+    return None
+
+
 def _default_model():
     from opti_oignon.config import config
 
@@ -351,6 +377,10 @@ def main(argv=None, *, resolve=None):
         if problem is not None:
             print(f"the {role} {problem}: nothing measured; choose another with {option}", file=sys.stderr)
             return 2
+    problem = _try_pair(backend, model, checks[1][2] or backend, config)
+    if problem is not None:
+        print(f"{problem}: nothing measured, no turn asked", file=sys.stderr)
+        return 2
 
     def ask(messages):
         response = backend.generate(model=model, messages=messages, options={"temperature": 0.0, "seed": 0, "num_predict": 128})

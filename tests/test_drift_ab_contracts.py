@@ -27,12 +27,16 @@ number means what it says.
     a backend that cannot list its models is not refused on that ground.
   * DA6 -- a request that fails once the run has started measures nothing:
     no number is printed and the command exits non-zero.
+  * DA7 -- the pair is tried in the run's order before the first turn: a
+    model that cannot answer beside the other -- the governor refusing the
+    load, say -- is reported by name with its reason, and no turn is asked.
 
 Local-only (the public distribution ships no tests). The script is loaded
 from its path; the onion's modules come through the shared isolation
 window, and the model is a recording seam.
 """
 
+import collections
 import importlib.util
 import sys
 from dataclasses import replace
@@ -247,6 +251,38 @@ def test_da6_a_request_that_fails_once_the_run_has_started_measures_nothing(caps
         assert backend.calls == 3, "the run started, and broke on its third request"
         assert code == 2 and out.out == "", "a broken run prints no number"
         assert "nothing measured" in out.err and "404" in out.err, out.err
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# DA7 -- the pair is tried before the first turn
+# ---------------------------------------------------------------------------
+class _Refusing(_Backend):
+    """A backend whose governor refuses to load one model, counting requests by model."""
+
+    def __init__(self, served, refuse):
+        super().__init__(served)
+        self._refuse = refuse
+        self.by_model = collections.Counter()
+
+    def generate(self, model, messages, **kwargs):
+        self.by_model[model] += 1
+        if model == self._refuse:
+            raise RuntimeError(f"Not enough resources to load {model} (short by 1.4 GB)")
+        return super().generate(model, messages, **kwargs)
+
+
+def test_da7_the_pair_is_tried_before_the_first_turn_and_a_refusal_asks_no_turn(capsys):
+    loaded, restore = _window()
+    try:
+        ab = _script()
+        backend = _Refusing(["llama3:latest", "small:1b"], refuse="small:1b")
+        code = ab.main(["--model", "llama3", "--librarian-model", "small:1b"], resolve=lambda model: backend)
+        out = capsys.readouterr()
+        assert code == 2 and out.out == "", "refused, and nothing that looks like a result"
+        assert "small:1b" in out.err and "short by 1.4 GB" in out.err and "nothing measured" in out.err, out.err
+        assert backend.by_model == {"llama3": 1, "small:1b": 1}, f"one trial each, and no turn: {dict(backend.by_model)}"
     finally:
         restore()
 

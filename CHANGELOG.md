@@ -53,7 +53,9 @@ package costs.
   decide. It prints no number without a backend. Before anything is asked,
   a model the backend lists as not installed -- the answering one
   (`--model`) or the librarian's (`--librarian-model`) -- is refused by name
-  with the served models listed, and a request that fails once the run has
+  with the served models listed; the pair is then tried in the run's order,
+  one minimal request each, so a pair the governor cannot load together is
+  refused before the first turn; and a request that fails once the run has
   started ends it without a number. The measurement itself is the host's
   to take.
 - `oo ask --json-out` shows its "Generating" spinner on stderr while it
