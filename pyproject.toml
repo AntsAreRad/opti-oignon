@@ -460,7 +460,25 @@ fail_under = 0
 # reads the table list from the table files on disk, with a witness that the
 # read finds the four names pn1 named.
 #
+# ae1 pinned, among its assertions, that the fixture's whole enzyme column is
+# the one row its dominance cases build, and ae2 a floor of 1284 compared
+# requests, the count its corpus reached at its birth. The fixture genome
+# gained the reserve's three enzyme loci, so the column holds four rows and
+# three fewer of the thousand seeded mutations decode: both spellings are
+# false while both properties hold. ae15 in the same file keeps every other
+# assertion of ae1 word for word and pins the property: the two columns are
+# equal, locus 7's row is the maximum in both, and the column holds a row per
+# enzyme locus of the fixture law, counted from the law, more than one. ae16
+# keeps every other assertion of ae2 word for word and pins the floor
+# re-measured under the current laws, 1281.
+#
+# tests/life is not a deselection: it is the life tier, ten-year lives of the
+# componion on the native core, owed where the core is not built. The sweep
+# ignores the directory; bash scripts/ladder.sh life runs it by path, which
+# pytest still collects under --ignore, and reads its own junit file.
+#
 addopts = """
+    --ignore=tests/life
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
     --deselect=tests/test_semantic_cache_management_contracts.py
@@ -527,4 +545,6 @@ addopts = """
     --deselect=tests/test_convergence_two_contracts.py::test_cv8_the_migrated_modules_carry_no_direct_site_and_the_owed_one_is_named
     --deselect=tests/test_allium_phonology_contracts.py::test_pn1_the_alphabet_and_its_features_are_one_table_in_both_engines
     --deselect=tests/test_allium_phonology_contracts.py::test_pn14_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_lawfiles
+    --deselect=tests/test_allium_equivalence_contracts.py::test_ae1_both_engines_answer_every_genome_request_with_the_same_bytes
+    --deselect=tests/test_allium_equivalence_contracts.py::test_ae2_both_engines_answer_the_whole_decoder_corpus_with_the_same_bytes
 """

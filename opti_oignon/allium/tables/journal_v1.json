@@ -12,7 +12,15 @@
     "braid": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "bury": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "celebrate": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
-    "clock": {"body": null, "payload": null, "producer": "recorder", "redact_by": null, "scope": "trunk"},
+    "clock": {
+      "body": {
+        "behind": {"hi": 9007199254740991, "lo": 1, "type": "int"}
+      },
+      "payload": null,
+      "producer": "recorder",
+      "redact_by": null,
+      "scope": "trunk"
+    },
     "dream_depth": {
       "body": {
         "depth": {"of": ["deep", "normal", "shallow"], "type": "symbol"}
@@ -22,7 +30,39 @@
       "redact_by": null,
       "scope": "trunk"
     },
-    "evolve": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "evolve": {
+      "body": {
+        "effective_from": {"hi": 9007199254740991, "lo": 0, "type": "int"},
+        "from": {
+          "fields": {
+            "name": {"max": 32, "type": "text"},
+            "sha256": {"len": 64, "type": "hex"}
+          },
+          "type": "object"
+        },
+        "params": {
+          "fields": {
+            "evap_awake": {"hi": 65536, "lo": 0, "type": "int"},
+            "evap_dormant": {"hi": 65536, "lo": 0, "type": "int"},
+            "rain_gain": {"hi": 262144, "lo": 0, "type": "int"},
+            "sun_max": {"hi": 65536, "lo": 0, "type": "int"}
+          },
+          "type": "object"
+        },
+        "to": {
+          "fields": {
+            "name": {"max": 32, "type": "text"},
+            "sha256": {"len": 64, "type": "hex"},
+            "v": {"hi": 65535, "lo": 0, "type": "int"}
+          },
+          "type": "object"
+        }
+      },
+      "payload": null,
+      "producer": "laws",
+      "redact_by": null,
+      "scope": "trunk"
+    },
     "excavate": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "forget_rhythm": {
       "body": {},
@@ -33,6 +73,7 @@
     },
     "genesis": {
       "body": {
+        "band": {"of": ["long", "medium", "short"], "type": "symbol"},
         "birth": {
           "fields": {
             "tz": {"hi": 840, "lo": -840, "type": "int"},
@@ -41,9 +82,19 @@
           "type": "object"
         },
         "derive": {"hi": 1, "lo": 1, "type": "int"},
+        "hemisphere": {"of": ["north", "south"], "type": "symbol"},
         "laws": {
           "fields": {
             "name": {"max": 32, "type": "text"},
+            "params": {
+              "fields": {
+                "evap_awake": {"hi": 65536, "lo": 0, "type": "int"},
+                "evap_dormant": {"hi": 65536, "lo": 0, "type": "int"},
+                "rain_gain": {"hi": 262144, "lo": 0, "type": "int"},
+                "sun_max": {"hi": 65536, "lo": 0, "type": "int"}
+              },
+              "type": "object"
+            },
             "provisional": {"type": "bool"},
             "sha256": {"len": 64, "type": "hex"},
             "v": {"hi": 65535, "lo": 0, "type": "int"}
@@ -53,7 +104,8 @@
         "owner": {"len": 32, "type": "hex"},
         "rhythm_consent": {"type": "bool"},
         "seed": {"len": 64, "type": "hex"},
-        "soil": {"of": ["encrypted", "glass"], "type": "symbol"}
+        "soil": {"of": ["encrypted", "glass"], "type": "symbol"},
+        "weather": {"of": ["garden", "windowsill"], "type": "symbol"}
       },
       "payload": null,
       "producer": "sow",
@@ -93,8 +145,20 @@
       "redact_by": "lang_forget",
       "scope": "trunk"
     },
-    "laws_pin": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
-    "laws_unpin": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "laws_pin": {
+      "body": {},
+      "payload": null,
+      "producer": "laws",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "laws_unpin": {
+      "body": {},
+      "payload": null,
+      "producer": "laws",
+      "redact_by": null,
+      "scope": "trunk"
+    },
     "letter_sealed": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "light_day": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "meeting_in": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
@@ -163,7 +227,15 @@
     "rhythm_seal": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "seal_broken": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
     "seed_in": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
-    "tz": {"body": null, "payload": null, "producer": "recorder", "redact_by": null, "scope": "trunk"}
+    "tz": {
+      "body": {
+        "quarters": {"hi": 56, "lo": -56, "type": "int"}
+      },
+      "payload": null,
+      "producer": "recorder",
+      "redact_by": null,
+      "scope": "trunk"
+    }
   },
   "name": "journal_v1",
   "schema": 1

@@ -20,6 +20,10 @@ from _isolation import isolate, source  # noqa: E402
 
 REFERENCE = ("wire", "fx", "rng", "lawfiles")
 ORGANS = ("genome", "compile", "bounds", "phon")
+# The life's reference modules under ``ref/``, after the fact identity and before the protocol, in this order.
+LIFE_REF = ("civil", "lawdata")
+# The life's organs under ``ref/organs/``, after them: the weather first, which the soil reads.
+LIFE_ORGANS = ("weather", "clock", "chem", "soil", "stage")
 PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref", "opti_oignon.allium.ref.organs")
 # The platform modules, in the order they load: each may name the ones before it.
 PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store")
@@ -38,6 +42,12 @@ def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=N
         targets[f"opti_oignon.allium.ref.organs.{name}"] = source("allium", "ref", "organs", f"{name}.py")
     # The fact identity before the protocol too, for the same reason.
     targets["opti_oignon.allium.ref.journal"] = source("allium", "ref", "journal.py")
+    for name in LIFE_REF:
+        targets[f"opti_oignon.allium.ref.{name}"] = source("allium", "ref", f"{name}.py")
+    for name in LIFE_ORGANS:
+        targets[f"opti_oignon.allium.ref.organs.{name}"] = source("allium", "ref", "organs", f"{name}.py")
+    # The life itself, which folds a being over the organs, before the protocol that answers for it.
+    targets["opti_oignon.allium.ref.world"] = source("allium", "ref", "world.py")
     targets["opti_oignon.allium.ref.protocol"] = source("allium", "ref", "protocol.py")
     targets["opti_oignon.allium.engine"] = source("allium", "engine.py")
     if platform:

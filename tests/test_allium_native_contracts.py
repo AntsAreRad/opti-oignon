@@ -41,6 +41,14 @@ no unsafe code, nothing but ASCII, and no internal planning vocabulary.
   * AN13 -- the platform files (settings, mode, chain, membrane, anchors,
     store) import only the standard library at module level, and SQLite's
     module only inside the store's default plain connect.
+  * AN14 -- the life's twin (civil time, the law data, the world and its
+    five organs) holds no unwrap, expect, panic, unreachable, todo or
+    unimplemented macro, no ``abs`` and no indexing, and denies the matching
+    lints; the native core's release build checks overflow, and its two
+    entry points reach the engine only through a guard that answers a panic
+    as ``engine_panic``; the Python reference imports only ``hashlib``,
+    ``math`` and ``re``, and ``pathlib`` in ``lawfiles``. Every rule fires
+    on a canary.
 
 Local-only (the public distribution ships no tests). The modules load
 through the shared isolation window.
@@ -84,6 +92,7 @@ BUDGET_S = {
     "test_an11_the_journal_twin_holds_no_construct_that_can_panic_and_denies_them": 2.0,
     "test_an12_the_journal_twin_outside_its_tests_holds_no_assertion_or_placeholder_that_can_panic": 2.0,
     "test_an13_the_platform_files_import_the_standard_library_alone_and_sqlite_in_one_place": 2.0,
+    "test_an14_the_life_twin_cannot_panic_the_core_guards_it_and_the_reference_imports_little": 2.0,
 }
 
 
@@ -555,6 +564,122 @@ def test_an13_the_platform_files_import_the_standard_library_alone_and_sqlite_in
     assert _platform_import_findings(ast.parse(canary), "_plain_connect") == [
         "module level: yaml", "module level: .", "module level: opti_oignon", "module level: requests",
         "sqlite3 in <module>", "sqlite3 in elsewhere"], "every rule can fire"
+
+
+# ---------------------------------------------------------------------------
+# AN14 -- the life's twin, the native core's guard, the reference's imports
+# ---------------------------------------------------------------------------
+_LIFE_TWIN = ("civil.rs", "lawdata.rs", "world.rs")
+_LIFE_ORGANS = ("chem.rs", "clock.rs", "soil.rs", "stage.rs", "weather.rs")
+_TWIN_BANS = _ORGAN_BANS + (("todo", r"\btodo!"), ("unimplemented", r"\bunimplemented!"))
+_TWIN_DENY = ("#![deny(clippy::indexing_slicing, clippy::unwrap_used, clippy::expect_used, clippy::panic, "
+              "clippy::todo, clippy::unimplemented)]")
+_PLACEHOLDER_DENY = "#![deny(clippy::todo, clippy::unimplemented)]"
+_PANIC_ANSWER = '{"detail":"panic","refused":"engine_panic"}'
+_REFERENCE_IMPORTS = ("hashlib", "math", "re")
+
+
+def _twin_findings(text):
+    return [name for name, pattern in _TWIN_BANS if re.search(pattern, text)]
+
+
+def _release_profile(manifest):
+    """The lines of a manifest's ``[profile.release]`` section."""
+    section = None
+    lines = []
+    for line in manifest.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            section = stripped
+        elif section == "[profile.release]" and stripped:
+            lines.append(stripped.replace(" ", ""))
+    return lines
+
+
+def _guard_findings(source):
+    """What keeps the native core's entry points from answering a panic as ``engine_panic``."""
+    findings = []
+    if "std::panic::catch_unwind(AssertUnwindSafe(" not in source:
+        findings.append("no catch_unwind")
+    if _PANIC_ANSWER not in source:
+        findings.append("no engine_panic answer")
+    engine_lines = [line for line in source.splitlines() if "::allium::" in line]
+    if not engine_lines or any("guarded(" not in line for line in engine_lines):
+        findings.append("an engine call outside the guard")
+    if "mod allium {" not in source or "py.allow_threads(move || allium::call(&owned))" not in source:
+        findings.append("the call is not the guarded one inside allow_threads")
+    return findings
+
+
+def _reference_import_findings(tree, name):
+    allowed = _REFERENCE_IMPORTS + (("pathlib",) if name == "lawfiles" else ())
+    findings = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            names = [node.module or ""]
+        else:
+            continue
+        for imported in names:
+            if imported.split(".")[0] not in allowed:
+                findings.append(imported)
+    return findings
+
+
+def test_an14_the_life_twin_cannot_panic_the_core_guards_it_and_the_reference_imports_little():
+    read = []
+    for name in _LIFE_TWIN:
+        text = (ENGINE_SRC / name).read_text(encoding="ascii")
+        assert _twin_findings(text) == [], (name, _twin_findings(text))
+        assert text.splitlines()[0] == _TWIN_DENY, f"{name} opens with the deny header"
+        read.append(name)
+    organs = ENGINE_SRC / "organs"
+    for name in _LIFE_ORGANS:
+        text = (organs / name).read_text(encoding="ascii")
+        assert _twin_findings(text) == [], (name, _twin_findings(text))
+        read.append(name)
+    head = (organs / "mod.rs").read_text(encoding="ascii")
+    assert _ORGAN_DENY in head and _PLACEHOLDER_DENY in head.splitlines(), "the organs deny the lints at their head"
+    for name in _LIFE_ORGANS:
+        assert f"pub mod {name[:-3]};" in head, name
+    lib = (ENGINE_SRC / "lib.rs").read_text(encoding="ascii")
+    for name in _LIFE_TWIN:
+        assert f"pub mod {name[:-3]};" in lib, name
+    assert len(read) >= 8, read
+    canary = "a.unwrap() b.expect(1) panic!() unreachable!() x.abs() values[0] todo!() unimplemented!()"
+    assert _twin_findings(canary) == [name for name, _ in _TWIN_BANS], "every ban can fire"
+
+    manifest = (REPO / "rust" / "oo_core" / "Cargo.toml").read_text(encoding="ascii")
+    assert "overflow-checks=true" in _release_profile(manifest), _release_profile(manifest)
+    assert "overflow-checks=true" not in _release_profile(manifest.replace("overflow-checks = true", ""))
+    assert _release_profile("[profile.test]\noverflow-checks = true\n") == [], "the section is the release one"
+    source = (CORE_SRC / "allium.rs").read_text(encoding="ascii")
+    assert _guard_findings(source) == [], _guard_findings(source)
+    unguarded = source.replace("std::panic::catch_unwind(AssertUnwindSafe(", "(identity(")
+    assert _guard_findings(unguarded) == ["no catch_unwind"], _guard_findings(unguarded)
+    bypass = source + "\nfn direct(r: &[u8]) -> Vec<u8> { ::allium::call(r) }\n"
+    assert _guard_findings(bypass) == ["an engine call outside the guard"], _guard_findings(bypass)
+    assert _guard_findings(source.replace(_PANIC_ANSWER, "{}")) == ["no engine_panic answer"]
+    around = "py.allow_threads(move || allium::call(&owned))"
+    assert source.count(around) == 1, "the guarded call is the one the canaries below edit"
+    for canary in (source.replace(around, "py.allow_threads(move || other(&owned))"),
+                   source.replace("mod allium {", "mod engine {")):
+        assert _guard_findings(canary) == ["the call is not the guarded one inside allow_threads"], \
+            _guard_findings(canary)
+
+    files = [PACKAGE / f"{name}.py" for name in ("wire", "fx", "rng", "lawfiles")]
+    files += sorted((PACKAGE / "ref").glob("*.py")) + sorted((PACKAGE / "ref" / "organs").glob("*.py"))
+    imported = 0
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="ascii"))
+        assert _reference_import_findings(tree, path.stem) == [], (path, _reference_import_findings(tree, path.stem))
+        imported += sum(1 for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom)))
+    assert len(files) >= 20 and imported >= 40, (len(files), imported)
+    lawfiles_tree = ast.parse((PACKAGE / "lawfiles.py").read_text(encoding="ascii"))
+    assert _reference_import_findings(lawfiles_tree, "civil") == ["pathlib"], "witness: the one exception is seen"
+    planted = "import time\nfrom os import path\nimport hashlib\nfrom . import fx\ndef f():\n    import datetime\n"
+    assert _reference_import_findings(ast.parse(planted), "civil") == ["time", "os", "datetime"], "every rule fires"
 
 
 if __name__ == "__main__":

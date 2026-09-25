@@ -1,4 +1,27 @@
 {
+  "bus": {"circadian": "clock", "dormant": "stage", "metab": "chem", "moisture": "soil"},
+  "code": "seed_1",
+  "constants": {
+    "chem": {
+      "core": 32768,
+      "enzymes": {"hydrolysis": ["enz_fructan_hydrolysis"], "photosynthesis": ["enz_photosynthesis"], "respiration": ["enz_respiration"], "synthesis": ["enz_fructan_synth_1", "enz_fructan_synth_2"]},
+      "fructan0": 131072,
+      "fructan_max": 4194304,
+      "hyd_scale": 512,
+      "k_w": 16384,
+      "metab_shift": 8,
+      "ps_scale": 1024,
+      "resp_scale": 128,
+      "sugar0": 16384,
+      "sugar_max": 262144,
+      "syn_scale": 512,
+      "theta_h": 8192,
+      "theta_s": 16384
+    },
+    "clock": {"genes": ["clock_m", "clock_d", "clock_e"], "init": [65536, 32768, 0], "light": "rec_clock_light"},
+    "soil": {"dose": 16384, "m0": 32768, "m_max": 65536},
+    "stage": {"d_enter": 14, "rest_dry": 7, "rest_max": 1000, "rest_winter": 60, "theta_dry": 16384, "theta_wet": 32768}
+  },
   "decays": {
     "tag": {"kind": "lazy", "length": 256, "tau": 3},
     "trace": {"kind": "iter", "tau": 2}
@@ -2234,15 +2257,22 @@
   },
   "journal": {
     "budgets": {"act": 128, "braid": 4, "bury": 2, "celebrate": 4, "dream_depth": 4, "evolve": 2, "excavate": 4, "forget_rhythm": 2, "keep_dream": 4, "lang_borrow": 8, "lang_forget": 16, "lang_insist": 16, "lang_reaction": 64, "lang_taboo_add": 16, "lang_talk": 64, "lang_teach": 16, "laws_pin": 2, "laws_unpin": 2, "letter_sealed": 4, "light_day": 2, "meeting_in": 4, "move_pot": 8, "name": 4, "offering_verdict": 32, "pollen_in": 2, "rest_begin": 4, "rest_end": 4, "rhythm_seal": 2, "seal_broken": 4, "seed_in": 2},
-    "table": {"name": "journal_v1", "sha256": "e02d3e3fc9e3a8c3938cc94ab05a1351da46966a600cb158d366d1f5042bf143"}
+    "table": {"name": "journal_v1", "sha256": "0be575833644c3829862ac979c415746f92e945672494cf2caa9d3a449c762ed"}
   },
   "lang": {
     "phon": {"name": "phon_v1", "sha256": "f37615023470f74cbce378b38e0f8379deb58c3ff176a45e9a86d8e7321cf200"},
     "taboo": {"name": "taboo_v1", "sha256": "bbc38c8c1b841eabe15271ea224df11c14dbbddcbb38bb87c0ba61fa68ce2983"}
   },
   "name": "v0_1",
+  "organs": ["chem", "clock", "soil", "stage"],
+  "params": {
+    "evap_awake": {"default": 4096, "hi": 16384, "lo": 0},
+    "evap_dormant": {"default": 1024, "hi": 8192, "lo": 0},
+    "rain_gain": {"default": 65536, "hi": 131072, "lo": 0},
+    "sun_max": {"default": 65536, "hi": 65536, "lo": 16384}
+  },
   "provisional": true,
-  "quiescent_in_dormancy": [],
+  "quiescent_in_dormancy": ["chem", "clock"],
   "stock_bounds": {
     "fructan": {"enz_readers": 1, "enz_writers": 2, "flow_max_raw": 196605, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(2+1)*65535 = 196605"},
     "structure": {"enz_readers": 0, "enz_writers": 0, "flow_max_raw": 0, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(0+0)*65535 = 0"},
@@ -2250,5 +2280,46 @@
     "water": {"enz_readers": 1, "enz_writers": 1, "flow_max_raw": 131070, "owed": "the physiology: provision, brain_cost, defense_cost, litter, rain, evaporation and the stock ceiling", "premise": "a reaction moves at most mul(kcat, ONE) of each substrate or product per step", "proof": "(1+1)*65535 = 131070"}
   },
   "tables": {"sine_q15": "52db0b0fbb426044cae83338a941d7a900dca26bcbf19df6680e6b1814659396"},
-  "version": 0
+  "version": 0,
+  "work": {
+    "caps": {"clock": 208, "owner": 8, "resumed": 8, "tz": 208},
+    "ceilings": {"awake_day": 4591, "dormant_day": 7},
+    "proof": {"awake_day": "96*(visit + env + chem.fast + clock.fast) + 3*(soil.daily + stage.daily + draw) + F*(visit + fact) + act*u_act + caps*(visit + fact) = 96*(1 + 4 + 15 + 13) + 3*(2 + 1 + 2) + 208*(1 + 1) + 128*1 + 432*(1 + 1) = 3168 + 15 + 416 + 128 + 864 = 4591", "dormant_day": "fast_path_day + visit + soil.daily + stage.daily + draw = 1 + 1 + 2 + 1 + 2 = 7"},
+    "units": {
+      "act": {
+        "water": {"soil": 1}
+      },
+      "draw": 2,
+      "env": 4,
+      "fact": 1,
+      "fast_path_day": 1,
+      "organs": {
+        "chem": {
+          "fast": {"awake": 15, "dormant": 0}
+        },
+        "clock": {
+          "fast": {"awake": 13, "dormant": 0}
+        },
+        "soil": {
+          "daily": {"awake": 2, "dormant": 2}
+        },
+        "stage": {
+          "daily": {"awake": 1, "dormant": 1}
+        }
+      },
+      "visit": 1
+    }
+  },
+  "world": {
+    "daylength": {
+      "amp": {"long": 240, "medium": 150, "short": 60},
+      "equinox": 79,
+      "mean": 720,
+      "ramp": 60
+    },
+    "rain": {"max": [21845, 21845, 16384, 21845], "p_wet": [39322, 32768, 22938, 32768]},
+    "season_shift": 31,
+    "south_shift": 183,
+    "year": {"kind": "civil"}
+  }
 }

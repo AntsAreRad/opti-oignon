@@ -25,7 +25,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "0.8.0";
+const VERSION: &str = "0.9.0";
 
 fn escape_into(out: &mut String, text: &str) {
     out.push('"');

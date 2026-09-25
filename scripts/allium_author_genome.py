@@ -3,9 +3,10 @@
 
 Writes, under ``opti_oignon/allium/laws/``:
 
-* ``fixture.json`` -- the small law the t1 contracts run on: one pair, 29 loci
+* ``fixture.json`` -- the small law the t1 contracts run on: one pair, 32 loci
   (a three-node clock, one record of every kind, the whole language block,
-  the four colour loci);
+  the four colour loci, and the three enzymes of the reserve the full law
+  also carries: respiration, fructan synthesis and hydrolysis);
 * ``v0_1.json`` -- the first provisional law of the full genome: eight
   pairs, 175 loci;
 * ``founders_fixture.json`` and ``founders_v1.json`` -- the founder allele
@@ -17,13 +18,30 @@ of each budgeted kind; ``scripts/allium_author_phon.py`` and
 ``scripts/allium_author_journal.py`` write those tables, own those budgets
 and run first.
 
+Each law carries the sections its life runs on: the organ ``code`` revision
+and its organs, the organs quiescent in dormancy, the bus, the ``world``
+(year, seasons, daylength, rain), the organs' ``constants``, the ranges of
+the ``params`` a genesis freezes, and the ``work`` section: the unit table,
+the per-day caps of the budget-exempt kinds, and the day ceilings derived
+from both, each with its proof. ``caps(law, table)`` and
+``ceilings(law, table)`` compute them; a contract loads them by path and
+recomputes the recorded ones. Every number there is a placeholder the later
+organs retune; a change to what an organ does bumps ``code``.
+
+``laws/retired.json`` lists the prototype laws that were rewritten in place
+or removed, by name and digest, so that a being sown under one is named as a
+retired prototype and never read under another digest. It is never
+embedded. ``--retire NAME`` appends law ``NAME`` as it is on disk now; run
+it before rewriting or removing a provisional law that a being outside the
+contracts may have been sown under.
+
 The engines read the written files, never this script. The script is the
 authoring tool: a contract runs it in-process and checks that it reproduces
 all four files byte for byte, so a hand edit to a law or a pool without the
 matching change here is caught.
 
-Usage: ``python3 scripts/allium_author_genome.py [--check]``. ``--check``
-writes nothing and exits 1 when a file on disk differs.
+Usage: ``python3 scripts/allium_author_genome.py [--check] [--retire NAME ...]``.
+``--check`` writes nothing and exits 1 when a file on disk differs.
 
 The v1 pool follows a rule rather than a list: a base allele ``a`` from the
 kind's defaults, and an allele ``b`` that moves one field by an eighth of
@@ -199,7 +217,7 @@ def lex(ident, index, flags):
     return L(ident, f"lex_{index}", "lex", flags, offset=offset, **LEX_BOXES[offset])
 
 
-FIXTURE_LOCI = (
+_FIXTURE_BASE = (
     L(0, "rec_clock_light", "rec", 0x04, channel=0, species=14, gain=(256, 512), threshold=0),
     L(1, "cis_clock_m_by_e", "cis", 0x0C, src=16, **CLOCK_CIS),
     L(2, "clock_m", "tf", 0x0D, out=14, **CLOCK_TF),
@@ -359,6 +377,18 @@ def _v0_1_loci():
 
 
 V0_1_LOCI = _v0_1_loci()
+
+
+def _copied(ident, name):
+    """Locus ``name`` of the full law, under the fixture id ``ident``: kind, flags, stages and boxes alike."""
+    source = next(locus for locus in V0_1_LOCI if locus.name == name)
+    return L(ident, source.name, source.kind, source.flags, source.mask, dict(source.founder), **source.fields)
+
+
+# The enzymes the reserve reads, which the fixture's one chromosome carries
+# after every other locus: no other locus's record or founder stream moves.
+FIXTURE_ENZYMES = ((29, "enz_respiration"), (30, "enz_fructan_synth_1"), (31, "enz_fructan_hydrolysis"))
+FIXTURE_LOCI = _FIXTURE_BASE + tuple(_copied(ident, name) for ident, name in FIXTURE_ENZYMES)
 
 # ---------------------------------------------------------------------------
 # Genome sections
@@ -635,6 +665,215 @@ def pool(name, loci, alleles_of):
 
 
 # ---------------------------------------------------------------------------
+# Life sections
+# ---------------------------------------------------------------------------
+
+# The organ code revision a law runs: the engine implements a closed set, and
+# a change to what an organ does bumps it, so the law's digest moves with it.
+CODE = "seed_1"
+ORGANS = ["chem", "clock", "soil", "stage"]
+QUIESCENT = ["chem", "clock"]
+BUS = {"circadian": "clock", "dormant": "stage", "metab": "chem", "moisture": "soil"}
+
+# Year, seasons, the provisional daylength (minutes, a sine by latitude band)
+# and rain by season (winter, spring, summer, autumn; Q16 of ONE). The
+# fixture's year is forty days, the full law's the civil calendar.
+_RAIN = {"max": [21845, 21845, 16384, 21845], "p_wet": [39322, 32768, 22938, 32768]}
+_AMP = {"long": 240, "medium": 150, "short": 60}
+WORLD = {
+    "fixture": {"daylength": {"amp": _AMP, "equinox": 10, "mean": 720, "ramp": 60}, "rain": _RAIN,
+                "season_shift": 5, "south_shift": 20, "year": {"days": 40, "kind": "fixed"}},
+    "v0_1": {"daylength": {"amp": _AMP, "equinox": 79, "mean": 720, "ramp": 60}, "rain": _RAIN,
+             "season_shift": 31, "south_shift": 183, "year": {"kind": "civil"}},
+}
+
+_SYNTHESIS = {"fixture": ["enz_fructan_synth_1"], "v0_1": ["enz_fructan_synth_1", "enz_fructan_synth_2"]}
+_STAGE_REST = {"fixture": (2, 5), "v0_1": (7, 60)}
+
+
+def constants(name):
+    """The organs' constants under law ``name``: stocks, scales and thresholds, and the loci they read."""
+    rest_dry, rest_winter = _STAGE_REST[name]
+    return {
+        "chem": {"core": 32768, "enzymes": {"hydrolysis": ["enz_fructan_hydrolysis"],
+                                            "photosynthesis": ["enz_photosynthesis"],
+                                            "respiration": ["enz_respiration"], "synthesis": _SYNTHESIS[name]},
+                 "fructan0": 131072, "fructan_max": 4194304, "hyd_scale": 512, "k_w": 16384, "metab_shift": 8,
+                 "ps_scale": 1024, "resp_scale": 128, "sugar0": 16384, "sugar_max": 262144, "syn_scale": 512,
+                 "theta_h": 8192, "theta_s": 16384},
+        "clock": {"genes": ["clock_m", "clock_d", "clock_e"], "init": [65536, 32768, 0], "light": "rec_clock_light"},
+        "soil": {"dose": 16384, "m0": 32768, "m_max": 65536},
+        "stage": {"d_enter": 14, "rest_dry": rest_dry, "rest_max": 1000, "rest_winter": rest_winter,
+                  "theta_dry": 16384, "theta_wet": 32768},
+    }
+
+
+# The ranges of the params a genesis freezes; the table's params schema bounds them.
+PARAMS = {
+    "evap_awake": {"default": 4096, "hi": 16384, "lo": 0},
+    "evap_dormant": {"default": 1024, "hi": 8192, "lo": 0},
+    "rain_gain": {"default": 65536, "hi": 131072, "lo": 0},
+    "sun_max": {"default": 65536, "hi": 65536, "lo": 16384},
+}
+
+# What the life costs, in units: a visited minute, a consumed fact, a day of
+# the fast path, a weather draw, the environment of an awake fast step, each
+# organ's layer awake and dormant, and each act's cost to the organs it moves.
+UNITS = {
+    "act": {"water": {"soil": 1}}, "draw": 2, "env": 4, "fact": 1, "fast_path_day": 1,
+    "organs": {"chem": {"fast": {"awake": 15, "dormant": 0}}, "clock": {"fast": {"awake": 13, "dormant": 0}},
+               "soil": {"daily": {"awake": 2, "dormant": 2}}, "stage": {"daily": {"awake": 1, "dormant": 1}}},
+    "visit": 1,
+}
+# The budget-exempt kinds a gesture never writes, capped per day of life so
+# that a day's ceiling bounds every folded fact.
+CAPPED_RARE = {"owner": 8, "resumed": 8}
+# Any 1440 consecutive minutes hold 96 fast boundaries; offsets span 1680
+# minutes, so one day of life holds at most three daily firings.
+FAST_A_DAY = 96
+FIRINGS_A_DAY = 3
+
+
+def _budget_total(law, table):
+    """``F``: the daily budgets of the budgeted kinds whose body is defined, summed."""
+    kinds = table["kinds"]
+    return sum(budget for kind, budget in law["journal"]["budgets"].items() if kinds[kind]["body"] is not None)
+
+
+def caps(law, table):
+    """Per-day caps of the exempt trunk kinds other than genesis: ``F`` for the recorder's, fixed for the rest."""
+    total = _budget_total(law, table)
+    return {"clock": total, "owner": CAPPED_RARE["owner"], "resumed": CAPPED_RARE["resumed"], "tz": total}
+
+
+def _layer(units, organ, layer):
+    costs = units["organs"][organ].get(layer)
+    return 0 if costs is None else max(costs["awake"], costs["dormant"])
+
+
+def _terms(law, table):
+    """Every term of both ceilings, with the name it is written under in the proofs."""
+    work = law["work"]
+    units = work["units"]
+    organs = law["organs"]
+    budgets = law["journal"]["budgets"]
+    kinds = table["kinds"]
+    act = max((sum(costs.values()) for costs in units["act"].values()), default=0)
+    extra = [(kind, budget, act) for kind, budget in sorted(budgets.items())
+             if kinds[kind]["body"] is not None and kind == "act" and act > 0]
+    return {
+        "fast": [(f"{organ}.fast", _layer(units, organ, "fast")) for organ in organs
+                 if "fast" in units["organs"][organ]],
+        "daily": [(f"{organ}.daily", _layer(units, organ, "daily")) for organ in organs
+                  if "daily" in units["organs"][organ]],
+        "dormant": [(f"{organ}.daily", units["organs"][organ]["daily"]["dormant"]) for organ in organs
+                    if "daily" in units["organs"][organ] and organ not in law["quiescent_in_dormancy"]],
+        "budget": _budget_total(law, table),
+        "extra": extra,
+        "caps": sum(work["caps"].values()),
+    }
+
+
+def ceilings(law, table):
+    """The day ceilings a law's unit table, budgets and caps imply: ``{"awake_day", "dormant_day"}``.
+
+    ``awake_day`` bounds the units of any day of life (``t div 1440``): 96
+    awake fast steps, three daily firings with their draws, every budgeted
+    fact at its own minute with its largest organ cost, and every capped
+    exempt fact at its own minute. ``dormant_day`` is one day of the fast
+    path with no fact: the day, one visit, each non-quiescent organ's dormant
+    daily layer, and the draw. The visit is there because the fast path stops
+    before a pending ``evolve``'s ``effective_from`` and the stepped path
+    visits that minute. At a local midnight that visit stands in for the fast
+    path's day; once a later ``tz`` fact has moved the minute off its
+    midnight, a due ``evolve`` is met by one visit even while the being
+    sleeps, and the day's firing is paid as well. A due ``evolve`` adds no
+    visit only awake, where every fast boundary is visited anyway.
+    """
+    units = law["work"]["units"]
+    terms = _terms(law, table)
+    visit, fact = units["visit"], units["fact"]
+    awake = (FAST_A_DAY * (visit + units["env"] + sum(cost for _, cost in terms["fast"]))
+             + FIRINGS_A_DAY * (sum(cost for _, cost in terms["daily"]) + units["draw"])
+             + terms["budget"] * (visit + fact) + sum(budget * cost for _, budget, cost in terms["extra"])
+             + terms["caps"] * (visit + fact))
+    dormant = units["fast_path_day"] + visit + sum(cost for _, cost in terms["dormant"]) + units["draw"]
+    return {"awake_day": awake, "dormant_day": dormant}
+
+
+def ceiling_proofs(law, table):
+    """Both ceilings as printable ASCII formulas with their numbers, as the bound analysis writes them."""
+    units = law["work"]["units"]
+    terms = _terms(law, table)
+    visit, fact, env, draw = units["visit"], units["fact"], units["env"], units["draw"]
+    found = ceilings(law, table)
+    fast_names = " + ".join(["visit", "env"] + [name for name, _ in terms["fast"]])
+    fast_values = " + ".join(str(value) for value in [visit, env] + [cost for _, cost in terms["fast"]])
+    daily_names = " + ".join([name for name, _ in terms["daily"]] + ["draw"])
+    daily_values = " + ".join(str(value) for value in [cost for _, cost in terms["daily"]] + [draw])
+    extra_names = "".join(f" + {kind}*u_{kind}" for kind, _, _ in terms["extra"])
+    extra_values = "".join(f" + {budget}*{cost}" for _, budget, cost in terms["extra"])
+    parts = ([FAST_A_DAY * (visit + env + sum(cost for _, cost in terms["fast"])),
+              FIRINGS_A_DAY * (sum(cost for _, cost in terms["daily"]) + draw),
+              terms["budget"] * (visit + fact)] + [budget * cost for _, budget, cost in terms["extra"]]
+             + [terms["caps"] * (visit + fact)])
+    awake = (f"{FAST_A_DAY}*({fast_names}) + {FIRINGS_A_DAY}*({daily_names}) + F*(visit + fact){extra_names}"
+             f" + caps*(visit + fact) = {FAST_A_DAY}*({fast_values}) + {FIRINGS_A_DAY}*({daily_values})"
+             f" + {terms['budget']}*({visit} + {fact}){extra_values} + {terms['caps']}*({visit} + {fact})"
+             f" = {' + '.join(str(part) for part in parts)} = {found['awake_day']}")
+    dormant_names = " + ".join(["fast_path_day", "visit"] + [name for name, _ in terms["dormant"]] + ["draw"])
+    dormant_values = " + ".join(str(value) for value in [units["fast_path_day"], visit]
+                                + [cost for _, cost in terms["dormant"]] + [draw])
+    dormant = f"{dormant_names} = {dormant_values} = {found['dormant_day']}"
+    return {"awake_day": awake, "dormant_day": dormant}
+
+
+def _journal_table():
+    return wire.parse(TABLES_DIR.joinpath("journal_v1.json").read_bytes(), lenient=True)
+
+
+def life_sections(name):
+    """Every life section of law ``name`` but ``work``, which needs the rest of the law."""
+    return {"bus": dict(BUS), "code": CODE, "constants": constants(name), "organs": list(ORGANS),
+            "params": {key: dict(value) for key, value in PARAMS.items()},
+            "quiescent_in_dormancy": list(QUIESCENT), "world": WORLD[name]}
+
+
+def work_section(law, table):
+    """The law's ``work`` section: its unit table, then the caps and ceilings those imply, with their proofs."""
+    work = {"caps": caps(law, table), "units": UNITS}
+    with_caps = dict(law, work=work)
+    return dict(work, ceilings=ceilings(with_caps, table), proof=ceiling_proofs(with_caps, table))
+
+
+def life_defects(law, table):
+    """What the life sections get wrong against the law's own genome and the table, by name."""
+    found = []
+    work = law["work"]
+    if work["caps"] != caps(law, table):
+        found.append("work: caps not recomputed")
+    if work["ceilings"] != ceilings(law, table) or work["proof"] != ceiling_proofs(law, table):
+        found.append("work: ceilings not recomputed")
+    kinds = {entry["name"]: entry["kind"] for entry in law["genome"]["loci"]}
+    chem = law["constants"]["chem"]
+    scales = {"hydrolysis": "hyd_scale", "photosynthesis": "ps_scale", "respiration": "resp_scale",
+              "synthesis": "syn_scale"}
+    for role, loci in chem["enzymes"].items():
+        if not 1 <= len(loci) <= 4 or len(set(loci)) != len(loci) or any(kinds.get(n) != "enz" for n in loci):
+            found.append(f"constants: chem {role} names 1..=4 distinct enzyme loci of the law")
+        if (len(loci) * 65535 * chem[scales[role]]) >> 16 > 65536:
+            found.append(f"constants: chem {role} rate bound")
+    clock = law["constants"]["clock"]
+    if any(kinds.get(n) != "tf" for n in clock["genes"]) or kinds.get(clock["light"]) != "rec":
+        found.append("constants: clock loci")
+    for name, spec in law["params"].items():
+        bounds_of = table["kinds"]["genesis"]["body"]["laws"]["fields"]["params"]["fields"].get(name)
+        if bounds_of is None or not bounds_of["lo"] <= spec["lo"] <= spec["default"] <= spec["hi"] <= bounds_of["hi"]:
+            found.append(f"params: {name}")
+    return found
+
+
+# ---------------------------------------------------------------------------
 # Laws
 # ---------------------------------------------------------------------------
 
@@ -663,7 +902,7 @@ def _journal_budgets(name):
     return dict(module.BUDGETS[name])
 
 
-def law(name, loci, pairs, founders_name, founders_value, taboo_name):
+def law(name, loci, pairs, founders_name, founders_value, taboo_name, table):
     value = {
         "decays": DECAYS,
         "founders": {"name": founders_name, "sha256": _digest(founders_value)},
@@ -674,10 +913,11 @@ def law(name, loci, pairs, founders_name, founders_value, taboo_name):
                  "taboo": {"name": taboo_name, "sha256": _table_digest(taboo_name)}},
         "name": name,
         "provisional": True,
-        "quiescent_in_dormancy": [],
         "tables": {"sine_q15": _sine_digest()},
         "version": 0,
     }
+    value.update(life_sections(name))
+    value["work"] = work_section(value, table)
     value.update(bounds.compute(value))
     return value
 
@@ -711,13 +951,27 @@ def render(value, indent=0):
     return "[\n" + ",\n".join(items) + "\n" + end + "]"
 
 
+def _fixture_alleles(v1_pool):
+    """The fixture's alleles: its own table, and the full law's pool by locus name for the copied loci."""
+    ident_of = {locus.name: locus.ident for locus in V0_1_LOCI}
+    by_ident = {entry["locus"]: entry["alleles"] for entry in v1_pool["loci"]}
+
+    def alleles_of(locus, entry):
+        if locus.ident in FIXTURE_POOL:
+            return FIXTURE_POOL[locus.ident]
+        return [(a["name"], a["freq"], a["body"], a["window"]) for a in by_ident[ident_of[locus.name]]]
+
+    return alleles_of
+
+
 def author():
     """Every authored file, ``{file name: text}``; writes nothing."""
-    fixture_pool = pool("fixture", FIXTURE_LOCI, lambda locus, entry: FIXTURE_POOL[locus.ident])
     v1_pool = pool("v1", V0_1_LOCI, _v1_alleles)
+    fixture_pool = pool("fixture", FIXTURE_LOCI, _fixture_alleles(v1_pool))
+    table = _journal_table()
     laws = {
-        "fixture.json": law("fixture", FIXTURE_LOCI, 1, "fixture", fixture_pool, "taboo_fixture_v1"),
-        "v0_1.json": law("v0_1", V0_1_LOCI, 8, "v1", v1_pool, "taboo_v1"),
+        "fixture.json": law("fixture", FIXTURE_LOCI, 1, "fixture", fixture_pool, "taboo_fixture_v1", table),
+        "v0_1.json": law("v0_1", V0_1_LOCI, 8, "v1", v1_pool, "taboo_v1", table),
     }
     files = {name: render(value) + "\n" for name, value in laws.items()}
     files["founders_fixture.json"] = render(fixture_pool) + "\n"
@@ -727,16 +981,61 @@ def author():
         defects = g.validate_law(value) + bounds.defects(value)
         pool_value = fixture_pool if name == "fixture.json" else v1_pool
         defects += g.validate_pool(value, pool_value)
+        defects += life_defects(value, table)
         if defects:
             raise ValueError(f"{name}: {defects[:5]}")
     return files
 
 
+RETIRED = "retired.json"
+_HEX = "0123456789abcdef"
+
+
+def retired_text(pairs):
+    """The register of retired prototype laws, rendered: ``{"retired": [{"name", "sha256"}, ...]}``."""
+    for pair in pairs:
+        if (sorted(pair) != ["name", "sha256"] or not isinstance(pair["name"], str)
+                or not isinstance(pair["sha256"], str) or len(pair["sha256"]) != 64
+                or any(char not in _HEX for char in pair["sha256"])):
+            raise ValueError(f"{RETIRED}: an entry is not a law's name and digest")
+    return render({"retired": [{"name": pair["name"], "sha256": pair["sha256"]} for pair in pairs]}) + "\n"
+
+
+def _retired_on_disk():
+    """The pairs the register holds, or ``None`` when it is absent."""
+    path = LAWS_DIR.joinpath(RETIRED)
+    if not path.exists():
+        return None
+    value = wire.parse(path.read_bytes(), lenient=True)
+    if not isinstance(value, dict) or sorted(value) != ["retired"] or not isinstance(value["retired"], list):
+        raise ValueError(f"{RETIRED}: not a register of retired laws")
+    return value["retired"]
+
+
+def retire(pairs, names):
+    """``pairs`` with each named provisional law appended as it is on disk now, once."""
+    out = list(pairs)
+    for name in names:
+        on_disk = wire.parse(LAWS_DIR.joinpath(f"{name}.json").read_bytes(), lenient=True)
+        if on_disk.get("provisional") is not True:
+            raise ValueError(f"{name}: only a provisional law is retired; a stable law is succeeded")
+        pair = {"name": name, "sha256": _digest(on_disk)}
+        if pair not in out:
+            out.append(pair)
+    return out
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="compare with the files on disk, write nothing")
+    parser.add_argument("--retire", action="append", default=[], choices=("fixture", "v0_1"), metavar="NAME",
+                        help="append law NAME, as it is on disk now, to the register of retired prototypes")
     args = parser.parse_args(argv)
+    if args.check and args.retire:
+        parser.error("--retire writes the register; it does not go with --check")
     files = author()
+    pairs = _retired_on_disk()
+    files[RETIRED] = retired_text(retire(pairs or [], args.retire))
     stale = []
     for name in sorted(files):
         path = LAWS_DIR.joinpath(name)

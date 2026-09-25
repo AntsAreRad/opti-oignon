@@ -1356,7 +1356,7 @@ class Store:
             cause += "; with no key configured, persistence.require_encryption: false would allow a glass jar"
         return cause
 
-    def _plant(self, temp, *, soil, tag, pin, wall, tz_minutes, rhythm_consent, mode, settings):
+    def _plant(self, temp, *, soil, tag, pin, wall, tz_minutes, rhythm_consent, sowing, mode, settings):
         """Steps 9 to 12: the file, its schema and probe, the draws, the genesis, the seed anchor."""
         from . import anchors, membrane
 
@@ -1384,14 +1384,17 @@ class Store:
             seed = self._draw(32).hex()
             key_id, anchor_key, _seal = self._soil_keys(soil)
             genesis = {
+                "band": sowing["band"],
                 "birth": {"tz": tz_minutes, "wall": wall},
                 "derive": 1,
-                "laws": {"name": pin["name"], "provisional": pin["provisional"], "sha256": pin["sha256"],
-                         "v": pin["version"]},
+                "hemisphere": sowing["hemisphere"],
+                "laws": {"name": pin["name"], "params": {name: spec["default"] for name, spec in pin["params"].items()},
+                         "provisional": pin["provisional"], "sha256": pin["sha256"], "v": pin["version"]},
                 "owner": tag,
                 "rhythm_consent": rhythm_consent,
                 "seed": seed,
                 "soil": soil,
+                "weather": sowing["weather"],
             }
             membrane.check_body(pin["table"]["kinds"]["genesis"]["body"], genesis)
             _guarded(conn, lambda: self._write_genesis(conn, soil=soil, tag=tag, being=being, origin=origin,
@@ -1467,12 +1470,16 @@ class Store:
         user = actor_of(transport, self._single_user_now(), now)
         return user, anchors.owner_tag(user), now
 
-    def sow(self, *, transport, law, tz_minutes, rhythm_consent):
+    def sow(self, *, transport, law, tz_minutes, rhythm_consent, hemisphere=None, band=None, weather=None):
         """Sow a being for the account behind ``transport``, and return it open.
 
         Every refusal is named; nothing is created before the soil is chosen,
         nothing is drawn before the file is proven encrypted (or a glass jar),
         and the store is never linked into place before its birth is anchored.
+
+        ``hemisphere``, ``band`` and ``weather`` are the being's identity,
+        frozen into its genesis with the law's default params; a missing one
+        reads north, long and garden.
         """
         from .membrane import MembraneRefused, law_pin
 
@@ -1486,6 +1493,13 @@ class Store:
                 raise MembraneRefused("clock", "unreadable")
             if not isinstance(rhythm_consent, bool):
                 raise MembraneRefused("body", "body rhythm_consent bool")
+            sowing = {"band": "long" if band is None else band,
+                      "hemisphere": "north" if hemisphere is None else hemisphere,
+                      "weather": "garden" if weather is None else weather}
+            genesis_schema = pin["table"]["kinds"]["genesis"]["body"]
+            for field in sorted(sowing):
+                if not isinstance(sowing[field], str) or sowing[field] not in genesis_schema[field]["of"]:
+                    raise MembraneRefused("body", f"body {field} symbol")
             settings = self._settings()
             soil = self._choose_soil(mode, settings)
             _root, directory = self._directory()
@@ -1500,7 +1514,7 @@ class Store:
                 temp = store_file(directory, tag, "sowing_" + soil)
                 final = store_file(directory, tag, soil)
                 self._plant(temp, soil=soil, tag=tag, pin=pin, wall=wall, tz_minutes=tz_minutes,
-                            rhythm_consent=rhythm_consent, mode=mode, settings=settings)
+                            rhythm_consent=rhythm_consent, sowing=sowing, mode=mode, settings=settings)
                 self._link(temp, final)
             finally:
                 self._release_lock(handle)

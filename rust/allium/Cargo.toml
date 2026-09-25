@@ -1,6 +1,6 @@
 [package]
 name = "allium"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "The componion's deterministic engine: canonical wire, fixed point, keyed randomness"
 license = "MIT"

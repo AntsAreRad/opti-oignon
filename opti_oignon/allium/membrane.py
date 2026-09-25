@@ -4,7 +4,8 @@ Nothing is journaled that did not pass here, in this order: the kind is in
 the kinds table; the surface the transport comes through may write it; its
 producer is the membrane (genesis is written by sowing, ``resumed`` by a
 resume, ``owner`` by a claim, ``tz`` and ``clock`` by the recorder, rhythm
-rows by the rhythm layer); its body schema is not reserved; it carries no
+rows by the rhythm layer, ``evolve`` and the law pins by the laws writer);
+its body schema is not reserved; it carries no
 taint; its body matches the schema exactly, and its payload the payload
 spec; and the account behind the transport owns the being. The store then
 reads the clock (never backwards, never before birth) and writes under its
@@ -24,7 +25,10 @@ What the request's own bytes claim (``Transport.claimed``) is never read.
 
 The kinds table is law data: it is validated whole, and the daily budgets
 the law pins beside it must name exactly the budgeted trunk kinds. Both are
-remembered per process by the digest of the bytes they came from.
+remembered per process by the digest of the bytes they came from. The
+table's grammar -- its own soundness and the bodies it admits -- is the
+reference engine's (``ref/journal.py``); the membrane wraps it with the
+same details and adds the surfaces.
 """
 
 import hashlib
@@ -98,20 +102,16 @@ VERBS = {
 }
 ATTENDED = ("grant", "revoke")
 
-TABLE_KEYS = ("kinds", "name", "schema")
-ENTRY_KEYS = ("body", "payload", "producer", "redact_by", "scope")
-SCOPES = ("rhythm", "trunk")
-PRODUCERS = ("claim", "membrane", "recorder", "resume", "rhythm", "sow")
+# The producers the kinds table names, as ``ref/journal.PRODUCERS`` lists them.
+PRODUCERS = ("claim", "laws", "membrane", "recorder", "resume", "rhythm", "sow")
 EXEMPT = ("clock", "genesis", "owner", "resumed", "tz")
 BUDGET_MAX = 4096
 MAX_INT = (1 << 53) - 1
 MINUTES_A_DAY = 1440
-HOUR_FIELDS = ("hour", "observed_hour")
-HEX32 = {"len": 32, "type": "hex"}
-HEX64 = {"len": 64, "type": "hex"}
-_HEX = "0123456789abcdef"
 _PRODUCED_BY = {
     "claim": "written only by claim",
+    "laws": "written only by the laws writer",
+    "membrane": "written only by the membrane",
     "recorder": "written only by the recorder",
     "resume": "written only by resume",
     "rhythm": "written only by the rhythm layer",
@@ -159,24 +159,6 @@ class Dropped(NamedTuple):
 
 def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _is_hex(value, length):
-    if not isinstance(value, str) or len(value) != length:
-        return False
-    for char in value:
-        if char not in _HEX:
-            return False
-    return True
-
-
-def _is_text(value, most):
-    if not isinstance(value, str) or not 1 <= len(value) <= most:
-        return False
-    for char in value:
-        if not 0x20 <= ord(char) <= 0x7E:
-            return False
-    return value[0] != " " and value[-1] != " "
 
 
 def _is_word(value, most):
@@ -261,112 +243,21 @@ def _exactly(value, names):
     return True
 
 
-def _spec_defect(spec):
-    """What is wrong with one field spec, or ``None``."""
-    if not isinstance(spec, dict):
-        return "a spec is not an object"
-    kind = spec.get("type")
-    if kind == "int":
-        if not _exactly(spec, ("hi", "lo", "type")) or not _is_int(spec["lo"]) or not _is_int(spec["hi"]):
-            return "int"
-        if not -MAX_INT <= spec["lo"] <= spec["hi"] <= MAX_INT:
-            return "int bounds"
-        return None
-    if kind == "bool":
-        return None if _exactly(spec, ("type",)) else "bool"
-    if kind == "symbol":
-        members = spec.get("of")
-        if not _exactly(spec, ("of", "type")) or not isinstance(members, list) or not members:
-            return "symbol"
-        for member in members:
-            if not _is_text(member, 32):
-                return "symbol member"
-        for index in range(1, len(members)):
-            if not members[index - 1] < members[index]:
-                return "symbol order"
-        return None
-    if kind == "hex":
-        return None if _exactly(spec, ("len", "type")) and _is_int(spec["len"]) and spec["len"] >= 1 else "hex"
-    if kind == "text":
-        return None if _exactly(spec, ("max", "type")) and _is_int(spec["max"]) and spec["max"] >= 1 else "text"
-    if kind == "object":
-        if not _exactly(spec, ("fields", "type")):
-            return "object"
-        return _schema_defect(spec["fields"])
-    return "unknown type"
-
-
-def _schema_defect(schema):
-    if not isinstance(schema, dict):
-        return "a schema is not an object"
-    for name, spec in schema.items():
-        if not isinstance(name, str) or not name:
-            return "a field name"
-        defect = _spec_defect(spec)
-        if defect is not None:
-            return f"{name}: {defect}"
-    return None
-
-
-def _field_names(schema):
-    names = []
-    for name, spec in schema.items():
-        names.append(name)
-        if isinstance(spec, dict) and spec.get("type") == "object" and isinstance(spec.get("fields"), dict):
-            names.extend(_field_names(spec["fields"]))
-    return names
-
-
-def _kind_name(kind):
-    if not isinstance(kind, str) or not 1 <= len(kind) <= 32:
-        return False
-    for char in kind:
-        if not ("a" <= char <= "z" or "0" <= char <= "9" or char == "_"):
-            return False
-    return True
-
-
 def validate_table(table):
-    """Refuse, by name, a kinds table that is not whole; ``StoreRefused("law", <defect>)``."""
-    if not _exactly(table, TABLE_KEYS) or not isinstance(table["name"], str) or table["schema"] != 1:
-        raise _law_refused("the kinds table: keys, name or schema")
-    kinds = table["kinds"]
-    if not isinstance(kinds, dict):
-        raise _law_refused("the kinds table: kinds")
-    for kind, entry in kinds.items():
-        if not _kind_name(kind):
-            raise _law_refused(f"{kind}: name")
-        if not _exactly(entry, ENTRY_KEYS):
-            raise _law_refused(f"{kind}: keys")
-        if entry["scope"] not in SCOPES or entry["producer"] not in PRODUCERS:
-            raise _law_refused(f"{kind}: scope or producer")
-        if entry["scope"] == "rhythm" and (entry["producer"] != "rhythm" or entry["redact_by"] is not None):
-            raise _law_refused(f"{kind}: a rhythm kind")
-        body = entry["body"]
-        if body is not None:
-            defect = _schema_defect(body)
-            if defect is not None:
-                raise _law_refused(f"{kind}: body {defect}")
-        payload = entry["payload"]
-        has_payload = body is not None and "payload" in body
-        if (payload is not None) != has_payload:
-            raise _law_refused(f"{kind}: payload")
-        if payload is not None and (not _exactly(payload, ("max", "type")) or payload["type"] != "word"
-                                    or not _is_int(payload["max"]) or payload["max"] < 1):
-            raise _law_refused(f"{kind}: payload spec")
-        redactor = entry["redact_by"]
-        if redactor is not None:
-            target = kinds.get(redactor) if isinstance(redactor, str) else None
-            if (not isinstance(target, dict) or target.get("scope") != "trunk" or target.get("redact_by") is not None
-                    or target.get("body") != {"target": HEX64}):
-                raise _law_refused(f"{kind}: redact_by")
-            if body is not None and (body.get("payload") != HEX32 or payload is None):
-                raise _law_refused(f"{kind}: redactable without a payload reference")
-        if entry["scope"] == "trunk" and body is not None:
-            for name in _field_names(body):
-                if name in HOUR_FIELDS:
-                    raise _law_refused(f"{kind}: an hour in the trunk")
-    if sorted(kinds) != sorted(MATRIX):
+    """Refuse, by name, a kinds table that is not whole; ``StoreRefused("law", <defect>)``.
+
+    The table's own soundness is the reference's (``ref/journal.validate_table``),
+    with the same details; the platform adds that the table and ``MATRIX``
+    name the same kinds.
+    """
+    from . import wire
+    from .ref import journal
+
+    try:
+        journal.validate_table(table)
+    except wire.Refused as refusal:
+        raise _law_refused(refusal.detail) from None
+    if sorted(table["kinds"]) != sorted(MATRIX):
         raise _law_refused("the kinds table and the surface matrix name different kinds")
 
 
@@ -426,12 +317,28 @@ def validate_pin(law, table_bytes):
 _LAWS = {}
 
 
-def law_pin(name):
-    """A carried law's identity and its validated journal pin.
+def _law_params(law, table):
+    """The ranges of the params a genesis under ``law`` freezes, checked against the table's params schema."""
+    schema = table["kinds"]["genesis"]["body"]["laws"]["fields"]["params"]["fields"]
+    params = law.get("params")
+    if not _exactly(params, tuple(schema)):
+        raise _law_refused("the law's params")
+    out = {}
+    for name in sorted(schema):
+        spec = params[name]
+        if (not _exactly(spec, ("default", "hi", "lo")) or not all(_is_int(spec[key]) for key in spec)
+                or not schema[name]["lo"] <= spec["lo"] <= spec["default"] <= spec["hi"] <= schema[name]["hi"]):
+            raise _law_refused(f"the law's params: {name}")
+        out[name] = {"default": spec["default"], "hi": spec["hi"], "lo": spec["lo"]}
+    return out
 
-    Returns ``{"budgets", "name", "provisional", "sha256", "table", "table_name", "version"}``;
-    a law this engine does not carry, or one whose pin is not whole, is
-    ``StoreRefused("law")``.
+
+def law_pin(name):
+    """A carried law's identity, its validated journal pin, and the ranges of its params.
+
+    Returns ``{"budgets", "name", "params", "provisional", "sha256", "table", "table_name", "version"}``;
+    a law this engine does not carry, or one whose pin or params are not
+    whole, is ``StoreRefused("law")``.
     """
     from . import lawfiles, wire
 
@@ -451,7 +358,9 @@ def law_pin(name):
     provisional = law.get("provisional")
     if not _is_int(version) or not 0 <= version <= 65535 or not isinstance(provisional, bool):
         raise _law_refused("the law's version or provisional flag")
-    result = dict(pin, name=name, provisional=provisional, sha256=lawfiles.digest(law), version=version)
+    params = _law_params(law, pin["table"])
+    result = dict(pin, name=name, params=params, provisional=provisional, sha256=lawfiles.digest(law),
+                  version=version)
     _LAWS[key] = result
     return result
 
@@ -459,49 +368,20 @@ def law_pin(name):
 # ---------------------------------------------------------------------------
 # Bodies, payloads, taint, producers
 # ---------------------------------------------------------------------------
-def _refuse_body(path, problem):
-    return MembraneRefused("body", " ".join(part for part in ("body", path, problem) if part))
-
-
-def _check_value(spec, value, path):
-    kind = spec["type"]
-    if kind == "int":
-        if not _is_int(value):
-            raise _refuse_body(path, "int")
-        if not spec["lo"] <= value <= spec["hi"]:
-            raise _refuse_body(path, "range")
-    elif kind == "bool":
-        if not isinstance(value, bool):
-            raise _refuse_body(path, "bool")
-    elif kind == "symbol":
-        if not isinstance(value, str) or value not in spec["of"]:
-            raise _refuse_body(path, "symbol")
-    elif kind == "hex":
-        if not _is_hex(value, spec["len"]):
-            raise _refuse_body(path, "hex")
-    elif kind == "text":
-        if not _is_text(value, spec["max"]):
-            raise _refuse_body(path, "text")
-    else:
-        check_body(spec["fields"], value, path)
-
-
 def check_body(schema, body, path=""):
     """Refuse a body that is not an object with exactly the schema's keys and valid values.
 
-    The detail reads ``body <path> <problem>``, for example
-    ``body laws.sha256 hex``.
+    The check is the reference's (``ref/journal.check_body``); its refusal
+    reaches the platform as ``MembraneRefused("body")`` with the same
+    detail, ``body <path> <problem>``, for example ``body laws.sha256 hex``.
     """
-    if not isinstance(body, dict):
-        raise _refuse_body(path, "object")
-    for name in body:
-        if not isinstance(name, str) or name not in schema:
-            raise _refuse_body(path, "fields")
-    for name in schema:
-        if name not in body:
-            raise _refuse_body(path, "fields")
-    for name in sorted(schema):
-        _check_value(schema[name], body[name], f"{path}.{name}" if path else name)
+    from . import wire
+    from .ref import journal
+
+    try:
+        journal.check_body(schema, body, path)
+    except wire.Refused as refusal:
+        raise MembraneRefused("body", refusal.detail) from None
 
 
 def check_payload(spec, text):
@@ -519,10 +399,13 @@ def check_taint(grant_ref):
     raise MembraneRefused("taint", "no compartment exists for this grant; nothing is written")
 
 
-def admit(kind, body, *, transport, grant_ref, payload, now, single_user, owner, table):
+def admit(kind, body, *, transport, grant_ref, payload, now, single_user, owner, table, producer="membrane"):
     """Steps 1 to 7 of an append, in their order; returns the kind's table entry.
 
     ``owner`` is the being's owner tag, ``table`` the validated kinds table.
+    ``producer`` is who writes: a gesture's append is the membrane's, and
+    the laws writer names itself; a kind another producer owns is refused
+    ``producer``, after the surface.
     """
     from . import anchors
 
@@ -532,7 +415,7 @@ def admit(kind, body, *, transport, grant_ref, payload, now, single_user, owner,
     surface = surface_of(transport, now)
     if surface not in MATRIX.get(kind, ()):
         raise MembraneRefused("surface", f"{kind} is not written from {surface}")
-    if entry["producer"] != "membrane":
+    if producer not in PRODUCERS or entry["producer"] != producer:
         raise MembraneRefused("producer", _PRODUCED_BY.get(entry["producer"], "not the membrane's"))
     schema = entry["body"]
     if schema is None:

@@ -22,6 +22,14 @@ Operations of the chassis:
 * ``genome_corner``  -- a genome at a corner of the law's box.
 * ``genome_decode``  -- a genome checked against its law: record counts.
 * ``genome_compile`` -- a genome's compiled tables and their digest.
+* ``grid``    -- local time, the next local midnight and the civil date of
+  explicit minutes of life, under a birth and an explicit offset list.
+* ``advance`` -- a life folded from its genesis, or from a state returned
+  before, over its facts up to a minute or a budget of work
+  (``ref/world.py``).
+* ``timeline`` -- the law kinds of a life folded alone: the law in force,
+  its params and pin, the pending change, the offset and the daily firing
+  minutes (``ref/world.py``).
 * ``phon_table``       -- the phonology table as the engine parsed it, with a
   byte classifier, for an exhaustive comparison of the two engines.
 * ``phon_lex``         -- a being's language block, from its genome or,
@@ -36,15 +44,16 @@ Operations of the chassis:
 * ``phon_taboo``       -- whether strings touch the taboo list.
 
 The genome operations read the embedded law and pool files, validated once
-per process and remembered by the SHA-256 of the file bytes; ``decode`` and
-``compile`` never read the pool. Parsing a law is outside ``work``.
+per process and remembered by the SHA-256 of the file bytes
+(``ref/lawdata.py``); ``decode`` and ``compile`` never read the pool.
+Parsing a law is outside ``work``.
 """
 
 import hashlib
 
 from .. import fx, lawfiles, rng, wire
 from ..wire import Refused
-from . import journal
+from . import civil, journal, lawdata, world
 from .organs import compile as organ_compile
 from .organs import genome, phon
 
@@ -58,12 +67,13 @@ LIMITS = {
     "depth": wire.MAX_DEPTH,
     "input": 1 << 20,
     "items": 100000,
+    "notes": 64,
     "state": 1 << 19,
     "steps": fx.STEPS_MAX,
 }
-OPS = ("bulk", "echo", "engine", "fact_envelope", "fact_id", "fx", "genome_compile", "genome_corner",
-       "genome_decode", "genome_found", "law", "phon_first_sound", "phon_invent", "phon_inventory", "phon_lex",
-       "phon_licit", "phon_sas", "phon_table", "phon_taboo", "rng")
+OPS = ("advance", "bulk", "echo", "engine", "fact_envelope", "fact_id", "fx", "genome_compile", "genome_corner",
+       "genome_decode", "genome_found", "grid", "law", "phon_first_sound", "phon_invent", "phon_inventory",
+       "phon_lex", "phon_licit", "phon_sas", "phon_table", "phon_taboo", "rng", "timeline")
 RNG_KINDS = ("below", "key", "noise", "stream", "unit")
 _HEX = "0123456789abcdef"
 
@@ -119,7 +129,8 @@ def _engine():
     for name in lawfiles.FOUNDERS:
         founders[name] = _file(lawfiles.founders_bytes(name))[1]
     return {
-        "domains": sorted(genome.DOMAINS + phon.DOMAINS),
+        "codes": list(lawdata.CODES),
+        "domains": sorted(genome.DOMAINS + phon.DOMAINS + world.DOMAINS),
         "engine": ENGINE_VERSION,
         "founders": founders,
         "genome_schema": genome.SCHEMA,
@@ -284,47 +295,13 @@ def _op_law(request):
     }
 
 
-# Per-process memory of the genome laws and pools, by the SHA-256 of their file bytes.
-_LAWS = {}
-_POOLS = {}
-
-
 def _genome_law(request):
     """The requested law, its codec view and its digest; refused by name when unsound."""
-    name = request["law"]
-    if not isinstance(name, str) or name not in lawfiles.LAWS:
-        raise Refused("unknown_law", "law")
-    data = lawfiles.law_bytes(name)
-    key = hashlib.sha256(data).hexdigest()
-    if key not in _LAWS:
-        law = wire.parse(data, lenient=True)
-        sound = not genome.validate_law(law)
-        _LAWS[key] = (law, genome.view(law) if sound else None, lawfiles.digest(law))
-    law, lawview, digest = _LAWS[key]
-    if lawview is None:
-        raise Refused("unknown_law", "genome law")
-    return law, lawview, digest
+    return lawdata.genome_law(request["law"])
 
 
 def _genome_pool(law):
-    pin = law.get("founders")
-    if not isinstance(pin, dict) or pin.get("name") not in lawfiles.FOUNDERS:
-        raise Refused("unknown_law", "founders digest")
-    data = lawfiles.founders_bytes(pin["name"])
-    key = hashlib.sha256(data).hexdigest()
-    if key not in _POOLS:
-        pool = wire.parse(data, lenient=True)
-        _POOLS[key] = (pool, lawfiles.digest(pool))
-    pool, digest = _POOLS[key]
-    if pin.get("sha256") != digest:
-        raise Refused("unknown_law", "founders digest")
-    checked = (key, lawfiles.digest(law))
-    if checked not in _POOLS:
-        _POOLS[checked] = genome.pool_alleles(pool) if not genome.validate_pool(law, pool) else None
-    alleles = _POOLS[checked]
-    if alleles is None:
-        raise Refused("unknown_law", "founders")
-    return alleles
+    return lawdata.genome_pool(law)
 
 
 def _genome_bytes(request, lawview):
@@ -379,6 +356,68 @@ def _op_genome_compile(request):
     data = _genome_bytes(request, lawview)
     tables, work = organ_compile.compile_genome(data, law, lawview, digest)
     return {"sha256": organ_compile.tables_digest(tables), "tables": tables, "work": work}
+
+
+# ---------------------------------------------------------------------------
+# Civil time
+# ---------------------------------------------------------------------------
+
+def _grid_offsets(request):
+    """The offset list of a ``grid`` request, ``[(t, z), ...]`` with ``t`` never decreasing."""
+    entries = _list(request, "tz")
+    checked = []
+    last = 0
+    for entry in entries:
+        if not isinstance(entry, list) or len(entry) != 2 or not _is_int(entry[0]) or not _is_int(entry[1]):
+            raise Refused("bad_request", "tz")
+        t, z = entry
+        if not 0 <= t <= civil.T_MAX or t < last or not civil.offset_ok(z):
+            raise Refused("bad_request", "tz")
+        checked.append((t, z))
+        last = t
+    return checked
+
+
+def _offset_at(entries, t, birth_tz):
+    """The offset of the last entry at or before ``t`` (the last of a shared minute), else ``birth_tz``."""
+    low, high = 0, len(entries)
+    while low < high:
+        middle = (low + high) // 2
+        if entries[middle][0] <= t:
+            low = middle + 1
+        else:
+            high = middle
+    return entries[low - 1][1] if low else birth_tz
+
+
+def _op_grid(request):
+    _fields(request, ("birth", "op", "ts", "tz", "v"))
+    birth = request["birth"]
+    if not isinstance(birth, dict) or sorted(birth) != ["tz", "wall"]:
+        raise Refused("bad_request", "birth")
+    wall, birth_tz = birth["wall"], birth["tz"]
+    if not _is_int(wall) or not civil.WALL_MIN <= wall <= wire.MAX_INT \
+            or not _is_int(birth_tz) or not civil.offset_ok(birth_tz):
+        raise Refused("bad_request", "birth")
+    entries = _grid_offsets(request)
+    ts = _list(request, "ts")
+    for t in ts:
+        if not _is_int(t) or not 0 <= t <= civil.T_MAX:
+            raise Refused("bad_request", "ts")
+    b = wall // 60
+    out = []
+    for t in ts:
+        z = _offset_at(entries, t, birth_tz)
+        day, minute = civil.local(b, t, z)
+        out.append({
+            "civil": list(civil.civil_from_days(day)),
+            "day": day,
+            "fast": (b + t) % civil.FAST == 0,
+            "midnight": civil.next_midnight(b, t, z),
+            "minute": minute,
+            "offset": z,
+        })
+    return {"out": out, "work": len(ts)}
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +727,7 @@ def _op_phon_taboo(request):
 
 
 _HANDLERS = {
+    "advance": lambda request, size: world.op_advance(request, size, LIMITS),
     "bulk": _op_bulk,
     "echo": _op_echo,
     "engine": lambda request: (_fields(request, ("op", "v")), _engine())[1],
@@ -698,6 +738,7 @@ _HANDLERS = {
     "genome_corner": _op_genome_corner,
     "genome_decode": _op_genome_decode,
     "genome_found": _op_genome_found,
+    "grid": _op_grid,
     "law": _op_law,
     "phon_first_sound": _op_phon_first_sound,
     "phon_invent": _op_phon_invent,
@@ -708,7 +749,10 @@ _HANDLERS = {
     "phon_table": _op_phon_table,
     "phon_taboo": _op_phon_taboo,
     "rng": _op_rng,
+    "timeline": lambda request: world.op_timeline(request, LIMITS),
 }
+# The operations whose answer counts the request's own size.
+_SIZED = ("advance",)
 
 
 def _answer(data):
@@ -724,6 +768,8 @@ def _answer(data):
         raise Refused("unknown_op", "wire version")
     if op not in _HANDLERS:
         raise Refused("unknown_op", "op")
+    if op in _SIZED:
+        return _HANDLERS[op](request, len(data))
     return _HANDLERS[op](request)
 
 

@@ -11,6 +11,62 @@ package costs.
 
 ### Added
 
+- The componion's life in time, in both engines. A being now lives: three
+  new engine operations, answered byte for byte by the reference and the
+  Rust twin. `advance` folds a being from its genesis and its facts to a
+  minute, or until a budget of work runs out, re-checking every fact (kind,
+  body, redaction, daily budget, law field) and returning the state, its
+  digest, the environment at that minute, notes and, on request, a trace of
+  the work; `grid` gives the local time, the civil date and the next
+  local midnight of explicit minutes under explicit offsets; `timeline`
+  folds the law kinds alone and says which law and params are in force,
+  what is pending and where the daily firings fall -- the one law timeline
+  in the tree. Time is a fifteen-minute layer aligned to UTC and a daily
+  layer that fires once per rise of the local day index, so a move of the
+  time zone never lives a day twice and a skipped day is not lived; the
+  offset comes from `tz` facts in quarter hours, and the calendar is
+  integer arithmetic equal to `datetime` from 1970 to 2199. Under the
+  provisional law the being is a breathing seed: a three-gene clock
+  entrained by light, a reserve of sugar and fructan, a soil that takes
+  rain and waters, and a stage that sleeps through drought and from the
+  first day of winter and wakes after its rest, joined by a four-channel
+  bus read one step late, so the order of the organs never matters; rain
+  is drawn from the being and the local day alone, so a life cut or sliced
+  anywhere is the same life. While the being sleeps, the organs the law
+  declares quiescent are never called, the soil and the stage step once a
+  day and the rest catch up once at the wake: this fast path reaches the
+  same bytes as stepping every minute, and a dormant windowsill year on the
+  fixture law costs 1460 units instead of 36135. Each law now carries its
+  organ code revision, its world (year, seasons, a provisional sine
+  daylength per band, rain), its organs' constants, the ranges of four
+  params a genesis freezes, and a unit table with per-day caps and day
+  ceilings recomputed by contract (4209 and 4591 units an awake day, 7 a
+  dormant one, which counts the visit a sleeping being pays for a pending
+  `evolve` a later time zone move took off its midnight); the
+  journal's reserved kinds get their bodies (`evolve`, the pins, `tz`,
+  `clock`), and `evolve` and the pins a producer of their own. An
+  `evolve` takes effect at the next local midnight and a pin holds the
+  law and params in force; a conflict is a note, never a refusal that
+  would replay forever, while a law the engine does not carry, a change of
+  law no migration joins and a law field never in force are refused by
+  name. The fixture genome gains the reserve's three enzymes, and a
+  register of retired prototype laws starts empty. The native core's
+  release build now checks integer overflow, and a panic inside the engine
+  is caught and answered as `engine_panic`. Six golden thirty-day lives
+  are committed in hexadecimal and replayed in both engines;
+  `scripts/allium_author_life.py` writes them and refuses to re-record a
+  life whose answer changed under an unchanged law digest, so a change to
+  what an organ does must bump the law's code revision. A new ladder tier,
+  `bash scripts/ladder.sh life` (not part of `all`), lives ten-year
+  lives on the native core with the reference replaying sampled windows,
+  and exits 3 as owed where the core is not built. Twenty-five contracts,
+  two of them in that tier and two that succeed the genome's equivalence
+  contracts, whose enzyme column and corpus floor the three new enzyme loci
+  moved. `scripts/allium_bench.py` measures the cost
+  of a unit of work in each engine and is for the machine only: no figure
+  of it is claimed here. The store does not advance a being yet: the
+  recorder, views, checkpoints and laws on the platform are later work.
+
 - The componion's journal and store. A being's life is a chain of facts, one
   file per person, each fact identified by the digest of its envelope in
   both engines (a new engine operation computes the ids of envelopes whose

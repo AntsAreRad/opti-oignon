@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Graded check ladder. Cheapest tier first; a red tier stops the run.
-# Usage: ladder.sh [t0|t1|t2|t3|t4|t5|all|stopgate]
+# Usage: ladder.sh [t0|t1|t2|t3|t4|t5|all|life|stopgate]
 # Every tier reports PASS, FAIL, or SKIP with a named reason. A tier is never
 # silently absent: a missing tool is a named skip, not a pass.
+# "life" is not part of "all": it runs alone, and exits 3 when it is owed.
 set -uo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" || exit 1
 
 TIER="${1:-all}"
 JUNIT="${JUNIT_OUT:-${TMPDIR:-/tmp}/oo_junit.xml}"
 rc_total=0
+owed=0
 
 say()  { printf '%s\n' "$*"; }
 head_() { printf '\n=== %s ===\n' "$*"; }
@@ -154,6 +156,57 @@ t5() {
   else skip "tests/adversarial/ does not exist yet"; fi
 }
 
+# The life tier: the componion's ten-year lives on the native core, in
+# tests/life, which the t1 sweep ignores. Exactly AK6 and AQ9 must be
+# collected; a skip means the native core is absent or stale, which is owed
+# (exit 3) and never a pass; a failure, an error or a contract that ran
+# over its budget is a failure, and is reported as one even beside a skip.
+life() {
+  head_ "life  ten-year lives on the native core"
+  purge
+  local junit="${TMPDIR:-/tmp}/oo_junit_life.xml"
+  rm -f "$junit"
+  PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:randomly tests/life --junitxml="$junit" \
+    >${TMPDIR:-/tmp}/oo_pytest_life.txt 2>&1
+  if [ ! -f "$junit" ]; then fail "no junitxml produced - the life tier did not run"; return; fi
+  python3 - "$junit" <<'PY'
+import ast, pathlib, sys, xml.etree.ElementTree as ET
+budgets = {}
+suite = pathlib.Path("tests/life/test_allium_life_contracts.py")
+for node in ast.walk(ast.parse(suite.read_text(encoding="ascii"))):
+    if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "BUDGET_S" for t in node.targets):
+        budgets.update(ast.literal_eval(node.value))
+cases = list(ET.parse(sys.argv[1]).getroot().iter("testcase"))
+names = sorted(case.get("name") for case in cases)
+print(f"  junitxml: {len(cases)} collected: {', '.join(names) or 'none'}")
+ids = sorted(name.split("_")[1] for name in names)
+if names != sorted(budgets) or ids != ["ak6", "aq9"]:
+    print("    the life tier collects exactly AK6 and AQ9, each with its budget")
+    sys.exit(1)
+failed = [case.get("name") for case in cases if case.find("failure") is not None or case.find("error") is not None]
+skipped = [case.get("name") for case in cases if case.find("skipped") is not None]
+# A contract that ran is held to its budget even when the other was skipped.
+over = [(case.get("name"), float(case.get("time", 0))) for case in cases
+        if case.get("name") not in skipped and float(case.get("time", 0)) > budgets[case.get("name")]]
+if failed:
+    print("    failed: " + ", ".join(failed))
+for name, took in over:
+    print(f"    over budget: {name} {took:.2f}s > {budgets[name]}s")
+if failed or over:
+    sys.exit(1)
+if skipped:
+    sys.exit(3)
+for case in cases:
+    print(f"    {case.get('name')} {float(case.get('time', 0)):.2f}s of {budgets[case.get('name')]}s")
+sys.exit(0)
+PY
+  case $? in
+    0) pass "the life tier ran on the native core, within its budgets" ;;
+    3) say "  OWED: the native core is not built here or is stale (scripts/build_oo_core.sh); the life tier did not run"
+       owed=1 ;;
+    *) fail "the life tier -> ${TMPDIR:-/tmp}/oo_pytest_life.txt" ;;
+  esac
+}
 
 case "$TIER" in
   t0) t0 ;;
@@ -163,8 +216,13 @@ case "$TIER" in
   t4) t4 ;;
   t5) t5 ;;
   all) t0; t2; t1; t3; t4; t5 ;;
+  life) life ;;
   *) say "unknown tier: $TIER"; exit 64 ;;
 esac
 
+if [ "$rc_total" -eq 0 ] && [ "$owed" -eq 1 ]; then
+  printf '\n=== ladder result: OWED ===\n'
+  exit 3
+fi
 printf '\n=== ladder result: %s ===\n' "$([ $rc_total -eq 0 ] && echo GREEN || echo RED)"
 exit $rc_total

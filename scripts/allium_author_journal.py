@@ -11,7 +11,8 @@ journal may hold, each with
   it, so appending it is refused until then;
 * ``payload`` -- the schema of the plaintext a redactable body carries
   sealed apart, by reference, or ``null``;
-* ``producer`` -- who alone may write it;
+* ``producer`` -- who alone may write it: the membrane (a gesture), sowing,
+  a claim, a resume, the recorder, the rhythm layer, or the laws writer;
 * ``redact_by`` -- the kind whose fact destroys its payload, or ``null``.
 
 A body schema maps each field to its spec: ``int`` (``lo``..``hi``),
@@ -44,7 +45,7 @@ from opti_oignon.allium import wire  # noqa: E402
 NAME = "journal_v1"
 MAX_INT = wire.MAX_INT
 SCOPES = ("rhythm", "trunk")
-PRODUCERS = ("claim", "membrane", "recorder", "resume", "rhythm", "sow")
+PRODUCERS = ("claim", "laws", "membrane", "recorder", "resume", "rhythm", "sow")
 BUDGET_MAX = 4096
 _KIND = re.compile(r"[a-z0-9_]{1,32}")
 
@@ -71,25 +72,51 @@ def _object(fields):
 
 BOOL = {"type": "bool"}
 
+# The params every law pinning this table shares: frozen into a genesis, and
+# changed afterwards only by an ``evolve``. Each law gives their ranges.
+PARAMS = _object({
+    "evap_awake": _int(0, 65536),
+    "evap_dormant": _int(0, 65536),
+    "rain_gain": _int(0, 262144),
+    "sun_max": _int(0, 65536),
+})
+
 GENESIS = {
+    "band": _symbol("long", "medium", "short"),
     "birth": _object({"tz": _int(-840, 840), "wall": _int(0, MAX_INT)}),
     "derive": _int(1, 1),
-    "laws": _object({"name": _text(32), "provisional": BOOL, "sha256": _hex(64), "v": _int(0, 65535)}),
+    "hemisphere": _symbol("north", "south"),
+    "laws": _object({"name": _text(32), "params": PARAMS, "provisional": BOOL, "sha256": _hex(64),
+                     "v": _int(0, 65535)}),
     "owner": _hex(32),
     "rhythm_consent": BOOL,
     "seed": _hex(64),
     "soil": _symbol("encrypted", "glass"),
+    "weather": _symbol("garden", "windowsill"),
+}
+
+# A law update: from the law in force to a carried law, with the params it
+# brings, due at a local midnight. Laws are named by name and digest.
+EVOLVE = {
+    "effective_from": _int(0, MAX_INT),
+    "from": _object({"name": _text(32), "sha256": _hex(64)}),
+    "params": PARAMS,
+    "to": _object({"name": _text(32), "sha256": _hex(64), "v": _int(0, 65535)}),
 }
 
 # kind: (scope, body schema, payload spec, redact_by, producer)
 DEFINED = {
     "genesis": ("trunk", GENESIS, None, None, "sow"),
     "act": ("trunk", {"act": _symbol("greet", "play", "touch", "warm", "water")}, None, None, "membrane"),
+    "clock": ("trunk", {"behind": _int(1, MAX_INT)}, None, None, "recorder"),
     "dream_depth": ("trunk", {"depth": _symbol("deep", "normal", "shallow")}, None, None, "membrane"),
+    "evolve": ("trunk", EVOLVE, None, None, "laws"),
     "forget_rhythm": ("trunk", {}, None, None, "membrane"),
     "lang_forget": ("trunk", {"target": _hex(64)}, None, None, "membrane"),
     "lang_taboo_add": ("trunk", {"len": _int(1, 12), "sha256": _hex(64)}, None, None, "membrane"),
     "lang_teach": ("trunk", {"payload": _hex(32)}, {"max": 24, "type": "word"}, "lang_forget", "membrane"),
+    "laws_pin": ("trunk", {}, None, None, "laws"),
+    "laws_unpin": ("trunk", {}, None, None, "laws"),
     "move_pot": ("trunk", {}, None, None, "membrane"),
     "name": ("trunk", {"name": _text(32)}, None, None, "membrane"),
     "owner": ("trunk", {"from": _hex(32), "to": _hex(32)}, None, None, "claim"),
@@ -97,6 +124,8 @@ DEFINED = {
     "rest_end": ("trunk", {}, None, None, "membrane"),
     "resumed": ("trunk", {"digest": _hex(64), "removed": _int(0, MAX_INT)}, None, None, "resume"),
     "presence_hour": ("rhythm", {"active": BOOL, "observed_hour": _int(0, 23)}, None, None, "rhythm"),
+    # The offset in force, in quarter hours: a non-quarter offset cannot be written.
+    "tz": ("trunk", {"quarters": _int(-56, 56)}, None, None, "recorder"),
 }
 
 # Reserved trunk kinds: kind -> (redact_by, producer). Their bodies come with the work that brings them.
@@ -104,16 +133,12 @@ RESERVED = {
     "braid": (None, "membrane"),
     "bury": (None, "membrane"),
     "celebrate": (None, "membrane"),
-    "clock": (None, "recorder"),
-    "evolve": (None, "membrane"),
     "excavate": (None, "membrane"),
     "keep_dream": (None, "membrane"),
     "lang_borrow": ("lang_forget", "membrane"),
     "lang_insist": (None, "membrane"),
     "lang_reaction": (None, "membrane"),
     "lang_talk": (None, "membrane"),
-    "laws_pin": (None, "membrane"),
-    "laws_unpin": (None, "membrane"),
     "letter_sealed": (None, "membrane"),
     "light_day": (None, "membrane"),
     "meeting_in": (None, "membrane"),
@@ -122,7 +147,6 @@ RESERVED = {
     "rhythm_seal": (None, "membrane"),
     "seal_broken": (None, "membrane"),
     "seed_in": (None, "membrane"),
-    "tz": (None, "recorder"),
 }
 
 # Trunk kinds no daily budget applies to: written once, by a closed producer, or by the recorder.

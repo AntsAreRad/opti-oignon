@@ -7,9 +7,16 @@
 //! `fact_id` and `fact_envelope` check and hash facts in `journal`, which
 //! mirrors the reference's `ref/journal.py`.
 //!
+//! `grid` reads local time, the next local midnight and the civil date of
+//! explicit minutes through `civil`, the twin of `ref/civil.py`.
+//!
+//! `advance` folds a life and `timeline` the law kinds of one, through
+//! `world`, the twin of `ref/world.py`, on the law data `lawdata` reads.
+//!
 //! The genome operations read the embedded law and pool files, parsed and
 //! validated at every call (the reference remembers them per process; the
-//! answers are the same). `decode` and `compile` never read the pool.
+//! answers are the same), through `lawdata`. `decode` and `compile` never
+//! read the pool.
 
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -17,23 +24,32 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::civil;
 use crate::fx::{self, Work};
 use crate::journal;
+use crate::lawdata;
 use crate::laws;
 use crate::ocj::{self, obj, refused, s, Refused, Value};
 use crate::organs::compile as organ_compile;
 use crate::organs::genome::{self, View};
 use crate::organs::phon::{self, Taboo};
+use crate::organs::weather;
 use crate::rng;
+use crate::world;
 
 pub const ENGINE_VERSION: &str = "0.1.0";
 pub const WIRE_VERSION: i64 = 1;
 
 const LIMIT_INPUT: usize = 1 << 20;
-const LIMIT_ITEMS: usize = 100_000;
+pub(crate) const LIMIT_ITEMS: usize = 100_000;
+/// The most notes one response carries.
+pub(crate) const LIMIT_NOTES: usize = 64;
 const LIMIT_STATE: usize = 1 << 19;
+/// The domain of the weather's draws.
+const WORLD_DOMAINS: [&str; 1] = [weather::DOMAIN];
 
-const OPS: [&str; 20] = [
+const OPS: [&str; 23] = [
+    "advance",
     "bulk",
     "echo",
     "engine",
@@ -44,6 +60,7 @@ const OPS: [&str; 20] = [
     "genome_corner",
     "genome_decode",
     "genome_found",
+    "grid",
     "law",
     "phon_first_sound",
     "phon_invent",
@@ -54,6 +71,7 @@ const OPS: [&str; 20] = [
     "phon_table",
     "phon_taboo",
     "rng",
+    "timeline",
 ];
 const RNG_KINDS: [&str; 5] = ["below", "key", "noise", "stream", "unit"];
 
@@ -132,9 +150,11 @@ fn engine() -> Answer {
         founder_members.push((String::from(name), Value::Str(ocj::hex(&laws::digest(&pool)?))));
     }
     let limit = |n: usize| Value::Int(i64::try_from(n).unwrap_or(i64::MAX));
-    let mut domains: Vec<&str> = genome::DOMAINS.iter().chain(phon::DOMAINS.iter()).copied().collect();
+    let mut domains: Vec<&str> =
+        genome::DOMAINS.iter().chain(phon::DOMAINS.iter()).chain(WORLD_DOMAINS.iter()).copied().collect();
     domains.sort_unstable();
     Ok(obj(vec![
+        (String::from("codes"), Value::Arr(lawdata::CODES.iter().map(|code| s(code)).collect())),
         (String::from("domains"), Value::Arr(domains.iter().map(|domain| s(domain)).collect())),
         (String::from("engine"), s(ENGINE_VERSION)),
         (String::from("founders"), obj(founder_members)),
@@ -147,6 +167,7 @@ fn engine() -> Answer {
                 (String::from("depth"), limit(ocj::MAX_DEPTH)),
                 (String::from("input"), limit(LIMIT_INPUT)),
                 (String::from("items"), limit(LIMIT_ITEMS)),
+                (String::from("notes"), limit(LIMIT_NOTES)),
                 (String::from("state"), limit(LIMIT_STATE)),
                 (String::from("steps"), int_value(fx::STEPS_MAX)),
             ]),
@@ -410,37 +431,12 @@ fn op_law(request: &Value) -> Answer {
 
 /// The requested law and its codec view; refused by name when unsound.
 fn genome_law(request: &Value) -> Result<(Value, View), Refused> {
-    let file = match text(request.get("law")).and_then(laws::law) {
-        Some(file) => file,
-        None => return Err(bad("unknown_law", "law")),
-    };
-    let law = laws::parse_file(file)?;
-    if !genome::validate_law(&law).is_empty() {
-        return Err(bad("unknown_law", "genome law"));
-    }
-    let lawview = genome::view(&law).ok_or_else(|| bad("unknown_law", "genome law"))?;
-    Ok((law, lawview))
+    lawdata::genome_law(text(request.get("law")))
 }
 
 /// The law's founder pool, checked against the law's pin, then validated.
 fn genome_pool(law: &Value, lawview: &View) -> Result<BTreeMap<i64, Vec<genome::Allele>>, Refused> {
-    let pin = match law.get("founders") {
-        Some(pin @ Value::Obj(_)) => pin,
-        _ => return Err(bad("unknown_law", "founders digest")),
-    };
-    let file = match text(pin.get("name")).and_then(laws::founders) {
-        Some(file) => file,
-        None => return Err(bad("unknown_law", "founders digest")),
-    };
-    let pool = laws::parse_file(file)?;
-    let digest = ocj::hex(&laws::digest(&pool)?);
-    if text(pin.get("sha256")) != Some(digest.as_str()) {
-        return Err(bad("unknown_law", "founders digest"));
-    }
-    if !genome::validate_pool(law, lawview, &pool).is_empty() {
-        return Err(bad("unknown_law", "founders"));
-    }
-    genome::pool_alleles(&pool).ok_or_else(|| bad("unknown_law", "founders"))
+    lawdata::genome_pool(law, lawview)
 }
 
 fn genome_bytes(request: &Value, lawview: &View) -> Result<Vec<u8>, Refused> {
@@ -534,6 +530,84 @@ fn op_genome_compile(request: &Value) -> Answer {
         (String::from("tables"), tables),
         (String::from("work"), count(work, "genome compile")?),
     ]))
+}
+
+// ---------------------------------------------------------------------------
+// Civil time
+// ---------------------------------------------------------------------------
+
+/// The offset list of a `grid` request, `[(t, z), ...]` with `t` never decreasing.
+fn grid_offsets(request: &Value) -> Result<Vec<(i64, i64)>, Refused> {
+    let entries = list(request, "tz")?;
+    let mut checked = Vec::with_capacity(entries.len());
+    let mut last: i64 = 0;
+    for entry in entries {
+        let (t, z) = match entry {
+            Value::Arr(pair) => match pair.as_slice() {
+                [Value::Int(t), Value::Int(z)] => (*t, *z),
+                _ => return Err(bad("bad_request", "tz")),
+            },
+            _ => return Err(bad("bad_request", "tz")),
+        };
+        if !(0..=civil::T_MAX).contains(&t) || t < last || !civil::offset_ok(z) {
+            return Err(bad("bad_request", "tz"));
+        }
+        checked.push((t, z));
+        last = t;
+    }
+    Ok(checked)
+}
+
+/// One answer of `grid`: minute `t` of a life born in UTC minute `b`, under offset `z`.
+fn grid_cell(b: i64, t: i64, z: i64) -> Option<Value> {
+    let (day, minute) = civil::local(b, t, z)?;
+    let (y, m, d) = civil::civil_from_days(day)?;
+    let fast = b.checked_add(t)?.checked_rem_euclid(civil::FAST)? == 0;
+    let midnight = civil::next_midnight(b, t, z)?;
+    Some(obj(vec![
+        (String::from("civil"), Value::Arr(vec![Value::Int(y), Value::Int(m), Value::Int(d)])),
+        (String::from("day"), Value::Int(day)),
+        (String::from("fast"), Value::Bool(fast)),
+        (String::from("midnight"), Value::Int(midnight)),
+        (String::from("minute"), Value::Int(minute)),
+        (String::from("offset"), Value::Int(z)),
+    ]))
+}
+
+fn op_grid(request: &Value) -> Answer {
+    fields(request, &["birth", "op", "ts", "tz", "v"], &[])?;
+    let (wall, birth_tz) = match request.get("birth") {
+        Some(birth @ Value::Obj(_)) if birth.keys() == ["tz", "wall"] => {
+            match (int(birth.get("wall")), int(birth.get("tz"))) {
+                (Some(wall), Some(tz)) if (civil::WALL_MIN..=ocj::MAX_INT).contains(&wall) && civil::offset_ok(tz) => {
+                    (wall, tz)
+                }
+                _ => return Err(bad("bad_request", "birth")),
+            }
+        }
+        _ => return Err(bad("bad_request", "birth")),
+    };
+    let entries = grid_offsets(request)?;
+    let ts = list(request, "ts")?;
+    let mut minutes = Vec::with_capacity(ts.len());
+    for t in ts {
+        match t {
+            Value::Int(t) if (0..=civil::T_MAX).contains(t) => minutes.push(*t),
+            _ => return Err(bad("bad_request", "ts")),
+        }
+    }
+    let b = wall.checked_div_euclid(60).ok_or_else(|| bad("engine_panic", "grid"))?;
+    let mut out = Vec::with_capacity(minutes.len());
+    for t in minutes {
+        // The entries are sorted by minute: those at or before `t` are a prefix, and its last one decides.
+        let before = entries.partition_point(|&(entry_t, _)| entry_t <= t);
+        let z = match before.checked_sub(1).and_then(|i| entries.get(i)) {
+            Some(&(_, z)) => z,
+            None => birth_tz,
+        };
+        out.push(grid_cell(b, t, z).ok_or_else(|| bad("engine_panic", "grid"))?);
+    }
+    Ok(obj(vec![(String::from("out"), Value::Arr(out)), (String::from("work"), size(ts.len(), "grid")?)]))
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,6 +1123,8 @@ fn op_phon_taboo(request: &Value) -> Answer {
 }
 
 fn answer(data: &[u8]) -> Answer {
+    // The request's own size is counted by `advance`.
+    let size = data.len();
     if data.len() > LIMIT_INPUT {
         return Err(bad("limit", "input size"));
     }
@@ -1080,6 +1156,7 @@ fn answer(data: &[u8]) -> Answer {
         "genome_corner" => op_genome_corner(&request),
         "genome_decode" => op_genome_decode(&request),
         "genome_found" => op_genome_found(&request),
+        "grid" => op_grid(&request),
         "law" => op_law(&request),
         "phon_first_sound" => op_phon_first_sound(&request),
         "phon_invent" => op_phon_invent(&request),
@@ -1090,6 +1167,8 @@ fn answer(data: &[u8]) -> Answer {
         "phon_table" => op_phon_table(&request),
         "phon_taboo" => op_phon_taboo(&request),
         "rng" => op_rng(&request),
+        "advance" => world::op_advance(&request, size),
+        "timeline" => world::op_timeline(&request),
         _ => Err(bad("unknown_op", "op")),
     }
 }
