@@ -11,6 +11,15 @@ package costs.
 
 ### Added
 
+- A suite-wide check, `tests/conftest.py`, fails at its teardown any
+  contract that leaves a stand-in project module, a neutralised project
+  entry or a replaced `urllib.request.urlopen` it did not find. A stand-in
+  left behind is what made the facade contract pass or fail with the order
+  of the suites before it, and five suites left the transport replaced. The
+  check reads the state before the contract's fixtures are set up and
+  checks it after they are torn down, so a suite that closes its own window
+  is not charged; the whole tree measured zero of each before it was
+  switched on.
 - [SECURITY] The sync gate shows what it lets in. The live approval of a
   received skill now leads with the name it lands under and the SHA-256 of
   its text -- the prompt cuts every value to 60 characters, so they come
