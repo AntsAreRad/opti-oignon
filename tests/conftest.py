@@ -23,16 +23,42 @@ in a fixture is not charged for it. A real module a contract imports for the
 first time is not a leftover. The check reads and never writes: it cannot
 turn a red contract green.
 
+The same file keeps the test process away from the maintainer's data. For
+the whole session, ``tests/_data_firewall.py`` redirects every path inside
+``data/``, ``opti_oignon/data/`` and every database file of the tree to a
+mirror that starts as a fresh checkout would; it is installed before any
+suite is collected, so a module that touches its data directory when it is
+imported is covered too, and the summary line says how many paths it kept
+off. A child process a contract starts is not covered.
+
 Local-only (the public distribution ships no tests).
 """
 
 import sys
 import urllib.request
+from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _data_firewall import DataFirewall  # noqa: E402
+
 _PACKAGE = "opti_oignon"
 _FOUND = pytest.StashKey()
+_FIREWALL = DataFirewall(Path(__file__).resolve().parent.parent)
+
+
+def pytest_configure(config):
+    _FIREWALL.install()
+
+
+def pytest_unconfigure(config):
+    _FIREWALL.uninstall()
+
+
+def pytest_terminal_summary(terminalreporter):
+    terminalreporter.write_line(_FIREWALL.summary())
 
 
 def _project_entries():
@@ -56,6 +82,7 @@ def left_behind(found, now):
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_setup(item):
+    _FIREWALL.current = item.nodeid
     item.stash[_FOUND] = (_project_entries(), urllib.request.urlopen)
     return (yield)
 
@@ -74,4 +101,5 @@ def pytest_runtest_teardown(item):
             problems.append("urllib.request.urlopen is left replaced")
         if problems:
             raise AssertionError("; ".join(problems))
+    _FIREWALL.current = None
     return result

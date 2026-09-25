@@ -74,6 +74,7 @@ def test_nothing_touched():
 def _session(tmp_path, canaries):
     """Run pytest on ``canaries`` beside a copy of the conftest; name -> [(phase, message)]."""
     shutil.copy2(_CONFTEST, tmp_path / "conftest.py")
+    shutil.copy2(_CONFTEST.with_name("_data_firewall.py"), tmp_path / "_data_firewall.py")
     (tmp_path / "test_canaries.py").write_text(canaries, encoding="utf-8")
     junit = tmp_path / "junit.xml"
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")

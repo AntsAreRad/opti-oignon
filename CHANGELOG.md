@@ -11,6 +11,18 @@ package costs.
 
 ### Added
 
+- [SECURITY] The test process no longer reaches the maintainer's data.
+  Measured first: 253 tests touched `data/`, `opti_oignon/data/` or a
+  database file of the tree through real modules -- the existence check
+  of the master key, loaded on any machine that has one; appends to the
+  signed audit chain; the application's own databases -- and a sandbox
+  that hid only `data/` answered otherwise than the maintainer's machine.
+  `tests/_data_firewall.py`, installed by the conftest before any suite is
+  collected, redirects every path in those places to a session mirror that
+  starts with the tracked files as HEAD holds them, taken from git: the
+  real places are never touched, and the session ends with the count of
+  paths kept off them (505 on the first run), a figure to bring down suite
+  by suite. A child process a contract starts is not covered.
 - A suite-wide check, `tests/conftest.py`, fails at its teardown any
   contract that leaves a stand-in project module, a neutralised project
   entry or a replaced `urllib.request.urlopen` it did not find. A stand-in
