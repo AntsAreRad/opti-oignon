@@ -453,6 +453,12 @@ package costs.
 
 ### Fixed
 
+- The notes store's phone opt-in suite loaded 21 real modules by name
+  behind its stand-in package -- the real sync package, encryption and the
+  post-quantum signatures among them -- and the auto-tuner's bounds suite
+  resolved the speculative-decoding module in a full sweep, depending on
+  the suites that ran before it. Both now load through the shared isolation
+  window; two more seal debts are paid.
 - Two sealed memory suites resolved real project modules by name behind
   their stand-in package. The canonical store's SQL hygiene suite ran the
   real encryption stack -- on a machine with a key, that key -- where the

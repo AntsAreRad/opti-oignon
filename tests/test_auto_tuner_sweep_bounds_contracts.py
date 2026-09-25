@@ -21,54 +21,34 @@ hill-climb thresholds, or the recommendation heuristics.
     breaking the tuner.
 
 Local-only (the public distribution ships no tests). Runs under pytest or the
-__main__ runner. Loading follows the sibling-harness idiom: the real module is
-loaded under a stand-in package and driven with a deterministic in-process
-benchmark, so no inference backend and no sibling module are required.
+__main__ runner. The real module is loaded through the shared isolation window
+and driven with a deterministic in-process benchmark; no sibling module is
+reachable there, so no inference backend is either.
 """
 
-import importlib.util
 import sys
 import traceback
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_TUNER = "opti_oignon.auto_tuner"
 
 
 # ---------------------------------------------------------------------------
-# Isolated loading (sibling-harness idiom)
+# Loading through the shared window
 # ---------------------------------------------------------------------------
 def _load():
-    """Load the real auto-tuner under a stand-in package.
+    """Load the real auto-tuner in the shared window.
 
     Returns (module, restore). The benchmark function is injected per test, so
     no inference backend is touched and no results file is written by the
     engine under test.
     """
-    keys = ("opti_oignon", "opti_oignon.auto_tuner")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.auto_tuner", _OO / "auto_tuner.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.auto_tuner"] = mod
-    spec.loader.exec_module(mod)
-    pkg.auto_tuner = mod
-
-    def restore():
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    loaded, restore = isolate(targets={_TUNER: source("auto_tuner.py")})
+    return loaded[_TUNER], restore
 
 
 def _deterministic_benchmark(mod):
