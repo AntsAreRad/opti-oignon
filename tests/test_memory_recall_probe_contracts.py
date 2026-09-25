@@ -21,6 +21,10 @@ rate of 0.0 when there were no probes to score has invented a measurement.
   * RP6 -- deleting the decision sentence fails at least one (blade 2).
   * RP7 -- swapping an entity fails at least one (blade 3).
   * RP8 -- shifting a date fails at least one (blade 4).
+  * RP9 -- a decision written in French is drawn, and inverting it fails
+    its probe, whether the negation is formal (ne ... pas) or familiar.
+  * RP10 -- a typographic apostrophe negates as the ASCII one does.
+  * RP11 -- French function words are neither entities nor decision words.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window; the module is pure and reaches nothing.
@@ -192,6 +196,68 @@ def test_rp8_shifting_a_date_fails_a_probe():
         assert any(p.kind == "date" and p.answer == "2024-05-01" for p in result.failures), (
             "by the date probe whose answer moved"
         )
+    finally:
+        restore()
+
+
+
+# ---------------------------------------------------------------------------
+# RP9 -- a French decision is drawn and its inversion caught
+# ---------------------------------------------------------------------------
+def test_rp9_a_french_decision_is_drawn_and_inverting_it_fails_its_probe():
+    mod, restore = _open()
+    try:
+        cases = (
+            ("Nous avons d\u00e9cid\u00e9 de ne pas utiliser Docker pour la d\u00e9mo.",
+             "Nous avons d\u00e9cid\u00e9 d'utiliser Docker pour la d\u00e9mo."),
+            ("On a d\u00e9cid\u00e9 : on utilisera pas Docker pour la d\u00e9mo.",
+             "On a d\u00e9cid\u00e9 : on utilisera Docker pour la d\u00e9mo."),
+            ("Il faut qu'on n'utilise plus Docker pour la d\u00e9mo.",
+             "Il faut qu'on utilise Docker pour la d\u00e9mo."),
+        )
+        for source_text, inverted in cases:
+            span = [{"turn_id": "t1", "text": source_text}]
+            drawn = mod.generate_probes(span)
+            decisions = [p for p in drawn if p.kind == "decision"]
+            assert decisions, f"a French decision is drawn: {source_text!r}"
+            assert decisions[0].negations >= 1, "its negation is counted"
+            assert mod.score(drawn, source_text).failed == 0, "the source answers its own probes"
+            failures = mod.score(drawn, inverted).failures
+            assert any(p.kind == "decision" for p in failures), f"the inversion is caught: {inverted!r}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RP10 -- the typographic apostrophe negates
+# ---------------------------------------------------------------------------
+def test_rp10_a_typographic_apostrophe_negates_as_the_ascii_one():
+    mod, restore = _open()
+    try:
+        typographic = "We decided we don\u2019t ship the demo on Friday."
+        span = [{"turn_id": "t1", "text": typographic}]
+        drawn = mod.generate_probes(span)
+        decision = next(p for p in drawn if p.kind == "decision")
+        assert decision.negations == 1, "don\u2019t is a negation"
+        assert mod.score(drawn, "We decided we don't ship the demo on Friday.").failed == 0, "either apostrophe answers"
+        assert mod.score(drawn, "We decided we do ship the demo on Friday.").failed >= 1, "the inversion is caught"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RP11 -- French function words
+# ---------------------------------------------------------------------------
+def test_rp11_french_function_words_are_neither_entities_nor_decision_words():
+    mod, restore = _open()
+    try:
+        span = [{"turn_id": "t1", "text": "Nous avons d\u00e9cid\u00e9 que Carol m\u00e8ne la revue avec Bob."}]
+        drawn = mod.generate_probes(span)
+        entities = {p.answer for p in drawn if p.kind == "entity"}
+        assert entities == {"Carol", "Bob"}, entities
+        decision = next(p for p in drawn if p.kind == "decision")
+        assert not decision.key & {"nous", "avons", "que", "la", "avec"}, decision.key
+        assert {"carol", "bob", "revue"} <= decision.key
     finally:
         restore()
 

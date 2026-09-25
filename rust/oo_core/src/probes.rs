@@ -29,12 +29,12 @@ const PATTERNS: [(&str, u32); 8] = [
     (r"(?<![\w-])\d+(?:[.,]\d+)?(?![\w-])", 32),
     (r"[a-z0-9]+", 32),
     (r"\b[A-Z][a-zA-Z]+\b", 32),
-    (r"\b(not|never|no|cannot)\b|n't\b", 34),
+    (r"\b(not|never|no|cannot|ne|pas|jamais|rien|aucun|aucune)\b|n['\u2019]t\b|\bn['\u2019](?=\w)", 34),
     (r"(?<![\w-])", 0),
     (r"(?![\w-])", 0),
 ];
 
-const NEGATION_WORDS: [&str; 4] = ["not", "never", "no", "cannot"];
+const NEGATION_WORDS: [&str; 10] = ["not", "never", "no", "cannot", "ne", "pas", "jamais", "rien", "aucun", "aucune"];
 
 fn implemented(patterns: &[(String, u32)]) -> bool {
     patterns.len() == PATTERNS.len()
@@ -258,18 +258,29 @@ fn capitalised(s: &[char]) -> Vec<String> {
     out
 }
 
-/// `s[i..]` starts with the ASCII `word`, case ignored. On the accepted set
-/// no code point but the ASCII letters matches these letters so.
-fn starts_with_ignoring_case(s: &[char], i: usize, word: &str) -> bool {
-    i + word.len() <= s.len()
-        && word
-            .chars()
-            .enumerate()
-            .all(|(k, letter)| s[i + k].is_ascii() && s[i + k].to_ascii_lowercase() == letter)
+/// One code point against one lowercase pattern letter, case ignored, as
+/// Python's `re` matches it on the accepted set: the ASCII letter in either
+/// case, and the two letters it folds beyond ASCII -- the dotless i for `i`,
+/// the long s for `s`.
+fn letter_matches(c: char, letter: char) -> bool {
+    (c.is_ascii() && c.to_ascii_lowercase() == letter)
+        || (letter == 'i' && c == '\u{131}')
+        || (letter == 's' && c == '\u{17f}')
 }
 
-/// The end of a `\b(not|never|no|cannot)\b|n't\b` match at `i`, alternatives
-/// tried in the reference's order.
+/// An apostrophe: the ASCII one or the typographic one. Neither has a case.
+fn apostrophe(c: char) -> bool {
+    c == '\'' || c == '\u{2019}'
+}
+
+/// `s[i..]` starts with the ASCII `word`, case ignored.
+fn starts_with_ignoring_case(s: &[char], i: usize, word: &str) -> bool {
+    i + word.len() <= s.len() && word.chars().enumerate().all(|(k, letter)| letter_matches(s[i + k], letter))
+}
+
+/// The end of a negation match at `i`, alternatives tried in the reference's
+/// order: a whole negation word, then `n't` with either apostrophe, then the
+/// French elision `n'` before a word character.
 fn negation_at(s: &[char], i: usize) -> Option<usize> {
     if boundary(s, i) {
         for word in NEGATION_WORDS {
@@ -279,8 +290,12 @@ fn negation_at(s: &[char], i: usize) -> Option<usize> {
             }
         }
     }
-    if starts_with_ignoring_case(s, i, "n't") && boundary(s, i + 3) {
+    let n_apostrophe = i + 1 < s.len() && letter_matches(s[i], 'n') && apostrophe(s[i + 1]);
+    if n_apostrophe && i + 2 < s.len() && letter_matches(s[i + 2], 't') && boundary(s, i + 3) {
         return Some(i + 3);
+    }
+    if n_apostrophe && boundary(s, i) && i + 2 < s.len() && is_word(s[i + 2]) {
+        return Some(i + 2);
     }
     None
 }
@@ -431,6 +446,21 @@ pub fn probe_score(probes: Vec<Scored>, text: String, patterns: Vec<(String, u32
         }
     }
     Some(failing)
+}
+
+/// Every accepted code point that matches one of ``letters`` with case
+/// ignored, as the negation scanner matches it, with the letters it matches.
+/// The contracts hold each row, and every absent one, against Python's `re`.
+#[pyfunction]
+pub fn probe_letter_folds(letters: &str) -> Vec<(u32, String)> {
+    (0u32..=0x10ffff)
+        .filter_map(char::from_u32)
+        .filter(|&c| accepted(c))
+        .filter_map(|c| {
+            let matched: String = letters.chars().filter(|&letter| letter_matches(c, letter)).collect();
+            (!matched.is_empty()).then_some((c as u32, matched))
+        })
+        .collect()
 }
 
 /// Every accepted code point with its classes as this core holds them:

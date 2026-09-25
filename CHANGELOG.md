@@ -190,6 +190,17 @@ package costs.
 
 ### Changed
 
+- The onion's eviction gate reads French. A decision written in French --
+  "nous avons convenu", "on va", "il faut", "doit" and their kin -- is drawn
+  as a decision probe, and negation counts "ne", the elided "n'", "pas",
+  "jamais", "rien" and "aucun(e)" beside the English words; "n't" counts with
+  the typographic apostrophe too. Before this, a French decision drew no
+  probe and a summary that inverted it passed the gate at 1.0. Both halves
+  of "ne ... pas" count, so a summary written in the other register fails
+  its decision probe and the verbatim stays. The native core reads the same
+  pattern, including the two letters Python folds beyond ASCII when case is
+  ignored, the dotless i and the long s.
+
 - [SECURITY] In Bulbe mode the external llama-server stays on the machine
   too. Its host comes from `backends.yaml` and every request went to it
   whatever the mode, while the registry's docstring already claimed the

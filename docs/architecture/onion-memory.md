@@ -27,7 +27,7 @@ and add up to the window exactly; the composer refuses a file that does not.
   Cellar span -- the digest checks every key before it renders a line.
 - A span leaves the Flesh only once its candidate peel has answered the
   recall probes drawn from the span, class by class, at the configured
-  thresholds. An empty probe set on a rich span is a defect, and an unknown
+  thresholds. The probes read English and French decisions and negations. An empty probe set on a rich span is a defect, and an unknown
   rate is not a pass.
 - A parent peel is summarised from the union of its children's Cellar
   spans, never from the children's text. A peel handed in that stands on

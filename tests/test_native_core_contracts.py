@@ -30,8 +30,12 @@ the artefact itself is never tracked.
     core and answered by the reference.
   * NC9 -- a regular expression the core does not implement sends the call
     to the reference: the patterns travel with every call.
+  * NC10 -- the native probes answer as the reference on French decisions
+    and negations, on the typographic apostrophe, and on the two letters
+    Python folds beyond ASCII when case is ignored: the dotless i and the
+    long s.
 
-NC1 to NC3 and NC6 to NC9 need the built artefact: the CI job that carries
+NC1 to NC3 and NC6 to NC10 need the built artefact: the CI job that carries
 a Rust toolchain builds it and runs this file by name, and a local sweep
 needs ``scripts/build_oo_core.sh`` run once. NC4 and NC5 always run.
 
@@ -548,6 +552,55 @@ def test_nc9_a_pattern_the_core_does_not_implement_sends_the_call_to_the_referen
         finally:
             probes._NEGATION = saved
         assert [p.negations for p in drawn if p.kind == "decision"] == [0], "control: the module's own pattern does not count it"
+    finally:
+        restore()
+
+
+
+# ---------------------------------------------------------------------------
+# NC10 -- French, the typographic apostrophe, the dotless i and the long s
+# ---------------------------------------------------------------------------
+_NEGATIONS = (
+    "Nous avons d\u00e9cid\u00e9 de ne pas utiliser Docker. On a d\u00e9cid\u00e9 : on utilisera pas Docker.",
+    "Il faut qu'on n'utilise plus Docker, et on ne l'a jamais fait. Aucun serveur, aucune base, rien.",
+    "Nous n\u2019utiliserons jamais Kafka. Je vais le dire : il n\u2019y a rien \u00e0 changer.",
+    "We decided we don\u2019t ship. We won't. We can\u2019t, WE CAN'T, we don'T.",
+    "Nous avons convenu que Bob ne m\u00e8ne pas la revue. Il doit la mener, ne pas oublier.",
+    "Ne PAS toucher. JAMAIS. Rien. N\u2019importe. n' existe. rock n' roll. N'2026 et n\u2019_x.",
+    "Jama\u0131s ! Pa\u017f question. R\u0131en. Nous avons opt\u00e9 pour Oslo le 2026-10-01, pa\u017f Lyon.",
+    "Pr\u00e9vu de livrer le 2026-11-02 ; nous allons livrer, on va livrer, je vais livrer, il faut livrer.",
+    "La d\u00e9cision est prise : Carol doit mener la revue, nous devons finir, vous devez lire, ils doivent signer.",
+)
+
+
+def test_nc10_the_native_probes_read_french_the_typographic_apostrophe_and_the_folded_letters():
+    loaded, restore = _probe_window()
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        core = loaded["opti_oignon.native"].load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        counting = _Counting(core)
+        probes._native = lambda: counting
+        negations = 0
+        for text in _NEGATIONS:
+            span = [{"turn_id": "t1", "text": text}]
+            drawn = probes.generate_probes(span)
+            assert drawn == _reference(probes, probes.generate_probes, span), f"probe for probe on {text!r}"
+            negations += sum(p.negations for p in drawn if p.kind == "decision")
+            for candidate in (text, text.replace("ne ", "").replace("pas ", ""), text.replace("\u2019", "'"), ""):
+                assert probes.score(drawn, candidate) == _reference(probes, probes.score, drawn, candidate), candidate
+        assert counting.calls["probe_generate"] == counting.answered["probe_generate"] == len(_NEGATIONS)
+        assert counting.answered["probe_score"] == counting.calls["probe_score"] == 4 * len(_NEGATIONS)
+        assert negations >= 10, "the corpus holds negations to count, French and English"
+        assert any(p.kind == "decision" for text in _NEGATIONS[:3] for p in probes.generate_probes([{"turn_id": "t", "text": text}]))
+        words = re.search(r"\(([a-z|]+)\)", probes._NEGATION.pattern).group(1).split("|")
+        letters = "".join(sorted(set("".join(words) + "nt")))
+        folds = {cp: set(matched) for cp, matched in core.probe_letter_folds(letters)}
+        for lo, hi in _SCOPE:
+            for cp in range(lo, hi + 1):
+                python = {letter for letter in letters if re.fullmatch(letter, chr(cp), re.IGNORECASE)}
+                assert folds.get(cp, set()) == python, f"U+{cp:04X} folds to {sorted(python)} in Python"
+        assert {0x131, 0x17F} <= set(folds), "the dotless i and the long s fold, as Python folds them"
     finally:
         restore()
 

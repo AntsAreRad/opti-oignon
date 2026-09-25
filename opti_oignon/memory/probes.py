@@ -35,7 +35,14 @@ _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _NUMBER = re.compile(r"(?<![\w-])\d+(?:[.,]\d+)?(?![\w-])")
 _WORD = re.compile(r"[a-z0-9]+")
 _CAPITALISED = re.compile(r"\b[A-Z][a-zA-Z]+\b")
-_NEGATION = re.compile(r"\b(not|never|no|cannot)\b|n't\b", re.IGNORECASE)
+# English and French. Both halves of "ne ... pas" count, so that "ne ... plus"
+# and the familiar form without "ne" are negations too; a summary that writes
+# the other form fails its decision probe, and the verbatim stays -- the safe
+# side. An apostrophe is the ASCII one or the typographic one.
+_NEGATION = re.compile(
+    r"\b(not|never|no|cannot|ne|pas|jamais|rien|aucun|aucune)\b|n['\u2019]t\b|\bn['\u2019](?=\w)",
+    re.IGNORECASE,
+)
 # The bounds of a date or number answer, named so the native core can be
 # handed the exact expression it has to reproduce.
 _ANSWER_BEFORE = r"(?<![\w-])"
@@ -49,13 +56,20 @@ _QUESTIONS = {
 }
 
 # Markers that make a sentence a recorded decision.
-_DECISION_MARKERS = ("decided", "agreed", "will ", "must", "chose", "plan to", "shall")
+_DECISION_MARKERS = (
+    "decided", "agreed", "will ", "must", "chose", "plan to", "shall",
+    "d\u00e9cid", "d\u00e9cision", "convenu", "choisi", "opt\u00e9", "on va ", "nous allons ", "je vais ",
+    "il faut", "doit", "devons", "devez", "doivent", "pr\u00e9vu de",
+)
 
 # Capitalised words that are not names of anything.
 _NOT_ENTITIES = frozenset({
     "the", "a", "an", "we", "i", "you", "he", "she", "it", "they", "this",
     "that", "these", "those", "our", "your", "their", "my", "in", "on", "at",
     "and", "but", "or", "if", "when", "then", "there", "here", "yes", "no",
+    "le", "la", "les", "un", "une", "des", "du", "nous", "vous", "il", "elle",
+    "ils", "elles", "je", "tu", "ce", "cet", "cette", "ces", "mais", "et", "ou",
+    "donc", "alors", "si", "quand", "puis", "ensuite", "oui", "non",
 })
 
 _STOPWORDS = frozenset({
@@ -63,6 +77,11 @@ _STOPWORDS = frozenset({
     "with", "by", "from", "is", "are", "was", "were", "be", "been", "we", "i",
     "you", "he", "she", "it", "they", "this", "that", "our", "your", "their",
     "not", "never", "no", "cannot", "do", "does", "did", "don", "doesn", "t",
+    "le", "la", "les", "un", "une", "des", "du", "de", "et", "ou", "en", "au",
+    "aux", "pour", "par", "sur", "dans", "avec", "sans", "nous", "vous", "il",
+    "elle", "ils", "elles", "je", "tu", "ce", "cet", "cette", "ces", "que", "qui",
+    "est", "sont", "ont", "avons", "avez", "ai", "ne", "pas", "jamais", "rien",
+    "aucun", "aucune", "l", "d", "n", "s", "c", "j", "qu",
 })
 
 # The share of a decision's content words a sentence must carry to count as
