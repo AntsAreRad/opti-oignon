@@ -11,7 +11,7 @@ package costs.
 
 ### Added
 
-- The companion's genome, in both engines. A genome is diploid: pairs of
+- The componion's genome, in both engines. A genome is diploid: pairs of
   chromosomes of fixed 16-byte records whose order is itself data, since a
   gene's promoter is the run of regulatory records just before it. Sixteen
   kinds of gene are laid out, seven of them reserved for the brain, the
@@ -37,7 +37,8 @@ package costs.
   refusals at the same positions: the equivalence contracts had run past
   their time budget on it.
 
-- The chassis of the companion's engine, `opti_oignon/allium` and
+- The chassis of the componion's engine (the componion: the companion
+  onion), `opti_oignon/allium` and
   `rust/allium`: a being that will be a pure function of its facts needs
   two engines that cannot disagree, so every piece is written twice, a
   Python reference and a Rust twin, and proven byte for byte equal. A

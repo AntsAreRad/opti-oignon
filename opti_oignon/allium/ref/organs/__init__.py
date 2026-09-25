@@ -1,4 +1,4 @@
-"""The reference organs of the companion's engine: pure functions over law values.
+"""The reference organs of the componion's engine: pure functions over law values.
 
 Every function here takes the law and the founder pool as values, never by
 name; the protocol loads the embedded files and hands them over. The Rust

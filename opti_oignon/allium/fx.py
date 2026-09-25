@@ -1,4 +1,4 @@
-"""Fixed point for the companion's engine: Q16.16 in i32, intermediates wide.
+"""Fixed point for the componion's engine: Q16.16 in i32, intermediates wide.
 
 The reference. Its Rust twin (``rust/allium/src/fx.rs``) computes in i128,
 which none of these primitives can overflow for i32 inputs, so Python's

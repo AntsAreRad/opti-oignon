@@ -65,7 +65,7 @@ PY
   engine_rust
 }
 
-# Every companion contract carries a time budget (BUDGET_S in its suite), read
+# Every componion contract carries a time budget (BUDGET_S in its suite), read
 # back from the junit file: over budget, or without a budget, is named.
 budgets() {
   if python3 - "$JUNIT" <<'PY'
@@ -88,13 +88,13 @@ for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
     elif took > budgets[name]:
         over += 1
         print(f"    over budget: {name} {took:.2f}s > {budgets[name]}s")
-print(f"  companion budgets: {seen} contract(s) read, {over} over, {missing} without a budget")
+print(f"  componion budgets: {seen} contract(s) read, {over} over, {missing} without a budget")
 sys.exit(1 if (over or missing or (suites and not seen)) else 0)
 PY
-  then pass "every companion contract within its time budget"; else fail "companion time budgets (above)"; fi
+  then pass "every componion contract within its time budget"; else fail "componion time budgets (above)"; fi
 }
 
-# The companion engine's own tests, and clippy's proof that its arithmetic is
+# The componion engine's own tests, and clippy's proof that its arithmetic is
 # explicit. A missing tool is owed, never a pass.
 engine_rust() {
   if ! command -v cargo >/dev/null 2>&1; then

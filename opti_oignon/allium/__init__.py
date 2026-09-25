@@ -1,4 +1,4 @@
-"""The onion companion's engine: the Python reference and the seam to its Rust twin.
+"""The componion's engine (the companion onion): the Python reference and the seam to its Rust twin.
 
 The being is a pure function of its facts. Everything that is hashed travels
 in one canonical encoding (``wire``), every quantity is an integer in fixed

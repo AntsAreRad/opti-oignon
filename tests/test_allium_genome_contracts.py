@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the companion's genome, on the reference: codec, founders, compilation, bounds.
+"""Contracts for the componion's genome, on the reference: codec, founders, compilation, bounds.
 
 A genome is the being's fixed inheritance: a diploid set of 16-byte records
 whose order is itself data (a gene's promoter is the run of CIS records just

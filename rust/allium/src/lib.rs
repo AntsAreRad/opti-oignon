@@ -1,4 +1,4 @@
-//! The onion companion's deterministic engine, the twin of `opti_oignon/allium`.
+//! The componion's deterministic engine, the twin of `opti_oignon/allium`.
 //!
 //! The being is a pure function of its facts. This crate never reads a clock,
 //! never touches a file or the network, and holds no float: time and facts

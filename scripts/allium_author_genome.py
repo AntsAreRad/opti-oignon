@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author the companion's genome laws and founder pools from one table.
+"""Author the componion's genome laws and founder pools from one table.
 
 Writes, under ``opti_oignon/allium/laws/``:
 

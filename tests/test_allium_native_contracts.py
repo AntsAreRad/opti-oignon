@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the companion engine's native side and for what its sources may not contain.
+"""Contracts for the componion engine's native side and for what its sources may not contain.
 
 The engine runs natively when the native core answers for the same world as
 the reference, and the reference answers otherwise. Its sources are held to

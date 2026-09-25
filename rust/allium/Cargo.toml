@@ -2,7 +2,7 @@
 name = "allium"
 version = "0.2.0"
 edition = "2021"
-description = "The onion companion's deterministic engine: canonical wire, fixed point, keyed randomness"
+description = "The componion's deterministic engine: canonical wire, fixed point, keyed randomness"
 license = "MIT"
 publish = false
 

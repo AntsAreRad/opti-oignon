@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the companion engine's fixed point: integers only, the same in both engines.
+"""Contracts for the componion engine's fixed point: integers only, the same in both engines.
 
 Every quantity the being carries is Q16.16 in an i32, computed wide and
 saturated. A float would answer differently on different platforms; an

@@ -1,4 +1,4 @@
-//! The companion's engine, reached from Python: two thin wrappers over the
+//! The componion's engine, reached from Python: two thin wrappers over the
 //! `allium` crate's byte protocol.
 //!
 //! `allium_call` copies the request, then releases the GIL for the whole of

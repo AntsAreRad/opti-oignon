@@ -151,7 +151,7 @@ takes effect at once, on the reference path, until the core is taught it.
 The rates, the thresholds and the gate's wording stay in Python.
 
 The same artefact links a second crate, `rust/allium`: the engine of the
-companion, which nothing in the application calls yet. It answers one
+componion, the companion onion, which nothing in the application calls yet. It answers one
 byte protocol -- canonical JSON in, canonical JSON out, never an
 exception -- and `opti_oignon/allium/ref` answers it too, as the
 reference. Before the native engine is used, its whole identity

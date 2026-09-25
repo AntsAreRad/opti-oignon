@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the companion engine's wire and randomness: one encoding, two engines, one answer.
+"""Contracts for the componion engine's wire and randomness: one encoding, two engines, one answer.
 
 Everything the being hashes travels in onion canonical JSON (OCJ), and every
 random draw is addressed by content. The Python reference and the Rust twin

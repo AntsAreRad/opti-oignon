@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genome corpora shared by the companion's genome contracts, and a test-local reader.
+"""Genome corpora shared by the componion's genome contracts, and a test-local reader.
 
 Every corpus is drawn at run time from the chassis stream on a fixed key
 (``rng.Stream(bytes(32), "test.<suite>", i)``), never from ``random``: the

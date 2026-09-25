@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the companion's genome in both engines: the same bytes, request for request.
+"""Contracts for the componion's genome in both engines: the same bytes, request for request.
 
   * AE1 -- for the four genome operations, the native engine and the
     reference answer with the same bytes: founders from seeded seeds, box
