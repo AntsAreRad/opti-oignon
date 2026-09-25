@@ -158,6 +158,14 @@ package costs.
 
 ### Changed
 
+- [SECURITY] In Bulbe mode the external llama-server stays on the machine
+  too. Its host comes from `backends.yaml` and every request went to it
+  whatever the mode, while the registry's docstring already claimed the
+  gate. Every head now asks the same question as Ollama's -- unless the
+  mode reads exactly Daily, a host off the machine, or one nobody can read,
+  is refused by name before any request is built -- and a generation or a
+  stream is refused before the governor is asked for room it would never
+  use. Health reads false, so the registry never resolves it.
 - [SECURITY] In Bulbe mode every Ollama request stays on the machine. Now
   that `backends.yaml` or `OLLAMA_HOST` can point the backend anywhere, a
   request whose endpoint is off the machine -- or whose endpoint cannot be

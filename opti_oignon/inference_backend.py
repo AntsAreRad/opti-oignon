@@ -158,6 +158,22 @@ def _is_on_this_machine(url: str) -> bool:
     return address.is_loopback or address.is_unspecified
 
 
+def _bulbe_refusal_for(label: str, endpoint: str | None, where: str = "") -> str | None:
+    """Why a request of ``label`` may not leave the process now, or None.
+
+    Only a mode that reads exactly Daily lets a request go off the machine;
+    an unreadable mode reads as Bulbe. An endpoint nobody can read is
+    refused too: the module cannot say where the request would go.
+    """
+    if _live_mode() == "daily":
+        return None
+    if endpoint is None:
+        return f"Bulbe mode: {label} cannot say where its requests would go, so none leaves"
+    if endpoint == ENDPOINT_IN_PROCESS or _is_on_this_machine(endpoint):
+        return None
+    return f"Bulbe mode: {label} requests stay on this machine; refusing {endpoint}{where}"
+
+
 def _connect_only_timeout(seconds: float) -> Any:
     """A transport timeout that bounds the connection and leaves reads unbounded."""
     import httpx
@@ -722,20 +738,7 @@ class OllamaBackend(InferenceBackend):
 
     def _bulbe_refusal(self) -> str | None:
         """Why a request may not leave, or None. Only Daily lets it go off the machine."""
-        if _live_mode() == "daily":
-            return None
-        endpoint = self.endpoint()
-        if endpoint is None:
-            return (
-                "Bulbe mode: Ollama cannot say where its requests would go, "
-                "so none leaves"
-            )
-        if not _is_on_this_machine(endpoint):
-            return (
-                f"Bulbe mode: Ollama requests stay on this machine; refusing "
-                f"{endpoint} (set in backends.yaml or OLLAMA_HOST)"
-            )
-        return None
+        return _bulbe_refusal_for("Ollama", self.endpoint(), " (set in backends.yaml or OLLAMA_HOST)")
 
     def _transport(self, timeout: float | None = None) -> Any:
         """The client every head asks: the module-level one when nothing binds it.
@@ -1740,6 +1743,12 @@ class LlamaServerBackend(InferenceBackend):
     def endpoint(self) -> str | None:
         return self._host
 
+    def _bulbe_gate(self) -> None:
+        """Refuse by name, before anything is built, a request Bulbe mode keeps on the machine."""
+        refusal = _bulbe_refusal_for("llama-server", self.endpoint(), " (set in backends.yaml)")
+        if refusal:
+            raise RuntimeError(refusal)
+
     @property
     def display_name(self) -> str:
         return "llama.cpp server"
@@ -1753,7 +1762,9 @@ class LlamaServerBackend(InferenceBackend):
         timeout_s: float | None = None,
     ) -> Any:
         """One guarded HTTP round trip; raises RuntimeError when the
-        server is unreachable or answers a non-JSON body."""
+        server is unreachable, answers a non-JSON body, or is off the
+        machine in Bulbe mode."""
+        self._bulbe_gate()
         url = f"{self._host}{path}"
         data = None
         headers = {"Accept": "application/json"}
@@ -1857,6 +1868,9 @@ class LlamaServerBackend(InferenceBackend):
             msgs.append({"role": "user", "content": str(prompt)})
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
+        # A request Bulbe keeps on the machine is refused before the
+        # governor is asked for room it will never use.
+        self._bulbe_gate()
         # Admission before anything leaves. A refusal that arrives after the
         # request has gone to the server is a log line, not a refusal.
         _governor_admission(model, options)
@@ -1916,6 +1930,7 @@ class LlamaServerBackend(InferenceBackend):
         """Streaming chat through the server's SSE channel."""
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
+        self._bulbe_gate()
         # Same gate as the whole-answer head, and for the same reason. A
         # generator body runs at first iteration, so the caller's first
         # ``next`` is where admission is decided.
@@ -2083,9 +2098,8 @@ class BackendRegistry:
         is not pinned to the fallback -- a later pull may make a backend
         recognise it). ``model_info`` may hit the network for Ollama or the
         filesystem for llama.cpp, so the cache removes that cost on the hot path.
-        In Bulbe an Ollama backend whose endpoint is off the machine, or
-        unknown, fails ``health_check`` and is never resolved; llama-server
-        carries no such gate yet.
+        In Bulbe an Ollama or llama-server backend whose endpoint is off the
+        machine, or unknown, fails ``health_check`` and is never resolved.
         """
         cached_name = self._route_cache.get(model)
         if cached_name is not None:

@@ -108,7 +108,12 @@ def _open(seeded=None):
         seeded=seeded,
         packages=("opti_oignon",),
     )
-    return loaded[_BACKEND], restore
+    mod = loaded[_BACKEND]
+    # The contracts here pin the transport against a fake host off the
+    # machine. Bulbe mode keeps such a host off limits (its own contracts,
+    # tests/test_bulbe_http_gate_contracts.py), so the window runs in Daily.
+    mod._live_mode = lambda: "daily"
+    return mod, restore
 
 
 def _ollama(mod, fake, available=True):

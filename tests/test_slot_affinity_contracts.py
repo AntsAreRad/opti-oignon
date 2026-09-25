@@ -415,6 +415,10 @@ def _load_backend():
         packages=("opti_oignon",),
     )
     mod = loaded[_BACKEND]
+    # The contracts here pin the transport against a fake host off the
+    # machine. Bulbe mode keeps such a host off limits (its own contracts,
+    # tests/test_bulbe_http_gate_contracts.py), so the window runs in Daily.
+    mod._live_mode = lambda: "daily"
     transport = _Transport()
     real = mod.urllib.request.urlopen
     mod.urllib.request.urlopen = transport.urlopen
