@@ -650,8 +650,9 @@ class ModelManager:
         model_dirs: list[str] | None = None,
         default_dir: str | None = None,
     ):
-        self._model_dirs = [Path(d) for d in (model_dirs or [])]
-        self._default_dir = Path(default_dir) if default_dir else None
+        # A configured directory written with ~ is the home directory.
+        self._model_dirs = [Path(d).expanduser() for d in (model_dirs or [])]
+        self._default_dir = Path(default_dir).expanduser() if default_dir else None
         self._metadata_cache: dict[str, GGUFMetadata] = {}
         self._lock = threading.Lock()
         self._active_downloads: dict[str, dict] = {}
@@ -667,8 +668,8 @@ class ModelManager:
         return self._default_dir
 
     def add_model_dir(self, path: str | Path) -> bool:
-        """Add a model directory to scan."""
-        p = Path(path)
+        """Add a model directory to scan; a leading ~ is the home directory."""
+        p = Path(path).expanduser()
         if p in self._model_dirs:
             return False
         self._model_dirs.append(p)
@@ -1126,7 +1127,7 @@ def init_model_manager(config_path: str | None = None) -> ModelManager:
         manager.add_model_dir(d)
 
     if default_dir:
-        manager._default_dir = Path(default_dir)
+        manager._default_dir = Path(default_dir).expanduser()
 
     return manager
 

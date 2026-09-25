@@ -1296,7 +1296,8 @@ class LlamaCppBackend(InferenceBackend):
         type_k: str | None = None,
         type_v: str | None = None,
     ):
-        self._model_dirs = [Path(d) for d in (model_dirs or [])]
+        # A configured directory written with ~ is the home directory.
+        self._model_dirs = [Path(d).expanduser() for d in (model_dirs or [])]
         self._n_ctx = n_ctx
         self._n_gpu_layers = n_gpu_layers
         self._n_threads = n_threads

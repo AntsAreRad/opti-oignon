@@ -372,6 +372,17 @@ package costs.
 
 ### Fixed
 
+- A directory written with `~` in `backends.yaml` was taken as a folder
+  named `~` under the working directory. The shipped `~/models/gguf` was
+  therefore never found -- llama.cpp listed no model even with the file
+  applied -- and the model manager would have downloaded into a literal
+  `./~/models/gguf`. llama.cpp's model directories and the model manager's
+  scan and download directories now expand `~` to the home directory.
+- The tuner loaded `benchmark_tokens` from `auto_tuner.yaml` and never used
+  it: the route built every benchmark on hardcoded defaults (128 tokens, a
+  120 s timeout). The budget and a new `benchmark_timeout_s` key now reach
+  the run on Ollama and llama.cpp; a value that cannot be read keeps its
+  default and says so in the log.
 - The facade contract that imports the real package failed or passed with
   the order of the suites before it. Two routing suites replaced the
   `opti_oignon` entry of `sys.modules` with a stand-in and never put it

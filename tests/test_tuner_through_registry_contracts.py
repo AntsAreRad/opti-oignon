@@ -21,6 +21,11 @@ every sweep point to the model without the governor's admission.
     by name, and no backend is an error by name, never a run.
   * TU6 -- the tuner module holds no HTTP transport of its own: no
     ``requests``, no endpoint path of the inference server.
+  * TU7 -- the benchmark's token budget and timeout come from
+    ``auto_tuner.yaml`` through the route to the run, on Ollama and on
+    llama.cpp.
+  * TU8 -- an unreadable budget or timeout falls back to its own default,
+    says so, and leaves the other settings as written.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window; the registry is a stand-in that has ``get`` and
@@ -83,12 +88,12 @@ def _stub(name, **attrs):
     return module
 
 
-def _open(registry, *, route=None):
+def _open(registry, *, route=None, manager=None):
     backend_mod = _stub("opti_oignon.inference_backend", get_backend_registry=lambda: registry)
     deps = _stub(
         "opti_oignon.api.deps",
         AUTO_TUNER_AVAILABLE=True, INFERENCE_BACKEND_AVAILABLE=True, SPECULATIVE_DECODING_AVAILABLE=True,
-        get_auto_tuner_manager=lambda: None, get_speculative_decoding_manager=lambda: None,
+        get_auto_tuner_manager=manager or (lambda: None), get_speculative_decoding_manager=lambda: None,
         get_backend_registry=lambda: registry,
     )
     seeded = {"opti_oignon.inference_backend": backend_mod, "opti_oignon.api.deps": deps}
@@ -221,3 +226,69 @@ def test_tu6_the_tuner_holds_no_http_transport_of_its_own():
     assert any("/" in s for s in literals), "control: the census reads string literals"
     endpoints = [s for s in literals if "/api/" in s]
     assert endpoints == [], f"no endpoint of the inference server is spelled here: {endpoints}"
+
+
+def _manager_from(tuner, tmp_path, text):
+    """The real manager, loaded from an auto_tuner.yaml written here; its results stay here too."""
+    tuner._RESULTS_PATH = tmp_path / "tuner_results.json"
+    config = tmp_path / "auto_tuner.yaml"
+    config.write_text(text, encoding="utf-8")
+    return tuner.AutoTunerManager(config_path=str(config))
+
+
+# ---------------------------------------------------------------------------
+# TU7 -- the budget and the timeout come from the YAML
+# ---------------------------------------------------------------------------
+def test_tu7_the_benchmark_budget_and_timeout_come_from_auto_tuner_yaml(tmp_path):
+    ollama, llama = _Backend(), _Backend()
+    registry = _Registry(ollama=ollama, llama_cpp=llama)
+    holder = {}
+    loaded, restore = _open(registry, route="tuner", manager=lambda: holder["manager"])
+    try:
+        tuner = loaded[_TUNER]
+        routes = loaded["opti_oignon.api.routes_tuner"]
+        manager = _manager_from(tuner, tmp_path, "auto_tuner:\n  benchmark_tokens: 64\n  benchmark_timeout_s: 30\n")
+        assert (manager.config.benchmark_tokens, manager.config.benchmark_timeout_s) == (64, 30.0)
+        started = []
+
+        def start_tuning(model_name, benchmark_fn):
+            started.append(benchmark_fn)
+            return tuner.TunerJob(job_id="stand-in", model_name=model_name, status="pending")
+
+        holder["manager"] = SimpleNamespace(config=manager.config, start_tuning=start_tuning)
+        routes.start_tuning(loaded["opti_oignon.api.schemas"].TunerRunRequest(model_name="stand-in-model"))
+        assert len(started) == 1, "the route started one tuning run"
+        started[0]({"threads": 6, "batch_size": 512})
+        options = ollama.calls[-1]["options"]
+        assert options["num_predict"] == 64 and options["timeout"] == 30.0, options
+        registry._backends["ollama"] = _Backend(healthy=False)
+        routes._resolve_benchmark_fn("stand-in-model", manager.config)({"threads": 6, "batch_size": 512})
+        assert llama.calls[-1]["options"]["num_predict"] == 64, "llama.cpp takes the same budget"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TU8 -- an unreadable value falls back alone
+# ---------------------------------------------------------------------------
+def test_tu8_an_unreadable_budget_or_timeout_falls_back_to_its_own_default(tmp_path, caplog):
+    loaded, restore = _open(_Registry())
+    try:
+        tuner = loaded[_TUNER]
+        defaults = tuner.TunerConfig()
+        cases = (
+            ("benchmark_tokens: lots\n  benchmark_timeout_s: -5\n", "benchmark_tokens"),
+            ("benchmark_tokens: true\n  benchmark_timeout_s: soon\n", "benchmark_timeout_s"),
+            ("benchmark_tokens: 0\n  benchmark_timeout_s: 0\n", "benchmark_tokens"),
+        )
+        for text, named in cases:
+            caplog.clear()
+            manager = _manager_from(tuner, tmp_path, "auto_tuner:\n  warmup_runs: 1\n  " + text)
+            config = manager.config
+            assert (config.benchmark_tokens, config.benchmark_timeout_s) == (defaults.benchmark_tokens, defaults.benchmark_timeout_s), text
+            assert config.warmup_runs == 1, "the other settings are read as written"
+            assert any(named in record.getMessage() for record in caplog.records), f"the fallback is said: {text!r}"
+        manager = _manager_from(tuner, tmp_path, "auto_tuner:\n  benchmark_tokens: '96'\n  benchmark_timeout_s: '12.5'\n")
+        assert (manager.config.benchmark_tokens, manager.config.benchmark_timeout_s) == (96, 12.5)
+    finally:
+        restore()

@@ -94,6 +94,29 @@ def weakest_source(sources) -> str:
 # Data types
 # ---------------------------------------------------------------------------
 
+def _positive_int(value):
+    """A whole number above zero, or None; a boolean is not a number here."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    return value if isinstance(value, int) and value >= 1 else None
+
+
+def _positive_seconds(value):
+    """A finite number of seconds above zero, as a float, or None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, (int, float)) and 0 < value < float("inf"):
+        return float(value)
+    return None
+
+
 @dataclass
 class TunerConfig:
     """Configuration for the auto-tuner."""
@@ -104,6 +127,7 @@ class TunerConfig:
     benchmark_prompt_tokens: int = 128
     trials_per_param: int = 3
     auto_apply: bool = False
+    benchmark_timeout_s: float = 120.0
 
     def validate(self) -> list[str]:
         """Return validation errors (empty = valid)."""
@@ -116,6 +140,8 @@ class TunerConfig:
             errors.append("benchmark_prompt_tokens must be >= 1")
         if self.trials_per_param < 1:
             errors.append("trials_per_param must be >= 1")
+        if _positive_seconds(self.benchmark_timeout_s) is None:
+            errors.append("benchmark_timeout_s must be a number of seconds > 0")
         return errors
 
     def to_dict(self) -> dict:
@@ -127,16 +153,31 @@ class TunerConfig:
             "benchmark_prompt_tokens": self.benchmark_prompt_tokens,
             "trials_per_param": self.trials_per_param,
             "auto_apply": self.auto_apply,
+            "benchmark_timeout_s": self.benchmark_timeout_s,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "TunerConfig":
-        """Create from dict, ignoring unknown keys."""
+        """Create from dict, ignoring unknown keys.
+
+        The benchmark's token budget and timeout are read alone: a value
+        that cannot be read keeps its own default, and the fallback is
+        logged by name rather than passed to the engine.
+        """
         known = {
             "enabled", "warmup_runs", "benchmark_tokens",
             "benchmark_prompt_tokens", "trials_per_param", "auto_apply",
+            "benchmark_timeout_s",
         }
         filtered = {k: v for k, v in data.items() if k in known}
+        for key, parse in (("benchmark_tokens", _positive_int), ("benchmark_timeout_s", _positive_seconds)):
+            if key not in filtered:
+                continue
+            value = parse(filtered[key])
+            if value is None:
+                logger.warning("auto_tuner.yaml %s %r cannot be read; its default is used", key, filtered.pop(key))
+            else:
+                filtered[key] = value
         return cls(**filtered)
 
 

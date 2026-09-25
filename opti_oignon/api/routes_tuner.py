@@ -84,7 +84,7 @@ def start_tuning(body: TunerRunRequest) -> dict:
     if not body.model_name:
         raise HTTPException(status_code=400, detail="model_name is required")
 
-    benchmark_fn = _resolve_benchmark_fn(body.model_name)
+    benchmark_fn = _resolve_benchmark_fn(body.model_name, mgr.config)
 
     try:
         job = mgr.start_tuning(
@@ -97,7 +97,7 @@ def start_tuning(body: TunerRunRequest) -> dict:
     return TunerJobSchema(**job.to_dict())
 
 
-def _resolve_benchmark_fn(model_name: str):
+def _resolve_benchmark_fn(model_name: str, config=None):
     """Detect the active backend and return the appropriate benchmark function.
 
     Priority order:
@@ -105,14 +105,20 @@ def _resolve_benchmark_fn(model_name: str):
         2. llama.cpp (if healthy and model is available)
         3. Mock fallback (always works)
 
+    The token budget and the request timeout are the tuner's configuration
+    (``auto_tuner.yaml``); without one, its defaults.
+
     Returns:
         A callable(params: dict) -> BenchmarkResult.
     """
     from opti_oignon.auto_tuner import (
+        TunerConfig,
         create_llamacpp_benchmark_fn,
         create_mock_benchmark_fn,
         create_ollama_benchmark_fn,
     )
+
+    cfg = config if config is not None else TunerConfig()
 
     # Try Ollama first.
     if INFERENCE_BACKEND_AVAILABLE and get_backend_registry is not None:
@@ -125,7 +131,12 @@ def _resolve_benchmark_fn(model_name: str):
                 logger.info(
                     "Tuner: using real Ollama benchmark for %s", model_name
                 )
-                return create_ollama_benchmark_fn(model_name, backend=ollama_backend)
+                return create_ollama_benchmark_fn(
+                    model_name,
+                    benchmark_tokens=cfg.benchmark_tokens,
+                    backend=ollama_backend,
+                    timeout_s=cfg.benchmark_timeout_s,
+                )
 
             # Check llama.cpp backend.
             llamacpp_backend = registry.get("llama_cpp")
@@ -135,7 +146,9 @@ def _resolve_benchmark_fn(model_name: str):
                     model_name,
                 )
                 return create_llamacpp_benchmark_fn(
-                    model_name, backend=llamacpp_backend
+                    model_name,
+                    backend=llamacpp_backend,
+                    benchmark_tokens=cfg.benchmark_tokens,
                 )
         except Exception as exc:
             logger.debug("Backend detection failed, falling back to mock: %s", exc)
