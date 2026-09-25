@@ -34,10 +34,16 @@ the artefact itself is never tracked.
     and negations, on the typographic apostrophe, and on the two letters
     Python folds beyond ASCII when case is ignored: the dotless i and the
     long s.
+  * NC11 -- the build script installs the artefact by rename: a process
+    that holds the old one keeps its bytes, and no staging file is left.
+  * NC12 -- the build script checks the artefact of its own tree, whatever
+    directory it is run from.
 
 NC1 to NC3 and NC6 to NC10 need the built artefact: the CI job that carries
 a Rust toolchain builds it and runs this file by name, and a local sweep
-needs ``scripts/build_oo_core.sh`` run once. NC4 and NC5 always run.
+needs ``scripts/build_oo_core.sh`` run once. NC4, NC5, NC11 and NC12 always
+run: the last two drive a copy of the script with a stand-in cargo and a
+stand-in loader.
 
 Local-only (the public distribution ships no tests).
 """
@@ -46,8 +52,11 @@ import ast
 import collections
 import hashlib
 import json
+import os
 import random
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -604,6 +613,86 @@ def test_nc10_the_native_probes_read_french_the_typographic_apostrophe_and_the_f
     finally:
         restore()
 
+
+
+# ---------------------------------------------------------------------------
+# The build script (NC11 and NC12)
+# ---------------------------------------------------------------------------
+_STAND_IN_CARGO = """#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--manifest-path" ]; then manifest="$2"; shift; fi
+  shift
+done
+mkdir -p "$(dirname "$manifest")/target/release"
+echo "new artefact" > "$(dirname "$manifest")/target/release/liboo_core.so"
+"""
+
+_STAND_IN_LOADER = """from pathlib import Path
+from types import SimpleNamespace
+
+
+def load():
+    path = Path(__file__).resolve().parent / "oo_core.so"
+    return SimpleNamespace(VERSION=path.read_text().strip()) if path.is_file() else None
+"""
+
+_OTHER_TREE_LOADER = """from types import SimpleNamespace
+
+
+def load():
+    return SimpleNamespace(VERSION="another tree")
+"""
+
+
+def _package(root, loader):
+    native = root / "opti_oignon" / "native"
+    native.mkdir(parents=True)
+    (root / "opti_oignon" / "__init__.py").write_text("", encoding="utf-8")
+    (native / "__init__.py").write_text(loader, encoding="utf-8")
+    return native
+
+
+def _script_tree(tmp_path):
+    """A tree the build script can run in: its own copy, a stand-in cargo, a stand-in loader."""
+    root = tmp_path / "root"
+    (root / "scripts").mkdir(parents=True)
+    script = root / "scripts" / "build_oo_core.sh"
+    shutil.copy2(REPO / "scripts" / "build_oo_core.sh", script)
+    (root / "rust" / "oo_core").mkdir(parents=True)
+    (root / "rust" / "oo_core" / "Cargo.toml").write_text('[package]\nname = "oo_core"\n', encoding="utf-8")
+    native = _package(root, _STAND_IN_LOADER)
+    (native / "oo_core.so").write_text("old artefact\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cargo = bin_dir / "cargo"
+    cargo.write_text(_STAND_IN_CARGO, encoding="utf-8")
+    cargo.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}", PYTHONDONTWRITEBYTECODE="1")
+    env.pop("PYTHONPATH", None)
+    return root, script, native, env
+
+
+def test_nc11_the_build_script_installs_by_rename_and_leaves_nothing_behind(tmp_path):
+    root, script, native, env = _script_tree(tmp_path)
+    installed = native / "oo_core.so"
+    before = installed.stat().st_ino
+    with installed.open("rb") as held:
+        run = subprocess.run(["bash", str(script)], cwd=root, env=env, capture_output=True, text=True, timeout=120)
+        assert run.returncode == 0, run.stderr
+        held.seek(0)
+        assert held.read() == b"old artefact\n", "a process holding the old artefact keeps its bytes"
+    assert installed.read_bytes() == b"new artefact\n", "the new artefact is in place"
+    assert installed.stat().st_ino != before, "a new file, renamed over the old one"
+    assert sorted(p.name for p in native.iterdir()) == ["__init__.py", "oo_core.so"], "no staging file is left behind"
+
+
+def test_nc12_the_build_script_checks_its_own_trees_artefact_from_any_directory(tmp_path):
+    root, script, native, env = _script_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    _package(elsewhere, _OTHER_TREE_LOADER)
+    run = subprocess.run(["bash", str(script)], cwd=elsewhere, env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip().splitlines()[-1] == "oo_core new artefact", run.stdout
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

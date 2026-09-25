@@ -451,6 +451,12 @@ package costs.
   helpers defaulted to on. They now follow the run -- `--no-color`,
   `NO_COLOR`, or `color: false` in `cli.yaml` -- and, outside a command,
   `NO_COLOR`.
+- `scripts/build_oo_core.sh` copied the new native core over the old file
+  in place: a running process that had loaded the old one could crash as
+  its mapped pages changed under it, and a loader starting mid-copy could
+  read half a file. It now installs by rename. Its final check also
+  imported whatever `opti_oignon` the calling directory offered; it now
+  checks the artefact of its own tree.
 - The browser specs no longer race the first-run dialog. The helper waited a
   fixed budget for it to appear and, when the budget ran out first, returned as
   though there were nothing to dismiss; the dialog then opened over the page and

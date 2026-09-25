@@ -11,7 +11,15 @@ DEST="$ROOT/opti_oignon/native"
 cargo build --release --locked --manifest-path "$CRATE/Cargo.toml"
 built="$CRATE/target/release/liboo_core.so"
 [ -f "$built" ] || { echo "no artefact at $built" >&2; exit 1; }
-cp "$built" "$DEST/oo_core.so"
+# Install by rename, never by writing over the old file: a process that has
+# the old artefact loaded keeps its bytes, and a loader never sees half a
+# file. The staging name is one the loader does not glob and git ignores.
+staged="$DEST/.oo_core-$$.so"
+trap 'rm -f "$staged"' EXIT
+cp "$built" "$staged"
+mv -f "$staged" "$DEST/oo_core.so"
+# Check this tree's artefact, whichever directory the script was run from.
+cd "$ROOT"
 python3 - <<'PY'
 from opti_oignon.native import load
 core = load()
