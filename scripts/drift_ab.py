@@ -15,8 +15,11 @@ untrusted data after the system prompt. So both arms send the same system
 prompt and the same history window to the same model, and the onion arm
 adds its block. The librarian runs in this process with persistence off
 and curates after every turn, not on a thread, so the reading never
-depends on timing; nothing reads or writes the data directory, and none of
-the user's memories enters either arm.
+depends on timing, and none of the user's memories enters either arm: no
+memory store is read or written. The requests go through the inference
+registry as the application's do, so the resource governor admits each of
+them and records its decision in its own store, as it does for any
+request.
 
 A sentence the deterministic templates cannot parse is counted undecided,
 never as agreement: the host's model judge is the remedy, and the report
@@ -25,12 +28,16 @@ conversation.
 
 Run on the host, never in CI::
 
-    python3 scripts/drift_ab.py                      # both arms, one JSON report
-    python3 scripts/drift_ab.py --model llama3:8b    # another answering model
+    python3 scripts/drift_ab.py                                # both arms, one JSON report
+    python3 scripts/drift_ab.py --model llama3:8b              # another answering model
+    python3 scripts/drift_ab.py --librarian-model qwen3:4b     # another librarian
     python3 scripts/drift_ab.py --history-tokens 2048
 
-Without a backend for the answering model or for the librarian's, it
-prints nothing that looks like a result and exits 2.
+Without a backend for the answering model or for the librarian's, or when
+the backend lists either model as not installed, it asks nothing, names
+the models the backend does serve, prints nothing that looks like a result
+and exits 2. A request that fails once the run has started ends the run the
+same way: a half-run is not a measurement.
 """
 
 import argparse
@@ -286,6 +293,25 @@ def _registry_resolver():
     return resolve
 
 
+def _unserved(name, backend):
+    """Why ``name`` cannot be measured on ``backend``, or None when it is served or nobody can tell.
+
+    A name without a tag is the backend's latest tag of it. A listing the
+    backend cannot give (None) or that fails says nothing either way, and
+    the run is left to find out.
+    """
+    try:
+        listing = backend.list_models()
+    except Exception:  # noqa: BLE001 - a failed listing says nothing
+        return None
+    if listing is None:
+        return None
+    names = {str(getattr(entry, "name", entry)) for entry in listing}
+    if name in names or (":" not in name and f"{name}:latest" in names):
+        return None
+    return f"{name!r} is not installed (the backend serves: {', '.join(sorted(names)) or 'no model'})"
+
+
 def _default_model():
     from opti_oignon.config import config
 
@@ -295,6 +321,7 @@ def _default_model():
 def main(argv=None, *, resolve=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default=None, help="the answering model (default: the general route's)")
+    parser.add_argument("--librarian-model", default=None, help="the librarian's model (default: onion.yaml's)")
     parser.add_argument("--history-tokens", type=int, default=HISTORY_TOKENS, help="the history window both arms share")
     args = parser.parse_args(argv)
     if resolve is None:
@@ -309,10 +336,21 @@ def main(argv=None, *, resolve=None):
     from opti_oignon.memory import librarian
 
     config = replace(librarian.load_config(), enabled=True, persist_path="")
+    if args.librarian_model:
+        config = replace(config, model=args.librarian_model)
     summarize = librarian.registry_summarizer(config, resolve=resolve)
     if summarize is None:
         print(f"no backend resolves the librarian's {config.model!r}: nothing measured", file=sys.stderr)
         return 2
+    checks = (
+        ("answering model", model, backend, "--model"),
+        ("librarian's model", config.model, resolve(config.model), "--librarian-model"),
+    )
+    for role, name, serving, option in checks:
+        problem = _unserved(name, serving) if serving is not None else None
+        if problem is not None:
+            print(f"the {role} {problem}: nothing measured; choose another with {option}", file=sys.stderr)
+            return 2
 
     def ask(messages):
         response = backend.generate(model=model, messages=messages, options={"temperature": 0.0, "seed": 0, "num_predict": 128})
@@ -322,9 +360,14 @@ def main(argv=None, *, resolve=None):
         return untrusted_context.wrap(block, source=untrusted_context.SOURCE_MEMORY)
 
     started = time.perf_counter()
-    plain = reading(TURNS, run_arm(TURNS, plain_arm(ask, history_tokens=args.history_tokens)), arm="plain", source="measured")
-    onion_answers = run_arm(TURNS, onion_arm(ask, librarian=librarian, config=config, summarize=summarize, wrap=wrap,
-                                             history_tokens=args.history_tokens))
+    try:
+        plain_answers = run_arm(TURNS, plain_arm(ask, history_tokens=args.history_tokens))
+        onion_answers = run_arm(TURNS, onion_arm(ask, librarian=librarian, config=config, summarize=summarize,
+                                                 wrap=wrap, history_tokens=args.history_tokens))
+    except Exception as exc:  # noqa: BLE001 - a half-run is not a measurement
+        print(f"the run broke before its end ({exc!r}): nothing measured", file=sys.stderr)
+        return 2
+    plain = reading(TURNS, plain_answers, arm="plain", source="measured")
     onion = reading(TURNS, onion_answers, arm="onion", source="measured")
     report = {
         "source": "measured",

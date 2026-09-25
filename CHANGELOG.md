@@ -50,8 +50,12 @@ package costs.
   history window, the librarian in process with persistence off), and per
   arm the contradictions per 1000 turns against the facts holding at each
   turn, the agreements, and what the deterministic templates could not
-  decide. It prints no number without a backend. The measurement itself is
-  the host's to take.
+  decide. It prints no number without a backend. Before anything is asked,
+  a model the backend lists as not installed -- the answering one
+  (`--model`) or the librarian's (`--librarian-model`) -- is refused by name
+  with the served models listed, and a request that fails once the run has
+  started ends it without a number. The measurement itself is the host's
+  to take.
 - `oo ask --json-out` shows its "Generating" spinner on stderr while it
   waits, as every other waiting command does; stdout is still exactly the
   JSON document. The spinner was there and could never turn on.

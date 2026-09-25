@@ -21,6 +21,12 @@ number means what it says.
     does; the onion arm refuses a librarian that would write a store.
   * DA4 -- without a backend the host command prints no number and exits
     non-zero.
+  * DA5 -- a model the backend lists as not served -- the answering one or
+    the librarian's -- is refused by name before any request, with the
+    served models named; a name without a tag matches its latest tag, and
+    a backend that cannot list its models is not refused on that ground.
+  * DA6 -- a request that fails once the run has started measures nothing:
+    no number is printed and the command exits non-zero.
 
 Local-only (the public distribution ships no tests). The script is loaded
 from its path; the onion's modules come through the shared isolation
@@ -175,6 +181,74 @@ def test_da4_without_a_backend_the_host_command_prints_no_number(capsys):
     assert out.out == "", "nothing that looks like a result"
     assert "absent:0b" in out.err and "nothing measured" in out.err
 
+
+
+# ---------------------------------------------------------------------------
+# DA5 -- a model that is not served is refused before any request
+# ---------------------------------------------------------------------------
+class _Listed:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Backend:
+    """A backend that lists fixed models and answers, or fails, as told."""
+
+    def __init__(self, served, *, fail_after=None):
+        self._served = served
+        self._fail_after = fail_after
+        self.calls = 0
+
+    def list_models(self):
+        return None if self._served is None else [_Listed(name) for name in self._served]
+
+    def generate(self, model, messages, **kwargs):
+        self.calls += 1
+        if self._fail_after is not None and self.calls > self._fail_after:
+            raise RuntimeError(f"model {model!r} not found (status code: 404)")
+        return type("_Reply", (), {"content": "Noted."})()
+
+
+def test_da5_a_model_that_is_not_served_is_refused_by_name_before_any_request(capsys):
+    loaded, restore = _window()
+    try:
+        ab = _script()
+        librarian_model = loaded["opti_oignon.memory.librarian"].load_config().model
+        backend = _Backend(["llama3:latest", librarian_model], fail_after=0)
+        code = ab.main(["--model", "qwen3:32b"], resolve=lambda model: backend)
+        out = capsys.readouterr()
+        assert code == 2 and out.out == "", "refused, and nothing that looks like a result"
+        assert "qwen3:32b" in out.err and "llama3:latest" in out.err and "--model" in out.err, out.err
+        assert "nothing measured" in out.err and backend.calls == 0, (out.err, backend.calls)
+        unserved = _Backend(["llama3:latest"], fail_after=0)
+        code = ab.main(["--model", "llama3"], resolve=lambda model: unserved)
+        out = capsys.readouterr()
+        assert code == 2 and out.out == "", "the librarian's model is checked too"
+        assert repr(librarian_model) in out.err and "--librarian-model" in out.err and unserved.calls == 0, out.err
+        blind = _Backend(None, fail_after=0)
+        code = ab.main(["--model", "llama3"], resolve=lambda model: blind)
+        out = capsys.readouterr()
+        assert blind.calls >= 1, "a backend that cannot list its models is asked, not refused"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# DA6 -- a run that breaks measures nothing
+# ---------------------------------------------------------------------------
+def test_da6_a_request_that_fails_once_the_run_has_started_measures_nothing(capsys):
+    loaded, restore = _window()
+    try:
+        ab = _script()
+        librarian_model = loaded["opti_oignon.memory.librarian"].load_config().model
+        backend = _Backend(["llama3:latest", librarian_model], fail_after=2)
+        code = ab.main(["--model", "llama3"], resolve=lambda model: backend)
+        out = capsys.readouterr()
+        assert backend.calls == 3, "the run started, and broke on its third request"
+        assert code == 2 and out.out == "", "a broken run prints no number"
+        assert "nothing measured" in out.err and "404" in out.err, out.err
+    finally:
+        restore()
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
