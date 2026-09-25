@@ -7,6 +7,11 @@ under the token budget from ``context_window.py`` and returned as a plain block,
 ready for the untrusted-context wrapping the agent applies (this module
 does not wrap; it only selects and formats).
 
+When the query cannot be embedded, the vector signal is absent: the ranking
+falls back to keywords and category, each memory's vector similarity is None --
+nothing was measured -- rather than the 0.0 of a fact the vector layer measured
+and found unrelated, and the retriever says so once.
+
 Per-user isolation is enforced: both the vector query and the canonical scan are
 scoped to the resolved user, so retrieval never crosses users. The module
 imports its sibling stores by injection and only guard-imports the token
@@ -52,7 +57,10 @@ except Exception:
         return max(1, int(len(text.split()) * 1.3))
 
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# A keyword is a whole word, accents included: ``[a-z0-9]+`` cut a French word
+# at its first accented letter, and a query then met unrelated facts through
+# the fragments. On ASCII text the two are the same.
+_TOKEN_RE = re.compile(r"[^\W_]+")
 
 # Common English words filtered from keyword scoring so a query does not match a
 # fact merely through shared function words.
@@ -115,7 +123,10 @@ class ScoredMemory:
     text: str
     category: str
     score: float
-    vector_similarity: float
+    # None when nothing was measured -- the query could not be embedded, or no
+    # query was asked; 0.0 when the vector layer answered and this fact was not
+    # among its neighbours.
+    vector_similarity: float | None
     keyword_score: float
     category_match: bool
     record: Any = None
@@ -156,6 +167,7 @@ class MemoryRetriever:
         self._keyword_weight = keyword_weight
         self._category_weight = category_weight
         self._vector_top_k = vector_top_k
+        self._said_blind = False
 
     def analyze_query(self, query: str) -> QueryAnalysis:
         return QueryAnalysis(
@@ -191,22 +203,31 @@ class MemoryRetriever:
             embedding = self._vector.embed(query)
 
         similarity_by_id: dict[str, float] = {}
-        if embedding is not None:
+        measured = embedding is not None
+        if measured:
             for neighbour in self._vector.find_similar(
                 embedding, user_id=uid, top_k=self._vector_top_k
             ):
                 similarity_by_id[neighbour.id] = neighbour.similarity
+        elif not self._said_blind:
+            self._said_blind = True
+            logger.warning(
+                "memory recall without its vector signal: the query could not be "
+                "embedded, so facts are ranked by keywords and category only"
+            )
 
         scored: list[ScoredMemory] = []
         for record in self._canonical.list(active_only=True, user_id=uid):
-            vector_similarity = max(0.0, similarity_by_id.get(record.id, 0.0))
+            vector_similarity = (
+                max(0.0, similarity_by_id.get(record.id, 0.0)) if measured else None
+            )
             keyword_score = self._keyword_score(analysis.tokens, record.text)
             category_match = (
                 analysis.category_hint is not None
                 and record.category == analysis.category_hint
             )
             score = (
-                self._vector_weight * vector_similarity
+                self._vector_weight * (vector_similarity or 0.0)
                 + self._keyword_weight * keyword_score
                 + (self._category_weight if category_match else 0.0)
             )
@@ -226,7 +247,7 @@ class MemoryRetriever:
             )
 
         scored.sort(
-            key=lambda m: (m.score, m.vector_similarity, m.record.use_count),
+            key=lambda m: (m.score, m.vector_similarity or 0.0, m.record.use_count),
             reverse=True,
         )
         selected = scored[: max(0, int(top_n))]
@@ -302,7 +323,7 @@ class MemoryRetriever:
                 text=r.text,
                 category=r.category,
                 score=float(r.use_count),
-                vector_similarity=0.0,
+                vector_similarity=None,
                 keyword_score=0.0,
                 category_match=False,
                 record=r,
@@ -539,7 +560,7 @@ def build_memory_block(
                 text=text,
                 category=str(category),
                 score=0.0,
-                vector_similarity=0.0,
+                vector_similarity=None,
                 keyword_score=0.0,
                 category_match=False,
                 record=None,

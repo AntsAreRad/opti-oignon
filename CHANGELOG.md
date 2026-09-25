@@ -421,6 +421,14 @@ package costs.
 
 ### Fixed
 
+- With no vector signal -- no embedding model, or the backend down -- the
+  memory recall ranked facts on keywords and category alone and gave every
+  one a vector similarity of 0.0, the value of a fact the vector layer
+  measured and found unrelated, without a word in the log. A similarity
+  nobody measured is now `None`, and the retriever says once that it
+  recalled without its vector signal. Its keywords are whole words, accents
+  included: a French query no longer meets an unrelated fact through the
+  fragments of other words.
 - A directory written with `~` in `backends.yaml` was taken as a folder
   named `~` under the working directory. The shipped `~/models/gguf` was
   therefore never found -- llama.cpp listed no model even with the file
