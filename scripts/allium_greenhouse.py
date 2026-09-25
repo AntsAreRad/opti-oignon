@@ -7,7 +7,8 @@ Founds ``count`` genomes from seeds keyed on one root, decodes and compiles
 each, and prints one canonical JSON object: how often each allele was
 drawn against the pool's frequencies, the spread of a few parameters, the
 colour classes the pigment loci allow, and how many of the genomes are
-distinct. It simulates no day; it writes nothing anywhere; its numbers are
+distinct, and the adult beard and moustache each genome allows. It
+simulates no day; it writes nothing anywhere; its numbers are
 ``"source": "static"`` -- properties of the law and the pool, not of a life.
 
 ``--native`` asks the native engine through the engine seam instead of
@@ -32,6 +33,15 @@ CLOCK_SPECIES = (14, 15, 16)
 PHOTOPERIOD_CHANNEL = 10
 COLOURS = ("golden", "red", "shallot", "white")
 
+# The beard's SHAPE trait codes (the full law's layout), and how they read.
+MEL_TRAITS = (12, 13, 14, 16)
+T_MC1R, T_ONSET, T_SPAN, T_CEILING, T_CREAM = 17, 18, 19, 20, 21
+T_MOUSTACHE, T_FORM, T_SIZE, T_THICK = 22, 23, 24, 25
+MEL_CUTS = (30, 58, 86, 114, 142, 170, 198)
+BEARD_CLASSES = ("platinum", "cream", "golden", "honey", "light_chestnut", "chestnut", "brown", "dark_brown")
+RED_SHADES = ("venetian", "copper", "red", "auburn")
+FORMS = ("brush", "straight", "droopy", "curled")
+
 
 def _column(tables, table, name):
     return wire.unpack_bulk(tables[table][name])[1]
@@ -52,6 +62,36 @@ def _colour(alleles):
     if alleles.get(3, 0) == 1:
         return "golden"
     return "shallot"
+
+
+def shape_traits(tables):
+    """The compiled SHAPE rows as ``{trait: value}``."""
+    rows = _column(tables["reserved"], "shape", "fields")
+    return {rows[k]: rows[k + 1] for k in range(0, len(rows), 3)}
+
+
+def beard_potential(shape):
+    """The adult beard and moustache a genome allows, before any day is lived.
+
+    A missing locus never invents a colour: without all four melanin loci,
+    or with the dominant cream allele (mean 1 or 2), the beard keeps the
+    cream every young gnome is born with; a missing mc1r reads as the
+    functional genotype (2), never as red. ``colour`` names what an adult
+    shows with no grey yet; ``glints`` marks the red carrier.
+    """
+    mel = [shape.get(trait) for trait in MEL_TRAITS]
+    melanin = None if None in mel else sum(mel) >> 8
+    mc1r = shape.get(T_MC1R)
+    mc1r = 2 if mc1r is None else mc1r
+    cream = (shape.get(T_CREAM) or 0) >= 1
+    level = 1 if cream or melanin is None else sum(1 for cut in MEL_CUTS if melanin >= cut)
+    colour = RED_SHADES[level >> 1] if mc1r == 0 else BEARD_CLASSES[level]
+    grey = [shape.get(trait) for trait in (T_ONSET, T_SPAN, T_CEILING)]
+    moustache = None
+    if (shape.get(T_MOUSTACHE) or 0) >= 1 and None not in (shape.get(T_FORM), shape.get(T_SIZE)):
+        moustache = {"form": FORMS[shape[T_FORM]], "size": shape[T_SIZE], "thick": shape.get(T_THICK) == 1}
+    return {"colour": colour, "cream": cream, "glints": mc1r == 1, "grey": None if None in grey else grey,
+            "level": level, "mc1r": mc1r, "melanin": melanin, "moustache": moustache}
 
 
 def _found_reference(seed, law, lawview, alleles, digest):
@@ -97,6 +137,12 @@ def report(law_name, count, root, pool=None, native=False):
     genomes = {}
     clock, photoperiod, vu_req, works = [], [], [], []
     colours = {name: 0 for name in COLOURS}
+    beards = {name: 0 for name in BEARD_CLASSES + RED_SHADES}
+    glints = 0
+    moustaches = {name: 0 for name in ("none",) + FORMS}
+    sizes = {1: 0, 2: 0, 3: 0}
+    thick = 0
+    greys = []
     size = 0
     for i in range(count):
         seed = rng.key(root, COHORT_DOMAIN, (i,))
@@ -121,7 +167,19 @@ def report(law_name, count, root, pool=None, native=False):
             vu_req.append(vern[3])
         pig = dict(zip(_column(tables, "pig", "class"), _column(tables, "pig", "allele")))
         colours[_colour(pig)] += 1
+        beard = beard_potential(shape_traits(tables))
+        beards[beard["colour"]] += 1
+        glints += beard["glints"]
+        moustache = beard["moustache"]
+        moustaches["none" if moustache is None else moustache["form"]] += 1
+        if moustache is not None:
+            sizes[moustache["size"]] += 1
+            thick += moustache["thick"]
+        if beard["grey"] is not None:
+            greys.append(beard["grey"])
     out = {
+        "beard_potential": {"colour": beards, "moustache": moustaches, "red_glints": glints,
+                            "sizes": [sizes[1], sizes[2], sizes[3]], "thick": thick},
         "clock_deg": _spread(clock),
         "colour_potential": colours,
         "compile_work": {"max": max(works), "min": min(works)},
@@ -139,6 +197,9 @@ def report(law_name, count, root, pool=None, native=False):
     }
     if photoperiod:
         out["photoperiod"] = _spread(photoperiod)
+    if greys:
+        out["beard_potential"]["grey"] = {name: _spread([row[k] for row in greys])
+                                          for k, name in enumerate(("onset", "span", "ceiling"))}
     return out
 
 

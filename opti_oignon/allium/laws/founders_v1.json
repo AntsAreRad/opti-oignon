@@ -96,6 +96,13 @@
     },
     {
       "alleles": [
+        {"body": [12, 1024, 0], "freq": 3, "name": "light", "window": [0, 768, 0]},
+        {"body": [12, 15359, 0], "freq": 2, "name": "dark", "window": [0, 768, 0]}
+      ],
+      "locus": 13
+    },
+    {
+      "alleles": [
         {"body": [10, 4096, 4096, 2, 0], "freq": 3, "name": "a", "window": [0, 256, 256, 0, 0]},
         {"body": [10, 12287, 4096, 2, 0], "freq": 1, "name": "b", "window": [0, 256, 256, 0, 0]}
       ],
@@ -248,6 +255,13 @@
         {"body": [18, 1, 3, 120, 35, 4, 85, 360], "freq": 1, "name": "c", "window": [2, 0, 0, 10, 4, 0, 10, 30]}
       ],
       "locus": 277
+    },
+    {
+      "alleles": [
+        {"body": [21, 2, 0], "freq": 3, "name": "cream", "window": [0, 0, 0]},
+        {"body": [21, 0, 0], "freq": 7, "name": "plain", "window": [0, 0, 0]}
+      ],
+      "locus": 278
     },
     {
       "alleles": [
@@ -447,6 +461,13 @@
     },
     {
       "alleles": [
+        {"body": [17, 2, 0], "freq": 4, "name": "func", "window": [0, 0, 0]},
+        {"body": [17, 0, 0], "freq": 1, "name": "lof", "window": [0, 0, 0]}
+      ],
+      "locus": 540
+    },
+    {
+      "alleles": [
         {"body": [0, 5, 2, 255, 16384, 2048, 32768], "freq": 3, "name": "a", "window": [0, 0, 0, 0, 512, 128, 512]},
         {"body": [0, 5, 2, 255, 24575, 2048, 32768], "freq": 1, "name": "b", "window": [0, 0, 0, 0, 512, 128, 512]}
       ],
@@ -563,6 +584,13 @@
         {"body": [9, 35, 4608, 0], "freq": 1, "name": "b", "window": [0, 0, 256, 0]}
       ],
       "locus": 784
+    },
+    {
+      "alleles": [
+        {"body": [13, 1024, 0], "freq": 3, "name": "light", "window": [0, 768, 0]},
+        {"body": [13, 15359, 0], "freq": 2, "name": "dark", "window": [0, 768, 0]}
+      ],
+      "locus": 785
     },
     {
       "alleles": [
@@ -734,6 +762,37 @@
     },
     {
       "alleles": [
+        {"body": [22, 2, 0], "freq": 4, "name": "yes", "window": [0, 0, 0]},
+        {"body": [22, 0, 0], "freq": 21, "name": "no", "window": [0, 0, 0]}
+      ],
+      "locus": 1048
+    },
+    {
+      "alleles": [
+        {"body": [23, 0, 0], "freq": 5, "name": "brush", "window": [0, 0, 0]},
+        {"body": [23, 1, 0], "freq": 7, "name": "straight", "window": [0, 0, 0]},
+        {"body": [23, 2, 0], "freq": 4, "name": "droopy", "window": [0, 0, 0]},
+        {"body": [23, 3, 0], "freq": 4, "name": "curled", "window": [0, 0, 0]}
+      ],
+      "locus": 1049
+    },
+    {
+      "alleles": [
+        {"body": [24, 1, 0], "freq": 1, "name": "small", "window": [0, 0, 0]},
+        {"body": [24, 2, 0], "freq": 1, "name": "medium", "window": [0, 0, 0]},
+        {"body": [24, 3, 0], "freq": 1, "name": "large", "window": [0, 0, 0]}
+      ],
+      "locus": 1050
+    },
+    {
+      "alleles": [
+        {"body": [25, 1, 0], "freq": 2, "name": "thick", "window": [0, 0, 0]},
+        {"body": [25, 0, 0], "freq": 3, "name": "thin", "window": [0, 0, 0]}
+      ],
+      "locus": 1051
+    },
+    {
+      "alleles": [
         {"body": [0, 2, 1024, 1, 8192, 64], "freq": 3, "name": "a", "window": [0, 0, 64, 0, 256, 2]},
         {"body": [0, 2, 1024, 1, 16383, 64], "freq": 1, "name": "b", "window": [0, 0, 64, 0, 256, 2]}
       ],
@@ -902,6 +961,29 @@
     },
     {
       "alleles": [
+        {"body": [18, 730, 0], "freq": 1, "name": "early", "window": [0, 30, 0]},
+        {"body": [18, 1095, 0], "freq": 2, "name": "mid", "window": [0, 30, 0]},
+        {"body": [18, 1825, 0], "freq": 1, "name": "late", "window": [0, 30, 0]}
+      ],
+      "locus": 1304
+    },
+    {
+      "alleles": [
+        {"body": [19, 1095, 0], "freq": 1, "name": "fast", "window": [0, 60, 0]},
+        {"body": [19, 2190, 0], "freq": 2, "name": "mid", "window": [0, 60, 0]},
+        {"body": [19, 3650, 0], "freq": 1, "name": "slow", "window": [0, 60, 0]}
+      ],
+      "locus": 1305
+    },
+    {
+      "alleles": [
+        {"body": [20, 256, 0], "freq": 4, "name": "full", "window": [0, 0, 0]},
+        {"body": [20, 96, 0], "freq": 1, "name": "retained", "window": [0, 0, 0]}
+      ],
+      "locus": 1306
+    },
+    {
+      "alleles": [
         {"body": [0, 16, 0, 0, 0, 0, 6, 3, 3, 4, 0, 0], "freq": 3, "name": "a", "window": [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
         {"body": [0, 47, 0, 0, 0, 0, 6, 3, 3, 4, 0, 0], "freq": 1, "name": "b", "window": [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
       ],
@@ -1004,6 +1086,13 @@
         {"body": [255, 8319, 0, 2, 4096], "freq": 1, "name": "b", "window": [0, 16, 0, 0, 256]}
       ],
       "locus": 1550
+    },
+    {
+      "alleles": [
+        {"body": [14, 1024, 0], "freq": 3, "name": "light", "window": [0, 768, 0]},
+        {"body": [14, 15359, 0], "freq": 2, "name": "dark", "window": [0, 768, 0]}
+      ],
+      "locus": 1551
     },
     {
       "alleles": [
@@ -1137,6 +1226,13 @@
         {"body": [27, 0, 8703, 2, 0], "freq": 1, "name": "b", "window": [0, 0, 16, 0, 0]}
       ],
       "locus": 1810
+    },
+    {
+      "alleles": [
+        {"body": [16, 1024, 0], "freq": 3, "name": "light", "window": [0, 768, 0]},
+        {"body": [16, 15359, 0], "freq": 2, "name": "dark", "window": [0, 768, 0]}
+      ],
+      "locus": 1811
     }
   ],
   "name": "v1",

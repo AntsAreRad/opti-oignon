@@ -7,7 +7,7 @@ Writes, under ``opti_oignon/allium/laws/``:
   (a three-node clock, one record of every kind, the whole language block,
   the four colour loci);
 * ``v0_1.json`` -- the first provisional law of the full genome: eight
-  pairs, 162 loci;
+  pairs, 175 loci;
 * ``founders_fixture.json`` and ``founders_v1.json`` -- the founder allele
   pools each law pins by digest.
 
@@ -68,7 +68,7 @@ KIND_BOXES = {
               "TAU_X": (1, 15), "TAU_Y": (1, 15), "TAU_E": (1, 15), "M_SEL": (0, 7), "M_SIGN": (0, 1)},
     "temp": {"channel": U8, "weight": I16, "base": I16, "habituation": U8, "curiosity": U16},
     "lex": dict([("offset", (0, 54))] + [(f"d{i}", U8) for i in range(9)]),
-    "shape": {"trait": (0, 15), "value": U16, "window": U16},
+    "shape": {"trait": (0, 31), "value": U16, "window": U16},
     "vern": {"D_enter": (7, 21), "v_cold": (1, 2), "v_dorm": (1, 3), "VU_req": (45, 120),
              "stalk_days": (20, 40), "offsets": (2, 4), "rest_days": (30, 90), "a_min": (180, 420)},
     "prc": {"block": (0, 5), "shift0": I16, "shift1": I16, "shift2": I16, "shift3": I16},
@@ -116,6 +116,42 @@ LEX_BOXES = {
 SHAPE_TRAITS = ("bulb_radius", "bulb_height", "taper", "neck", "meridians", "leaf_stiffness",
                 "breath_base", "turn_speed", "ramp_offset", "leaf_tint", "stripe", "speckle")
 SHAPE_VALUE_BOX = {2: (1, 3), 4: (0, 16), 8: (0, 2), 9: (0, 1)}
+
+# Beard and moustache loci of the full law: (id, name, trait, value box).
+# Each sits after every other locus of its pair, so no record lands inside a
+# gene's promoter run and no other locus's founder stream moves. Trait 15
+# stays free. A dominant reading (cream, moustache) uses alleles 2 and 0, so
+# the additive mean shows a carrier as 1; mc1r reads the same way, 1 being
+# the carrier with red glints.
+BEARD_LOCI = (
+    (0x00D, "shape_beard_mel_0", 12, (0, 16383)),
+    (0x116, "shape_beard_cream", 21, (0, 2)),
+    (0x21C, "shape_beard_mc1r", 17, (0, 2)),
+    (0x311, "shape_beard_mel_1", 13, (0, 16383)),
+    (0x418, "shape_moustache", 22, (0, 2)),
+    (0x419, "shape_moustache_form", 23, (0, 3)),
+    (0x41A, "shape_moustache_size", 24, (1, 3)),
+    (0x41B, "shape_moustache_thick", 25, (0, 1)),
+    (0x518, "shape_grey_onset", 18, (730, 4380)),
+    (0x519, "shape_grey_span", 19, (730, 7300)),
+    (0x51A, "shape_grey_ceiling", 20, (64, 256)),
+    (0x60F, "shape_beard_mel_2", 14, (0, 16383)),
+    (0x713, "shape_beard_mel_3", 16, (0, 16383)),
+)
+
+MEL = (("light", 3, 1024, 768), ("dark", 2, 15359, 768))
+BEARD_ALLELES = {
+    "shape_beard_mel_0": MEL, "shape_beard_mel_1": MEL, "shape_beard_mel_2": MEL, "shape_beard_mel_3": MEL,
+    "shape_beard_cream": (("cream", 3, 2, 0), ("plain", 7, 0, 0)),
+    "shape_beard_mc1r": (("func", 4, 2, 0), ("lof", 1, 0, 0)),
+    "shape_moustache": (("yes", 4, 2, 0), ("no", 21, 0, 0)),
+    "shape_moustache_form": (("brush", 5, 0, 0), ("straight", 7, 1, 0), ("droopy", 4, 2, 0), ("curled", 4, 3, 0)),
+    "shape_moustache_size": (("small", 1, 1, 0), ("medium", 1, 2, 0), ("large", 1, 3, 0)),
+    "shape_moustache_thick": (("thick", 2, 1, 0), ("thin", 3, 0, 0)),
+    "shape_grey_onset": (("early", 1, 730, 30), ("mid", 2, 1095, 30), ("late", 1, 1825, 30)),
+    "shape_grey_span": (("fast", 1, 1095, 60), ("mid", 2, 2190, 60), ("slow", 1, 3650, 60)),
+    "shape_grey_ceiling": (("full", 4, 256, 0), ("retained", 1, 96, 0)),
+}
 
 
 class L:
@@ -290,6 +326,8 @@ def _v0_1_loci():
     for index in range(12):
         loci.append(L(0x707 + index, f"temp_social_{index}", "temp", 0x01, channel=16 + index,
                       weight=0, curiosity=0))
+    for ident, name, trait, box in BEARD_LOCI:
+        loci.append(L(ident, name, "shape", 0x01, trait=trait, window=0, value=box))
     return tuple(loci)
 
 
@@ -555,6 +593,10 @@ def _v1_alleles(locus, entry):
                 ("c", 1, [18, 1, 3, 120, 35, 4, 85, 360], window)]
     if kind == "lex":
         return _lex_alleles(fields["offset"], 3, 1)
+    if name in BEARD_ALLELES:
+        trait = fields["trait"]
+        return [(label, freq, [trait, value, 0], [0, window, 0])
+                for label, freq, value, window in BEARD_ALLELES[name]]
     return _rule_alleles(locus, entry)
 
 

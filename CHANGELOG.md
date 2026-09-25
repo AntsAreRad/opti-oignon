@@ -11,6 +11,21 @@ package costs.
 
 ### Added
 
+- The componion's beard and moustache genes, in the full law. Thirteen shape
+  loci, each placed after every other locus of its pair so that no founder
+  draw and no promoter moves: four additive melanin loci and a red locus
+  give the colours (platinum to dark brown, red glints on carriers,
+  venetian to auburn), a dominant cream allele keeps the cream beard every
+  young gnome is born with (about half of all founders, the commonest
+  beard by far), three loci time and cap the greying, and four decide
+  whether a moustache grows (about three in ten) and its form, size and
+  thickness. The shape kind's trait box widens to 0..31 in both laws; code
+  15 stays free. The greenhouse reports the adult beard and moustache each
+  founder allows, reading a missing locus as the cream beard with no red
+  and no moustache rather than inventing a colour. Nothing draws a beard
+  yet: the renderer and the greying clock are later work, and the
+  frequencies are proposals, not a sowing.
+
 - The componion's phonology, in both engines. A being's language starts
   from sixty-three bytes of its genome: which of twenty-seven sounds it can
   make (with floors every language keeps: the corner vowels, a stop, a
@@ -40,8 +55,8 @@ package costs.
   language, the shape, the clock and the cold that later work will read;
   their layout and bounds are fixed now so that a genome written today
   stays valid. Two laws carry it: a small fixture law (one pair, 29 loci)
-  for the contracts, and a first provisional full law (eight pairs, 162
-  loci, 5224 bytes a genome). A genome is never stored: it is founded from
+  for the contracts, and a first provisional full law (eight pairs, 175
+  loci, 5640 bytes a genome). A genome is never stored: it is founded from
   a 32-byte seed and the law's founder pool, one keyed stream per locus and
   homolog so that a change at one locus moves no other, and compiled on
   demand into flat tables -- dominance by each locus's mode, promoters as

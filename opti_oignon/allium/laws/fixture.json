@@ -131,7 +131,7 @@
       {
         "code": 11,
         "fields": [
-          {"hi": 15, "lo": 0, "name": "trait"},
+          {"hi": 31, "lo": 0, "name": "trait"},
           {"hi": 65535, "lo": 0, "name": "value"},
           {"hi": 65535, "lo": 0, "name": "window"}
         ],

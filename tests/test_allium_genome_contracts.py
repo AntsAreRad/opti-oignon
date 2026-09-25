@@ -35,9 +35,20 @@ are -- and compiled into flat tables each time it is needed.
     validators name the defects they exist to catch.
   * GN11 -- the greenhouse draws alleles at the pool's frequencies,
     reproducibly, writes nothing, and counts how many genomes are distinct.
+  * GN12 -- the greenhouse draws the full law's beards and moustaches at the
+    frequencies its pool implies (counted on the native engine), against an
+    exact enumeration written apart from the reader; cream is the commonest
+    beard; every melanin dose keeps one colour class under the pool's widest
+    jitter; a pool that makes red common shows red on the reference.
+  * GN13 -- the beard loci move nothing else: founders of the full law and
+    of the same law without them carry the same records at every other
+    locus and compile to the same tables but for the beard's own rows.
+  * GN14 -- one locus per beard trait code, trait 15 free, each beard locus
+    last on its pair; a law or a genome without a beard locus reads as the
+    cream beard with no red and no moustache, never as an invented colour.
 
 Local-only. The modules load through the shared isolation window; GN10
-also needs the native artefact that ``scripts/build_oo_core.sh`` builds.
+and GN12 also need the native artefact that ``scripts/build_oo_core.sh`` builds.
 """
 
 import copy
@@ -76,6 +87,9 @@ BUDGET_S = {
     "test_gn9_dominance_follows_each_mode_and_ignores_which_homolog_carries_what": 2.0,
     "test_gn10_each_law_and_its_pool_have_one_source_pinned_by_digest": 2.0,
     "test_gn11_the_greenhouse_draws_at_the_pools_frequencies_and_writes_nothing": 2.0,
+    "test_gn12_the_greenhouse_draws_beards_and_moustaches_at_the_pools_frequencies": 2.0,
+    "test_gn13_the_beard_loci_move_no_other_record_or_table": 2.0,
+    "test_gn14_one_locus_per_beard_trait_each_last_on_its_pair_and_absence_reads_as_cream": 2.0,
 }
 
 
@@ -777,6 +791,266 @@ def test_gn11_the_greenhouse_draws_at_the_pools_frequencies_and_writes_nothing(r
     wall = _firewall()
     assert wall is not None, "the data firewall is installed"
     assert not wall.redirected.get(wall.current), "the greenhouse reached for a data place"
+
+
+# ---------------------------------------------------------------------------
+# GN12, GN13, GN14 -- the beard and moustache loci of the full law
+# ---------------------------------------------------------------------------
+BEARD_CODES = (12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25)
+MEL_CODES = (12, 13, 14, 16)
+CUTS = (30, 58, 86, 114, 142, 170, 198)
+CLASSES = ("platinum", "cream", "golden", "honey", "light_chestnut", "chestnut", "brown", "dark_brown")
+REDS = ("venetian", "copper", "red", "auburn")
+FORMS = ("brush", "straight", "droopy", "curled")
+
+
+def _trait_of(entry):
+    for override in entry["box"]:
+        if override["field"] == "trait":
+            return override["lo"]
+    return None
+
+
+def _beard_loci(law):
+    return {entry["id"]: _trait_of(entry) for entry in law["genome"]["loci"]
+            if entry["kind"] == "shape" and _trait_of(entry) in BEARD_CODES}
+
+
+def _alleles_by_trait(law, pool):
+    traits = _beard_loci(law)
+    return {traits[entry["locus"]]: entry["alleles"] for entry in pool["loci"] if entry["locus"] in traits}
+
+
+def _means(alleles):
+    """``{floor mean of two values: probability}`` over ordered allele pairs, jitter ignored."""
+    from fractions import Fraction
+    total = sum(a["freq"] for a in alleles)
+    out = {}
+    for x in alleles:
+        for y in alleles:
+            mean = (x["body"][1] + y["body"][1]) // 2
+            out[mean] = out.get(mean, 0) + Fraction(x["freq"] * y["freq"], total * total)
+    return out
+
+
+def _beard_shares(by_trait):
+    """Exact shares of each reported count, enumerated from the pool alone."""
+    from itertools import product
+    shares = {}
+
+    def add(key, p):
+        shares[key] = shares.get(key, 0) + p
+
+    mel = [_means(by_trait[code]).items() for code in MEL_CODES]
+    cream, mc1r = _means(by_trait[21]), _means(by_trait[17])
+    for combo in product(*mel):
+        melanin = sum(value for value, _p in combo) >> 8
+        p_mel = 1
+        for _value, p in combo:
+            p_mel *= p
+        for c, p_c in cream.items():
+            level = 1 if c >= 1 else sum(1 for cut in CUTS if melanin >= cut)
+            for m, p_m in mc1r.items():
+                colour = REDS[level >> 1] if m == 0 else CLASSES[level]
+                add(("colour", colour), p_mel * p_c * p_m)
+                if m == 1:
+                    add(("glints",), p_mel * p_c * p_m)
+    for has, p_has in _means(by_trait[22]).items():
+        if has < 1:
+            add(("moustache", "none"), p_has)
+            continue
+        for form, p_f in _means(by_trait[23]).items():
+            add(("moustache", FORMS[form]), p_has * p_f)
+        for size, p_s in _means(by_trait[24]).items():
+            add(("size", size), p_has * p_s)
+        for thick, p_t in _means(by_trait[25]).items():
+            if thick == 1:
+                add(("thick",), p_has * p_t)
+    return shares
+
+
+def _within(observed, n, share):
+    """Four standard deviations of a binomial count, in exact arithmetic."""
+    return (observed - n * share) ** 2 <= 16 * n * share * (1 - share)
+
+
+def test_gn12_the_greenhouse_draws_beards_and_moustaches_at_the_pools_frequencies(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    loaded, restore = open_allium(native=True)
+    try:
+        native_module(loaded)
+        engine = loaded["opti_oignon.allium.engine"]
+        engine.reset()
+        assert engine.native_in_use(), "the cohort is counted on the native engine"
+        _gn12_body(Ref(loaded), _load_script("allium_greenhouse.py", "_gn12_greenhouse"), tmp_path)
+    finally:
+        restore()
+
+
+def _gn12_body(ref, greenhouse, tmp_path):
+    law = ref.lawfiles.law("v0_1")
+    pool = ref.lawfiles.founders("v1")
+    by_trait = _alleles_by_trait(law, pool)
+    assert sorted(by_trait) == sorted(BEARD_CODES)
+    shares = _beard_shares(by_trait)
+    assert sum(p for key, p in shares.items() if key[0] == "colour") == 1
+    assert sum(p for key, p in shares.items() if key[0] == "moustache") == 1
+    n = 64
+    report = greenhouse.report("v0_1", n, bytes(range(32)), native=True)["beard_potential"]
+    counted = 0
+    for colour, observed in report["colour"].items():
+        assert _within(observed, n, shares.get(("colour", colour), 0)), (colour, observed, shares.get(("colour", colour)))
+        counted += observed
+    assert counted == n
+    for form, observed in report["moustache"].items():
+        assert _within(observed, n, shares.get(("moustache", form), 0)), (form, observed)
+    for size, observed in zip((1, 2, 3), report["sizes"]):
+        assert _within(observed, n, shares.get(("size", size), 0)), (size, observed)
+    assert _within(report["thick"], n, shares.get(("thick",), 0)), report["thick"]
+    assert _within(report["red_glints"], n, shares[("glints",)]), report["red_glints"]
+    cream_share = shares[("colour", "cream")]
+    assert cream_share > max(p for key, p in shares.items() if key[0] == "colour" and key[1] != "cream")
+    boxes = {_trait_of(e): next(o for o in e["box"] if o["field"] == "value") for e in law["genome"]["loci"]
+             if e["kind"] == "shape" and _trait_of(e) in MEL_CODES}
+    for counts in __import__("itertools").product(range(3), repeat=4):
+        low = high = 0
+        for code, dark in zip(MEL_CODES, counts):
+            alleles = sorted(by_trait[code], key=lambda a: a["body"][1])
+            box = boxes[code]
+            pair = [alleles[-1]] * dark + [alleles[0]] * (2 - dark)
+            ends = [(max(a["body"][1] - a["window"][1], box["lo"]), min(a["body"][1] + a["window"][1], box["hi"]))
+                    for a in pair]
+            low += (ends[0][0] + ends[1][0]) // 2
+            high += (ends[0][1] + ends[1][1]) // 2
+        levels = {sum(1 for cut in CUTS if value >= cut) for value in (low >> 8, high >> 8)}
+        assert levels == {min(sum(counts), 7)}, (counts, low >> 8, high >> 8)
+    reds = copy.deepcopy(pool)
+    for entry in reds["loci"]:
+        if entry["locus"] in _beard_loci(law) and _beard_loci(law)[entry["locus"]] == 17:
+            for allele in entry["alleles"]:
+                allele["freq"] = 999 if allele["body"][1] == 0 else 1
+    red = greenhouse.report("v0_1", 16, bytes(range(32)), pool=reds)["beard_potential"]["colour"]
+    assert sum(red[name] for name in REDS) >= 13, red
+    assert list(tmp_path.iterdir()) == [], "the greenhouse wrote nothing where it ran"
+
+
+def _without_beard(ref, law):
+    beard = _beard_loci(law)
+    value = copy.deepcopy(law)
+    genome = value["genome"]
+    genome["loci"] = [entry for entry in genome["loci"] if entry["id"] not in beard]
+    genome["chromosomes"] = [[ident for ident in chromosome if ident not in beard]
+                             for chromosome in genome["chromosomes"]]
+    genome["max_bytes"] = (ref.genome.HEADER + genome["pairs"] * ref.genome.PLOIDY * 2
+                           + ref.genome.PLOIDY * ref.genome.RECORD * len(genome["loci"]))
+    value.update(ref.bounds.compute(value))
+    return value
+
+
+def _gene_columns(ref, tables, table):
+    """A table's columns, each ``gene`` row index replaced by the locus it names."""
+    loci = ref.column(tables, "genes", "locus")
+    out = {}
+    for name, packed in table.items():
+        values = ref.wire.unpack_bulk(packed)[1]
+        out[name] = [loci[index] for index in values] if name == "gene" else values
+    return out
+
+
+def _shape_rows(ref, tables, drop):
+    rows = ref.column(tables, "reserved", "shape", "fields")
+    genes = _gene_columns(ref, tables, tables["reserved"]["shape"])["gene"]
+    return [rows[k:k + 3] + [genes[k // 3]] for k in range(0, len(rows), 3) if rows[k] not in drop]
+
+
+def _gene_rows(ref, tables, drop):
+    """Each gene row as (locus, kind, dose, stages, edge count), without the loci in ``drop``."""
+    start = ref.column(tables, "genes", "edge_start")
+    columns = [ref.column(tables, "genes", name) for name in ("locus", "kind", "dose", "stages")]
+    return [row + (start[i + 1] - start[i],) for i, row in enumerate(zip(*columns)) if row[0] not in drop]
+
+
+def test_gn13_the_beard_loci_move_no_other_record_or_table(ref):
+    law = ref.lawfiles.law("v0_1")
+    beard = _beard_loci(law)
+    assert len(beard) == 13
+    bare = _without_beard(ref, law)
+    assert ref.genome.validate_law(bare) == [] and ref.bounds.defects(bare) == []
+    full_view, bare_view = ref.genome.view(law), ref.genome.view(bare)
+    alleles = ref.pool(law)
+    seen = 0
+    for seed in [ref.rng.key(bytes(32), "test.gn13", (i,)) for i in range(20)]:
+        full, _chosen, _work = ref.genome.found(seed, full_view, alleles)
+        plain, _chosen, _work = ref.genome.found(seed, bare_view, alleles)
+        with_beard = ref.genome.decode(full, full_view)["chromosomes"]
+        without = ref.genome.decode(plain, bare_view)["chromosomes"]
+        for chromosome, other in zip(with_beard, without):
+            kept = [record for record in chromosome if record["locus"] not in beard]
+            seen += len(chromosome) - len(kept)
+            assert kept == other, "a record of another locus moved"
+        mine, theirs = ref.tables(full, law, full_view), ref.tables(plain, bare, bare_view)
+        for key in mine:
+            if key in ("genome", "law"):
+                continue
+            if key == "genes":
+                assert _gene_rows(ref, mine, beard) == _gene_rows(ref, theirs, set()), "a gene row moved"
+                assert len(_gene_rows(ref, mine, set())) == len(_gene_rows(ref, theirs, set())) + 13
+                continue
+            if key == "reserved":
+                for part in mine[key]:
+                    if part != "shape":
+                        assert _gene_columns(ref, mine, mine[key][part]) == _gene_columns(ref, theirs, theirs[key][part]), part
+                assert _shape_rows(ref, mine, set(BEARD_CODES)) == _shape_rows(ref, theirs, set())
+                assert len(_shape_rows(ref, mine, set())) == len(_shape_rows(ref, theirs, set())) + 13
+            elif isinstance(mine[key], dict) and "gene" in mine[key]:
+                assert _gene_columns(ref, mine, mine[key]) == _gene_columns(ref, theirs, theirs[key]), key
+            else:
+                assert mine[key] == theirs[key], key
+    assert seen == 20 * 13 * 2, seen
+
+
+def test_gn14_one_locus_per_beard_trait_each_last_on_its_pair_and_absence_reads_as_cream(ref, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    greenhouse = _load_script("allium_greenhouse.py", "_gn14_greenhouse")
+    law = ref.lawfiles.law("v0_1")
+    traits = [_trait_of(e) for e in law["genome"]["loci"] if e["kind"] == "shape"]
+    for code in BEARD_CODES:
+        assert traits.count(code) == 1, code
+    assert 15 not in traits, "trait 15 stays free"
+    shape_kind = next(k for k in law["genome"]["kinds"] if k["name"] == "shape")
+    assert next(f for f in shape_kind["fields"] if f["name"] == "trait")["hi"] >= max(BEARD_CODES)
+    ids = [e["id"] for e in law["genome"]["loci"]]
+    for ident in _beard_loci(law):
+        assert ident > max(i for i in ids if i >> 8 == ident >> 8 and i not in _beard_loci(law)), hex(ident)
+    fixture = ref.lawfiles.law("fixture")
+    assert _beard_loci(fixture) == {}
+    fixture_view, fixture_pool = ref.genome.view(fixture), ref.pool(fixture)
+    for i in range(6):
+        data, _chosen, _work = ref.genome.found(ref.rng.key(bytes(32), "test.gn14", (i,)), fixture_view, fixture_pool)
+        reading = greenhouse.beard_potential(greenhouse.shape_traits(ref.tables(data, fixture, fixture_view)))
+        assert reading["colour"] == "cream" and reading["mc1r"] == 2 and reading["moustache"] is None, reading
+        assert reading["melanin"] is None and reading["grey"] is None and reading["glints"] is False
+    view, alleles = ref.genome.view(law), ref.pool(law)
+    shapes = []
+    for i in range(40):
+        data, _chosen, _work = ref.genome.found(ref.rng.key(bytes(32), "test.gn14.full", (i,)), view, alleles)
+        shapes.append(greenhouse.shape_traits(ref.tables(data, law, view)))
+    readings = [greenhouse.beard_potential(shape) for shape in shapes]
+    assert all(r["melanin"] is not None and r["grey"] is not None for r in readings)
+    assert any(r["colour"] != "cream" for r in readings) and any(r["moustache"] for r in readings)
+    dark = next(s for s, r in zip(shapes, readings) if not r["cream"] and r["level"] >= 3)
+    for code in MEL_CODES:
+        missing = {k: v for k, v in dark.items() if k != code}
+        reading = greenhouse.beard_potential(missing)
+        assert reading["melanin"] is None and reading["level"] == 1, code
+    red = next((s for s, r in zip(shapes, readings) if r["mc1r"] == 0), None)
+    red = red if red is not None else dict(shapes[0], **{17: 0})
+    assert greenhouse.beard_potential(red)["colour"] in REDS
+    unread = greenhouse.beard_potential({k: v for k, v in red.items() if k != 17})
+    assert unread["mc1r"] == 2 and unread["colour"] not in REDS, unread
+    for code in (22, 23, 24):
+        with_moustache = next(s for s, r in zip(shapes, readings) if r["moustache"])
+        assert greenhouse.beard_potential({k: v for k, v in with_moustache.items() if k != code})["moustache"] is None
 
 
 if __name__ == "__main__":
