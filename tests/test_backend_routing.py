@@ -21,40 +21,38 @@ unchanged). Contracts:
 
 ``inference_backend.py`` imports with stdlib-only top-level imports (the Ollama /
 llama.cpp SDKs load lazily inside methods), so the registry is exercised in
-isolation through ``spec_from_file_location`` with fake ``InferenceBackend``
-subclasses whose ``health_check`` and ``model_info`` are fully controllable. No
-network, no filesystem model probe, no real backend.
+isolation through the shared window (``tests/_isolation.py``), one window per
+contract, with fake ``InferenceBackend`` subclasses whose ``health_check`` and
+``model_info`` are fully controllable. No network, no filesystem model probe,
+no real backend.
 
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_IB_SRC = _REPO / "opti_oignon" / "inference_backend.py"
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_BACKEND = "opti_oignon.inference_backend"
 
 
-def _load_ib():
-    """Load inference_backend.py in isolation (idempotent)."""
-    cached = sys.modules.get("opti_oignon.inference_backend")
-    if cached is not None:
-        return cached
-    if not isinstance(sys.modules.get("opti_oignon"), types.ModuleType) or (
-        getattr(sys.modules.get("opti_oignon"), "__file__", "x") is not None
-    ):
-        pkg = types.ModuleType("opti_oignon")
-        pkg.__path__ = [str(_REPO / "opti_oignon")]
-        sys.modules["opti_oignon"] = pkg
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.inference_backend", _IB_SRC
-    )
-    ib = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.inference_backend"] = ib
-    spec.loader.exec_module(ib)
-    return ib
+@pytest.fixture(autouse=True)
+def _package_left_as_found():
+    """Every contract here loads the backend module; none may leave a stand-in package behind."""
+    before = sys.modules.get("opti_oignon")
+    yield
+    assert sys.modules.get("opti_oignon") is before, "the package entry is left as the contract found it"
+
+
+def _open():
+    """The backend module loaded from its source in the shared window, and its closer."""
+    loaded, restore = isolate(targets={_BACKEND: source("inference_backend.py")}, packages=("opti_oignon",))
+    return loaded[_BACKEND], restore
 
 
 def _fake_backend_cls(ib):
@@ -97,68 +95,83 @@ def _fake_backend_cls(ib):
 def test_br1_recognizer_wins_over_active():
     """BR1 -- a model recognised by exactly one healthy backend resolves to that
     backend even though the active backend is a different one."""
-    ib = _load_ib()
-    Fake = _fake_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    ollama = Fake("ollama", recognizes={"llama3"})
-    llamacpp = Fake("llamacpp", recognizes={"mistral.gguf"})
-    reg.register(ollama)
-    reg.register(llamacpp)
-    reg.activate("llamacpp")  # active does NOT recognise llama3
-    assert reg.resolve_backend("llama3") is ollama
+    ib, restore = _open()
+    try:
+        Fake = _fake_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        ollama = Fake("ollama", recognizes={"llama3"})
+        llamacpp = Fake("llamacpp", recognizes={"mistral.gguf"})
+        reg.register(ollama)
+        reg.register(llamacpp)
+        reg.activate("llamacpp")  # active does NOT recognise llama3
+        assert reg.resolve_backend("llama3") is ollama
+    finally:
+        restore()
 
 
 def test_br2_unknown_model_falls_back_to_active():
     """BR2 -- a model no backend recognises falls back to the active backend."""
-    ib = _load_ib()
-    Fake = _fake_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    reg.register(Fake("ollama", recognizes={"llama3"}))
-    reg.register(Fake("llamacpp", recognizes={"mistral.gguf"}))
-    reg.activate("llamacpp")
-    assert reg.resolve_backend("unknown-model") is reg.get("llamacpp")
+    ib, restore = _open()
+    try:
+        Fake = _fake_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        reg.register(Fake("ollama", recognizes={"llama3"}))
+        reg.register(Fake("llamacpp", recognizes={"mistral.gguf"}))
+        reg.activate("llamacpp")
+        assert reg.resolve_backend("unknown-model") is reg.get("llamacpp")
+    finally:
+        restore()
 
 
 def test_br3_unhealthy_recognizer_is_health_gated():
     """BR3 -- an unhealthy backend that recognises the model is skipped; the load
     is never routed to a dead backend (it falls back to the healthy active)."""
-    ib = _load_ib()
-    Fake = _fake_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    sick = Fake("ollama", healthy=False, recognizes={"m"})  # recognises but dead
-    other = Fake("llamacpp", healthy=True, recognizes=())  # healthy, not a recogniser
-    reg.register(sick)
-    reg.register(other)  # no active set -> active = first healthy = other
-    resolved = reg.resolve_backend("m")
-    assert resolved is not sick  # never the dead backend
-    assert resolved is other  # the healthy fallback
+    ib, restore = _open()
+    try:
+        Fake = _fake_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        sick = Fake("ollama", healthy=False, recognizes={"m"})  # recognises but dead
+        other = Fake("llamacpp", healthy=True, recognizes=())  # healthy, not a recogniser
+        reg.register(sick)
+        reg.register(other)  # no active set -> active = first healthy = other
+        resolved = reg.resolve_backend("m")
+        assert resolved is not sick  # never the dead backend
+        assert resolved is other  # the healthy fallback
+    finally:
+        restore()
 
 
 def test_br4_active_recognizer_is_preferred():
     """BR4 -- when the active backend also recognises the model it is preferred
     over another recogniser (no needless switch)."""
-    ib = _load_ib()
-    Fake = _fake_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    first = Fake("llamacpp", recognizes={"m"})  # registered first
-    active = Fake("ollama", recognizes={"m"})  # also recognises
-    reg.register(first)
-    reg.register(active)
-    reg.activate("ollama")  # both recognise; active is ollama
-    assert reg.resolve_backend("m") is active
+    ib, restore = _open()
+    try:
+        Fake = _fake_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        first = Fake("llamacpp", recognizes={"m"})  # registered first
+        active = Fake("ollama", recognizes={"m"})  # also recognises
+        reg.register(first)
+        reg.register(active)
+        reg.activate("ollama")  # both recognise; active is ollama
+        assert reg.resolve_backend("m") is active
+    finally:
+        restore()
 
 
 def test_br5_single_backend_unchanged():
     """BR5 (control) -- a single-backend registry resolves to that backend whether
     or not the model is recognised (backward compatibility)."""
-    ib = _load_ib()
-    Fake = _fake_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    only = Fake("ollama", recognizes={"x"})
-    reg.register(only)
-    reg.activate("ollama")
-    assert reg.resolve_backend("x") is only  # recognised
-    assert reg.resolve_backend("y") is only  # unrecognised -> active fallback
+    ib, restore = _open()
+    try:
+        Fake = _fake_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        only = Fake("ollama", recognizes={"x"})
+        reg.register(only)
+        reg.activate("ollama")
+        assert reg.resolve_backend("x") is only  # recognised
+        assert reg.resolve_backend("y") is only  # unrecognised -> active fallback
+    finally:
+        restore()
 
 
 if __name__ == "__main__":

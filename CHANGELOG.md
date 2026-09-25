@@ -372,6 +372,14 @@ package costs.
 
 ### Fixed
 
+- The facade contract that imports the real package failed or passed with
+  the order of the suites before it. Two routing suites replaced the
+  `opti_oignon` entry of `sys.modules` with a stand-in and never put it
+  back, and five transport suites left `urllib.request.urlopen` swapped for
+  the rest of the process. All seven now close what they open -- the two
+  routing suites through the shared isolation window, paying their seal
+  debt -- and each carries a teardown check that fails a contract leaving
+  either one altered.
 - [SECURITY] `/skill` in `oo chat` put the text of a skill received from a
   paired device into the system prompt, as an instruction. The device's
   sync gate had let the record through on its provenance -- peer, device,

@@ -20,37 +20,36 @@ Isolation reuses the S283 idiom: ``inference_backend.py`` imports with
 stdlib-only top-level imports, so the registry is exercised with a fake
 ``InferenceBackend`` whose ``health_check`` is flippable and whose ``model_info``
 counts its calls (the cache observable). No network, no filesystem, no real
-backend.
+backend. The module is loaded from its source through the shared window
+(``tests/_isolation.py``), one window per contract, closed after it.
 
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_IB_SRC = _REPO / "opti_oignon" / "inference_backend.py"
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_BACKEND = "opti_oignon.inference_backend"
 
 
-def _load_ib():
-    cached = sys.modules.get("opti_oignon.inference_backend")
-    if cached is not None:
-        return cached
-    if not isinstance(sys.modules.get("opti_oignon"), types.ModuleType) or (
-        getattr(sys.modules.get("opti_oignon"), "__file__", "x") is not None
-    ):
-        pkg = types.ModuleType("opti_oignon")
-        pkg.__path__ = [str(_REPO / "opti_oignon")]
-        sys.modules["opti_oignon"] = pkg
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.inference_backend", _IB_SRC
-    )
-    ib = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.inference_backend"] = ib
-    spec.loader.exec_module(ib)
-    return ib
+@pytest.fixture(autouse=True)
+def _package_left_as_found():
+    """Every contract here loads the backend module; none may leave a stand-in package behind."""
+    before = sys.modules.get("opti_oignon")
+    yield
+    assert sys.modules.get("opti_oignon") is before, "the package entry is left as the contract found it"
+
+
+def _open():
+    """The backend module loaded from its source in the shared window, and its closer."""
+    loaded, restore = isolate(targets={_BACKEND: source("inference_backend.py")}, packages=("opti_oignon",))
+    return loaded[_BACKEND], restore
 
 
 def _counting_backend_cls(ib):
@@ -95,65 +94,77 @@ def _counting_backend_cls(ib):
 def test_cache1_second_resolve_is_a_cache_hit():
     """CACHE1 -- resolving the same model twice probes model_info only once; the
     second call is served from the cache."""
-    ib = _load_ib()
-    Counting = _counting_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    a = Counting("ollama", recognizes={"m"})
-    reg.register(a)
-    reg.resolve_backend("m")
-    probes_after_first = a.model_info_calls
-    reg.resolve_backend("m")  # cache hit: no new probe
-    assert a.model_info_calls == probes_after_first
+    ib, restore = _open()
+    try:
+        Counting = _counting_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        a = Counting("ollama", recognizes={"m"})
+        reg.register(a)
+        reg.resolve_backend("m")
+        probes_after_first = a.model_info_calls
+        reg.resolve_backend("m")  # cache hit: no new probe
+        assert a.model_info_calls == probes_after_first
+    finally:
+        restore()
 
 
 def test_cache2_register_clears_cache():
     """CACHE2 -- registering a backend clears the cache, so the next resolve of a
     previously-cached model re-probes (the new backend may change routing)."""
-    ib = _load_ib()
-    Counting = _counting_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    a = Counting("ollama", recognizes={"m"})
-    reg.register(a)
-    reg.resolve_backend("m")
-    probes_after_first = a.model_info_calls
-    reg.register(Counting("llamacpp", recognizes={"m"}))  # topology change
-    reg.resolve_backend("m")
-    assert a.model_info_calls > probes_after_first  # re-probed after register
+    ib, restore = _open()
+    try:
+        Counting = _counting_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        a = Counting("ollama", recognizes={"m"})
+        reg.register(a)
+        reg.resolve_backend("m")
+        probes_after_first = a.model_info_calls
+        reg.register(Counting("llamacpp", recognizes={"m"}))  # topology change
+        reg.resolve_backend("m")
+        assert a.model_info_calls > probes_after_first  # re-probed after register
+    finally:
+        restore()
 
 
 def test_cache3_hit_rechecks_health():
     """CACHE3 -- a cache hit re-runs health_check; a backend that became unhealthy
     since being cached is not served, resolution falls through to a healthy one."""
-    ib = _load_ib()
-    Counting = _counting_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    a = Counting("ollama", recognizes={"m"})
-    b = Counting("llamacpp", recognizes={"m"})
-    reg.register(a)
-    reg.register(b)
-    reg.activate("ollama")  # active recognises -> first resolve caches m -> a
-    assert reg.resolve_backend("m") is a
-    a.healthy = False  # a dies after being cached
-    resolved = reg.resolve_backend("m")
-    assert resolved is not a  # never served the dead cached backend
-    assert resolved is b  # fell through to the healthy recogniser
+    ib, restore = _open()
+    try:
+        Counting = _counting_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        a = Counting("ollama", recognizes={"m"})
+        b = Counting("llamacpp", recognizes={"m"})
+        reg.register(a)
+        reg.register(b)
+        reg.activate("ollama")  # active recognises -> first resolve caches m -> a
+        assert reg.resolve_backend("m") is a
+        a.healthy = False  # a dies after being cached
+        resolved = reg.resolve_backend("m")
+        assert resolved is not a  # never served the dead cached backend
+        assert resolved is b  # fell through to the healthy recogniser
+    finally:
+        restore()
 
 
 def test_cache4_unregister_clears_cache():
     """CACHE4 -- unregistering a backend clears the cache, so a previously-cached
     model re-probes on the next resolve."""
-    ib = _load_ib()
-    Counting = _counting_backend_cls(ib)
-    reg = ib.BackendRegistry()
-    a = Counting("ollama", recognizes={"m"})
-    b = Counting("llamacpp", recognizes=())
-    reg.register(a)
-    reg.register(b)
-    reg.resolve_backend("m")  # caches m -> a
-    probes_after_first = a.model_info_calls
-    reg.unregister("llamacpp")  # topology change
-    reg.resolve_backend("m")
-    assert a.model_info_calls > probes_after_first  # re-probed after unregister
+    ib, restore = _open()
+    try:
+        Counting = _counting_backend_cls(ib)
+        reg = ib.BackendRegistry()
+        a = Counting("ollama", recognizes={"m"})
+        b = Counting("llamacpp", recognizes=())
+        reg.register(a)
+        reg.register(b)
+        reg.resolve_backend("m")  # caches m -> a
+        probes_after_first = a.model_info_calls
+        reg.unregister("llamacpp")  # topology change
+        reg.resolve_backend("m")
+        assert a.model_info_calls > probes_after_first  # re-probed after unregister
+    finally:
+        restore()
 
 
 if __name__ == "__main__":

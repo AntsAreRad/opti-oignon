@@ -26,11 +26,23 @@ isolation window; the transport is injected and no server is reached.
 import json
 import sys
 import traceback
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _transport_left_as_found():
+    """Every contract here may swap the stdlib HTTP transport; none may leave it swapped."""
+    before = urllib.request.urlopen
+    yield
+    assert urllib.request.urlopen is before, "the stdlib HTTP transport is left as the contract found it"
+
 
 _BACKEND = "opti_oignon.inference_backend"
 
@@ -95,12 +107,19 @@ def _open(refuse=False):
     # machine. Bulbe mode keeps such a host off limits (its own contracts,
     # tests/test_bulbe_http_gate_contracts.py), so the window runs in Daily.
     mod._live_mode = lambda: "daily"
+    urlopen = urllib.request.urlopen
     transport = _Transport()
     mod.urllib.request.urlopen = transport.urlopen
     gate = _Gate(refuse=refuse)
     mod._governor_admission = gate
     backend = mod.LlamaServerBackend(host="http://fake:8080")
-    return backend, gate, transport, restore
+
+    def close():
+        # The stdlib transport is not the window's: put it back, then close.
+        urllib.request.urlopen = urlopen
+        restore()
+
+    return backend, gate, transport, close
 
 
 _MESSAGES = [{"role": "user", "content": "hello"}]

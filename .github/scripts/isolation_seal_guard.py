@@ -69,8 +69,6 @@ LEDGER = {
     "test_auth_2fa_verification_bounds_contracts.py": "5d28b964742ba03ad7448fe4289771bc42c367f33776dcfff9c26007885454c2",
     "test_auto_capture.py": "cf84d5916bf518fb148afb4e28d8206254bbfef06096a1926c8d186c2750a98e",
     "test_auto_tuner_sweep_bounds_contracts.py": "891993c81186f77718736c48b4b7c14e08913b79c73cdc45039b264f9c9f6313",
-    "test_backend_routing.py": "58effc7706be9fa50d47af9e05841d8ec33b9b16d9af4fc3064ecbc273f91eb7",
-    "test_backend_routing_cache.py": "d9bd7906b11cee2309c45a27611559fbf7b9e3ca88b0391c17cbc77438b0b1cf",
     "test_backup_encrypted_format_contracts.py": "11a7cc96ad45728eeea38fe0fdf364257317a2170d07d4fce3015d94565fb570",
     "test_backup_export_content_contracts.py": "5027ce23197e40f21b993e1688c62ec4661f55321e05361ae3d8375a0a7f5385",
     "test_backup_import_signature_rollback_contracts.py": "bbb08937db5307093e56e7c95c0680c2b788f0b2c2232dc31839ffaa6bfcea19",

@@ -31,6 +31,7 @@ loaded through the shared isolation window with every client faked.
 
 import json
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
 from _registry_bridge import ScriptedBackend  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _transport_left_as_found():
+    """Every contract here may swap the stdlib HTTP transport; none may leave it swapped."""
+    before = urllib.request.urlopen
+    yield
+    assert urllib.request.urlopen is before, "the stdlib HTTP transport is left as the contract found it"
+
 
 _BACKEND = "opti_oignon.inference_backend"
 _MSGS = [{"role": "user", "content": "hi"}]
@@ -84,7 +94,15 @@ def _open():
     # machine. Bulbe mode keeps such a host off limits (its own contracts,
     # tests/test_bulbe_http_gate_contracts.py), so the window runs in Daily.
     mod._live_mode = lambda: "daily"
-    return mod, restore
+    urlopen = urllib.request.urlopen
+
+    def close():
+        # The contracts swap the stdlib transport, which the window does not
+        # own: put it back, then close the window.
+        urllib.request.urlopen = urlopen
+        restore()
+
+    return mod, close
 
 
 def _ollama(mod):
