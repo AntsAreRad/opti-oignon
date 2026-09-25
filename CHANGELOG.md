@@ -446,6 +446,11 @@ package costs.
 - An error printed while a spinner turned landed inside the spinner's
   line. The eight commands that wait behind a spinner now stop it and erase
   its line before they say why they failed.
+- The CLI's `OK` and `Error:` prefixes were coloured on a terminal whatever
+  the run had been told: 23 of the 26 calls passed no colour, and the
+  helpers defaulted to on. They now follow the run -- `--no-color`,
+  `NO_COLOR`, or `color: false` in `cli.yaml` -- and, outside a command,
+  `NO_COLOR`.
 - The browser specs no longer race the first-run dialog. The helper waited a
   fixed budget for it to appear and, when the budget ran out first, returned as
   though there were nothing to dismiss; the dialog then opened over the page and

@@ -24,6 +24,12 @@ stopped and erased it.
     file as it was.
   * CK6 -- ``oo ask --json-out`` waits behind a live spinner when colour
     is on, and stdout is exactly the JSON document.
+  * CK7 -- an error or success line follows the run's colour: with
+    ``--no-color``, ``NO_COLOR`` or ``color: false`` in the file, no escape
+    byte reaches the output, from a command that names its configuration
+    or one that does not.
+  * CK8 -- outside a command, the caller's word decides the colour of those
+    lines, and ``NO_COLOR`` decides when the caller says nothing.
 
 Local-only (the public distribution ships no tests). The CLI modules are
 loaded through the shared isolation window; the HTTP client, the spinner,
@@ -302,6 +308,67 @@ def test_ck6_ask_json_out_waits_behind_a_live_spinner_and_prints_only_the_docume
     finally:
         restore()
 
+
+
+# ---------------------------------------------------------------------------
+# CK7 -- error and success lines follow the run's colour
+# ---------------------------------------------------------------------------
+def test_ck7_error_and_success_lines_follow_the_runs_colour(monkeypatch, tmp_path):
+    escape = "\033["
+    runs = (
+        ("colour on", [], {}, None),
+        ("--no-color", ["--no-color"], {}, None),
+        ("NO_COLOR", [], {"NO_COLOR": "1"}, None),
+        ("the file", [], {}, {"color": False}),
+    )
+    for index, (label, flags, env, cli_yaml) in enumerate(runs):
+        loaded, restore = _open(monkeypatch, tmp_path / str(index), cli_yaml=cli_yaml)
+        try:
+            main = loaded["opti_oignon.cli.main"]
+            for name, value in env.items():
+                monkeypatch.setenv(name, value)
+            saved = _runner().invoke(main.cli, [*flags, "config", "set", "default_model", "llama3"], color=True)
+            refused = _runner().invoke(main.cli, [*flags, "config", "set", "color", "maybe"], color=True)
+            reset = _runner().invoke(main.cli, [*flags, "config", "reset"], color=True)
+            assert (saved.exit_code, refused.exit_code, reset.exit_code) == (0, 1, 0), label
+            said = (saved.output, refused.stderr, reset.output)
+            assert "default_model = llama3" in said[0] and "must be true or false" in said[1], (label, said)
+            assert "Configuration reset" in said[2], (label, said)
+            if label == "colour on":
+                assert all(escape in line for line in said), f"control: with colour on every line is coloured: {said}"
+            else:
+                assert not any(escape in line for line in said), f"{label}: no escape byte reaches the output: {said}"
+        finally:
+            restore()
+            for name in env:
+                monkeypatch.delenv(name, raising=False)
+
+
+# ---------------------------------------------------------------------------
+# CK8 -- outside a command, the caller's word, else NO_COLOR
+# ---------------------------------------------------------------------------
+def test_ck8_outside_a_command_the_callers_word_then_no_color_decides(monkeypatch, tmp_path):
+    escape = "\033["
+    loaded, restore = _open(monkeypatch, tmp_path)
+    try:
+        out = loaded["opti_oignon.cli.output"]
+        written = []
+        monkeypatch.setattr(out, "_safe_echo", lambda: lambda text, err=False, **_kw: written.append(text))
+        out.echo_error("plain")
+        out.echo_success("plain")
+        assert all(escape in line for line in written), f"control: no NO_COLOR, no word, colour: {written}"
+        del written[:]
+        out.echo_error("told", color=False)
+        out.echo_success("told", color=False)
+        monkeypatch.setenv("NO_COLOR", "1")
+        out.echo_error("quiet")
+        out.echo_success("quiet")
+        assert len(written) == 4 and not any(escape in line for line in written), written
+        del written[:]
+        out.echo_error("told", color=True)
+        assert escape in written[0], "the caller's word wins over NO_COLOR"
+    finally:
+        restore()
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -46,16 +46,35 @@ def _col(text: str, colour: str, *, bold: bool = False, enabled: bool = True) ->
 
 # -- Public helpers --------------------------------------------------------
 
-def echo_error(msg: str, *, color: bool = True) -> None:
-    """Print an error message to stderr."""
-    prefix = _col("Error:", _C.RED, bold=True, enabled=color)
+def _run_color() -> bool:
+    """The colour of the run: its configuration inside a command, else ``NO_COLOR``.
+
+    A caller that says nothing gets the colour the run was given --
+    ``--no-color``, ``NO_COLOR`` or the file -- and not a default of its own.
+    """
+    try:
+        import click
+    except ImportError:
+        click = None
+    ctx = click.get_current_context(silent=True) if click is not None else None
+    if ctx is not None:
+        obj = ctx.find_root().obj
+        color = getattr(obj.get("config") if isinstance(obj, dict) else None, "color", None)
+        if isinstance(color, bool):
+            return color
+    return "NO_COLOR" not in os.environ
+
+
+def echo_error(msg: str, *, color: bool | None = None) -> None:
+    """Print an error message to stderr, coloured as the run is unless told."""
+    prefix = _col("Error:", _C.RED, bold=True, enabled=_run_color() if color is None else color)
     click_echo = _safe_echo()
     click_echo(f"{prefix} {msg}", err=True)
 
 
-def echo_success(msg: str, *, color: bool = True) -> None:
-    """Print a success message."""
-    prefix = _col("OK", _C.GREEN, bold=True, enabled=color)
+def echo_success(msg: str, *, color: bool | None = None) -> None:
+    """Print a success message, coloured as the run is unless told."""
+    prefix = _col("OK", _C.GREEN, bold=True, enabled=_run_color() if color is None else color)
     click_echo = _safe_echo()
     click_echo(f"{prefix} {msg}")
 
