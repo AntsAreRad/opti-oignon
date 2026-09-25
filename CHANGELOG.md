@@ -11,6 +11,22 @@ package costs.
 
 ### Added
 
+- The componion's journal and store. A being's life is a chain of facts, one
+  file per person, each fact identified by the digest of its envelope in
+  both engines (a new engine operation computes the ids of envelopes whose
+  body is only a digest, so a forgotten fact still verifies). One membrane
+  admits every write, deriving the surface and actor from the transport
+  and holding each kind to a closed table of schemas, surfaces and daily
+  budgets that both laws pin by digest. The store refuses a birth without
+  a readable key and SQLCipher (a labelled glass jar only when the owner
+  allows it, no key is configured and the mode is Daily, never opened in
+  Bulbe), checks the file header before trusting the cipher, anchors each
+  birth in the signed audit log and its head under a keyed anchor, and
+  refuses a flipped byte, a reordered event, a truncation, an older copy
+  or a missing file by name. Forgetting a taught word destroys its random
+  key and sealed bytes and compacts the file; resuming a broken journal is
+  an explicit, recorded act that never brings a forgotten thing back.
+
 - The componion's body is read from its own genes. The eight continuous
   shape loci of the full law (bulb width and height, hat height, leaf
   stiffness, eye spacing, lean and gaze, skin lines, speckles) get alleles

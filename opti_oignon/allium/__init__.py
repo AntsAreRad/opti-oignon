@@ -8,8 +8,8 @@ Rust crate ``rust/allium``, linked into the native core, must answer byte for
 byte as it does, and ``engine`` uses it only when its handshake agrees.
 
 This package imports nothing at module level beyond the standard library,
-starts no thread, opens no file and no database. Nothing on the chat path
-imports it.
+starts no thread, and opens no file and no database at import; the store
+opens its own database when called. Nothing on the chat path imports it.
 """
 
 checkpoint_before_apply = True

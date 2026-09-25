@@ -4,6 +4,9 @@
 //! the order of the checks is part of that: it decides which refusal a
 //! request with several defects gets.
 //!
+//! `fact_id` and `fact_envelope` check and hash facts in `journal`, which
+//! mirrors the reference's `ref/journal.py`.
+//!
 //! The genome operations read the embedded law and pool files, parsed and
 //! validated at every call (the reference remembers them per process; the
 //! answers are the same). `decode` and `compile` never read the pool.
@@ -13,9 +16,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use sha2::{Digest, Sha256};
 
 use crate::fx::{self, Work};
+use crate::journal;
 use crate::laws;
 use crate::ocj::{self, obj, refused, s, Refused, Value};
 use crate::organs::compile as organ_compile;
@@ -26,15 +29,15 @@ use crate::rng;
 pub const ENGINE_VERSION: &str = "0.1.0";
 pub const WIRE_VERSION: i64 = 1;
 
-const LIMIT_BODY: usize = 4096;
 const LIMIT_INPUT: usize = 1 << 20;
 const LIMIT_ITEMS: usize = 100_000;
 const LIMIT_STATE: usize = 1 << 19;
 
-const OPS: [&str; 19] = [
+const OPS: [&str; 20] = [
     "bulk",
     "echo",
     "engine",
+    "fact_envelope",
     "fact_id",
     "fx",
     "genome_compile",
@@ -53,22 +56,21 @@ const OPS: [&str; 19] = [
     "rng",
 ];
 const RNG_KINDS: [&str; 5] = ["below", "key", "noise", "stream", "unit"];
-const FACT_FIELDS: [&str; 7] = ["being", "body", "kind", "laws", "origin", "oseq", "t"];
 
 type Answer = Result<Value, Refused>;
 
-fn bad(code: &'static str, detail: &str) -> Refused {
+pub(crate) fn bad(code: &'static str, detail: &str) -> Refused {
     refused(code, String::from(detail))
 }
 
-fn int(value: Option<&Value>) -> Option<i64> {
+pub(crate) fn int(value: Option<&Value>) -> Option<i64> {
     match value {
         Some(Value::Int(n)) => Some(*n),
         _ => None,
     }
 }
 
-fn text(value: Option<&Value>) -> Option<&str> {
+pub(crate) fn text(value: Option<&Value>) -> Option<&str> {
     match value {
         Some(Value::Str(t)) => Some(t.as_str()),
         _ => None,
@@ -83,7 +85,7 @@ fn present(value: Option<&Value>) -> Option<&Value> {
     }
 }
 
-fn fields(request: &Value, required: &[&str], optional: &[&str]) -> Result<(), Refused> {
+pub(crate) fn fields(request: &Value, required: &[&str], optional: &[&str]) -> Result<(), Refused> {
     for name in request.keys() {
         if !required.contains(&name) && !optional.contains(&name) {
             return Err(bad("bad_request", "fields"));
@@ -141,7 +143,7 @@ fn engine() -> Answer {
         (
             String::from("limits"),
             obj(vec![
-                (String::from("body"), limit(LIMIT_BODY)),
+                (String::from("body"), limit(journal::BODY_LIMIT)),
                 (String::from("depth"), limit(ocj::MAX_DEPTH)),
                 (String::from("input"), limit(LIMIT_INPUT)),
                 (String::from("items"), limit(LIMIT_ITEMS)),
@@ -376,68 +378,19 @@ fn op_bulk(request: &Value) -> Answer {
 
 fn op_fact_id(request: &Value) -> Answer {
     fields(request, &["fact", "op", "v"], &[])?;
-    let fact = match request.get("fact") {
-        Some(fact @ Value::Obj(_)) => fact,
-        _ => return Err(bad("bad_fact", "fact")),
+    journal::fact_id(request.get("fact").unwrap_or(&Value::Null))
+}
+
+fn op_fact_envelope(request: &Value) -> Answer {
+    fields(request, &["envelopes", "op", "v"], &[])?;
+    let envelopes = match request.get("envelopes") {
+        Some(Value::Arr(envelopes)) => envelopes,
+        _ => return Err(bad("bad_request", "envelopes")),
     };
-    for name in fact.keys() {
-        if !FACT_FIELDS.contains(&name) {
-            return Err(bad("bad_fact", "fields"));
-        }
+    if envelopes.len() > LIMIT_ITEMS {
+        return Err(bad("limit", "items"));
     }
-    for name in FACT_FIELDS {
-        if fact.get(name).is_none() {
-            return Err(bad("bad_fact", "fields"));
-        }
-    }
-    if !matches!(text(fact.get("being")), Some(being) if ocj::is_hex(being, 32)) {
-        return Err(bad("bad_fact", "being"));
-    }
-    let kind_ok = match text(fact.get("kind")) {
-        Some(kind) => {
-            (1..=32).contains(&kind.len())
-                && kind.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        }
-        None => false,
-    };
-    if !kind_ok {
-        return Err(bad("bad_fact", "kind"));
-    }
-    if !matches!(int(fact.get("laws")), Some(laws) if laws >= 0) {
-        return Err(bad("bad_fact", "laws"));
-    }
-    if !matches!(text(fact.get("origin")), Some(origin) if ocj::is_hex(origin, 16)) {
-        return Err(bad("bad_fact", "origin"));
-    }
-    if !matches!(int(fact.get("oseq")), Some(oseq) if oseq >= 0) {
-        return Err(bad("bad_fact", "oseq"));
-    }
-    if int(fact.get("t")).is_none() {
-        return Err(bad("bad_fact", "t"));
-    }
-    let body = match fact.get("body") {
-        Some(body @ Value::Obj(_)) => body,
-        _ => return Err(bad("bad_fact", "body")),
-    };
-    let body_bytes = ocj::emit(body)?;
-    if body_bytes.len() > LIMIT_BODY {
-        return Err(bad("limit", "body size"));
-    }
-    let body_digest = ocj::hex(&Sha256::digest(&body_bytes));
-    let mut members = Vec::with_capacity(FACT_FIELDS.len());
-    for name in FACT_FIELDS {
-        let value = if name == "body" {
-            Value::Str(body_digest.clone())
-        } else {
-            fact.get(name).cloned().unwrap_or(Value::Null)
-        };
-        members.push((String::from(name), value));
-    }
-    let envelope = ocj::emit(&obj(members))?;
-    Ok(obj(vec![
-        (String::from("body"), Value::Str(body_digest)),
-        (String::from("eid"), Value::Str(ocj::hex(&Sha256::digest(&envelope)))),
-    ]))
+    journal::fact_envelope(envelopes)
 }
 
 fn op_law(request: &Value) -> Answer {
@@ -1120,6 +1073,7 @@ fn answer(data: &[u8]) -> Answer {
             fields(&request, &["op", "v"], &[])?;
             engine()
         }
+        "fact_envelope" => op_fact_envelope(&request),
         "fact_id" => op_fact_id(&request),
         "fx" => op_fx(&request),
         "genome_compile" => op_genome_compile(&request),

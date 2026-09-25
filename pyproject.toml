@@ -446,6 +446,20 @@ fail_under = 0
 # same file keeps the live property: one request on the step model through
 # the registry, and a plain marker with zero requests when no backend serves
 # it.
+# pn1 pinned, among its assertions, that the engine exports exactly four
+# tables, spelled as a closed list. The journal adds a fifth table, so the
+# closed spelling is false while the property holds: both engines export the
+# same tables. pn14 in the same file keeps every other assertion of pn1 word
+# for word and pins the table list against lawfiles.TABLES, which a later
+# table cannot falsify, plus the four names pn1 named.
+#
+# pn14 compared the exported table list with lawfiles.TABLES, the very list
+# the reference builds the export from, so the comparison held by
+# construction and a table file on disk that no engine exports left it green.
+# pn15 in the same file keeps every other assertion of pn14 word for word and
+# reads the table list from the table files on disk, with a witness that the
+# read finds the four names pn1 named.
+#
 addopts = """
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
@@ -511,4 +525,6 @@ addopts = """
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf7_an_owed_module_that_vanished_is_stale
     --deselect=tests/test_registry_funnel_guard_contracts.py::test_rf10_the_probe_finds_the_debt_the_ledger_records
     --deselect=tests/test_convergence_two_contracts.py::test_cv8_the_migrated_modules_carry_no_direct_site_and_the_owed_one_is_named
+    --deselect=tests/test_allium_phonology_contracts.py::test_pn1_the_alphabet_and_its_features_are_one_table_in_both_engines
+    --deselect=tests/test_allium_phonology_contracts.py::test_pn14_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_lawfiles
 """

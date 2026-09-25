@@ -1,0 +1,19 @@
+# The componion (the companion onion)
+# ===================================
+# Off until the service that serves it is switched on. Nothing reads this
+# switch yet; the store below reads only the persistence section.
+enabled: false
+
+# Where each person's journal lives, and how a new one may be born.
+#
+# One file per person under the data directory. A birth needs a readable
+# master key and SQLCipher; without them the being waits for its soil.
+persistence:
+  # Relative to the data directory. No "..", no empty part.
+  path: allium
+  # Only the boolean false allows a glass jar (a store in clear), and only
+  # when no key is configured, in Daily mode. It governs births only: a jar
+  # already born stays open, labelled, until it is repotted.
+  require_encryption: true
+  # How long a write waits for another writer before it is refused as busy.
+  busy_timeout_ms: 5000

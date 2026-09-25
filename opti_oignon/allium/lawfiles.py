@@ -20,7 +20,8 @@ checkpoint_before_apply = True
 _HERE = Path(__file__).resolve().parent
 LAWS = ("fixture", "v0_1")
 FOUNDERS = ("fixture", "v1")
-TABLES = ("phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1")
+TABLES = ("journal_v1", "phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1")
+JOURNAL_TABLES = ("journal_v1",)
 PHON_TABLES = ("phon_v1",)
 TABOO_TABLES = ("taboo_fixture_v1", "taboo_v1")
 

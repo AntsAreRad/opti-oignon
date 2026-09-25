@@ -179,3 +179,34 @@ as SHA-256 digests only. `scripts/allium_author_phon.py` writes the
 phonology table and the fixture's witness digests;
 `scripts/allium_taboo_digest.py` turns the owner's word list, read from
 outside the repository, into the full law's digests.
+
+A being's life is written in a journal, one file per person under the data
+directory. Each fact has an id that does not depend on the device (the
+digest of its envelope, the body entering only by its digest) and is
+linked to the one before it, so a flipped byte, a reordered event or a cut
+tail is refused by name at the event where it breaks, never repaired.
+Every write goes through one membrane that derives the surface and the
+actor from how the request arrived, not from what it claims, and that
+holds each kind of event to its schema, its surfaces and a daily budget.
+
+A being is not born without encryption: the store needs a readable master
+key and SQLCipher, and without them it waits for its soil. Only when no key
+is configured, in Daily mode, can the owner allow a glass jar (a journal in
+clear) by setting `persistence.require_encryption` to false; a jar is
+labelled everywhere, never opened in Bulbe mode, and stays open once born
+until it is repotted. The being's birth is anchored in the signed audit log,
+and the store carries a keyed anchor over its head, so an older copy, a
+swapped file or a being whose file went missing is shown as such rather
+than as a new garden. These anchors protect the being against the software
+and against a file changed behind its back; they are not a lock against its
+owner, and they do not detect a restore of the whole data directory, audit
+log included, to an earlier day.
+
+Forgetting is real but has a scope. A taught word lives sealed under its
+own random key, and forgetting destroys the key and the sealed bytes, then
+compacts the file; the event that it was forgotten stays in the journal,
+without the word. What is gone is gone from the store's files, not from the
+medium: an older backup or a disk image may still hold it. A broken journal
+is never mended in silence; the owner can resume from the last verified
+event, which is recorded as such, keeps every forgotten thing forgotten and
+discards what could not be verified.

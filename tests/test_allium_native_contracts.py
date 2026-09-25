@@ -32,6 +32,15 @@ no unsafe code, nothing but ASCII, and no internal planning vocabulary.
     construct that can panic: no unwrap, no expect, no panic or unreachable
     macro, no ``abs`` (which panics on the signed minimum) and no indexing;
     their module denies the matching lints.
+  * AN11 -- the journal twin, which checks the facts a peer may send, holds
+    none of those constructs either, and denies the same lints at its head.
+  * AN12 -- outside its tests, the journal twin holds no assertion and no
+    placeholder macro, and none of the slice calls that panic on a length
+    (``split_at``, ``copy_from_slice``); it denies ``todo`` and
+    ``unimplemented`` at its head, and every ban can fire.
+  * AN13 -- the platform files (settings, mode, chain, membrane, anchors,
+    store) import only the standard library at module level, and SQLite's
+    module only inside the store's default plain connect.
 
 Local-only (the public distribution ships no tests). The modules load
 through the shared isolation window.
@@ -72,6 +81,9 @@ BUDGET_S = {
     "test_an8_the_committed_golden_vectors_are_hexadecimal_and_clean": 2.0,
     "test_an9_the_engine_forbids_unsafe_code_and_denies_side_effect_arithmetic": 2.0,
     "test_an10_the_organs_hold_no_construct_that_can_panic_and_deny_them": 2.0,
+    "test_an11_the_journal_twin_holds_no_construct_that_can_panic_and_denies_them": 2.0,
+    "test_an12_the_journal_twin_outside_its_tests_holds_no_assertion_or_placeholder_that_can_panic": 2.0,
+    "test_an13_the_platform_files_import_the_standard_library_alone_and_sqlite_in_one_place": 2.0,
 }
 
 
@@ -417,6 +429,132 @@ def test_an10_the_organs_hold_no_construct_that_can_panic_and_deny_them():
     assert "pub mod organs;" in lib
     canary = "a.unwrap() b.expect(1) panic!() unreachable!() x.abs() values[0]"
     assert _organ_findings(canary) == [name for name, _ in _ORGAN_BANS], "every ban can fire"
+
+
+# ---------------------------------------------------------------------------
+# AN11 -- the journal twin cannot panic on hostile input
+# ---------------------------------------------------------------------------
+def test_an11_the_journal_twin_holds_no_construct_that_can_panic_and_denies_them():
+    text = (ENGINE_SRC / "journal.rs").read_text(encoding="ascii")
+    for name in ("check_envelope", "body_digest", "eid", "fact_id", "fact_envelope"):
+        assert f"pub fn {name}(" in text, f"the scanned file is the journal twin: {name}"
+    assert _organ_findings(text) == [], _organ_findings(text)
+    assert _ORGAN_DENY in text.splitlines(), "the journal module denies the lints itself"
+    lib = (ENGINE_SRC / "lib.rs").read_text(encoding="ascii")
+    assert "pub mod journal;" in lib
+    canary = "a.unwrap() b.expect(1) panic!() unreachable!() x.abs() values[0]"
+    assert _organ_findings(canary) == [name for name, _ in _ORGAN_BANS], "every ban can fire"
+
+# ---------------------------------------------------------------------------
+# AN12 -- the journal twin, outside its tests: no assertion, no placeholder
+# ---------------------------------------------------------------------------
+_JOURNAL_BANS = (
+    ("assert", r"\bassert!"),
+    ("assert_eq", r"\bassert_eq!"),
+    ("todo", r"\btodo!"),
+    ("unimplemented", r"\bunimplemented!"),
+    ("split_at", r"\.split_at\("),
+    ("copy_from_slice", r"\.copy_from_slice\("),
+)
+_JOURNAL_DENY = "#![deny(clippy::todo, clippy::unimplemented)]"
+
+
+def _journal_findings(text):
+    return [name for name, pattern in _JOURNAL_BANS if re.search(pattern, text)]
+
+
+def test_an12_the_journal_twin_outside_its_tests_holds_no_assertion_or_placeholder_that_can_panic():
+    text = (ENGINE_SRC / "journal.rs").read_text(encoding="ascii")
+    marker = "#[cfg(test)]"
+    assert text.count(marker) == 1, "the scan stops where the test module starts"
+    twin, tests = text.split(marker)
+    assert "pub fn fact_envelope(" in twin and "pub fn check_envelope(" in twin, "the scanned part is the twin"
+    assert "assert_eq!(" in tests, "witness: the part left out is the one that asserts"
+    assert _journal_findings(twin) == [], _journal_findings(twin)
+    assert _JOURNAL_DENY in twin.splitlines()[:3], "the module denies the placeholders at its head"
+    planted = ("assert!(ok)", "assert_eq!(a, b)", "todo!()", "unimplemented!()", "v.split_at(3)",
+               "d.copy_from_slice(s)")
+    for (name, _pattern), canary in zip(_JOURNAL_BANS, planted):
+        assert _journal_findings(canary) == [name], (name, _journal_findings(canary))
+    assert _journal_findings("debug_assert!(x) assert_ne!(a, b) v.split_first()") == [], "only what is named"
+
+
+# ---------------------------------------------------------------------------
+# AN13 -- the platform files: the standard library at module level, SQLite in one place
+# ---------------------------------------------------------------------------
+_PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store")
+
+
+def _module_level_imports(tree):
+    """The import statements run when the module is imported: not those inside a function."""
+    found = []
+
+    def visit(nodes):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                found.append(node)
+            for field in ("body", "orelse", "finalbody", "handlers"):
+                inner = getattr(node, field, None)
+                if isinstance(inner, list):
+                    visit(inner)
+
+    visit(tree.body)
+    return found
+
+
+def _platform_import_findings(tree, allowed_sqlite):
+    findings = []
+    for node in _module_level_imports(tree):
+        if isinstance(node, ast.ImportFrom):
+            names = ["." * node.level + (node.module or "")]
+        else:
+            names = [alias.name for alias in node.names]
+        for name in names:
+            if name.startswith(".") or name.split(".")[0] not in sys.stdlib_module_names:
+                findings.append("module level: " + name)
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            names = [node.module or ""]
+        else:
+            continue
+        if not any(name.split(".")[0] == "sqlite3" for name in names):
+            continue
+        owner = parents.get(node)
+        while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = parents.get(owner)
+        where = "<module>" if owner is None else owner.name
+        if where != allowed_sqlite:
+            findings.append("sqlite3 in " + where)
+    return findings
+
+
+def test_an13_the_platform_files_import_the_standard_library_alone_and_sqlite_in_one_place():
+    read = []
+    for name in _PLATFORM:
+        tree = ast.parse((PACKAGE / f"{name}.py").read_text(encoding="ascii"))
+        allowed = "_plain_connect" if name == "store" else None
+        assert _platform_import_findings(tree, allowed) == [], (name, _platform_import_findings(tree, allowed))
+        read.append(name)
+        if name == "store":
+            store_tree = tree
+    assert read == list(_PLATFORM), "every platform file is read"
+    assert _platform_import_findings(store_tree, None) == ["sqlite3 in _plain_connect"], \
+        "witness: the one import allowed is there, and the check sees it"
+    canary = ("import os\nimport sqlite3\nimport yaml\nfrom . import wire\nfrom opti_oignon import config\n"
+              "try:\n    import requests\nexcept ImportError:\n    pass\n"
+              "def _plain_connect():\n    import sqlite3\n"
+              "def elsewhere():\n    import sqlite3\n    from opti_oignon import db_utils\n")
+    assert _platform_import_findings(ast.parse(canary), "_plain_connect") == [
+        "module level: yaml", "module level: .", "module level: opti_oignon", "module level: requests",
+        "sqlite3 in <module>", "sqlite3 in elsewhere"], "every rule can fire"
 
 
 if __name__ == "__main__":

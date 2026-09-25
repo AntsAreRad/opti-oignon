@@ -12,8 +12,10 @@ Writes, under ``opti_oignon/allium/laws/``:
   pools each law pins by digest.
 
 Each law also pins, by name and digest, the phonology table and the taboo
-table it speaks with; ``scripts/allium_author_phon.py`` writes those tables
-and runs first.
+table it speaks with, and the journal's table of kinds with the daily budget
+of each budgeted kind; ``scripts/allium_author_phon.py`` and
+``scripts/allium_author_journal.py`` write those tables, own those budgets
+and run first.
 
 The engines read the written files, never this script. The script is the
 authoring tool: a contract runs it in-process and checks that it reproduces
@@ -32,6 +34,7 @@ body shape levels).
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -651,11 +654,22 @@ def _table_digest(name):
     return _digest(wire.parse(TABLES_DIR.joinpath(f"{name}.json").read_bytes(), lenient=True))
 
 
+def _journal_budgets(name):
+    """The daily budgets law ``name`` pins, from the journal's authoring script (loaded by path)."""
+    spec = importlib.util.spec_from_file_location(
+        "_allium_author_journal", Path(__file__).resolve().parent.joinpath("allium_author_journal.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(module.BUDGETS[name])
+
+
 def law(name, loci, pairs, founders_name, founders_value, taboo_name):
     value = {
         "decays": DECAYS,
         "founders": {"name": founders_name, "sha256": _digest(founders_value)},
         "genome": genome_section(loci, pairs),
+        "journal": {"budgets": _journal_budgets(name),
+                    "table": {"name": "journal_v1", "sha256": _table_digest("journal_v1")}},
         "lang": {"phon": {"name": "phon_v1", "sha256": _table_digest("phon_v1")},
                  "taboo": {"name": taboo_name, "sha256": _table_digest(taboo_name)}},
         "name": name,

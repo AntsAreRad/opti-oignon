@@ -1,0 +1,170 @@
+{
+  "kinds": {
+    "act": {
+      "body": {
+        "act": {"of": ["greet", "play", "touch", "warm", "water"], "type": "symbol"}
+      },
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "braid": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "bury": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "celebrate": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "clock": {"body": null, "payload": null, "producer": "recorder", "redact_by": null, "scope": "trunk"},
+    "dream_depth": {
+      "body": {
+        "depth": {"of": ["deep", "normal", "shallow"], "type": "symbol"}
+      },
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "evolve": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "excavate": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "forget_rhythm": {
+      "body": {},
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "genesis": {
+      "body": {
+        "birth": {
+          "fields": {
+            "tz": {"hi": 840, "lo": -840, "type": "int"},
+            "wall": {"hi": 9007199254740991, "lo": 0, "type": "int"}
+          },
+          "type": "object"
+        },
+        "derive": {"hi": 1, "lo": 1, "type": "int"},
+        "laws": {
+          "fields": {
+            "name": {"max": 32, "type": "text"},
+            "provisional": {"type": "bool"},
+            "sha256": {"len": 64, "type": "hex"},
+            "v": {"hi": 65535, "lo": 0, "type": "int"}
+          },
+          "type": "object"
+        },
+        "owner": {"len": 32, "type": "hex"},
+        "rhythm_consent": {"type": "bool"},
+        "seed": {"len": 64, "type": "hex"},
+        "soil": {"of": ["encrypted", "glass"], "type": "symbol"}
+      },
+      "payload": null,
+      "producer": "sow",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "keep_dream": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "lang_borrow": {"body": null, "payload": null, "producer": "membrane", "redact_by": "lang_forget", "scope": "trunk"},
+    "lang_forget": {
+      "body": {
+        "target": {"len": 64, "type": "hex"}
+      },
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "lang_insist": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "lang_reaction": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "lang_taboo_add": {
+      "body": {
+        "len": {"hi": 12, "lo": 1, "type": "int"},
+        "sha256": {"len": 64, "type": "hex"}
+      },
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "lang_talk": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "lang_teach": {
+      "body": {
+        "payload": {"len": 32, "type": "hex"}
+      },
+      "payload": {"max": 24, "type": "word"},
+      "producer": "membrane",
+      "redact_by": "lang_forget",
+      "scope": "trunk"
+    },
+    "laws_pin": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "laws_unpin": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "letter_sealed": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "light_day": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "meeting_in": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "move_pot": {
+      "body": {},
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "name": {
+      "body": {
+        "name": {"max": 32, "type": "text"}
+      },
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "offering_verdict": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "owner": {
+      "body": {
+        "from": {"len": 32, "type": "hex"},
+        "to": {"len": 32, "type": "hex"}
+      },
+      "payload": null,
+      "producer": "claim",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "pollen_in": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "presence_hour": {
+      "body": {
+        "active": {"type": "bool"},
+        "observed_hour": {"hi": 23, "lo": 0, "type": "int"}
+      },
+      "payload": null,
+      "producer": "rhythm",
+      "redact_by": null,
+      "scope": "rhythm"
+    },
+    "rest_begin": {
+      "body": {},
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "rest_end": {
+      "body": {},
+      "payload": null,
+      "producer": "membrane",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "resumed": {
+      "body": {
+        "digest": {"len": 64, "type": "hex"},
+        "removed": {"hi": 9007199254740991, "lo": 0, "type": "int"}
+      },
+      "payload": null,
+      "producer": "resume",
+      "redact_by": null,
+      "scope": "trunk"
+    },
+    "rhythm_seal": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "seal_broken": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "seed_in": {"body": null, "payload": null, "producer": "membrane", "redact_by": null, "scope": "trunk"},
+    "tz": {"body": null, "payload": null, "producer": "recorder", "redact_by": null, "scope": "trunk"}
+  },
+  "name": "journal_v1",
+  "schema": 1
+}

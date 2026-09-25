@@ -15,6 +15,8 @@ Operations of the chassis:
 * ``rng``     -- draws from a keyed stream, a key, or positional noise.
 * ``bulk``    -- a compact integer array packed or unpacked.
 * ``fact_id`` -- the identity of a fact: body digest and event id.
+* ``fact_envelope`` -- the event ids of envelopes whose body is already a
+  digest, as a redacted fact keeps it.
 * ``law``     -- a law file's name, version, provisional flag and digest.
 * ``genome_found``   -- a founder genome from a 32-byte seed and a law.
 * ``genome_corner``  -- a genome at a corner of the law's box.
@@ -42,6 +44,7 @@ import hashlib
 
 from .. import fx, lawfiles, rng, wire
 from ..wire import Refused
+from . import journal
 from .organs import compile as organ_compile
 from .organs import genome, phon
 
@@ -51,16 +54,16 @@ ENGINE_VERSION = "0.1.0"
 WIRE_VERSION = 1
 
 LIMITS = {
-    "body": 4096,
+    "body": journal.BODY_LIMIT,
     "depth": wire.MAX_DEPTH,
     "input": 1 << 20,
     "items": 100000,
     "state": 1 << 19,
     "steps": fx.STEPS_MAX,
 }
-OPS = ("bulk", "echo", "engine", "fact_id", "fx", "genome_compile", "genome_corner", "genome_decode",
-       "genome_found", "law", "phon_first_sound", "phon_invent", "phon_inventory", "phon_lex", "phon_licit",
-       "phon_sas", "phon_table", "phon_taboo", "rng")
+OPS = ("bulk", "echo", "engine", "fact_envelope", "fact_id", "fx", "genome_compile", "genome_corner",
+       "genome_decode", "genome_found", "law", "phon_first_sound", "phon_invent", "phon_inventory", "phon_lex",
+       "phon_licit", "phon_sas", "phon_table", "phon_taboo", "rng")
 RNG_KINDS = ("below", "key", "noise", "stream", "unit")
 _HEX = "0123456789abcdef"
 
@@ -252,46 +255,19 @@ def _op_bulk(request):
     return {"type": kind, "values": values}
 
 
-_FACT_FIELDS = ("being", "body", "kind", "laws", "origin", "oseq", "t")
-
-
 def _op_fact_id(request):
     _fields(request, ("fact", "op", "v"))
-    fact = request["fact"]
-    if not isinstance(fact, dict):
-        raise Refused("bad_fact", "fact")
-    for name in fact:
-        if name not in _FACT_FIELDS:
-            raise Refused("bad_fact", "fields")
-    for name in _FACT_FIELDS:
-        if name not in fact:
-            raise Refused("bad_fact", "fields")
-    if not _is_hex(fact["being"], 32):
-        raise Refused("bad_fact", "being")
-    kind = fact["kind"]
-    if not isinstance(kind, str) or not 1 <= len(kind) <= 32:
-        raise Refused("bad_fact", "kind")
-    for char in kind:
-        if not ("a" <= char <= "z" or "0" <= char <= "9" or char == "_"):
-            raise Refused("bad_fact", "kind")
-    if not _is_int(fact["laws"]) or fact["laws"] < 0:
-        raise Refused("bad_fact", "laws")
-    if not _is_hex(fact["origin"], 16):
-        raise Refused("bad_fact", "origin")
-    if not _is_int(fact["oseq"]) or fact["oseq"] < 0:
-        raise Refused("bad_fact", "oseq")
-    if not _is_int(fact["t"]):
-        raise Refused("bad_fact", "t")
-    body = fact["body"]
-    if not isinstance(body, dict):
-        raise Refused("bad_fact", "body")
-    body_bytes = wire.emit(body)
-    if len(body_bytes) > LIMITS["body"]:
-        raise Refused("limit", "body size")
-    body_digest = hashlib.sha256(body_bytes).hexdigest()
-    envelope = {name: fact[name] for name in _FACT_FIELDS}
-    envelope["body"] = body_digest
-    return {"body": body_digest, "eid": hashlib.sha256(wire.emit(envelope)).hexdigest()}
+    return journal.fact_id(request["fact"])
+
+
+def _op_fact_envelope(request):
+    _fields(request, ("envelopes", "op", "v"))
+    envelopes = request["envelopes"]
+    if not isinstance(envelopes, list):
+        raise Refused("bad_request", "envelopes")
+    if len(envelopes) > LIMITS["items"]:
+        raise Refused("limit", "items")
+    return journal.fact_envelope(envelopes)
 
 
 def _op_law(request):
@@ -715,6 +691,7 @@ _HANDLERS = {
     "bulk": _op_bulk,
     "echo": _op_echo,
     "engine": lambda request: (_fields(request, ("op", "v")), _engine())[1],
+    "fact_envelope": _op_fact_envelope,
     "fact_id": _op_fact_id,
     "fx": _op_fx,
     "genome_compile": _op_genome_compile,

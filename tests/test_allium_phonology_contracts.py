@@ -23,6 +23,11 @@ written twice (a Python reference, a Rust twin) and compared.
     operation, and the cases the corpus exists to reach are reached.
   * PN13 -- the first sound is a sound the being can make, never the glottal
     stop, and depends only on its seed and block.
+  * PN14 -- PN1's property with the table list compared to the list the
+    engine is built from (PN1 is superseded). That list is where the export
+    comes from, so the comparison held by construction; PN14 is superseded.
+  * PN15 -- PN14's property with the table list read from the table files
+    on disk, so a table file that the engines do not export is seen.
 
 Local-only. The modules load through the shared isolation window; PN1, PN12
 and PN13 also need the native artefact ``scripts/build_oo_core.sh`` builds.
@@ -53,6 +58,8 @@ BUDGET_S = {
     "test_pn5_no_taboo_form_or_substring_is_produced_and_the_witnesses_fire": 2.0,
     "test_pn12_both_engines_answer_every_phonology_request_with_the_same_bytes": 2.0,
     "test_pn13_the_first_sound_is_a_sound_the_being_can_make_keyed_on_seed_and_block": 2.0,
+    "test_pn14_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_lawfiles": 2.0,
+    "test_pn15_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_files_on_disk": 2.0,
 }
 
 
@@ -519,6 +526,98 @@ def test_pn13_the_first_sound_is_a_sound_the_being_can_make_keyed_on_seed_and_bl
             if block == blocks[0]:
                 distinct_hi[p] = True
     assert len(distinct_hi) >= 20, len(distinct_hi)
+
+
+# ---------------------------------------------------------------------------
+# PN14
+# ---------------------------------------------------------------------------
+def test_pn14_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_lawfiles(engines):
+    e = engines
+    file_value = e.lawfiles.table("phon_v1")
+    for law in e.lawfiles.LAWS:
+        export = e.both({"law": law, "op": "phon_table"})
+        classify = e.wire.unpack_bulk(export["classify"])[1]
+        assert len(classify) == 256
+        for byte in range(256):
+            expected = S.ALPHABET.index(chr(byte)) if chr(byte) in S.ALPHABET else -1
+            assert classify[byte] == expected, byte
+        for key in ("alphabet", "bias", "features", "first_sound_exclude", "floor_consonants", "floor_vowels",
+                    "fold", "form_max", "invent_tries", "lex_box", "potential_min", "sas", "shown_max",
+                    "taboo_extra_max", "taboo_max", "taboo_window", "templates", "anchored_max",
+                    "anchored_total_max"):
+            assert export[key] == file_value[key], key
+        features = export["features"]
+        for p, row in enumerate(features):
+            vowel = p <= 4
+            assert (row[0] == 0) == vowel and (row[2] == 7) == vowel and (row[1] == 8) == vowel, p
+            assert row[4] == (1, 2, 3, 4, 5, 5, 6, 7)[row[2]], p
+            assert row[4] == S.SON[p] and row[2] == S.MANNER[p], p
+        assert [p for p, row in enumerate(features) if row[2] == 0] == list(range(5, 13))
+        assert [p for p, row in enumerate(features) if row[2] == 3] == [21, 22]
+        lang = e.lawfiles.law(law)["lang"]
+        assert lang["phon"] == {"name": "phon_v1", "sha256": e.lawfiles.digest(file_value)}
+        taboo_file = e.lawfiles.table(lang["taboo"]["name"])
+        assert lang["taboo"]["sha256"] == e.lawfiles.digest(taboo_file) == export["taboo"]["sha256"]
+        assert export["work"] == 27 + 256
+    author = _load_script("allium_author_phon.py", "_pn14_author")
+    for name, text in author.author().items():
+        assert TABLES_DIR.joinpath(name).read_text(encoding="ascii") == text, name
+    assert TABLES_DIR.joinpath("taboo_v1.json").read_text(encoding="ascii") == author.empty_taboo(), \
+        "the full law's list is empty while its owner's list is owed"
+    mine = e.wire.parse(e.protocol.engine_info())
+    theirs = e.wire.parse(bytes(e.native.allium_engine()))
+    assert theirs["tables"] == mine["tables"] and theirs["domains"] == mine["domains"]
+    assert sorted(mine["tables"]) == sorted(e.lawfiles.TABLES)
+    for name in ("phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1"):
+        assert name in mine["tables"], name
+
+
+
+# ---------------------------------------------------------------------------
+# PN15
+# ---------------------------------------------------------------------------
+def test_pn15_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_files_on_disk(engines):
+    e = engines
+    file_value = e.lawfiles.table("phon_v1")
+    for law in e.lawfiles.LAWS:
+        export = e.both({"law": law, "op": "phon_table"})
+        classify = e.wire.unpack_bulk(export["classify"])[1]
+        assert len(classify) == 256
+        for byte in range(256):
+            expected = S.ALPHABET.index(chr(byte)) if chr(byte) in S.ALPHABET else -1
+            assert classify[byte] == expected, byte
+        for key in ("alphabet", "bias", "features", "first_sound_exclude", "floor_consonants", "floor_vowels",
+                    "fold", "form_max", "invent_tries", "lex_box", "potential_min", "sas", "shown_max",
+                    "taboo_extra_max", "taboo_max", "taboo_window", "templates", "anchored_max",
+                    "anchored_total_max"):
+            assert export[key] == file_value[key], key
+        features = export["features"]
+        for p, row in enumerate(features):
+            vowel = p <= 4
+            assert (row[0] == 0) == vowel and (row[2] == 7) == vowel and (row[1] == 8) == vowel, p
+            assert row[4] == (1, 2, 3, 4, 5, 5, 6, 7)[row[2]], p
+            assert row[4] == S.SON[p] and row[2] == S.MANNER[p], p
+        assert [p for p, row in enumerate(features) if row[2] == 0] == list(range(5, 13))
+        assert [p for p, row in enumerate(features) if row[2] == 3] == [21, 22]
+        lang = e.lawfiles.law(law)["lang"]
+        assert lang["phon"] == {"name": "phon_v1", "sha256": e.lawfiles.digest(file_value)}
+        taboo_file = e.lawfiles.table(lang["taboo"]["name"])
+        assert lang["taboo"]["sha256"] == e.lawfiles.digest(taboo_file) == export["taboo"]["sha256"]
+        assert export["work"] == 27 + 256
+    author = _load_script("allium_author_phon.py", "_pn15_author")
+    for name, text in author.author().items():
+        assert TABLES_DIR.joinpath(name).read_text(encoding="ascii") == text, name
+    assert TABLES_DIR.joinpath("taboo_v1.json").read_text(encoding="ascii") == author.empty_taboo(), \
+        "the full law's list is empty while its owner's list is owed"
+    mine = e.wire.parse(e.protocol.engine_info())
+    theirs = e.wire.parse(bytes(e.native.allium_engine()))
+    assert theirs["tables"] == mine["tables"] and theirs["domains"] == mine["domains"]
+    on_disk = sorted(path.stem for path in TABLES_DIR.glob("*.json"))
+    assert len(on_disk) >= 4 and all(name in on_disk for name in (
+        "phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1")), ("witness: the glob reads the files", on_disk)
+    assert sorted(mine["tables"]) == sorted(p.stem for p in TABLES_DIR.glob("*.json"))
+    for name in ("phon_v1", "sine_q15_v1", "taboo_fixture_v1", "taboo_v1"):
+        assert name in mine["tables"], name
 
 
 if __name__ == "__main__":

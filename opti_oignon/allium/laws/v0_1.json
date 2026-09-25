@@ -2232,6 +2232,10 @@
     "mm_intermediate_max": {"ceiling": "i64", "max_raw": 34359738368, "premise": "c in [0, CMAX]", "proof": "CMAX*65536 = 524288*65536 = 34359738368"},
     "promoter_term_max": {"ceiling": "i32", "max_raw": 524288, "premise": "act in [0, ONE]", "proof": "W*16 = 32768*16 = 524288"}
   },
+  "journal": {
+    "budgets": {"act": 128, "braid": 4, "bury": 2, "celebrate": 4, "dream_depth": 4, "evolve": 2, "excavate": 4, "forget_rhythm": 2, "keep_dream": 4, "lang_borrow": 8, "lang_forget": 16, "lang_insist": 16, "lang_reaction": 64, "lang_taboo_add": 16, "lang_talk": 64, "lang_teach": 16, "laws_pin": 2, "laws_unpin": 2, "letter_sealed": 4, "light_day": 2, "meeting_in": 4, "move_pot": 8, "name": 4, "offering_verdict": 32, "pollen_in": 2, "rest_begin": 4, "rest_end": 4, "rhythm_seal": 2, "seal_broken": 4, "seed_in": 2},
+    "table": {"name": "journal_v1", "sha256": "e02d3e3fc9e3a8c3938cc94ab05a1351da46966a600cb158d366d1f5042bf143"}
+  },
   "lang": {
     "phon": {"name": "phon_v1", "sha256": "f37615023470f74cbce378b38e0f8379deb58c3ff176a45e9a86d8e7321cf200"},
     "taboo": {"name": "taboo_v1", "sha256": "bbc38c8c1b841eabe15271ea224df11c14dbbddcbb38bb87c0ba61fa68ce2983"}

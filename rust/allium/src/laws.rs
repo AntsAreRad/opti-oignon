@@ -20,7 +20,8 @@ pub const FOUNDERS: [(&str, &str); 2] = [
 ];
 
 /// Every table the engine carries, in the order the reference lists them.
-pub const TABLES: [(&str, &str); 4] = [
+pub const TABLES: [(&str, &str); 5] = [
+    ("journal_v1", include_str!("../../../opti_oignon/allium/tables/journal_v1.json")),
     ("phon_v1", include_str!("../../../opti_oignon/allium/tables/phon_v1.json")),
     ("sine_q15_v1", include_str!("../../../opti_oignon/allium/tables/sine_q15_v1.json")),
     ("taboo_fixture_v1", include_str!("../../../opti_oignon/allium/tables/taboo_fixture_v1.json")),

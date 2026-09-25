@@ -14,6 +14,7 @@
 extern crate alloc;
 
 pub mod fx;
+pub mod journal;
 pub mod laws;
 pub mod ocj;
 pub mod organs;
