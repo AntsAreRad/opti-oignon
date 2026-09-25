@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 
 
 def _format_size(size_bytes) -> str | None:
-    """Formate une taille en bytes en representation lisible."""
+    """Format a size in bytes as a human-readable string."""
     if not size_bytes:
         return None
     try:

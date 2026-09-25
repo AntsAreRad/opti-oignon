@@ -175,7 +175,7 @@ class OptiOignonConfig:
             logger.debug(f"Fallback to primary for {model_type}/{priority}")
             return model
 
-        # Last resort: first available fallback (avec cache pour le warning)
+        # Last resort: the first available fallback, warning once per type
         fallbacks = self._models_config.get("fallback_order", [])
         if fallbacks:
             if model_type not in self._warned_types:

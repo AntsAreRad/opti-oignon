@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Routes API pour l'export de conversations.
+API routes for exporting conversations.
 
-Endpoint pour exporter une conversation en Markdown, JSON, ou HTML.
+An endpoint to export a conversation as Markdown, JSON or HTML.
 """
 
 import logging

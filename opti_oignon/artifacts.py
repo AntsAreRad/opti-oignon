@@ -537,10 +537,10 @@ class ArtifactManager:
         if target is None:
             return []
 
-        # Determiner l'ID racine de la chaine
+        # Find the root ID of the chain
         root_id = target.parent_id or target.id
 
-        # Collecter toutes les versions de la chaine
+        # Collect every version of the chain
         chain = []
         for a in self.get_artifacts(conversation_id):
             if a.id == root_id or a.parent_id == root_id:

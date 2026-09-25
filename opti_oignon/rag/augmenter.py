@@ -207,7 +207,7 @@ Contexte disponible :
         )
 
     def _format_chunk(self, result: SearchResult, include_sources: bool) -> str:
-        """Formate un chunk pour l'inclusion dans le contexte."""
+        """Format a chunk for inclusion in the context."""
         lines = []
 
         if include_sources:
@@ -364,10 +364,10 @@ Contexte disponible :
         Smart augmentation with automatic type detection.
 
         Args:
-            query: Question de l'utilisateur
-            n_results: Nombre de chunks
-            min_score: Score minimum
-            file_types: Types de fichiers
+            query: The user's question
+            n_results: Number of chunks
+            min_score: Minimum score
+            file_types: File types
 
         Returns:
             Optimized AugmentedPrompt

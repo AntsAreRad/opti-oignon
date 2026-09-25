@@ -2,8 +2,8 @@
 """
 API routes for persistent memory management.
 
-Endpoints pour lister, ajouter, supprimer les faits memoire,
-et extraire automatiquement des faits depuis une conversation.
+Endpoints to list, add and delete memory facts, and to extract
+facts from a conversation automatically.
 """
 
 import logging

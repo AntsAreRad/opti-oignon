@@ -156,7 +156,7 @@ class DynamicPipelinePlan:
 
     def format_preview(self, show_models: bool = True) -> str:
         """
-        Formate le plan pour affichage utilisateur.
+        Format the plan for display to the user.
 
         Returns:
             Formatted string for Markdown display

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Routes API pour l'execution de code.
+API routes for code execution.
 
-Endpoints pour executer du code, extraire les blocs de code
-of a texte, et reinitialiser le repertoire de travail persistant.
+Endpoints to execute code, extract the code blocks of a text, and
+reset the persistent working directory.
 """
 
 import logging
@@ -41,7 +41,7 @@ def _check_available():
 
 @router.post("/execute", response_model=CodeExecuteResponse)
 def execute_code(request: CodeExecuteRequest) -> dict:
-    """Execute un bloc de code dans un sous-processus sandboxe."""
+    """Execute a code block in a sandboxed subprocess."""
     if _emergency_stop is not None:
         _emergency_stop.guard_http()  # Refused, not hung
     _check_available()

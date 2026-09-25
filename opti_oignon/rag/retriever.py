@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class SearchResult:
     """Search result."""
 
-    content: str                      # Contenu du chunk
+    content: str                      # The chunk's content
     score: float                      # Similarity score (0-1)
     source_file: str                  # Source file path
     file_type: str                    # Type de fichier
@@ -46,7 +46,7 @@ class SearchResult:
 
     @property
     def location(self) -> str:
-        """Description de la localisation dans le fichier."""
+        """Description of the location in the file."""
         if self.section_name:
             return f"{self.source_name} ({self.section_name})"
         elif self.start_line and self.end_line:
@@ -213,7 +213,7 @@ class DocumentRetriever:
             else:
                 conditions.append({"file_type": {"$in": file_types}})
 
-        # Filtre par fichier source
+        # Filter by source file
         if source_files:
             if len(source_files) == 1:
                 conditions.append({"source_file": {"$eq": source_files[0]}})

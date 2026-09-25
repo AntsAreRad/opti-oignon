@@ -118,7 +118,7 @@ def health_dashboard() -> dict:
 
 @router.post("/benchmarks")
 def run_all_benchmarks(iterations: int = 200) -> dict:
-    """Execute tous les benchmarks disponibles."""
+    """Run every available benchmark."""
     if not BENCHMARK_AVAILABLE or perf_benchmark_runner is None:
         raise HTTPException(
             status_code=503,
@@ -156,7 +156,7 @@ def run_all_benchmarks(iterations: int = 200) -> dict:
 
 @router.post("/benchmarks/{name}", response_model=BenchmarkResultSchema)
 def run_single_benchmark(name: str, iterations: int = 200) -> dict:
-    """Execute un benchmark specifique par nom."""
+    """Run one benchmark, named."""
     if not BENCHMARK_AVAILABLE or perf_benchmark_runner is None:
         raise HTTPException(
             status_code=503,

@@ -66,7 +66,7 @@ ALLOWED_IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
 }
 
-# Correspondance extension -> MIME type pour les images
+# File extension -> MIME type, for images
 _IMAGE_MIME_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

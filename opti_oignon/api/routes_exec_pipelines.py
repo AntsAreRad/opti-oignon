@@ -81,7 +81,7 @@ class ExecDuplicateRequest(BaseModel):
 
 
 class StepTypeInfo(BaseModel):
-    """Information sur un type de step."""
+    """Information about a step type."""
     type: str
     description: str = ""
 
@@ -134,7 +134,7 @@ def list_exec_pipelines(
     builtin_only: bool = False,
     custom_only: bool = False,
 ) -> list:
-    """Liste tous les pipelines d'execution."""
+    """List every execution pipeline."""
     _check_available()
     store = get_pipeline_store()
     if builtin_only:
@@ -148,7 +148,7 @@ def list_exec_pipelines(
 
 @router.get("/step-types", response_model=list[StepTypeInfo])
 def list_step_types() -> list:
-    """Liste les types de step disponibles avec descriptions."""
+    """List the available step types with their descriptions."""
     _check_available()
     store = get_pipeline_store()
     return [StepTypeInfo(**st) for st in store.get_step_types()]

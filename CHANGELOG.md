@@ -447,9 +447,15 @@ package costs.
   exists, an unattributable change is now reported as unjudged -- neither
   accepted nor refused -- and listed by name, so an absence of checking stays
   visible instead of passing for a check that succeeded.
-- `public_clean_guard.py`, `public_language_guard.py`, `published_prose_guard.py`,
-  `summary_fidelity_guard.py`, `isolation_seal_guard.py` and `red_team_guard.py`
-  are unchanged in this cycle and continue to gate merges.
+- Fifteen modules carried French prose in their comments and docstrings,
+  among them seven published API descriptions (six operations and one
+  schema). All of it is in English now, the published prose digest is
+  recorded again, and the English-only ledger falls from 320 French spans
+  in 33 files to 295 in 18: a file paid down to nothing comes off it.
+- `public_clean_guard.py`, `published_prose_guard.py`, `summary_fidelity_guard.py`
+  and `red_team_guard.py` are unchanged in this cycle and continue to gate
+  merges. `isolation_seal_guard.py` and `public_language_guard.py` changed only
+  in their sealed ledgers, which fell as debt was paid.
 
 ### Fixed
 

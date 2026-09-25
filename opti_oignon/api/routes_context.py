@@ -27,13 +27,13 @@ router = APIRouter(prefix="/api/context", tags=["context"])
 
 
 def _estimate_tokens(text: str) -> int:
-    """Estimation rapide du nombre de tokens (approximation ~4 chars/token).
+    """Quick estimate of the token count (roughly 4 chars per token).
 
     Args:
-        text: Texte a estimer
+        text: The text to estimate
 
     Returns:
-        Estimation du nombre de tokens
+        The estimated number of tokens
     """
     if not text:
         return 0
@@ -123,7 +123,7 @@ def _get_conversation_context(conversation_id: str | None = None) -> dict[str, A
         except Exception as e:
             logger.debug(f"Impossible de calculer le budget: {e}")
 
-    # Stats de la derniere fenetre glissante (depuis l'executor)
+    # Stats of the last sliding window (from the executor)
     if EXECUTOR_AVAILABLE and executor is not None:
         try:
             window_stats = executor.last_window_stats

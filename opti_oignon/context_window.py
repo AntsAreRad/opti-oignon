@@ -388,10 +388,10 @@ class SlidingWindowManager:
 
     @staticmethod
     def _has_artifact_markers(text: str) -> bool:
-        """Detecte la presence probable d'artefacts.
+        """Detect the likely presence of artifacts.
 
         Args:
-            text: Contenu du message
+            text: The message content
 
         Returns:
             True if the message contains artifact markers

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Routes API pour la gestion de la configuration.
+API routes for configuration management.
 
-Endpoints pour lire/ecrire les preferences utilisateur
-et recharger la configuration depuis le disque.
+Endpoints to read and write the user preferences and to reload the
+configuration from disk.
 """
 
 # Import theme engine via importlib to avoid triggering __init__.py chain
@@ -397,7 +397,7 @@ def get_setting(key: str) -> dict:
 
 @router.put("/{key}", response_model=SettingValue)
 def set_setting(key: str, request: SettingSetRequest) -> dict:
-    """Definit une preference utilisateur."""
+    """Set a user preference."""
     _check_available()
 
     if not key.strip():
