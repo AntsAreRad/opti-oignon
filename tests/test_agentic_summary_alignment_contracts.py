@@ -25,13 +25,12 @@ the aligned chain:
     the next summary).
 
 Local-only (the public distribution ships no tests). Runs under pytest or
-the __main__ runner. Two isolated loads: the tool executor with the
-robust-suite stand-ins (stubbed ollama, fake registry, scripted
-decisions), and the agentic executor under a bare stub package with
-fully injected fakes.
+the __main__ runner. Two loads through the shared isolation window, where
+no other project module is reachable: the tool executor with the
+robust-suite stand-ins (fake registry, scripted decisions), and the
+agentic executor alone with fully injected fakes.
 """
 
-import importlib.util
 import logging
 import sys
 import traceback
@@ -39,62 +38,37 @@ import types
 from pathlib import Path
 from typing import Any
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Isolated loading -- tool executor (robust-suite idiom)
 # ---------------------------------------------------------------------------
 def _load_tool_executor():
-    keys = (
-        "ollama", "opti_oignon", "opti_oignon.tool_calling",
-        "opti_oignon.tool_registry", "opti_oignon.structured_output",
-        "opti_oignon.tool_executor",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
+    """The tool executor in the shared window, beside stand-in seams.
 
-    ollama_stub = types.ModuleType("ollama")
-    ollama_stub.chat = lambda **kw: None
-    sys.modules["ollama"] = ollama_stub
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec_tc = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_calling", _OO / "tool_calling.py",
-    )
-    tc = importlib.util.module_from_spec(spec_tc)
-    sys.modules["opti_oignon.tool_calling"] = tc
-    spec_tc.loader.exec_module(tc)
-
+    The model client needs no stand-in: the executor reaches it only
+    through the backend registry, which the window refuses.
+    """
     reg = types.ModuleType("opti_oignon.tool_registry")
     reg.ToolRegistry = object
     reg.tool_registry = None
-    sys.modules["opti_oignon.tool_registry"] = reg
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.structured_engine = None
     so.STRUCTURED_OUTPUT_AVAILABLE = False
-    sys.modules["opti_oignon.structured_output"] = so
 
-    spec_te = importlib.util.spec_from_file_location(
-        "opti_oignon.tool_executor", _OO / "tool_executor.py",
+    loaded, restore = isolate(
+        targets={
+            "opti_oignon.tool_calling": source("tool_calling.py"),
+            "opti_oignon.tool_executor": source("tool_executor.py"),
+        },
+        seeded={"opti_oignon.tool_registry": reg, "opti_oignon.structured_output": so},
     )
-    te = importlib.util.module_from_spec(spec_te)
-    sys.modules["opti_oignon.tool_executor"] = te
-    spec_te.loader.exec_module(te)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-    return te, restore
+    return loaded["opti_oignon.tool_executor"], restore
 
 
 class _FakeRegistry:
@@ -184,37 +158,18 @@ def test_c2_result_schema_carries_the_count_additively():
 
 
 # ---------------------------------------------------------------------------
-# Isolated loading -- agentic executor (bare stub package, injected fakes)
+# Isolated loading -- agentic executor (alone in the window, injected fakes)
 # ---------------------------------------------------------------------------
 def _load_agentic():
-    saved = {
-        k: sys.modules.pop(k)
-        for k in list(sys.modules)
-        if k == "opti_oignon" or k.startswith("opti_oignon.")
-    }
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.agentic_executor", _OO / "agentic_executor.py",
+    loaded, restore = isolate(
+        targets={"opti_oignon.agentic_executor": source("agentic_executor.py")},
     )
-    ag = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.agentic_executor"] = ag
-    spec.loader.exec_module(ag)
-    pkg.agentic_executor = ag
+    ag = loaded["opti_oignon.agentic_executor"]
     # The availability property consults the module import flag as well as
-    # the injected instance; under the bare stub package the flag resolves
-    # False and every tools run would silently fall back to direct. Force
-    # it so the injected fake tool executor is honored.
+    # the injected instance; in the window the flag resolves False and every
+    # tools run would silently fall back to direct. Force it so the injected
+    # fake tool executor is honored.
     ag.TOOL_EXECUTOR_AVAILABLE = True
-
-    def restore():
-        for key in list(sys.modules):
-            if key == "opti_oignon" or key.startswith("opti_oignon."):
-                sys.modules.pop(key, None)
-        sys.modules.update(saved)
-
     return ag, restore
 
 

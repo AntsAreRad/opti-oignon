@@ -13,17 +13,22 @@ any model call. These contracts pin two properties of that seam:
     the legacy name only when the configuration seam is absent.
 
 Local-only (the public distribution ships no tests). Runs under pytest or
-directly via the __main__ runner. Modules load in isolation with stubbed
-heavy dependencies.
+directly via the __main__ runner. Modules load through the shared isolation
+window, where no other project module is reachable: the heavy imports of the
+classifier degrade by design, and an absent configuration is proven
+unreachable before the tool executor runs.
 """
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_CONFIG = "opti_oignon.config"
+_HYGIENE = "opti_oignon.response_hygiene"
 
 
 def _pydantic_shim() -> types.ModuleType:
@@ -43,90 +48,94 @@ def _pydantic_shim() -> types.ModuleType:
     return mod
 
 
-_KEYS = (
-    "pydantic", "ollama", "opti_oignon", "opti_oignon.tool_calling",
-    "opti_oignon.tool_registry", "opti_oignon.structured_output",
-    "opti_oignon.response_hygiene", "opti_oignon.tool_executor",
-    "opti_oignon.agentic_executor", "opti_oignon.config",
-)
+# What closes each window the suite has open, innermost last.
+_OPEN = []
 
 
 def _snapshot():
-    return {k: sys.modules.get(k) for k in _KEYS}
+    """A savepoint: how many windows are open now."""
+    return len(_OPEN)
 
 
-def _restore(saved):
-    for k, v in saved.items():
-        if v is None:
-            sys.modules.pop(k, None)
-        else:
-            sys.modules[k] = v
+def _restore(savepoint):
+    """Close, innermost first, every window opened since ``savepoint``."""
+    while len(_OPEN) > savepoint:
+        _OPEN.pop()()
 
 
-def _prime_package():
+def _open(targets, **window):
+    """Open the shared window on ``targets``; ``_restore`` closes it.
+
+    pydantic is not a project module, so the window does not hold it: the
+    shim stands in only when the real package is absent, and leaves with
+    the window.
+    """
     try:
         import pydantic  # noqa: F401
+        shimmed = False
     except ImportError:
         sys.modules["pydantic"] = _pydantic_shim()
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
+        shimmed = True
+    try:
+        loaded, close_window = isolate(targets=targets, **window)
+    except BaseException:
+        if shimmed:
+            sys.modules.pop("pydantic", None)
+        raise
+
+    def close():
+        close_window()
+        if shimmed:
+            sys.modules.pop("pydantic", None)
+
+    _OPEN.append(close)
+    return loaded
 
 
-def _load_module(name, filename):
-    spec = importlib.util.spec_from_file_location(
-        f"opti_oignon.{name}", _OO / filename,
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[f"opti_oignon.{name}"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+def _hygiene():
+    """The hygiene helper as a target of the window, when present."""
+    path = source("response_hygiene.py")
+    return {_HYGIENE: path} if path.exists() else {}
 
 
 def _load_agentic():
     """The classifier module alone; every heavy import degrades by design.
 
-    The hygiene helper is preloaded when present so the nominal
+    The hygiene helper is loaded first when present so the nominal
     normalization path is the one under contract (its absence degrades to
     plain lowercasing by design, which these contracts do not pin).
     """
-    _prime_package()
-    rh_path = _OO / "response_hygiene.py"
-    if rh_path.exists():
-        _load_module("response_hygiene", "response_hygiene.py")
-    return _load_module("agentic_executor", "agentic_executor.py")
+    name = "opti_oignon.agentic_executor"
+    return _open({**_hygiene(), name: source("agentic_executor.py")})[name]
 
 
 def _load_tool_executor(config_stub):
-    """The tool executor with a controllable configuration seam."""
-    _prime_package()
-    ollama_stub = types.ModuleType("ollama")
-    ollama_stub.chat = lambda **kw: None
-    sys.modules["ollama"] = ollama_stub
+    """The tool executor with a controllable configuration seam.
 
-    _load_module("tool_calling", "tool_calling.py")
-
+    With a stand-in the configuration is seeded; without one it is declared
+    absent, and the window proves it unreachable before the executor runs.
+    """
     reg = types.ModuleType("opti_oignon.tool_registry")
     reg.ToolRegistry = object
     reg.tool_registry = None
-    sys.modules["opti_oignon.tool_registry"] = reg
 
     so = types.ModuleType("opti_oignon.structured_output")
     so.StructuredOutputEngine = object
     so.structured_engine = None
     so.STRUCTURED_OUTPUT_AVAILABLE = False
-    sys.modules["opti_oignon.structured_output"] = so
 
-    rh_path = _OO / "response_hygiene.py"
-    if rh_path.exists():
-        _load_module("response_hygiene", "response_hygiene.py")
-
+    seeded = {"opti_oignon.tool_registry": reg, "opti_oignon.structured_output": so}
     if config_stub is not None:
-        sys.modules["opti_oignon.config"] = config_stub
-    else:
-        sys.modules.pop("opti_oignon.config", None)
+        seeded[_CONFIG] = config_stub
+    blocked = () if config_stub is not None else (_CONFIG,)
+    name = "opti_oignon.tool_executor"
+    targets = {
+        "opti_oignon.tool_calling": source("tool_calling.py"),
+        **_hygiene(),
+        name: source("tool_executor.py"),
+    }
+    return _open(targets, seeded=seeded, blocked=blocked)[name]
 
-    return _load_module("tool_executor", "tool_executor.py")
 
 
 # ---------------------------------------------------------------------------

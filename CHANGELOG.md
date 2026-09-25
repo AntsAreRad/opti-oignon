@@ -453,6 +453,17 @@ package costs.
 
 ### Fixed
 
+- The two agentic suites ran on the real executor stack: behind their
+  stand-in package the classifier suite loaded 82 real modules and the
+  summary alignment suite 84. The classifier's fallback check -- the
+  configuration absent, so the legacy model name -- ran with the real
+  configuration loaded, and the summary suite's comment said the tool
+  executor's flag resolved False under the bare package when the real
+  module had loaded. Both now load through the shared isolation window:
+  the configuration is proven unreachable where its absence is asserted,
+  the flag resolves False as the comment says, and the model-client stubs
+  are gone, since nothing under contract imports the client any more. Two
+  more seal debts are paid.
 - The memory wrap suite's last check -- no retrieval backend importable,
   so no message -- held for the wrong reason: behind its stand-in package
   the real retrieval module loaded, with 26 others, and ran against the

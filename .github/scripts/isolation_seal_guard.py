@@ -62,8 +62,6 @@ LEDGER = {
     "test_adaptive_routing_bounds_contracts.py": "941d0d93f15359877c44b6c83e31090c2fa0cb98082ea055b764a91d205da127",
     "test_agent_run_model_capability_gate_contracts.py": "0dad2100fa2f9d1513aa82844deee3f86d0fdb50d9239bc5492de56e90758d95",
     "test_agent_run_teacher_wiring_contracts.py": "d9e474d6989dc69f5ef34e71304fcea1840db3e2069b8df4eaa71850024c09d3",
-    "test_agentic_classifier_contracts.py": "778c879f8b2f6e9e859030d2ff4fcb5fe29a0d5723b660d7356f1be237ec2b3e",
-    "test_agentic_summary_alignment_contracts.py": "286f9c6ce564378a8b31b16fb0f3f222f2245df0fd8ac534a17d0809ce18fa18",
     "test_agentic_thinking_guard_contracts.py": "9a40e39968bad0449ab97d774860e6969db269648df5582727123f6a17902e6a",
     "test_auth_2fa_secret_at_rest_contracts.py": "1eb3ad229db134bbda4ad1bf8acb39812831fc2f63fd2d66f09a81332882ec3e",
     "test_auth_2fa_verification_bounds_contracts.py": "5d28b964742ba03ad7448fe4289771bc42c367f33776dcfff9c26007885454c2",
