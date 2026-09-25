@@ -156,3 +156,4 @@ CLAUDE.local.md
 # The native core's artefact and build tree: rebuilt from the pinned crate, never tracked
 opti_oignon/native/*.so
 rust/oo_core/target/
+rust/allium/target/

@@ -1,0 +1,14 @@
+[package]
+name = "allium"
+version = "0.1.0"
+edition = "2021"
+description = "The onion companion's deterministic engine: canonical wire, fixed point, keyed randomness"
+license = "MIT"
+publish = false
+
+[lib]
+name = "allium"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = { version = "=0.10.9", default-features = false }

@@ -60,7 +60,53 @@ sys.exit(1 if (f or e) else 0)
 PY
     if [ $? -eq 0 ]; then pass "junitxml is the authority; no failures, no errors"
     else fail "see ${TMPDIR:-/tmp}/oo_pytest.txt"; grep -E '^FAILED|^ERROR' ${TMPDIR:-/tmp}/oo_pytest.txt | head -12; fi
+    budgets
   else fail "no junitxml produced - the sweep did not run"; fi
+  engine_rust
+}
+
+# Every companion contract carries a time budget (BUDGET_S in its suite), read
+# back from the junit file: over budget, or without a budget, is named.
+budgets() {
+  if python3 - "$JUNIT" <<'PY'
+import ast, pathlib, sys, xml.etree.ElementTree as ET
+budgets = {}
+suites = sorted(pathlib.Path("tests").glob("test_allium_*_contracts.py"))
+for path in suites:
+    for node in ast.walk(ast.parse(path.read_text(encoding="ascii"))):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "BUDGET_S" for t in node.targets):
+            budgets.update(ast.literal_eval(node.value))
+seen = over = missing = 0
+for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
+    if not case.get("classname", "").startswith("tests.test_allium_"):
+        continue
+    seen += 1
+    name, took = case.get("name"), float(case.get("time", 0))
+    if name not in budgets:
+        missing += 1
+        print(f"    no budget: {name}")
+    elif took > budgets[name]:
+        over += 1
+        print(f"    over budget: {name} {took:.2f}s > {budgets[name]}s")
+print(f"  companion budgets: {seen} contract(s) read, {over} over, {missing} without a budget")
+sys.exit(1 if (over or missing or (suites and not seen)) else 0)
+PY
+  then pass "every companion contract within its time budget"; else fail "companion time budgets (above)"; fi
+}
+
+# The companion engine's own tests, and clippy's proof that its arithmetic is
+# explicit. A missing tool is owed, never a pass.
+engine_rust() {
+  if ! command -v cargo >/dev/null 2>&1; then
+    skip "OWED: cargo is not installed; rust/allium's own tests and clippy did not run"; return 0
+  fi
+  if (cd rust/allium && cargo test --locked --quiet >${TMPDIR:-/tmp}/oo_allium_test.txt 2>&1); then pass "cargo test (rust/allium)"
+  else fail "cargo test (rust/allium) -> ${TMPDIR:-/tmp}/oo_allium_test.txt"; fi
+  if cargo clippy --version >/dev/null 2>&1; then
+    if (cd rust/allium && cargo clippy --locked --quiet -- -D warnings >${TMPDIR:-/tmp}/oo_allium_clippy.txt 2>&1); then
+      pass "cargo clippy (rust/allium): the arithmetic is explicit"
+    else fail "cargo clippy (rust/allium) -> ${TMPDIR:-/tmp}/oo_allium_clippy.txt"; fi
+  else skip "OWED: cargo clippy is not installed; rust/allium's explicit arithmetic is unproven here"; fi
 }
 
 t2() {

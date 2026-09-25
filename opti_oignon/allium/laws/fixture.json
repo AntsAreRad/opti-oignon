@@ -1,0 +1,21 @@
+{
+  "decays": {
+    "tag": {
+      "kind": "lazy",
+      "length": 256,
+      "tau": 3
+    },
+    "trace": {
+      "kind": "iter",
+      "tau": 2
+    }
+  },
+  "name": "fixture",
+  "provisional": true,
+  "quiescent_in_dormancy": [],
+  "stock_bounds": {},
+  "tables": {
+    "sine_q15": "52db0b0fbb426044cae83338a941d7a900dca26bcbf19df6680e6b1814659396"
+  },
+  "version": 0
+}

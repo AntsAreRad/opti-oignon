@@ -17,6 +17,7 @@
 //! The recall probes of the eviction gate live in `probes`: they answer
 //! only for text they class exactly as Python does, and refuse the rest.
 
+mod allium;
 mod probes;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -24,7 +25,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "0.4.0";
+const VERSION: &str = "0.5.0";
 
 fn escape_into(out: &mut String, text: &str) {
     out.push('"');
@@ -272,5 +273,7 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(probes::probe_score, m)?)?;
     m.add_function(wrap_pyfunction!(probes::probe_text_classes, m)?)?;
     m.add_function(wrap_pyfunction!(probes::probe_letter_folds, m)?)?;
+    m.add_function(wrap_pyfunction!(allium::allium_call, m)?)?;
+    m.add_function(wrap_pyfunction!(allium::allium_engine, m)?)?;
     Ok(())
 }

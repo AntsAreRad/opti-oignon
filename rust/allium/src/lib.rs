@@ -1,0 +1,48 @@
+//! The onion companion's deterministic engine, the twin of `opti_oignon/allium`.
+//!
+//! The being is a pure function of its facts. This crate never reads a clock,
+//! never touches a file or the network, and holds no float: time and facts
+//! are arguments, every quantity is an integer in fixed point, and every
+//! random draw is addressed by content. Its one entry point is a byte
+//! protocol, `call(&[u8]) -> Vec<u8>`, answered byte for byte as the Python
+//! reference answers it; the native core wraps it for Python, and the same
+//! bytes will serve the phone.
+#![cfg_attr(not(test), no_std)]
+#![forbid(unsafe_code)]
+#![deny(clippy::arithmetic_side_effects)]
+
+extern crate alloc;
+
+pub mod fx;
+pub mod laws;
+pub mod ocj;
+pub mod protocol;
+pub mod rng;
+
+pub use protocol::{call, engine_info, ENGINE_VERSION};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stepped_decay_and_a_table_decay_differ_as_the_law_file_says() {
+        let mut work = fx::Work::default();
+        assert_eq!(fx::decay_iter(7, 2, 1, &mut work), 6);
+        assert_eq!(fx::decay_lazy(7, 2, 1, 256, &mut work), 5);
+        assert_eq!(work.alarm, 0);
+    }
+
+    #[test]
+    fn a_canonical_document_is_its_own_re_emission() {
+        let doc = br#"{"a":[1,-2,true,false,null,"x\"y\\z"],"b":{}}"#;
+        let value = ocj::parse(doc, false).expect("canonical");
+        assert_eq!(ocj::emit(&value).expect("emits"), doc.to_vec());
+    }
+
+    #[test]
+    fn a_float_is_refused_by_name() {
+        let answer = call(br#"{"doc":1.5,"op":"echo","v":1}"#);
+        assert_eq!(answer, br#"{"detail":"number at 7","refused":"float"}"#.to_vec());
+    }
+}

@@ -149,3 +149,14 @@ to the reference. The expressions travel with every call and the core
 refuses any it does not reproduce, so a change to them on the Python side
 takes effect at once, on the reference path, until the core is taught it.
 The rates, the thresholds and the gate's wording stay in Python.
+
+The same artefact links a second crate, `rust/allium`: the engine of the
+companion, which nothing in the application calls yet. It answers one
+byte protocol -- canonical JSON in, canonical JSON out, never an
+exception -- and `opti_oignon/allium/ref` answers it too, as the
+reference. Before the native engine is used, its whole identity
+(versions, limits, operations, refusal codes, and the digests of the law
+and table files both engines read) must equal the reference's; an
+artefact built from other files is not used, and that is said once. The
+crate is `no_std`, holds no float and no hashed map, and releases the GIL
+for the length of a call.

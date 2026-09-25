@@ -11,6 +11,24 @@ package costs.
 
 ### Added
 
+- The chassis of the companion's engine, `opti_oignon/allium` and
+  `rust/allium`: a being that will be a pure function of its facts needs
+  two engines that cannot disagree, so every piece is written twice, a
+  Python reference and a Rust twin, and proven byte for byte equal. A
+  canonical JSON wire (printable ASCII, sorted unique keys, integers within
+  2^53 - 1, no float, no whitespace, a closed set of eleven refusal codes);
+  Q16.16 fixed point with primitives that never raise and never panic --
+  a correction saturates and counts an alarm; randomness addressed by
+  content (SHA-256 keys, SplitMix64 streams, rejection without modulo
+  bias); law and table files digested from their canonical re-emission, so
+  indentation never counts and a native core built from other files fails
+  its handshake and is not used. The twin is `no_std`, forbids unsafe code,
+  denies arithmetic with side effects, links `sha2` alone and releases the
+  GIL for the length of a call. Twenty-one contracts, each within two
+  seconds; the ladder now reads their measured durations against the
+  budget each suite declares, and runs the engine's own `cargo test` and
+  `cargo clippy` (owed where clippy is not installed, as here). Nothing in
+  the application calls the engine yet.
 - [SECURITY] The test process no longer reaches the maintainer's data.
   Measured first: 253 tests touched `data/`, `opti_oignon/data/` or a
   database file of the tree through real modules -- the existence check
