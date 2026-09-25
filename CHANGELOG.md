@@ -453,6 +453,13 @@ package costs.
 
 ### Fixed
 
+- The memory wrap suite's last check -- no retrieval backend importable,
+  so no message -- held for the wrong reason: behind its stand-in package
+  the real retrieval module loaded, with 26 others, and ran against the
+  real memory store, which happened to return nothing. The extraction
+  bounds suite loaded 13 real modules the same way. Both now load through
+  the shared isolation window, the retrieval module proven unreachable for
+  the first; two more seal debts are paid.
 - The notes store's phone opt-in suite loaded 21 real modules by name
   behind its stand-in package -- the real sync package, encryption and the
   post-quantum signatures among them -- and the auto-tuner's bounds suite

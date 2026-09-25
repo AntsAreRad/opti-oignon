@@ -16,59 +16,30 @@ This suite pins the memory seam of that envelope:
     message at all;
   * MW4 -- the message always rides the user role, never system.
 
-Loads the untrusted-context module in isolation with the retrieval backend
-absent, so the provider resolution is exercised deterministically.
+The untrusted-context module is loaded through the shared isolation window
+with the retrieval backend proven unreachable, so the provider resolution is
+exercised deterministically and never reaches a real memory store.
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_AGENT = _REPO / "opti_oignon" / "agent"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_CONTEXT = "opti_oignon.agent.untrusted_context"
 
 
 def _load():
-    """Load the untrusted-context module under a stand-in package.
-
-    Every ``opti_oignon.*`` entry is snapshotted and evicted first so a
-    previously imported real retrieval module cannot leak into the provider
-    resolution, then restored afterwards.
-    """
-    saved = {
-        k: sys.modules[k]
-        for k in list(sys.modules)
-        if k == "opti_oignon" or k.startswith("opti_oignon.")
-    }
-    for k in saved:
-        del sys.modules[k]
-
-    root = types.ModuleType("opti_oignon")
-    root.__path__ = []
-    agent = types.ModuleType("opti_oignon.agent")
-    agent.__path__ = []
-    sys.modules["opti_oignon"] = root
-    sys.modules["opti_oignon.agent"] = agent
-
-    full = "opti_oignon.agent.untrusted_context"
-    spec = importlib.util.spec_from_file_location(
-        full, _AGENT / "untrusted_context.py"
+    """Load the untrusted-context module in the shared window, retrieval unreachable."""
+    loaded, restore = isolate(
+        targets={_CONTEXT: source("agent", "untrusted_context.py")},
+        blocked=("opti_oignon.memory.retrieval",),
+        packages=("opti_oignon.agent",),
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[full] = mod
-    agent.untrusted_context = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k in list(sys.modules):
-            if k == "opti_oignon" or k.startswith("opti_oignon."):
-                del sys.modules[k]
-        for k, v in saved.items():
-            sys.modules[k] = v
-
-    return mod, restore
+    return loaded[_CONTEXT], restore
 
 
 _BLOCK = "Relevant memories:\n- [preference] the user likes green tea"

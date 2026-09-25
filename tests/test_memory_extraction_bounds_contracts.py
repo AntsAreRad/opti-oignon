@@ -21,60 +21,53 @@ path. This suite pins those bounds:
   * EX6 -- the transcript is bounded to the most recent turns and skips
     empty contents.
 
-Loads the extraction module in isolation; the model client import is
-blocked so resolution stays deterministic. Local-only. Runs under pytest or
-the __main__ runner.
+The extraction module is loaded through the shared isolation window, where
+no other project module is reachable, and the model client import is blocked
+so resolution stays deterministic. Local-only. Runs under pytest or the
+__main__ runner.
 """
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_MEMORY = _REPO / "opti_oignon" / "memory"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
+_EXTRACTION = "opti_oignon.memory.extraction"
+_ABSENT = object()
 
 
 def _load():
-    """Load the extraction module under a stand-in package.
+    """Load the extraction module in the shared window, the model client blocked.
 
-    Every ``opti_oignon.*`` entry plus the model client entry is snapshotted
-    and evicted first so a previously imported real module cannot leak into
-    the isolation window, then restored afterwards.
+    The client is not a project module, so the window does not hold it: its
+    entry is neutralised here and put back by the same closer.
     """
-    keys = ["ollama"] + [
-        k
-        for k in list(sys.modules)
-        if k == "opti_oignon" or k.startswith("opti_oignon.")
-    ]
-    saved = {k: sys.modules[k] for k in keys if k in sys.modules}
-    for k in keys:
-        sys.modules.pop(k, None)
+    client = sys.modules.get("ollama", _ABSENT)
     sys.modules["ollama"] = None  # imports of the client fail deterministically
-
-    root = types.ModuleType("opti_oignon")
-    root.__path__ = []
-    memory = types.ModuleType("opti_oignon.memory")
-    memory.__path__ = []
-    sys.modules["opti_oignon"] = root
-    sys.modules["opti_oignon.memory"] = memory
-
-    full = "opti_oignon.memory.extraction"
-    spec = importlib.util.spec_from_file_location(full, _MEMORY / "extraction.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[full] = mod
-    memory.extraction = mod
-    spec.loader.exec_module(mod)
+    try:
+        loaded, close_window = isolate(
+            targets={_EXTRACTION: source("memory", "extraction.py")},
+            packages=("opti_oignon.memory",),
+        )
+    except BaseException:
+        _put_back(client)
+        raise
 
     def restore():
-        for k in list(sys.modules):
-            if k == "opti_oignon" or k.startswith("opti_oignon."):
-                del sys.modules[k]
-        sys.modules.pop("ollama", None)
-        for k, v in saved.items():
-            sys.modules[k] = v
+        close_window()
+        _put_back(client)
 
-    return mod, restore
+    return loaded[_EXTRACTION], restore
+
+
+def _put_back(client):
+    if client is _ABSENT:
+        sys.modules.pop("ollama", None)
+    else:
+        sys.modules["ollama"] = client
 
 
 class _Store:
