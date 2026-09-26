@@ -420,7 +420,8 @@ package costs.
   starts with the tracked files as HEAD holds them, taken from git: the
   real places are never touched, and the session ends with the count of
   paths kept off them (505 on the first run), a figure to bring down suite
-  by suite. A child process a contract starts is not covered.
+  by suite. Its reach to the child processes a contract starts came later,
+  under Fixed.
 - A suite-wide check, `tests/conftest.py`, fails at its teardown any
   contract that leaves a stand-in project module, a neutralised project
   entry or a replaced `urllib.request.urlopen` it did not find. A stand-in
@@ -874,6 +875,75 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The children of a test session reached the maintainer's data,
+  and so did the session's own pathlib listings. The data firewall covered
+  the test process only: under `strace -f` over a full sweep, 25 child
+  processes that contracts start reached the real data places, 21 of them
+  with a call that succeeded. Five import probes opened
+  `opti_oignon/data/branches.db` and `plugins.db` read-write, with their WAL
+  and shared-memory files, and made `opti_oignon/data/plugins`; about twenty
+  more read `opti_oignon/data/user_config.yaml` and made the data
+  directories. On the maintainer's machine every local sweep therefore
+  opened the real branch and plugin stores. In the test process, glob's
+  string globber, which every `pathlib` glob and rglob lists through, had
+  bound `os.scandir` and `os.lstat` when its class was made, out of the
+  firewall's reach, and 24 tree-walking tests listed the real
+  `opti_oignon/data`, its plugins and its projects by name. The session now
+  sets two variables and puts `tests/_firewall_site`, then the tree's own
+  root, first on `PYTHONPATH`; its `usercustomize` installs the firewall,
+  on the session's mirror, in each Python child that inherits them -- as it
+  is, copied and extended, or built by the componion suites' `child_env` --
+  before any code of the child's own. It loads nothing the interpreter had
+  not loaded: the firewall's source runs under a private name, outside the
+  module cache and without touching `sys.path`, and the connect, globber
+  and bound-open wraps are applied as their modules are executed. The root
+  on the path matters in a second worktree, where the editable install maps
+  the package to the main checkout: a child started from an empty directory
+  imported that checkout's package, whose data places no firewall covered.
+  It now imports the tree under test, and in a covered process the package
+  is refused outright when an install would load it from outside every
+  covered tree. A child that cannot be covered -- variables that do not
+  pair as absolute paths, a firewall that cannot be installed -- exits 70
+  and says why instead of running uncovered, and the session starts one
+  child before any suite to see the firewall installed there: when it is
+  not (a user site disabled by `PYTHONNOUSERSITE`, say), the session stops
+  with status 70 and the reason instead of running on. The globber is
+  wrapped in the test process too, and a listing through it names what it
+  found in the mirror under the path the caller gave, so a walk of the tree
+  still reads as a walk of the tree.
+
+  The review of that change found more of the same kind, all closed here.
+  In the test process the package-level `sqlcipher3.connect` -- the one the
+  application calls -- and `sqlite3.dbapi2.connect` were never wrapped,
+  since each package had copied its connect before the firewall came; a
+  path that reached a data place through `..`, a doubled slash or a climb
+  out of the working directory was passed through, because the prefix was
+  tested before the path was normalised; a listing with no path, in a data
+  place, listed the real one; `tarfile` and `bz2` had bound `open` at
+  import, so an archive written or extracted into a data place landed in
+  the real one; and truncating, linking, making a pipe or a node, reading a
+  link and changing an owner were not redirected at all. The summary line
+  now counts the processes that installed the firewall -- a marker each,
+  written even when a process keeps nothing off, forks included -- beside
+  what they kept off, and names every launch the firewall does not reach,
+  by reason: a Python child run with `-I`, `-E`, `-s` or `-S`, with
+  `PYTHONNOUSERSITE`, without the two variables, or with a `PYTHONPATH`
+  that lacks the site, and a process that is not Python started in a data
+  place. The import footprint guard's probe is one of them, by decision:
+  its `PYTHONPATH` is replaced to measure a fresh interpreter, so the
+  regression it exists to catch, a store opened at import, would open the
+  tree's real store once before being reported. The ladder's first tier
+  prints the line, and holds every suite that declares time budgets to
+  them. Not covered, and written in the firewall: a path spelled through a
+  symbolic link, the files SQLite opens from SQL (`ATTACH`,
+  `VACUUM INTO`), a `sqlite3.Connection` built directly, an interpreter
+  whose own build disables its user site, a child that is not Python
+  outside the data places, and a Python process such a child starts in
+  turn, as the native core's build script does. Measured again with the
+  same two instruments and a wider set of traced calls, against this tree
+  and the main checkout: no process reaches a real data place, and the
+  test process lists none. Fourteen contracts, twelve of them first red on
+  their property against the tree as it was.
 - The chat composer's five server-wide switches -- semantic cache, cascading,
   humanizer, quick sandbox and coding agent -- showed what they had asked for,
   not what the server held. Each was a raw request without the CSRF header, so

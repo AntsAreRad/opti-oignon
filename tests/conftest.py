@@ -29,7 +29,19 @@ the whole session, ``tests/_data_firewall.py`` redirects every path inside
 mirror that starts as a fresh checkout would; it is installed before any
 suite is collected, so a module that touches its data directory when it is
 imported is covered too, and the summary line says how many paths it kept
-off. A child process a contract starts is not covered.
+off. The firewall is carried to the Python child processes a contract
+starts with the environment inherited -- as it is, or copied and extended:
+each installs it before any code of its own, imports the package from this
+tree whatever its working directory, and reports what it kept off. One
+child is started first to see it installed; when it is not -- the user site
+disabled, say -- the session stops before any suite with status 70 and
+names why, since a session that ran on would let every child reach the real
+places. The summary line counts the children that installed it, what they
+kept off, and every launch it does not reach, by reason: a Python child run
+with ``-I``, ``-E``, ``-s`` or ``-S``, or whose ``PYTHONPATH`` or whole
+environment is replaced (the import footprint guard's probe, on purpose),
+and a process that is not Python started in a data place.
+``tests/_data_firewall.py`` has what stays uncovered.
 
 Local-only (the public distribution ships no tests).
 """
@@ -42,7 +54,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _data_firewall import DataFirewall  # noqa: E402
+from _data_firewall import REFUSED, DataFirewall  # noqa: E402
 
 _PACKAGE = "opti_oignon"
 _FOUND = pytest.StashKey()
@@ -51,9 +63,14 @@ _FIREWALL = DataFirewall(Path(__file__).resolve().parent.parent)
 
 def pytest_configure(config):
     _FIREWALL.install()
+    uncovered = _FIREWALL.cover_children()
+    if uncovered:
+        pytest.exit(f"data firewall: the child processes of this session cannot be covered ({uncovered}); "
+                    "the session refuses to run uncovered", returncode=REFUSED)
 
 
 def pytest_unconfigure(config):
+    _FIREWALL.uncover_children()
     _FIREWALL.uninstall()
 
 

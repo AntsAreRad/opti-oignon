@@ -63,8 +63,11 @@ sys.exit(1 if (f or e) else 0)
 PY
     if [ $? -eq 0 ]; then pass "junitxml is the authority; no failures, no errors"
     else fail "see ${TMPDIR:-/tmp}/oo_pytest.txt"; grep -E '^FAILED|^ERROR' ${TMPDIR:-/tmp}/oo_pytest.txt | head -12; fi
+    # What the data firewall kept off the real places, and what it does not reach.
+    grep -m1 '^data firewall:' ${TMPDIR:-/tmp}/oo_pytest.txt | sed 's/^/  /'
     budgets
-  else fail "no junitxml produced - the sweep did not run"; fi
+  else fail "no junitxml produced - the sweep did not run"
+    grep -m1 'data firewall' ${TMPDIR:-/tmp}/oo_pytest.txt | sed 's/^/    /'; fi
   engine_rust
   frontend_step
 }
@@ -72,7 +75,8 @@ PY
 # Every componion and frontend contract carries a time budget (BUDGET_S in its
 # suite), read back from the junit file: over budget, or without a budget, is
 # named. The frontend suites are the test_ui_* suites and every suite that
-# imports the frontend helper (tests/_frontend.py).
+# imports the frontend helper (tests/_frontend.py). Any other suite that
+# declares BUDGET_S is held to it the same way, every one of its contracts.
 budgets() {
   if python3 - "$JUNIT" <<'PY'
 import ast, pathlib, sys, xml.etree.ElementTree as ET
@@ -99,9 +103,13 @@ tests = pathlib.Path("tests")
 componion = sorted(tests.glob("test_allium_*_contracts.py"))
 frontend = sorted({*tests.glob("test_ui_*_contracts.py"), *(p for p in tests.glob("test_*.py") if uses_helper(p))})
 modules = {f"tests.{path.stem}" for path in frontend}
+others = sorted(p for p in tests.glob("test_*.py") if p not in componion and p not in frontend
+                and "BUDGET_S" in p.read_text(encoding="utf-8", errors="replace") and declared(p))
+declaring = {f"tests.{path.stem}" for path in others}
 families = (
     ("componion", componion, lambda cls: cls.startswith("tests.test_allium_")),
     ("frontend", frontend, lambda cls: cls in modules or cls.rsplit(".", 1)[0] in modules),
+    ("declared", others, lambda cls: cls in declaring or cls.rsplit(".", 1)[0] in declaring),
 )
 cases = list(ET.parse(sys.argv[1]).getroot().iter("testcase"))
 red = False
@@ -128,7 +136,7 @@ if (tests / "_frontend.py").is_file() and not frontend:
     red = True
 sys.exit(1 if red else 0)
 PY
-  then pass "every componion and frontend contract within its time budget"; else fail "time budgets (above)"; fi
+  then pass "every componion, frontend and declared contract within its time budget"; else fail "time budgets (above)"; fi
 }
 
 # The frontend's lint and production build, both on a copy under $TMPDIR made
