@@ -11,6 +11,52 @@ package costs.
 
 ### Added
 
+- A measuring harness for the frontend; nothing in the interface changes.
+  Sixteen per-file ratchets count what the interface has to pay down, each
+  in every spelling that draws the same thing: hand-made buttons (a
+  `<button>` or `role="button"`) and fields outside the primitives, `style=`
+  attributes and `style:` directives, type under 12 px (px, rem or em, a
+  class, a declaration, a directive or a `font` shorthand, and a text-scale
+  token declared under 12 px), `rgb(` literals, hover-only reveals (a
+  `group-hover:` utility no focus variant sets too), raw `fetch(` (bare or
+  through the global object) outside the API layer and inside it outside
+  its client, French comment lines (with a plain reading as their floor),
+  `setInterval(` sites, symbol glyphs (raw, as a numeric or named reference,
+  a script or CSS escape, or built from a number), border tokens read
+  directly or through an alias, capitals and wide tracking, lines between
+  rows (the classes, and the CSS that draws the same line), gradients (CSS
+  and the Tailwind utilities) and page reloads. They read the files `git
+  ls-files --cached --others --exclude-standard frontend/src` lists, so a
+  file being written is counted and an ignored one is not, and a further
+  contract refuses a file of a kind no census reads. Each ledger is a
+  literal dict in its test file, born equal to today's count, and one
+  engine in `tests/_frontend.py` holds them all: no file above its entry, a
+  file not in the ledger counts 0, an entry above its count fails with
+  "lower the ledger", no entry higher than the committed one at `HEAD`, a
+  listing that is never empty, and a positive sample every probe must
+  count, so a probe gone blind is red instead of a quiet zero. A moved file
+  carries its entry when git's rename detection pairs it with the file it
+  was, whether or not the move was staged (the untracked files are shown to
+  git in a scratch copy of the index, never in the index itself); a ledger
+  renamed, or moved to another test file, is compared with the one `HEAD`
+  holds. Eight contracts prove those rules on synthetic repositories.
+  svelte-check's errors are now counted per file -- 78 in 16 files today,
+  42 of them in the settings page -- so a new error in one file can no
+  longer hide behind a repair in another. Each run plants one error in a
+  component and one in a module, under `src/lib` and under `src/routes`, on
+  its copy and must count all four, and it refuses a run that printed no
+  `COMPLETED` summary or whose total differs from the error lines read: the
+  two ways a global count reads zero. The CI svelte-check step is not
+  changed. `bash scripts/ladder.sh t1` now also lints the frontend (0
+  errors, over at least one component and one module) and builds it (`vite
+  build` exits 0 and writes its index page), both on a copy under `$TMPDIR`
+  whose dependencies are linked one package at a time, with the reports in
+  the run's own scratch directory, so nothing is written in the tree;
+  without `frontend/node_modules` the step is a named OWED skip, and `bash
+  scripts/ladder.sh frontend` runs it alone. The ladder's time budgets now
+  read the frontend suites as well as the componion's. Twenty-six
+  contracts.
+
 - The componion's life on the platform: the store now lives a being in
   time. Each journaled write reads the wall clock and the machine's UTC
   offset once; a late write lands on the latest recorded minute, a clock

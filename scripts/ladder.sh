@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Graded check ladder. Cheapest tier first; a red tier stops the run.
-# Usage: ladder.sh [t0|t1|t2|t3|t4|t5|all|life|stopgate]
+# Usage: ladder.sh [t0|t1|t2|t3|t4|t5|all|life|frontend|stopgate]
 # Every tier reports PASS, FAIL, or SKIP with a named reason. A tier is never
 # silently absent: a missing tool is a named skip, not a pass.
 # "life" is not part of "all": it runs alone, and exits 3 when it is owed.
+# "frontend" runs t1's frontend step alone.
 set -uo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" || exit 1
 
@@ -65,35 +66,130 @@ PY
     budgets
   else fail "no junitxml produced - the sweep did not run"; fi
   engine_rust
+  frontend_step
 }
 
-# Every componion contract carries a time budget (BUDGET_S in its suite), read
-# back from the junit file: over budget, or without a budget, is named.
+# Every componion and frontend contract carries a time budget (BUDGET_S in its
+# suite), read back from the junit file: over budget, or without a budget, is
+# named. The frontend suites are the test_ui_* suites and every suite that
+# imports the frontend helper (tests/_frontend.py).
 budgets() {
   if python3 - "$JUNIT" <<'PY'
 import ast, pathlib, sys, xml.etree.ElementTree as ET
-budgets = {}
-suites = sorted(pathlib.Path("tests").glob("test_allium_*_contracts.py"))
-for path in suites:
+
+def declared(path):
+    found = {}
     for node in ast.walk(ast.parse(path.read_text(encoding="ascii"))):
         if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "BUDGET_S" for t in node.targets):
-            budgets.update(ast.literal_eval(node.value))
-seen = over = missing = 0
-for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
-    if not case.get("classname", "").startswith("tests.test_allium_"):
-        continue
-    seen += 1
-    name, took = case.get("name"), float(case.get("time", 0))
-    if name not in budgets:
-        missing += 1
-        print(f"    no budget: {name}")
-    elif took > budgets[name]:
-        over += 1
-        print(f"    over budget: {name} {took:.2f}s > {budgets[name]}s")
-print(f"  componion budgets: {seen} contract(s) read, {over} over, {missing} without a budget")
-sys.exit(1 if (over or missing or (suites and not seen)) else 0)
+            found.update(ast.literal_eval(node.value))
+    return found
+
+def uses_helper(path):
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if "_frontend" not in text:
+        return False
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.ImportFrom) and node.module == "_frontend":
+            return True
+        if isinstance(node, ast.Import) and any(alias.name == "_frontend" for alias in node.names):
+            return True
+    return False
+
+tests = pathlib.Path("tests")
+componion = sorted(tests.glob("test_allium_*_contracts.py"))
+frontend = sorted({*tests.glob("test_ui_*_contracts.py"), *(p for p in tests.glob("test_*.py") if uses_helper(p))})
+modules = {f"tests.{path.stem}" for path in frontend}
+families = (
+    ("componion", componion, lambda cls: cls.startswith("tests.test_allium_")),
+    ("frontend", frontend, lambda cls: cls in modules or cls.rsplit(".", 1)[0] in modules),
+)
+cases = list(ET.parse(sys.argv[1]).getroot().iter("testcase"))
+red = False
+for label, suites, member in families:
+    budgets = {}
+    for path in suites:
+        budgets.update(declared(path))
+    seen = over = missing = 0
+    for case in cases:
+        if not member(case.get("classname", "")):
+            continue
+        seen += 1
+        name, took = case.get("name"), float(case.get("time", 0))
+        if name not in budgets:
+            missing += 1
+            print(f"    no budget: {name}")
+        elif took > budgets[name]:
+            over += 1
+            print(f"    over budget: {name} {took:.2f}s > {budgets[name]}s")
+    print(f"  {label} budgets: {len(suites)} suite(s), {seen} contract(s) read, {over} over, {missing} without a budget")
+    red = red or bool(over or missing or (suites and not seen))
+if (tests / "_frontend.py").is_file() and not frontend:
+    print("    the frontend helper exists and no suite was found to use it: the frontend budgets read nothing")
+    red = True
+sys.exit(1 if red else 0)
 PY
-  then pass "every componion contract within its time budget"; else fail "componion time budgets (above)"; fi
+  then pass "every componion and frontend contract within its time budget"; else fail "time budgets (above)"; fi
+}
+
+# The frontend's lint and production build, both on a copy under $TMPDIR made
+# by tests/_frontend.py (frontend_copy: the listed files, the dependencies
+# linked one package at a time), so nothing is written in the tree or beside
+# the installed packages. eslint must lint at least one component and one
+# module under src/ and report 0 errors; vite build must exit 0 and write
+# build/index.html. The reports live in the run's own scratch directory, so
+# two ladders running at once never read each other's; it is removed when
+# the step passes and kept, and named, when it fails. Without the
+# dependencies the step is owed, never a pass.
+frontend_step() {
+  if [ ! -d frontend/node_modules ]; then
+    skip "OWED: frontend/node_modules absent"; return 0
+  fi
+  local scratch copy rc red=0
+  if ! scratch=$(mktemp -d "${TMPDIR:-/tmp}/oo_frontend.XXXXXX"); then fail "frontend: no scratch directory"; return; fi
+  if ! copy=$(PYTHONDONTWRITEBYTECODE=1 python3 -B -c 'import sys; sys.path.insert(0, "tests"); import _frontend; print(_frontend.frontend_copy(sys.argv[1]))' "$scratch" 2>"$scratch/copy.txt"); then
+    fail "frontend: the copy failed -> $scratch/copy.txt"; return
+  fi
+  (cd "$copy" && node_modules/.bin/eslint . --format json) >"$scratch/eslint.json" 2>"$scratch/eslint.txt"
+  if python3 - "$scratch/eslint.json" "$copy" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        results = json.load(handle)
+except (OSError, ValueError) as exc:
+    print(f"    eslint wrote no report ({exc})")
+    sys.exit(1)
+errors = sum(result.get("errorCount", 0) for result in results)
+warnings = sum(result.get("warningCount", 0) for result in results)
+source = sys.argv[2] + "/src/"
+kinds = {}
+for result in results:
+    path = result.get("filePath", "")
+    if path.startswith(source):
+        kind = path.rsplit(".", 1)[-1]
+        kinds[kind] = kinds.get(kind, 0) + 1
+shown_kinds = ", ".join(f"{count} .{kind}" for kind, count in sorted(kinds.items())) or "none"
+print(f"  eslint: {len(results)} file(s) linted ({shown_kinds} under src/), {errors} error(s), {warnings} warning(s)")
+shown = 0
+for result in results:
+    for message in result.get("messages", []):
+        if message.get("severity") == 2 and shown < 10:
+            shown += 1
+            where = result.get("filePath", "").replace(sys.argv[2] + "/", "frontend/")
+            print(f"    {where}:{message.get('line')} {message.get('ruleId')} {message.get('message')}")
+if not kinds.get("svelte") or not kinds.get("ts"):
+    print("    eslint linted no component or no module under src/: its 0 errors mean nothing")
+    sys.exit(1)
+sys.exit(1 if errors else 0)
+PY
+  then pass "eslint: 0 errors"; else fail "eslint -> $scratch/eslint.json"; red=1; fi
+  (cd "$copy" && node_modules/.bin/vite build) >"$scratch/build.txt" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "vite build exited $rc -> $scratch/build.txt"; red=1
+    { grep -A2 -m1 'error during build' "$scratch/build.txt" || tail -5 "$scratch/build.txt"; } | sed 's/^/    /'
+  elif [ ! -f "$copy/build/index.html" ]; then
+    fail "vite build exited 0 and wrote no build/index.html -> $scratch/build.txt"; red=1
+  else pass "vite build: exit 0, build/index.html written"; fi
+  if [ "$red" -eq 0 ]; then rm -rf "$scratch"; else say "  frontend reports kept in $scratch"; fi
 }
 
 # The componion engine's own tests, and clippy's proof that its arithmetic is
@@ -217,6 +313,7 @@ case "$TIER" in
   t5) t5 ;;
   all) t0; t2; t1; t3; t4; t5 ;;
   life) life ;;
+  frontend) head_ "frontend  lint and build (also run by t1)"; frontend_step ;;
   *) say "unknown tier: $TIER"; exit 64 ;;
 esac
 
