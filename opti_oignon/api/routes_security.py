@@ -536,16 +536,30 @@ class EncryptionSetupRequest(BaseModel):
     passphrase: str | None = Field(default=None, description="Passphrase (for mode=passphrase)")
 
 
+_KEYFILE_REFUSAL = (
+    "A key file exists and does not open in this server (if it is wrapped "
+    "under a passphrase, set OPTI_KEYFILE_PASSPHRASE in the server's "
+    "environment and restart the server). Setup never replaces a key file."
+)
+
+
 @router.post("/encryption/setup")
 def setup_encryption(req: EncryptionSetupRequest) -> dict:
-    """Initialize data-at-rest encryption.
+    """Initialize data-at-rest encryption, never replacing a key file.
 
-    Generates an encryption key and saves it to the keyfile.
-    Use mode='random' for auto-generated key, or mode='passphrase'
-    with a user-provided passphrase for PBKDF2-derived key.
+    A key that already loads (OPTI_ENCRYPTION_KEY, or the keyfile) is
+    enabled as it is and no keyfile is written. Anything at the keyfile's
+    path that does not open in this server, a symbolic link included, is
+    refused with 409. Otherwise a key is made and saved to a new keyfile:
+    use mode='random' for an auto-generated key, or mode='passphrase' with
+    a user-provided passphrase for a derived key.
     """
     try:
-        from opti_oignon.encryption import get_encryption_manager
+        from opti_oignon.encryption import (
+            KeyfileExists,
+            get_encryption_manager,
+            keyfile_present,
+        )
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -567,20 +581,33 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
                 status_code=400,
                 detail="Passphrase must be at least 8 characters",
             )
-        ok = mgr.setup_from_passphrase(req.passphrase)
-    elif req.mode == "random":
-        ok = mgr.setup_random_key()
-    else:
+    elif req.mode != "random":
         raise HTTPException(
             status_code=400,
             detail="Invalid mode. Use 'passphrase' or 'random'.",
         )
 
-    if not ok:
-        raise HTTPException(
-            status_code=500,
-            detail="Encryption setup failed. Check server logs.",
-        )
+    # A key that loads here is the one the databases are keyed by, and a key
+    # file that does not open here may be: a new key would leave them
+    # unreadable.
+    if mgr.enable_with_existing_key():
+        detail = "Encryption enabled with the existing key"
+    elif keyfile_present():
+        raise HTTPException(status_code=409, detail=_KEYFILE_REFUSAL)
+    else:
+        try:
+            if req.mode == "passphrase":
+                ok = mgr.setup_from_passphrase(req.passphrase)
+            else:
+                ok = mgr.setup_random_key()
+        except KeyfileExists:
+            raise HTTPException(status_code=409, detail=_KEYFILE_REFUSAL) from None
+        if not ok:
+            raise HTTPException(
+                status_code=500,
+                detail="Encryption setup failed. Check server logs.",
+            )
+        detail = "Encryption configured successfully"
 
     # Enable in config
     current = _load_security_yaml()
@@ -589,7 +616,7 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
 
     return {
         "setup": True,
-        "detail": "Encryption configured successfully",
+        "detail": detail,
         "status": mgr.get_status(),
     }
 

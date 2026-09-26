@@ -1186,6 +1186,39 @@ package costs.
   swallowed the next click, so the failure landed on an unrelated locator. No
   budget can tell "not yet" from "never", so the application now marks the
   moment it has decided and the helper waits for that mark.
+- [SECURITY] Encryption setup could replace the master key file.
+  `POST /api/security/encryption/setup` stood aside only when the running
+  encryption manager was enabled, and the manager turns itself off whenever
+  the server cannot load the key: an enveloped key file without
+  `OPTI_KEYFILE_PASSPHRASE` in the server's environment is enough. Setup
+  then made a new key and wrote it over the existing file -- in random mode,
+  in the unprotected format -- and every encrypted database and the audit
+  chain, keyed by the old one, would no longer have opened. A quieter path
+  went the same way: with `OPTI_ENCRYPTION_KEY` set and encryption off in
+  `security.yaml`, setup wrote a new key file and encrypted fields under it
+  for the rest of the session, while the databases kept the variable's key
+  and the next start loaded the variable again. Setup now never replaces a
+  key file. A key that already loads (`OPTI_ENCRYPTION_KEY`, or the key
+  file) is enabled as it is and no key file is written; anything at the key
+  file's path that does not open in this server -- a symbolic link
+  included, which the old write followed -- is refused with 409 before any
+  key is made, the refusal naming the variable and the restart it needs. A
+  new key file is written to a temp created with mode 0600 by
+  `O_CREAT|O_EXCL|O_NOFOLLOW` and synced, then hard-linked into place and
+  its directory synced, so it never exists partly written or with looser
+  permissions, and a key file another writer put there meanwhile is refused
+  with the same 409, not replaced. Once linked, a temp that cannot be
+  removed or a directory that cannot be synced is logged as a warning, not
+  answered as a failed setup. Setup now needs hard links in the key
+  directory: on a filesystem without them it fails and writes nothing,
+  since the only fallback, a rename, could replace a file. Owed to the key
+  ceremony panel, not changed here: it shows the refusal as "API error 409"
+  without the server's reason, and it words every success as a new key --
+  when an existing key is enabled, a passphrase typed there was not used,
+  the random-mode text names a key file that may not exist, and an existing
+  key in the unprotected format stays unwrapped at rest. Seven contracts
+  (nineteen cases); before the change the same call rewrote the key file it
+  could not open, and wrote a new key through a link at the key path.
 
 ## 2.2.0 -- 2026-07-28
 

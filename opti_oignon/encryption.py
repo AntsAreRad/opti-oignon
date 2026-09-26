@@ -27,6 +27,7 @@ Configuration in config/security.yaml > encryption section.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -429,6 +430,84 @@ def _verify_keyfile_perms(fpath: Path) -> None:
         _chmod_600(fpath)
 
 
+class KeyfileExists(RuntimeError):
+    """A key file is already at this path: setup never replaces one."""
+
+
+def keyfile_present(path: Path | None = None) -> bool:
+    """Whether anything is at the key file's path (default: the data key file).
+
+    A symbolic link is not followed: a dangling one is present, since writing
+    through it would put the key wherever it points. Setup writes no key file
+    where this answers True.
+    """
+    return os.path.lexists(path or _DEFAULT_KEYFILE)
+
+
+def _write_keyfile(fpath: Path, data: bytes) -> None:
+    """Create the key file ``fpath`` holding ``data``; never replace one.
+
+    The bytes go to a temp file beside it, created with mode 0600 by
+    ``O_CREAT | O_EXCL | O_NOFOLLOW`` and synced, which is then hard-linked
+    to ``fpath`` and unlinked, and the directory is synced. The link fails
+    when anything is already at ``fpath``, so a key file another writer put
+    in place after the existence check is refused, not replaced, and the key
+    file never exists partly written or with looser permissions. A failure
+    before the link removes the temp and writes nothing; there is no other
+    way in, so a filesystem without hard links gets no key file.
+
+    Once the link has succeeded the key file is whole and in place: a temp
+    that cannot be removed (it still holds the key) or a directory that
+    cannot be synced is logged as a warning naming it, never raised. A
+    process killed between the temp's creation and its link leaves the temp,
+    mode 0600, holding a key that never became the key file; nothing sweeps
+    it, since a sweep could remove another writer's live temp.
+
+    Raises ``KeyfileExists`` when anything is at ``fpath``.
+    """
+    parent = fpath.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    if keyfile_present(fpath):
+        raise KeyfileExists(str(fpath))
+    temp = parent / ("." + fpath.name + ".tmp-" + os.urandom(4).hex())
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    handle = os.open(temp, flags, 0o600)
+    try:
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(handle, view):]
+            os.fsync(handle)
+        finally:
+            os.close(handle)
+        try:
+            os.link(temp, fpath)
+        except FileExistsError:
+            raise KeyfileExists(str(fpath)) from None
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+    try:
+        os.unlink(temp)
+    except OSError as exc:
+        logger.warning(
+            "Key file %s is in place, but its temp %s could not be removed "
+            "and still holds the key: %s", fpath, temp, exc,
+        )
+    try:
+        directory = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as exc:
+        logger.warning(
+            "Key file %s is in place, but its directory %s could not be "
+            "synced: %s", fpath, parent, exc,
+        )
+
+
 def save_keyfile(
     key: bytes,
     salt: bytes | None = None,
@@ -457,13 +536,14 @@ def save_keyfile(
     ``kdf_name`` positional arguments are retained for backward compatibility
     and recorded only in the legacy format.
 
-    File permissions are set to 600 (owner read/write only).
+    The file is created with mode 0600 (owner read/write only) and written
+    whole, and an existing key file is never replaced: ``KeyfileExists``
+    (see ``_write_keyfile``).
     """
     if len(key) != _KEY_SIZE:
         raise ValueError(f"Key must be {_KEY_SIZE} bytes, got {len(key)}")
 
     fpath = path or _DEFAULT_KEYFILE
-    fpath.parent.mkdir(parents=True, exist_ok=True)
 
     effective_pass = passphrase or os.environ.get(_ENV_KEYFILE_PASS)
 
@@ -479,8 +559,7 @@ def save_keyfile(
             "kek_salt": base64.urlsafe_b64encode(kek_salt).decode("ascii"),
             "blob": base64.urlsafe_b64encode(blob).decode("ascii"),
         }
-        fpath.write_text(json.dumps(payload) + "\n", encoding="ascii")
-        _chmod_600(fpath)
+        _write_keyfile(fpath, (json.dumps(payload) + "\n").encode("ascii"))
         logger.info(
             "Encryption keyfile saved (enveloped, kdf=%s): %s", kek_kdf, fpath,
         )
@@ -505,8 +584,7 @@ def save_keyfile(
     else:
         lines.append("")
     lines.append(kdf_name or "")
-    fpath.write_text("\n".join(lines) + "\n", encoding="ascii")
-    _chmod_600(fpath)
+    _write_keyfile(fpath, ("\n".join(lines) + "\n").encode("ascii"))
     logger.info(
         "Encryption keyfile saved (unprotected, kdf=%s): %s",
         kdf_name or "random", fpath,
@@ -798,8 +876,29 @@ class EncryptionManager:
 
         return result
 
+    def enable_with_existing_key(self) -> bool:
+        """Enable encryption with the key that already loads; write no key file.
+
+        The key is the one ``get_encryption_key`` answers (OPTI_ENCRYPTION_KEY,
+        then the key file). Answers False, and installs nothing, when none
+        loads. Loading a key file tightens its permissions to 0600 when they
+        are looser, as every load does.
+        """
+        key = get_encryption_key()
+        if key is None:
+            return False
+        if self._key is not None and isinstance(self._key, SecureBytes):
+            self._key.wipe()
+        self._key = key
+        self._enabled = True
+        logger.info("Encryption enabled with the existing key")
+        return True
+
     def setup_from_passphrase(self, passphrase: str) -> bool:
-        """Derive key from passphrase, save keyfile, enable encryption."""
+        """Derive key from passphrase, save keyfile, enable encryption.
+
+        Raises ``KeyfileExists`` when a key file is already there.
+        """
         try:
             key, salt, kdf_name = derive_key_from_passphrase(passphrase)
             # Wrap the key at rest under a KEK derived from the same passphrase.
@@ -811,12 +910,17 @@ class EncryptionManager:
             self._enabled = True
             logger.info("Encryption configured from passphrase (kdf=%s)", kdf_name)
             return True
+        except KeyfileExists:
+            raise
         except Exception as e:
             logger.error("Failed to setup encryption: %s", e)
             return False
 
     def setup_random_key(self) -> bool:
-        """Generate a random key, save keyfile, enable encryption."""
+        """Generate a random key, save keyfile, enable encryption.
+
+        Raises ``KeyfileExists`` when a key file is already there.
+        """
         try:
             key = generate_key()
             env_pass = os.environ.get(_ENV_KEYFILE_PASS)
@@ -833,6 +937,8 @@ class EncryptionManager:
             self._enabled = True
             logger.info("Encryption configured with random key")
             return True
+        except KeyfileExists:
+            raise
         except Exception as e:
             logger.error("Failed to setup encryption: %s", e)
             return False
