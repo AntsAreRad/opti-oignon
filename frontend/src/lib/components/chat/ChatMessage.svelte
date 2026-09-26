@@ -8,8 +8,13 @@
   Displays inline tool calls.
   Displays feedback widget (thumbs up/down) on assistant messages.
   Retry button on last assistant message.
-  Mobile responsive -- reduced padding, code block scroll, responsive images.
-  Quick-branch fork button, collapsible long messages, code block copy buttons.
+  Mobile responsive -- reduced padding.
+  Quick-branch fork button. An assistant reply renders its markdown through
+  markdown/Markdown.svelte (a long finished reply collapses by whole blocks,
+  each code block carries its own Copy, and the streaming caret follows the
+  reply's last character); any other message, a user's or one of another
+  role, stays plain text (markdown/PlainText.svelte), a long one collapsed by
+  whole lines.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
@@ -23,6 +28,8 @@
 	import SandboxFileManager from '$lib/components/panels/SandboxFileManager.svelte';
 	import CodingAgentInline from './CodingAgentInline.svelte';
 	import Icon from '$lib/ds/Icon.svelte';
+	import Markdown from './markdown/Markdown.svelte';
+	import PlainText from './markdown/PlainText.svelte';
 
 	export let message: MessageItem;
 	export let isStreaming: boolean = false;
@@ -62,7 +69,9 @@
 	export let routingReason: RoutingReasonFull | null = null;
 	// Conversation ID for quick fork
 	export let conversationId: string = '';
-	// Collapsible long messages threshold (lines)
+	// A finished message longer than this (in lines of source, about)
+	// collapses: a reply to its first whole blocks, plain text to its first
+	// lines.
 	export let collapseThreshold: number = 500;
 
 	const dispatch = createEventDispatcher<{
@@ -73,13 +82,10 @@
 	let copied = false;
 	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 	let thinkingOpen = false;
-	// Collapsible state
-	let isCollapsed = true;
-	// Code block copy feedback
-	let codeBlockCopied: Record<number, boolean> = {};
-	let contentEl: HTMLDivElement;
 
 	$: isUser = message.role === 'user';
+	// Only the assistant's messages are replies, rendered from their markdown.
+	$: isReply = message.role === 'assistant';
 	$: displayContent = isStreaming ? streamContent : message.content;
 	$: showRetry = !isUser && isLast && !isStreaming && !isRetrying;
 	// Thinking content (streaming or history)
@@ -120,13 +126,9 @@
 	} | undefined;
 	$: hasCoding = !isStreaming && !!codingMeta?.chat_coding;
 
-	// Collapsible long messages
-	$: lineCount = displayContent ? displayContent.split('\n').length : 0;
-	$: shouldCollapse = collapseThreshold > 0 && lineCount > collapseThreshold && !isStreaming;
-	$: visibleContent = shouldCollapse && isCollapsed
-		? displayContent.split('\n').slice(0, Math.min(20, Math.floor(collapseThreshold / 10))).join('\n')
-		: displayContent;
-	$: hiddenLineCount = shouldCollapse ? lineCount - Math.min(20, Math.floor(collapseThreshold / 10)) : 0;
+	// Collapsed, a long message keeps about this many lines (whole blocks, for
+	// a reply).
+	$: collapseKeep = Math.min(20, Math.floor(collapseThreshold / 10));
 	// Show fork button (not during streaming, message must have an id)
 	$: showForkButton = !isStreaming && message.id != null && conversationId;
 
@@ -149,40 +151,6 @@
 		}
 	}
 
-	// Copy a code block by index
-	function copyCodeBlock(text: string, index: number) {
-		navigator.clipboard.writeText(text).then(() => {
-			codeBlockCopied = { ...codeBlockCopied, [index]: true };
-			setTimeout(() => {
-				codeBlockCopied = { ...codeBlockCopied, [index]: false };
-			}, 1500);
-		});
-	}
-
-	// Extract code blocks (triple backtick fenced) from content
-	function extractCodeBlocks(content: string): { start: number; end: number; code: string; lang: string }[] {
-		const blocks: { start: number; end: number; code: string; lang: string }[] = [];
-		const regex = /```(\w*)\n([\s\S]*?)```/g;
-		let match;
-		while ((match = regex.exec(content)) !== null) {
-			blocks.push({
-				start: match.index,
-				end: match.index + match[0].length,
-				code: match[2],
-				lang: match[1] || '',
-			});
-		}
-		return blocks;
-	}
-
-	$: codeBlocks = displayContent ? extractCodeBlocks(displayContent) : [];
-	$: hasCodeBlocks = codeBlocks.length > 0;
-
-	// Toggle collapse
-	function toggleCollapse() {
-		isCollapsed = !isCollapsed;
-	}
-
 	onDestroy(() => {
 		if (copyTimeout) clearTimeout(copyTimeout);
 	});
@@ -195,6 +163,12 @@
 			? 'background-color: var(--oo-msg-user-bg); border: 1px solid var(--oo-msg-user-bd); color: var(--oo-msg-user-fg);'
 			: 'background-color: var(--oo-msg-bot-bg); border: 1px solid var(--oo-msg-bot-bd); color: var(--oo-msg-bot-fg);'}"
 	>
+		<!-- The reply's own heading, for screen readers: its markdown headings
+		     start one level below it. -->
+		{#if isReply}
+			<h2 class="sr-only">{message.model ? `Reply from ${message.model}` : 'Reply'}</h2>
+		{/if}
+
 		<!-- Model (assistant only, hidden during streaming) -->
 		{#if !isUser && message.model && !isStreaming}
 			<div class="text-xs font-mono mb-1" style="color: var(--oo-fg-muted);">{message.model}</div>
@@ -252,56 +226,24 @@
 			<CorrectionIndicator {correction} />
 		{/if}
 
-		<!-- Content -- mobile code scroll, responsive images -- collapsible -->
+		<!-- Content: a reply's markdown, rendered; any other message as written -->
 		<div
-			class="whitespace-pre-wrap break-words msg-content"
-			bind:this={contentEl}
+			class="break-words msg-content"
 			aria-live={isStreaming ? 'polite' : 'off'}
 			aria-atomic="false"
 		>
-			{visibleContent}{#if isStreaming}<span class="inline-block w-1.5 h-4 ml-0.5 align-text-bottom animate-cursor-blink" style="background-color: var(--oo-acc-400);" />{/if}
+			{#if isReply}
+				<Markdown
+					source={displayContent}
+					streaming={isStreaming}
+					collapseAbove={collapseThreshold}
+					{collapseKeep}
+					caret={isStreaming}
+				/>
+			{:else}
+				<PlainText text={displayContent} collapseAbove={collapseThreshold} {collapseKeep} />
+			{/if}
 		</div>
-
-		<!-- Show more / Show less toggle for long messages -->
-		{#if shouldCollapse}
-			<button
-				class="collapse-toggle-btn"
-				on:click={toggleCollapse}
-			>
-				{#if isCollapsed}
-					Show more ({hiddenLineCount} more lines)
-				{:else}
-					Show less
-				{/if}
-			</button>
-		{/if}
-
-		<!-- Code block copy buttons (displayed below content for detected fenced blocks) -->
-		{#if hasCodeBlocks && !isStreaming}
-			<div class="code-blocks-actions">
-				{#each codeBlocks as block, i}
-					<button
-						class="code-copy-btn"
-						on:click={() => copyCodeBlock(block.code, i)}
-						title="Copy code block{block.lang ? ' (' + block.lang + ')' : ''}"
-						aria-label="Copy code block {i + 1}"
-					>
-						{#if codeBlockCopied[i]}
-							<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<path d="M5 13l4 4L19 7" />
-							</svg>
-							<span>Copied</span>
-						{:else}
-							<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-								<path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-							</svg>
-							<span>{block.lang || 'code'}</span>
-						{/if}
-					</button>
-				{/each}
-			</div>
-		{/if}
 
 		<!-- Badges de verification de code -->
 		{#if !isUser && !isStreaming && hasVerification}
@@ -430,67 +372,3 @@
 		{/if}
 	</div>
 </div>
-
-<style>
-	/* Mobile-friendly code blocks with touch scroll */
-	.msg-content :global(pre),
-	.msg-content :global(code) {
-		max-width: 100%;
-		overflow-x: auto;
-		-webkit-overflow-scrolling: touch;
-	}
-
-	/* Responsive images inside messages */
-	.msg-content :global(img) {
-		max-width: 100%;
-		height: auto;
-	}
-
-	/* Collapse toggle for long messages */
-	.collapse-toggle-btn {
-		display: block;
-		width: 100%;
-		margin-top: 0.375rem;
-		padding: 0.3rem 0.5rem;
-		border: 1px solid var(--oo-bd-subtle);
-		border-radius: 6px;
-		background: var(--oo-bg-base);
-		color: var(--oo-fg-muted);
-		font-size: 0.75rem;
-		cursor: pointer;
-		text-align: center;
-		transition: border-color 0.12s ease, color 0.12s ease;
-	}
-
-	.collapse-toggle-btn:hover {
-		border-color: var(--oo-accent);
-		color: var(--oo-accent);
-	}
-
-	/* Code block copy buttons row */
-	.code-blocks-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.375rem;
-		margin-top: 0.375rem;
-	}
-
-	.code-copy-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		padding: 0.2rem 0.5rem;
-		border: 1px solid var(--oo-bd-subtle);
-		border-radius: 4px;
-		background: var(--oo-bg-base);
-		color: var(--oo-fg-muted);
-		font-size: 0.6875rem;
-		cursor: pointer;
-		transition: border-color 0.12s ease, color 0.12s ease;
-	}
-
-	.code-copy-btn:hover {
-		border-color: var(--oo-accent);
-		color: var(--oo-accent);
-	}
-</style>

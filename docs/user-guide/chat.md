@@ -7,8 +7,15 @@ Responses stream in real time via WebSocket.
 
 The chat interface supports:
 
-- **Markdown rendering** in both input and output
-- **Code blocks** with syntax highlighting and copy button
+- **Markdown rendering** of replies: headings, lists and task lists,
+  quotes, tables, links and code blocks. Your own messages are shown as you
+  typed them. Raw HTML in a reply is shown as text, images are never
+  loaded (a reply shows "Image: alt (url)"), and links open in a new tab.
+- **Code blocks** with their language, keywords and defined names coloured
+  for Python, JavaScript and TypeScript, Rust, shell and SQL, and a Copy
+  button in each block
+- **Long messages** collapse: a long reply shows its first whole blocks, a
+  long message of yours its first lines, each with "Show the rest"
 - **Multi-turn conversations** with full history context
 - **Conversation branching** -- fork a conversation at any message to
   explore alternative paths

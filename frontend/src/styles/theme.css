@@ -177,6 +177,12 @@ html.dark {
 	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
 	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
 	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
+
+	/* -- Reply renderer (provisional: re-derived when the palettes become roles) -- */
+	--oo-bg-code: var(--oo-bg-subtle);
+	--oo-code-keyword: var(--oo-info);
+	--oo-code-name: var(--oo-success);
+	--oo-font-serif: 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
 }
 
 html:not(.dark) {
@@ -319,6 +325,12 @@ html:not(.dark) {
 	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
 	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
 	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
+
+	/* -- Reply renderer (provisional: re-derived when the palettes become roles) -- */
+	--oo-bg-code: var(--oo-bg-subtle);
+	--oo-code-keyword: var(--oo-info);
+	--oo-code-name: var(--oo-success);
+	--oo-font-serif: 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
 }
 
 /* ------------------------------------------------------------------ */

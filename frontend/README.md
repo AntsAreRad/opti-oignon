@@ -26,8 +26,10 @@ Backend (FastAPI :8000) <-- REST/SSE --> Frontend (SvelteKit :5173)
 ## Development Setup
 
 ```bash
-# Install dependencies
-npm install
+# Install the dependencies package-lock.json pins; run it again after a
+# pull that changes the lock (the launcher, `python -m opti_oignon`, does
+# this by itself)
+npm ci
 
 # Start development server (hot reload)
 npm run dev
@@ -56,6 +58,13 @@ src/
   lib/
     types.ts            # Shared TypeScript interfaces
 
+    markdown/           # A reply's markdown as a closed node tree (no raw HTML)
+      tree.ts           # marked's lexer (GFM, single newline = break) -> nodes, work bounded
+      entities.ts       # Character references in text, from a fixed table
+      collapse.ts       # A long reply collapsed by whole blocks, plain text by lines
+      frame.ts          # At most one lex per animation frame; a slow lex is not repeated
+      highlight.ts      # Two-role highlighter for code (keywords, defined names)
+
     api/                # REST client modules (15 modules)
       client.ts         # Base HTTP client (fetch wrapper, error handling)
       conversations.ts  # Conversation CRUD
@@ -83,7 +92,8 @@ src/
 
     components/
       chat/             # Chat interface (10 components)
-        ChatMessage       # Message bubble with role icon, markdown, retry button
+        ChatMessage       # Message bubble: a reply's markdown, any other message as written, retry button
+        markdown/         # Markdown, MarkdownNode, CodeBlock (label, Copy), MarkdownTable, PlainText, Caret
         ChatInput         # Textarea with send/cancel, file attach, keyboard submit
         FileUpload        # Drag-and-drop + click file upload
         ContextBar        # Active model/preset/temperature display

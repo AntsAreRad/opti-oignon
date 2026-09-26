@@ -11,6 +11,56 @@ package costs.
 
 ### Added
 
+- An assistant reply is rendered from its markdown: headings, lists and
+  task lists, quotes, tables, links, emphasis, code blocks, and line breaks
+  (a single newline breaks the line, as a chat reply means it). marked's
+  lexer turns the reply into tokens and nothing else of marked runs: each
+  token becomes a node of a closed set, shown through Svelte's text
+  interpolation, so no reply reaches the page as markup. The frontend holds
+  none of the raw HTML sinks (`{@html}`, with or without a space after the
+  brace, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `Function(` and
+  `eval(`, bare or on an object), and the lint rule against `{@html}` stays
+  on; the one other call that writes markup, `document.write` in the
+  recovery codes' print window, is pinned where it is. Raw HTML in a reply
+  shows as the text it is, a block of it with its lines and indentation;
+  character references in text decode once, through a fixed table and every
+  numeric reference, while code keeps them as written; a link is a link only
+  when it is an absolute http, https or mailto address, and it opens in a
+  new tab with no referrer -- anything else shows as its source; an image
+  is never fetched and shows as "Image: alt (url)". A code block is named by
+  its language and carries a Copy that writes that block's code and says
+  "Copied" once the clipboard took it ("Copy failed" otherwise), absent only
+  while the block is still arriving; keywords and defined names are coloured
+  for Python, JavaScript and TypeScript, Rust, shell and SQL. A table scrolls
+  sideways in a region the keyboard can focus. Headings start one level
+  below a screen-reader heading each reply now carries. While a reply
+  streams it is lexed at most once per animation frame, and its caret, a
+  2 px bar that reduced motion stills, follows its last character inside
+  its last block. A long finished reply shows its first whole blocks and a
+  "Show the rest" toggle, and the blocks it hides are not rendered, so a
+  code block or a table is never cut; a reply that is one long block is
+  shown whole. The row of code-copy buttons under a reply is gone. Any
+  message that is not the assistant's -- a user's, or one of another role
+  -- stays plain text, and a long one shows its first lines and a toggle,
+  as before. The renderer cannot fail or hold the page: marked's lexer is
+  super-linear on some inputs (six kilobytes of unclosed link openers took
+  over six seconds to lex), so the work is estimated from marked's
+  block pass before the inline pass runs, and a reply over the limit, one
+  marked cannot lex, or one nested deeper than the tree's cap of 32 levels
+  (past it, a level is its source as text) is shown as plain text with every
+  character; a lex that still turns out slow is not repeated for the rest of
+  that stream or when the reply is shown again. Replies are set in a serif
+  stack; four provisional tokens (`--oo-bg-code`, `--oo-code-keyword`,
+  `--oo-code-name`, `--oo-font-serif`) carry the reply's colours and type
+  until the palettes are rebuilt, and no size in the renderer computes under
+  12 px. Thirty hostile replies are rendered on every run, finished and
+  streaming, and must emit nothing that loads or runs. The contracts render
+  the components compiled for the server, since the app itself renders only
+  in the browser: how a long reply feels while it streams, the clipboard and
+  screen readers are checked on the machine, not here. Twenty-five
+  contracts. The chat page's script grows by about 87 KB (24 KB gzipped),
+  marked and the renderer, in the chat route's own chunk.
+
 - A measuring harness for the frontend; nothing in the interface changes.
   Sixteen per-file ratchets count what the interface has to pay down, each
   in every spelling that draws the same thing: hand-made buttons (a
@@ -489,6 +539,23 @@ package costs.
 
 ### Changed
 
+- Run `npm ci` in `frontend/` after pulling this change: the reply renderer
+  adds `marked`, the frontend's third runtime dependency, and an install
+  made before it does not hold it, so the app fails to load. The launcher
+  (`python -m opti_oignon`) now does this by itself. It used to install only
+  when `node_modules` was missing, so an install older than the lock stayed
+  as it was while the launcher still said the frontend was ready; it now
+  compares what `node_modules` holds (npm's own record of it,
+  `node_modules/.package-lock.json`) with `package-lock.json` package by
+  package -- version and digest, or the source for a package pinned without
+  a digest, so the same build fetched through a registry mirror is not
+  reinstalled; an optional or dev-optional package npm skips on this system
+  excepted -- and runs `npm ci` when they differ, saying why, with npm's
+  output left on the terminal. A failed install, or no npm, stops the
+  launch before any port is touched. The frontend's Dockerfile installs
+  from the lock with `npm ci` too. `scripts/dev_frontend.sh` and
+  `scripts/run_e2e.sh` still install only when `node_modules` is missing:
+  run `npm ci` yourself before them after this pull.
 - `think=False` now reaches Ollama. The registry declared `think: bool =
   False` and sent `think` only when it was true, so a model that thinks by
   default thought whatever the caller said -- through the agentic pipelines

@@ -4,16 +4,18 @@ Opti-Oignon UI Launcher
 ========================
 
 Launches the full Opti-Oignon stack:
-  1. Checks prerequisites (Python, Node, Ollama)
+  1. Checks prerequisites (Python, Node, Ollama), and holds the frontend's
+     installed dependencies to package-lock.json (npm ci when they differ)
   2. Frees ports if occupied (with user confirmation)
   3. Starts FastAPI backend
   4. Starts SvelteKit frontend (npm run dev)
   5. Opens browser
 
 Usage:
-    opti-oignon ui [--port PORT]
+    python -m opti_oignon [ui] [--port PORT]
 """
 
+import json
 import os
 import signal
 import subprocess
@@ -132,6 +134,119 @@ def _check_ollama() -> bool:
         return False
 
 
+def _lock_packages(path: Path) -> dict | None:
+    """The ``packages`` map of an npm lockfile, or None when it cannot be read."""
+    try:
+        packages = json.loads(path.read_text(encoding="utf-8")).get("packages")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return packages if isinstance(packages, dict) else None
+
+
+def _package_name(path: str) -> str:
+    return path.rpartition("node_modules/")[2] or path
+
+
+def _same_build(pinned: dict, have: dict) -> bool:
+    """True when ``have`` is the build ``pinned`` names: the same version and,
+    when either side records a digest, the same digest. The same bytes
+    fetched through a registry mirror carry the mirror's source, so the
+    source decides only for a package pinned without a digest (a git or a
+    local one)."""
+    if have.get("version") != pinned.get("version"):
+        return False
+    if pinned.get("integrity") or have.get("integrity"):
+        return have.get("integrity") == pinned.get("integrity")
+    return have.get("resolved") == pinned.get("resolved")
+
+
+def _skippable(pinned: object) -> bool:
+    """True for a package npm may leave out: an optional or dev-optional one,
+    built for another system."""
+    return isinstance(pinned, dict) and (
+        pinned.get("optional") is True or pinned.get("devOptional") is True
+    )
+
+
+def _install_differences(frontend_dir: Path) -> list[str]:
+    """How ``node_modules`` differs from ``package-lock.json``; empty when it
+    holds what the lock pins.
+
+    npm records what it installed in ``node_modules/.package-lock.json`` (the
+    hidden lockfile): every package of the lock, less the lock's root entry
+    and the optional or dev-optional packages it skipped because they are
+    built for another system. So the two files are compared package by
+    package, never byte for byte, and a build is named by its version and
+    digest (``_same_build``).
+    """
+    modules = frontend_dir / "node_modules"
+    if not modules.is_dir():
+        return ["node_modules is missing"]
+    lock = _lock_packages(frontend_dir / "package-lock.json")
+    if lock is None:
+        return ["package-lock.json cannot be read"]
+    installed = _lock_packages(modules / ".package-lock.json")
+    if installed is None:
+        return ["node_modules/.package-lock.json is missing or unreadable"]
+    differences = []
+    for path, pinned in lock.items():
+        if not path:
+            continue
+        have = installed.get(path)
+        if have is None:
+            if not _skippable(pinned):
+                differences.append(f"{_package_name(path)} is not installed")
+            continue
+        if not isinstance(pinned, dict) or not isinstance(have, dict) or not _same_build(
+            pinned, have
+        ):
+            version = have.get("version") if isinstance(have, dict) else None
+            wanted = pinned.get("version") if isinstance(pinned, dict) else None
+            differences.append(
+                f"{_package_name(path)} {version} is installed, the lock pins {wanted}"
+            )
+    for path in installed:
+        if path and path not in lock:
+            differences.append(f"{_package_name(path)} is installed and the lock no longer pins it")
+    return differences
+
+
+def _install_frontend(frontend_dir: Path) -> bool:
+    """Hold ``frontend/node_modules`` to ``package-lock.json`` before the dev
+    server starts, and say what was done.
+
+    When the install differs from the lock, ``npm ci`` replaces it, with
+    npm's output left on the terminal. Without a lock, ``npm install`` runs
+    only when ``node_modules`` is missing, as before. Returns False when npm
+    failed or could not be run; the caller stops.
+    """
+    if not (frontend_dir / "package-lock.json").is_file():
+        if (frontend_dir / "node_modules").is_dir():
+            return True
+        command = ["npm", "install"]
+        print(f"{YELLOW}[>] Installing frontend dependencies (no package-lock.json)...{NC}")
+    else:
+        differences = _install_differences(frontend_dir)
+        if not differences:
+            return True
+        command = ["npm", "ci"]
+        shown = "; ".join(differences[:3])
+        if len(differences) > 3:
+            shown += f"; and {len(differences) - 3} more"
+        print(f"{YELLOW}[>] The frontend's dependencies differ from package-lock.json: {shown}.{NC}")
+        print("    Running npm ci, which reinstalls node_modules from the lock...")
+    try:
+        result = subprocess.run(command, cwd=str(frontend_dir))
+    except OSError as exc:
+        print(f"{RED}[ERR] Could not run npm ({exc}). Install Node.js and npm, then retry.{NC}")
+        return False
+    if result.returncode != 0:
+        print(f"{RED}[ERR] {' '.join(command)} failed (exit {result.returncode}); npm's output is above.{NC}")
+        return False
+    print(f"{GREEN}    Done.{NC}")
+    return True
+
+
 def _update_vite_proxy(project_root: Path, backend_port: int) -> None:
     """Update vite.config.ts proxy target to match backend port."""
     vite_config = project_root / "frontend" / "vite.config.ts"
@@ -241,11 +356,9 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
         print(f"{RED}[ERR] Frontend directory not found: {frontend_dir}{NC}")
         sys.exit(1)
 
-    # Install frontend deps if needed
-    if not (frontend_dir / "node_modules").is_dir():
-        print(f"{YELLOW}[>] Installing frontend dependencies...{NC}")
-        subprocess.run(["npm", "install"], cwd=str(frontend_dir), capture_output=True)
-        print(f"{GREEN}    Done.{NC}")
+    # The installed dependencies are the lock's, or the launch stops here.
+    if not _install_frontend(frontend_dir):
+        sys.exit(1)
 
     # -- Free ports --
     if not _free_port(backend_port, "backend"):

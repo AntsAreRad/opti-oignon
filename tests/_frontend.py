@@ -19,9 +19,11 @@ What it provides:
     (rules below), proven by the RX contracts.
   * ``run_ts(modules, driver, clause)`` -- runs a dependency-free TypeScript
     module under Node's type stripping (node >= 22.6), with a driver that
-    prints ``PASS <clause>``. Without Node it raises. No contract calls it
-    yet (see its docstring).
-  * ``ssr()`` -- not built yet (see its docstring).
+    prints ``PASS <clause>``. Without Node it raises.
+  * ``ssr()`` -- the session's server renderer: one vite server on a copy
+    under ``$TMPDIR``, the ``$app`` modules stubbed by
+    ``tests/_frontend_stubs/``; ``render(path, props)`` returns what a
+    component emits when compiled for the server (see its docstring).
   * ``frontend_copy(dest)`` -- a working copy of ``frontend/`` (the listed
     files, the dependencies linked one package at a time), where a tool
     may write without touching the tree; the ladder builds and lints on it.
@@ -72,12 +74,16 @@ Local-only (the public distribution ships no tests).
 from __future__ import annotations
 
 import ast
+import atexit
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -480,9 +486,9 @@ def run_ts(modules, driver, clause, *, env=None, timeout=60):
     argument, and it passes only by printing the line ``PASS <clause>`` and
     exiting 0. Returns the driver's standard output.
 
-    No contract calls it yet, so nothing rests on it: its first caller
-    proves it, with a blade on its refusal (a driver that exits 0 without
-    its ``PASS`` line must fail).
+    Its refusals are proven by MK18 (tests/test_markdown_render_contracts.py):
+    a driver that exits 0 without its ``PASS`` line, one that prints it and
+    exits non-zero, one that passes another clause, and an absent module.
     """
     version = node_version()
     if version < NODE_MIN:
@@ -518,21 +524,237 @@ def run_ts(modules, driver, clause, *, env=None, timeout=60):
     return proc.stdout
 
 
-def ssr():
-    """Server rendering of components: not built yet, and nothing calls it.
+STUBS = Path(__file__).resolve().parent / "_frontend_stubs"
+_STUB_NAMES = ("navigation", "stores", "environment")
+_SSR_DIR = "frontend/.oo_ssr"
+_SSR_TAG = "OO_SSR "
 
-    The first contract that needs a component compiled for the server builds
-    it here: one vite server per test session with the Svelte plugin,
-    ``$lib`` aliased, ``$app/navigation``, ``$app/stores`` and
-    ``$app/environment`` aliased to stubs under ``tests/_frontend_stubs/``,
-    the vite cache under ``$TMPDIR``, nothing written in the tree. The app is
-    client-rendered only, so what it will prove is what the template emits
-    when compiled for the server, not what the browser build does.
+# The server-rendering process: vite in middleware mode (no port, no file
+# watcher, no dependency optimizer, no config file, no PostCSS), the Svelte
+# plugin with TypeScript preprocessing, ``$lib`` and the three ``$app``
+# modules aliased. It reads one JSON request per line and answers each on a
+# tagged line, an error included, so a failed render is never an empty one.
+_SSR_SERVER = r"""
+import path from 'node:path';
+import readline from 'node:readline';
+import { createServer } from 'vite';
+import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+const [root, cacheDir] = process.argv.slice(2);
+const stubs = path.join(root, '.oo_ssr', 'app');
+const say = (payload) => process.stdout.write('OO_SSR ' + JSON.stringify(payload) + '\n');
+const describe = (error) => String((error && error.stack) || error);
+
+let server;
+try {
+    server = await createServer({
+        root,
+        cacheDir,
+        configFile: false,
+        logLevel: 'silent',
+        clearScreen: false,
+        appType: 'custom',
+        server: { middlewareMode: true, hmr: false, watch: null },
+        optimizeDeps: { noDiscovery: true, include: [] },
+        css: { postcss: {} },
+        resolve: {
+            alias: [
+                { find: /^\$lib(?=\/|$)/, replacement: path.join(root, 'src', 'lib') },
+                { find: '$app/navigation', replacement: path.join(stubs, 'navigation.js') },
+                { find: '$app/stores', replacement: path.join(stubs, 'stores.js') },
+                { find: '$app/environment', replacement: path.join(stubs, 'environment.js') },
+            ],
+        },
+        plugins: [svelte({ configFile: false, preprocess: vitePreprocess({ style: false }) })],
+    });
+} catch (error) {
+    say({ id: 0, error: describe(error) });
+    process.exit(1);
+}
+say({ id: 0, ready: true });
+
+const lines = readline.createInterface({ input: process.stdin });
+for await (const line of lines) {
+    let request;
+    try {
+        request = JSON.parse(line);
+    } catch {
+        continue;
+    }
+    try {
+        const module = await server.ssrLoadModule(path.join(root, request.path));
+        const component = module.default;
+        if (!component || typeof component.render !== 'function') {
+            throw new Error(request.path + ' exports no component that renders on the server');
+        }
+        const out = component.render(request.props || {});
+        say({ id: request.id, html: out.html, head: out.head, css: (out.css && out.css.code) || '' });
+    } catch (error) {
+        say({ id: request.id, error: describe(error) });
+    }
+}
+await server.close();
+"""
+
+
+@dataclass(frozen=True)
+class Rendered:
+    """What a component compiled for the server emitted."""
+
+    html: str
+    head: str
+    css: str
+
+
+class SsrServer:
+    """One vite server rendering components for the server, on a copy.
+
+    The copy is a ``frontend_copy`` under ``$TMPDIR`` with the three ``$app``
+    stubs of ``tests/_frontend_stubs/`` and the server script planted under
+    ``.oo_ssr/``; vite's root and cache are both in it, so nothing is written
+    in the tree or beside the installed packages. Components are named by
+    their repository path (``frontend/src/...``).
     """
-    raise NotImplementedError(
-        "ssr() is not built yet: the first contract that renders a component "
-        "for the server builds it"
-    )
+
+    def __init__(self, root=REPO, *, timeout=60):
+        self._scratch = tempfile.TemporaryDirectory(prefix="oo_ssr_")
+        planted = {
+            f"{_SSR_DIR}/app/{name}.js": (STUBS / f"{name}.js").read_text(encoding="utf-8")
+            for name in _STUB_NAMES
+        }
+        planted[f"{_SSR_DIR}/server.mjs"] = _SSR_SERVER
+        self.root = frontend_copy(self._scratch.name, root=root, extra=planted)
+        # The tsconfig extends the one svelte-kit generates; the TypeScript
+        # preprocessing reads it, as the app's build does.
+        sync = subprocess.run(
+            [str(self.root / "node_modules" / ".bin" / "svelte-kit"), "sync"],
+            cwd=self.root, capture_output=True, text=True, timeout=timeout,
+        )
+        if sync.returncode != 0:
+            self._scratch.cleanup()
+            raise RuntimeError(
+                f"svelte-kit sync failed (rc={sync.returncode}):\n{sync.stdout}{sync.stderr}"
+            )
+        self._lines = queue.Queue()
+        self._errors = []
+        self._next = 0
+        self._proc = subprocess.Popen(
+            ["node", str(self.root / ".oo_ssr" / "server.mjs"), str(self.root),
+             str(Path(self._scratch.name) / "vite-cache")],
+            cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
+        )
+        threading.Thread(
+            target=self._pump, args=(self._proc.stdout, self._lines), daemon=True,
+        ).start()
+        threading.Thread(
+            target=self._pump, args=(self._proc.stderr, self._errors), daemon=True,
+        ).start()
+        ready = self._answer(0, timeout)
+        if not ready.get("ready"):
+            self.close()
+            raise RuntimeError(f"the server-rendering process did not start:\n{ready}")
+
+    @staticmethod
+    def _pump(stream, sink):
+        for line in stream:
+            if isinstance(sink, list):
+                sink.append(line)
+            elif line.startswith(_SSR_TAG):
+                sink.put(json.loads(line[len(_SSR_TAG):]))
+
+    def _answer(self, ident, timeout):
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise RuntimeError(
+                    f"no answer from the server-rendering process within {timeout}s:\n"
+                    + "".join(self._errors[-40:])
+                )
+            try:
+                answer = self._lines.get(timeout=min(left, 0.5))
+            except queue.Empty:
+                if self._proc.poll() is not None and self._lines.empty():
+                    raise RuntimeError(
+                        f"the server-rendering process exited ({self._proc.returncode}):\n"
+                        + "".join(self._errors[-40:])
+                    ) from None
+                continue
+            if answer.get("id") == ident:
+                return answer
+
+    def plant(self, path, text):
+        """Writes ``text`` at the repository path ``path`` in the copy only.
+
+        A path the copy already holds is refused, so a plant never hides a
+        file of the tree, and a plant is never rewritten under a module
+        vite has already loaded."""
+        parts = PurePosixPath(path).parts
+        if len(parts) < 2 or parts[0] != "frontend" or ".." in parts or parts[1] == "node_modules":
+            raise AssertionError(f"cannot plant {path}: not a frontend path")
+        target = self.root.joinpath(*parts[1:])
+        if target.exists() or target.is_symlink():
+            raise AssertionError(f"cannot plant {path}: the copy already holds it")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        return target
+
+    def render(self, path, props=None, *, timeout=30):
+        """Renders the component at the repository path ``path`` with
+        ``props``. A render that fails raises, never reads as empty."""
+        parts = PurePosixPath(path).parts
+        if len(parts) < 2 or parts[0] != "frontend" or ".." in parts:
+            raise AssertionError(f"cannot render {path}: not a frontend path")
+        if self._proc.poll() is not None:
+            raise RuntimeError(
+                f"the server-rendering process has exited ({self._proc.returncode}):\n"
+                + "".join(self._errors[-40:])
+            )
+        self._next += 1
+        ident = self._next
+        request = {"id": ident, "path": str(PurePosixPath(*parts[1:])), "props": props or {}}
+        self._proc.stdin.write(json.dumps(request) + "\n")
+        self._proc.stdin.flush()
+        answer = self._answer(ident, timeout)
+        if "error" in answer:
+            raise AssertionError(f"{path} did not render on the server:\n{answer['error']}")
+        return Rendered(answer["html"], answer["head"], answer["css"])
+
+    def close(self):
+        proc = self._proc
+        if proc.poll() is None:
+            try:
+                proc.stdin.close()
+                proc.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                proc.kill()
+                proc.wait(timeout=10)
+        self._scratch.cleanup()
+
+
+_SSR = None
+
+
+def ssr():
+    """The session's server renderer, started on first use and closed at exit.
+
+    One vite server per test session (``SsrServer``): the Svelte plugin,
+    ``$lib`` aliased, ``$app/navigation``, ``$app/stores`` and
+    ``$app/environment`` aliased to the stubs under ``tests/_frontend_stubs/``,
+    vite's root and cache in a copy under ``$TMPDIR``, nothing written in the
+    tree. ``plant(path, text)`` adds a file to the copy; ``render(path,
+    props)`` returns what the component emits (``html``, ``head``, ``css``).
+    The app is client-rendered only, so what it proves is what the template
+    emits when compiled for the server, not what the browser build does.
+    Needs Node and ``frontend/node_modules``; without them it raises.
+    """
+    global _SSR
+    if _SSR is None:
+        node_version()
+        _SSR = SsrServer()
+        atexit.register(_SSR.close)
+    return _SSR
 
 
 _COMPLETED = re.compile(
