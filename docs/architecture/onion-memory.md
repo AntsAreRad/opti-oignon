@@ -239,7 +239,7 @@ whose law file was edited in place does not open.
 
 The first surface is the terminal. `oo garden` runs in the calling process
 and reaches the componion through one service,
-`opti_oignon/allium/service.py`, which the API is to serve as well. The
+`opti_oignon/allium/service.py`, which the API serves as well (below). The
 garden is off until `config/allium.yaml` says `enabled: true`, and
 switched off it builds no store and reads no key, security mode or clock.
 Each command is one action: the security mode, whether the machine has a
@@ -291,3 +291,74 @@ stays sealed and nothing of it is shown; and the capabilities the policy
 in `allium/habitat.py` closes outside Daily (taste, voice, initiatives,
 sync, a change of dream depth) are behind a gate that calls nothing
 outside Daily, though none of them exists yet.
+
+### The garden over the API
+
+The API serves the componion read only, through one route,
+`GET /api/allium/status`, which answers the terminal's own projection: the
+status, its label codes, the being's codes at the served minute and the
+lines that say them, unwrapped, the doctrine last. The router is always
+mounted, so the published surface never depends on the settings file.
+While `enabled` is not `true` the route answers `disabled` with no line at
+all -- the terminal's form names the path of the settings file, which is
+never served -- and neither the route nor the `allium` key of
+`/api/health` imports anything of the being, whichever allowed name the
+request was addressed by: both read the switch, and the route the names of
+`api.hosts`, from the file themselves, by the garden's own rules. Only a
+refused request imports the garden's catalogue and its nets, to say its
+line. The API's garden is built at the first status request with the
+switch on, one per process; it serves no gesture, refuses a caller that is
+not given, reads this server's emergency stop, and takes its single-user
+rule from the auth manager the server already runs, whose read opens the
+auth store as the platform's own reads do.
+
+Every garden route first checks where a request comes from. Its Host
+header, exactly one, must name this machine as `127.0.0.1`, `localhost` or
+`[::1]`, or a name listed in `api.hosts` in `config/allium.yaml`: exact
+lowercase names or IP literals, with no port, scheme or wildcard, an IPv4
+address written as its dotted quad. Ports are
+never compared (a rebound name is the attacker's, the port is not), and
+`X-Forwarded-Host` is never read. An Origin, when one is sent, must name
+the same set, over https for a listed name; a `Sec-Fetch-Site` other than
+`same-origin` or `none` is answered only beside such an Origin, so a page
+of another site cannot make the garden look, even with an image pointed at
+the loopback API. A refused request gets one closed line and a code, never
+an echo of what it sent. A phone reads the status through a page served by
+this machine. Through the Vite dev server on the local network, list the
+PC's IP address (a name also needs Vite's `server.allowedHosts`). Behind
+remote access over TLS, or a reverse proxy that forwards the Host, list the
+name the page is served under. A proxy that rewrites the Host to a loopback
+name (nginx's default, `proxy_set_header Host $proxy_host`) turns the name
+check off, as the dev proxy's `changeOrigin: true` did: forward the
+browser's Host (`proxy_set_header Host $host`) and give the proxy no
+catch-all server. Prefer an IP literal to a name for the phone: a name is
+only as safe as its resolution, and a device on the local network can
+answer for a `.local` name or a local DNS name. A page on one origin
+calling the API on another needs an https origin whose name is listed, and
+the platform's CORS to allow it. The dev proxy keeps the browser's own Host
+(`changeOrigin: false`), so the check holds through it; Vite's own host
+check is off when `server.allowedHosts` is `true`, and when Vite serves
+https. The phone app's own channel, remote inference, refuses the being's
+names as a capability it never reaches.
+
+A view in a request is capped: `api.python_cap` units of engine work with
+the Python reference (200,000 by default), `api.native_cap` with the native
+core (5,000,000). No request asks the engine for more than the cap at once,
+and a view that does not finish within it is shown as of its last kept
+state, labelled, with a line saying that the next write made in
+`oo garden` computes it: the API never catches up and writes nothing in the
+being's store, and each write the terminal makes settles the being in the
+terminal's own process. A cap below one awake day of the laws the engine
+carries is raised to that day, so the line holds. Building the native core
+(`scripts/build_oo_core.sh`) removes the reference cap in practice. A look
+can still cause one write of the platform's own: when the mode files have
+changed to disagree, the garden's mode reading records the mismatch as
+tamper evidence (the auth store's audit log and the signed audit chain),
+once per change of the files; and the first look of a process may be its
+first user of the signed audit log, which then creates its table and may
+rewrite its anchor. The API holds one store for the life of its
+process, so a key made readable after its first garden request is seen
+only after a restart; restart the API after an upgrade as well. The web
+writes nothing in this version: sowing is irreversible, and in the default
+single-user mode, which has no login, the membrane keeps it to an attended
+terminal; and no consent request exists yet that a page could grant.

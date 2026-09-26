@@ -1,4 +1,4 @@
-"""The componion's settings: strict readers for ``persistence``, ``laws`` and ``life`` in ``config/allium.yaml``.
+"""The componion's settings: strict readers for ``persistence``, ``laws``, ``life`` and ``api`` in ``config/allium.yaml``.
 
 ``persistence`` has three keys, each read on its own terms:
 
@@ -43,9 +43,36 @@ file's top level is a mapping whose ``enabled`` is the YAML boolean
 does not parse, or whose top level is not a mapping -- and a switch that
 cannot be read is off, said as such, once per modification of the file.
 
+``api`` is read only for the API's garden routes, never by ``oo garden``
+(``api``, an ``Api``): ``hosts`` are the names those routes answer beside
+the loopback names, which are always allowed, for the Host and the Origin
+of a request -- a YAML list of exact lowercase names or bracketed IPv6
+literals, with no port, scheme or wildcard. A list that is not one, holds
+one entry that is not such a name, names an unspecified address
+(``0.0.0.0``, ``[::]`` and their spellings, which some browsers route to
+loopback), or spells an IPv4 address otherwise than as its dotted quad
+(``0``, ``0x0``, ``127.1``, which a browser reads as the address itself)
+allows the loopback names only, ``()``, and is logged; a missing key is
+``()``. The API's router reads the same names by the same rule without
+importing this package, and a contract holds the two readers equal.
+``python_cap`` and ``native_cap`` bound the engine's work in one request,
+with the Python reference and with the native core: integers (not
+booleans) in 1..=2^53-1, else 200000 and 5000000, and the fallback is
+logged; a missing key reads its default. A file that cannot be read reads
+every default. The service never caps a view below one awake day of the
+laws the engine carries (``service.api_view_cap``).
+
 ``yaml`` is imported when the file is read, the file is found from this
 package's location, and each reader keeps its parsed result, in a cache of
-its own, until the file's modification time changes.
+its own, until the file changes: its modification time, and for ``switch``
+and ``api`` its size and inode too.
+
+Threads. A long-lived process (the API) calls ``switch`` and ``api`` from
+many threads at once: each keeps its cache as one ``(key, value)`` pair,
+stored in one assignment, so no reader pairs a new key with an old value.
+``persistence``, ``life`` and ``laws`` write their key and their value in
+two statements: at most one reader sees the value from before a change,
+which is what a read made just before the change would have seen.
 """
 
 import logging
@@ -61,6 +88,10 @@ DEFAULT_BUSY_TIMEOUT_MS = 5000
 BUSY_TIMEOUT_MAX_MS = 60000
 MAX_INT = (1 << 53) - 1
 DEFAULT_SKEW_NOTE_MIN = 5
+DEFAULT_PYTHON_CAP = 200000
+DEFAULT_NATIVE_CAP = 5000000
+# A name of ``api.hosts``: an exact lowercase name, or a bracketed IPv6 literal; no port, scheme or wildcard.
+HOST_PATTERN = r"[a-z0-9-]+(\.[a-z0-9-]+)*|\[[0-9a-f:]+\]"
 DEFAULT_CHECKPOINTS = {"daily": 14, "monthly": True, "weekly": 52}
 
 # Each param and each sowing field of the proposal, and where it lives under ``laws`` in the file.
@@ -75,13 +106,23 @@ _UNPARSED = object()
 _cache = {"key": None, "value": None}
 _life_cache = {"key": None, "value": None}
 _laws_cache = {"key": None, "value": None}
-_switch_cache = {"key": None, "value": None}
+# ``(key, value)`` pairs, each stored in one assignment: a thread never pairs a new key with an old value.
+_switch_cache = {"entry": None}
+_api_cache = {"entry": None}
 
 
 class Malformed(NamedTuple):
     """A proposal value the reader could not read as one; ``detail`` names it, and it is refused where used."""
 
     detail: str
+
+
+class Api(NamedTuple):
+    """The ``api`` section as read: the names the garden's routes answer beside loopback, and the two caps."""
+
+    hosts: tuple
+    python_cap: int
+    native_cap: int
 
 
 def config_file():
@@ -155,6 +196,16 @@ def _stamped(path):
     return file, (str(file), stamp)
 
 
+def _file_key(path):
+    """``(file, cache key)``: the file, its modification time, size and inode; ``None`` for them when absent."""
+    file = Path(path) if path is not None else config_file()
+    try:
+        st = file.stat()
+    except OSError:
+        return file, (str(file), None)
+    return file, (str(file), st.st_mtime_ns, st.st_size, st.st_ino)
+
+
 def persistence(path=None):
     """The persistence settings, from ``path`` or the package's own YAML file."""
     file, key = _stamped(path)
@@ -177,14 +228,10 @@ def switch(path=None):
     modification. Cached until the file changes (its modification time,
     size and inode).
     """
-    file = Path(path) if path is not None else config_file()
-    try:
-        st = file.stat()
-        key = (str(file), st.st_mtime_ns, st.st_size, st.st_ino)
-    except OSError:
-        key = (str(file), None)
-    if _switch_cache["key"] == key:
-        return _switch_cache["value"]
+    file, key = _file_key(path)
+    entry = _switch_cache["entry"]
+    if entry is not None and entry[0] == key:
+        return entry[1]
     if key[1] is None:
         value = "off"
     else:
@@ -199,8 +246,7 @@ def switch(path=None):
             logger.warning("the componion's settings file cannot be read: the garden is off")
         else:
             value = "on" if data.get("enabled") is True else "off"
-    _switch_cache["key"] = key
-    _switch_cache["value"] = value
+    _switch_cache["entry"] = (key, value)
     return value
 
 
@@ -335,3 +381,108 @@ def laws(path=None):
     if not readable:
         return _all(Malformed(UNREADABLE))
     return normalise_laws(section)
+
+
+def _api_cap(section, name, default):
+    if name not in section:
+        return default
+    raw = section[name]
+    if isinstance(raw, int) and not isinstance(raw, bool) and 1 <= raw <= MAX_INT:
+        return raw
+    logger.warning("api.%s is not an integer in 1..=%d: %d is used", name, MAX_INT, default)
+    return default
+
+
+def _unspecified(entry):
+    """Whether ``entry`` is an address no host has: ``0.0.0.0``, ``[::]``, or ``[::ffff:0.0.0.0]``."""
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(entry[1:-1] if entry.startswith("[") else entry)
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    return address.is_unspecified or (mapped is not None and mapped.is_unspecified)
+
+
+def _other_spelling(entry):
+    """Whether ``entry`` is an IPv4 address spelled otherwise than as its dotted quad (``0``, ``0x0``, ``127.1``).
+
+    A browser reads such a name as the address itself (``0`` and ``0x0`` as
+    ``0.0.0.0``), and sends the dotted quad in its Host: listed as written,
+    it names an address that no request is addressed by, or the unspecified one.
+    """
+    import socket
+
+    if entry.startswith("["):
+        return False
+    try:
+        packed = socket.inet_aton(entry)
+    except (OSError, ValueError):
+        return False
+    return socket.inet_ntoa(packed) != entry
+
+
+def _api_hosts(section):
+    """The names of ``api.hosts``: ``()`` when the key is missing, and, logged, for anything that is not a list of them.
+
+    A bracketed entry must be an IPv6 literal the ``ipaddress`` module reads.
+    """
+    import re
+
+    if "hosts" not in section:
+        return ()
+    raw = section["hosts"]
+    if not isinstance(raw, list):
+        logger.warning("api.hosts is not a list of names: only the loopback names are allowed")
+        return ()
+    for entry in raw:
+        if not isinstance(entry, str) or not re.fullmatch(HOST_PATTERN, entry):
+            logger.warning("api.hosts holds an entry that is not a lowercase name with no port or scheme: "
+                           "only the loopback names are allowed")
+            return ()
+        unspecified = _unspecified(entry)
+        if unspecified is None and entry.startswith("["):
+            logger.warning("api.hosts holds a bracketed entry that is not an address: only the loopback names "
+                           "are allowed")
+            return ()
+        if unspecified:
+            logger.warning("api.hosts names an unspecified address: only the loopback names are allowed")
+            return ()
+        if _other_spelling(entry):
+            logger.warning("api.hosts holds an address that is not written as its dotted quad: only the loopback "
+                           "names are allowed")
+            return ()
+    return tuple(raw)
+
+
+def normalise_api(section):
+    """The ``api`` mapping read by the rules above, as an ``Api``; never refuses, every fallback logged.
+
+    ``section`` is what the YAML holds under ``api`` (or a mapping a caller
+    injects); ``None`` reads as all defaults, and anything else that is not
+    a mapping falls back to them with a warning.
+    """
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        logger.warning("api is not a mapping: its defaults are used")
+        section = {}
+    return Api(_api_hosts(section), _api_cap(section, "python_cap", DEFAULT_PYTHON_CAP),
+               _api_cap(section, "native_cap", DEFAULT_NATIVE_CAP))
+
+
+def api(path=None):
+    """The ``api`` settings (``Api``), from ``path`` or the package's own file; a file that cannot be read: defaults.
+
+    Cached until the file changes (its modification time, size and inode),
+    as one pair stored in one assignment.
+    """
+    file, key = _file_key(path)
+    entry = _api_cache["entry"]
+    if entry is not None and entry[0] == key:
+        return entry[1]
+    data = _read(file, "the api defaults are used") if key[1] is not None else None
+    value = normalise_api(data.get("api") if data is not None else None)
+    _api_cache["entry"] = (key, value)
+    return value

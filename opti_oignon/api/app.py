@@ -21,6 +21,9 @@ from opti_oignon.__version__ import __version__
 
 from .routes_agent import router as agent_router
 from .routes_agent_eval import router as agent_eval_router
+from .routes_allium import close_garden as allium_close_garden
+from .routes_allium import health_flag as allium_health_flag
+from .routes_allium import router as allium_router
 from .routes_answer_verification import answer_verification_router
 from .routes_artifacts import router as artifacts_router
 from .routes_auth import router as auth_router
@@ -155,6 +158,11 @@ async def lifespan(app: FastAPI):
             plugin_loader.shutdown_all()
     except Exception:  # noqa: BLE001 - shutdown is defensive
         logger.debug("plugins: shutdown_all failed", exc_info=True)
+    # Close the garden's store if a status request built one; builds nothing. Defensive.
+    try:
+        allium_close_garden()
+    except Exception:  # noqa: BLE001 - shutdown is defensive
+        logger.debug("garden: closing its store at shutdown failed", exc_info=True)
     logger.info("Opti-Oignon API stopped")
 
 
@@ -399,6 +407,10 @@ app.include_router(telemetry_router)
 app.include_router(profiler_router)
 app.include_router(backup_router)
 app.include_router(context_optimizer_router)
+# The componion's garden, read only: always mounted, so the published surface never
+# depends on the settings file; with the garden switched off its status route answers
+# `disabled` and imports nothing of it. Every route carries its own Host/Origin check.
+app.include_router(allium_router)
 # Sandboxed agent loop: status / cancel / run / WebSocket event stream (
 # Theme 3 / Odysseus Core). Guarded so a partial agent build cannot block app
 # startup; Bulbe approvals reuse /api/security/tool-approval/*.
@@ -612,6 +624,8 @@ def health_check():
             "telemetry": TELEMETRY_AVAILABLE,
             "inference_profiler": INFERENCE_PROFILER_AVAILABLE,
             "context_optimizer": CONTEXT_OPTIMIZER_AVAILABLE,
+            # The garden is switched on and its package is there; read without importing it.
+            "allium": allium_health_flag(),
         },
         # Security and sandbox isolation status
         "security": _get_health_security_info(),

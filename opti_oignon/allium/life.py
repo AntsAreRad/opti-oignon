@@ -30,9 +30,11 @@ A view asked with a ``cap`` of work that does not reach its minute serves
 the state it started from -- the checkpoint's, or the minute-0 state, the
 facts of minute 0 folded, as a view of minute 0 shows it -- as
 ``catching_up``, with what is still owed estimated from the law's awake-day
-ceiling: a partial state is never served. A view's ``work`` and ``notes``
-are those of every engine call it made, the one that gave the state it
-serves included.
+ceiling: a partial state is never served. The state it starts from is
+asked within the same cap: no request of a capped view carries a budget
+above it. The engine never splits a minute, so the minute-0 fold gives the
+same answer under any budget. A view's ``work`` and ``notes`` are those of
+every engine call it made, the one that gave the state it serves included.
 
 ``settle`` is a producer of caches. From the same start, it asks the law
 timeline for the local midnights where the daily layer fires, keeps the
@@ -59,11 +61,12 @@ facts alone do not fit refuses the whole call ``limit``. The same packer
 chains ``advance`` and the law ``timeline``.
 
 ``stored`` serves the state a view starts from, as it is kept: what a look
-shows, frozen, when the engine stops on a fault past it. ``deep_verify``
-verifies the chain, then replays every kept state and the state served now
-on the reference engine (``ask`` and ``chain`` take the engine to call) and
-says what agreed, what was stale and what lies past the minute shown; a
-disagreement is ``Diverged``, a finding, and nothing is written or repaired.
+shows, frozen, when the engine stops on a fault past it; it takes the
+view's cap. ``deep_verify`` verifies the chain, then replays every kept
+state and the state served now on the reference engine (``ask`` and
+``chain`` take the engine to call) and says what agreed, what was stale and
+what lies past the minute shown; a disagreement is ``Diverged``, a finding,
+and nothing is written or repaired.
 
 Refusals: an engine refusal is ``LifeRefused`` with the engine's own code and
 detail; ``limit`` also comes from the packer, and ``bad_request`` from a
@@ -359,7 +362,7 @@ def view(being, to=None, cap=None):
         work, notes = _spent(answers)
         return View("current", last["state"], last["at"], last["hash"], last["env"], labels(being),
                     last["state"]["law"], being.provisional, 0, work, notes)
-    stored = _start_answers(base, ordered, state)
+    stored = _start_answers(base, ordered, state, budget=MAX_INT if cap is None else cap)
     served = stored[-1]
     work, notes = _spent(answers + stored)
     law = served["state"]["law"]
@@ -367,36 +370,39 @@ def view(being, to=None, cap=None):
                 being.provisional, _owed(law, goal, served["at"]), work, notes)
 
 
-def _start_answers(base, ordered, state):
+def _start_answers(base, ordered, state, budget=MAX_INT):
     """The engine's answers that show the state a view starts from, at its own minute.
 
     The minute-0 state as a view of minute 0 shows it (the facts of minute 0
-    folded) when there is no usable checkpoint; else the checkpoint's own
-    minute, with no fact: the engine lives no minute and says what it shows.
+    folded) when there is no usable checkpoint, asked within ``budget``;
+    else the checkpoint's own minute, with no fact: the engine lives no
+    minute and says what it shows.
     """
     if state is None:
         zero = [fact for _seq, _eid, fact in ordered[1:] if fact["t"] == 0]
-        return chain(base, "state", None, zero, 0, budget=MAX_INT)
+        return chain(base, "state", None, zero, 0, budget=budget)
     return [ask(dict(base, budget=1, facts=[], state=state, to=state["at"]))]
 
 
-def stored(being, to=None):
+def stored(being, to=None, cap=None):
     """The state a view at minute ``to`` starts from, served as it is kept; read-only.
 
     The latest usable checkpoint at or before the minute (``start_point``),
     else the minute-0 state with the facts of minute 0 folded, shown at its
     own minute: what a ``catching_up`` view serves, as a ``View`` of status
     ``stored`` that owes nothing. A look serves it when the engine stops on
-    a fault past it.
+    a fault past it. ``cap`` bounds every request, as a view's does.
     """
     from .evolution import labels
 
     if to is not None and (not _is_int(to) or not 0 <= to <= MAX_INT):
         raise LifeRefused("bad_request", "to")
+    if cap is not None and (not _is_int(cap) or not 1 <= cap <= MAX_INT):
+        raise LifeRefused("bad_request", "budget")
     ordered, _goal, rows = _read(being, to)
     _start, state = start_point(ordered, rows)
     base = {"genesis": ordered[0][2], "op": "advance", "v": 1}
-    answers = _start_answers(base, ordered, state)
+    answers = _start_answers(base, ordered, state, budget=MAX_INT if cap is None else cap)
     served = answers[-1]
     work, notes = _spent(answers)
     return View("stored", served["state"], served["at"], served["hash"], served["env"], labels(being),

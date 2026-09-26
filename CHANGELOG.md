@@ -107,6 +107,90 @@ package costs.
   read the frontend suites as well as the componion's. Twenty-six
   contracts.
 
+- [SECURITY] The componion is served over the API, read only.
+  `GET /api/allium/status` answers the terminal's own projection -- the
+  status, its label codes, the being's codes at the served minute and the
+  lines that say them, the doctrine last -- through one router under
+  `/api/allium` and schemas of its own (`api/schemas_allium.py`, every model
+  named `Allium*`, so no published component is renamed). The router is
+  always mounted. While the garden is switched off the route answers
+  `disabled` with no line (the terminal's form names the settings file's
+  path, which is never served), and neither the route nor the new `allium`
+  key of `/api/health` imports anything of the being, whichever allowed name
+  the request was addressed by: both read the switch, and the route the
+  names of `api.hosts`, from `config/allium.yaml` themselves, one `stat` per
+  read, by the garden's own rules; only a refused request imports the
+  garden's catalogue and its nets, to say its line. Every garden
+  route first checks the raw Host header (exactly one, naming `127.0.0.1`,
+  `localhost`, `[::1]` or a name listed in the new `api.hosts`, where an
+  address spelled otherwise than as its dotted quad refuses the list; ports
+  are not compared and `X-Forwarded-Host` is never read), the Origin when one is
+  sent (the same names, over https for a listed one; `null` refused) and
+  `Sec-Fetch-Site` (anything but `same-origin` or `none` is answered only
+  beside an accepted Origin). A rebound name, a page of another site and an
+  image pointed at the loopback API are refused before the user dependency
+  or the garden runs. The platform's user dependency comes next, and the
+  garden's caller is built from its principal alone: a validated token, from
+  the cookie or as Bearer, is a session, and the single-user principal is
+  the local web surface. Every refusal is a closed body,
+  `{"detail": <one of the garden's lines>, "refusal": <code>}`: nothing of
+  the request or of an exception is repeated, and a 401 keeps its status.
+  The API's garden is built at the first status request with the switch on,
+  one per process, and its store is closed at shutdown; it serves no gesture,
+  refuses a caller that is not given, reads this server's emergency stop, and
+  takes its single-user rule from the auth manager the server already runs,
+  whose read opens the auth store as the platform's own reads do (so a look
+  can checkpoint that store's pending frames, as they can). A view in a
+  request is capped
+  (`api.python_cap`, 200,000 units of engine work with the Python reference;
+  `api.native_cap`, 5,000,000 with the native core): every request to the
+  engine asks at most the cap, the fold from the genesis included (`life`
+  now carries the cap to it and to the frozen path, where it was uncapped),
+  and a view that does not finish is shown as of its last kept state,
+  labelled, followed by the new line "The next write made in oo garden
+  computes it."; a cap below one awake day of the laws the engine carries is
+  raised to that day, logged, so the line holds. A look never catches up and
+  writes nothing in the being's store. The one write it can cause is the
+  platform's tamper evidence: after the mode files change to disagree, the
+  mode reading records the mismatch in the auth store's audit log and in
+  the signed audit chain, once per change of the files. Three shared
+  lines are reworded to hold on every surface: the two emergency-stop lines
+  ("in this server", presupposing no onion) and the missing-account line.
+  For a process that lives long and runs many threads, the engine handshake
+  is answered once for every thread, the switch and `api` readers keep their
+  caches in one assignment, and the mode reading keeps a manager of its own,
+  so looking at the garden no longer makes the whole server re-read its
+  security mode. Around the being: remote inference refuses the fields
+  `allium`, `componion`, `garden` and `pet` as a capability it never reaches;
+  while a plugin loads in process (the fallback when its subprocess cannot
+  run), the sandbox refuses the being and its two entry modules (the router
+  and the terminal's commands) to code with a plugin frame anywhere on its
+  stack, loaded or not -- by a statement, `__import__`, a relative import
+  whose package the plugin forged, or importlib's own entries -- and a
+  plugin that renames itself is still plugin code. It is a rule of the load,
+  not a boundary against a hostile plugin: hooks run after the load with no
+  import restriction, and a loader of the plugin's own can execute a file by
+  its path (both left to the plugins audit). Vite's dev proxy keeps the
+  browser's Host (`changeOrigin: false`), so the check holds through it. The
+  inference backend gains a passive light sink -- a record of a finished
+  request's raw token counts, each with its source -- with no sink
+  registered and no head calling it yet. `docs/api-reference.md` counts 531
+  endpoints and the published prose digest records the new route and
+  schemas. Nineteen contracts. Owed to the machine: the first prototype
+  sowing on the real key file, read through the running API and through the
+  dev proxy; a capped view's time at the default caps, reference and native;
+  the first status request of an API process on the real record (the chain,
+  the audit log's chain, the cipher integrity check, the engine handshake;
+  when that request is the process's first user of the signed audit log, it
+  creates its table and may rewrite the chain's anchor);
+  the auth manager's store reads per request, and whether one checkpoints
+  the auth store; the store held open while
+  `oo garden` writes; the browsers and the phone (the Fetch Metadata they
+  send to the loopback names, an image from another site refused, the phone
+  reading with `api.hosts` set, a page of another origin refused); an API
+  kept running across an upgrade; the frontend's degraded ratio with one more
+  module key; and the light counts from a real engine, once a sink exists.
+
 - The componion's first surface: `oo garden`, in the terminal's own process.
   It reaches the componion through one service,
   `opti_oignon/allium/service.py`, the one the API is to serve as well, so

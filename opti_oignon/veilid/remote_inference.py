@@ -83,9 +83,10 @@ _CONT_ALLOWED_FIELDS = frozenset({"v", "type", "device", "request_id", "cursor"}
 
 # Fields that, if present, name a capability the remote surface must never reach
 # at tier 1 (state-mutation, sandbox, filesystem, shell, config, mutating
-# pipelines). The allow-set above already refuses anything not allowed; this set
-# only sharpens the refusal so it names the offending capability class rather
-# than reporting a bare unknown field.
+# pipelines, or the componion: its garden is read on the PC, through the API's
+# own checked route, never through this channel). The allow-set above already
+# refuses anything not allowed; this set only sharpens the refusal so it names
+# the offending capability class rather than reporting a bare unknown field.
 _FORBIDDEN_FIELDS = frozenset(
     {
         "tool",
@@ -103,6 +104,10 @@ _FORBIDDEN_FIELDS = frozenset(
         "config",
         "settings",
         "pipeline",
+        "allium",
+        "componion",
+        "garden",
+        "pet",
     }
 )
 
@@ -206,7 +211,7 @@ def _enforce_bounded_surface(
                 "out_of_surface",
                 "field '" + str(key) + "' names a capability the tier 1 remote "
                 "surface does not reach (state-mutation/sandbox/filesystem/"
-                "shell/config); refused, not dropped",
+                "shell/config, or the componion); refused, not dropped",
             )
         return _refusal(
             request_id,

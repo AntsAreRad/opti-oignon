@@ -1,4 +1,4 @@
-"""The garden as the terminal uses it: every look and every act on the componion goes through here.
+"""The garden as the terminal and the API use it: every look and every act on the componion goes through here.
 
 ``Garden`` is the one facade over the componion's store. Every public
 method is one action: the switch is read first (anything but ``"on"`` is
@@ -48,6 +48,17 @@ place a ``membrane.Transport`` is built; ``terminal_attended`` is the strong
 terminal test, and ``platform_single_user`` the single-user reader the
 production store is built with (``Garden.production``): it writes nothing
 in the auth store it reads.
+
+The API's garden (``Garden.production(terminal=False, ...)``) serves the
+same looks to the web and nothing else it can reach: no attended verb, a
+caller given to every method (a missing one is a ``TypeError``, a defect of
+its caller, never a status, since a default caller would read as the
+terminal), the emergency stop the API process holds, the single-user rule
+that process already runs, and a cap on each view's work,
+``api_view_cap``: the ``api`` settings' cap for the reference engine, or
+for the native core when it answers, chosen at each look after the store
+said alive. A view past the cap is served ``catching_up`` from its last
+kept state. The terminal's garden caps nothing and has a default caller.
 
 ``gated`` is the Bulbe gate of a capability: it calls the capability only
 when the switch is on, nothing is stopped and the policy of the pinned mode
@@ -261,6 +272,55 @@ def _auth_connect(path):
     return conn
 
 
+# The largest ``work.ceilings.awake_day`` among the laws this engine carries, read once; the caps said raised.
+_awake_day = {"value": None}
+_raised = set()
+
+
+def _day_of_work():
+    """The work of one awake day under the costliest law this engine carries (its ``awake_day`` ceiling)."""
+    if _awake_day["value"] is None:
+        from . import lawfiles
+
+        _awake_day["value"] = max(int(lawfiles.law(name)["work"]["ceilings"]["awake_day"]) for name in lawfiles.LAWS)
+    return _awake_day["value"]
+
+
+def api_view_cap(path=None):
+    """The API's cap on a view's work: ``api.native_cap`` when the native core answers, else ``api.python_cap``.
+
+    Read at each look, so a change of the settings file or of the engine in
+    use is followed. An engine that cannot say which it is counts as the
+    reference; settings that cannot be read give the reference's default
+    cap. A cap below one awake day of the costliest law this engine carries
+    is raised to that day, and the raise is logged once per value: under it,
+    the view after a write made in ``oo garden`` would still be catching up,
+    and the line a capped view says (the next write computes it) would be
+    false. Never raises.
+    """
+    from . import engine, settings
+
+    try:
+        native = engine.native_in_use() is True
+    except Exception:  # noqa: BLE001 - an engine that cannot say is the reference
+        native = False
+    try:
+        read = settings.api(path)
+    except Exception:  # noqa: BLE001 - settings that cannot be read give the reference's default
+        return settings.DEFAULT_PYTHON_CAP
+    cap = read.native_cap if native else read.python_cap
+    try:
+        day = _day_of_work()
+    except Exception:  # noqa: BLE001 - laws that cannot be read leave the cap as written
+        return cap
+    if cap < day:
+        if (cap, day) not in _raised:
+            _raised.add((cap, day))
+            logger.warning("the API's view cap %d is below one awake day of work (%d): %d is used", cap, day, day)
+        return day
+    return cap
+
+
 def platform_single_user(config=None, root=None):
     """Whether the platform runs for one person, read without importing the auth module; ``False`` when unsure.
 
@@ -431,38 +491,62 @@ def _mode_label(mode):
 
 
 class Garden:
-    """The componion's garden for one process: its seams, and one store built at most once, when first needed."""
+    """The componion's garden for one process: its seams, and one store built at most once, when first needed.
 
-    def __init__(self, *, store_factory, switch, stopped=None, attended=None, law=None):
+    ``view_cap`` (a callable of no argument answering a cap, or ``None``)
+    bounds the engine's work of each view when no cap is asked for; it is
+    called once per look, after the store said alive. ``caller_required``:
+    every method that takes a caller refuses a missing one (``TypeError``).
+    """
+
+    def __init__(self, *, store_factory, switch, stopped=None, attended=None, law=None, view_cap=None,
+                 caller_required=False):
         if not callable(store_factory) or not callable(switch):
             raise TypeError("store_factory and switch are callables")
+        if view_cap is not None and not callable(view_cap):
+            raise TypeError("view_cap is a callable or None")
         self.store_factory = store_factory
         self.switch = switch
         self.stopped = stopped
         self.attended = attended
         self.law = law
+        self.view_cap = view_cap
+        self.caller_required = caller_required is True
         self._store = None
         self._lock = threading.Lock()
 
     @classmethod
-    def production(cls):
-        """This process's garden: the settings' switch, the strong terminal test, the single-user reader.
+    def production(cls, *, stopped=None, terminal=True, view_cap=None, single_user=None):
+        """This process's garden: the settings' switch and a single-user reader; the terminal's by default.
 
-        No emergency stop is read (the terminal's process holds none) and the
-        law sown is the channel's. The store is built at the first action
-        that needs it, with the single-user reader and every other seam at
-        the store's own default.
+        The terminal's (the defaults): the strong terminal test, no emergency
+        stop (the terminal's process holds none), no cap on a view, and
+        ``platform_single_user``. With ``terminal`` anything but ``True``, the
+        API's: no attended verb, a caller required on every method, the
+        ``stopped`` seam, the ``view_cap`` and the ``single_user`` rule the
+        API process gives. The law sown is the channel's. The store is built
+        at the first action that needs it, with the single-user reader and
+        every other seam at the store's own default.
         """
         from . import settings
 
         def build():
             from . import store
 
-            return store.Store(single_user=platform_single_user)
+            reader = platform_single_user if single_user is None else single_user
+            return store.Store(single_user=reader)
 
-        return cls(store_factory=build, switch=settings.switch, stopped=None, attended=terminal_attended, law=None)
+        terminal = terminal is True
+        return cls(store_factory=build, switch=settings.switch, stopped=stopped,
+                   attended=terminal_attended if terminal else None, law=None, view_cap=view_cap,
+                   caller_required=not terminal)
 
     # -- the seams ------------------------------------------------------------
+
+    def _given(self, caller):
+        """A garden that requires its caller refuses a missing one: a defect of the caller, never a status."""
+        if caller is None and self.caller_required:
+            raise TypeError("this garden serves only a caller that is given")
 
     def store(self):
         """This process's one ``Store``, built on the first call."""
@@ -594,6 +678,8 @@ class Garden:
             return _made("unavailable", labels=labels, mode=mode, habitat=place, reason=reason,
                          glass_allowed=seen.glass_allowed)
         info = _being_info(being, ordered)
+        if cap is None and self.view_cap is not None:
+            cap = self.view_cap()
         frozen = False
         try:
             view = being.view(cap=cap)
@@ -601,7 +687,7 @@ class Garden:
             view = None
             if exc.code == "engine_panic":
                 try:
-                    view = life.stored(being)
+                    view = life.stored(being, cap=cap)
                     frozen = True
                 except Exception as fault:  # noqa: BLE001 - even the kept state refused: the engine's reason
                     if _view_reason(fault) is None:
@@ -640,6 +726,7 @@ class Garden:
 
     def look(self, caller=None, cap=None):
         """What the being is now, as a ``Look``: every outcome a status; nothing is written."""
+        self._given(caller)
         early = self._early()
         if early is not None:
             return early
@@ -682,6 +769,7 @@ class Garden:
 
     def sow_card(self, caller=None, *, hemisphere=None, band=None, weather=None):
         """The sowing card, every check a sowing makes done first; nothing is written."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -693,6 +781,7 @@ class Garden:
         """Sow the one seed of this garden, name it when a name is given, and say what was sown (``Sown``)."""
         from . import membrane
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -780,6 +869,7 @@ class Garden:
 
     def act(self, act, caller=None):
         """A gesture (``greet``, ``water``, ``warm``, ``play``): one fact, and the law update it may carry."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -789,6 +879,7 @@ class Garden:
 
     def name_card(self, caller=None):
         """The checks a name goes through before its question is asked: the look of an alive being."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -797,6 +888,7 @@ class Garden:
 
     def name(self, text, caller=None):
         """Name the being: one permanent ``name`` fact, from an attended terminal."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -807,6 +899,7 @@ class Garden:
 
     def laws_apply(self, confirm, caller=None):
         """Write the law update the diff confirmed, with its code: ``Acted``, ``carried`` the update itself."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -816,6 +909,7 @@ class Garden:
 
     def laws_pin(self, caller=None):
         """Pin the laws in force, from an attended terminal."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -825,6 +919,7 @@ class Garden:
 
     def laws_unpin(self, caller=None):
         """Lift the pin, from an attended terminal."""
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -838,6 +933,7 @@ class Garden:
         """Deep verification of an alive being (``life.deep_verify``): ``Verified``; nothing is written."""
         from . import life
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -849,6 +945,7 @@ class Garden:
         """The laws of the being's world (``LawsView``); a proposal that cannot be used is kept, not raised."""
         from . import evolution
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -875,6 +972,7 @@ class Garden:
         """What a law update from the proposal would change (``Diffed``); a proposal that is not one is refused."""
         from . import evolution
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -896,6 +994,7 @@ class Garden:
         """Resume a record that failed its verification, with the numbers its look showed; the look after."""
         from .store import ResumeRefused
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -918,6 +1017,7 @@ class Garden:
         """Finish an interrupted sowing, with the tag its look showed; the look after."""
         from .store import ResumeRefused
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:
@@ -944,6 +1044,7 @@ class Garden:
         """
         from . import membrane
 
+        self._given(caller)
         self._begin()
         store = self.store()
         with store.action() as action:

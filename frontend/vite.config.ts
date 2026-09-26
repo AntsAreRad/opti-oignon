@@ -8,7 +8,9 @@ export default defineConfig({
 		proxy: {
 			'/api': {
 				target: 'http://localhost:8001',
-				changeOrigin: true,
+				// Keep the browser's own Host: the garden's routes refuse a name that is not
+				// this machine's, and behind a rewritten Host they could not tell.
+				changeOrigin: false,
 				ws: true
 			}
 		}

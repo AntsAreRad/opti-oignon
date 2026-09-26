@@ -25,6 +25,11 @@ The slot types:
 * ``name`` -- a person's text; ``path`` -- a file path, escaped with
   ``backslashreplace``; ``key`` -- a template key. These three are masked.
 
+``WEB`` holds the lines only the API says: its refusals, and the line a
+capped view adds after its label. They pass the same nets; ``web(key)``
+renders one as a checked ``Line`` (they have no slots), and
+``WEB_FALLBACK`` is the one fixed string said when a line fails its check.
+
 ``REFUSALS`` is the closed refusal table: for each refusal class the
 garden serves, each of its codes names the lines it is said with and its
 exit. ``describe.refusal`` renders it; no exception text and no detail ever
@@ -48,11 +53,11 @@ TEMPLATES = {
         "The garden is off: its settings file cannot be read, and a switch that cannot be read is off:"),
     "status.disabled.kept": "An onion sown here keeps its record, and its time runs on while the garden is off.",
     "status.stopped": (
-        "The emergency stop is on in this server: it computes nothing for this onion until the stop is lifted. "
-        "Its time runs on."),
+        "The emergency stop is on in this server: the garden computes nothing until it is lifted. The time of an "
+        "onion sown here runs on."),
     "status.stopped.unknown": (
-        "The emergency stop cannot be read in this server, so it computes nothing for this onion. Its time runs "
-        "on."),
+        "The emergency stop cannot be read in this server, so the garden computes nothing. The time of an onion "
+        "sown here runs on."),
     "status.unavailable": "The garden cannot open its store: {reason}.",
     "status.unavailable.view": "The garden cannot compute this onion now: {reason}.",
     "status.awaiting_soil": (
@@ -204,7 +209,7 @@ TEMPLATES = {
     "refuse.membrane": "The membrane refused this write ({code}). Nothing was written.",
     "refuse.engine": "The engine refused ({code}). Nothing was written.",
     "refuse.other": "Refused ({code}). Nothing was written.",
-    "reason.account": "this machine requires an account, or its accounts cannot be read, and this terminal has none",
+    "reason.account": "this machine requires an account, or its accounts cannot be read, and none was given",
     "reason.path": "persistence.path in allium.yaml is refused, or no data directory is reachable",
     "reason.key": (
         "a master key is configured and this process cannot read it (a key file under a passphrase opens only "
@@ -226,6 +231,31 @@ TEMPLATES = {
     "reason.clock": "the clock cannot be read, or reads before its birth",
     "reason.engine": "the engine refused to serve even its last kept state",
 }
+
+# The lines only the API says, beside the catalogue: its refusals, by the code of each, and the line a view the
+# API capped says after its label. None has a slot.
+WEB = {
+    "web.host": (
+        "This garden answers only a request addressed to this machine as 127.0.0.1, localhost or [::1], or by a "
+        "name listed in api.hosts in allium.yaml. No garden was opened, and nothing in it was written."),
+    "web.origin": (
+        "This garden answers only a request whose Origin is this machine, or a name listed in api.hosts in "
+        "allium.yaml over https, with no path. No garden was opened, and nothing in it was written."),
+    "web.site": (
+        "This garden answers no request made by a page of another site. No garden was opened, and nothing in it "
+        "was written."),
+    "web.sign_in": "The garden answers only a signed-in session. No garden was opened, and nothing in it was written.",
+    "web.auth_unavailable": (
+        "The garden cannot check the request's account: the authentication module is not available. No garden "
+        "was opened, and nothing in it was written."),
+    "web.request": (
+        "The garden does not read this request: its fields are not the ones this route takes. No garden was "
+        "opened, and nothing in it was written."),
+    "web.fault": "The garden could not answer: an unexpected fault. Nothing in it was written.",
+    "web.catching_up": "The next write made in oo garden computes it.",
+}
+# The one fixed string the API says when one of its own lines fails its check.
+WEB_FALLBACK = "The garden could not answer."
 
 # The type of every slot of the catalogue.
 SLOTS = {
@@ -489,3 +519,17 @@ def say(key, /, **slots):
     if not _PRINTABLE.fullmatch(out):
         raise CopyRefused(key)
     return Line(key, out)
+
+
+def web(key):
+    """The API's own line ``key`` (``WEB``) as a checked ``Line``; ``CopyRefused(key)`` when it fails its check.
+
+    ``KeyError`` for a key ``WEB`` does not hold: that is a defect of the
+    caller, never a line to serve.
+    """
+    from . import ethics
+
+    text = WEB[key]
+    if not isinstance(text, str) or ethics.check(text) or not _PRINTABLE.fullmatch(text):
+        raise CopyRefused(key)
+    return Line(key, text)

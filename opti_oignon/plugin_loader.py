@@ -7,11 +7,13 @@ sandbox (no host filesystem access outside plugin dir, no network by
 default), manage lifecycle (install, enable, disable, uninstall).
 """
 
+import contextlib
 import importlib.util
 import io
 import logging
 import shutil
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Any
@@ -78,6 +80,162 @@ _NETWORK_MODULES = frozenset({
     "xmlrpc",
 })
 
+# The componion and the two modules that open it -- the API's garden router,
+# whose garden seam is writable, and the terminal's commands. While a plugin
+# loads in process, its code does not import them, cached or not: the finder
+# refuses them while they are not yet loaded, the import wrapper and
+# importlib's own entries once they are. Every rule acts only while a plugin
+# frame is on the stack, so a platform thread that serves the garden while a
+# plugin loads is never refused, and nothing is hidden from ``sys.modules``.
+# This is a rule of the load, in the in-process fallback: hooks run after it
+# with no import restriction, and it is no boundary against a hostile plugin
+# (a loader of the plugin's own can execute a file by its path).
+_BLOCKED_PACKAGES = ("opti_oignon.allium", "opti_oignon.api.routes_allium", "opti_oignon.cli.garden")
+
+# The globals of every plugin module whose sandboxed load is running. A frame
+# that runs code of one of them is plugin code, whatever that code binds as its
+# ``__name__``: the dictionary is the one the module was given, and plugin code
+# cannot hand its frames another.
+_LOADING: list = []
+_LOADING_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _plugin_scope(module: types.ModuleType) -> Any:
+    """Hold ``module``'s globals as a loading plugin's for the length of the block.
+
+    Read as ``module.__dict__``: the sandbox refuses ``vars`` while it stands.
+    """
+    scope = module.__dict__
+    with _LOADING_LOCK:
+        _LOADING.append(scope)
+    try:
+        yield
+    finally:
+        with _LOADING_LOCK:
+            for index, held in enumerate(_LOADING):
+                if held is scope:
+                    del _LOADING[index]
+                    break
+
+
+def _in_blocked_package(name: str, packages: tuple = _BLOCKED_PACKAGES) -> bool:
+    """Whether ``name`` is one of ``packages`` or a submodule of one."""
+    return any(name == package or name.startswith(package + ".") for package in packages)
+
+
+def _is_plugin_frame(frame: Any) -> bool:
+    """Whether ``frame`` runs plugin code: the globals of a loading plugin, or a module named ``_opti_plugin_*``."""
+    scope = frame.f_globals
+    if any(scope is held for held in tuple(_LOADING)):
+        return True
+    name = scope.get("__name__", "")
+    return isinstance(name, str) and name.startswith("_opti_plugin_")
+
+
+def _plugin_on_stack() -> bool:
+    """Whether any frame of the calling thread's stack runs plugin code.
+
+    Stricter than the exec/eval blockers, which look at the immediate caller
+    only: a plugin that reaches an import through a platform helper is
+    still on the stack, and a plugin that rebinds its ``__name__`` still runs
+    in the globals it was loaded with.
+    """
+    frame = sys._getframe(1)
+    while frame is not None:
+        if _is_plugin_frame(frame):
+            return True
+        frame = frame.f_back
+    return False
+
+
+def _package_of(importer_globals: Any) -> str | None:
+    """The package a relative ``__import__`` resolves against, by the import system's own rule; ``None`` if unsure.
+
+    The rule of ``importlib._bootstrap``: ``__package__`` when it is not
+    ``None``, else ``__spec__.parent`` when there is a spec, else the
+    module's name (its parent unless it has ``__path__``). Read once: a
+    caller that must act on it hands the import system this answer.
+    """
+    try:
+        scope = importer_globals if importer_globals is not None else {}
+        package = scope.get("__package__")
+        if package is None:
+            spec = scope.get("__spec__")
+            if spec is not None:
+                package = spec.parent
+            else:
+                package = scope["__name__"]
+                if "__path__" not in scope:
+                    package = package.rpartition(".")[0]
+    except Exception:  # noqa: BLE001 - a package that cannot be read is not resolved here
+        return None
+    return package if isinstance(package, str) and package else None
+
+
+def _absolute_import(name: str, package: str | None, level: Any) -> str | None:
+    """The absolute name an ``__import__`` call resolves to against ``package``; ``None`` when unsure."""
+    if not level:
+        return name
+    if package is None or not isinstance(level, int) or level < 0 or not isinstance(name, str):
+        return None
+    bits = package.rsplit(".", level - 1)
+    if len(bits) < level:
+        return None
+    return bits[0] + "." + name if name else bits[0]
+
+
+def _import_call(name: str, args: tuple, kwargs: dict) -> tuple:
+    """``(given arguments, package or None, targets)`` of an ``__import__`` call, the package read once.
+
+    The targets are the module and each ``from`` name under it; an import
+    this cannot resolve has the one target ``None``.
+    """
+    given = dict(zip(("globals", "locals", "fromlist", "level"), args))
+    given.update(kwargs)
+    level = given.get("level") or 0
+    package = _package_of(given.get("globals")) if level else None
+    base = _absolute_import(name, package, level)
+    if base is None:
+        return given, package, [None]
+    targets: list[str | None] = [base]
+    for item in given.get("fromlist") or ():
+        if isinstance(item, str) and item != "*":
+            targets.append(base + "." + item if base else item)
+    return given, package, targets
+
+
+def _guarded_import(real: Any, via: str, name: str, args: tuple, kwargs: dict) -> Any:
+    """``real(name, ...)``, unless it reaches a blocked module while plugin code is on the stack.
+
+    A relative import made while a plugin is on the stack is handed to the
+    import system with the package this rule judged, so a package that
+    answers differently when read twice cannot pass the rule and then
+    import elsewhere.
+    """
+    given, package, targets = _import_call(name, args, kwargs)
+    if not _plugin_on_stack():
+        return real(name, *args, **kwargs)
+    reached = _reaches_blocked(targets)
+    if reached:
+        raise PluginSandboxViolation(
+            f"Plugin attempted to import a module plugins never reach via {via}: '{reached}'"
+        )
+    if given.get("level"):
+        return real(name, {"__package__": package, "__name__": package}, given.get("locals"),
+                    given.get("fromlist") or (), given["level"])
+    return real(name, *args, **kwargs)
+
+
+def _reaches_blocked(targets: list[str | None]) -> str | None:
+    """The first target that is a blocked module, or an unresolved one (``"?"``); ``None`` when none is."""
+    for target in targets:
+        if target is None:
+            return "?"
+        if _in_blocked_package(target):
+            return target
+    return None
+
 
 class PluginLoadError(Exception):
     """Raised when a plugin fails to load."""
@@ -99,16 +257,28 @@ class _RestrictedImporter:
         blocked: frozenset[str],
         network_blocked: frozenset[str],
         has_network_permission: bool = False,
+        *,
+        blocked_packages: tuple = _BLOCKED_PACKAGES,
     ) -> None:
         self._blocked = blocked
         self._network_blocked = network_blocked
         self._has_network = has_network_permission
+        self._blocked_packages = tuple(blocked_packages)
         self._active = True
 
     def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
-        """Python 3 meta-path protocol: raise if blocked, return None to allow."""
+        """Python 3 meta-path protocol: raise if blocked, return None to allow.
+
+        A module of ``blocked_packages`` is refused only while a plugin frame
+        is on the stack; the finder is asked only for a module that is not
+        loaded yet, and the import wrapper holds the rule once it is.
+        """
         if not self._active:
             return None
+        if _in_blocked_package(fullname, self._blocked_packages) and _plugin_on_stack():
+            raise PluginSandboxViolation(
+                f"Plugin attempted to import a module plugins never reach: '{fullname}'"
+            )
         top = fullname.split(".")[0]
         if top in self._blocked:
             raise PluginSandboxViolation(
@@ -375,13 +545,20 @@ class _RestrictedBuiltins:
       (detected by checking the caller's module name), but allowed
       when called from Python internals (import system, etc.)
     - __import__: selective wrapper that blocks _BLOCKED_IMPORTS modules
-      but allows safe module imports
+      but allows safe module imports; it also refuses a module of
+      _BLOCKED_PACKAGES, named directly or as a ``from`` name, whenever a
+      plugin frame is on the stack, cached or not, and a relative import
+      made by plugin code itself
+    - importlib.import_module and importlib.__import__: the same rule for
+      _BLOCKED_PACKAGES, for a platform helper that imports by name while
+      plugin code is on the stack
 
     Restored on exit.
     """
 
     def __init__(self) -> None:
         self._originals: dict[str, Any] = {}
+        self._importlib_originals: dict[str, Any] = {}
         self._builtins_module: Any = None
 
     def __enter__(self) -> "_RestrictedBuiltins":
@@ -447,12 +624,52 @@ class _RestrictedBuiltins:
                     f"Plugin attempted to import blocked module via "
                     f"__import__: '{name}'"
                 )
-            return original_import(name, *args, **kwargs)
+            # A plugin module is top-level: a relative import made by its own
+            # code can only name a package it forged, and is refused.
+            level = args[3] if len(args) > 3 else kwargs.get("level", 0)
+            if level and _is_plugin_frame(_sys._getframe(1)):
+                raise PluginSandboxViolation(
+                    f"Plugin attempted a relative import via __import__: '{name}'"
+                )
+            # The componion and its two doors: refused to plugin code, whether
+            # the module is cached or not, by its name or by a ``from`` name.
+            return _guarded_import(original_import, "__import__", name, args, kwargs)
 
         builtins.__import__ = _restricted_import  # type: ignore[assignment]
+
+        # importlib's own entries take a module by name without going through
+        # the builtin: a platform helper that imports by name while plugin code
+        # is on the stack is held to the same rule.
+        self._importlib_originals = {"import_module": importlib.import_module,
+                                     "__import__": importlib.__import__}
+        real_import_module = importlib.import_module
+        real_importlib_import = importlib.__import__
+
+        def _restricted_import_module(name: str, package: Any = None) -> Any:
+            try:
+                relative = isinstance(name, str) and name.startswith(".")
+                target = importlib.util.resolve_name(name, package) if relative else name
+            except Exception:  # noqa: BLE001 - a name that cannot be resolved here is unsure
+                target = None
+            reached = _reaches_blocked([target])
+            if reached and _plugin_on_stack():
+                raise PluginSandboxViolation(
+                    f"Plugin attempted to import a module plugins never reach "
+                    f"via importlib.import_module: '{reached}'"
+                )
+            return real_import_module(name, package)
+
+        def _restricted_importlib_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            return _guarded_import(real_importlib_import, "importlib.__import__", name, args, kwargs)
+
+        importlib.import_module = _restricted_import_module  # type: ignore[assignment]
+        importlib.__import__ = _restricted_importlib_import  # type: ignore[assignment]
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        for name, original in self._importlib_originals.items():
+            setattr(importlib, name, original)
+        self._importlib_originals.clear()
         builtins = self._builtins_module
         if builtins is None:
             return
@@ -990,7 +1207,7 @@ class PluginLoader:
 
             if sandbox:
                 allowed_dirs = [plugin_path]
-                with _RestrictedPathAccessor(allowed_dirs), _RestrictedBuiltins():
+                with _RestrictedPathAccessor(allowed_dirs), _RestrictedBuiltins(), _plugin_scope(module):
                     spec.loader.exec_module(module)
             else:
                 spec.loader.exec_module(module)

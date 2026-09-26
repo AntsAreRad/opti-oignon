@@ -114,6 +114,76 @@ def _governor_admission(model: str, options: dict | None) -> None:
         logger.debug("Governor gate failed open: %s", exc)
 
 
+# The light sink. Passive by construction: nothing in this module resolves,
+# imports, reads or waits for a sink. A head hands the hook what its engine
+# reported, and the hook returns on its second statement when no sink is
+# registered. The counts are never weighed, summed, capped or converted here:
+# what they mean belongs to whoever registers the sink. No head calls the hook
+# yet; the change that registers a sink adds the calls.
+
+_LIGHT_SINK = None
+
+
+class LightCount:
+    """What one finished request read and wrote, as far as its engine said.
+
+    ``head`` names the head that answered (``generate``, ``stream``,
+    ``embed`` or ``embed_many``) and ``backend`` the backend's name. The
+    prompt and completion counts are integers or ``None``, each with its own
+    source: ``reported`` when the engine said it, ``unknown`` when it did
+    not, ``not_generated`` for an embedding, which writes nothing. No text,
+    model name, option, image, duration, caller or user is ever carried.
+    """
+
+    __slots__ = ("head", "backend", "prompt", "prompt_source", "completion", "completion_source")
+
+    def __init__(self, head, backend, prompt, prompt_source, completion, completion_source):
+        self.head = head
+        self.backend = backend
+        self.prompt = prompt
+        self.prompt_source = prompt_source
+        self.completion = completion
+        self.completion_source = completion_source
+
+
+def set_light_sink(sink):
+    """Register the sink the heads report to, or withdraw it with ``None``. Returns the sink it replaces."""
+    global _LIGHT_SINK
+    if sink is not None and not callable(sink):
+        raise TypeError(f"a light sink must be callable, got {type(sink).__name__}")
+    previous, _LIGHT_SINK = _LIGHT_SINK, sink
+    return previous
+
+
+def _light_count(value):
+    """A reported count as it is passed on: a non-negative integer, else ``None``."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _light(head, backend, reported):
+    """Hand the registered sink what one finished request read and wrote; nothing when no sink is registered.
+
+    ``reported`` is the mapping of counts the engine returned. A sink that
+    raises never breaks the head: its failure is logged by class name only.
+    """
+    sink = _LIGHT_SINK
+    if sink is None:
+        return
+    try:
+        prompt = _light_count(reported.get("prompt_eval_count"))
+        if head in ("embed", "embed_many"):
+            completion, completion_source = None, "not_generated"
+        else:
+            completion = _light_count(reported.get("eval_count"))
+            completion_source = "unknown" if completion is None else "reported"
+        sink(LightCount(head, backend, prompt, "unknown" if prompt is None else "reported",
+                        completion, completion_source))
+    except Exception as exc:  # noqa: BLE001 - a sink never breaks a head
+        logger.debug("Light sink failed: %s", type(exc).__name__)
+
+
 # Model integrity seam. Deliberately the OPPOSITE posture to the governor gate
 # above, and the contrast is the point: an absent resource governor means an
 # unguarded but otherwise correct load, so it fails open. An absent integrity

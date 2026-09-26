@@ -32,16 +32,22 @@ PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store", "evolut
             "habitat", "ethics", "wording", "describe", "service")
 # The terminal's modules, loaded after the platform when a contract drives ``oo garden``.
 CLI = ("config", "client", "output", "main", "garden")
+# The API's modules for the garden's routes, loaded last (after the terminal when both are asked), in this
+# order: the schemas, the platform's auth routes whose user dependency the garden's router carries, the router.
+API = ("schemas_allium", "routes_auth", "routes_allium")
 
 
-def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=None, cli=False):
+def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=None, cli=False, api=False):
     """Load the reference, the seam and (when asked) the platform and the native loader; ``(loaded, restore)``.
 
     ``extra`` maps further dotted names to source files, loaded last: a
     contract that names a real platform module (the mode manager, say) loads
     it here, and must then leave it out of ``blocked``. ``cli`` adds the
     terminal's modules after the platform, under a stand-in ``opti_oignon.cli``
-    package, so ``oo garden`` runs inside the window.
+    package, so ``oo garden`` runs inside the window. ``api`` adds the garden's
+    routes (``API``) after them, under a stand-in ``opti_oignon.api`` package;
+    the platform's dependency module (``opti_oignon.api.deps``) and the
+    emergency stop are the caller's to seed.
     """
     targets = {f"opti_oignon.allium.{name}": source("allium", f"{name}.py") for name in REFERENCE}
     # The organs before the protocol: it imports them when it is executed.
@@ -65,6 +71,10 @@ def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=N
         packages = PACKAGES + ("opti_oignon.cli",)
         for name in CLI:
             targets[f"opti_oignon.cli.{name}"] = source("cli", f"{name}.py")
+    if api:
+        packages = packages + ("opti_oignon.api",)
+        for name in API:
+            targets[f"opti_oignon.api.{name}"] = source("api", f"{name}.py")
     if native:
         targets["opti_oignon.native"] = source("native", "__init__.py")
     targets.update(extra or {})

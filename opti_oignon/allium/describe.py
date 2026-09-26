@@ -30,7 +30,11 @@ one. ``lab`` and ``lab_laws`` open with the doctrine, as the sow card does.
 service marked ``written`` (raised after its verb's write returned) is
 said as a refusal after the write, never as nothing written.
 ``served_fields(look)`` is the closed projection ``show --json`` prints:
-every value a closed code but the lines' text.
+every value a closed code but the lines' text. ``web_fields(look)`` is the
+one the API serves: the same, except that the switched-off form carries no
+line at all -- the terminal's ends in the settings file's path, which a
+page or a phone never sees -- and that a view the API capped says, right
+after its ``catching_up`` label, the API's own line of what computes it.
 
 Pure: no clock, no randomness, no environment, no terminal width, no locale.
 Nothing is imported at module level but the standard library.
@@ -646,6 +650,42 @@ def served_fields(look):
         "source": "simulation",
         "status": look.status,
     }
+
+
+def _web_disabled():
+    """The switched-off form the API serves: every field empty, no line, so no path of this machine."""
+    return {"as_of": None, "being": None, "habitat": None, "labels": [], "law": None, "lines": [],
+            "source": "simulation", "status": "disabled"}
+
+
+def web_fields(look):
+    """The closed projection the API serves: ``served_fields``, the switched-off form emptied, never a path.
+
+    ``disabled`` is built directly, with no line: its terminal form is never
+    computed. Every other status is ``served_fields(look)``, with the API's
+    own ``web.catching_up`` line inserted right after ``label.catching_up``.
+    A line keyed ``path.line`` is refused (``CopyRefused("path.line")``),
+    and so is a key that names an absence (``CopyRefused("json")``).
+    """
+    from . import ethics
+
+    w = _wording()
+    if look.status == "disabled":
+        payload = _web_disabled()
+    else:
+        payload = served_fields(look)
+        lines = []
+        for line in payload["lines"]:
+            lines.append(line)
+            if line["key"] == "label.catching_up":
+                said = w.web("web.catching_up")
+                lines.append({"key": said.key, "text": said.text})
+        payload["lines"] = lines
+    if any(line["key"] == "path.line" for line in payload["lines"]):
+        raise w.CopyRefused("path.line")
+    if ethics.check_fields(payload):
+        raise w.CopyRefused("json")
+    return payload
 
 
 # ---------------------------------------------------------------------------

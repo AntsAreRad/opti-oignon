@@ -8,16 +8,24 @@ refusal codes -- with the reference's, byte for byte. A native core built
 from other law files, or an older one left installed, would answer for a
 different world: it is not used, and that is said once.
 
-The native core is looked up at the first call, never at import.
+The native core is looked up at the first call, never at import. The
+handshake is answered once for every thread: the first caller loads and
+asks under a lock, and any other caller waits for its answer rather than
+read "no native" while the load is in progress -- a long-lived process
+would otherwise pick the reference's cap for a view the native engine then
+computes.
 """
 
 import logging
+import threading
 
 checkpoint_before_apply = True
 
 logger = logging.getLogger(__name__)
 
+# ``native`` is set before ``checked``: a caller that sees ``checked`` without the lock sees the answer too.
 _state = {"checked": False, "native": None}
+_lock = threading.Lock()
 
 
 def _load_native():
@@ -43,17 +51,23 @@ def handshake(module):
 
 
 def _native_call():
-    if not _state["checked"]:
-        _state["checked"] = True
-        module = _load_native()
-        if module is not None and handshake(module):
-            _state["native"] = module.allium_call
-        elif module is not None and getattr(module, "allium_call", None) is not None:
-            logger.warning(
-                "the native engine does not answer for the reference's world "
-                "(a stale build or other law files): the reference answers"
-            )
-    return _state["native"]
+    if _state["checked"]:
+        return _state["native"]
+    with _lock:
+        if not _state["checked"]:
+            try:
+                module = _load_native()
+                if module is not None and handshake(module):
+                    _state["native"] = module.allium_call
+                elif module is not None and getattr(module, "allium_call", None) is not None:
+                    logger.warning(
+                        "the native engine does not answer for the reference's world "
+                        "(a stale build or other law files): the reference answers"
+                    )
+            finally:
+                # A loader that raises is asked once: its caller sees the error, every later call the reference.
+                _state["checked"] = True
+        return _state["native"]
 
 
 def native_in_use():
@@ -73,5 +87,6 @@ def call(request):
 
 def reset():
     """Forget the handshake, for the contracts that swap the native core."""
-    _state["checked"] = False
-    _state["native"] = None
+    with _lock:
+        _state["checked"] = False
+        _state["native"] = None

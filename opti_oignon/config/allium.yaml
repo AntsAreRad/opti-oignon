@@ -1,8 +1,8 @@
 # The componion (the companion onion)
 # ===================================
-# Off until the service that serves it is switched on. `oo garden` reads it;
-# anything but true is off. The store below reads the persistence and life
-# sections.
+# Off until the service that serves it is switched on. `oo garden` and the
+# API's garden routes read it; anything but true is off. The store below reads
+# the persistence and life sections.
 enabled: false
 
 # Where each person's journal lives, and how a new one may be born.
@@ -40,3 +40,18 @@ life:
   # local days, the Mondays of the last `weekly` weeks, every first of a
   # month when `monthly`, and the latest. Dropping them changes no view.
   checkpoints: {daily: 14, weekly: 52, monthly: true}
+
+# The garden's routes in the API: which names may address them, and how much
+# the engine may compute inside one request. `oo garden` never reads this.
+api:
+  # Names the routes answer beside 127.0.0.1, localhost and [::1], which are
+  # always allowed, for the Host and the Origin of a request. Exact names or
+  # IP literals, lowercase, with no port, scheme or wildcard; a page from a
+  # listed name must be served over https. A list that cannot be read allows
+  # the loopback names only.
+  hosts: []
+  # Engine work a view may do inside one request with the Python reference;
+  # past it the view shows its last kept state, labelled.
+  python_cap: 200000
+  # The same bound when the native core answers.
+  native_cap: 5000000
