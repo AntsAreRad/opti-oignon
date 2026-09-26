@@ -41,6 +41,7 @@ def safe_connect(
     *,
     check_same_thread: bool = True,
     timeout: float = 5.0,
+    read_only: bool = False,
 ) -> sqlite3.Connection:
     """Open a SQLite connection, using SQLCipher when available.
 
@@ -55,12 +56,23 @@ def safe_connect(
         SQLite check_same_thread parameter.
     timeout : float
         Connection timeout in seconds.
+    read_only : bool
+        Open the file read-only: nothing is written through the connection,
+        and opening or closing it writes no byte of the store's files (no WAL
+        checkpoint, no rollback of a hot journal, which is refused instead).
 
     Returns
     -------
     sqlite3.Connection
     """
     if _ENCRYPTION_AVAILABLE and get_encrypted_connection is not None:
+        if read_only:
+            return get_encrypted_connection(
+                str(db_path),
+                check_same_thread=check_same_thread,
+                timeout=timeout,
+                read_only=True,
+            )
         return get_encrypted_connection(
             str(db_path),
             check_same_thread=check_same_thread,
@@ -91,6 +103,11 @@ def safe_connect(
             db_path,
         )
         _plaintext_fallback_warned = True
+    if read_only:
+        uri = Path(db_path).absolute().as_uri() + "?mode=ro"
+        if Path(str(db_path) + "-shm").exists():
+            uri += "&readonly_shm=1"
+        return sqlite3.connect(uri, check_same_thread=check_same_thread, timeout=timeout, uri=True)
     return sqlite3.connect(
         str(db_path),
         check_same_thread=check_same_thread,

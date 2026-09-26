@@ -36,6 +36,13 @@ retention ``daily`` and ``weekly`` are integers (not booleans) in
 0..=2^53-1, ``monthly`` is a boolean; a malformed value falls back to its
 default and the fallback is logged, a missing one reads its default.
 
+``enabled`` is the garden's switch (``switch``): ``"on"`` only when the
+file's top level is a mapping whose ``enabled`` is the YAML boolean
+``true``; ``"off"`` for a missing file, a missing key or any other value
+(the string ``"true"``, ``1``); ``"unreadable"`` for a file that exists and
+does not parse, or whose top level is not a mapping -- and a switch that
+cannot be read is off, said as such, once per modification of the file.
+
 ``yaml`` is imported when the file is read, the file is found from this
 package's location, and each reader keeps its parsed result, in a cache of
 its own, until the file's modification time changes.
@@ -62,10 +69,13 @@ PARAM_KEYS = {"evap_awake": ("soil", "evap_awake"), "evap_dormant": ("soil", "ev
 SOWING_KEYS = {"band": ("seasons", "default_band"), "hemisphere": ("seasons", "default_hemisphere"),
                "weather": ("weather", "mode")}
 UNREADABLE = "the settings file cannot be read"
+# What a file that does not parse reads as, apart from a file that parses to nothing.
+_UNPARSED = object()
 
 _cache = {"key": None, "value": None}
 _life_cache = {"key": None, "value": None}
 _laws_cache = {"key": None, "value": None}
+_switch_cache = {"key": None, "value": None}
 
 
 class Malformed(NamedTuple):
@@ -155,6 +165,48 @@ def persistence(path=None):
     _cache["key"] = key
     _cache["value"] = value
     return dict(value)
+
+
+def switch(path=None):
+    """The garden's switch in ``path`` or the package's own file: ``"on"``, ``"off"`` or ``"unreadable"``.
+
+    ``"on"`` only for a top-level mapping whose ``enabled`` is the YAML
+    boolean ``true`` (``true`` or ``yes``). A missing file or key, and every
+    other value, is ``"off"``; a file that exists and does not parse, or
+    whose top level is not a mapping, is ``"unreadable"``, logged once per
+    modification. Cached until the file changes (its modification time,
+    size and inode).
+    """
+    file = Path(path) if path is not None else config_file()
+    try:
+        st = file.stat()
+        key = (str(file), st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        key = (str(file), None)
+    if _switch_cache["key"] == key:
+        return _switch_cache["value"]
+    if key[1] is None:
+        value = "off"
+    else:
+        try:
+            import yaml
+
+            data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - a switch that cannot be read is off, and said to be unreadable
+            data = _UNPARSED
+        if data is _UNPARSED or not isinstance(data, dict):
+            value = "unreadable"
+            logger.warning("the componion's settings file cannot be read: the garden is off")
+        else:
+            value = "on" if data.get("enabled") is True else "off"
+    _switch_cache["key"] = key
+    _switch_cache["value"] = value
+    return value
+
+
+def enabled(path=None):
+    """Whether the garden is on: exactly ``switch(path) == "on"``."""
+    return switch(path) == "on"
 
 
 def _count(name, raw, default):

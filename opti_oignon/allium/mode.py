@@ -1,8 +1,11 @@
 """The security mode as the componion reads it: Daily or Bulbe, fail-closed.
 
-``live_mode()`` answers ``"daily"`` only when the platform's mode manager
-says exactly ``"daily"``; anything else -- another word, a stray space, an
-exception, a module that cannot be imported -- is ``"bulbe"``.
+``live_reading()`` answers ``"daily"`` or ``"bulbe"`` when the platform's
+mode manager says exactly that word, and ``"unknown"`` for anything else --
+another word, a stray space, an exception, a module that cannot be imported.
+``live_mode()`` answers ``"daily"`` only for a reading of ``"daily"`` and
+``"bulbe"`` otherwise: a mode that cannot be read takes Bulbe's rules. The
+garden tells the two apart only to say which it was.
 
 The manager keeps the mode in a per-process cache that only a transition in
 the same process clears, so a long-running server would never see a mode
@@ -30,8 +33,8 @@ def _stat(path):
     return (st.st_mtime_ns, st.st_size, st.st_ino)
 
 
-def live_mode():
-    """``"daily"`` or ``"bulbe"``; ``"bulbe"`` whenever the mode cannot be read exactly."""
+def live_reading():
+    """``"daily"`` or ``"bulbe"`` as the manager says it exactly; ``"unknown"`` whenever it cannot be read so."""
     try:
         from opti_oignon import security_mode as sm
 
@@ -41,6 +44,13 @@ def live_mode():
             sm.security_mode_manager.invalidate_cache()
             _seen["stamp"] = stamp
         mode = sm.security_mode_manager.get_current_mode()
-    except Exception:  # noqa: BLE001 - a mode that cannot be read is Bulbe
-        return "bulbe"
-    return "daily" if mode == "daily" else "bulbe"
+    except Exception:  # noqa: BLE001 - a mode that cannot be read is unknown
+        return "unknown"
+    if isinstance(mode, str) and mode in ("daily", "bulbe"):
+        return mode
+    return "unknown"
+
+
+def live_mode():
+    """``"daily"`` or ``"bulbe"``; ``"bulbe"`` whenever the mode cannot be read exactly."""
+    return "daily" if live_reading() == "daily" else "bulbe"

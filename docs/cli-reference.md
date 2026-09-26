@@ -4,9 +4,9 @@
 
 The `oo` command-line tool is a companion for interacting with a
 running Opti-Oignon backend from the terminal. Most commands communicate
-via the HTTP API and never import heavy backend dependencies. Two run in
-the calling process instead: `oo chat`, the interactive session, and
-`oo core`, the resident core daemon.
+via the HTTP API and never import heavy backend dependencies. Three run
+in the calling process instead: `oo chat`, the interactive session;
+`oo core`, the resident core daemon; and `oo garden`, the componion.
 
 Install: `pip install -e ".[all]"` registers the `oo` console script.
 
@@ -222,6 +222,105 @@ oo core serve --config path/to/core.yaml
 |------------|-------------|
 | `serve` | Run the core daemon on the loopback |
 | `status` | Ask the configured daemon for its health |
+
+### oo garden
+
+The componion: a simulated onion whose record lives on this machine,
+looked after in this process through the componion's service (see the
+architecture page on the onion memory). It needs no API server. The
+garden is off until `opti_oignon/config/allium.yaml` says
+`enabled: true`; any other value, and a file that cannot be read, is off.
+Switched off, every look and every write says so and names the file,
+and nothing opens a store or reads a key, a clock or the security mode.
+
+```bash
+oo garden                          # the same as oo garden show
+oo garden show --tier text         # the lines alone, without the drawing
+oo garden show --json              # one line of JSON
+oo garden sow --weather windowsill # the card, then a name and yes on stdin
+oo garden care water
+oo garden lab laws
+oo garden keep verify
+```
+
+| Subtopic | Description |
+|----------|-------------|
+| `show [--tier text\|ascii] [--json]` | The onion as the simulation computes it now; writes nothing in its record |
+| `sow [--hemisphere north\|south] [--band long\|medium\|short] [--weather garden\|windowsill]` | Sow the one seed of this garden |
+| `care greet\|water\|warm\|play` | A gesture, noted in its record |
+| `lab` | The doctrine, the record's event count and its labels; writes nothing in its record |
+| `lab laws` | The laws of its world: born under, in force, pinned, pending, written, and your proposal; writes nothing in its record |
+| `keep verify` | Verify the whole record and replay every kept state on the reference engine; writes nothing in its record |
+| `keep name` | Name the onion; the name is read from stdin |
+| `keep laws diff` | What a law update from your `allium.yaml` proposal would change, and its code |
+| `keep laws apply CODE` | Write that law update, with the 16 hex digits the diff shows |
+| `keep laws pin` / `unpin` | Keep the laws in force, or lift the pin |
+| `keep resume KEPT DISCARDED` | Resume a record that failed its verification from its last verified event |
+| `keep finish TAG` | Link an interrupted sowing into place |
+
+A seed is sown only in an encrypted store (a readable master key and
+SQLCipher). When no key is configured and `persistence.require_encryption`
+is false, it can live in a glass jar instead, in Daily mode only; a jar is
+labelled on every form. There is one seed per account, sown under the
+newest law the engine carries for sowing; every law in this version is a
+prototype, and every form says so. Before its question, `sow` prints a
+card that says what the seed is, where its hemisphere, daylight band and
+weather come from (the option, `allium.yaml`, or the default), that
+learning your rhythm is not offered, and that there is no way yet to
+compost it or put it to rest.
+
+Text is never read from the command line. Every parameter is a closed
+choice, a count or a fixed number of hex digits, and a refusal names the
+shape it expects, never the value given; words left over, unknown
+options and unknown subtopics are refused without being repeated. The
+name and the confirmation of `sow`, and the name of `keep name`, are read
+from stdin, one line each of at most 255 bytes of UTF-8, and every
+question is printed on stdout before its line is read. A name is 1 to 32
+letters, digits, spaces, hyphens, apostrophes or periods, starts with a
+letter or a digit and not with the word Beetle, and stays in the record
+for good. `sow`, `keep name`, `keep laws apply`, `pin`, `unpin`,
+`keep resume`, `keep finish` and the hidden `share confirm` run only from
+an interactive terminal in the foreground.
+
+Forms go to stdout. A refusal, and the form of a store that cannot be
+opened or an onion that cannot be computed now, go to stderr: its first
+line after `Error:` says what was refused, and the labels of the onion
+concerned follow it. A refusal that comes after a write says that the
+write was done. `show --json` always prints on stdout, with the exit of
+the form it projects. The exit is 0 when it was done or the state was
+said, 1 when it could not be done, and 2 for a usage or set-up error
+(text on the command line, a malformed answer or name, or no soil yet).
+The garden's own lines are printable ASCII, wrapped at 78 columns (the
+drawing, 32 columns by 9 rows, and a file's path are never broken); its
+only colour is the `Error:` prefix, which follows `--no-color`,
+`NO_COLOR` and `color: false`. Click prints its own usage lines for a
+command line it cannot parse. `show --json` prints one line: the
+text-tier lines with their keys, then the status, labels, habitat and
+law, the onion's day, name, place, season, light, soil, life and stage,
+the local time shown, and `"source": "simulation"`; nothing else of its
+state is served. No log record of the platform reaches the terminal
+while a garden command runs.
+
+In Bulbe mode, or when the mode cannot be read, its life goes on and a
+label says so; a glass jar stays sealed and nothing of it is shown.
+`keep verify` names a kept state that disagrees with the replay by its day
+and law version and replaces nothing. An engine that stops on a fault
+shows the onion as of its last kept state, labelled, with exit 1.
+
+`python3 scripts/allium_garden_gallery.py [--tier text|ascii]` prints
+sample forms from fixed values, without a store, to see how a terminal
+draws them. Hidden subtopics of later versions (`lang`, `tray`, `share`,
+`keep celebrate`, `keep bury`) say that they are not in this version and
+write nothing; `share confirm` looks at the onion first and is always
+refused.
+
+The terminal's account comes from the single-user answer, which is read
+from the auth settings and, when the auth store exists, from one count of
+its accounts. That store is opened so that nothing in it is written: read
+only while a WAL file or a journal lies beside it (pending frames are read
+and never checkpointed, and a hot journal is never rolled back -- the
+answer is then "not single-user"), otherwise as usual with SQL writes
+refused.
 
 ### oo config
 

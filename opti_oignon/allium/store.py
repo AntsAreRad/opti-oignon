@@ -51,8 +51,12 @@ ON and ``temp_store`` MEMORY, and a destruction is followed by ``VACUUM``.
 
 A birth is anchored in the signed audit log before the store is linked into
 place, so a store missing after its birth is ``missing`` and never ``ready``,
-and a being is never adopted by another account. Looking (``status``) writes
-nothing and creates nothing.
+and a being is never adopted by another account. Looking (``status``,
+``look``) writes nothing and creates nothing.
+
+One public action of the garden reads the mode, the single-user seam and
+the clock once (``action()``): every call inside it shares those readings,
+and outside an action every call reads its seams as it always did.
 
 Outside the journal, each being keeps local layers the trunk read never
 touches: rhythm rows (the light hook's presence hours, with their minute
@@ -77,6 +81,7 @@ Refusals are named (``StoreRefused``, ``ChainRefused``, ``PlaintextRefused``,
 is a wire code.
 """
 
+import contextlib
 import errno
 import hashlib
 import hmac
@@ -252,6 +257,36 @@ class Checkpoint(NamedTuple):
     through: str
     state_hash: str
     blob: bytes
+
+
+class Action(NamedTuple):
+    """The readings one public action shares: the mode as read, whether the platform runs for one person, the wall.
+
+    ``mode`` is ``"daily"`` or ``"bulbe"`` for exactly those words, and
+    ``"unknown"`` for anything else or a reader that raised; ``wall`` is
+    ``None`` when the clock could not be read.
+    """
+
+    mode: str
+    single_user: bool
+    wall: object
+
+
+class Seen(NamedTuple):
+    """One look at a person's store: its ``Status``, the being when it opens, the refusal, the soil, the jar option.
+
+    ``soil`` is the being's soil when a store file exists (``glass`` for a
+    sealed jar, the soil of the file for a retired, unreadable or
+    unavailable one), the soil a sowing would choose when the store is
+    ``ready``, else ``None``;
+    ``glass_allowed`` says whether the settings allow a glass jar at all.
+    """
+
+    status: Status
+    being: object
+    refusal: object
+    soil: object
+    glass_allowed: bool
 
 
 def _is_int(value):
@@ -699,7 +734,7 @@ class Store:
         self._entropy = entropy if entropy is not None else os.urandom
         self._cipher = cipher
         self._clock = clock if clock is not None else _default_clock
-        self._mode = mode if mode is not None else modes.live_mode
+        self._mode = mode if mode is not None else modes.live_reading
         self._stage = stage if stage is not None else _no_stage
         self._laws = laws
         self._life = life
@@ -711,10 +746,68 @@ class Store:
         self._trusted = {}
         self._sown = {}
         self._anchored = {}
+        # The readings an action pinned, per thread: ``pin`` (an ``Action``) and ``depth``.
+        self._pins = threading.local()
+
+    # -- one action ----------------------------------------------------------
+
+    @contextlib.contextmanager
+    def action(self):
+        """Pin the mode, the single-user reading and the wall for one public action; yields the ``Action``.
+
+        At the outermost entry of a thread each seam is read once; every
+        store call inside the action (and every nested ``action()``) reuses
+        those readings, and they are let go when the outermost one ends. The
+        next action reads again. Outside an action every call reads its
+        seams as it always did.
+        """
+        pins = self._pins
+        pin = getattr(pins, "pin", None)
+        if pin is not None:
+            pins.depth += 1
+            try:
+                yield pin
+            finally:
+                pins.depth -= 1
+            return
+        pin = Action(self._raw_mode(), self._raw_single_user(), self._raw_clock())
+        pins.pin = pin
+        pins.depth = 1
+        try:
+            yield pin
+        finally:
+            pins.depth = 0
+            pins.pin = None
+
+    def _pinned(self):
+        return getattr(self._pins, "pin", None)
 
     # -- reading the seams ---------------------------------------------------
 
+    def _raw_mode(self):
+        """The mode seam's answer as read: ``"daily"``, ``"bulbe"`` or ``"unknown"``."""
+        try:
+            value = self._mode()
+        except Exception:  # noqa: BLE001 - a mode that cannot be read is unknown, and Bulbe's rules apply
+            return "unknown"
+        return value if value in ("daily", "bulbe") and isinstance(value, str) else "unknown"
+
+    def _raw_single_user(self):
+        try:
+            return self._single_user() is True
+        except Exception:  # noqa: BLE001 - unknown is not single-user: an account is then required
+            return False
+
+    def _raw_clock(self):
+        try:
+            return self._clock()
+        except Exception:  # noqa: BLE001 - refused where the reading is used
+            return None
+
     def _read_mode(self):
+        pin = self._pinned()
+        if pin is not None:
+            return "daily" if pin.mode == "daily" else "bulbe"
         try:
             value = self._mode()
         except Exception:  # noqa: BLE001 - a mode that cannot be read is Bulbe
@@ -722,10 +815,10 @@ class Store:
         return "daily" if value == "daily" else "bulbe"
 
     def _read_clock(self):
-        try:
-            return self._clock()
-        except Exception:  # noqa: BLE001 - refused where the reading is used
-            return None
+        pin = self._pinned()
+        if pin is not None:
+            return pin.wall
+        return self._raw_clock()
 
     def _read_tz(self, now):
         """The offset the ``tz`` seam reads at ``now``, in minutes; ``None`` when it is not one."""
@@ -753,10 +846,10 @@ class Store:
         return settings.laws()
 
     def _single_user_now(self):
-        try:
-            return self._single_user() is True
-        except Exception:  # noqa: BLE001 - unknown is not single-user: an account is then required
-            return False
+        pin = self._pinned()
+        if pin is not None:
+            return pin.single_user
+        return self._raw_single_user()
 
     def _key_state(self):
         if self._keys is None:
@@ -814,9 +907,10 @@ class Store:
         base = self._data_dir
         if base is None:
             try:
-                from opti_oignon import config
+                # The module's own name: the package's facade answers ``config`` with the settings object.
+                from opti_oignon.config import DATA_DIR
 
-                base = config.DATA_DIR
+                base = DATA_DIR
             except Exception:  # noqa: BLE001
                 raise StoreRefused("path", "no data directory: the platform's configuration is not reachable") from None
         parts = self._settings()["path"].split("/")
@@ -1369,6 +1463,72 @@ class Store:
         if status.status == "ready":
             return None
         raise refusal
+
+    def look(self, user):
+        """One look at ``user``'s store, read with one mode reading: a ``Seen``; writes and creates nothing.
+
+        The status is ``status()``'s, the being is ``open()``'s when it opens,
+        and the refusal is the one ``open()`` would raise -- a ``ChainRefused``
+        still carries the event where the record breaks.
+        """
+        with self._lock:
+            mode = self._read_mode()
+            status, being, refusal = self._examine(user, mode)
+            soil = None
+            if being is not None:
+                soil = being.soil
+            elif status.status == "sealed_bulbe":
+                soil = "glass"
+            elif status.status in ("retired_prototype", "unreadable", "unavailable"):
+                soil = self._file_soil(user)
+            elif status.status == "ready":
+                try:
+                    soil = self._choose_soil(mode, self._settings())
+                except StoreRefused:
+                    soil = None
+            return Seen(status, being, refusal, soil, self._glass_allowed())
+
+    def _file_soil(self, user):
+        """The soil of ``user``'s existing store file (the glass name first, as looking reads it); ``None`` if none."""
+        from . import anchors
+
+        try:
+            _root, directory = self._directory()
+            tag = anchors.owner_tag(user)
+            for soil in ("glass", "encrypted"):
+                if store_file(directory, tag, soil).exists():
+                    return soil
+        except (StoreRefused, OSError):
+            return None
+        return None
+
+    def _glass_allowed(self):
+        """Whether the settings allow a glass jar (``require_encryption`` exactly false); a refusal is no."""
+        try:
+            return self._settings()["require_encryption"] is False
+        except StoreRefused:
+            return False
+
+    def account(self, transport):
+        """The account behind ``transport``, read with this action's single-user reading and wall.
+
+        ``membrane.actor_of``: the local user when the platform runs for one
+        person, else a session's subject; ``MembraneRefused("owner")`` for a
+        transport with no account.
+        """
+        from .membrane import actor_of
+
+        return actor_of(transport, self._single_user_now(), self._read_clock())
+
+    def reading(self):
+        """``(wall, offset)``: the wall clock and the local offset at it, in minutes; either may be ``None``.
+
+        Nothing is written. The offset is read only when the wall is a whole
+        number of seconds.
+        """
+        wall = self._read_clock()
+        offset = self._read_tz(wall) if _is_int(wall) else None
+        return wall, offset
 
     def unclaimed(self, *, transport):
         """The local being left without an account, ``[(owner_tag, short being tag)]``: listed, never adopted.

@@ -1,7 +1,8 @@
 # The componion (the companion onion)
 # ===================================
-# Off until the service that serves it is switched on. Nothing reads this
-# switch yet; the store below reads the persistence and life sections.
+# Off until the service that serves it is switched on. `oo garden` reads it;
+# anything but true is off. The store below reads the persistence and life
+# sections.
 enabled: false
 
 # Where each person's journal lives, and how a new one may be born.

@@ -3,9 +3,10 @@
 CLI entry point -- Opti-Oignon.
 
 Click-based command-line interface that talks to a running Opti-Oignon
-backend.  Installed as the ``oo`` console script.  Two commands run in
-this process instead: ``oo chat``, the interactive session, and ``oo
-core``, the resident core daemon.
+backend.  Installed as the ``oo`` console script.  Three commands run in
+this process instead: ``oo chat``, the interactive session; ``oo core``,
+the resident core daemon; and ``oo garden``, the componion, a simulated
+onion whose record lives on this machine.
 
 Usage examples::
 
@@ -24,6 +25,9 @@ Usage examples::
     oo redteam run
     oo core serve
     oo core status
+    oo garden
+    oo garden sow
+    oo garden lab laws
     oo config
     oo config set api_url http://remote:8001
 """
@@ -360,6 +364,357 @@ def core_status(config_path: str | None) -> None:
     else:
         echo_error(f"no core daemon at {config.base_url} (enabled: {config.enabled})")
         sys.exit(1)
+
+
+# =========================================================================
+# oo garden (group): the componion, in this process
+# =========================================================================
+#
+# Declarations only. Every body imports its runner from ``.garden`` when it
+# runs, so importing the CLI imports nothing of the garden. Text is never
+# read from the command line: every parameter type is closed and quiet (a
+# refusal names the shape it expects, never the value given), and extras
+# and unknown options reach the body, which refuses them without repeating
+# them. A name and every answer are read from stdin.
+
+_GARDEN = {"ignore_unknown_options": True, "allow_extra_args": True}
+_COUNT_MAX = (1 << 53) - 1
+_DIGITS = "0123456789"
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+_BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+
+class _QuietGroup(click.Group):
+    """A group whose unknown subtopic is refused without its words being repeated."""
+
+    def resolve_command(self, ctx: click.Context, args: list[str]):
+        name = args[0] if args else None
+        command = self.get_command(ctx, name) if isinstance(name, str) else None
+        if command is None:
+            from .garden import refuse_subtopic
+
+            refuse_subtopic(ctx)
+        return name, command, args[1:]
+
+
+class _QuietChoice(click.ParamType):
+    """One word of a closed set, case-insensitive, lowered."""
+
+    name = "word"
+
+    def __init__(self, words: tuple[str, ...]) -> None:
+        self.words = tuple(words)
+
+    def get_metavar(self, param: click.Parameter) -> str:
+        return "[" + "|".join(self.words) + "]"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, str) and value.isascii() and value.lower() in self.words:
+            return value.lower()
+        self.fail("expected one of: " + ", ".join(self.words), param, ctx)
+
+
+class _Count(click.ParamType):
+    """A whole number of 1 to 16 digits, at most 2^53-1."""
+
+    name = "count"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= _COUNT_MAX:
+            return value
+        if isinstance(value, str) and 1 <= len(value) <= 16 and all(char in _DIGITS for char in value):
+            number = int(value)
+            if number <= _COUNT_MAX:
+                return number
+        self.fail("expected a whole number of 1 to 16 digits, at most 2^53-1", param, ctx)
+
+
+class _Hex(click.ParamType):
+    """Exactly ``length`` hexadecimal digits, case-insensitive, lowered."""
+
+    name = "hex"
+
+    def __init__(self, length: int) -> None:
+        self.length = length
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, str) and len(value) == self.length and all(char in _HEX_DIGITS for char in value):
+            return value.lower()
+        self.fail(f"expected {self.length} hexadecimal digits", param, ctx)
+
+
+class _ConsentCode(click.ParamType):
+    """Four RFC 4648 base32 symbols, a dash, four more; case-insensitive, raised."""
+
+    name = "code"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, str) and value.isascii() and len(value) == 9 and value[4] == "-":
+            code = value.upper()
+            if all(char in _BASE32 for char in code[:4] + code[5:]):
+                return code
+        self.fail("expected four of A-Z or 2-7, a dash, and four more", param, ctx)
+
+
+@cli.group(cls=_QuietGroup, invoke_without_command=True, context_settings=_GARDEN)
+@click.pass_context
+def garden(ctx: click.Context) -> None:
+    """Your componion, a simulated onion, in this process. Without a subtopic: show."""
+    if ctx.invoked_subcommand is None:
+        from .garden import run_show
+
+        run_show(ctx, tier="ascii", as_json=False)
+
+
+@garden.command("show", context_settings=_GARDEN)
+@click.option("--tier", type=_QuietChoice(("text", "ascii")), default="ascii", show_default=True,
+              help="text: the lines alone; ascii: the lines and a drawing.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="One line of JSON: the lines, and closed codes for the rest.")
+@click.pass_context
+def garden_show(ctx: click.Context, tier: str, as_json: bool) -> None:
+    """Show the onion as the simulation computes it now. Writes nothing in its record."""
+    from .garden import run_show
+
+    run_show(ctx, tier=tier, as_json=as_json)
+
+
+@garden.command("sow", context_settings=_GARDEN)
+@click.option("--hemisphere", type=_QuietChoice(("north", "south")), default=None,
+              help="The hemisphere of its seasons (else allium.yaml, else north).")
+@click.option("--band", type=_QuietChoice(("long", "medium", "short")), default=None,
+              help="How much its daylight changes with the seasons (else allium.yaml, else long).")
+@click.option("--weather", type=_QuietChoice(("garden", "windowsill")), default=None,
+              help="Rain, or only the water you give (else allium.yaml, else garden).")
+@click.pass_context
+def garden_sow(ctx: click.Context, hemisphere: str | None, band: str | None, weather: str | None) -> None:
+    """Sow the one seed of this garden, from an interactive terminal.
+
+    The card is printed first; the name and the confirmation are then read
+    from stdin, one line each.
+    """
+    from .garden import run_sow
+
+    run_sow(ctx, hemisphere=hemisphere, band=band, weather=weather)
+
+
+@garden.group("care", cls=_QuietGroup, context_settings=_GARDEN)
+def garden_care() -> None:
+    """A gesture: greet, water, warm or play. Each is noted in its record."""
+
+
+@garden_care.command("greet", context_settings=_GARDEN)
+@click.pass_context
+def garden_care_greet(ctx: click.Context) -> None:
+    """Greet the onion."""
+    from .garden import run_care
+
+    run_care(ctx, "greet")
+
+
+@garden_care.command("water", context_settings=_GARDEN)
+@click.pass_context
+def garden_care_water(ctx: click.Context) -> None:
+    """Water the onion."""
+    from .garden import run_care
+
+    run_care(ctx, "water")
+
+
+@garden_care.command("warm", context_settings=_GARDEN)
+@click.pass_context
+def garden_care_warm(ctx: click.Context) -> None:
+    """Warm the onion."""
+    from .garden import run_care
+
+    run_care(ctx, "warm")
+
+
+@garden_care.command("play", context_settings=_GARDEN)
+@click.pass_context
+def garden_care_play(ctx: click.Context) -> None:
+    """Play with the onion."""
+    from .garden import run_care
+
+    run_care(ctx, "play")
+
+
+@garden.group("lab", cls=_QuietGroup, invoke_without_command=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_lab(ctx: click.Context) -> None:
+    """The laboratory: what its record holds. Subtopic: laws. Writes nothing in its record."""
+    if ctx.invoked_subcommand is None:
+        from .garden import run_lab
+
+        run_lab(ctx)
+
+
+@garden_lab.command("laws", context_settings=_GARDEN)
+@click.pass_context
+def garden_lab_laws(ctx: click.Context) -> None:
+    """The laws of its world: in force, pinned, pending, written, and your proposal. Writes nothing in its record."""
+    from .garden import run_lab_laws
+
+    run_lab_laws(ctx)
+
+
+@garden.group("keep", cls=_QuietGroup, context_settings=_GARDEN)
+def garden_keep() -> None:
+    """Keeping its record: verify, name, laws, resume, finish."""
+
+
+@garden_keep.command("verify", context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_verify(ctx: click.Context) -> None:
+    """Verify its whole record, and replay every kept state on the reference engine. Writes nothing in its record."""
+    from .garden import run_verify
+
+    run_verify(ctx)
+
+
+@garden_keep.command("name", context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_name(ctx: click.Context) -> None:
+    """Name the onion, from an interactive terminal: one line read from stdin, kept in its record for good."""
+    from .garden import run_name
+
+    run_name(ctx)
+
+
+@garden_keep.group("laws", cls=_QuietGroup, context_settings=_GARDEN)
+def garden_keep_laws() -> None:
+    """Law updates from your allium.yaml proposal: diff, apply, pin, unpin."""
+
+
+@garden_keep_laws.command("diff", context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_laws_diff(ctx: click.Context) -> None:
+    """What a law update from your proposal would change, and the code that writes it. Writes nothing in its record."""
+    from .garden import run_laws_diff
+
+    run_laws_diff(ctx)
+
+
+@garden_keep_laws.command("apply", context_settings=_GARDEN)
+@click.argument("confirm", type=_Hex(16))
+@click.pass_context
+def garden_keep_laws_apply(ctx: click.Context, confirm: str) -> None:
+    """Write the law update the diff shows, with its code, from an interactive terminal."""
+    from .garden import run_laws_apply
+
+    run_laws_apply(ctx, confirm)
+
+
+@garden_keep_laws.command("pin", context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_laws_pin(ctx: click.Context) -> None:
+    """Keep the laws in force: no law update applies until unpin. From an interactive terminal."""
+    from .garden import run_laws_pin
+
+    run_laws_pin(ctx)
+
+
+@garden_keep_laws.command("unpin", context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_laws_unpin(ctx: click.Context) -> None:
+    """Lift the pin, from an interactive terminal."""
+    from .garden import run_laws_unpin
+
+    run_laws_unpin(ctx)
+
+
+@garden_keep.command("resume", context_settings=_GARDEN)
+@click.argument("kept", type=_Count())
+@click.argument("discarded", type=_Count())
+@click.pass_context
+def garden_keep_resume(ctx: click.Context, kept: int, discarded: int) -> None:
+    """Resume a record that failed its verification, with the two numbers the garden shows.
+
+    From an interactive terminal. The later events it names are deleted for good.
+    """
+    from .garden import run_resume
+
+    run_resume(ctx, kept, discarded)
+
+
+@garden_keep.command("finish", context_settings=_GARDEN)
+@click.argument("tag", type=_Hex(8))
+@click.pass_context
+def garden_keep_finish(ctx: click.Context, tag: str) -> None:
+    """Finish an interrupted sowing, with the tag the garden shows, from an interactive terminal."""
+    from .garden import run_finish
+
+    run_finish(ctx, tag)
+
+
+@garden_keep.command("celebrate", hidden=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_celebrate(ctx: click.Context) -> None:
+    """Not in this version."""
+    from .garden import run_later_refused
+
+    run_later_refused(ctx)
+
+
+@garden_keep.command("bury", hidden=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_keep_bury(ctx: click.Context) -> None:
+    """Not in this version."""
+    from .garden import run_later_refused
+
+    run_later_refused(ctx)
+
+
+@garden.group("lang", cls=_QuietGroup, hidden=True, context_settings=_GARDEN)
+def garden_lang() -> None:
+    """Not in this version."""
+
+
+@garden_lang.command("talk", hidden=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_lang_talk(ctx: click.Context) -> None:
+    """Not in this version."""
+    from .garden import run_later_refused
+
+    run_later_refused(ctx)
+
+
+@garden_lang.command("teach", hidden=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_lang_teach(ctx: click.Context) -> None:
+    """Not in this version."""
+    from .garden import run_later_refused
+
+    run_later_refused(ctx)
+
+
+@garden.command("tray", hidden=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_tray(ctx: click.Context) -> None:
+    """Not in this version."""
+    from .garden import run_later
+
+    run_later(ctx)
+
+
+@garden.group("share", cls=_QuietGroup, hidden=True, invoke_without_command=True, context_settings=_GARDEN)
+@click.pass_context
+def garden_share(ctx: click.Context) -> None:
+    """Not in this version."""
+    if ctx.invoked_subcommand is None:
+        from .garden import run_later
+
+        run_later(ctx)
+
+
+@garden_share.command("confirm", hidden=True, context_settings=_GARDEN)
+@click.argument("code", type=_ConsentCode())
+@click.pass_context
+def garden_share_confirm(ctx: click.Context, code: str) -> None:
+    """Not in this version: no consent request can be opened, and none is confirmed."""
+    from .garden import run_share_confirm
+
+    run_share_confirm(ctx, code)
 
 
 # =========================================================================

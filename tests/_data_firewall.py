@@ -17,7 +17,8 @@ never from the places themselves, and nothing else: a read finds only what
 this session wrote, a write lands in the mirror, and the real place is
 never touched. The redirection covers the file functions the standard
 library routes through -- ``open``, the ``os`` calls that take a path, and
-the SQLite and SQLCipher connects -- in this process only: a child process
+the SQLite and SQLCipher connects, by path or by a ``file:`` URI whose
+query is kept -- in this process only: a child process
 a contract starts is not covered. A path relative to a directory
 descriptor is left alone, since it names something the descriptor already
 reached.
@@ -146,12 +147,39 @@ class DataFirewall:
 
         return redirected
 
+    def _uri_target(self, database):
+        """A ``file:`` URI whose file lies in a data place, rewritten to the mirror with its query kept; else as given.
+
+        The query (``mode=ro``, say) and the fragment travel unchanged, so a
+        read-only open of the mirror stays read-only. An in-memory URI, one
+        that is not ``file:``, and one naming a file elsewhere pass untouched.
+        """
+        from urllib.parse import quote, unquote, urlsplit
+
+        text = os.fsdecode(os.fspath(database))
+        if not text.startswith("file:"):
+            return database
+        parts = urlsplit(text)
+        path = unquote(parts.path)
+        if path in _NOT_A_FILE or path.startswith(":memory:"):
+            return database
+        moved = self.target(path)
+        if moved is path:
+            return database
+        os.makedirs(os.path.dirname(moved), exist_ok=True)
+        rebuilt = "file:" + quote(moved) + ("?" + parts.query if parts.query else "")
+        rebuilt += "#" + parts.fragment if parts.fragment else ""
+        return os.fsencode(rebuilt) if isinstance(database, bytes) else rebuilt
+
     def _connect(self, original):
         target = self.target
+        uri_target = self._uri_target
 
         def redirected(database, *args, **kwargs):
-            plain = isinstance(database, (str, bytes, os.PathLike)) and not kwargs.get("uri")
-            if plain and os.fsdecode(os.fspath(database)) not in _NOT_A_FILE:
+            named = isinstance(database, (str, bytes, os.PathLike))
+            if named and kwargs.get("uri"):
+                database = uri_target(database)
+            elif named and os.fsdecode(os.fspath(database)) not in _NOT_A_FILE:
                 moved = target(database)
                 if moved is not database:
                     os.makedirs(os.path.dirname(os.fsdecode(moved)), exist_ok=True)

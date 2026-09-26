@@ -107,6 +107,82 @@ package costs.
   read the frontend suites as well as the componion's. Twenty-six
   contracts.
 
+- The componion's first surface: `oo garden`, in the terminal's own process.
+  It reaches the componion through one service,
+  `opti_oignon/allium/service.py`, the one the API is to serve as well, so
+  the store and its life are no longer uncalled. The garden is off until
+  `config/allium.yaml` says `enabled: true` (anything else, and a file that
+  cannot be read, is off); switched off, every look and every write says so
+  and names the file, and nothing builds a store or reads a key, the
+  security mode or the clock. Five subtopics are listed: `show` (the text,
+  or the text and a drawing of 32 columns by 9 rows, or one line of JSON),
+  `sow`, `care greet|water|warm|play`, `lab` with `lab laws`, and `keep`
+  (`verify`, `name`, `laws diff|apply|pin|unpin`, `resume`, `finish`);
+  `lang`, `tray`, `share` and `keep celebrate|bury` are hidden and say that
+  they are not in this version. Each command is one action: the security
+  mode, the single-user answer and the clock are read once for it
+  (`Store.action`), the being is opened only under the account the service
+  derives for the terminal, and every outcome is a served status with its
+  own form, stream and exit. A look writes nothing in the being's store,
+  nor in the auth store it reads the single-user answer from: that store is
+  opened read-only while a WAL file or a journal lies beside it (the keyed
+  connector gains a read-only open), so pending frames are never
+  checkpointed and a hot journal is never rolled back.
+  Each write the terminal makes is followed by a settle in the same action,
+  so `keep verify` has kept states to check: it verifies the chain from the
+  genesis, replays every kept state on the reference engine and compares the
+  state served now, and names a divergence by its day and law version
+  without replacing anything. An engine that stops on a fault freezes that
+  one look on the last kept state, labelled, with exit 1. Text never comes
+  from the command line: every parameter is a closed, quiet type, and
+  extras, unknown options and unknown subtopics are refused without being
+  repeated; a name or an answer is read from stdin, one line, after its
+  question is printed. Sowing, naming, the law writes, resume and finish run
+  only from an interactive terminal in the foreground. A sowing names only
+  the newest law of the sowing channel the engine carries and has not
+  retired, never the test law, and writes no rhythm consent; its card says
+  why, and says before the question that the seed is a prototype and that
+  there is no way yet to compost it or put it to rest. Every form comes from
+  a closed catalogue of 139 templates and passes the ethics nets before it
+  is printed: printable ASCII, a closed class of inner-state words of which
+  only the design's verbs of a simulation pass, phrases grouped by the
+  psychological law they would break, and no served field named after an
+  absence; one sentence, the doctrine every `show` closes with, is exempt by
+  its exact bytes. The lists are code, and a refusal is said through a
+  closed table, never with an exception's text: its first line says what
+  was refused, and one that comes after a write says the write was done.
+  No platform log record reaches the terminal while a garden command runs
+  (`oo` configures no logging, so a warning would otherwise print outside
+  the catalogue). Under Bulbe's rules, or with
+  a mode that cannot be read, the life goes on and a label says so, and a
+  glass jar stays sealed. The single-user answer is read from the auth
+  settings and, when the auth store exists, from one count of its accounts,
+  without importing the auth module. `scripts/allium_garden_gallery.py`
+  prints sample forms from fixed values, without a store. Two fixes on the
+  way, neither released: the store's default data directory was read from
+  the package's settings object instead of the configuration module, so the
+  production store could only answer `unavailable`; and the test process's
+  data firewall now redirects a SQLite connect by `file:` URI as it does a
+  connect by path. Nineteen contracts, and one for the firewall; the cold
+  footprints of the CLI's import, of a garden switched off (predicted, then
+  measured equal), of a seamed `show` and of the production look behind the
+  data firewall's empty mirror are frozen. Owed to the machine: the gallery and the forms in each
+  terminal used (IDE, tmux, ssh; light and dark backgrounds; the drawing's
+  backslashes, backquotes and quotes, the blank sky row, the 78-column wrap,
+  the unsplit path line, and the `Error:` colour under `--no-color`,
+  `NO_COLOR` and `color: false`); a readable key and a security mode read as
+  Daily from each of those terminals; the terminal test true in a foreground
+  interactive shell and false in a pipe, in the background and under a
+  sandbox; a cold `oo garden` switched off, then `show` with the production
+  seams once a first prototype is sown, and that the single-user read leaves
+  a SQLCipher auth store's bytes and file list unchanged (the container
+  proves it on a plaintext store: closed cleanly, with frames never
+  checkpointed, and with a hot journal); deep verification
+  of a real life over a month and a year, with the native engine present;
+  the chain verification's cost per command on a journal of 20,000 events;
+  and the settle after a gesture on a year-old being with no kept state,
+  native against reference.
+
 - The componion's life on the platform: the store now lives a being in
   time. Each journaled write reads the wall clock and the machine's UTC
   offset once; a late write lands on the latest recorded minute, a clock

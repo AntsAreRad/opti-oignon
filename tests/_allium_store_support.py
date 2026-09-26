@@ -74,6 +74,11 @@ class Platform:
         self.store = loaded[prefix + "store"]
         self.evolution = loaded[prefix + "evolution"]
         self.life = loaded[prefix + "life"]
+        self.habitat = loaded[prefix + "habitat"]
+        self.ethics = loaded[prefix + "ethics"]
+        self.wording = loaded[prefix + "wording"]
+        self.describe = loaded[prefix + "describe"]
+        self.service = loaded[prefix + "service"]
 
 
 def open_platform(*, seeded=None, blocked=BLOCKED, extra=None):

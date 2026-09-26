@@ -151,8 +151,9 @@ takes effect at once, on the reference path, until the core is taught it.
 The rates, the thresholds and the gate's wording stay in Python.
 
 The same artefact links a second crate, `rust/allium`: the engine of the
-componion, the companion onion, which nothing in the application calls yet. It answers one
-byte protocol -- canonical JSON in, canonical JSON out, never an
+componion, the companion onion, which the terminal's `oo garden` looks
+after (below). It answers one byte protocol -- canonical JSON in,
+canonical JSON out, never an
 exception -- and `opti_oignon/allium/ref` answers it too, as the
 reference. Before the native engine is used, its whole identity
 (versions, limits, operations, refusal codes, and the digests of the law
@@ -235,3 +236,58 @@ prototypes, and every being sown under one is labelled so wherever it is
 shown; a prototype whose law is retired (listed in `laws/retired.json`) is
 shown as a retired prototype, never as missing or broken, and a being
 whose law file was edited in place does not open.
+
+The first surface is the terminal. `oo garden` runs in the calling process
+and reaches the componion through one service,
+`opti_oignon/allium/service.py`, which the API is to serve as well. The
+garden is off until `config/allium.yaml` says `enabled: true`, and
+switched off it builds no store and reads no key, security mode or clock.
+Each command is one action: the security mode, whether the machine has a
+single account, and the wall clock are read once and hold for the whole
+action. The terminal's account is derived by the service (`local` on a
+single-user machine; a terminal on a machine with accounts has none and is
+told so), and a being is opened only under that account; the single-user
+answer is read from the auth settings and, when the auth store exists,
+from one count of its accounts, without importing the auth module and
+without writing in that store: while a WAL file or a journal lies beside
+it, it is opened read-only, so pending frames are never checkpointed and a
+hot journal is never rolled back (the answer is then "not single-user").
+A look writes nothing in the being's store. After each write the terminal makes
+-- a sowing, a gesture, a name, a law update, a pin or unpin, a resume --
+the service settles the being in the same action (a settle that fails is
+logged and changes nothing the write said), so there are kept states
+for `keep verify` to check: it verifies the chain from the genesis,
+replays every kept state on the reference engine, and compares the state
+served now; a kept state that disagrees is named by its day and law
+version and never replaced. An engine that stops on a fault freezes that
+one look on the last kept state, labelled, and the next look computes
+again. Sowing, naming, writing a law update, resuming and finishing a
+sowing run only from an interactive terminal in the foreground, and every
+sowing names the newest law the engine carries for sowing and does not
+retire, never the test law.
+
+Every form the garden prints comes from a closed catalogue
+(`allium/wording.py`, rendered through `allium/describe.py`) and passes
+the checks of `allium/ethics.py` before it is printed, a person's name, a
+file path and a catalogue key being read as neutral words: printable ASCII; no
+word of an inner state -- feeling, wanting, missing, fearing, thinking,
+knowing, waiting, and the words of affect -- beyond the few verbs the
+design allows a simulation (it predicts, learns, expects, sleeps, rests,
+flowers, computes, and asks for); none of the phrases a companion uses to
+hold a person (a streak, days away, come back, last chance, and the like);
+and no served field named after an absence. The lists hold the forms they
+name and no paraphrase of them, which `ethics.LAWS` says where it matters.
+One sentence is exempt, by its
+exact bytes, and every `show` closes with it: "This is a simulation of an
+onion. It does not feel anything; what it does follows the laws its
+laboratory names (oo garden lab laws). It will never ask you to come
+back." These rules are code, not configuration, so no settings file can
+loosen them. A refusal is said through a closed table, never with an
+exception's text, and one that comes after a write says the write was
+done. While a garden command runs, no log record of the platform reaches
+the terminal. Under Bulbe's rules -- Bulbe mode, or a mode that cannot
+be read -- the life goes on as in Daily and the forms say so; a glass jar
+stays sealed and nothing of it is shown; and the capabilities the policy
+in `allium/habitat.py` closes outside Daily (taste, voice, initiatives,
+sync, a change of dream depth) are behind a gate that calls nothing
+outside Daily, though none of them exists yet.

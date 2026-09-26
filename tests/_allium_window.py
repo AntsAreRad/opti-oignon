@@ -26,16 +26,22 @@ LIFE_REF = ("civil", "lawdata")
 LIFE_ORGANS = ("weather", "clock", "chem", "soil", "stage")
 PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref", "opti_oignon.allium.ref.organs")
 # The platform modules, in the order they load: each may name the ones before it. The life's two
-# (the law timeline and the views) come last.
-PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store", "evolution", "life")
+# (the law timeline and the views) come next, then the garden's five: the habitat, the ethics nets, the
+# catalogue of lines, the description and the service the terminal uses.
+PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store", "evolution", "life",
+            "habitat", "ethics", "wording", "describe", "service")
+# The terminal's modules, loaded after the platform when a contract drives ``oo garden``.
+CLI = ("config", "client", "output", "main", "garden")
 
 
-def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=None):
+def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=None, cli=False):
     """Load the reference, the seam and (when asked) the platform and the native loader; ``(loaded, restore)``.
 
     ``extra`` maps further dotted names to source files, loaded last: a
     contract that names a real platform module (the mode manager, say) loads
-    it here, and must then leave it out of ``blocked``.
+    it here, and must then leave it out of ``blocked``. ``cli`` adds the
+    terminal's modules after the platform, under a stand-in ``opti_oignon.cli``
+    package, so ``oo garden`` runs inside the window.
     """
     targets = {f"opti_oignon.allium.{name}": source("allium", f"{name}.py") for name in REFERENCE}
     # The organs before the protocol: it imports them when it is executed.
@@ -54,10 +60,15 @@ def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=N
     if platform:
         for name in PLATFORM:
             targets[f"opti_oignon.allium.{name}"] = source("allium", f"{name}.py")
+    packages = PACKAGES
+    if cli:
+        packages = PACKAGES + ("opti_oignon.cli",)
+        for name in CLI:
+            targets[f"opti_oignon.cli.{name}"] = source("cli", f"{name}.py")
     if native:
         targets["opti_oignon.native"] = source("native", "__init__.py")
     targets.update(extra or {})
-    return isolate(targets=targets, packages=PACKAGES, seeded=seeded, blocked=blocked)
+    return isolate(targets=targets, packages=packages, seeded=seeded, blocked=blocked)
 
 
 def native_module(loaded):

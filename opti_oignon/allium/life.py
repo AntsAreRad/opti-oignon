@@ -58,6 +58,13 @@ state it returned. The facts of one minute are never split: a minute whose
 facts alone do not fit refuses the whole call ``limit``. The same packer
 chains ``advance`` and the law ``timeline``.
 
+``stored`` serves the state a view starts from, as it is kept: what a look
+shows, frozen, when the engine stops on a fault past it. ``deep_verify``
+verifies the chain, then replays every kept state and the state served now
+on the reference engine (``ask`` and ``chain`` take the engine to call) and
+says what agreed, what was stale and what lies past the minute shown; a
+disagreement is ``Diverged``, a finding, and nothing is written or repaired.
+
 Refusals: an engine refusal is ``LifeRefused`` with the engine's own code and
 detail; ``limit`` also comes from the packer, and ``bad_request`` from a
 minute or a budget that is not one. None of them is new on the wire.
@@ -118,6 +125,44 @@ class Settled(NamedTuple):
     owed: int
 
 
+class Diverged(ValueError):
+    """A replay on the reference engine that disagrees with what the store keeps or the engine serves.
+
+    ``kind`` is ``kept`` (a kept state), ``blob`` (a kept state that does
+    not hold what its hash names) or ``served`` (the state served now);
+    ``t`` is its minute of life and ``day`` its day of life, ``laws`` the law
+    version at that minute, and ``engine`` the engine that served the view
+    (``native`` or ``reference``) when ``kind`` is ``served``. It is a
+    finding, never a wire code, and nothing is replaced.
+    """
+
+    KINDS = ("kept", "blob", "served")
+
+    def __init__(self, kind, t, laws, engine=None):
+        if kind not in self.KINDS:
+            raise ValueError(f"unknown divergence: {kind}")
+        super().__init__(f"{kind} state at minute {t} disagrees with the reference replay")
+        self.kind = kind
+        self.code = kind
+        self.t = t
+        self.day = t // DAY if _is_int(t) else None
+        self.laws = laws
+        self.engine = engine
+
+
+class Deep(NamedTuple):
+    """What a deep verification found: facts and days of life, kept states compared, agreed, stale and ahead."""
+
+    facts: int
+    days: int
+    kept: int
+    agreed: int
+    stale: int
+    ahead: int
+    engine: str
+    version: object
+
+
 def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -137,17 +182,23 @@ def limits():
     return _LIMITS["input"], _LIMITS["items"]
 
 
-def ask(request):
-    """The engine's answer to one request, parsed; a refusal is ``LifeRefused`` with the engine's words."""
+def ask(request, call=None):
+    """The engine's answer to one request, parsed; a refusal is ``LifeRefused`` with the engine's words.
+
+    ``call`` is the engine asked (default: ``engine.call``, native when the
+    handshake agreed); a deep verification passes the reference's own.
+    """
     from . import engine, wire
 
-    answer = wire.parse(engine.call(wire.emit(request)))
+    if call is None:
+        call = engine.call
+    answer = wire.parse(call(wire.emit(request)))
     if "refused" in answer:
         raise LifeRefused(answer["refused"], answer.get("detail", ""))
     return answer
 
 
-def chain(base, key, state, facts, to, budget=None):
+def chain(base, key, state, facts, to, budget=None, call=None):
     """Ask the engine for ``facts`` (canonical order, none after ``to``) up to ``to``, packed; the answers.
 
     ``base`` is the request without its state, ``facts``, ``to`` and
@@ -155,7 +206,8 @@ def chain(base, key, state, facts, to, budget=None):
     ``"from"`` for ``timeline``) and ``state`` is where the first request
     starts. With a ``budget``, each request carries what is left of it, and
     the chain stops at an answer that is not done or once it is spent: the
-    last answer's ``at`` then says how far the life got.
+    last answer's ``at`` then says how far the life got. ``call`` is the
+    engine asked (``ask``).
     """
     from . import wire
 
@@ -190,7 +242,7 @@ def chain(base, key, state, facts, to, budget=None):
         request["to"] = to if end == len(facts) else facts[end]["t"] - 1
         if len(wire.emit(request)) > limit:
             raise LifeRefused("limit", "a packed request is over the engine's input limit")
-        answer = ask(request)
+        answer = ask(request, call)
         answers.append(answer)
         state = answer["state"]
         start = end
@@ -307,18 +359,48 @@ def view(being, to=None, cap=None):
         work, notes = _spent(answers)
         return View("current", last["state"], last["at"], last["hash"], last["env"], labels(being),
                     last["state"]["law"], being.provisional, 0, work, notes)
-    if state is None:
-        # The minute-0 state as a view of minute 0 shows it: the facts of minute 0 folded.
-        zero = [fact for _seq, _eid, fact in ordered[1:] if fact["t"] == 0]
-        stored = chain(base, "state", None, zero, 0, budget=MAX_INT)
-    else:
-        # The checkpoint's own minute, with no fact: the engine lives no minute and says what it shows.
-        stored = [ask(dict(base, budget=1, facts=[], state=state, to=state["at"]))]
+    stored = _start_answers(base, ordered, state)
     served = stored[-1]
     work, notes = _spent(answers + stored)
     law = served["state"]["law"]
     return View("catching_up", served["state"], served["at"], served["hash"], served["env"], labels(being), law,
                 being.provisional, _owed(law, goal, served["at"]), work, notes)
+
+
+def _start_answers(base, ordered, state):
+    """The engine's answers that show the state a view starts from, at its own minute.
+
+    The minute-0 state as a view of minute 0 shows it (the facts of minute 0
+    folded) when there is no usable checkpoint; else the checkpoint's own
+    minute, with no fact: the engine lives no minute and says what it shows.
+    """
+    if state is None:
+        zero = [fact for _seq, _eid, fact in ordered[1:] if fact["t"] == 0]
+        return chain(base, "state", None, zero, 0, budget=MAX_INT)
+    return [ask(dict(base, budget=1, facts=[], state=state, to=state["at"]))]
+
+
+def stored(being, to=None):
+    """The state a view at minute ``to`` starts from, served as it is kept; read-only.
+
+    The latest usable checkpoint at or before the minute (``start_point``),
+    else the minute-0 state with the facts of minute 0 folded, shown at its
+    own minute: what a ``catching_up`` view serves, as a ``View`` of status
+    ``stored`` that owes nothing. A look serves it when the engine stops on
+    a fault past it.
+    """
+    from .evolution import labels
+
+    if to is not None and (not _is_int(to) or not 0 <= to <= MAX_INT):
+        raise LifeRefused("bad_request", "to")
+    ordered, _goal, rows = _read(being, to)
+    _start, state = start_point(ordered, rows)
+    base = {"genesis": ordered[0][2], "op": "advance", "v": 1}
+    answers = _start_answers(base, ordered, state)
+    served = answers[-1]
+    work, notes = _spent(answers)
+    return View("stored", served["state"], served["at"], served["hash"], served["env"], labels(being),
+                served["state"]["law"], being.provisional, 0, work, notes)
 
 
 def _spent(answers):
@@ -405,3 +487,100 @@ def settle(being, budget=None):
         return Settled(True, at, written, pruned, 0)
     law = genesis["body"]["laws"] if state is None else state["law"]
     return Settled(False, at, written, pruned, _owed(law, goal, at))
+
+
+def _deep_read(being):
+    """Under the store's lock and the mode gate, once: the facts in order, the minute shown, every kept state.
+
+    The kept states are this engine's at any minute, ascending by minute,
+    law version and event.
+    """
+    from .store import _guarded
+
+    store = being._store
+    with store._lock:
+        being._gate()
+        conn = being._live()
+
+        def read():
+            ordered = being._in_order(conn)
+            goal = target(being, conn, store._read_clock())
+            rows = being._checkpoint_rows(conn, MAX_INT)
+            return ordered, goal, rows
+
+        ordered, goal, rows = _guarded(conn, read)
+    return ordered, goal, sorted(rows, key=lambda row: (row[0], row[1], row[2]))
+
+
+def deep_verify(being):
+    """Verify the chain from genesis, then replay every kept state and the state served now on the reference.
+
+    The chain is verified first (a ``ChainRefused`` is raised as it is).
+    Then, from one read, each kept state at or before the minute shown now
+    is compared with the reference engine's replay from the genesis: one
+    whose event is no longer the last fact by its minute, or whose count of
+    facts is not the count up to that event, is stale and skipped; one whose
+    blob does not hold the state its hash names is ``Diverged("blob")``; one
+    the replay disagrees with is ``Diverged("kept")``. A kept state past the
+    minute shown (the clock set back since) is counted as ahead and
+    skipped. Last, the replay reaches the minute shown and is compared with
+    the view the engine serves there (native when the handshake agreed):
+    ``Diverged("served")`` when they differ. Nothing is written and nothing
+    is repaired; a ``Deep`` says what was compared.
+    """
+    from . import engine, wire
+    from .ref import protocol
+    from .store import _inflate
+
+    being.verify()
+    ordered, goal, rows = _deep_read(being)
+    reference = protocol.call
+    times = [fact["t"] for _seq, _eid, fact in ordered]
+    position = {eid: index for index, (_seq, eid, _fact) in enumerate(ordered)}
+    facts = [fact for _seq, _eid, fact in ordered[1:]]
+    base = {"genesis": ordered[0][2], "op": "advance", "v": 1}
+    state = None
+    cursor = 0
+    kept = agreed = stale = ahead = 0
+
+    def replay(to):
+        nonlocal state, cursor
+        upto = cursor
+        while upto < len(facts) and facts[upto]["t"] <= to:
+            upto += 1
+        answers = chain(base, "state", state, facts[cursor:upto], to, budget=MAX_INT, call=reference)
+        state = answers[-1]["state"]
+        cursor = upto
+        return answers[-1]
+
+    for t, laws, through, state_hash, blob in rows:
+        if t > goal:
+            ahead += 1
+            continue
+        kept += 1
+        last = _last_at(times, t)
+        if position.get(through) != last:
+            stale += 1
+            continue
+        # A blob that does not inflate within the engine's input limit holds no state the engine could be given.
+        canonical = _inflate(blob, limits()[0])
+        if canonical is None or hashlib.sha256(canonical).hexdigest() != state_hash:
+            raise Diverged("blob", t, laws)
+        try:
+            held = wire.parse(canonical)
+        except Exception:  # noqa: BLE001 - bytes the codec refuses hold no state
+            raise Diverged("blob", t, laws) from None
+        if not isinstance(held, dict):
+            raise Diverged("blob", t, laws)
+        if held.get("n") != last:
+            stale += 1
+            continue
+        if replay(t)["hash"] != state_hash:
+            raise Diverged("kept", t, laws)
+        agreed += 1
+    reached = replay(goal)
+    used = "native" if engine.native_in_use() else "reference"
+    served = view(being, to=goal)
+    if served.hash != reached["hash"]:
+        raise Diverged("served", goal, reached["state"]["law"]["v"], engine=used)
+    return Deep(len(ordered), goal // DAY, kept, agreed, stale, ahead, used, protocol.ENGINE_VERSION)

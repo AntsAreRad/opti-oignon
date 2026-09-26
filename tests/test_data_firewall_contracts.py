@@ -17,6 +17,10 @@ tracked files as HEAD holds them, nothing else.
     they were.
   * DF3 -- the tracked files of the data places are served as HEAD holds
     them, not as the working copy has them, and nothing untracked shows.
+  * DF4 -- a SQLite or SQLCipher connect by ``file:`` URI that names a file
+    in a data place opens the mirror's file, its query kept (a read-only
+    open stays read-only); a URI elsewhere, and an in-memory one, pass
+    untouched.
 
 Local-only (the public distribution ships no tests). DF2 and DF3 run a
 real pytest session on a fake tree carrying a copy of the conftest and of
@@ -36,6 +40,10 @@ _TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_TESTS))
 
 import _data_firewall  # noqa: E402
+
+BUDGET_S = {
+    "test_df4_a_uri_connect_to_a_data_place_opens_the_mirror_and_keeps_its_query": 2.0,
+}
 
 
 def _module():
@@ -198,6 +206,67 @@ def test_df3_tracked_files_are_served_as_head_holds_them_and_nothing_untracked_s
     outcomes, output = _session(tree)
     assert outcomes == {"test_the_tracked_files_are_served_as_head_holds_them": []}, (outcomes, output)
     assert presets.read_text(encoding="utf-8") == "changed in the working copy\n", "the working copy is left as it was"
+
+
+# ---------------------------------------------------------------------------
+# DF4 -- a connect by URI is redirected too
+# ---------------------------------------------------------------------------
+def _uri_modules():
+    """The connect functions the firewall covers: SQLite's, and SQLCipher's when it is installed."""
+    modules = [("sqlite3", sqlite3)]
+    try:
+        import sqlcipher3.dbapi2 as cipher
+    except Exception:  # noqa: BLE001 - no SQLCipher here: the standard library alone
+        cipher = None
+    if cipher is not None:
+        modules.append(("sqlcipher3", cipher))
+    return modules
+
+
+def test_df4_a_uri_connect_to_a_data_place_opens_the_mirror_and_keeps_its_query(tmp_path):
+    root, mirror = tmp_path / "tree", tmp_path / "mirror"
+    (root / "data").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere.sqlite"
+    firewall = _module().DataFirewall(root, mirror=mirror, seed=False)
+    read, refused, outside, memory = {}, {}, {}, {}
+    firewall.install()
+    try:
+        for name, module in _uri_modules():
+            real = root / "data" / f"{name} store.db"
+            conn = module.connect(str(real))
+            conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            conn.execute("INSERT INTO users VALUES (1)")
+            conn.commit()
+            conn.close()
+            conn = module.connect(real.as_uri() + "?mode=ro", uri=True)
+            try:
+                read[name] = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+                try:
+                    conn.execute("INSERT INTO users VALUES (2)")
+                    refused[name] = False
+                except module.OperationalError:
+                    refused[name] = True
+            finally:
+                conn.close()
+            conn = module.connect(elsewhere.as_uri() + "?mode=rwc", uri=True)
+            conn.execute("CREATE TABLE IF NOT EXISTS t (x)")
+            conn.close()
+            outside[name] = elsewhere.exists()
+            conn = module.connect("file::memory:?cache=shared", uri=True)
+            memory[name] = conn.execute("SELECT 1").fetchone()[0]
+            conn.close()
+    finally:
+        firewall.uninstall()
+    names = [name for name, _module_ in _uri_modules()]
+    assert "sqlite3" in names
+    assert read == {name: 1 for name in names}, "a read-only URI opens the store the firewall wrote: the mirror's"
+    assert refused == {name: True for name in names}, "and its query is kept: it stays read-only"
+    assert outside == {name: True for name in names}, "a URI outside the data places is the real filesystem"
+    assert memory == {name: 1 for name in names}, "an in-memory URI passes"
+    assert sorted(path.name for path in (root / "data").iterdir()) == [], "nothing reached the real place"
+    assert sorted(path.name for path in (mirror / "data").iterdir()) == sorted(f"{name} store.db" for name in names)
+    counted = set().union(*firewall.redirected.values())
+    assert {f"data/{name} store.db" for name in names} <= counted, counted
 
 
 if __name__ == "__main__":

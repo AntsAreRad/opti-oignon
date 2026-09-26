@@ -38,7 +38,8 @@ write's minute with the recorder's offset fact already planned:
   it, and the day's budget of law updates is not spent. It carries the
   params in force, or the params of an update already pending (one the
   owner confirmed is extended, never cancelled): the proposal reaches a
-  being only through ``apply``.
+  being only through ``apply``. ``due`` asks the same question as a look:
+  the law the next such gesture would carry, written nowhere.
 
 Every law update takes effect at the next local midnight after its minute,
 under the offset the minute ends with. A view writes nothing: ``diff`` and
@@ -366,6 +367,61 @@ def unpin(being, transport):
                           plan=plan)
 
 
+def _due_of(being, state, evolve_count):
+    """The law a gesture from the being's home would carry now, ``{"name", "sha256", "v"}``, or ``None``.
+
+    One predicate for ``automatic`` and ``due``: this device is the being's
+    home, it is not pinned (``state`` is the timeline's), a carried stable
+    law follows the one in force, no pending update already goes to it, and
+    the day's budget of law updates is not spent. ``evolve_count()`` counts
+    today's law updates; it is asked last, only when everything else holds.
+    """
+    from . import lawfiles
+
+    if being.origin != being._verified.genesis_origin:
+        return None
+    if state["pinned"]:
+        return None
+    law = state["law"]
+    found = lawfiles.successor(law["name"], law["sha256"])
+    if found is None:
+        return None
+    pending = state["pending"]
+    if pending is not None and pending["to"] == found:
+        return None
+    if evolve_count() >= being._verified.pin["budgets"]["evolve"]:
+        return None
+    return found
+
+
+def due(being, to=None):
+    """The law a gesture from a surface the law update's row holds would carry at minute ``to``, or ``None``.
+
+    A look: under the store's lock and the mode gate, once, the minute (the
+    one a view shows unless ``to`` is given), the facts the timeline folds
+    and the day's count of law updates; the engine is asked once the lock is
+    let go. Nothing is written.
+    """
+    from . import life, membrane
+    from .store import _guarded
+
+    if to is not None and (not _is_int(to) or not 0 <= to <= MAX_INT):
+        raise life.LifeRefused("bad_request", "to")
+    store = being._store
+    with store._lock:
+        being._gate()
+        conn = being._live()
+
+        def read():
+            t = to if to is not None else life.target(being, conn, store._read_clock())
+            genesis, facts = being._law_facts(conn)
+            return t, genesis, facts, being._day_count(conn, "evolve", membrane.day_of(t))
+
+        t, genesis, facts, count = _guarded(conn, read)
+    line = timeline_of(genesis, [fact for fact in facts if fact["t"] <= t], t)
+    return _due_of(being, line.state, lambda: count)
+
+
 def automatic(being, conn, t, in_force, surface, planned):
     """The body of the law update a generic append at minute ``t`` carries, or ``None``.
 
@@ -373,26 +429,18 @@ def automatic(being, conn, t, in_force, surface, planned):
     recorder's offset fact of this transaction folded in, whose next local
     midnight the update takes effect at. Only a device that is the being's
     home writes it, and only after a gesture from a surface the law update's
-    row holds.
+    row holds (``_due_of``).
     """
-    from . import lawfiles, membrane
+    from . import membrane
 
     if surface not in membrane.MATRIX["evolve"]:
         return None
-    if being.origin != being._verified.genesis_origin:
-        return None
     st = in_force.state
-    if st["pinned"]:
-        return None
-    law = st["law"]
-    found = lawfiles.successor(law["name"], law["sha256"])
+    found = _due_of(being, st, lambda: being._day_count(conn, "evolve", membrane.day_of(t)))
     if found is None:
         return None
+    law = st["law"]
     pending = st["pending"]
-    if pending is not None and pending["to"] == found:
-        return None
-    if being._day_count(conn, "evolve", membrane.day_of(t)) >= being._verified.pin["budgets"]["evolve"]:
-        return None
     # A pending update the owner confirmed with ``apply`` is extended, never cancelled: its params ride with
     # the law update (the successor's ranges hold the old law's, so they stay in range); else the params in
     # force.

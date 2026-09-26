@@ -203,12 +203,26 @@ def _key_to_hex_pragma(key: bytes) -> str:
 # Connection factory
 # ---------------------------------------------------------------------------
 
+def _read_only_uri(db_path: str) -> str:
+    """The URI that opens ``db_path`` read-only: ``mode=ro``, and its shared index read-only when it exists.
+
+    A read-only connection never checkpoints a WAL file, never deletes one
+    and never rolls back a hot journal (it refuses instead); with the index
+    read-only too, it writes no byte of any of the store's files.
+    """
+    uri = Path(db_path).absolute().as_uri() + "?mode=ro"
+    if Path(db_path + "-shm").exists():
+        uri += "&readonly_shm=1"
+    return uri
+
+
 def get_encrypted_connection(
     db_path: str | Path,
     *,
     check_same_thread: bool = True,
     timeout: float = 5.0,
     enforce_encryption: bool | None = None,
+    read_only: bool = False,
 ) -> sqlite3.Connection:
     """Open a SQLite connection with optional SQLCipher encryption.
 
@@ -226,6 +240,10 @@ def get_encrypted_connection(
     enforce_encryption : bool or None
         If True, raises if SQLCipher not available.
         If None, uses mode-based enforcement (Bulbe = required).
+    read_only : bool
+        If True, the file is opened read-only (``_read_only_uri``): the key
+        and its PRAGMAs apply as usual, and nothing can be written through
+        the connection or by its opening and closing.
 
     Returns
     -------
@@ -256,13 +274,15 @@ def get_encrypted_connection(
 
     key = _get_db_encryption_key()
 
+    options = {"check_same_thread": check_same_thread, "timeout": timeout}
+    target = db_path
+    if read_only:
+        target = _read_only_uri(db_path)
+        options["uri"] = True
+
     if SQLCIPHER_AVAILABLE and key:
         # Use SQLCipher encrypted connection
-        conn = _sqlcipher_module.connect(
-            db_path,
-            check_same_thread=check_same_thread,
-            timeout=timeout,
-        )
+        conn = _sqlcipher_module.connect(target, **options)
         hex_key = _key_to_hex_pragma(key)
         conn.execute(f"PRAGMA key = {hex_key}")
         conn.execute(f"PRAGMA cipher_page_size = {_CIPHER_PAGE_SIZE}")
@@ -289,11 +309,7 @@ def get_encrypted_connection(
             f"for {db_path}."
         )
 
-    conn = sqlite3.connect(
-        db_path,
-        check_same_thread=check_same_thread,
-        timeout=timeout,
-    )
+    conn = sqlite3.connect(target, **options)
     global _plaintext_warned
     if not _plaintext_warned:
         logger.warning(
