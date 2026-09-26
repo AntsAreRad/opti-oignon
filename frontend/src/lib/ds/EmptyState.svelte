@@ -10,7 +10,7 @@
 	import Icon from './Icon.svelte';
 	import type { IconName } from './types';
 
-	/** Decorative lucide icon shown above the title. */
+	/** Decorative icon shown above the title. */
 	export let icon: IconName | undefined = undefined;
 	/** Primary line (what is empty). Always provided. */
 	export let title: string;
@@ -67,7 +67,7 @@
 		height: 56px;
 		border-radius: var(--oo-radius-full);
 		background-color: var(--oo-bg-elevated);
-		border: 1px solid var(--oo-bd-subtle);
+		border: 1px solid var(--oo-edge);
 	}
 
 	.oo-empty-title {

@@ -101,15 +101,8 @@
 		display: flex;
 		gap: var(--oo-space-1);
 	}
-	.oo-tablist[data-variant='underline'] {
-		border-bottom: 1px solid var(--oo-bd-default);
-	}
 	.oo-tabs[data-orientation='vertical'] .oo-tablist {
 		flex-direction: column;
-		border-bottom: none;
-	}
-	.oo-tabs[data-orientation='vertical'] .oo-tablist[data-variant='underline'] {
-		border-right: 1px solid var(--oo-bd-default);
 	}
 	.oo-tab {
 		display: inline-flex;
@@ -139,33 +132,46 @@
 		color: var(--oo-fg-primary);
 	}
 
-	/* Underline variant */
+	/* Underline variant: the selected tab is underlined in the mark token
+	   and set at weight 600; the list draws no line. */
 	.oo-tab[data-variant='underline'] {
-		border-radius: 0;
-		margin-bottom: -1px;
-		border-bottom: 2px solid transparent;
+		border-radius: var(--oo-radius-sm);
 	}
 	.oo-tab[data-variant='underline'][aria-selected='true'] {
 		color: var(--oo-fg-primary);
-		border-bottom-color: var(--oo-acc-500);
+		font-weight: 600;
+		text-decoration: underline;
+		text-decoration-color: var(--oo-acc-mark);
+		text-decoration-thickness: 2px;
+		text-underline-offset: 6px;
 	}
 
-	/* Pill variant */
+	/* Pill variant: the selected tab takes the accent fill, its edge and its weight. */
 	.oo-tab[data-variant='pill'] {
 		border-radius: var(--oo-radius-full);
 	}
 	.oo-tab[data-variant='pill'][aria-selected='true'] {
 		color: var(--oo-fg-on-accent);
 		background-color: var(--oo-acc-fill);
+		border-color: var(--oo-edge);
+		font-weight: 600;
 	}
 
+	/* The panel takes focus (tabindex 0), so it keeps the global focus ring. */
 	.oo-tabpanel {
 		margin-top: var(--oo-space-4);
-		outline: none;
 	}
 	.oo-tabs[data-orientation='vertical'] .oo-tabpanel {
 		margin-top: 0;
 		flex: 1;
+	}
+	/* Forced colours drop the fill: the selected pill takes the system's
+	   selection colours, beside its weight. */
+	@media (forced-colors: active) {
+		.oo-tab[data-variant='pill'][aria-selected='true'] {
+			background-color: SelectedItem;
+			color: SelectedItemText;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.oo-tab {

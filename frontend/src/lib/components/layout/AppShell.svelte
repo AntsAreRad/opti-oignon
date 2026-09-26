@@ -9,7 +9,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { sidebarOpen, toggleSidebar } from '$lib/stores/ui';
-	import { activePanel, panelWidth, isPanelOpen, closePanel, setPanelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH } from '$lib/stores/panels';
+	import { panelWidth, isPanelOpen, closePanel, setPanelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH } from '$lib/stores/panels';
+	import SidePanel from '$lib/ds/SidePanel.svelte';
 	import Sidebar from './Sidebar.svelte';
 	import Header from './Header.svelte';
 	import StatusFooter from './StatusFooter.svelte';
@@ -19,9 +20,6 @@
 	export let onExport: (id: string, title: string) => void = () => {};
 
 	let isMobile = false;
-	let resizing = false;
-	let startX = 0;
-	let startWidth = 0;
 
 	// Swipe-to-close state for sidebar
 	let sidebarEl: HTMLDivElement;
@@ -74,29 +72,6 @@
 		}
 	}
 
-	function startResize(event: MouseEvent) {
-		if (isMobile) return;
-		resizing = true;
-		startX = event.clientX;
-		startWidth = $panelWidth;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-	}
-
-	function onMouseMove(event: MouseEvent) {
-		if (!resizing) return;
-		// Panel is on the right, so we grow by moving left
-		const delta = startX - event.clientX;
-		setPanelWidth(startWidth + delta);
-	}
-
-	function onMouseUp() {
-		if (!resizing) return;
-		resizing = false;
-		document.body.style.cursor = '';
-		document.body.style.userSelect = '';
-	}
-
 	onMount(() => {
 		checkMobile();
 		// Start with sidebar closed on mobile
@@ -105,16 +80,12 @@
 		}
 		if (typeof window !== 'undefined') {
 			window.addEventListener('resize', checkMobile);
-			window.addEventListener('mousemove', onMouseMove);
-			window.addEventListener('mouseup', onMouseUp);
 		}
 	});
 
 	onDestroy(() => {
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('resize', checkMobile);
-			window.removeEventListener('mousemove', onMouseMove);
-			window.removeEventListener('mouseup', onMouseUp);
 		}
 	});
 </script>
@@ -203,32 +174,19 @@
 				<slot />
 			</main>
 
-			<!-- Right panel (desktop: inline, mobile: fixed overlay) -->
+			<!-- Right panel: beside the page on a desktop, over its edge on a phone -->
 			{#if $isPanelOpen}
-				<aside
-					aria-label="Side panel"
-					class="shrink-0 h-full panel-transition animate-panel-slide
-						{isMobile
-							? 'fixed inset-y-0 right-0 z-50 w-full max-w-[90vw] sm:max-w-[400px]'
-							: 'relative'}"
-					style="border-left: 1px solid var(--oo-bd-subtle); {isMobile ? '' : `width: ${$panelWidth}px`}"
+				<SidePanel
+					label="Side panel"
+					class="panel-transition animate-panel-slide"
+					width={$panelWidth}
+					min={PANEL_MIN_WIDTH}
+					max={PANEL_MAX_WIDTH}
+					overlay={isMobile}
+					on:resize={(event) => setPanelWidth(event.detail)}
 				>
-					<!-- Resize handle (desktop only) -->
-					{#if !isMobile}
-						<div
-							class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 transition-colors
-								{resizing ? '' : ''}"
-							style="background-color: {resizing ? 'var(--oo-warning-bd)' : 'transparent'};"
-							on:mousedown={startResize}
-							on:mouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--oo-warning-bg)'}
-							on:mouseleave={(e) => { if (!resizing) e.currentTarget.style.backgroundColor = 'transparent'; }}
-							role="separator"
-							aria-label="Resize panel"
-						/>
-					{/if}
-
 					<slot name="panel" />
-				</aside>
+				</SidePanel>
 			{/if}
 		</div>
 

@@ -47,6 +47,9 @@ reads 0.
   * UR2 -- hand-made ``<input``, ``<select`` and ``<textarea`` outside the
     primitives.
   * UR3 -- ``style=`` attributes and ``style:`` directives in components.
+    Geometry a script writes at run time (a width an action sets, a
+    position a placement library sets) is outside this census: it is a
+    measured value, not a style written in the markup.
   * UR4 -- type under 12 px, in px, rem or em: ``text-[N<unit>]`` classes,
     ``font-size`` (declaration or directive), the ``font`` shorthand, and a
     text-scale token declared under 12 px (once, at its declaration).
@@ -1371,7 +1374,6 @@ UR1_LEDGER = {
     'frontend/src/lib/components/ui/ThemeSwitcher.svelte': 3,
     'frontend/src/lib/components/ui/UserMenu.svelte': 3,
     'frontend/src/routes/chat/+layout.svelte': 1,
-    'frontend/src/routes/dev/components/+page.svelte': 2,
     'frontend/src/routes/settings/+page.svelte': 3,
     'frontend/src/routes/verify/+page.svelte': 2,
 }
@@ -1467,7 +1469,7 @@ UR3_LEDGER = {
     'frontend/src/lib/components/chat/VisionDelegationIndicator.svelte': 2,
     'frontend/src/lib/components/health/CacheManager.svelte': 33,
     'frontend/src/lib/components/health/HealthDashboard.svelte': 52,
-    'frontend/src/lib/components/layout/AppShell.svelte': 6,
+    'frontend/src/lib/components/layout/AppShell.svelte': 4,
     'frontend/src/lib/components/layout/Sidebar.svelte': 9,
     'frontend/src/lib/components/panels/AnalyticsDashboard.svelte': 62,
     'frontend/src/lib/components/panels/ArtifactPanel.svelte': 2,
@@ -1730,7 +1732,7 @@ UR11_LEDGER = {
     'frontend/src/lib/components/chat/RoutingIndicator.svelte': 4,
     'frontend/src/lib/components/health/CacheManager.svelte': 1,
     'frontend/src/lib/components/health/HealthDashboard.svelte': 3,
-    'frontend/src/lib/components/layout/AppShell.svelte': 2,
+    'frontend/src/lib/components/layout/AppShell.svelte': 1,
     'frontend/src/lib/components/layout/Sidebar.svelte': 4,
     'frontend/src/lib/components/layout/StatusFooter.svelte': 2,
     'frontend/src/lib/components/panels/AnalyticsDashboard.svelte': 14,
@@ -1825,15 +1827,8 @@ UR11_LEDGER = {
     'frontend/src/lib/components/ui/OnboardingOverlay.svelte': 6,
     'frontend/src/lib/components/ui/SkeletonLoader.svelte': 2,
     'frontend/src/lib/components/ui/ThemeSwitcher.svelte': 2,
-    'frontend/src/lib/ds/Button.svelte': 2,
-    'frontend/src/lib/ds/EmptyState.svelte': 1,
-    'frontend/src/lib/ds/Modal.svelte': 2,
-    'frontend/src/lib/ds/Select.svelte': 1,
-    'frontend/src/lib/ds/Tabs.svelte': 2,
-    'frontend/src/lib/ds/Toast.svelte': 2,
     'frontend/src/routes/chat/+layout.svelte': 2,
     'frontend/src/routes/chat/[id]/+page.svelte': 3,
-    'frontend/src/routes/dev/components/+page.svelte': 1,
     'frontend/src/routes/health/+page.svelte': 1,
     'frontend/src/routes/projects/+layout.svelte': 1,
     'frontend/src/routes/settings/+page.svelte': 2,
@@ -1876,8 +1871,6 @@ UR12_LEDGER = {
     'frontend/src/lib/components/ui/EmergencyStopControl.svelte': 4,
     'frontend/src/lib/components/ui/OnboardingOverlay.svelte': 2,
     'frontend/src/lib/components/ui/ThemeSwitcher.svelte': 2,
-    'frontend/src/lib/ds/Button.svelte': 1,
-    'frontend/src/routes/dev/components/+page.svelte': 2,
 }
 UR13_LEDGER = {
     'frontend/src/lib/components/chat/BranchExplorer.svelte': 3,
@@ -1947,8 +1940,6 @@ UR13_LEDGER = {
     'frontend/src/lib/components/settings/SpeculativeDecodingPanel.svelte': 1,
     'frontend/src/lib/components/ui/BackendStatus.svelte': 1,
     'frontend/src/lib/components/ui/NotificationCenter.svelte': 1,
-    'frontend/src/lib/ds/Modal.svelte': 2,
-    'frontend/src/lib/ds/Tabs.svelte': 2,
     'frontend/src/routes/+page.svelte': 1,
     'frontend/src/routes/chat/+layout.svelte': 1,
     'frontend/src/routes/chat/[id]/+page.svelte': 3,

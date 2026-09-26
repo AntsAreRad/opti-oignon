@@ -13,7 +13,7 @@
 
 	const ICON: Record<ToastType, string> = {
 		success: 'check',
-		error: 'x',
+		error: 'alert-octagon',
 		warning: 'alert-triangle',
 		info: 'info'
 	};
@@ -103,23 +103,14 @@
 		gap: var(--oo-space-3);
 		padding: var(--oo-space-3) var(--oo-space-4);
 		border-radius: var(--oo-radius-lg);
-		border: 1px solid var(--oo-bd-default);
+		border: 1px solid var(--oo-edge);
 		background-color: var(--oo-bg-elevated);
 		box-shadow: var(--oo-shadow-lg);
 		pointer-events: auto;
 	}
-	.oo-toast[data-type='success'] {
-		border-color: var(--oo-success-bd);
-	}
-	.oo-toast[data-type='error'] {
-		border-color: var(--oo-error-bd);
-	}
-	.oo-toast[data-type='warning'] {
-		border-color: var(--oo-warning-bd);
-	}
-	.oo-toast[data-type='info'] {
-		border-color: var(--oo-info-bd);
-	}
+	/* The kind is said by the icon, its shape and its ink (an error is the
+	   octagon, never the cross the dismiss button draws); the toast keeps
+	   the edge of every toned ground. */
 	.oo-toast-icon {
 		flex-shrink: 0;
 		margin-top: 1px;
@@ -155,14 +146,17 @@
 	.oo-toast-action {
 		flex-shrink: 0;
 		align-self: center;
-		border: 1px solid var(--oo-bd-strong);
-		border-radius: var(--oo-radius-sm);
-		background: transparent;
-		color: var(--oo-acc-500);
+		border: 1px solid var(--oo-edge);
+		border-radius: var(--oo-radius-full);
+		background-color: var(--oo-btn-secondary-bg);
+		color: var(--oo-fg-primary);
 		font-size: var(--oo-text-xs);
 		font-weight: 500;
 		padding: var(--oo-space-1) var(--oo-space-3);
 		cursor: pointer;
+	}
+	.oo-toast-action:hover:not(:disabled) {
+		background-color: var(--oo-btn-secondary-hover);
 	}
 	.oo-toast-action:disabled {
 		opacity: 0.6;

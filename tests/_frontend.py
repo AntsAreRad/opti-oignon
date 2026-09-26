@@ -29,7 +29,8 @@ What it provides:
     may write without touching the tree; the ladder builds and lints on it.
   * ``svelte_check_counts()`` -- svelte-check errors per file, on a copy of
     ``frontend/`` under ``$TMPDIR``, with files planted on request.
-  * ``HELD`` -- the files held to the surface rules.
+  * ``HELD`` -- the files held to the surface rules, and ``held_files()``,
+    which expands its directory entries.
 
 The ratchet rules. A ledger is a literal ``{path: count}`` dict assigned to a
 module-level name in the test file that checks it.
@@ -99,11 +100,39 @@ _GIT_LOCATORS = (
 )
 
 
-HELD: list[str] = []
+HELD: list[str] = [
+    "frontend/src/lib/ds/",
+    "frontend/src/routes/dev/components/+page.svelte",
+]
 """Files held to the surface rules: separation by tone and space rather than
 by lines, matte surfaces, sentence-case labels, selection never by colour
 alone. A file joins when it is rebuilt under those rules, and the list only
-grows. It is empty until the first file is rebuilt."""
+grows. An entry is a repository path, or a directory ending in ``/`` that
+holds every listed file under it, the ones written later included
+(``held_files`` expands it). The primitives come first: every surface is
+drawn from them; their gallery beside them."""
+
+
+def held_files(held=None, *, root=REPO):
+    """The files the surface rules hold, sorted: every file ``held``
+    (``HELD`` by default) names, a directory entry standing for every file
+    the listing rule lists under it. Raises when the list is empty, or when
+    an entry names nothing: a rule held over nothing reads a false zero."""
+    held = HELD if held is None else held
+    if not held:
+        raise AssertionError(
+            "HELD is empty: no file is held to the surface rules, and a rule "
+            "held over nothing reads a false zero"
+        )
+    found = set()
+    for entry in held:
+        if entry.endswith("/"):
+            found.update(files(None, within=entry.rstrip("/"), root=root))
+        elif (Path(root) / entry).is_file():
+            found.add(entry)
+        else:
+            raise AssertionError(f"HELD names {entry}, which is not a file of the tree")
+    return sorted(found)
 
 
 def _git(root, *args, index=None, stdin=None, ok=(0,)):

@@ -2250,7 +2250,6 @@ DS18_LEDGER = {
     'frontend/src/lib/components/chat/ToolCallDisplay.svelte': 4,
     'frontend/src/lib/components/health/CacheManager.svelte': 2,
     'frontend/src/lib/components/health/HealthDashboard.svelte': 3,
-    'frontend/src/lib/components/layout/AppShell.svelte': 2,
     'frontend/src/lib/components/panels/AgentPanel.svelte': 4,
     'frontend/src/lib/components/panels/AnalyticsDashboard.svelte': 2,
     'frontend/src/lib/components/panels/BenchmarkPage.svelte': 2,

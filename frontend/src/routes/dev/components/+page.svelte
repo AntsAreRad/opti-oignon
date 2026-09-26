@@ -1,19 +1,42 @@
 <!--
-  /dev/components -- design-system primitive gallery (spec 10.12).
-  Development-only (import.meta.env.DEV). Lets us verify the 10
-  primitives across the three palettes and three densities. Not a user
-  route. The gallery is a preview: its root carries the palette attribute
-  and the density class, and the page's own root is left as the theme path
-  set it.
+  /dev/components -- the design system's gallery.
+  Development only (import.meta.env.DEV); not a user route. It shows every
+  primitive in its states, and every icon of the inline set by name, in the
+  palette and the density chosen at its top. The gallery is a preview: its
+  root carries the palette attribute and the density class, and the page's
+  own root is left as the theme path set it. It is held to the surface
+  rules like the primitives it shows.
 -->
 <script lang="ts">
-	import { Button, Input, Card, Modal, Select, Switch, Tabs, Tooltip, Icon } from '$lib/ds';
+	import {
+		Button,
+		Card,
+		Checkbox,
+		Icon,
+		IconButton,
+		Input,
+		Menu,
+		Modal,
+		Select,
+		SidePanel,
+		Switch,
+		Tabs,
+		ToggleChip,
+		Tooltip,
+		ICONS
+	} from '$lib/ds';
 	import Toast from '$lib/ds/Toast.svelte';
 	import { addToast } from '$lib/stores/notifications';
-	import type { SelectOption, TabItem } from '$lib/ds';
+	import type { MenuItem, SelectOption, TabItem } from '$lib/ds';
 	import { CHOICE_LABELS, DENSITIES, PALETTES, type Density, type Palette } from '$lib/theme/apply';
 
 	const isDev = import.meta.env.DEV;
+
+	const DENSITY_LABELS: Record<Density, string> = {
+		compact: 'Compact',
+		comfortable: 'Comfortable',
+		spacious: 'Spacious'
+	};
 
 	let theme: Palette = 'night';
 	let density: Density = 'comfortable';
@@ -25,7 +48,21 @@
 	let textVal = '';
 	let selVal = 'a';
 	let tabVal = 'one';
+	let pillVal = 'one';
 	let retryCount = 0;
+	let pinned = true;
+	let details = false;
+	let webSearch = true;
+	let thinking = false;
+	let sandbox = false;
+	let remember = true;
+	let notify = false;
+	let allChosen = false;
+	let someChosen = true;
+	let chosen = 'nothing yet';
+	let panelWidth = 260;
+
+	const iconNames = Object.keys(ICONS).sort();
 
 	const selectOptions: SelectOption[] = [
 		{ value: 'a', label: 'Alpha' },
@@ -34,9 +71,15 @@
 		{ value: 'd', label: 'Delta', group: 'Greek' }
 	];
 	const tabItems: TabItem[] = [
-		{ id: 'one', label: 'Overview', icon: 'layout-dashboard' },
-		{ id: 'two', label: 'Settings', icon: 'settings' },
+		{ id: 'one', label: 'Overview', icon: 'home' },
+		{ id: 'two', label: 'Settings', icon: 'sliders' },
 		{ id: 'three', label: 'About' }
+	];
+	const menuItems: MenuItem[] = [
+		{ id: 'copy', label: 'Copy', icon: 'copy' },
+		{ id: 'export', label: 'Export', icon: 'download' },
+		{ id: 'rename', label: 'Rename', icon: 'pencil', disabled: true },
+		{ id: 'wipe', label: 'Wipe', icon: 'trash', danger: true }
 	];
 
 	async function fakeRetry() {
@@ -50,20 +93,28 @@
 		<Toast />
 
 		<header class="dev-header">
-			<h1>Design System — Primitives</h1>
+			<h1>Design system primitives</h1>
 			<div class="dev-controls">
-				<div class="dev-seg" role="group" aria-label="Theme">
+				<div class="dev-seg" role="group" aria-label="Palette">
 					{#each PALETTES as t}
-						<button class="dev-chip" class:active={theme === t} on:click={() => (theme = t)}>
-							{CHOICE_LABELS[t]}
-						</button>
+						<Button
+							variant="ghost"
+							shape="pill"
+							size="sm"
+							pressed={theme === t}
+							on:click={() => (theme = t)}>{CHOICE_LABELS[t]}</Button
+						>
 					{/each}
 				</div>
 				<div class="dev-seg" role="group" aria-label="Density">
 					{#each DENSITIES as d}
-						<button class="dev-chip" class:active={density === d} on:click={() => (density = d)}>
-							{d}
-						</button>
+						<Button
+							variant="ghost"
+							shape="pill"
+							size="sm"
+							pressed={density === d}
+							on:click={() => (density = d)}>{DENSITY_LABELS[d]}</Button
+						>
 					{/each}
 				</div>
 			</div>
@@ -83,22 +134,101 @@
 					<Button size="sm" iconLeft="plus">Small</Button>
 					<Button size="md" iconLeft="plus">Medium</Button>
 					<Button size="lg" iconLeft="plus">Large</Button>
-					<Button iconOnly="settings" ariaLabel="Settings" />
 					<Button loading>Loading</Button>
 					<Button disabled>Disabled</Button>
+				</div>
+				<div class="row">
+					<Button shape="pill" variant="secondary" iconLeft="search">Pill</Button>
+					<Button shape="round" variant="primary" iconOnly="arrow-up" ariaLabel="Send" />
+					<Button shape="round" variant="secondary" iconOnly="more" ariaLabel="More" />
+					<Button iconOnly="sliders" ariaLabel="Settings" />
+				</div>
+				<div class="row">
+					<Button variant="secondary" pressed={pinned} on:click={() => (pinned = !pinned)}>Pinned</Button>
+					<Button
+						variant="ghost"
+						iconOnly="pin"
+						ariaLabel="Pin"
+						pressed={pinned}
+						on:click={() => (pinned = !pinned)}
+					/>
+					<Button
+						variant="ghost"
+						iconRight={details ? 'chevron-up' : 'chevron-down'}
+						expanded={details}
+						controls="dev-details"
+						on:click={() => (details = !details)}>Details</Button
+					>
+				</div>
+				<p id="dev-details" class="dev-note" hidden={!details}>
+					A pressed button draws its check; a button that shows a region says whether it is shown.
+				</p>
+			</Card>
+
+			<Card variant="raised" padding="md">
+				<h2>Icon button</h2>
+				<div class="row">
+					<IconButton icon="x" label="Close" />
+					<IconButton icon="copy" label="Copy" />
+					<IconButton icon="retry" label="Retry" />
+					<IconButton icon="arrow-up" label="Send" variant="primary" />
+					<IconButton icon="trash" label="Delete" disabled />
+				</div>
+				<div class="row">
+					<IconButton icon="panel-right" label="Open the panel" size="lg" />
+					<IconButton icon="stop-fill" label="Stop this reply" size="lg" variant="primary" />
 				</div>
 			</Card>
 
 			<Card variant="raised" padding="md">
-				<h2>Icon</h2>
+				<h2>Toggle chip</h2>
 				<div class="row">
-					<Icon name="home" size="sm" />
-					<Icon name="settings" size="md" />
-					<Icon name="search" size="lg" />
-					<Icon name="bell" size="md" />
-					<Icon name="user" size="md" />
-					<Icon name="check" size="md" />
+					<ToggleChip label="Web search" icon="globe" bind:pressed={webSearch} />
+					<ToggleChip label="Thinking" icon="bulb" note="auto" bind:pressed={thinking} />
+					<ToggleChip label="Sandbox" icon="box" bind:pressed={sandbox} />
+					<ToggleChip label="Code" icon="code" disabled />
 				</div>
+			</Card>
+
+			<Card variant="raised" padding="md">
+				<h2>Menu</h2>
+				<div class="row">
+					<Menu label="Actions" items={menuItems} on:select={(e) => (chosen = e.detail)} />
+					<Menu
+						label="More actions"
+						icon="more"
+						items={menuItems}
+						placement="bottom-start"
+						on:select={(e) => (chosen = e.detail)}
+					/>
+				</div>
+				<p class="dev-note">Chosen: {chosen}</p>
+			</Card>
+
+			<Card variant="raised" padding="md">
+				<h2>Checkbox</h2>
+				<div class="column">
+					<Checkbox label="Remember this device" bind:checked={remember} />
+					<Checkbox
+						label="Notify me"
+						description="A notice when a long task ends"
+						bind:checked={notify}
+					/>
+					<Checkbox label="Select all" bind:checked={allChosen} bind:indeterminate={someChosen} />
+					<Checkbox label="Unavailable" disabled />
+				</div>
+			</Card>
+
+			<Card variant="raised" padding="md">
+				<h2>Icons</h2>
+				<ul class="dev-icons">
+					{#each iconNames as name}
+						<li class="dev-icon">
+							<Icon {name} size="lg" />
+							<span class="dev-icon-name">{name}</span>
+						</li>
+					{/each}
+				</ul>
 			</Card>
 
 			<Card variant="raised" padding="md">
@@ -125,6 +255,9 @@
 				<Tabs bind:value={tabVal} tabs={tabItems}>
 					<p>Active panel: <strong>{tabVal}</strong></p>
 				</Tabs>
+				<Tabs bind:value={pillVal} tabs={tabItems} variant="pill">
+					<p>Active pill: <strong>{pillVal}</strong></p>
+				</Tabs>
 			</Card>
 
 			<Card variant="raised" padding="md">
@@ -136,7 +269,7 @@
 			</Card>
 
 			<Card variant="raised" padding="md">
-				<h2>Modal &amp; Toast</h2>
+				<h2>Modal and toast</h2>
 				<div class="row">
 					<Button on:click={() => (modalOpen = true)}>Open modal</Button>
 					<Button on:click={() => (drawerOpen = true)}>Open drawer</Button>
@@ -155,9 +288,26 @@
 
 			<Card variant="flat" padding="md">
 				<h2>Card (flat)</h2>
-				<p>This is a flat card — border only, no shadow.</p>
+				<p>A flat card: set apart by its tone, with no shadow.</p>
 			</Card>
 		</main>
+
+		<!-- The side panel is a complementary landmark, which stands at the top
+		     level: its demonstration sits outside the page's main region. -->
+		<div class="dev-grid dev-after-main">
+			<Card variant="raised" padding="md">
+				<h2>Side panel</h2>
+				<div class="dev-frame">
+					<div class="dev-frame-main">The page</div>
+					<SidePanel label="Demo panel" bind:width={panelWidth} min={160} max={320}>
+						<p class="dev-frame-panel">
+							Beside the page, {panelWidth} px. Focus its edge and use the arrows, or press it
+							without dragging.
+						</p>
+					</SidePanel>
+				</div>
+			</Card>
+		</div>
 
 		<Modal open={modalOpen} title="Example modal" size="md" onClose={() => (modalOpen = false)}>
 			<p>A center modal rendered through the native &lt;dialog&gt; focus trap.</p>
@@ -168,7 +318,7 @@
 		</Modal>
 
 		<Modal open={drawerOpen} variant="drawer-right" title="Example drawer" size="md" onClose={() => (drawerOpen = false)}>
-			<p>Drawer variant — collapses to a bottom sheet below 768px.</p>
+			<p>The drawer variant: a bottom sheet below 768px.</p>
 		</Modal>
 	</div>
 {:else}
@@ -197,29 +347,8 @@
 	}
 	.dev-seg {
 		display: inline-flex;
+		flex-wrap: wrap;
 		gap: var(--oo-space-1);
-		padding: var(--oo-space-1);
-		background-color: var(--oo-bg-surface);
-		border: 1px solid var(--oo-bd-default);
-		border-radius: var(--oo-radius-md);
-	}
-	.dev-chip {
-		border: none;
-		background: transparent;
-		color: var(--oo-fg-secondary);
-		font-size: var(--oo-text-xs);
-		padding: var(--oo-space-2) var(--oo-space-3);
-		border-radius: var(--oo-radius-sm);
-		cursor: pointer;
-		text-transform: capitalize;
-	}
-	.dev-chip:hover {
-		background-color: var(--oo-bg-hover);
-		color: var(--oo-fg-primary);
-	}
-	.dev-chip.active {
-		background-color: var(--oo-acc-fill);
-		color: var(--oo-fg-on-accent);
 	}
 	.dev-grid {
 		display: grid;
@@ -230,9 +359,7 @@
 		margin: 0 0 var(--oo-space-4);
 		font-size: var(--oo-text-sm);
 		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: var(--oo-tracking-wide);
-		color: var(--oo-fg-tertiary);
+		color: var(--oo-fg-secondary);
 	}
 	.row {
 		display: flex;
@@ -243,6 +370,59 @@
 	}
 	.row:last-child {
 		margin-bottom: 0;
+	}
+	.column {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-3);
+	}
+	.dev-note {
+		margin: var(--oo-space-3) 0 0;
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-secondary);
+	}
+	.dev-after-main {
+		margin-top: var(--oo-space-5);
+	}
+	.dev-frame {
+		display: flex;
+		height: 12rem;
+		border-radius: var(--oo-radius-md);
+		background-color: var(--oo-bg-base);
+		overflow: hidden;
+	}
+	.dev-frame-main {
+		flex: 1;
+		min-width: 0;
+		padding: var(--oo-space-4);
+		font-size: var(--oo-text-sm);
+		color: var(--oo-fg-secondary);
+	}
+	.dev-frame-panel {
+		margin: 0;
+		padding: var(--oo-space-4);
+		font-size: var(--oo-text-sm);
+	}
+	.dev-icons {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+		gap: var(--oo-space-3);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.dev-icon {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--oo-space-2);
+		padding: var(--oo-space-2);
+		color: var(--oo-fg-primary);
+	}
+	.dev-icon-name {
+		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-2xs);
+		color: var(--oo-fg-secondary);
 	}
 	.dev-disabled {
 		padding: var(--oo-space-7);

@@ -196,8 +196,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: var(--oo-space-4);
-		padding: var(--oo-space-5);
-		border-bottom: 1px solid var(--oo-bd-subtle);
+		padding: var(--oo-space-5) var(--oo-space-5) var(--oo-space-3);
 	}
 	.oo-modal-title {
 		margin: 0;
@@ -231,8 +230,7 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: var(--oo-space-3);
-		padding: var(--oo-space-5);
-		border-top: 1px solid var(--oo-bd-subtle);
+		padding: var(--oo-space-3) var(--oo-space-5) var(--oo-space-5);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.oo-modal-close {

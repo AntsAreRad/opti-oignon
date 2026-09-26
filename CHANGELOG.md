@@ -11,6 +11,69 @@ package costs.
 
 ### Added
 
+- The interface's primitives, its own icons, and the rules its surfaces are
+  held to. The button forwards what it is to assistive technology --
+  `pressed`, `expanded`, `haspopup` and `controls` become `aria-pressed`,
+  `aria-expanded`, `aria-haspopup` and `aria-controls`, each omitted when not
+  given -- takes a pill or a round shape, and draws a check when pressed,
+  beside its label or at the corner of an icon alone, where it keeps the
+  accent ink on its own tint and a line over a pixel wide; a pressed quiet
+  button keeps its tint under the pointer. Five primitives join it in
+  `frontend/src/lib/ds`: an icon button (a 36 px circle on a desktop, 44 px
+  as a phone's target); a toggle chip, whose pressed state is the accent
+  tint and a check in place of its icon, with an optional visible note such
+  as "auto"; a menu, placed by floating-ui, whose keys (the arrows,
+  wrapping and skipping disabled items, Home, End, Escape, which returns
+  focus to the trigger, and Tab, and on the closed trigger the down and up
+  arrows alone) are decided by one pure module; a native checkbox named by
+  its visible label alone, its description said after it, with a mixed
+  state that is the input's own; and a side panel, a labelled complementary
+  region beside the page, never a dialog, whose edge is a focusable
+  separator that says its width in pixels, which the arrow keys move by
+  16 px, Home and End take to its narrowest and widest, and a press
+  without a drag steps through three widths, so a pointer resizes it
+  without dragging. An icon alone never renders without a name: the icon
+  button, a button drawing an icon alone and a menu refuse a missing or
+  blank one. Every shell that mounts the app shell (chat, notes, projects,
+  benchmark, settings, health and verify) hosts its right panel in the side
+  panel, so that panel can now be resized from the keyboard, and its bar no
+  longer lights in the warning wash. Icons are drawn once, as compact path
+  data: the forty-one the interface needs, thirty from the approved
+  drawings and eleven drawn in the same hand (close, the up chevron, a
+  warning, an error, information, a straight line, the two feedback thumbs,
+  delete, download and attach); every icon the icon primitive draws is
+  stroked at 1.5 now, not 2, and the older icon package draws only a name
+  the set does not hold yet. An error toast shows the octagon, no longer
+  the cross its dismiss button draws.
+
+  The primitives and the component gallery are held to six rules, checked
+  on every run over a list that only grows: a toned ground (a surface, a
+  tint, the accent fill) carries the edge token, which the day and night
+  palettes draw transparent and high contrast draws; no border token draws
+  a line (the dialog's header and footer, the tab list's rule and the
+  toast's status border are gone, the dialog's parts set apart by space, a
+  toast's kind said by its icon); no capitals, no title case and no wide
+  tracking (the button's tracking is gone); matte; a selection is never a
+  colour alone: a pressed control draws its check, a selected tab is set at
+  weight 600 (an underline in the mark token, or the fill, which forced
+  colours draw in the system's selection colours), and so is a selected
+  option; and focus stays visible: the tab panel keeps its focus ring, and
+  the option under the keyboard in a select, whose focus stays on the
+  field, draws its own ring in the focus ink. The gallery
+  (`/dev/components`, development only) shows every primitive in its
+  states and every icon by name, in the palette and density chosen at its
+  top. The ratchets fall with it: border-token reads by 12, capitals and
+  wide tracking by 3, lines between rows by 4, style attributes by 2 (the
+  panel's width is now run-time geometry its primitive writes, and the
+  handle's hand-made hover colour is gone), status washes outside the
+  primitives by 2 and hand-made buttons by 2. Sixteen contracts; the ones
+  that render do so compiled for the server, since the app renders only in
+  the browser: the menu's keyboard, the panel's resize by keys, drag and
+  press, the icons as drawn, forced colours and an accessibility pass over
+  the gallery in each palette are checked on the machine. The rest of the
+  interface adopts the primitives as each surface is rebuilt; until then
+  its own buttons, fields and lines stand, counted.
+
 - An assistant reply is rendered from its markdown: headings, lists and
   task lists, quotes, tables, links, emphasis, code blocks, and line breaks
   (a single newline breaks the line, as a chat reply means it). marked's

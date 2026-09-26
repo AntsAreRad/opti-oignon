@@ -273,8 +273,8 @@
 		list-style: none;
 		max-height: 16rem;
 		overflow-y: auto;
-		background-color: var(--oo-bg-elevated);
-		border: 1px solid var(--oo-bd-default);
+		background-color: var(--oo-bg-overlay);
+		border: 1px solid var(--oo-edge);
 		border-radius: var(--oo-radius-md);
 		box-shadow: var(--oo-shadow-md);
 	}
@@ -285,12 +285,22 @@
 		color: var(--oo-fg-primary);
 		cursor: pointer;
 	}
+	/* The option under the keyboard keeps DOM focus on the field
+	   (aria-activedescendant), so the global ring never draws on it: it
+	   draws its own, inside its box, in the focus ink. */
 	.oo-option.active {
 		background-color: var(--oo-bg-hover);
+		outline: var(--oo-focus-ring-width, 2px) solid var(--oo-focus-ink);
+		outline-offset: calc(-1 * var(--oo-focus-ring-width, 2px));
+	}
+	@media (forced-colors: active) {
+		.oo-option.active {
+			outline-color: Highlight;
+		}
 	}
 	.oo-option[aria-selected='true'] {
-		color: var(--oo-acc-500);
-		font-weight: 500;
+		color: var(--oo-acc-ink);
+		font-weight: 600;
 	}
 	.oo-option.disabled {
 		opacity: 0.5;
