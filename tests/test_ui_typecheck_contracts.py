@@ -218,7 +218,6 @@ UX14_LEDGER = {
     'frontend/src/lib/components/chat/ChatMessage.svelte': 3,
     'frontend/src/lib/components/chat/ToolCallDisplay.svelte': 2,
     'frontend/src/lib/components/health/CacheManager.svelte': 1,
-    'frontend/src/lib/components/layout/AppShell.svelte': 1,
     'frontend/src/lib/components/panels/CompressionSettings.svelte': 1,
     'frontend/src/lib/components/panels/ProjectList.svelte': 1,
     'frontend/src/lib/components/panels/SandboxSettingsStrip.svelte': 5,
@@ -228,7 +227,6 @@ UX14_LEDGER = {
     'frontend/src/lib/components/settings/PluginsPanel.svelte': 5,
     'frontend/src/lib/components/settings/SecurityPanel.svelte': 1,
     'frontend/src/lib/stores/chat.ts': 4,
-    'frontend/src/routes/settings/+page.svelte': 42,
 }
 
 

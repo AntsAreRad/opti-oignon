@@ -8,7 +8,7 @@
 | `Ctrl+Enter` | Send message | Chat |
 | `Ctrl+B` | Toggle sidebar | Navigation |
 | `Ctrl+K` | Search conversations | Navigation |
-| `Ctrl+,` | Open settings | Navigation |
+| `Ctrl+,` | Open Preferences | Navigation |
 | `Ctrl+Shift+T` | Switch between the day and night palettes | UI |
 | `Ctrl+Shift+E` | Export conversation | Chat |
 | `?` | Show keyboard shortcuts | Help |
@@ -19,7 +19,7 @@
 
 You can rebind any shortcut to a different key combination:
 
-1. Open **Settings > Advanced > Shortcuts** (or press `?`)
+1. Open **Preferences > Keyboard > Keyboard shortcuts** (or press `?`)
 2. Click on the shortcut you want to change
 3. Press the new key combination
 4. The system validates the binding and warns about browser conflicts

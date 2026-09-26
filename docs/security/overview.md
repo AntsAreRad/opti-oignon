@@ -72,5 +72,6 @@ security checklist that verifies:
 - Red team resistance score (if red team data is available)
 - CSP middleware status
 
-Results are available at `GET /api/security/health` and displayed in
-the settings dashboard.
+Results are available at `GET /api/security/health` and displayed as
+the security grade in the sidebar's status card, which leads to
+**Workshop > Security**.

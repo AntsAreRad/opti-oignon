@@ -1,13 +1,17 @@
 <!--
   ThemeSwitcher.svelte
-  Header palette quick-switcher. One click to move between the palette
-  choices ("Match system", day, night, high contrast) without opening
-  Settings, plus the three density modes. Wired to the preferences store,
+  Palette quick-switcher, in Preferences > Appearance. One click to move
+  between the palette choices ("Match system", day, night, high contrast),
+  plus the three density modes. Wired to the preferences store,
   which stores the choice and has the theme path apply it.
 
   Each palette's preview is an element carrying that palette's attribute,
   so it shows the palette's own tokens and no colour of its own; "Match
   system" shows day and night side by side.
+
+  Drawn to the surface rules: the menu on the second surface with its
+  edge, sentence-case group names, space rather than a line between the
+  groups, a wash under the pointer, the chosen item marked by its check.
 
   Accessibility: a button (aria-haspopup, aria-expanded) opens a
   role="menu" with role="menuitemradio" options (single selection per
@@ -146,7 +150,7 @@
 		on:click={toggle}
 		on:keydown={onTriggerKeydown}
 	>
-		<Icon name="palette" size="sm" />
+		<Icon name="sliders" size="sm" />
 	</button>
 
 	{#if open}
@@ -223,14 +227,14 @@
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		color: var(--oo-fg-tertiary);
+		color: var(--oo-fg-secondary);
 		transition:
 			background-color var(--oo-motion-fast) var(--oo-ease-default),
 			color var(--oo-motion-fast) var(--oo-ease-default);
 	}
 	.oo-ts-trigger:hover {
-		background-color: var(--oo-bg-elevated);
-		color: var(--oo-fg-secondary);
+		background-color: var(--oo-bg-hover);
+		color: var(--oo-fg-primary);
 	}
 
 	.oo-ts-menu {
@@ -241,9 +245,9 @@
 		min-width: 200px;
 		padding: var(--oo-space-1);
 		border-radius: var(--oo-radius-lg);
-		background-color: var(--oo-bg-elevated);
-		border: 1px solid var(--oo-bd-subtle);
-		box-shadow: var(--oo-shadow-lg);
+		background-color: var(--oo-bg-overlay);
+		border: 1px solid var(--oo-edge);
+		box-shadow: var(--oo-shadow-md);
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
@@ -271,10 +275,9 @@
 	.oo-ts-group-label {
 		margin: 0;
 		padding: var(--oo-space-1) var(--oo-space-2);
-		font-size: var(--oo-text-2xs);
-		text-transform: uppercase;
-		letter-spacing: var(--oo-tracking-wide);
-		color: var(--oo-fg-tertiary);
+		font-size: var(--oo-text-xs);
+		font-weight: 600;
+		color: var(--oo-fg-muted);
 	}
 
 	.oo-ts-item {
@@ -295,7 +298,7 @@
 			color var(--oo-motion-fast) var(--oo-ease-default);
 	}
 	.oo-ts-item:hover {
-		background-color: var(--oo-bg-surface);
+		background-color: var(--oo-bg-hover);
 		color: var(--oo-fg-primary);
 	}
 	.oo-ts-item[aria-checked='true'] {
@@ -374,9 +377,9 @@
 		color: var(--oo-acc-ink);
 	}
 
+	/* Space, not a line, sets the two groups apart. */
 	.oo-ts-sep {
-		height: 1px;
-		margin: var(--oo-space-1) 0;
-		background-color: var(--oo-bd-subtle);
+		height: 0;
+		margin: var(--oo-space-2) 0 0;
 	}
 </style>

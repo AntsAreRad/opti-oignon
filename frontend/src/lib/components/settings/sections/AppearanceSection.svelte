@@ -1,6 +1,6 @@
 <!--
   AppearanceSection.svelte
-  The Appearance section of the consolidated /settings hub (spec 5.5, 9.2).
+  The appearance groups of Preferences, and the keyboard's.
 
   Appearance is the one new section: it did not exist among the 12 legacy
   tabs. It owns the visual preferences in the `preferences` store -- the
@@ -21,6 +21,11 @@
 	import Modal from '$lib/ds/Modal.svelte';
 	import Button from '$lib/ds/Button.svelte';
 	import ShortcutSettings from '$lib/components/settings/ShortcutSettings.svelte';
+
+	/** The groups to render, by id; every group when not given. The settings
+	    hub renders each group on the page that holds it. */
+	export let groups: string[] | undefined = undefined;
+	$: shows = (id: string) => !groups || groups.includes(id);
 	import {
 		palette,
 		CHOICES,
@@ -109,121 +114,131 @@
 </script>
 
 <div class="oo-appearance">
-	<SettingsGroup
-		id="appearance-theme"
-		title="Theme"
-		description="The palette applies instantly across the whole interface. Match system follows your system's light or dark setting, and its contrast setting."
-		onReset={resetTheme}
-	>
-		<div class="oo-swatch-grid" role="radiogroup" aria-label="Theme palette">
-			{#each CHOICES as p (p)}
-				<button
-					type="button"
-					class="oo-swatch"
-					class:oo-swatch-active={$palette === p}
-					role="radio"
-					aria-checked={$palette === p}
-					on:click={() => choosePalette(p)}
-				>
-					<span class="oo-swatch-preview" aria-hidden="true">
-						{#if p === 'system'}
-							<span class="oo-swatch-half" data-oo-theme="day"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
-							<span class="oo-swatch-half" data-oo-theme="night"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
-						{:else}
-							<span class="oo-swatch-half" data-oo-theme={p}><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
-						{/if}
-					</span>
-					<span class="oo-swatch-meta">
-						<span class="oo-swatch-name">{CHOICE_LABELS[p]}</span>
-						<span class="oo-swatch-mode">{PALETTE_HINT[p]}</span>
-					</span>
-				</button>
-			{/each}
-		</div>
-	</SettingsGroup>
+	{#if shows('appearance-theme')}
+		<SettingsGroup
+			id="appearance-theme"
+			title="Theme"
+			description="The palette applies instantly across the whole interface. Match system follows your system's light or dark setting, and its contrast setting."
+			onReset={resetTheme}
+		>
+			<div class="oo-swatch-grid" role="radiogroup" aria-label="Theme palette">
+				{#each CHOICES as p (p)}
+					<button
+						type="button"
+						class="oo-swatch"
+						class:oo-swatch-active={$palette === p}
+						role="radio"
+						aria-checked={$palette === p}
+						on:click={() => choosePalette(p)}
+					>
+						<span class="oo-swatch-preview" aria-hidden="true">
+							{#if p === 'system'}
+								<span class="oo-swatch-half" data-oo-theme="day"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+								<span class="oo-swatch-half" data-oo-theme="night"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+							{:else}
+								<span class="oo-swatch-half" data-oo-theme={p}><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+							{/if}
+						</span>
+						<span class="oo-swatch-meta">
+							<span class="oo-swatch-name">{CHOICE_LABELS[p]}</span>
+							<span class="oo-swatch-mode">{PALETTE_HINT[p]}</span>
+						</span>
+					</button>
+				{/each}
+			</div>
+		</SettingsGroup>
+	{/if}
 
-	<SettingsGroup
-		id="appearance-density"
-		title="Density"
-		description="Controls spacing and control sizes throughout the app."
-		onReset={resetDensity}
-	>
-		<div class="oo-opt-row oo-opt-row-3" role="radiogroup" aria-label="Interface density">
-			{#each DENSITIES as d (d)}
-				<button
-					type="button"
-					class="oo-opt"
-					class:oo-opt-active={$density === d}
-					role="radio"
-					aria-checked={$density === d}
-					on:click={() => chooseDensity(d)}
-				>
-					<span class="oo-opt-name">{DENSITY_LABELS[d]}</span>
-					<span class="oo-opt-hint">{DENSITY_HINT[d]}</span>
-				</button>
-			{/each}
-		</div>
-	</SettingsGroup>
+	{#if shows('appearance-density')}
+		<SettingsGroup
+			id="appearance-density"
+			title="Density"
+			description="Controls spacing and control sizes throughout the app."
+			onReset={resetDensity}
+		>
+			<div class="oo-opt-row oo-opt-row-3" role="radiogroup" aria-label="Interface density">
+				{#each DENSITIES as d (d)}
+					<button
+						type="button"
+						class="oo-opt"
+						class:oo-opt-active={$density === d}
+						role="radio"
+						aria-checked={$density === d}
+						on:click={() => chooseDensity(d)}
+					>
+						<span class="oo-opt-name">{DENSITY_LABELS[d]}</span>
+						<span class="oo-opt-hint">{DENSITY_HINT[d]}</span>
+					</button>
+				{/each}
+			</div>
+		</SettingsGroup>
+	{/if}
 
-	<SettingsGroup
-		id="appearance-typography"
-		title="Text size"
-		description="Scales every text size across the app. Composes with density."
-		onReset={resetTypeScale}
-	>
-		<div class="oo-opt-row oo-opt-row-4" role="radiogroup" aria-label="Text size">
-			{#each TYPE_SCALES as t (t)}
-				<button
-					type="button"
-					class="oo-opt oo-opt-center"
-					class:oo-opt-active={$typeScale === t}
-					role="radio"
-					aria-checked={$typeScale === t}
-					on:click={() => chooseTypeScale(t)}
-				>
-					<span class="oo-opt-name">{TYPE_SCALE_LABELS[t]}</span>
-				</button>
-			{/each}
-		</div>
-		<p class="oo-type-preview">
-			The quick brown fox jumps over the lazy dog.
-		</p>
-	</SettingsGroup>
+	{#if shows('appearance-typography')}
+		<SettingsGroup
+			id="appearance-typography"
+			title="Text size"
+			description="Scales every text size across the app. Composes with density."
+			onReset={resetTypeScale}
+		>
+			<div class="oo-opt-row oo-opt-row-4" role="radiogroup" aria-label="Text size">
+				{#each TYPE_SCALES as t (t)}
+					<button
+						type="button"
+						class="oo-opt oo-opt-center"
+						class:oo-opt-active={$typeScale === t}
+						role="radio"
+						aria-checked={$typeScale === t}
+						on:click={() => chooseTypeScale(t)}
+					>
+						<span class="oo-opt-name">{TYPE_SCALE_LABELS[t]}</span>
+					</button>
+				{/each}
+			</div>
+			<p class="oo-type-preview">
+				The quick brown fox jumps over the lazy dog.
+			</p>
+		</SettingsGroup>
+	{/if}
 
-	<SettingsGroup
-		id="appearance-motion"
-		title="Motion"
-		description="How much the interface animates."
-		onReset={resetMotion}
-	>
-		<div class="oo-opt-row oo-opt-row-3" role="radiogroup" aria-label="Motion preference">
-			{#each MOTION_PREFS as m (m)}
-				<button
-					type="button"
-					class="oo-opt"
-					class:oo-opt-active={$motionPref === m}
-					role="radio"
-					aria-checked={$motionPref === m}
-					on:click={() => chooseMotion(m)}
-				>
-					<span class="oo-opt-name">{MOTION_LABELS[m]}</span>
-					<span class="oo-opt-hint">{MOTION_HINT[m]}</span>
-				</button>
-			{/each}
-		</div>
-	</SettingsGroup>
+	{#if shows('appearance-motion')}
+		<SettingsGroup
+			id="appearance-motion"
+			title="Motion"
+			description="How much the interface animates."
+			onReset={resetMotion}
+		>
+			<div class="oo-opt-row oo-opt-row-3" role="radiogroup" aria-label="Motion preference">
+				{#each MOTION_PREFS as m (m)}
+					<button
+						type="button"
+						class="oo-opt"
+						class:oo-opt-active={$motionPref === m}
+						role="radio"
+						aria-checked={$motionPref === m}
+						on:click={() => chooseMotion(m)}
+					>
+						<span class="oo-opt-name">{MOTION_LABELS[m]}</span>
+						<span class="oo-opt-hint">{MOTION_HINT[m]}</span>
+					</button>
+				{/each}
+			</div>
+		</SettingsGroup>
+	{/if}
 
-	<SettingsGroup
-		id="appearance-advanced"
-		title="Advanced"
-		description="Keyboard shortcuts."
-	>
-		<div class="oo-adv-actions">
-			<Button variant="secondary" iconLeft="keyboard" on:click={() => (showShortcuts = true)}>
-				Keyboard shortcuts
-			</Button>
-		</div>
-	</SettingsGroup>
+	{#if shows('appearance-advanced')}
+		<SettingsGroup
+			id="appearance-advanced"
+			title="Keyboard shortcuts"
+			description="See and change the keyboard shortcuts."
+		>
+			<div class="oo-adv-actions">
+				<Button variant="secondary" iconLeft="keyboard" on:click={() => (showShortcuts = true)}>
+					Show the shortcuts
+				</Button>
+			</div>
+		</SettingsGroup>
+	{/if}
 </div>
 
 <Modal

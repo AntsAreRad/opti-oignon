@@ -36,7 +36,7 @@ Supports USB keys (YubiKey, SoloKeys), platform authenticators
 
 Setup:
 
-1. Go to **Settings > Security > 2FA**
+1. Go to **Preferences > Account > Two-factor (WebAuthn)**
 2. Click **Register Security Key**
 3. Follow the browser prompt to touch your key
 4. Name the key for identification
@@ -50,7 +50,7 @@ Authenticator, Authy, KeePassXC, etc.).
 
 Setup:
 
-1. Go to **Settings > Security > 2FA**
+1. Go to **Preferences > Account > Two-factor (TOTP)**
 2. Click **Enable TOTP**
 3. Scan the QR code with your authenticator app
 4. Enter the verification code to confirm
@@ -76,7 +76,7 @@ this re-keying were hashed under the previous scheme. They are not rejected:
   not stored). After any successful 2FA, the 2FA status reports
   `recovery_reissue_required: true` until you regenerate your recovery codes; the
   regenerated set is keyed under the new scheme. Regenerate them from
-  **Settings > Security > 2FA** to re-key.
+  **Preferences > Account > Recovery codes** to re-key.
 
 
 ## Session management
@@ -93,7 +93,9 @@ properties:
 - **Session fingerprinting** -- sessions are bound to the client's
   user agent and IP range to detect hijacking
 
-Active sessions can be viewed and revoked from Settings > Security.
+The web interface does not list active sessions: a session ends when its
+token expires, or when you sign out from the account menu in
+**Preferences > Account**.
 
 
 ## RBAC (Role-Based Access Control)

@@ -308,7 +308,7 @@
 			<button on:click={handleSkip}
 				class="text-sm px-3 py-1.5 rounded-lg transition-colors"
 				style="color: var(--oo-fg-muted); margin-right: auto;"
-				title="Skip and configure manually later in Settings">
+				title="Skip and configure manually later, in Preferences and the Workshop">
 				Skip
 			</button>
 			<button on:click={handleApply}

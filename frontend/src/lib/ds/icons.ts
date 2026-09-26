@@ -152,6 +152,11 @@ export const ICONS: Readonly<Record<string, readonly IconShape[]>> = Object.free
 	paperclip: [
 		'M19.5 11.5l-7.1 7.1a4.6 4.6 0 0 1-6.5-6.5l7.4-7.4a3.1 3.1 0 0 1 4.4 4.4l-7.2 7.2a1.6 1.6 0 0 1-2.3-2.3l6.6-6.6',
 	],
+	// The Workshop's pages that had no drawing: the benchmarks, the
+	// observability of the pipeline, the security page.
+	'bar-chart-3': ['M4.5 20h15', 'M7.5 16.5v-4', 'M12 16.5v-9', 'M16.5 16.5v-6'],
+	activity: ['M3 12h4l2.5-6 5 12 2.5-6H21'],
+	'shield-check': ['M12 3.5 19 6v5.5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6Z', 'm9 12 2.2 2.2L15.5 10'],
 });
 
 /** A name as the set spells it: kebab-case, from PascalCase, camelCase or snake_case. */

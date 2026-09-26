@@ -1,196 +1,221 @@
 <!--
   AppShell.svelte
-  Main layout: collapsible sidebar + content area + right panel.
-  Mobile: sidebar as overlay with swipe-to-close, panel as overlay.
-  Desktop: sidebar fixed, panel on the right.
-  Enhanced mobile responsive -- swipe gesture, touch targets, dvh, safe-area.
-  Slots: header, subheader, panel-toggle, default (main area), panel (right panel).
+  The one frame of both spaces, mounted once, by the layout every page of
+  Use and Workshop sits under; the page comes through the default slot, the
+  only one it has. The sidebar sits on the page's ground and the page on a
+  sheet beside it.
+
+  On a desktop the sidebar is never unmounted: expanded, or collapsed to
+  its 72 px rail, which keeps Stop all. On a phone (under 768 px) a header
+  outside the drawer holds the drawer's opener and Stop all, so the stop is
+  one tap away while the drawer is shut; the sidebar opens as the drawer,
+  a modal dialog with its own close control and its own Stop all: while it
+  is open the header and the page behind it are inert, focus moves into it,
+  and it goes back to the opener when the drawer shuts.
+
+  At every width the shell keeps clear of the safe areas (a notch, rounded
+  corners, the home indicator): the sidebar and the sheet read the insets
+  of their edges, and on a phone the header and the drawer do.
+
+  The shell also remembers the last route of each space, for the space
+  switch.
 -->
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { sidebarOpen, toggleSidebar } from '$lib/stores/ui';
-	import { panelWidth, isPanelOpen, closePanel, setPanelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH } from '$lib/stores/panels';
-	import SidePanel from '$lib/ds/SidePanel.svelte';
+	import { onMount, tick } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
+	import { page } from '$app/stores';
+	import IconButton from '$lib/ds/IconButton.svelte';
 	import Sidebar from './Sidebar.svelte';
-	import Header from './Header.svelte';
-	import StatusFooter from './StatusFooter.svelte';
+	import PhoneHeader from './PhoneHeader.svelte';
+	import { DESTINATIONS, visibleDestinations } from '$lib/nav/destinations';
+	import { destinationFor } from '$lib/nav/active';
+	import { rememberRoute } from '$lib/nav/space';
+	import { lastRoutes } from '$lib/stores/lastRoutes';
+	import { isPhone, sidebarOpen, toggleSidebar } from '$lib/stores/ui';
 
-	export let onSelect: (id: string) => void = () => {};
-	export let onCreate: () => void = () => {};
-	export let onExport: (id: string, title: string) => void = () => {};
+	const DRAWER = 'oo-drawer';
+	const PHONE_QUERY = '(max-width: 767.98px)';
 
-	let isMobile = false;
+	$: pathname = $page.url?.pathname ?? '/';
+	$: route = pathname + ($page.url?.search ?? '');
+	$: lastRoutes.update((last) => rememberRoute(last, route));
+	$: title = destinationFor(pathname, visibleDestinations(DESTINATIONS, { componion: true }))?.label ?? 'Opti-Oignon';
 
-	// Swipe-to-close state for sidebar
-	let sidebarEl: HTMLDivElement;
-	let swipeTouchStartX = 0;
-	let swipeTouchCurrentX = 0;
-	let isSwiping = false;
-	const SWIPE_THRESHOLD = 60;
+	let drawerPanel: HTMLElement | undefined;
+	let wasOpen = false;
 
-	function checkMobile() {
-		const wasMobile = isMobile;
-		isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-		// Close sidebar when switching to mobile if open
-		if (!wasMobile && isMobile && $sidebarOpen) {
-			sidebarOpen.set(false);
-		}
+	function closeDrawer() {
+		sidebarOpen.set(false);
 	}
 
-	// Swipe-to-close touch handlers for sidebar overlay
-	function handleSidebarTouchStart(event: TouchEvent) {
-		if (!isMobile || !$sidebarOpen) return;
-		const touch = event.touches[0];
-		swipeTouchStartX = touch.clientX;
-		swipeTouchCurrentX = touch.clientX;
-		isSwiping = true;
+	/** Focus goes to the drawer's first control when it opens. */
+	async function focusIntoDrawer() {
+		await tick();
+		drawerPanel?.querySelector<HTMLElement>('button, [href], input')?.focus();
 	}
 
-	function handleSidebarTouchMove(event: TouchEvent) {
-		if (!isSwiping) return;
-		const touch = event.touches[0];
-		swipeTouchCurrentX = touch.clientX;
-		// Only track leftward swipes (to dismiss sidebar)
-		const delta = swipeTouchStartX - swipeTouchCurrentX;
-		if (delta > 0 && sidebarEl) {
-			// Apply real-time transform for visual feedback
-			const offset = Math.min(delta, 280);
-			sidebarEl.style.transform = `translateX(-${offset}px)`;
-		}
+	/** And back to the opener that controls it when it shuts. */
+	async function focusBackToOpener() {
+		await tick();
+		document.querySelector<HTMLElement>(`[aria-controls="${DRAWER}"]`)?.focus();
 	}
 
-	function handleSidebarTouchEnd() {
-		if (!isSwiping) return;
-		isSwiping = false;
-		const delta = swipeTouchStartX - swipeTouchCurrentX;
-		if (sidebarEl) {
-			sidebarEl.style.transform = '';
-		}
-		// If swiped left beyond threshold, close sidebar
-		if (delta > SWIPE_THRESHOLD) {
-			sidebarOpen.set(false);
-		}
+	$: drawerOpen = $isPhone && $sidebarOpen;
+	$: if (typeof document !== 'undefined' && drawerOpen !== wasOpen) {
+		wasOpen = drawerOpen;
+		if (drawerOpen) void focusIntoDrawer();
+		else if ($isPhone) void focusBackToOpener();
 	}
 
-	onMount(() => {
-		checkMobile();
-		// Start with sidebar closed on mobile
-		if (isMobile) {
-			sidebarOpen.set(false);
-		}
-		if (typeof window !== 'undefined') {
-			window.addEventListener('resize', checkMobile);
-		}
+	function closeOnEscape(event: KeyboardEvent) {
+		if ($isPhone && $sidebarOpen && event.key === 'Escape') closeDrawer();
+	}
+
+	afterNavigate(() => {
+		if ($isPhone) closeDrawer();
 	});
 
-	onDestroy(() => {
-		if (typeof window !== 'undefined') {
-			window.removeEventListener('resize', checkMobile);
-		}
+	onMount(() => {
+		const query = window.matchMedia(PHONE_QUERY);
+		const follow = (phone: boolean) => {
+			isPhone.set(phone);
+			// A phone starts with its drawer shut; a desktop with its sidebar expanded.
+			sidebarOpen.set(!phone);
+		};
+		follow(query.matches);
+		const onChange = (event: MediaQueryListEvent) => follow(event.matches);
+		query.addEventListener('change', onChange);
+		return () => query.removeEventListener('change', onChange);
 	});
 </script>
 
-<div class="h-viewport flex overflow-hidden" style="background-color: var(--oo-bg-base);">
-	<!-- Route change announcements for screen readers -->
-	<div class="sr-only" aria-live="polite" aria-atomic="true" id="oo-route-announcer"></div>
+<svelte:window on:keydown={closeOnEscape} />
 
-	<!-- Overlay backdrop (sidebar, mobile only) with fade transition -->
-	{#if $sidebarOpen && isMobile}
-		<button
-			class="fixed inset-0 z-20 md:hidden sidebar-mobile-backdrop"
-			style="background-color: rgba(0, 0, 0, 0.5);"
-			on:click={toggleSidebar}
-			aria-label="Close sidebar"
-		/>
-	{/if}
-
-	<!-- Overlay mobile (panel) -->
-	{#if $isPanelOpen && isMobile}
-		<button
-			class="fixed inset-0 bg-[var(--oo-scrim)] z-40 md:hidden"
-			on:click={closePanel}
-			aria-label="Close panel"
-		/>
-	{/if}
-
-	<!-- Sidebar with swipe-to-close on mobile -->
-	<nav
-		aria-label="Sidebar navigation"
-		bind:this={sidebarEl}
-		class="shrink-0 h-full z-30 sidebar-transition sidebar-mobile-enter
-			fixed md:relative
-			{$sidebarOpen ? 'w-[280px] translate-x-0' : 'w-0 -translate-x-full md:w-0'}"
-		on:touchstart={handleSidebarTouchStart}
-		on:touchmove={handleSidebarTouchMove}
-		on:touchend={handleSidebarTouchEnd}
-	>
-		{#if $sidebarOpen}
-			<div class="w-[280px] h-full animate-sidebar-slide safe-area-pad safe-area-pad-top">
-				<Sidebar {onSelect} {onCreate} {onExport} />
-			</div>
-		{/if}
-	</nav>
-
-	<!-- Main content + panel wrapper -->
-	<div class="flex-1 flex flex-col min-w-0 h-full">
-		<!-- Top bar with safe-area padding -->
-		<header class="flex items-center gap-3 px-3 sm:px-4 h-12 shrink-0 safe-area-pad"
-			style="border-bottom: 1px solid var(--oo-bd-subtle); background-color: var(--oo-header-bg);"
-		>
-			<!-- Touch-friendly hamburger button (44px target on mobile) -->
-			<button
-				on:click={toggleSidebar}
-				class="p-1.5 rounded-md shrink-0
-					{isMobile ? 'touch-target' : ''}"
-				style="color: var(--oo-fg-tertiary);"
-				title="Toggle sidebar"
-				aria-label="Toggle sidebar"
-				aria-expanded={$sidebarOpen}
-			>
-				<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-					{#if $sidebarOpen && !isMobile}
-						<path d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-					{:else}
-						<path d="M4 6h16M4 12h16M4 18h16" />
-					{/if}
-				</svg>
-			</button>
-			<slot name="header" />
-
-			<!-- Consolidated header status cluster -->
-			<div class="ml-auto shrink-0 flex items-center gap-2">
-				<Header />
-				<slot name="panel-toggle" />
-			</div>
-		</header>
-
-		<!-- Sub-header (presets, options, etc.) -->
-		<slot name="subheader" />
-
-		<!-- Content + panel split -->
-		<div class="flex-1 min-h-0 flex overflow-hidden">
-			<!-- Main content area -->
-			<main id="main-content" class="flex-1 min-w-0 overflow-hidden relative">
-				<slot />
-			</main>
-
-			<!-- Right panel: beside the page on a desktop, over its edge on a phone -->
-			{#if $isPanelOpen}
-				<SidePanel
-					label="Side panel"
-					class="panel-transition animate-panel-slide"
-					width={$panelWidth}
-					min={PANEL_MIN_WIDTH}
-					max={PANEL_MAX_WIDTH}
-					overlay={isMobile}
-					on:resize={(event) => setPanelWidth(event.detail)}
-				>
-					<slot name="panel" />
-				</SidePanel>
+<div class="oo-shell" data-phone={$isPhone ? 'true' : 'false'}>
+	{#if $isPhone}
+		<div class="oo-phone-top" inert={drawerOpen || undefined}>
+			<PhoneHeader {title} open={$sidebarOpen} drawer={DRAWER} onToggle={toggleSidebar} />
+		</div>
+		<div id={DRAWER} class="oo-drawer" hidden={!$sidebarOpen}>
+			{#if $sidebarOpen}
+				<button type="button" class="oo-drawer-scrim" tabindex="-1" aria-label="Close navigation" on:click={closeDrawer}></button>
+				<div class="oo-drawer-panel" role="dialog" aria-modal="true" aria-label="Navigation" bind:this={drawerPanel}>
+					<div class="oo-drawer-close">
+						<IconButton icon="x" size="lg" label="Close navigation" on:click={closeDrawer} />
+					</div>
+					<Sidebar phone />
+				</div>
 			{/if}
 		</div>
+	{:else}
+		<div class="oo-shell-side">
+			<Sidebar collapsed={!$sidebarOpen} />
+		</div>
+	{/if}
 
-		<!-- Optional thin status footer (spec 8.5) -->
-		<StatusFooter />
+	<div class="oo-sheet" inert={drawerOpen || undefined}>
+		<main id="main-content" class="oo-main">
+			<slot />
+		</main>
 	</div>
 </div>
+
+<style>
+	.oo-shell {
+		display: flex;
+		height: 100vh;
+		height: 100dvh;
+		overflow: hidden;
+		background-color: var(--oo-bg-base);
+	}
+	.oo-shell[data-phone='true'] {
+		flex-direction: column;
+	}
+
+	/* The sidebar keeps clear of the top, bottom and left insets: a phone on
+	   its side is 768 px wide and more, and draws this branch. */
+	.oo-shell-side {
+		display: flex;
+		flex-shrink: 0;
+		box-sizing: border-box;
+		height: 100%;
+		padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+	}
+
+	/* The page: a sheet on the surface beside the sidebar, clear of the
+	   top, right and bottom insets. */
+	.oo-sheet {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		margin: calc(var(--oo-space-3) + env(safe-area-inset-top, 0px)) calc(var(--oo-space-3) + env(safe-area-inset-right, 0px))
+			calc(var(--oo-space-3) + env(safe-area-inset-bottom, 0px)) 0;
+		overflow: hidden;
+		border: 1px solid var(--oo-edge);
+		border-radius: var(--oo-radius-4xl);
+		background-color: var(--oo-bg-surface);
+		box-shadow: var(--oo-shadow-sm);
+	}
+	.oo-shell[data-phone='true'] .oo-sheet {
+		margin: 0;
+		border-radius: var(--oo-radius-2xl) var(--oo-radius-2xl) 0 0;
+		box-shadow: none;
+		padding-bottom: env(safe-area-inset-bottom, 0px);
+	}
+
+	.oo-main {
+		position: relative;
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	/* The phone's drawer: the sidebar over the page, a veil behind it. */
+	.oo-drawer {
+		position: fixed;
+		inset: 0;
+		z-index: var(--oo-z-modal);
+	}
+	.oo-drawer[hidden] {
+		display: none;
+	}
+	.oo-drawer-scrim {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		padding: 0;
+		border: 0;
+		background-color: var(--oo-scrim);
+		cursor: pointer;
+	}
+	.oo-drawer-panel {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		display: flex;
+		flex-direction: column;
+		padding-top: env(safe-area-inset-top, 0px);
+		padding-left: env(safe-area-inset-left, 0px);
+		background-color: var(--oo-bg-base);
+		box-shadow: var(--oo-shadow-lg);
+	}
+	.oo-drawer-close {
+		display: flex;
+		flex-shrink: 0;
+		justify-content: flex-end;
+		padding: var(--oo-space-2) var(--oo-space-2) 0;
+	}
+	.oo-drawer-panel > :global(.oo-sidebar) {
+		flex: 1;
+		min-height: 0;
+	}
+	.oo-phone-top {
+		display: contents;
+	}
+</style>

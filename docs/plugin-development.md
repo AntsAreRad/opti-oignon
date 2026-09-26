@@ -4,7 +4,7 @@
 
 The fastest way to scaffold a new plugin:
 
-1. Open **Settings > Plugins > Marketplace**
+1. Open **Workshop > Extensions > Marketplace**
 2. Click **New Plugin**
 3. Fill in name, author, description, and select hooks
 4. Click **Generate**

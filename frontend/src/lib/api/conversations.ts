@@ -10,13 +10,20 @@ import type {
 	MessageItem
 } from '$lib/types';
 
+/**
+ * The conversations, newest first. With `q`, the server searches titles and
+ * messages and returns at most `limit` matches (it takes no offset then);
+ * without, it lists them a page at a time from `offset`.
+ */
 export async function listConversations(params?: {
 	q?: string;
 	limit?: number;
+	offset?: number;
 }): Promise<ConversationSummary[]> {
 	const queryParams: Record<string, string> = {};
 	if (params?.q) queryParams.q = params.q;
 	if (params?.limit) queryParams.limit = String(params.limit);
+	if (params?.offset !== undefined && !params?.q) queryParams.offset = String(params.offset);
 	return apiGet<ConversationSummary[]>('/api/conversations', queryParams);
 }
 

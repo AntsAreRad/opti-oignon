@@ -1,14 +1,24 @@
 <!--
   ToolCallApprovalDrawer.svelte
   Standalone, self-contained approvals surface extracted from the inline
-  ToolCallApproval card. Polls for pending tool-call approvals and presents
-  them in a ds Modal drawer-right with per-request Allow / Deny actions and a
-  risk badge. A small anchored pill appears only while approvals are pending.
-  Pure --oo-* tokens; English only. The original inline card is unchanged.
+  ToolCallApproval card. Mounted once, by the shell's layout, on every page.
+  Polls for pending tool-call approvals and presents them in a ds Modal
+  drawer-right with per-request Allow / Deny actions and a risk badge. The
+  count goes to the approvals store, whose pill (in the status card and the
+  phone header) appears only while approvals are pending and opens this
+  drawer. Pure --oo-* tokens; English only. The original inline card is
+  unchanged.
+
+  The drawer is a modal dialog, which makes the rest of the page inert, the
+  shell's Stop all included; so its foot holds Stop all of its own, one tap
+  away while a risky call is being read.
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { Modal, Button } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
+	import { pendingApprovals, approvalsOpen, closeApprovals } from '$lib/stores/approvals';
 	import {
 		getPendingApprovals,
 		approveToolCall,
@@ -17,7 +27,6 @@
 	} from '$lib/api/toolCallApproval';
 
 	let pending: PendingApproval[] = [];
-	let open = false;
 	let actioningId = '';
 	let error = '';
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -77,21 +86,11 @@
 		return 'var(--oo-success)';
 	}
 
-	function closeDrawer() {
-		open = false;
-	}
-
 	$: count = pending.length;
+	$: pendingApprovals.set(count);
 </script>
 
-{#if count > 0}
-	<button class="oo-approval-pill" on:click={() => (open = true)}>
-		<span class="oo-approval-dot"></span>
-		{count} pending approval{count !== 1 ? 's' : ''}
-	</button>
-{/if}
-
-<Modal {open} variant="drawer-right" size="md" title="Tool call approvals" onClose={closeDrawer}>
+<Modal open={$approvalsOpen} variant="drawer-right" size="md" title="Tool call approvals" onClose={closeApprovals}>
 	{#if count === 0}
 		<p class="text-sm" style="color: var(--oo-fg-muted);">No pending approvals.</p>
 	{:else}
@@ -134,36 +133,7 @@
 			Requests auto-deny on timeout (fail-secure).
 		</p>
 	{/if}
+	<svelte:fragment slot="footer">
+		<StopAllButton placement="dialog" large={$isPhone} />
+	</svelte:fragment>
 </Modal>
-
-<style>
-	.oo-approval-pill {
-		position: fixed;
-		right: 1.25rem;
-		bottom: 5rem;
-		z-index: 40;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.5rem 0.875rem;
-		border-radius: var(--oo-radius-full);
-		font-size: var(--oo-text-xs);
-		font-weight: 500;
-		color: var(--oo-fg-on-semantic);
-		background-color: var(--oo-warning);
-		border: none;
-		cursor: pointer;
-		box-shadow: var(--oo-shadow-md);
-	}
-	.oo-approval-dot {
-		width: 0.5rem;
-		height: 0.5rem;
-		border-radius: var(--oo-radius-full);
-		background-color: var(--oo-fg-on-semantic);
-		animation: oo-approval-pulse 1.4s ease-in-out infinite;
-	}
-	@keyframes oo-approval-pulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.4; }
-	}
-</style>

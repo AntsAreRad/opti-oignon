@@ -14,7 +14,7 @@ and filesystem access.
 
 The fastest way to create a new plugin is with the template generator:
 
-1. Open **Settings > Plugins > Marketplace**
+1. Open **Workshop > Extensions > Marketplace**
 2. Click **New Plugin**
 3. Fill in name, author, description, and select hooks
 4. Click **Generate**
@@ -276,7 +276,8 @@ config_schema:
     description: "Enable verbose logging"
 ```
 
-Users can edit plugin configuration in **Settings > Plugins > [plugin] > Config**.
+Users can edit plugin configuration in **Workshop > Extensions > Installed plugins**,
+in the plugin's details.
 At runtime, access configuration via the `PLUGIN_CONFIG` variable or read
 it from the host API.
 
@@ -367,13 +368,13 @@ To share your plugin with other Opti-Oignon users:
 
 ### From the Marketplace UI
 
-1. Go to **Settings > Plugins > Marketplace**
+1. Go to **Workshop > Extensions > Marketplace**
 2. Browse or search for plugins
 3. Click **Install** on the plugin card
 
 ### From a URL
 
-1. Go to **Settings > Plugins > Marketplace**
+1. Go to **Workshop > Extensions > Marketplace**
 2. Click **Install from URL**
 3. Paste the GitHub repository URL or direct archive link
 4. Optionally provide a SHA-256 hash for verification
@@ -381,7 +382,7 @@ To share your plugin with other Opti-Oignon users:
 
 ### From a Local Directory
 
-1. Go to **Settings > Plugins > Installed**
+1. Go to **Workshop > Extensions > Installed plugins**
 2. Click **Install Plugin**
 3. Enter the path to the plugin directory
 4. Click **Install**
@@ -391,7 +392,7 @@ To share your plugin with other Opti-Oignon users:
 Before publishing, test your plugin locally:
 
 1. Create your plugin directory with manifest and entry point
-2. Install it via Settings > Plugins > Install Plugin
+2. Install it with **Install Plugin**, in Workshop > Extensions > Installed plugins
 3. Enable it and verify hooks work as expected
 4. Check the application logs for any sandbox violations or errors
 5. Test edge cases (empty responses, missing data keys, etc.)

@@ -9,7 +9,7 @@ This scenario demonstrates a simple chat interaction with smart model routing.
 
 ### Steps
 
-1. **Open the app** — Navigate to `http://localhost:5173`. The chat interface loads with a model selector in the top bar and a conversation list in the sidebar.
+1. **Open the app** — Navigate to `http://localhost:5173`. The app opens on the chats index; the sidebar lists the six most recent chats, and an open conversation's bar holds the model selector.
 
 2. **Check available models** — Click the model selector dropdown. It shows all Ollama models currently pulled on your system, with capability badges (code, creative, analysis, etc.) from the model profiles.
 
@@ -24,14 +24,14 @@ This scenario demonstrates a simple chat interaction with smart model routing.
 
 6. **Try thinking mode** — In the Chat Controls bar, toggle "Think" on. Send "Compare the trade-offs between recursion and iteration for tree traversals." The response now includes a collapsible thinking section showing the model's internal reasoning before the final answer.
 
-7. **View conversation** — The conversation is saved automatically. It appears in the sidebar. Click the conversation title to rename it.
+7. **View conversation** — The conversation is saved automatically. It appears under Recent in the sidebar and in the chats index, where each row's menu renames it.
 
 ### What to verify
 
 - Model selector shows installed models with profile info
 - Pipeline auto-selection works (code queries → `code_verify`, complex queries → `think`)
 - Streaming works smoothly with token count display
-- Conversation persists in the sidebar
+- Conversation persists in the chats index
 
 
 ## Scenario 2: Running a Benchmark and Viewing Results
@@ -40,7 +40,7 @@ This scenario walks through benchmarking your models and comparing their perform
 
 ### Steps
 
-1. **Navigate to Benchmark** — Click "Benchmark" in the sidebar (bar-chart icon). The Benchmark page loads with three tabs: Run, History, and Model Assignment.
+1. **Navigate to Benchmark** — Switch to the Workshop (the switch at the foot of the sidebar) and choose "Benchmarks" (bar-chart icon). The page loads with its tabs, Run and History among them; each run in History opens its detail.
 
 2. **Configure a run** — On the Run tab:
    - Select one or more models using the model chips (e.g., `qwen3-coder:30b` and `qwen3:32b`)
@@ -134,7 +134,7 @@ This scenario demonstrates using benchmarks to make an informed model selection 
 
 2. **Record the run** — Note the run ID. The run is automatically saved to history.
 
-3. **Change model parameters** — Go to Settings and adjust the temperature for one model (e.g., lower temperature for code tasks). Alternatively, pull a new model variant: `ollama pull qwen3-coder:30b-q4_0`.
+3. **Change model parameters** — Open **Workshop > Models and inference** and adjust the temperature of one model's profile (e.g., lower temperature for code tasks). Alternatively, pull a new model variant: `ollama pull qwen3-coder:30b-q4_0`.
 
 4. **Run second benchmark** — Run the same suites again with the updated configuration.
 
@@ -166,7 +166,7 @@ This scenario demonstrates creating and running custom pipelines.
 
 ### Steps
 
-1. **Navigate to Pipeline Editor** — Go to Settings, then the Pipelines tab. The editor shows builtin pipelines (Code Expert, Creative Writer, Research Assistant, Thorough Analyst) as read-only cards.
+1. **Navigate to Pipeline Editor** — Open a conversation, then the Pipelines side panel from the conversation's panel toggle. The editor shows builtin pipelines (Code Expert, Creative Writer, Research Assistant, Thorough Analyst) as read-only cards.
 
 2. **Create a custom pipeline** — Click "New Pipeline" and configure:
    - **Name**: "Thorough Code Review"
@@ -271,7 +271,7 @@ This scenario walks through the first-run experience with system presets.
 
 ### Steps
 
-1. **Fresh start** — If you have used the app before, go to Settings > Advanced > Onboarding and click "Reset Onboarding" to simulate a first run. Reload the page.
+1. **Fresh start** — If you have used the app before, go to Workshop > Backup > Configuration and click "Reset onboarding" to simulate a first run. Reload the page.
 
 2. **Onboarding overlay** — A full-screen overlay appears with:
    - Opti-Oignon logo with copper glow
@@ -286,17 +286,17 @@ This scenario walks through the first-run experience with system presets.
    - "Get Started" button
 
 4. **Verify configuration** — After applying:
-   - Go to Settings > Quick tab: the preset selector shows the active preset
+   - Go to Workshop > Models and inference > System preset: the active preset reads "Applied"
    - Feature toggles match the preset (e.g., Power enables cascading and speculative)
    - Default model is set to the largest/smallest model per strategy
 
-5. **Try different presets** — In Settings > Quick tab, click another preset card and "Apply". Configs update live. Use the smoke test to verify: `bash scripts/smoke_test.sh`
+5. **Try different presets** — In Workshop > Models and inference > System preset, click "Apply" on another preset. Configs update live. Use the smoke test to verify: `bash scripts/smoke_test.sh`
 
 ### What to verify
 
 - Onboarding overlay appears on first run
 - Model detection correctly identifies installed models
 - Preset apply updates all relevant YAML config files
-- Settings page reflects the applied preset
+- Workshop > Models and inference reflects the applied preset
 - Skip button works (closes overlay without applying)
 

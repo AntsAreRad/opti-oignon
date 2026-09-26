@@ -18,7 +18,8 @@ appears automatically. It performs three steps:
 3. **One-click apply** -- selecting a preset configures all YAML files
    at once (routing, pipelines, security, plugins)
 
-You can change your preset later in **Settings > Quick tab**.
+You can change your preset later in **Workshop > Models and inference >
+System preset**.
 
 
 ## First conversation
@@ -29,18 +30,24 @@ After onboarding:
 2. Opti-Oignon routes your query to the best available model
 3. The response streams in real time via WebSocket
 
-The sidebar shows your conversation history. You can start a new chat
-with `Ctrl+N`.
+The sidebar shows your six most recent chats; the chats index (Chats in
+the sidebar) holds them all. You can start a new chat with `Ctrl+N`.
 
 
-## Settings overview
+## Preferences and the Workshop
 
-Open settings with `Ctrl+,` or the gear icon. The settings page has two
-tabs:
+The settings live in two places, each reached from the sidebar:
 
-- **Quick** -- preset selection, default model, theme toggle
-- **Advanced** -- per-pipeline configuration, security settings, plugin
-  management, RAG configuration, benchmark dashboard
+- **Preferences** (`Ctrl+,`) -- your own: appearance and the palette,
+  keyboard shortcuts, your account and its two-factor methods, task
+  presets, memories
+- **the Workshop** (the switch at the foot of the sidebar) -- the
+  operator's pages: system status, models and inference (the system
+  preset among them), knowledge, extensions, verify, benchmarks,
+  observability, network and sync, security, backup
+
+The search at the top of Preferences or of any Workshop settings page
+finds every setting, in either place, and links to it.
 
 
 ## Security on first run
@@ -50,9 +57,11 @@ No authentication is required for local-only access.
 
 To enable full security (recommended for any networked use):
 
-1. Go to **Settings > Advanced > Security**
+1. Go to **Workshop > Security > Authentication mode** and turn on
+   multi-user mode
 2. Create an admin account with a strong password
-3. Optionally enable 2FA (TOTP or WebAuthn/FIDO2)
+3. Optionally enable 2FA (TOTP or WebAuthn/FIDO2), in
+   **Preferences > Account**
 4. Consider enabling **Bulbe mode** for maximum security
    (see [Bulbe Mode](../security/bulbe-mode.md))
 

@@ -5,10 +5,12 @@
   It is a labelled complementary landmark, never a dialog: the page beside
   it stays reachable, focus is not trapped and nothing else is hidden from
   assistive technology. On a phone (`overlay`) it stands over the right or
-  left edge of the page instead of beside it, as the shell's panel did
-  before it; the page that opens it draws whatever sits behind and closes
-  it. What a phone makes of a panel over the page (a sheet, a dialog) is
-  decided with the phone's own layout, and checked there on the machine.
+  left edge of the page instead of beside it: over the frame of the page
+  that opens it (its nearest positioned ancestor), never fixed to the
+  viewport, so the shell's header and its stop stay above it. That page
+  draws whatever sits behind the panel, and a control that closes it. What
+  a phone makes of a panel over the page (a sheet, a dialog) is decided
+  with the phone's own layout, and checked there on the machine.
 
   Its inner edge is a resize handle: a focusable vertical separator that
   says the width in pixels, its bounds and the region it sizes. Its keys go
@@ -147,7 +149,7 @@
 		color: var(--oo-fg-primary);
 	}
 	.oo-side-panel[data-overlay='true'] {
-		position: fixed;
+		position: absolute;
 		top: 0;
 		bottom: 0;
 		right: 0;

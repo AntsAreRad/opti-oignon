@@ -1,7 +1,7 @@
 <!--
   PluginsQuickPanel.svelte
   Lightweight panel for the right sidebar: lists installed plugins,
-  toggle enable/disable, and link to full Settings > Plugins page.
+  toggle enable/disable, and link to the Workshop's Extensions page.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -67,7 +67,7 @@
 
 	function goToSettings() {
 		closePanel();
-		goto('/settings?tab=plugins');
+		goto('/workshop/extensions');
 	}
 </script>
 
@@ -149,7 +149,7 @@
 		{/if}
 	</div>
 
-	<!-- Footer: link to full settings -->
+	<!-- Footer: link to the Workshop's extensions page -->
 	<div class="px-4 py-3 shrink-0" style="border-top: 1px solid var(--oo-bd-subtle);">
 		<button
 			on:click={goToSettings}
@@ -157,7 +157,7 @@
 			style="background-color: var(--oo-bg-elevated); color: var(--oo-fg-secondary);
 				border: 1px solid var(--oo-bd-default);"
 		>
-			Open Plugins Settings
+			Open the extensions page
 		</button>
 	</div>
 </div>

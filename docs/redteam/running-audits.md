@@ -48,10 +48,8 @@ robustness:
 
 ### From the UI
 
-1. Go to **Settings > Advanced > Security > Red Team**
-2. Select categories, strategies, and targets (or leave all selected)
-3. Click **Run Audit**
-4. Monitor progress in the dashboard
+The web interface has no audit page yet: run an audit from the CLI or
+the API below. Its categories, strategies and targets are the same.
 
 ### From the CLI
 

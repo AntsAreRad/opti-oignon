@@ -103,6 +103,48 @@ _GIT_LOCATORS = (
 HELD: list[str] = [
     "frontend/src/lib/ds/",
     "frontend/src/routes/dev/components/+page.svelte",
+    "frontend/src/lib/nav/",
+    "frontend/src/params/workshopSection.ts",
+    "frontend/src/lib/components/layout/AppShell.svelte",
+    "frontend/src/lib/components/layout/Sidebar.svelte",
+    "frontend/src/lib/components/layout/StatusCard.svelte",
+    "frontend/src/lib/components/layout/StopAllButton.svelte",
+    "frontend/src/lib/components/layout/ApprovalsPill.svelte",
+    "frontend/src/lib/components/layout/SpaceSwitch.svelte",
+    "frontend/src/lib/components/layout/WorkshopBand.svelte",
+    "frontend/src/lib/components/layout/PhoneHeader.svelte",
+    "frontend/src/lib/components/settings/SettingsHub.svelte",
+    "frontend/src/lib/stores/estop.ts",
+    "frontend/src/lib/stores/backendStatus.ts",
+    "frontend/src/lib/stores/exportDialog.ts",
+    "frontend/src/lib/stores/approvals.ts",
+    "frontend/src/lib/stores/lastRoutes.ts",
+    "frontend/src/routes/+page.ts",
+    "frontend/src/routes/(app)/+layout.svelte",
+    "frontend/src/routes/(app)/+error.svelte",
+    "frontend/src/routes/(app)/(use)/+layout.svelte",
+    "frontend/src/routes/(app)/(use)/chat/+layout.svelte",
+    "frontend/src/routes/(app)/(use)/preferences/+page.svelte",
+    "frontend/src/routes/(app)/(workshop)/+layout.svelte",
+    "frontend/src/routes/(app)/(workshop)/workshop/[section=workshopSection]/+page.svelte",
+    "frontend/src/routes/benchmark/+page.ts",
+    "frontend/src/routes/claims/+page.ts",
+    "frontend/src/routes/health/+page.ts",
+    "frontend/src/routes/settings/+page.ts",
+    "frontend/src/routes/verify/+page.ts",
+    "frontend/src/routes/verify-answer/+page.ts",
+    "frontend/src/routes/verify-citations/+page.ts",
+    "frontend/src/routes/+layout.svelte",
+    "frontend/src/routes/(app)/(use)/chat/+page.svelte",
+    "frontend/src/lib/chat/chatsIndex.ts",
+    "frontend/src/lib/settings/search.ts",
+    "frontend/src/lib/settings/catalog.ts",
+    "frontend/src/lib/components/ui/ThemeSwitcher.svelte",
+    "frontend/src/lib/components/ui/UserMenu.svelte",
+    "frontend/src/lib/components/ui/NotificationCenter.svelte",
+    "frontend/src/lib/components/settings/NetworkReachability.svelte",
+    "frontend/src/lib/stores/estopState.ts",
+    "frontend/src/routes/(app)/[...missing]/+page.ts",
 ]
 """Files held to the surface rules: separation by tone and space rather than
 by lines, matte surfaces, sentence-case labels, selection never by colour
@@ -110,7 +152,15 @@ alone. A file joins when it is rebuilt under those rules, and the list only
 grows. An entry is a repository path, or a directory ending in ``/`` that
 holds every listed file under it, the ones written later included
 (``held_files`` expands it). The primitives come first: every surface is
-drawn from them; their gallery beside them."""
+drawn from them; their gallery beside them. Then the shell of both spaces:
+the navigation table and its modules, the sidebar, the status card and the
+stop, the phone header, the settings hub, the stores they read, the root
+and route groups' layouts and the redirects of the old addresses; the chats
+index and the module that builds its requests; the settings search and
+the catalog it reads; what the old header held, moved into Preferences (the
+palette switcher, the account menu, the notification history); the network
+page's reachability; the stop's pure read rules; and the catch-all that
+answers an address no page serves."""
 
 
 def held_files(held=None, *, root=REPO):

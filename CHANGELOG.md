@@ -11,6 +11,140 @@ package costs.
 
 ### Added
 
+- One shell for the whole interface, and two spaces in it. Use holds the
+  pages a person works in (chats, notes, projects, preferences) and the
+  Workshop holds the operator pages, all under `/workshop`: system status,
+  models and inference, knowledge, extensions, verify, benchmarks,
+  observability, network and sync, security and backup. The shell is mounted
+  once, by the layout both spaces sit under, so moving between pages no
+  longer mounts it again; the page sits on a sheet beside the sidebar. The
+  sidebar shows the onion mark and the name (drawn inline in the accent ink,
+  no longer an image that needed a filter at night), New chat, a search of
+  the chats, the destinations of the space on screen, the six most recent
+  chats, then Preferences, the switch between the two spaces (which goes
+  back to the page last open in that space) and a status card: the inference
+  backend and its state, "Server unreachable" when the API itself does not
+  answer and "Ollama unavailable" (by the backend's name) when the server
+  answers and its backend does not, read once a minute and only while the
+  page is visible; the security grade; the word Bulbe in Bulbe mode alone;
+  and a pill while tool calls wait on an approval. Every destination the
+  sidebar, the route announcer and the old addresses name is read from one
+  table, and which entry is current is decided in one place: the page itself
+  is marked, and a conversation marks Chats as its section and its own
+  recent row as the page.
+
+  The emergency stop, Stop all, is one control with a visible label, drawn
+  wherever the shell stands: in the status card; in the 72 px rail a
+  collapsed sidebar becomes on a desktop (the sidebar is no longer unmounted
+  when it collapses); on a phone in a header outside the drawer, above every
+  layer that is not a dialog (a side panel on a phone now stands over the
+  page below it, with a control that closes it), and in the drawer's own
+  card while the drawer is open; and in the approvals drawer, a modal
+  dialog that leaves the rest of the page out of reach. Its confirmation is
+  fixed to the viewport and placed from its button, so neither the rail nor
+  the card clips it, and on a touch screen its actions and Resume are 44 px
+  targets like the button. It always renders now: disabled with its reason
+  written beside it when the server says it cannot stop, and enabled while
+  its state is unknown, which a status that cannot be read makes it again,
+  a failed request then saying so; before, it vanished whenever its status
+  had not been read. Its state is read by one poller, one request at a time
+  whoever asks, instead of one per mounted control, and only the copy the
+  reader acted on announces what changed. Its confirmation keeps both
+  actions (stop, or stop and switch to Bulbe), the steps that failed, and
+  the stopped pill with Resume; under the pointer it lifts to the second
+  surface and keeps 4.5:1 in every palette. The other dialogs (export, a
+  chat's rename or delete, the first-run overlay) still cover it while they
+  are open. The approvals drawer and the export dialog are mounted once, by
+  the shell, and the count of the tool calls waiting on an approval shows
+  in the status card, the rail and the phone header alike, so an approval
+  can be answered and a conversation exported from any page (the export
+  shortcut no longer depends on the chat page listening for a window
+  event). The global fifteen-second health poll is gone, and so is the
+  health store the old dashboard alone still read; the stop's status and
+  the backend's state are read by their stores, each with a timeout set
+  again after its answer.
+
+  On a phone the drawer is a modal dialog with its own close control: while
+  it is open the header and the page behind it are inert, focus moves into
+  it and back to its opener when it shuts. At every width the shell keeps
+  clear of the safe areas (a phone on its side draws the desktop's sidebar),
+  and the drawer's links are 44 px targets. An address no page serves (a
+  mistyped Workshop page, a stale link) is answered inside the shell, with
+  the sidebar and Stop all, instead of by the framework's bare error page.
+
+  Every address the interface used to serve still lands: `/settings` with
+  its old `section`, `tab`, `g` and `q` parameters, `/health`, `/benchmark`,
+  `/verify`, `/claims`, `/verify-answer` and `/verify-citations` redirect
+  permanently, in the route's load, to the page that holds what they held,
+  their query kept; an unknown one goes to Preferences, never to a missing
+  page, and a settings group named by `g` is found wherever it now lives.
+  The root sends its reader to the chats index for now, temporarily. The
+  settings are split between Preferences (appearance, keyboard, account,
+  chats and memory) and the Workshop's pages, one settings hub drawing the
+  groups each page holds; its search still reads every group's title,
+  description and synonyms, and now the name of the page holding it and of
+  the old section it sat in, across both spaces; each result links to the
+  page holding it, Enter opens the first, Escape clears, and the words stay
+  in the address. The palette switcher, the account menu and the
+  notification history, which the old header held, are in Preferences,
+  redrawn to the surface rules; the network page shows the server's
+  reachability (the inference server, its latency, the offline queue, the
+  last error), read when the page is shown and on request. The chats' side
+  panels are hosted by the chat frame, drawn around a conversation only.
+  Each run in the benchmarks' history links to its detail (every model's
+  accuracy, code, structure and speed), which the old sidebar's runs list
+  alone used to open, and the history, now the latest fifty runs, filters
+  by a run's id, profile or models. The Workshop is drawn
+  compact under a band in the cool tint whatever the reader's density, and
+  is marked as its own space; Use follows the reader's density.
+
+  Chats, where the old dashboard stood, is an index of every conversation,
+  newest first, grouped by the day it last changed: today, yesterday, the
+  previous seven days, earlier; it stands alone, the chat frame's model,
+  preset and context bars drawn only around a conversation. Its search is
+  the server's, over titles and messages: the words travel in the address
+  (the sidebar's search lands there), up to 200 matches come back, and when
+  a search fills that limit the page says so instead of passing a partial
+  list off as the whole. Without words the listing comes fifty at a time,
+  from an offset, and "Show more chats" reads the next page (a chat deleted
+  meanwhile does not make it skip one). Each row keeps its actions in sight,
+  a menu button always drawn, never revealed by the pointer alone: rename
+  and delete ask in a dialog that shows why the server refused, if it does,
+  and export opens the shell's export dialog; a rename or a delete reaches
+  the sidebar's recent chats too. The dashboard, the old sidebar's list of
+  conversations (nothing mounted it since the sidebar was rebuilt) and the
+  health store only the dashboard still read are removed. The guides name
+  the new places: the twenty-three paths into the old settings page, in
+  eleven documents, now read Preferences or the Workshop (the plugin
+  marketplace, two-factor setup, Bulbe mode, the system preset, the keyboard
+  shortcuts, backups, the knowledge base); where no page did what a guide
+  described (active sessions, a red-team page, a pipeline override), the
+  guide says what the interface does instead. The branch-protection guide
+  keeps its path, which leads through the repository host's own settings.
+
+  svelte-check reports 34 errors, down from 77: the settings page's 42 went
+  with it, and the shell's one. The ratchets fall with the rebuilt and
+  removed files: style attributes by 46, border-token reads by 27, hand-made
+  buttons by 23, lines between rows by 10, capitals and wide tracking by 10,
+  type under 12 px by 7, raw requests outside the API layer by 6, hand-made
+  fields by 4, status washes outside the primitives by 4, interval timers by
+  3 (one poll is gone, the health store's; the stop's and the backend's
+  reads remain, as timeouts set again after each answer), colour literals by
+  3, the one hover-only reveal of the old chat list and one French comment
+  line. The shell, the sidebar, the status card, the stop, the phone header,
+  the settings hub, the navigation table, the root and route layouts, the
+  chats index, the settings search and its catalog, the three moved header
+  controls, the network reachability, the stop's read rules and the
+  catch-all join the files held to the surface rules. What the contracts
+  prove is what the templates emit when compiled for the server, what the
+  pure modules answer under Node and what the styles declare; the shell
+  kept across a space switch, the redirects firing in a browser, the
+  keyboard (the drawer's focus among it), an accessibility pass in each
+  palette, no horizontal scroll at 393 px (with approvals waiting and the
+  machine stopped), the rail's confirmation in view, and the stop in one
+  tap on a phone on every page, a side panel open, are checked on the
+  machine.
+
 - The interface's primitives, its own icons, and the rules its surfaces are
   held to. The button forwards what it is to assistive technology --
   `pressed`, `expanded`, `haspopup` and `controls` become `aria-pressed`,

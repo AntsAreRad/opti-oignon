@@ -10,7 +10,8 @@ When the user sends an image to a non-vision model, this pipeline:
    with full image context.
 
 The vision model selection respects the VisionConfig:
-- User can pick a specific model in Settings > Vision Model.
+- User can pick a specific model in Workshop > Models and inference >
+  Vision model.
 - "auto" mode detects the first available vision-capable model.
 - Manual known_vision_models list is honored.
 
@@ -180,7 +181,8 @@ class VisionPipeline:
     def _resolve_vision_model(self) -> str | None:
         """Resolve the effective vision model using VisionConfig.
 
-        Respects the user's preferred selection from Settings > Vision Model.
+        Respects the user's preferred selection from Workshop > Models and
+        inference > Vision model.
         Falls back to auto-detect if set to 'auto'.
         """
         if self._vision_config is None:

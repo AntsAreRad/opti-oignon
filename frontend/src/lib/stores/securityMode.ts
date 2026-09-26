@@ -6,6 +6,7 @@
  */
 
 import { writable, derived } from 'svelte/store';
+import { getSecurityMode } from '../api/securityMode';
 import type { SecurityModeStatus, PendingDowngrade, ModePolicy } from '../api/securityMode';
 
 /** Full security mode state. */
@@ -31,3 +32,15 @@ export const pendingDowngrade = derived(
   securityModeStatus,
   ($s) => $s.pending_downgrade ?? null
 );
+
+/**
+ * Reads the mode from the server into the store; a failed read keeps what
+ * the store holds.
+ */
+export async function refreshSecurityMode(): Promise<void> {
+  try {
+    securityModeStatus.set(await getSecurityMode());
+  } catch {
+    // The mode cannot be read now: keep the last one known.
+  }
+}

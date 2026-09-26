@@ -496,6 +496,31 @@ fail_under = 0
 # classes the theme path sets for each motion choice, run under Node, are
 # exactly the ones motion.ts reads. The node half of ux11 stays selected.
 #
+# The host half of pr6 (tests/test_ui_primitives_contracts.py) required the
+# app shell to host the right panel in the side panel primitive. The shell is
+# now the frame of every page of both spaces, with its default slot alone and
+# no panel; the chats' side panels moved with the chat frame (the chats'
+# layout), which hosts them in the same primitive. pr10 in the same file keeps
+# every assertion of that half word for word, read on the chat frame: it
+# imports the primitive, hosts one, gives it its width and takes its resizes,
+# and holds no resize logic and no panel of its own; and it adds that the
+# shell hosts no side panel and no resize. The landmark and resize halves of
+# pr6 stay selected.
+#
+# Both halves of ux13 (tests/test_ui_repairs_contracts.py) read the settings
+# page and the sidebar's list of settings sections, which are gone: the
+# settings hub renders the catalog's groups on the Preferences and Workshop
+# pages, and the sidebar lists destinations. ux17 in the same file keeps
+# every other assertion of ux13 word for word, reading the hub where ux13
+# read the page: its loaders are the catalog's panels, its introductions
+# render the catalog's inline groups under the sections that render them,
+# no other file declares a section list or the old tab map, and a list of
+# three tabs is no section list (the census's precision). It drops exactly
+# two reads: of the section list, which no longer exists, and of the
+# catalog's section resolver, which nothing calls any more (the old
+# addresses are resolved by lib/nav/legacy.ts); and it adds that the hub
+# alone loads the panels.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -573,4 +598,7 @@ addopts = """
     --deselect=tests/test_allium_equivalence_contracts.py::test_ae2_both_engines_answer_the_whole_decoder_corpus_with_the_same_bytes
     --deselect=tests/test_cache_surface_contracts.py::test_cs4_the_frontend_cache_client_speaks_the_published_prefix
     --deselect=tests/test_ui_repairs_contracts.py::test_ux11_scrolling_is_smooth_only_where_motion_is_allowed[wiring]
+    --deselect=tests/test_ui_primitives_contracts.py::test_pr6_a_side_panel_is_a_region_beside_the_page_resized_by_keys[host]
+    --deselect=tests/test_ui_repairs_contracts.py::test_ux13_every_settings_group_is_in_the_catalog_and_nowhere_else[node]
+    --deselect=tests/test_ui_repairs_contracts.py::test_ux13_every_settings_group_is_in_the_catalog_and_nowhere_else[wiring]
 """

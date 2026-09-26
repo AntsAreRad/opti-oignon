@@ -1,6 +1,7 @@
 /**
- * Svelte stores for UI state: the sidebar, whether the palette on screen is
- * a dark one, and the system's reduced-motion setting.
+ * Svelte stores for UI state: the sidebar, whether the shell is drawn for a
+ * phone, whether the palette on screen is a dark one, and the system's
+ * reduced-motion setting.
  *
  * Nothing here writes the root element or storage: the palette and every
  * other appearance choice go through the preferences store and the theme
@@ -10,8 +11,18 @@
 
 import { writable } from 'svelte/store';
 
-/** Sidebar open/closed (desktop: always visible, mobile: overlay). */
+/**
+ * The sidebar: on a desktop, expanded (true) or the 72 px rail (false), and
+ * mounted either way; on a phone, the drawer open (true) or shut (false).
+ */
 export const sidebarOpen = writable<boolean>(true);
+
+/**
+ * Whether the shell is drawn for a phone (under 768 px): a header holding
+ * the stop and the drawer's opener, the sidebar as a drawer. The shell sets
+ * it from the viewport's width.
+ */
+export const isPhone = writable<boolean>(false);
 
 /**
  * Whether motion should be reduced: the user's motion choice, or the

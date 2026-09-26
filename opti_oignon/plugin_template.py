@@ -345,12 +345,12 @@ class PluginTemplateGenerator:
             via the Plugin Marketplace:
 
             ```
-            Settings > Plugins > Marketplace > Install from URL
+            Workshop > Extensions > Marketplace > Install from URL
             ```
 
             ## Configuration
 
-            Edit the plugin configuration in Settings > Plugins > {name} > Config.
+            Edit the plugin configuration in Workshop > Extensions > {name} > Config.
 
             ## Development
 

@@ -35,8 +35,8 @@ When Bulbe mode is active, the following constraints apply:
 
 ### From the UI
 
-1. Go to **Settings > Advanced > Security**
-2. Toggle **Bulbe mode** on
+1. Go to **Workshop > Security > Security mode**
+2. Click **Escalate to Bulbe**
 3. The backend restarts with all security layers enforced
 
 ### From the configuration

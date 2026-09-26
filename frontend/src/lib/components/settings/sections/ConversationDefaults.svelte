@@ -1,6 +1,7 @@
 <!--
   ConversationDefaults.svelte
-  Conversation & Chat > Defaults group of the consolidated /settings hub.
+  The system preset and configuration groups (Workshop > Models and
+  inference, Workshop > Backup), and the retired defaults group.
 
   This is where the legacy "Quick" tab content now lives (spec 5.5: the
   default model, temperature, code execution, memory injection and the
@@ -28,6 +29,11 @@
 	import { handleApiError } from '$lib/api/errorHandler';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import type { SystemPresetInfo, SystemPresetDetectResponse } from '$lib/types';
+
+	/** The groups to render, by id; every group when not given. The settings
+	    hub renders each group on the page that holds it. */
+	export let groups: string[] | undefined = undefined;
+	$: shows = (id: string) => !groups || groups.includes(id);
 
 	let loading = true;
 	let error = '';
@@ -180,127 +186,133 @@
 		</div>
 	{/if}
 
-	<SettingsGroup
-		id="conversation-system-preset"
-		title="System preset"
-		description="Infrastructure-level configuration. Applies caching, cascading, routing and token budgets in one click."
-	>
-		{#if detectLoading}
-			<p class="oo-conv-muted">Detecting models...</p>
-		{:else}
-			{#if detection && detection.models.length > 0}
-				<div class="oo-conv-models">
-					{#each detection.models as m}
-						<span class="oo-conv-chip">
-							<span class="oo-conv-chip-name">{m.name}</span>
-							{#if m.parameter_count_b > 0}
-								<span class="oo-conv-chip-size">{m.parameter_count_b}B</span>
-							{/if}
-						</span>
+	{#if shows('conversation-system-preset')}
+		<SettingsGroup
+			id="conversation-system-preset"
+			title="System preset"
+			description="Infrastructure-level configuration. Applies caching, cascading, routing and token budgets in one click."
+		>
+			{#if detectLoading}
+				<p class="oo-conv-muted">Detecting models...</p>
+			{:else}
+				{#if detection && detection.models.length > 0}
+					<div class="oo-conv-models">
+						{#each detection.models as m}
+							<span class="oo-conv-chip">
+								<span class="oo-conv-chip-name">{m.name}</span>
+								{#if m.parameter_count_b > 0}
+									<span class="oo-conv-chip-size">{m.parameter_count_b}B</span>
+								{/if}
+							</span>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="oo-preset-grid">
+					{#each systemPresets as preset (preset.id)}
+						{@const isCurrent = currentAppliedPreset === preset.id}
+						{@const isRecommended = detection?.recommended_preset === preset.id}
+						<div class="oo-preset" class:oo-preset-current={isCurrent}>
+							<div class="oo-preset-icon" class:oo-preset-icon-current={isCurrent}>
+								<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
+									<path d={presetIconSvg(preset.icon)} />
+								</svg>
+							</div>
+							<div class="oo-preset-info">
+								<div class="oo-preset-head">
+									<span class="oo-preset-name">{preset.name}</span>
+									{#if isCurrent}
+										<span class="oo-preset-tag oo-preset-tag-active">Active</span>
+									{:else if isRecommended}
+										<span class="oo-preset-tag oo-preset-tag-rec">Recommended</span>
+									{/if}
+									<span class="oo-preset-ram">{preset.recommended_ram_gb}+ GB</span>
+								</div>
+								<p class="oo-preset-desc">{preset.description}</p>
+							</div>
+							<Button
+								size="sm"
+								variant={isCurrent ? 'ghost' : 'primary'}
+								loading={applyingPreset}
+								disabled={applyingPreset || isCurrent}
+								on:click={() => handleApplySystemPreset(preset.id)}
+							>
+								{isCurrent ? 'Applied' : 'Apply'}
+							</Button>
+						</div>
 					{/each}
 				</div>
-			{/if}
 
-			<div class="oo-preset-grid">
-				{#each systemPresets as preset (preset.id)}
-					{@const isCurrent = currentAppliedPreset === preset.id}
-					{@const isRecommended = detection?.recommended_preset === preset.id}
-					<div class="oo-preset" class:oo-preset-current={isCurrent}>
-						<div class="oo-preset-icon" class:oo-preset-icon-current={isCurrent}>
-							<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke="currentColor">
-								<path d={presetIconSvg(preset.icon)} />
-							</svg>
-						</div>
-						<div class="oo-preset-info">
-							<div class="oo-preset-head">
-								<span class="oo-preset-name">{preset.name}</span>
-								{#if isCurrent}
-									<span class="oo-preset-tag oo-preset-tag-active">Active</span>
-								{:else if isRecommended}
-									<span class="oo-preset-tag oo-preset-tag-rec">Recommended</span>
-								{/if}
-								<span class="oo-preset-ram">{preset.recommended_ram_gb}+ GB</span>
-							</div>
-							<p class="oo-preset-desc">{preset.description}</p>
-						</div>
-						<Button
-							size="sm"
-							variant={isCurrent ? 'ghost' : 'primary'}
-							loading={applyingPreset}
-							disabled={applyingPreset || isCurrent}
-							on:click={() => handleApplySystemPreset(preset.id)}
-						>
-							{isCurrent ? 'Applied' : 'Apply'}
-						</Button>
-					</div>
-				{/each}
+				{#if detection?.reason}
+					<p class="oo-conv-reason">{detection.reason}</p>
+				{/if}
+			{/if}
+		</SettingsGroup>
+	{/if}
+
+	{#if shows('conversation-defaults')}
+		<SettingsGroup
+			id="conversation-defaults"
+			title="Defaults for new conversations"
+			description="The starting values every new conversation inherits. Per-conversation overrides live in the chat control bar."
+			onReset={resetDefaults}
+		>
+			{#if loading}
+				<p class="oo-conv-muted">Loading settings...</p>
+			{:else}
+				<Input
+					label="Default model"
+					bind:value={defaultModel}
+					placeholder="e.g. qwen3:8b"
+					hint="Used when a conversation does not pin a model."
+					on:change={() => saveSetting('default_model', defaultModel, 'Default model')}
+				/>
+				<Input
+					type="number"
+					label="Default temperature"
+					bind:value={defaultTemperature}
+					hint="0 is deterministic; higher is more varied."
+					on:change={() => saveSetting('temperature', defaultTemperature, 'Default temperature')}
+				/>
+				<Switch
+					label="Code execution"
+					description="Allow the assistant to run code in the sandbox by default."
+					bind:checked={codeExecutionEnabled}
+					on:change={() => saveSetting('code_execution', codeExecutionEnabled, 'Code execution')}
+				/>
+				<Switch
+					label="Memory injection"
+					description="Inject relevant memory into the prompt by default."
+					bind:checked={memoryInjectionEnabled}
+					on:change={() => saveSetting('memory_injection', memoryInjectionEnabled, 'Memory injection')}
+				/>
+				<Input
+					label="Persistent directory"
+					bind:value={persistentDir}
+					placeholder="Optional path"
+					hint="Working directory persisted across sandbox runs."
+					on:change={() => saveSetting('persistent_dir', persistentDir, 'Persistent directory')}
+				/>
+			{/if}
+		</SettingsGroup>
+	{/if}
+
+	{#if shows('conversation-config-maintenance')}
+		<SettingsGroup
+			id="conversation-config-maintenance"
+			title="Configuration"
+			description="Reload configuration from disk or re-run the first-time setup."
+		>
+			<div class="oo-conv-actions">
+				<Button variant="secondary" size="sm" iconLeft="refresh-cw" loading={reloading} on:click={handleReload}>
+					Reload from disk
+				</Button>
+				<Button variant="ghost" size="sm" iconLeft="rotate-ccw" loading={resettingOnboarding} on:click={handleResetOnboarding}>
+					Reset onboarding
+				</Button>
 			</div>
-
-			{#if detection?.reason}
-				<p class="oo-conv-reason">{detection.reason}</p>
-			{/if}
-		{/if}
-	</SettingsGroup>
-
-	<SettingsGroup
-		id="conversation-defaults"
-		title="Defaults for new conversations"
-		description="The starting values every new conversation inherits. Per-conversation overrides live in the chat control bar."
-		onReset={resetDefaults}
-	>
-		{#if loading}
-			<p class="oo-conv-muted">Loading settings...</p>
-		{:else}
-			<Input
-				label="Default model"
-				bind:value={defaultModel}
-				placeholder="e.g. qwen3:8b"
-				hint="Used when a conversation does not pin a model."
-				on:change={() => saveSetting('default_model', defaultModel, 'Default model')}
-			/>
-			<Input
-				type="number"
-				label="Default temperature"
-				bind:value={defaultTemperature}
-				hint="0 is deterministic; higher is more varied."
-				on:change={() => saveSetting('temperature', defaultTemperature, 'Default temperature')}
-			/>
-			<Switch
-				label="Code execution"
-				description="Allow the assistant to run code in the sandbox by default."
-				bind:checked={codeExecutionEnabled}
-				on:change={() => saveSetting('code_execution', codeExecutionEnabled, 'Code execution')}
-			/>
-			<Switch
-				label="Memory injection"
-				description="Inject relevant memory into the prompt by default."
-				bind:checked={memoryInjectionEnabled}
-				on:change={() => saveSetting('memory_injection', memoryInjectionEnabled, 'Memory injection')}
-			/>
-			<Input
-				label="Persistent directory"
-				bind:value={persistentDir}
-				placeholder="Optional path"
-				hint="Working directory persisted across sandbox runs."
-				on:change={() => saveSetting('persistent_dir', persistentDir, 'Persistent directory')}
-			/>
-		{/if}
-	</SettingsGroup>
-
-	<SettingsGroup
-		id="conversation-config-maintenance"
-		title="Configuration"
-		description="Reload configuration from disk or re-run the first-time setup."
-	>
-		<div class="oo-conv-actions">
-			<Button variant="secondary" size="sm" iconLeft="refresh-cw" loading={reloading} on:click={handleReload}>
-				Reload from disk
-			</Button>
-			<Button variant="ghost" size="sm" iconLeft="rotate-ccw" loading={resettingOnboarding} on:click={handleResetOnboarding}>
-				Reset onboarding
-			</Button>
-		</div>
-	</SettingsGroup>
+		</SettingsGroup>
+	{/if}
 </div>
 
 <style>

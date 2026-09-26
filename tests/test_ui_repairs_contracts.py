@@ -114,6 +114,12 @@ when compiled for the server, not what a browser does with it.
   * UX15 -- no URL in ``frontend/src`` names a vendor's organisation.
   * UX16 -- every DOM selector a global shortcut handler queries matches an
     element that a mounted component or a route renders.
+  * UX17 -- the settings hub (``SettingsHub.svelte``), which renders the
+    catalog's groups on the page that holds each, loads exactly the
+    catalog's panels, and its section introductions render exactly the
+    catalog's inline groups, each under the section whose introduction
+    renders it; no other file declares a list of the settings sections or
+    the map of the old tab ids, and no other file loads the panels.
 
 The censuses each carry a positive fixture, a sample they must count, so a
 probe that goes blind turns red instead of reading a false zero. Words the
@@ -167,6 +173,8 @@ BUDGET_S = {
     "test_ux13_every_settings_group_is_in_the_catalog_and_nowhere_else[wiring]": 1.0,
     "test_ux15_no_url_names_a_vendor_organisation": 1.0,
     "test_ux16_every_selector_a_global_shortcut_queries_is_rendered": 1.0,
+    "test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[node]": 2.0,
+    "test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[wiring]": 1.0,
 }
 
 _SRC = "frontend/src"
@@ -859,7 +867,7 @@ _PRIMITIVES = f"{_SRC}/lib/ds/"
 _DEAF_EXEMPT = {
     (f"{_SRC}/lib/components/chat/ChatMessage.svelte", "retry"): {
         # The replies still being written: Retry shows only on a finished one.
-        f"{_SRC}/routes/chat/[id]/+page.svelte": 2,
+        f"{_SRC}/routes/(app)/(use)/chat/[id]/+page.svelte": 2,
     },
     (f"{_SRC}/lib/components/panels/PipelineEditor.svelte", "change"): {
         # The read-only view of a pipeline, whose steps cannot change.
@@ -2601,6 +2609,88 @@ def test_ux16_every_selector_a_global_shortcut_queries_is_rendered():
         if not found:
             unmatched.append(f"{path}: {kind}({selector!r})" + (" is not a simple selector" if found is None else ""))
     assert not unmatched, "selectors a shortcut queries that nothing rendered matches:\n  " + "\n  ".join(unmatched)
+
+
+# ---------------------------------------------------------------------------
+# UX17 -- every settings group in the catalog, rendered by the settings hub
+# ---------------------------------------------------------------------------
+_HUB = f"{_SRC}/lib/components/settings/SettingsHub.svelte"
+_LAZY = re.compile(r"(\w+)\s*:\s*\(\)\s*=>\s*import\(")
+
+
+def _hub_inline_groups(tree):
+    """``{group id: intro}`` of the groups the hub's section introductions
+    render inline, read from the components the hub mounts for each."""
+    out = {}
+    for match in re.finditer(r"intro\s*===\s*['\"](\w+)['\"]\s*\}\s*<([A-Z]\w*)", _markup(tree.sources[_HUB])):
+        component = tree.names[_HUB].get(match.group(2))
+        assert component, f"the introduction {match.group(1)} names a component the hub imports"
+        for _, body, _ in _tags(_markup(tree.sources[component]), r"SettingsGroup"):
+            ids = [value for name, value in _attributes(body) if name == "id"]
+            assert ids and isinstance(ids[0], str), f"{component}: a SettingsGroup has a literal id"
+            out[ids[0]] = match.group(1)
+    return out
+
+
+@pytest.mark.parametrize("half", ("node", "wiring"))
+def test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it(half):
+    if half == "wiring":
+        sample = (
+            "const s = [{ id: 'appearance' }, { id: 'account' }, { id: 'conversation' },\n"
+            "{ id: 'models' }, { id: 'knowledge' }];\n"
+            "const m = { quick: 'conversation', presets: 'conversation', 'fine-tune': 'data',\n"
+            "backup: 'data', security: 'account', advanced: 'performance', models: 'models' };\n"
+        )
+        assert _settings_lists("sample.ts", sample) == 2, "the census reads both kinds of list"
+        assert _settings_lists("sample.ts", "tabs = [{ id: 'models' }, { id: 'network' }, { id: 'plugins' }]") == 0
+        assert len(_LAZY.findall("const l = { A: () => import('./A.svelte'), B: () => import('./B.svelte') };")) == 2
+
+        sources = {path: read(path) for path in files(_SCRIPTS, exclude=(_CATALOG,))}
+        lists = _count_in(sources, _settings_lists)
+        assert not lists, f"settings lists declared outside the catalog: {lists}"
+        assert re.search(r"from\s*['\"]\$lib/settings/catalog['\"]", sources[_HUB]), "the hub reads the catalog"
+        loaders = {
+            path: count for path, text in sources.items()
+            if (count := len(_LAZY.findall(_script(text, path)))) >= 10
+        }
+        assert list(loaders) == [_HUB], f"the hub alone loads the settings panels: {loaders}"
+        return
+
+    tree = _real_tree()
+    loaders = _LAZY.findall(_script(tree.sources[_HUB], _HUB))
+    inline = _hub_inline_groups(tree)
+    assert len(loaders) >= 40 and len(inline) >= 9, (
+        f"the census reads the hub's panels and inline groups: {len(loaders)}, {len(inline)}"
+    )
+    catalog = _node("catalog", ("OO_CATALOG",), [])
+    sections = catalog["sections"]
+    assert [section["id"] for section in sections] == list(_SECTION_IDS), (
+        "the catalog's sections are the ones the census recognises"
+    )
+    assert catalog["legacy"] == _LEGACY_TABS, "the catalog's old tab map is the one the census recognises"
+
+    groups = [group for section in sections for group in section["groups"]]
+    ids = [group["id"] for group in groups] + [group["id"] for group in catalog["inline"]]
+    assert len(ids) == len(set(ids)), "every group id is unique"
+    for group in groups + catalog["inline"]:
+        assert group["title"] and group["description"], f"{group['id']} has a title and a description"
+
+    panels = [group["panel"] for group in groups]
+    assert sorted(panels) == sorted(loaders) and len(panels) == len(set(panels)), (
+        "every lazy panel the hub can load is one catalog group, and every group has a panel: "
+        f"missing {sorted(set(loaders) - set(panels))}, unloadable {sorted(set(panels) - set(loaders))}"
+    )
+
+    intro_of = {section["id"]: section.get("intro") for section in sections}
+    listed = {group["id"]: group["sectionId"] for group in catalog["inline"]}
+    assert set(listed) == set(inline), (
+        "every group an introduction renders is in the catalog, and none it does not: "
+        f"missing {sorted(set(inline) - set(listed))}, phantom {sorted(set(listed) - set(inline))}"
+    )
+    for group_id, intro in inline.items():
+        assert intro_of.get(listed[group_id]) == intro, (
+            f"{group_id} is listed under the section whose introduction renders it"
+        )
 
 
 if __name__ == "__main__":

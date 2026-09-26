@@ -272,7 +272,7 @@
 			<header class="notes-header">
 				<div class="notes-title">
 					<Icon name="file-text" size="md" />
-					<h2>Notes</h2>
+					<h1>Notes</h1>
 				</div>
 				<Button variant="primary" size="sm" iconLeft="plus" on:click={newNote}>New</Button>
 			</header>
@@ -487,7 +487,7 @@
 		color: var(--oo-fg-primary);
 	}
 
-	.notes-title h2 {
+	.notes-title h1 {
 		margin: 0;
 		font-size: var(--oo-text-lg);
 		font-weight: 600;

@@ -11,9 +11,9 @@ All processing stays local -- no data leaves your machine.
 
 ## Creating a project
 
-1. Open **Settings > Advanced > RAG**
-2. Click **New Project**
-3. Name your project and optionally set a default collection
+1. Open **Workshop > Knowledge > Knowledge base**
+2. Under **Create Collection**, name the collection
+3. Click **Create**
 
 Each project maintains isolated collections. In multi-user mode,
 projects are scoped to individual users with RBAC enforcement.

@@ -1,8 +1,8 @@
 <!--
   SecurityBadge.svelte
-  Compact security status badge in the sidebar footer. Shows the letter
+  Compact security status badge in the status card. Shows the letter
   grade (A+ to F) with color coding; a tooltip surfaces the numeric score.
-  Clicking opens the security section of settings. Uses the ds Tooltip and
+  Clicking opens the Workshop's security page. Uses the ds Tooltip and
   Icon primitives and --oo-* tokens.
 -->
 <script lang="ts">
@@ -42,7 +42,7 @@
 {#if !loading && grade}
 	<Tooltip content={`Security score: ${score}/${maxScore}`}>
 		<a
-			href="/settings?tab=security"
+			href="/workshop/security"
 			class="oo-sec-badge"
 			aria-label={`Security score ${score} of ${maxScore}, grade ${grade}`}
 		>

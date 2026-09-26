@@ -92,6 +92,10 @@ component using it.
   * PR9 -- no icon-only control renders without a name: a button that
     draws an icon alone, and a menu, refuse a missing or blank name as the
     icon button does.
+  * PR10 -- the chat frame (the chats' layout) hosts its side panels in
+    ``SidePanel``, giving it its width and taking its resizes, and holds no
+    resize logic and no panel of its own; the shell, which is every page's
+    frame, hosts no side panel and holds no resize logic either.
 
 Local-only (the public distribution ships no tests). Needs Node >= 22.6 and
 ``frontend/node_modules``; without them the helpers raise, and so do the
@@ -137,6 +141,7 @@ BUDGET_S = {
     "test_pr8_a_pressed_check_is_seen_on_its_ground_and_the_pressed_tint_holds_under_the_pointer[check]": 2.0,
     "test_pr8_a_pressed_check_is_seen_on_its_ground_and_the_pressed_tint_holds_under_the_pointer[hover]": 1.0,
     "test_pr9_no_icon_only_control_renders_without_a_name": 1.0,
+    "test_pr10_the_chat_frame_hosts_its_side_panels_in_the_primitive": 1.0,
 }
 
 _DS = "frontend/src/lib/ds"
@@ -1638,6 +1643,43 @@ def test_pr9_no_icon_only_control_renders_without_a_name():
     assert trigger.get("aria-haspopup") == "menu" and "Actions" in trigger.visible_text(), (
         f"a named menu's trigger says its name and what it opens: {trigger.attrs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# PR10 -- the chat frame hosts its side panels in SidePanel
+# ---------------------------------------------------------------------------
+_CHAT_FRAME = "frontend/src/routes/(app)/(use)/chat/+layout.svelte"
+
+
+def test_pr10_the_chat_frame_hosts_its_side_panels_in_the_primitive():
+    sample = (
+        "<script>\n\timport SidePanel from '$lib/ds/SidePanel.svelte';\n"
+        "\twindow.addEventListener('mousemove', onMouseMove);\n</script>\n"
+        '<div role="separator" class="cursor-col-resize" on:mousedown={start}></div>\n'
+    )
+    assert len(_HAND_RESIZE.findall(sample)) == 4, (
+        f"the census reads a hand-made resize: {_HAND_RESIZE.findall(sample)}"
+    )
+    frame, script, markup = read(_CHAT_FRAME), _script(_CHAT_FRAME), _markup(_CHAT_FRAME)
+    assert re.search(
+        r"""import\s+SidePanel\s+from\s*['"]\$lib/ds/SidePanel(?:\.svelte)?['"]"""
+        r"""|import\s*\{[^}]*\bSidePanel\b[^}]*\}\s*from\s*['"]\$lib/ds['"]""", script,
+    ), "the chat frame imports the side panel primitive"
+    hosted = re.findall(r"<SidePanel\b", markup)
+    assert len(hosted) == 1, f"the chat frame hosts its side panels in the side panel: {len(hosted)}"
+    start = markup.find("<SidePanel")
+    opening = markup[start:_tag_end(markup, start)]
+    assert re.search(r"\bon:resize\s*=", opening) and re.search(r"(?<![\w-])width\s*=\s*\{", opening), (
+        f"the frame gives the panel its width and takes its resizes: {opening}"
+    )
+    competing = _HAND_RESIZE.findall(frame) + re.findall(r"<aside\b", markup)
+    assert not competing, f"the frame holds no resize logic and no panel of its own: {competing}"
+    shell = read(_APP_SHELL)
+    in_shell = (
+        _HAND_RESIZE.findall(shell) + re.findall(r"<aside\b|<SidePanel\b", _markup(_APP_SHELL))
+        + re.findall(r"\bSidePanel\b", _script(_APP_SHELL))
+    )
+    assert not in_shell, f"the shell of every page hosts no side panel and no resize: {in_shell}"
 
 
 if __name__ == "__main__":

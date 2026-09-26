@@ -1,7 +1,7 @@
 <!--
   PerformanceTunerPanel.svelte -- Inference Auto-Tuner panel.
 
-  Collapsible panel in Settings > Performance tab.
+  Collapsible panel in Workshop > Models and inference.
   Sections:
   1. Status overview and feature description
   2. Model input + "Run Tuner" button (estimated time ~2-5 min)

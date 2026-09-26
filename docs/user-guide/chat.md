@@ -39,8 +39,8 @@ selected automatically based on query analysis:
   (Best-of-N, Weighted Vote, LLM Merge)
 - **Self-correction** -- iterative refinement loop
 
-The pipeline is shown in the response header. You can override it in
-Settings > Advanced > Pipelines.
+The pipeline is shown in the response header. The pipelines themselves
+are managed in the chat's **Pipelines** panel.
 
 
 ## Smart routing
@@ -87,7 +87,8 @@ auto-escalates to stronger models on repeated failures.
 
 Conversations are stored locally in SQLite (encrypted with SQLCipher
 when available). You can export and import conversations via the
-backup system (Settings > Advanced > Backup, or `oo backup` CLI).
+backup system (Workshop > Backup > Backup & restore, or the `oo backup`
+CLI).
 
 
 ## Conversation branches

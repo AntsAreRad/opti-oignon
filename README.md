@@ -80,7 +80,7 @@ See [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerab
 ```mermaid
 graph TB
     subgraph Frontend["Frontend -- SvelteKit + Tailwind"]
-        UI[Chat / Projects / Settings]
+        UI[Chats / Projects / Preferences / Workshop]
         WS[WebSocket client]
     end
 

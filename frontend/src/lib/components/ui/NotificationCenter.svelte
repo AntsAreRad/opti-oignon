@@ -1,9 +1,15 @@
 <!--
   NotificationCenter.svelte
-  Bell icon with unread count badge in the navbar.
+  Bell icon with unread count badge, in Preferences.
   Dropdown panel showing notification history with timestamps.
   Mark as read, mark all read, clear history actions.
   Uses --oo-* CSS variables exclusively.
+
+  Drawn to the surface rules: the panel on the second surface with its
+  edge and a shadow token, space rather than a line under its head, a wash
+  under the pointer; an unread entry says so by its weight (and in words to
+  a screen reader), not by a fill. Each kind of entry takes its ink from the
+  status tokens.
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
@@ -42,15 +48,6 @@
 		}
 	}
 
-	function typeColor(type: ToastType): string {
-		switch (type) {
-			case 'success': return 'var(--oo-success)';
-			case 'error': return 'var(--oo-error)';
-			case 'warning': return 'var(--oo-warning)';
-			default: return 'var(--oo-fg-muted)';
-		}
-	}
-
 	function formatTime(timestamp: number): string {
 		const now = Date.now();
 		const diff = now - timestamp;
@@ -78,7 +75,7 @@
 		aria-label="Notifications{$unreadCount > 0 ? `, ${$unreadCount} unread` : ''}"
 	>
 		<!-- Bell icon -->
-		<svg class="notif-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<svg class="notif-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
 			<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" />
 		</svg>
 		<!-- Unread badge -->
@@ -109,12 +106,14 @@
 				{:else}
 					{#each $notificationHistory as notif (notif.id)}
 						<div class="notif-item" class:notif-unread={!notif.read}>
-							<svg class="notif-item-icon" style="color: {typeColor(notif.type)};"
-								fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<svg class="notif-item-icon" data-type={notif.type}
+								fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
 								<path d={typeIcon(notif.type)} />
 							</svg>
 							<div class="notif-item-content">
-								<span class="notif-item-msg">{notif.message}</span>
+								<span class="notif-item-msg">
+									{notif.message}{#if !notif.read}<span class="oo-sr-only">{' (unread)'}</span>{/if}
+								</span>
 								<span class="notif-item-time">{formatTime(notif.timestamp)}</span>
 							</div>
 						</div>
@@ -137,36 +136,38 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		padding: 5px;
-		border-radius: 6px;
+		min-width: 36px;
+		min-height: 36px;
+		padding: var(--oo-space-2);
+		border-radius: var(--oo-radius-full);
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		color: var(--oo-fg-tertiary);
-		transition: background-color 0.15s ease, color 0.15s ease;
+		color: var(--oo-fg-secondary);
+		transition: background-color var(--oo-motion-fast) var(--oo-ease-default);
 	}
 
 	.notif-bell-btn:hover {
-		background-color: var(--oo-bg-elevated);
-		color: var(--oo-fg-secondary);
+		background-color: var(--oo-bg-hover);
+		color: var(--oo-fg-primary);
 	}
 
 	.notif-icon {
-		width: 16px;
-		height: 16px;
+		width: 18px;
+		height: 18px;
 	}
 
 	.notif-badge {
 		position: absolute;
-		top: -2px;
-		right: -4px;
+		top: 0;
+		right: 0;
 		min-width: 16px;
 		height: 16px;
 		padding: 0 4px;
-		border-radius: 8px;
+		border-radius: var(--oo-radius-full);
 		background-color: var(--oo-error);
 		color: var(--oo-fg-on-semantic);
-		font-size: 0.625rem;
+		font-size: var(--oo-text-2xs);
 		font-weight: 700;
 		display: flex;
 		align-items: center;
@@ -178,13 +179,13 @@
 		position: absolute;
 		top: calc(100% + 6px);
 		right: 0;
-		z-index: 50;
-		width: 320px;
+		z-index: var(--oo-z-overlay);
+		width: min(20rem, calc(100vw - 32px));
 		max-height: 400px;
-		border-radius: 10px;
-		background-color: var(--oo-bg-elevated);
-		border: 1px solid var(--oo-bd-subtle);
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		border-radius: var(--oo-radius-lg);
+		background-color: var(--oo-bg-overlay);
+		border: 1px solid var(--oo-edge);
+		box-shadow: var(--oo-shadow-md);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -194,64 +195,64 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 10px 14px;
-		border-bottom: 1px solid var(--oo-bd-subtle);
+		padding: var(--oo-space-3) var(--oo-space-4) var(--oo-space-2);
 	}
 
 	.notif-panel-title {
-		font-size: 0.8125rem;
+		font-size: var(--oo-text-sm);
 		font-weight: 600;
 		color: var(--oo-fg-primary);
 	}
 
 	.notif-panel-actions {
 		display: flex;
-		gap: 6px;
+		gap: var(--oo-space-2);
 	}
 
 	.notif-action-btn {
-		padding: 2px 8px;
-		border-radius: 4px;
+		min-height: 28px;
+		padding: 0 var(--oo-space-3);
+		border-radius: var(--oo-radius-full);
 		border: none;
 		background: transparent;
-		color: var(--oo-fg-muted);
-		font-size: 0.6875rem;
+		color: var(--oo-fg-secondary);
+		font-size: var(--oo-text-xs);
 		cursor: pointer;
-		transition: background-color 0.15s ease, color 0.15s ease;
 	}
 
 	.notif-action-btn:hover {
-		background-color: var(--oo-bg-overlay);
-		color: var(--oo-fg-secondary);
+		background-color: var(--oo-bg-hover);
+		color: var(--oo-fg-primary);
 	}
 
 	.notif-panel-list {
 		flex: 1;
 		overflow-y: auto;
-		padding: 4px 0;
+		padding: 0 var(--oo-space-1) var(--oo-space-2);
 	}
 
 	.notif-empty {
-		padding: 24px 14px;
+		padding: var(--oo-space-6) var(--oo-space-4);
 		text-align: center;
-		font-size: 0.8125rem;
-		color: var(--oo-fg-faint);
+		font-size: var(--oo-text-sm);
+		color: var(--oo-fg-muted);
 	}
 
 	.notif-item {
 		display: flex;
 		align-items: flex-start;
-		gap: 10px;
-		padding: 8px 14px;
-		transition: background-color 0.1s ease;
+		gap: var(--oo-space-3);
+		padding: var(--oo-space-2) var(--oo-space-3);
+		border-radius: var(--oo-radius-md);
 	}
 
 	.notif-item:hover {
-		background-color: var(--oo-bg-overlay);
+		background-color: var(--oo-bg-hover);
 	}
 
-	.notif-unread {
-		background-color: var(--oo-bg-overlay);
+	.notif-unread .notif-item-msg {
+		color: var(--oo-fg-primary);
+		font-weight: 600;
 	}
 
 	.notif-item-icon {
@@ -259,6 +260,16 @@
 		height: 14px;
 		flex-shrink: 0;
 		margin-top: 2px;
+		color: var(--oo-fg-muted);
+	}
+	.notif-item-icon[data-type='success'] {
+		color: var(--oo-success);
+	}
+	.notif-item-icon[data-type='error'] {
+		color: var(--oo-error);
+	}
+	.notif-item-icon[data-type='warning'] {
+		color: var(--oo-warning);
 	}
 
 	.notif-item-content {
@@ -270,14 +281,14 @@
 	}
 
 	.notif-item-msg {
-		font-size: 0.8125rem;
+		font-size: var(--oo-text-sm);
 		color: var(--oo-fg-secondary);
 		word-break: break-word;
-		line-height: 1.35;
+		line-height: var(--oo-leading-snug);
 	}
 
 	.notif-item-time {
-		font-size: 0.6875rem;
-		color: var(--oo-fg-faint);
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-muted);
 	}
 </style>

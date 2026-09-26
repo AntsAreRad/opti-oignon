@@ -51,7 +51,7 @@ See [Installation](getting-started/installation.md) for detailed instructions.
 ```mermaid
 graph TB
     subgraph Frontend["Frontend (SvelteKit + Tailwind)"]
-        UI[Chat UI / Settings / Benchmark]
+        UI[Chats / Preferences / Workshop]
     end
 
     subgraph Backend["Backend (FastAPI)"]

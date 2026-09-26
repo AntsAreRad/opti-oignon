@@ -71,10 +71,17 @@ src/
 
     chat/
       requestFields.ts  # The ChatRequest fields a message sends, and their two builders
+      chatsIndex.ts     # The chats index's requests (the search limit, the pages) and day groups
+    nav/
+      destinations.ts   # The destination table: every link the sidebar and the announcer draw
+      active.ts         # Which entry is the current page, which holds it as its section
+      space.ts          # Use or Workshop, and where switching between them goes
+      legacy.ts         # Where each address the interface used to serve now leads
     switches/
       serverSwitch.ts   # A server setting shown as the server confirmed it, never as asked
     settings/
-      catalog.ts        # Every settings section and group, and the old tab ids
+      catalog.ts        # Every settings group, where it lives (Preferences or a Workshop page), the old tab ids
+      search.ts         # The settings search: every group of both spaces, linked to the page holding it
 
     markdown/           # A reply's markdown as a closed node tree (no raw HTML)
       tree.ts           # marked's lexer (GFM, single newline = break) -> nodes, work bounded
@@ -107,6 +114,11 @@ src/
       chatOptions.ts    # Model, temperature, system prompt, preset selection
       notifications.ts  # Toast notification queue
       panels.ts         # Panel visibility (artifacts, code, memory, pipeline)
+      estop.ts          # The emergency stop's state, read by one poller
+      backendStatus.ts  # The inference backend's state, read once a minute while visible
+      approvals.ts      # Tool calls waiting on an approval, and the drawer's open state
+      exportDialog.ts   # The one export dialog, opened from anywhere
+      lastRoutes.ts     # The page last open in each space
 
     components/
       chat/             # Chat interface (10 components)
@@ -122,15 +134,17 @@ src/
         ExportDialog      # Modal: format selector, preview, download/copy
         MessageSkeleton   # Pulsing loading placeholder for messages
 
-      sidebar/          # Conversation sidebar (4 components)
-        ConversationList  # Scrollable list with search, skeleton loading
-        ConversationItem  # Single conversation row (rename, delete, export)
-        NewConversationButton  # Create new conversation
-        ConversationSkeleton   # Pulsing loading placeholder for sidebar
+      sidebar/
+        SecurityBadge     # The security grade, in the status card
 
-      layout/           # Layout shell (2 components)
-        AppShell          # Main layout: sidebar + content + panel
-        Sidebar           # Sidebar wrapper with toggle, theme button
+      layout/           # The one shell of both spaces
+        AppShell          # Sidebar (or its 72 px rail) and the page; the phone header and drawer
+        Sidebar           # New chat, search, the space's destinations, recent chats, Preferences
+        SpaceSwitch       # Use or Workshop, back to the page last open in that space
+        StatusCard        # The backend's state, the security grade, Stop all
+        StopAllButton     # The one emergency stop control
+        PhoneHeader       # On a phone: the drawer opener, the page title, Stop all
+        WorkshopBand      # The band over every Workshop page
 
       panels/           # Feature panels (6 components)
         ArtifactPanel     # Artifact viewer with version history
@@ -153,22 +167,21 @@ src/
         ErrorBoundary     # Error wrapper with retry button
 
   routes/
-    +layout.svelte      # Root layout: theme init, shortcuts, toasts
+    +layout.svelte      # Root layout: theme init, shortcuts, toasts, the route announcer
     +layout.ts          # SvelteKit layout config (SSR disabled)
-    +page.svelte        # Home redirect to /chat
-
-    chat/
-      +layout.svelte    # Chat layout: AppShell, header, export dialog
-      +page.svelte      # Empty state (no conversation selected)
-      [id]/+page.svelte # Active conversation: messages, input, panels
-
-    settings/
-      +layout.svelte    # Settings layout
-      +page.svelte      # Settings page: tabs for presets, general
-
-    health/
-      +layout.svelte    # Health layout
-      +page.svelte      # Health dashboard + cache manager
+    +page.ts            # "/" goes to the chats index, for now
+    (app)/+layout.svelte          # The shell, mounted once; approvals drawer; export dialog
+    (app)/(use)/                  # The Use space
+      chat/+page.svelte           # The chats index: search, pages, rename, export, delete
+      chat/+layout.svelte         # The chat frame and its side panels
+      chat/[id]/+page.svelte      # A conversation
+      notes/, projects/, preferences/
+    (app)/(workshop)/workshop/    # The Workshop space, compact, under its band
+      +page.svelte                # System status
+      [section]/+page.svelte      # A settings page: models, knowledge, extensions, ...
+      verify/, benchmarks/
+    settings/, health/, benchmark/, verify/, claims/, verify-answer/, verify-citations/
+                                  # Old addresses: a redirect in load to where they went
 ```
 
 
@@ -224,7 +237,7 @@ CSS animations (all in `app.css`):
 |------------------|-------------------------|
 | `Ctrl+N`         | New conversation        |
 | `Ctrl+Shift+E`   | Export conversation     |
-| `Ctrl+,`         | Open settings           |
+| `Ctrl+,`         | Open Preferences        |
 | `Ctrl+K`         | Focus search            |
 | `?`              | Show shortcuts help     |
 | `Escape`         | Close modal / panel     |

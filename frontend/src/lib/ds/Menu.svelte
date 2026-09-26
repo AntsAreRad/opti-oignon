@@ -2,7 +2,8 @@
   Menu.svelte (lib/ds) -- a button that opens a short list of actions.
 
   The trigger is a Button (a label, with a chevron) or, when an icon is
-  given, an IconButton named by the label; it says it opens a menu and
+  given, an IconButton named by the label, at the icon button's size (lg
+  is the phone's 44 px target); it says it opens a menu and
   whether the menu is open. The label is required: a missing or blank one
   refuses to render, as the icon button does. The list is a role=menu of
   role=menuitem buttons, placed beside the trigger by floating-ui, on the
@@ -29,13 +30,15 @@
 	import IconButton from './IconButton.svelte';
 	import Icon from './Icon.svelte';
 	import { menuKey, triggerKey } from './menuKeys';
-	import type { ButtonVariant, IconName, MenuItem, MenuPlacement } from './types';
+	import type { ButtonVariant, IconButtonSize, IconName, MenuItem, MenuPlacement } from './types';
 
 	/** The trigger's name: its visible text, or an icon trigger's accessible name. */
 	export let label: string;
 	export let items: MenuItem[] = [];
 	/** Draw the trigger as an icon alone. */
 	export let icon: IconName | undefined = undefined;
+	/** The icon trigger's size: md on a desktop, lg as a phone's target. */
+	export let size: IconButtonSize = 'md';
 	/** The labelled trigger's variant. */
 	export let variant: ButtonVariant = 'ghost';
 	export let placement: MenuPlacement = 'bottom-end';
@@ -142,6 +145,7 @@
 		<IconButton
 			{icon}
 			{label}
+			{size}
 			haspopup="menu"
 			expanded={open}
 			controls={open ? uid : undefined}

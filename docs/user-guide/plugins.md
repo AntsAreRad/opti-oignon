@@ -11,7 +11,7 @@ external services -- all while running in sandboxed subprocesses.
 
 ### From the marketplace
 
-1. Open **Settings > Plugins > Marketplace**
+1. Open **Workshop > Extensions > Marketplace**
 2. Browse available plugins or search by name
 3. Click **Install** on a plugin
 4. The plugin is downloaded, verified against the allowlist, and loaded
