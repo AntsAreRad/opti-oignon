@@ -95,6 +95,7 @@ VERBS = {
     "finish_sowing": _CS,
     "grant": _CS,
     "import": _CS,
+    "laws_apply": _CS,
     "resume": _CS,
     "revoke": _CS,
     "sow": _CS,
@@ -108,6 +109,9 @@ EXEMPT = ("clock", "genesis", "owner", "resumed", "tz")
 BUDGET_MAX = 4096
 MAX_INT = (1 << 53) - 1
 MINUTES_A_DAY = 1440
+# The last minute of life a fact may carry: two days short of the largest integer, so that the next local
+# midnight after it, and a law update's minute, stay in range.
+LAST_MINUTE = MAX_INT - 2 * MINUTES_A_DAY
 _PRODUCED_BY = {
     "claim": "written only by claim",
     "laws": "written only by the laws writer",
@@ -435,11 +439,14 @@ def admit(kind, body, *, transport, grant_ref, payload, now, single_user, owner,
 # The recorder: never backwards, never before birth
 # ---------------------------------------------------------------------------
 def recorder_wall(wall, birth_wall):
-    """Never before birth: a wall reading that is not an integer, or is before birth, is refused ``clock``."""
+    """Never before birth: a wall reading that is not an integer, is before birth, or is past the last minute
+    of life a fact may carry (``LAST_MINUTE``), is refused ``clock``."""
     if not _is_int(wall):
         raise MembraneRefused("clock", "unreadable")
     if wall < birth_wall:
         raise MembraneRefused("clock", "before birth")
+    if (wall - birth_wall) // 60 > LAST_MINUTE:
+        raise MembraneRefused("clock", "past the last minute of life a fact may carry")
     return wall
 
 

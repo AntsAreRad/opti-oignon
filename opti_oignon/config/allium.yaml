@@ -1,7 +1,7 @@
 # The componion (the companion onion)
 # ===================================
 # Off until the service that serves it is switched on. Nothing reads this
-# switch yet; the store below reads only the persistence section.
+# switch yet; the store below reads the persistence and life sections.
 enabled: false
 
 # Where each person's journal lives, and how a new one may be born.
@@ -17,3 +17,25 @@ persistence:
   require_encryption: true
   # How long a write waits for another writer before it is refused as busy.
   busy_timeout_ms: 5000
+
+# The proposal for a new being, frozen into its genesis at its birth. An edit
+# here reaches a living being only through a law update its owner applies; a
+# replay never reads it. A malformed value is refused by name where it is
+# used, never replaced by a default. The ranges are the law's own.
+laws:
+  seasons: {default_hemisphere: north, default_band: long}
+  weather: {mode: garden}
+  light: {sun_max: 65536}
+  soil: {evap_awake: 4096, evap_dormant: 1024, rain_gain: 65536}
+
+# Machine policy: it decides which caches are kept and when a clock set back
+# is noted, never what a being is. A replay never reads it. A malformed value
+# falls back to its default, and the fallback is logged.
+life:
+  # How many minutes behind the latest recorded minute the wall clock may
+  # read before the next write notes it with a clock fact (one per minute).
+  skew_note_min: 5
+  # The reducer states kept as caches, at local midnights: the last `daily`
+  # local days, the Mondays of the last `weekly` weeks, every first of a
+  # month when `monthly`, and the latest. Dropping them changes no view.
+  checkpoints: {daily: 14, weekly: 52, monthly: true}

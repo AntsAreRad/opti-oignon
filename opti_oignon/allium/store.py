@@ -9,8 +9,30 @@ configured and only in Daily mode, and never opened in Bulbe.
 Every dependency comes in through a seam of ``Store`` (the data directory,
 the settings, both connects, the probe, the cipher's availability, the
 anchor key, the audit log, the entropy source, the payload cipher, the
-clock, the mode) and the platform defaults are imported only when a seam is
-not given. Importing this module opens nothing.
+clock, the mode, the settings' ``laws`` and ``life`` sections, the local
+offset) and the platform defaults are imported only when a seam is not
+given. Importing this module opens nothing.
+
+A journaled write reads the wall clock and the local offset once. The
+recorder never moves a being backwards (a late write lands on the latest
+minute) and never before its birth; in the gesture's own transaction and
+before it, it records the offset when it differs from the one the law
+timeline has in force, and notes a clock set back by more than the life
+settings' skew, once per minute it lands on. Only offsets are recorded,
+never a zone's name. The same transaction drops the checkpoints from its
+minute on, which are caches. Every fact carries the law version in force at
+its minute, as the engine's law timeline gives it.
+
+Laws. A birth freezes the settings' proposal into the genesis, after the
+engine has lived the genesis's first minute in a dry run (a genesis it
+refuses is never written); after that the proposal moves nothing by itself.
+The laws writer (``evolution``) writes law updates and pins through the same
+journaled write, deciding inside its transaction; a gesture from the
+being's home device may carry, right after it, the law update to a carried
+stable successor of the law in force. Looking never writes one. A being
+whose law this engine does not carry under the digest, version and flag its
+genesis names is ``unavailable`` -- ``retired_prototype`` when it is a
+prototype whose law the register of retired laws names.
 
 A file is judged before it is trusted:
 
@@ -39,6 +61,11 @@ sealed inside), heard rows per season, and checkpoints of reducer states
 at random and lives only in its store; destroying one deletes its rows in the
 same transaction, then VACUUM runs and a cross-anchor records the
 destruction.
+
+Checkpoints are caches. A view reads them and writes nothing; ``settle``
+keeps states at the local midnights the life settings retain, and
+``checkpoint_prune`` drops the rest and every row of another engine in one
+transaction. Dropping every one of them changes no view.
 
 A refused store is refused the same way however often it is opened, and
 nothing is repaired behind the person's back: ``resume`` runs only when the
@@ -110,6 +137,10 @@ UNREADABLE = ("soil", "pages", "owner", "unsown", "local")
 HEARD_WORD_MAX = 24
 HEARD_DATA_MAX = 512
 LAWS_MAX = 65535
+# The widest local offset, in minutes either side of UTC.
+TZ_MAX = 840
+# The earliest wall clock a birth takes: the second day of 1970, so that every local day index is a day.
+WALL_MIN = 86400
 T_MAX = "SELECT MAX(f.t) FROM facts f JOIN links l ON l.eid = f.eid"
 ANCHOR_LABEL = b"opti-oignon-allium-anchor-v1"
 KEYID_LABEL = b"opti-oignon-allium-anchor-keyid-v1"
@@ -124,7 +155,7 @@ class StoreRefused(ValueError):
 
     CODES = ("path", "plaintext", "no_soil", "key", "cipher", "soil", "pages", "exists", "anchor_unwritten",
              "audit", "unanchored", "foreign", "unsown", "sealed", "busy", "divergence", "owner", "law", "local",
-             "unclaimed")
+             "unclaimed", "retired")
 
     def __init__(self, code, detail=""):
         if code not in self.CODES:
@@ -270,6 +301,20 @@ def _inflates_to(blob, canonical):
     return out == canonical and inflater.eof and not inflater.unused_data
 
 
+def _inflate(blob, limit):
+    """The bytes a kept blob inflates to, never more than ``limit`` of them; ``None`` when it holds no whole state."""
+    import zlib
+
+    try:
+        inflater = zlib.decompressobj()
+        out = inflater.decompress(bytes(blob), limit + 1)
+    except Exception:  # noqa: BLE001 - a blob that does not inflate holds no state
+        return None
+    if len(out) > limit or not inflater.eof or inflater.unused_data:
+        return None
+    return out
+
+
 def _envelopes(rows):
     from . import wire
 
@@ -277,6 +322,35 @@ def _envelopes(rows):
         envelope = {"being": being, "body": digest, "kind": kind, "laws": laws, "origin": origin,
                     "oseq": oseq, "t": t}
         yield envelope, (None if body is None else wire.parse(bytes(body)))
+
+
+# The linked facts as the engine takes them; the genesis (seq 0) sorts first, then canonical order.
+_FACTS = ("SELECT l.seq, l.eid, f.being, f.body_sha256, f.kind, f.laws, f.origin, f.oseq, f.t, b.body "
+          "FROM facts f JOIN links l ON l.eid = f.eid LEFT JOIN bodies b ON b.eid = l.eid ")
+_CANONICAL = " ORDER BY l.seq != 0, f.t, f.origin, f.oseq"
+
+
+def _law_facts(conn):
+    """``(genesis, facts)``: the genesis and the linked facts the law timeline folds, in canonical order.
+
+    The kinds are read through the ``facts_budget`` index, never by a scan of the whole trunk.
+    """
+    [genesis] = _ordered(conn.execute(_FACTS + "WHERE l.seq = 0").fetchall())
+    rows = conn.execute(_FACTS + "WHERE f.kind IN ('evolve', 'laws_pin', 'laws_unpin', 'tz') "
+                                 "ORDER BY f.t, f.origin, f.oseq").fetchall()
+    return genesis[2], [fact for _seq, _eid, fact in _ordered(rows)]
+
+
+def _ordered(rows):
+    """``[(seq, eid, fact)]``: each fact as the engine takes it, a redacted body as its digest."""
+    from . import wire
+
+    out = []
+    for seq, eid, being, digest, kind, laws, origin, oseq, t, body in rows:
+        fact = {"being": being, "body": digest if body is None else wire.parse(bytes(body)), "kind": kind,
+                "laws": laws, "origin": origin, "oseq": oseq, "t": t}
+        out.append((seq, eid, fact))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +630,12 @@ def _default_clock():
     return time.time_ns() // 1000000000
 
 
+def _default_tz(now):
+    import time
+
+    return time.localtime(now).tm_gmtoff // 60
+
+
 def _no_stage(name):
     return None
 
@@ -591,7 +671,17 @@ class Store:
 
     def __init__(self, *, single_user, data_dir=None, persistence=None, connect=None, plain_connect=None,
                  probe=None, cipher_available=None, anchor_secret=None, audit=None, audit_present=None,
-                 entropy=None, cipher=None, clock=None, mode=None, stage=None):
+                 entropy=None, cipher=None, clock=None, mode=None, stage=None, laws=None, life=None, tz=None):
+        """The seams after ``stage`` are the life's.
+
+        ``laws`` and ``life`` are the ``laws`` and ``life`` sections of the
+        settings file, injected like ``persistence`` (default: read from the
+        file); ``tz`` is a callable ``tz(now) -> minutes east of UTC``, read
+        once per journaled write beside the clock (default: the local time
+        zone's offset at ``now``). A ``tz`` reading that raises, is not an
+        integer, is not a whole quarter hour or is beyond 14 hours is
+        unknown, and an unknown offset records nothing.
+        """
         if not callable(single_user):
             raise TypeError("single_user is a callable: whether the platform runs for one person")
         from . import mode as modes
@@ -611,6 +701,9 @@ class Store:
         self._clock = clock if clock is not None else _default_clock
         self._mode = mode if mode is not None else modes.live_mode
         self._stage = stage if stage is not None else _no_stage
+        self._laws = laws
+        self._life = life
+        self._tz = tz if tz is not None else _default_tz
         self._lock = threading.RLock()
         self._keys = None
         self._beings = {}
@@ -633,6 +726,31 @@ class Store:
             return self._clock()
         except Exception:  # noqa: BLE001 - refused where the reading is used
             return None
+
+    def _read_tz(self, now):
+        """The offset the ``tz`` seam reads at ``now``, in minutes; ``None`` when it is not one."""
+        try:
+            value = self._tz(now)
+        except Exception:  # noqa: BLE001 - an offset that cannot be read is unknown
+            return None
+        if not _is_int(value) or value % 15 != 0 or not -TZ_MAX <= value <= TZ_MAX:
+            return None
+        return value
+
+    def _life_settings(self):
+        from . import settings
+
+        if self._life is not None:
+            return settings.normalise_life(self._life)
+        return settings.life()
+
+    def _laws_settings(self):
+        """The proposal for a new being, read raw (``settings.laws``); judged where it is used."""
+        from . import settings
+
+        if self._laws is not None:
+            return settings.normalise_laws(self._laws)
+        return settings.laws()
 
     def _single_user_now(self):
         try:
@@ -1154,13 +1272,17 @@ class Store:
             return _status("unreadable", reason=refusal.reason, detail=str(refusal), hints=hints,
                            offer=offer), None, refusal
         except StoreRefused as refusal:
+            labels = ()
             if refusal.code in UNREADABLE:
                 name = "unreadable"
             elif refusal.code == "sealed":
                 name = "sealed_bulbe"
+            elif refusal.code == "retired":
+                # A prototype whose law was retired: said as such, with its label, never as a missing store.
+                name, labels = "retired_prototype", ("prototype",)
             else:
                 name = "unavailable"
-            return _status(name, reason=refusal.code, detail=str(refusal), hints=hints), None, refusal
+            return _status(name, labels=labels, reason=refusal.code, detail=str(refusal), hints=hints), None, refusal
         labels = []
         hints = list(hints)
         if soil == "glass":
@@ -1356,9 +1478,14 @@ class Store:
             cause += "; with no key configured, persistence.require_encryption: false would allow a glass jar"
         return cause
 
-    def _plant(self, temp, *, soil, tag, pin, wall, tz_minutes, rhythm_consent, sowing, mode, settings):
-        """Steps 9 to 12: the file, its schema and probe, the draws, the genesis, the seed anchor."""
-        from . import anchors, membrane
+    def _plant(self, temp, *, soil, tag, pin, wall, tz_minutes, rhythm_consent, sowing, params, mode, settings):
+        """Steps 9 to 12: the file, its schema and probe, the draws, the genesis and its dry run, the seed anchor.
+
+        The engine lives the genesis's first minute before it is written: a
+        genesis the engine refuses is never written, and its draws are
+        discarded with the file.
+        """
+        from . import anchors, evolution, membrane
 
         flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
@@ -1388,8 +1515,8 @@ class Store:
                 "birth": {"tz": tz_minutes, "wall": wall},
                 "derive": 1,
                 "hemisphere": sowing["hemisphere"],
-                "laws": {"name": pin["name"], "params": {name: spec["default"] for name, spec in pin["params"].items()},
-                         "provisional": pin["provisional"], "sha256": pin["sha256"], "v": pin["version"]},
+                "laws": {"name": pin["name"], "params": dict(params), "provisional": pin["provisional"],
+                         "sha256": pin["sha256"], "v": pin["version"]},
                 "owner": tag,
                 "rhythm_consent": rhythm_consent,
                 "seed": seed,
@@ -1397,6 +1524,8 @@ class Store:
                 "weather": sowing["weather"],
             }
             membrane.check_body(pin["table"]["kinds"]["genesis"]["body"], genesis)
+            evolution.dry_run({"being": being, "body": genesis, "kind": "genesis", "laws": pin["version"],
+                               "origin": origin, "oseq": 0, "t": 0})
             _guarded(conn, lambda: self._write_genesis(conn, soil=soil, tag=tag, being=being, origin=origin,
                                                        secret=secret, genesis=genesis, laws=pin["version"],
                                                        key_id=key_id, anchor_key=anchor_key))
@@ -1478,9 +1607,15 @@ class Store:
         and the store is never linked into place before its birth is anchored.
 
         ``hemisphere``, ``band`` and ``weather`` are the being's identity,
-        frozen into its genesis with the law's default params; a missing one
-        reads north, long and garden.
+        frozen into its genesis with the params of the proposal (the
+        ``laws`` seam, or the settings file): a field named here wins, then
+        the proposal's, then north, long and garden. A sowing field that is
+        not one of the genesis's symbols is refused ``LawsRefused("sowing")``,
+        a param outside the law's range ``LawsRefused("params")``, both by
+        name; a genesis the engine's dry run refuses is never written
+        (``LawsRefused("law")`` for a law it cannot live).
         """
+        from . import evolution
         from .membrane import MembraneRefused, law_pin
 
         with self._lock:
@@ -1491,15 +1626,13 @@ class Store:
                 raise MembraneRefused("clock", "the time zone is whole quarter hours within 14 hours of UTC")
             if not _is_int(wall) or not 0 <= wall <= MAX_INT:
                 raise MembraneRefused("clock", "unreadable")
+            if wall < WALL_MIN:
+                raise MembraneRefused("clock", "a birth needs a wall clock from the second day of 1970 on")
             if not isinstance(rhythm_consent, bool):
                 raise MembraneRefused("body", "body rhythm_consent bool")
-            sowing = {"band": "long" if band is None else band,
-                      "hemisphere": "north" if hemisphere is None else hemisphere,
-                      "weather": "garden" if weather is None else weather}
-            genesis_schema = pin["table"]["kinds"]["genesis"]["body"]
-            for field in sorted(sowing):
-                if not isinstance(sowing[field], str) or sowing[field] not in genesis_schema[field]["of"]:
-                    raise MembraneRefused("body", f"body {field} symbol")
+            raw = self._laws_settings()
+            sowing = evolution.sowing(pin, raw, hemisphere=hemisphere, band=band, weather=weather)
+            params = evolution.proposal(pin, raw)
             settings = self._settings()
             soil = self._choose_soil(mode, settings)
             _root, directory = self._directory()
@@ -1514,7 +1647,8 @@ class Store:
                 temp = store_file(directory, tag, "sowing_" + soil)
                 final = store_file(directory, tag, soil)
                 self._plant(temp, soil=soil, tag=tag, pin=pin, wall=wall, tz_minutes=tz_minutes,
-                            rhythm_consent=rhythm_consent, sowing=sowing, mode=mode, settings=settings)
+                            rhythm_consent=rhythm_consent, sowing=sowing, params=params, mode=mode,
+                            settings=settings)
                 self._link(temp, final)
             finally:
                 self._release_lock(handle)
@@ -1641,7 +1775,7 @@ class Store:
 
     def _resume_in(self, conn, *, refusal, tag, soil, genesis, pin, found, wall):
         """The resume transaction; what the cross-anchor after it needs."""
-        from . import anchors, chain, membrane, wire
+        from . import anchors, chain, evolution, membrane, wire
 
         meta = _read_meta(conn)
         if meta.get("gen") != refusal.gen:
@@ -1679,7 +1813,9 @@ class Store:
         removed = done["removed"]
         body = {"digest": hashlib.sha256(wire.emit(removed)).hexdigest(), "removed": len(removed)}
         membrane.check_body(pin["table"]["kinds"]["resumed"]["body"], body)
-        laws = genesis["laws"]["v"]
+        # The law in force at the resume's minute, as the engine's timeline gives it over the facts kept.
+        kept, law_facts = _law_facts(conn)
+        laws = evolution.timeline_of(kept, law_facts, t).state["law"]["v"]
         # Past every event anything names, so an anchor inside the gap is satisfied by this resume.
         _eid, seq, link = _insert_fact(conn, being=meta["being"], origin=origin, oseq=oseq, t=t, kind="resumed",
                                        body=body, laws=laws, head=(refusal.through, prev))
@@ -1773,9 +1909,30 @@ class BeingStore:
     def _put(self, conn, key, value):
         _put(conn, key, value)
 
-    def _insert_fact(self, conn, *, origin, oseq, t, kind, body, head):
+    def _insert_fact(self, conn, *, origin, oseq, t, kind, body, head, laws=None):
+        """A fact's rows and link; its envelope ``laws`` is the law in force at ``t`` unless one is given."""
+        if laws is None:
+            from . import evolution
+
+            laws = evolution.timeline_at(self, t, conn=conn).state["law"]["v"]
         return _insert_fact(conn, being=self.being, origin=origin, oseq=oseq, t=t, kind=kind, body=body,
-                            laws=self.laws, head=head)
+                            laws=laws, head=head)
+
+    def _day_count(self, conn, kind, day):
+        """How many facts of ``kind`` the trunk holds on day of life ``day``, every device's merged."""
+        from . import membrane
+
+        low = day * membrane.MINUTES_A_DAY
+        return conn.execute("SELECT COUNT(*) FROM facts WHERE kind = ? AND t >= ? AND t < ?",
+                            (kind, low, low + membrane.MINUTES_A_DAY)).fetchone()[0]
+
+    def _in_order(self, conn):
+        """``in_order`` on a connection the caller holds."""
+        return _ordered(conn.execute(_FACTS + _CANONICAL).fetchall())
+
+    def _law_facts(self, conn):
+        """``(genesis, facts)``: the genesis and the linked facts the law timeline folds (``_law_facts``)."""
+        return _law_facts(conn)
 
     def _rewrite_anchor(self, conn, gen):
         key_id, anchor_key, _seal = self._store._soil_keys(self.soil)
@@ -1801,66 +1958,188 @@ class BeingStore:
 
     def append(self, kind, body, *, transport, grant_ref=None, payload=None):
         """Journal one fact through the membrane: ``Appended``, ``Dropped("budget")``, or a named refusal."""
+        return self._journal(kind, body, transport=transport, grant_ref=grant_ref, payload=payload,
+                             producer="membrane")
+
+    def _own(self, transport, now):
+        """The account behind ``transport`` owns this being, or the verb is refused ``owner``."""
+        from . import anchors, membrane
+
+        if anchors.owner_tag(membrane.actor_of(transport, self._store._single_user_now(), now)) != self.owner:
+            raise membrane.MembraneRefused("owner", "this account does not own this being")
+
+    def _journal(self, kind, body, *, transport, grant_ref, payload, producer, plan=None, verb=None):
+        """One journaled write: the membrane's checks, the clock and the offset read once, one transaction.
+
+        ``producer`` is who writes (the membrane for a gesture, the laws
+        writer for its kinds); the kinds table names the producer of each
+        kind, and ``admit`` refuses another. ``plan(timeline)`` is the laws
+        writer's decision, taken inside the transaction on the timeline at
+        the write's minute: it returns the body, or refuses. A write named
+        by a ``verb`` (a law update) passes the verb's surface and owner
+        checks before the mode gate, and is admitted once its body is known.
+        """
         from . import membrane
 
         store = self._store
         with store._lock:
-            self._gate()
+            if verb is not None:
+                now = store._read_clock()
+                membrane.permit(verb, transport, now)
+                self._gate()
+                self._own(transport, now)
+            else:
+                self._gate()
+                now = store._read_clock()
             self._live()
-            now = store._read_clock()
-            entry = membrane.admit(kind, body, transport=transport, grant_ref=grant_ref, payload=payload, now=now,
-                                   single_user=store._single_user_now(), owner=self.owner,
-                                   table=self._verified.pin["table"])
+
+            def admit(written):
+                membrane.admit(kind, written, transport=transport, grant_ref=grant_ref, payload=payload, now=now,
+                               single_user=store._single_user_now(), owner=self.owner,
+                               table=self._verified.pin["table"], producer=producer)
+
+            if body is not None:
+                admit(body)
             wall = membrane.recorder_wall(now, self.birth_wall)
+            reading = {"offset": store._read_tz(now), "producer": producer,
+                       "skew": store._life_settings()["skew_note_min"],
+                       "surface": membrane.surface_of(transport, now), "wall": wall}
             seal = store._cipher_pair()[0] if payload is not None else None
             self._tighten()
-            outcome, after = self._write(lambda conn: self._append_in(conn, kind, entry, body, payload, wall, seal))
+            late = admit if body is None else None
+            outcome, after = self._write(lambda conn: self._journal_in(conn, kind, body, payload, reading, seal,
+                                                                       plan=plan, admit=late))
             self._after(after)
             return outcome
 
-    def _append_in(self, conn, kind, entry, body, payload, wall, seal):
-        from . import membrane
+    def _recorded(self, conn, t, t_max, reading, oseq):
+        """What the recorder writes before a fact at ``t``, and the law timeline there, read before any insert.
+
+        ``(facts, in_force, planned)``: the recorder's facts, ``[(kind, body)]``;
+        the timeline at ``t``; and ``planned()``, the timeline with this
+        transaction's offset fact folded in. Both timelines are read here,
+        before the transaction inserts anything, so a planned fact is never
+        folded twice. An offset fact is written only when it is the one the
+        minute ends with once folded: one another device landed at ``t``,
+        from an origin that sorts after this device's, ends the minute
+        whatever this device writes there, and the reading waits for the
+        next minute.
+        """
+        from . import evolution
+
+        in_force = evolution.timeline_at(self, t, conn=conn)
+        line = in_force
+        facts = []
+        offset = reading["offset"]
+        if offset is not None and offset != in_force.state["tz"]:
+            body = {"quarters": offset // 15}
+            moved = {"being": self.being, "body": body, "kind": "tz", "laws": in_force.state["law"]["v"],
+                     "origin": self.origin, "oseq": oseq, "t": t}
+            folded = evolution.timeline_at(self, t, planned=(moved,), conn=conn)
+            if folded.state["tz"] == offset:
+                facts.append(("tz", body))
+                line = folded
+        behind = 0 if t_max is None else t_max - (reading["wall"] - self.birth_wall) // 60
+        if behind > reading["skew"] and conn.execute("SELECT 1 FROM facts WHERE kind = 'clock' AND t = ? LIMIT 1",
+                                                     (t,)).fetchone() is None:
+            facts.append(("clock", {"behind": behind}))
+        return facts, in_force, lambda: line
+
+    def _journal_in(self, conn, kind, body, payload, reading, seal, plan=None, admit=None):
+        """The transaction of a journaled write, in its order; ``(outcome, what the commit's aftermath needs)``.
+
+        The head and the minute (never backwards) come first. A laws
+        writer's decision follows, on the timeline at the write's minute with
+        the recorder's offset fact planned; its refusal writes nothing. Then
+        the day's budget: a write the budget drops writes nothing else. Then
+        the recorder's facts, before the fact and at its minute:
+
+        * ``tz {"quarters"}`` when the offset read at ``now`` is known and
+          differs from the one the law timeline has in force at that minute
+          (a landed ``tz`` fact counts; an unknown reading keeps the offset),
+          and folding it makes it the offset that minute ends with;
+        * ``clock {"behind"}`` when the wall reads more than ``skew_note_min``
+          minutes behind the latest recorded minute -- the minute the write
+          then lands on -- and no ``clock`` fact has that minute yet: one scar
+          per set-back, never one for a jump forward.
+
+        Then the fact, and after a gesture the law update it carries, when
+        one is due (``evolution.automatic``). They take consecutive ``oseq``
+        and links -- ``tz``, ``clock``, the fact, the law update -- and each
+        carries the law in force at its minute, as the engine's law timeline
+        gives it. Last, the checkpoints from the write's minute on are
+        dropped: a state kept there would stand before a fact of its own
+        minute.
+        """
+        from . import evolution, membrane
 
         store = self._store
         store._stage("head")
         head = _head(conn)
+        base = head[0]
         t_max = conn.execute(T_MAX).fetchone()[0]
         meta = _read_meta(conn)
-        t = membrane.recorder_t(wall, self.birth_wall, t_max)
+        t = membrane.recorder_t(reading["wall"], self.birth_wall, t_max)
         day = membrane.day_of(t)
-        low = day * membrane.MINUTES_A_DAY
-        count = conn.execute("SELECT COUNT(*) FROM facts WHERE kind = ? AND t >= ? AND t < ?",
-                             (kind, low, low + membrane.MINUTES_A_DAY)).fetchone()[0]
+        name = "oseq_next:" + self.origin
+        oseq = meta[name]
         gen = meta["gen"] + 1
-        if count >= self._verified.pin["budgets"][kind]:
+        recorded = None
+        if plan is not None:
+            recorded = self._recorded(conn, t, t_max, reading, oseq)
+            body = plan(recorded[2]())
+            if admit is not None:
+                admit(body)
+        if self._day_count(conn, kind, day) >= self._verified.pin["budgets"][kind]:
             conn.execute("INSERT INTO overflow (day, kind, dropped) VALUES (?, ?, 1) "
                          "ON CONFLICT (day, kind) DO UPDATE SET dropped = dropped + 1", (day, kind))
             _put(conn, "gen", gen)
             self._rewrite_anchor(conn, gen)
             return membrane.Dropped("budget"), self._after_info(conn, meta, day, t, gen, False)
-        name = "oseq_next:" + self.origin
-        oseq = meta[name]
+        if recorded is None:
+            recorded = self._recorded(conn, t, t_max, reading, oseq)
+        facts, in_force, planned = recorded
+        laws = in_force.state["law"]["v"]
+        kinds = self._verified.pin["table"]["kinds"]
+        for recorded_kind, recorded_body in facts:
+            membrane.check_body(kinds[recorded_kind]["body"], recorded_body)
+            _eid, seq, link = self._insert_fact(conn, origin=self.origin, oseq=oseq, t=t, kind=recorded_kind,
+                                                body=recorded_body, head=head, laws=laws)
+            head = (seq, link)
+            oseq += 1
         written = dict(body)
         ref = key = None
         if payload is not None:
             ref = store._draw(16).hex()
             key = store._draw(32)
             written["payload"] = ref
-        eid, seq, _link = self._insert_fact(conn, origin=self.origin, oseq=oseq, t=t, kind=kind, body=written,
-                                            head=head)
+        eid, seq, link = self._insert_fact(conn, origin=self.origin, oseq=oseq, t=t, kind=kind, body=written,
+                                           head=head, laws=laws)
         if payload is not None:
             sealed = bytes(seal(key, bytes.fromhex(ref) + payload.encode("ascii")))
             conn.execute("INSERT INTO keys (name, key) VALUES (?, ?)", ("payload:" + ref, key))
             conn.execute("INSERT INTO payloads (ref, eid, ct) VALUES (?, ?, ?)", (ref, eid, sealed))
+        outcome = membrane.Appended(eid, seq, oseq, t)
+        oseq += 1
+        evolved = [written["to"]["v"]] if kind == "evolve" else []
+        if reading["producer"] == "membrane":
+            update = evolution.automatic(self, conn, t, in_force, reading["surface"], planned)
+            if update is not None:
+                membrane.check_body(kinds["evolve"]["body"], update)
+                self._insert_fact(conn, origin=self.origin, oseq=oseq, t=t, kind="evolve", body=update,
+                                  head=(seq, link), laws=laws)
+                evolved.append(update["to"]["v"])
+                oseq += 1
         destruction = self._side_effect(conn, kind, written, eid, meta)
-        _put(conn, name, oseq + 1)
+        conn.execute("DELETE FROM checkpoints WHERE t >= ?", (t,))
+        _put(conn, name, oseq)
         _put(conn, "gen", gen)
         if destruction is not None:
             _put(conn, "cross_pending", list(meta.get("cross_pending", [])) + [destruction])
             _put(conn, "vacuum_owed", 1)
         self._rewrite_anchor(conn, gen)
-        outcome = membrane.Appended(eid, seq, oseq, t)
-        return outcome, self._after_info(conn, meta, day, t, gen, destruction is not None)
+        return outcome, self._after_info(conn, meta, day, t, gen, destruction is not None, base=base,
+                                         evolved=evolved)
 
     def _side_effect(self, conn, kind, body, eid, meta):
         """What a forget destroys, inside its own transaction; ``None`` for every other kind."""
@@ -1878,12 +2157,17 @@ class BeingStore:
             return {"destroyed": done["destroyed"], "ended": ended, "forgot": [], "rhythm_floor": done["rhythm_floor"]}
         return None
 
-    def _after_info(self, conn, before, day, t, gen, destroyed):
+    def _after_info(self, conn, before, day, t, gen, destroyed, base=None, evolved=()):
+        """What the aftermath of a commit needs; ``base`` is the head seq the transaction wrote after, if it wrote.
+
+        ``evolved`` are the law versions the transaction's ``evolve`` facts go to.
+        """
         head_seq, head_link = _head(conn)
         after = _read_meta(conn)
-        return {"cross": before.get("cross"), "day": day, "destroyed": destroyed,
-                "ended": after.get("heard_ended", []), "floor": after.get("rhythm_floor", 0), "gen": gen,
-                "head": head_link, "pending": after.get("cross_pending", []), "seq": head_seq, "t": t,
+        return {"base": base, "cross": before.get("cross"), "day": day, "destroyed": destroyed,
+                "ended": after.get("heard_ended", []), "evolved": list(evolved),
+                "floor": after.get("rhythm_floor", 0), "gen": gen, "head": head_link,
+                "pending": after.get("cross_pending", []), "seq": head_seq, "t": t,
                 "vacuum_owed": after.get("vacuum_owed", 0)}
 
     # -- the local layers, outside the journal -------------------------------
@@ -2070,13 +2354,103 @@ class BeingStore:
         owed = self._bump(conn, _read_meta(conn)) if inserted else None
         return Checkpoint(self.being, t, engine, laws, through, state_hash, bytes(row[1])), owed
 
+    def _checkpoint_rows(self, conn, upto):
+        """This engine's checkpoints at or before minute ``upto``, latest first: ``(t, laws, through, hash, blob)``."""
+        return conn.execute("SELECT t, laws, through, state_hash, blob FROM checkpoints WHERE being = ? AND engine = ? "
+                            "AND t <= ? ORDER BY t DESC, laws DESC, through DESC",
+                            (self.being, _engine_id(), upto)).fetchall()
+
+    def checkpoint_prune(self, keep=()):
+        """Drop every checkpoint but the ones ``keep`` names, in one transaction; the number of rows dropped.
+
+        ``keep`` maps a minute to the event its checkpoint runs through; an
+        empty one drops them all. A row of another engine always goes, and so
+        does a row at a kept minute that runs through another event (a fact
+        landed since made it stale). The generation moves and the anchor is
+        rewritten only when a row goes; checkpoints are caches, so a view
+        shows the same after a prune as before it.
+        """
+        try:
+            kept = dict(keep)
+        except (TypeError, ValueError):
+            raise StoreRefused("local", "the checkpoints to keep map minutes to events") from None
+        for t, through in kept.items():
+            if not _is_int(t) or not 0 <= t <= MAX_INT or not _is_hex(through, 64):
+                raise StoreRefused("local", "a checkpoint to keep is a minute and the event it runs through")
+        store = self._store
+        with store._lock:
+            self._gate()
+            self._live()
+            engine = _engine_id()
+            self._tighten()
+            dropped, owed = self._write(lambda conn: self._prune_in(conn, engine, kept))
+            self._after_local(owed)
+            return dropped
+
+    def _prune_in(self, conn, engine, kept):
+        rows = conn.execute("SELECT being, t, engine, laws, through FROM checkpoints").fetchall()
+        doomed = [row for row in rows if row[0] != self.being or row[2] != engine or kept.get(row[1]) != row[4]]
+        for row in doomed:
+            conn.execute("DELETE FROM checkpoints WHERE being = ? AND t = ? AND engine = ? AND laws = ? AND through = ?",
+                         tuple(row))
+        if not doomed:
+            return 0, None
+        return len(doomed), self._bump(conn, _read_meta(conn))
+
+    def _checkpoint_drop(self, rows):
+        """Drop these checkpoints of this engine, ``[(t, laws, through, state_hash)]``, in one transaction.
+
+        A settle drops the rows a fact landed before their event made stale
+        (``life.start_point``): such a row still names the event it runs
+        through, so the true state kept at its minute would meet it under
+        the same key. Only a row that still holds the named state goes. The
+        number of rows dropped.
+        """
+        store = self._store
+        with store._lock:
+            self._gate()
+            self._live()
+            engine = _engine_id()
+            self._tighten()
+            dropped, owed = self._write(lambda conn: self._drop_in(conn, engine, rows))
+            self._after_local(owed)
+            return dropped
+
+    def _drop_in(self, conn, engine, rows):
+        dropped = 0
+        for t, laws, through, state_hash in rows:
+            dropped += conn.execute("DELETE FROM checkpoints WHERE being = ? AND t = ? AND engine = ? AND laws = ? "
+                                    "AND through = ? AND state_hash = ?",
+                                    (self.being, t, engine, laws, through, state_hash)).rowcount
+        if not dropped:
+            return 0, None
+        return dropped, self._bump(conn, _read_meta(conn))
+
+    def settle(self, budget=None):
+        """Keep the reducer's states at the local midnights the retention keeps, and drop the rest (``life.settle``).
+
+        A producer of caches, never of facts: it writes checkpoints and no
+        fact, meta of its own or anchor beyond what each checkpoint write
+        takes. ``budget`` bounds the engine's work.
+        """
+        from . import life
+
+        return life.settle(self, budget=budget)
+
     # -- after the commit ----------------------------------------------------
 
     def _after(self, info):
         """VACUUM after a destruction (or when owed), then a cross-anchor when one is due."""
         verified = self._verified
-        if info["seq"] == verified.head + 1:
+        # One transaction may write several facts (the recorder's before a gesture, a law update after it):
+        # the verified head moves only when that transaction wrote right after it, never over rows another
+        # process wrote, and the law versions its evolve facts go to join the ones a fact may carry, since
+        # the next verification reads only what is above that head.
+        if info.get("base") == verified.head and info["seq"] > verified.head:
             verified.head, verified.head_link, verified.head_t = info["seq"], info["head"], info["t"]
+            for version in info.get("evolved", ()):
+                if version not in verified.versions:
+                    verified.versions.append(version)
         if info["destroyed"] or info["vacuum_owed"] == 1:
             self._vacuum()
         cross = info["cross"] if isinstance(info["cross"], dict) else {}
@@ -2124,6 +2498,58 @@ class BeingStore:
                 "SELECT f.being, f.body_sha256, f.kind, f.laws, f.origin, f.oseq, f.t, b.body FROM links l "
                 "JOIN facts f ON f.eid = l.eid LEFT JOIN bodies b ON b.eid = l.eid ORDER BY l.seq").fetchall())
         return _envelopes(rows)
+
+    def in_order(self):
+        """``[(seq, eid, fact)]``: the genesis first, then every other linked fact in canonical order.
+
+        Canonical order is ``(t, origin, oseq)``, text compared byte by byte
+        as the engine compares it; a fact landed at minute 0 from an origin
+        that sorts below the genesis's still comes after the genesis. Each
+        fact is as the engine takes it, a redacted body as its digest. Read
+        from the facts, the bodies and the links alone; nothing is written.
+        """
+        with self._store._lock:
+            self._gate()
+            conn = self._live()
+            return _guarded(conn, lambda: self._in_order(conn))
+
+    def view(self, to=None, cap=None):
+        """The being at minute ``to`` (default: the recorder's minute of now); nothing is written (``life.view``)."""
+        from . import life
+
+        return life.view(self, to=to, cap=cap)
+
+    # -- laws ----------------------------------------------------------------
+
+    def law_state(self, to=None):
+        """The laws in force at minute ``to`` (default: a view's), with the label; nothing is written."""
+        from . import evolution
+
+        return evolution.law_state(self, to=to)
+
+    def laws_diff(self, to=None):
+        """What a law update from the settings' proposal would change, and its confirmation; nothing is written."""
+        from . import evolution
+
+        return evolution.diff(self, to=to)
+
+    def laws_apply(self, transport, confirm):
+        """Write the law update the diff confirmed (``evolution.apply``); refused by name otherwise."""
+        from . import evolution
+
+        return evolution.apply(self, transport, confirm)
+
+    def laws_pin(self, transport):
+        """Pin the law and params in force (``evolution.pin``)."""
+        from . import evolution
+
+        return evolution.pin(self, transport)
+
+    def laws_unpin(self, transport):
+        """Lift the pin (``evolution.unpin``)."""
+        from . import evolution
+
+        return evolution.unpin(self, transport)
 
     def verify(self):
         """Verify the whole chain again from genesis; nothing is written, and a refusal closes this being."""

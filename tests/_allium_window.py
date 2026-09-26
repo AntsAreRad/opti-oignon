@@ -25,8 +25,9 @@ LIFE_REF = ("civil", "lawdata")
 # The life's organs under ``ref/organs/``, after them: the weather first, which the soil reads.
 LIFE_ORGANS = ("weather", "clock", "chem", "soil", "stage")
 PACKAGES = ("opti_oignon.allium", "opti_oignon.allium.ref", "opti_oignon.allium.ref.organs")
-# The platform modules, in the order they load: each may name the ones before it.
-PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store")
+# The platform modules, in the order they load: each may name the ones before it. The life's two
+# (the law timeline and the views) come last.
+PLATFORM = ("settings", "mode", "chain", "membrane", "anchors", "store", "evolution", "life")
 
 
 def open_allium(*, native=True, seeded=None, blocked=(), platform=False, extra=None):

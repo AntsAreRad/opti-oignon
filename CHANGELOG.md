@@ -11,6 +11,65 @@ package costs.
 
 ### Added
 
+- The componion's life on the platform: the store now lives a being in
+  time. Each journaled write reads the wall clock and the machine's UTC
+  offset once; a late write lands on the latest recorded minute, a clock
+  set back by more than `life.skew_note_min` is noted once with a `clock`
+  fact, and an offset that differs from the one in force is recorded as a
+  `tz` fact in quarter hours, never a zone's name (unless an offset another
+  device recorded at that minute ends it: the reading then waits for the
+  next minute); a wall past the last minute a fact may carry is refused
+  like one before birth. Both go before the
+  gesture, in its own transaction, and every fact carries the law version
+  the engine's law timeline has in force at its minute. A view writes
+  nothing -- no fact, checkpoint, meta or anchor: it reads the facts in
+  canonical order, the genesis first, then asks the engine outside the
+  store's lock, packed under the engine's input limit without ever
+  splitting a minute; a view whose budget of work does not get there
+  serves a stored state labelled `catching_up`, with an estimate of the
+  work still owed, never a partial one. `settle` keeps states at the local
+  midnights the new `life:` section retains (the last 14 local days, the
+  Mondays of the last 52 weeks, every first of a month, the latest) and
+  drops the rest and every row of another engine; a gesture drops the
+  checkpoints from its minute on, and a checkpoint a later-landed fact made
+  stale is skipped by a view, never repaired, and replaced by the next
+  settle, so dropping every checkpoint changes no view; one whose bytes do
+  not hold the state it names is refused `divergence`. The engine never
+  runs under the store's lock for a view, `law_state`, `laws_diff` or a
+  settle. Advancing the clock buys nothing: a clock jumped forward and an
+  honest absence give the same facts and the same state, in the garden and
+  on the windowsill. The new `laws:` section of `config/allium.yaml` is the
+  proposal a birth freezes into the genesis (four params, the hemisphere,
+  the day-length band, the weather); a malformed value is refused by name
+  where it is used, the engine lives the genesis's first minute before it
+  is written (a genesis it refuses is never written), and a wall clock
+  before the second day of 1970 is refused. After the birth the proposal
+  moves nothing by itself: `laws_diff` shows what it would change and a
+  confirmation, `laws_apply` writes the law update the confirmation names
+  (refused `pinned`, `params`, `nothing` or `confirm` by name, and
+  extending a pending update rather than cancelling it), `laws_pin` and
+  `laws_unpin` hold and release the law and params in force, and
+  `law_state` says what is in force; a gesture on the being's home device
+  writes the update to a carried stable successor of its law, with the
+  params in force (or those of an update the owner confirmed that is still
+  pending, which it extends), at the next local midnight of the offset its
+  own write records, within the day's budget of law updates, and a view
+  never does. A generic append of the law
+  kinds is refused `producer`. Law identity is a name and a digest: a
+  being whose law is not carried under the digest, version and provisional
+  flag its genesis names -- a law file edited in place included -- reads
+  `unavailable`, a prototype whose law the register of retired laws names
+  reads `retired_prototype`, and a fact may carry only the genesis's law
+  version or one an `evolve` in the trunk goes to. Every form a prototype
+  being is served in carries the `prototype` label. Fifteen contracts; the
+  stable laws that exercise law updates are injected in the reference only,
+  since both carried laws are prototypes. The latencies on a real keyed
+  store (the sowing dry run, the law timeline per write, a view after a
+  month away, a settle over a year, retention on a store months old) and
+  the machine's real UTC offset across a daylight-saving change and during
+  travel are owed to the machine, and nothing in the application calls the
+  store yet.
+
 - The componion's life in time, in both engines. A being now lives: three
   new engine operations, answered byte for byte by the reference and the
   Rust twin. `advance` folds a being from its genesis and its facts to a
@@ -64,8 +123,8 @@ package costs.
   contracts, whose enzyme column and corpus floor the three new enzyme loci
   moved. `scripts/allium_bench.py` measures the cost
   of a unit of work in each engine and is for the machine only: no figure
-  of it is claimed here. The store does not advance a being yet: the
-  recorder, views, checkpoints and laws on the platform are later work.
+  of it is claimed here. The store's side of it -- the recorder, views,
+  checkpoints and laws on the platform -- is the entry above.
 
 - The componion's journal and store. A being's life is a chain of facts, one
   file per person, each fact identified by the digest of its envelope in

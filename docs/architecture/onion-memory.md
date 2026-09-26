@@ -210,3 +210,28 @@ medium: an older backup or a disk image may still hold it. A broken journal
 is never mended in silence; the owner can resume from the last verified
 event, which is recorded as such, keeps every forgotten thing forgotten and
 discards what could not be verified.
+
+A being lives in real time. Its age is the minutes since its birth, read
+from the wall clock, and its days are local days: whenever the machine's
+UTC offset changes, the next write records the new offset (never a zone's
+name), so a journey across time zones neither lives a day twice nor
+skips one silently. Looking writes nothing: a view is the engine folding
+the journal from the genesis to the minute asked, and the states kept at
+a few local midnights are caches it may start from, which can all be
+dropped without changing what it shows. Advancing the clock buys nothing:
+a being whose clock jumps a month ahead lives the same month as one left
+alone for a month -- the garden rains on it, a windowsill dries it out
+and it sleeps -- because the engine sees only the facts and the minute; a
+clock set back is noted in the journal once, and a late gesture lands on
+the latest minute recorded. Each being keeps the law and the four params
+its birth froze from the proposal in `config/allium.yaml`, so editing that
+file moves no living being. A law update takes effect at the next local
+midnight: the owner can apply the proposal to a being, or pin it to the
+law and params it has; when a stable successor of its law is carried, the
+next gesture on the being's home device writes the update to it, with the
+params in force (or with those of an update the owner applied that has not
+taken effect yet), and a view never does. The laws in this tree are
+prototypes, and every being sown under one is labelled so wherever it is
+shown; a prototype whose law is retired (listed in `laws/retired.json`) is
+shown as a retired prototype, never as missing or broken, and a being
+whose law file was edited in place does not open.

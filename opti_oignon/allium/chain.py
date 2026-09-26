@@ -24,6 +24,14 @@ computes outside it, so another writer is never kept waiting on the hashes.
 The first failure decides, and a break in the chain is refused with the
 event it breaks at. A refused verification writes nothing.
 
+Law identity is a name and a digest. The genesis's law must be carried under
+the digest it names, at its version and with its provisional flag, or the
+store is refused ``law`` (``retired`` for a prototype whose law the register
+of retired laws names); so must every law an ``evolve`` in the trunk names.
+A fact's law version must be the genesis's or one an ``evolve`` in the trunk
+goes to (``laws`` otherwise); which one is in force at its minute is the
+reducer's to judge.
+
 A resume, which only a person asks for, sets aside what failed to verify
 and never rewrites what it keeps: the tail above the last sound event goes,
 every recorded destruction is enforced again, and a forget whose forgetter
@@ -263,17 +271,49 @@ def _genesis_ok(body, table):
     return True
 
 
+def _law_refusal(name, sha256, provisional, detail):
+    """``retired`` for a provisional being's law the register names as retired, ``law`` otherwise."""
+    from . import lawfiles
+    from .store import StoreRefused
+
+    if provisional is True and {"name": name, "sha256": sha256} in lawfiles.retired():
+        return StoreRefused("retired", f"the prototype law {name} was retired")
+    return StoreRefused("law", detail)
+
+
+def _carried(name, sha256, version, provisional):
+    """The journal pin of carried law ``name`` when it is the law ``(name, sha256)`` names; refused otherwise.
+
+    Law identity is the name and the digest: a law not carried, or carried
+    under another digest (a law file edited in place), or whose version
+    differs from the one named, is refused ``law`` -- ``retired`` when the
+    being is a prototype whose pair the register of retired laws names.
+    """
+    from . import lawfiles, membrane
+
+    if name not in lawfiles.LAWS:
+        raise _law_refusal(name, sha256, provisional, f"{name} is a law this engine does not carry")
+    pin = membrane.law_pin(name)
+    if sha256 != pin["sha256"]:
+        raise _law_refusal(name, sha256, provisional, f"{name} is carried under another digest")
+    if version is not None and version != pin["version"]:
+        raise _law_refusal(name, sha256, provisional, f"{name} is carried at another version")
+    return pin
+
+
 def _pin_for(rows):
     """The journal pin of the law the genesis names, or of the first carried law when it cannot be read.
 
     A genesis that reads -- the first row, of kind ``genesis``, its bytes
-    hashing to its digest -- and names a law this engine does not carry is
-    refused ``law``: its being is never read under another law's kinds and
-    budgets. A genesis that cannot be read is left to the per-row checks,
-    which refuse it at event #0.
+    hashing to its digest -- is held to its law's identity: a law this
+    engine does not carry, one carried under another digest or at another
+    version, or one whose provisional flag is not the carried law's, is
+    refused ``law`` (``retired`` for a prototype whose law was retired): its
+    being is never read under another law's kinds and budgets. A genesis
+    that cannot be read, or whose law fields are not of their types, is left
+    to the per-row checks, which refuse it at event #0.
     """
     from . import lawfiles, membrane
-    from .store import StoreRefused
 
     name = None
     if rows and rows[0][12] is not None:
@@ -282,11 +322,47 @@ def _pin_for(rows):
         name = laws.get("name") if isinstance(laws, dict) else None
         sound = (rows[0][0] == 0 and rows[0][7] == "genesis"
                  and hashlib.sha256(bytes(rows[0][12])).hexdigest() == rows[0][11])
-        if sound and isinstance(name, str) and name not in lawfiles.LAWS:
-            raise StoreRefused("law", "the genesis names a law this engine does not carry")
+        if sound and isinstance(name, str):
+            sha256, version, provisional = laws.get("sha256"), laws.get("v"), laws.get("provisional")
+            if not (isinstance(sha256, str) and _is_int(version) and isinstance(provisional, bool)):
+                if name not in lawfiles.LAWS:
+                    raise _law_refusal(name, sha256, provisional, f"{name} is a law this engine does not carry")
+                return membrane.law_pin(name)
+            pin = _carried(name, sha256, version, provisional)
+            if provisional != pin["provisional"]:
+                raise _law_refusal(name, sha256, provisional, f"the genesis says {name} is not what it is")
+            return pin
     if isinstance(name, str) and name in lawfiles.LAWS:
         return membrane.law_pin(name)
     return membrane.law_pin(lawfiles.LAWS[0])
+
+
+def _named_laws(body):
+    """``[(name, sha256, version or None)]``: the laws an ``evolve`` body names, as far as they read."""
+    out = []
+    if not isinstance(body, dict):
+        return out
+    for key in ("from", "to"):
+        law = body.get(key)
+        if isinstance(law, dict) and isinstance(law.get("name"), str) and isinstance(law.get("sha256"), str):
+            version = law.get("v") if key == "to" else None
+            out.append((law["name"], law["sha256"], version if _is_int(version) else None))
+    return out
+
+
+def _evolved_versions(rows):
+    """The law versions the ``evolve`` facts among ``rows`` go to, from the bodies that hash to their digest."""
+    found = []
+    for row in rows:
+        body = row[12]
+        if row[7] != "evolve" or body is None or hashlib.sha256(bytes(body)).hexdigest() != row[11]:
+            continue
+        parsed = _strict_object(body)
+        target = parsed.get("to") if isinstance(parsed, dict) else None
+        version = target.get("v") if isinstance(target, dict) else None
+        if _is_int(version) and version not in found:
+            found.append(version)
+    return found
 
 
 def verify(conn, *, name_tag, name_soil, key_id, anchor_key, cross_seq=None, prior=None):
@@ -369,15 +445,22 @@ def _check(conn, state, *, name_tag, name_soil, key_id, anchor_key, cross_seq, p
         expected_seq, expected_prev = 0, ZERO
         kept_seq, kept_t = -1, 0
         genesis, owner_to, gaps = None, None, []
+        genesis_origin, versions = None, []
     else:
         pin = prior.pin
         check_rows = rows[1:]
         expected_seq, expected_prev = prior.head + 1, prior.head_link
         kept_seq, kept_t = prior.head, prior.head_t
         genesis, owner_to, gaps = prior.genesis, prior.owner, list(prior.gaps)
+        genesis_origin, versions = prior.genesis_origin, list(prior.versions)
         context["birth"] = genesis["birth"]["wall"]
     table = pin["table"]
     kinds = table["kinds"]
+    # The law versions a fact may carry: the genesis's, and every version an evolve in the trunk goes to.
+    for version in _evolved_versions(check_rows):
+        if version not in versions:
+            versions.append(version)
+    evolves = []
 
     envelopes = []
     positions = []
@@ -395,7 +478,7 @@ def _check(conn, state, *, name_tag, name_soil, key_id, anchor_key, cross_seq, p
     pending = {}
     times = {}
     for index, row in enumerate(check_rows):
-        seq, prev, leid, stored_link, feid, being, t, kind, _origin, oseq, laws, digest, body, redacted_by = row
+        seq, prev, leid, stored_link, feid, being, t, kind, origin, oseq, laws, digest, body, redacted_by = row
         at = seq if _is_int(seq) else expected_seq
         if not _is_int(seq) or not (seq == expected_seq or (kind == "resumed" and seq > expected_seq)):
             raise refuse(at, "seq", kept_seq, kept_t)
@@ -431,14 +514,17 @@ def _check(conn, state, *, name_tag, name_soil, key_id, anchor_key, cross_seq, p
             if kind != "genesis" or oseq != 0 or t != 0 or not _genesis_ok(parsed, table):
                 raise refuse(seq, "genesis", kept_seq, kept_t, "the first event is not a genesis")
             genesis = parsed
+            genesis_origin = origin
             context["birth"] = genesis["birth"]["wall"]
             if laws != genesis["laws"]["v"]:
                 raise refuse(seq, "laws", kept_seq, kept_t)
         else:
-            if laws != genesis["laws"]["v"]:
-                raise refuse(seq, "laws", kept_seq, kept_t)
+            if laws != genesis["laws"]["v"] and laws not in versions:
+                raise refuse(seq, "laws", kept_seq, kept_t, "a law version no evolve in the trunk names")
             if kind == "genesis":
                 raise refuse(seq, "genesis", kept_seq, kept_t, "a second genesis")
+        if kind == "evolve":
+            evolves.append(parsed)
         if kind == "lang_forget":
             named = parsed.get("target") if isinstance(parsed, dict) else None
             info = seen.get(named) if isinstance(named, str) else None
@@ -464,6 +550,10 @@ def _check(conn, state, *, name_tag, name_soil, key_id, anchor_key, cross_seq, p
     head = kept_seq
     head_link = expected_prev
     head_t = kept_t
+    # Every law an evolve names is held to its identity as the genesis's is.
+    for named in evolves:
+        for name, sha256, version in _named_laws(named):
+            _carried(name, sha256, version, genesis["laws"]["provisional"])
     # 4. The genesis names the owner and the soil the store has.
     owner_now = owner_to if owner_to is not None else genesis["owner"]
     if owner_now != meta["owner"]:
@@ -502,8 +592,8 @@ def _check(conn, state, *, name_tag, name_soil, key_id, anchor_key, cross_seq, p
     secret = dict(keys)["being_secret"]
     return Verified(
         being_tag=anchors.being_tag(secret), birth=genesis["birth"]["wall"], gaps=gaps, genesis=genesis,
-        head=head, head_link=head_link, head_t=head_t, keys=keys, meta=meta, owner=owner_now, pin=pin,
-        segment=meta["segment"], through=through())
+        genesis_origin=genesis_origin, head=head, head_link=head_link, head_t=head_t, keys=keys, meta=meta,
+        owner=owner_now, pin=pin, segment=meta["segment"], through=through(), versions=versions)
 
 
 def _canonical_int(text):

@@ -49,6 +49,10 @@ no unsafe code, nothing but ASCII, and no internal planning vocabulary.
     as ``engine_panic``; the Python reference imports only ``hashlib``,
     ``math`` and ``re``, and ``pathlib`` in ``lawfiles``. Every rule fires
     on a canary.
+  * AN15 -- the platform census: every file the isolation window loads as
+    the platform -- the six above, the law timeline and the views among
+    them -- imports only the standard library at module level, and SQLite's
+    module only inside the store's default plain connect.
 
 Local-only (the public distribution ships no tests). The modules load
 through the shared isolation window.
@@ -93,6 +97,7 @@ BUDGET_S = {
     "test_an12_the_journal_twin_outside_its_tests_holds_no_assertion_or_placeholder_that_can_panic": 2.0,
     "test_an13_the_platform_files_import_the_standard_library_alone_and_sqlite_in_one_place": 2.0,
     "test_an14_the_life_twin_cannot_panic_the_core_guards_it_and_the_reference_imports_little": 2.0,
+    "test_an15_every_platform_file_the_window_loads_imports_the_standard_library_alone": 2.0,
 }
 
 
@@ -680,6 +685,26 @@ def test_an14_the_life_twin_cannot_panic_the_core_guards_it_and_the_reference_im
     assert _reference_import_findings(lawfiles_tree, "civil") == ["pathlib"], "witness: the one exception is seen"
     planted = "import time\nfrom os import path\nimport hashlib\nfrom . import fx\ndef f():\n    import datetime\n"
     assert _reference_import_findings(ast.parse(planted), "civil") == ["time", "os", "datetime"], "every rule fires"
+
+
+# ---------------------------------------------------------------------------
+# AN15 -- the platform census: every file the window loads as the platform
+# ---------------------------------------------------------------------------
+def test_an15_every_platform_file_the_window_loads_imports_the_standard_library_alone():
+    from _allium_window import PLATFORM
+
+    for name in _PLATFORM + ("evolution", "life"):
+        assert name in PLATFORM, f"witness: {name} is in the census"
+    read = []
+    for name in PLATFORM:
+        tree = ast.parse((PACKAGE / f"{name}.py").read_text(encoding="ascii"))
+        allowed = "_plain_connect" if name == "store" else None
+        assert _platform_import_findings(tree, allowed) == [], (name, _platform_import_findings(tree, allowed))
+        read.append(name)
+    assert read == list(PLATFORM) and len(read) >= 8, "every platform file is read"
+    planted = (PACKAGE / "evolution.py").read_text(encoding="ascii") + "\nimport yaml\n"
+    assert _platform_import_findings(ast.parse(planted), None) == ["module level: yaml"], \
+        "the rule fires on a platform file of the census"
 
 
 if __name__ == "__main__":

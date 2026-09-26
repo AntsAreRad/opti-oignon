@@ -8,6 +8,11 @@ time; the handshake compares the digests, and a native core built from other
 files is not used.
 
 Files are read when asked for, never at import.
+
+Two readers serve the platform alone, and neither is embedded in the twin
+nor part of the engine's identity: ``retired()`` lists the prototype laws
+retired from the tree (``laws/retired.json``), and ``successor()`` finds the
+carried stable law that may follow a given one.
 """
 
 import hashlib
@@ -73,3 +78,47 @@ def table(name):
 def sine():
     """The frozen Q15 sine table: 1024 entries, one binary-angle turn."""
     return table("sine_q15_v1")["entries"]
+
+
+def retired():
+    """The retired prototype laws, ``[{"name", "sha256"}]``, from ``laws/retired.json``; platform only.
+
+    An entry that is not a name and a digest is left out: it names no law.
+    """
+    value = _read(_HERE.joinpath("laws", "retired.json"))
+    entries = value.get("retired") if isinstance(value, dict) else None
+    out = []
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str) and isinstance(entry.get("sha256"), str):
+            out.append({"name": entry["name"], "sha256": entry["sha256"]})
+    return out
+
+
+def successor(name, sha256):
+    """The carried stable law that may follow law ``(name, sha256)``, ``{"name", "sha256", "v"}``, or ``None``.
+
+    A successor is what the engine's own migration check accepts: a stable
+    law naming this one as the law it follows by the identity migration,
+    with a higher version (``ref/lawdata.successor_ok``). A provisional law
+    has none. When several are carried, the highest version is taken, then
+    the first name. Platform only.
+    """
+    from .ref import lawdata
+
+    try:
+        source = lawdata.life(name)
+    except wire.Refused:
+        return None
+    if source.provisional or source.digest != sha256:
+        return None
+    found = None
+    for candidate in LAWS:
+        try:
+            life = lawdata.life(candidate)
+        except wire.Refused:
+            continue
+        if not lawdata.successor_ok(life, {"name": name, "sha256": sha256}):
+            continue
+        if found is None or life.version > found["v"]:
+            found = {"name": life.name, "sha256": life.digest, "v": life.version}
+    return found

@@ -15,6 +15,8 @@ on ``tmp_path`` with
 * ``Clock``, ``Mode`` and ``MemoryAudit`` -- stand-ins with the real
   signatures; ``load_audit`` loads the real signed audit log on ``tmp_path``
   instead, in a window of its own that blocks the key and the configuration;
+* the life's seams -- a local offset of 0 (UTC), and the settings file's
+  ``laws`` and ``life`` sections as the shipped file sets them;
 * ``TestCipher`` -- AES-256-GCM in the byte layout of the platform's cipher.
 
 The file tools count bytes over a store and its journals, edit a store
@@ -70,6 +72,8 @@ class Platform:
         self.membrane = loaded[prefix + "membrane"]
         self.anchors = loaded[prefix + "anchors"]
         self.store = loaded[prefix + "store"]
+        self.evolution = loaded[prefix + "evolution"]
+        self.life = loaded[prefix + "life"]
 
 
 def open_platform(*, seeded=None, blocked=BLOCKED, extra=None):
@@ -333,6 +337,13 @@ def seams(platform, tmp_path, *, suite, index=0, **overrides):
         "cipher": TestCipher().pair(),
         "clock": Clock(),
         "mode": Mode("daily"),
+        # The life's seams: the local offset is UTC's, the law proposal and the machine policy are the
+        # settings file's defaults, so no contract reads the machine's time zone or the file.
+        "tz": lambda now: 0,
+        "laws": {"light": {"sun_max": 65536}, "seasons": {"default_band": "long", "default_hemisphere": "north"},
+                 "soil": {"evap_awake": 4096, "evap_dormant": 1024, "rain_gain": 65536},
+                 "weather": {"mode": "garden"}},
+        "life": {"checkpoints": {"daily": 14, "monthly": True, "weekly": 52}, "skew_note_min": 5},
     }
     out.update(overrides)
     return out
