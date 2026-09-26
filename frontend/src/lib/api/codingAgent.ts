@@ -15,7 +15,8 @@ import type {
 	CodingStatusResponse,
 	CodingDiffResponse,
 	CodingApplyRequest,
-	CodingApplyResponse
+	CodingApplyResponse,
+	ChatCodingStatusResponse
 } from '../types';
 
 /** Start a new coding task. */
@@ -98,4 +99,15 @@ export function connectCodingWebSocket(
 	} catch {
 		return null;
 	}
+}
+
+/** The chat coding agent's server-wide default, and whether it can run. */
+export async function getChatCodingStatus(): Promise<ChatCodingStatusResponse> {
+	return apiGet('/api/chat/coding/status');
+}
+
+/** Sets the chat coding agent's server-wide default; the answer is the state
+ * the server now holds, until it restarts. 503 when the agent cannot run. */
+export async function setChatCoding(enabled: boolean): Promise<ChatCodingStatusResponse> {
+	return apiPost('/api/chat/coding/toggle', { enabled });
 }

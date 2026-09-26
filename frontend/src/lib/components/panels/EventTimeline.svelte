@@ -10,11 +10,9 @@
   5. Click-to-inspect: clicking a dot shows full event details
 -->
 <script lang="ts">
-	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { getTelemetryHistory } from '$lib/api/telemetry';
 	import type { HistoryEvent } from '$lib/api/telemetry';
-
-	const dispatch = createEventDispatcher<{ selectEvent: HistoryEvent }>();
 
 	// -------------------------------------------------------------------------
 	// Props
@@ -186,7 +184,6 @@
 
 	function handleDotClick(ev: HistoryEvent) {
 		selectedEvent = selectedEvent?.id === ev.id ? null : ev;
-		dispatch('selectEvent', ev);
 	}
 
 	function clearSelection() {

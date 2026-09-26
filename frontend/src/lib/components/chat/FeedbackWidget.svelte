@@ -2,7 +2,9 @@
   FeedbackWidget.svelte
   Inline thumbs up/down feedback for chat messages. Appears alongside the
   copy/retry actions; thumbs-down expands a short text field. Uses the ds
-  Icon and Button primitives.
+  Icon and Button primitives. Feedback belongs to one message of one
+  conversation: without both ids the thumbs are not shown, since nothing
+  they chose could be recorded.
 -->
 <script lang="ts">
 	import { submitFeedback } from '$lib/api/feedback';
@@ -22,6 +24,7 @@
 	let submitted = false;
 
 	async function handleThumb(value: 0 | 1) {
+		if (!conversationId || !messageId) return;
 		if (submitted || submitting) return;
 		feedbackState = value === 1 ? 'up' : 'down';
 		// For thumbs down, show the text input before submitting.
@@ -34,6 +37,9 @@
 	}
 
 	async function doSubmit(value: number) {
+		// Feedback belongs to one message of one conversation: without both
+		// ids there is nothing it could be recorded against.
+		if (!conversationId || !messageId) return;
 		submitting = true;
 		try {
 			await submitFeedback({
@@ -67,7 +73,7 @@
 	}
 </script>
 
-{#if !submitted}
+{#if !submitted && conversationId && messageId}
 	<div class="inline-flex items-center gap-0.5">
 		<!-- Thumbs up -->
 		<button
@@ -115,7 +121,7 @@
 			</div>
 		</div>
 	{/if}
-{:else}
+{:else if submitted}
 	<!-- Submitted state -->
 	<div class="inline-flex items-center gap-1 text-xs" style="color: var(--oo-fg-faint);">
 		<Icon name="check" size="sm" />

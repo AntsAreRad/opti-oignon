@@ -8,6 +8,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { isStreaming } from '$lib/stores/chat';
+	import { getLiveMetrics } from '$lib/api/liveMetrics';
 
 	/** Whether the overlay is visible (auto-controlled). */
 	let visible = false;
@@ -69,16 +70,14 @@
 
 	async function fetchMetrics() {
 		try {
-			const res = await fetch('/api/metrics/live');
-			if (!res.ok) return;
-			metrics = await res.json();
+			metrics = await getLiveMetrics();
 
 			// Update sparkline.
 			const val = metrics.tokens_per_second ?? 0;
 			sparkline = [...sparkline.slice(-(SPARKLINE_MAX - 1)), val];
 			maxTokS = Math.max(1, ...sparkline);
 		} catch {
-			// Silently ignore fetch errors.
+			// The overlay is decorative: a missed sample is skipped.
 		}
 	}
 

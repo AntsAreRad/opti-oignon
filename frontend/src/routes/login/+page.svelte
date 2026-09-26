@@ -53,7 +53,7 @@
 	}
 </script>
 
-<div class="oo-auth-page">
+<main id="main-content" class="oo-auth-page">
 	<div class="oo-auth-card">
 		<Card variant="raised" padding="lg">
 			<div class="oo-auth-logo">
@@ -96,7 +96,7 @@
 			</p>
 		</Card>
 	</div>
-</div>
+</main>
 
 <style>
 	.oo-auth-page {

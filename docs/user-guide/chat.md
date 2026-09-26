@@ -18,7 +18,8 @@ The chat interface supports:
   long message of yours its first lines, each with "Show the rest"
 - **Multi-turn conversations** with full history context
 - **Conversation branching** -- fork a conversation at any message to
-  explore alternative paths
+  explore alternative paths: select the message, then fork it from the
+  branch explorer above the thread
 
 
 ## Pipelines
@@ -92,5 +93,6 @@ backup system (Settings > Advanced > Backup, or `oo backup` CLI).
 ## Conversation branches
 
 Fork any conversation at a specific message to explore alternative
-responses without losing the original thread. Branches are visible in
-the sidebar and can be merged or deleted independently.
+responses without losing the original thread: select the message, then
+use Fork in the branch explorer above the thread. Branches are listed
+there and can be merged or deleted independently.

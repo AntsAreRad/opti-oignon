@@ -40,7 +40,8 @@ import type {
 	SandboxApplyResponse,
 	SandboxNetworkToggleResponse,
 	SandboxProvisionRequest,
-	SandboxProvisionResponse
+	SandboxProvisionResponse,
+	QuickSandboxStatusResponse
 } from '../types';
 
 /** Get sandbox system status. */
@@ -280,4 +281,15 @@ export async function provisionWorkspace(
 	request: SandboxProvisionRequest
 ): Promise<SandboxProvisionResponse> {
 	return apiPost(`/api/sandbox/${sessionId}/provision`, request);
+}
+
+/** The quick sandbox's server-wide default, and whether it can run at all. */
+export async function getQuickSandboxStatus(): Promise<QuickSandboxStatusResponse> {
+	return apiGet('/api/sandbox/quick/status');
+}
+
+/** Sets the quick sandbox's server-wide default; the answer is the state the
+ * server now holds, until it restarts. 503 when the sandbox cannot run. */
+export async function setQuickSandbox(enabled: boolean): Promise<QuickSandboxStatusResponse> {
+	return apiPost('/api/sandbox/quick/toggle', { enabled });
 }

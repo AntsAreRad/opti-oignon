@@ -22,7 +22,6 @@
 		send: { text: string; images: string[] };
 		cancel: void;
 		retry: void;
-		editLast: void;
 	}>();
 
 	let inputText = '';
@@ -67,12 +66,6 @@
 		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
 			handleSend();
-			return;
-		}
-		// Up arrow with empty input: edit last user message
-		if (event.key === 'ArrowUp' && inputText.trim() === '' && attachedImages.length === 0) {
-			event.preventDefault();
-			dispatch('editLast');
 			return;
 		}
 	}

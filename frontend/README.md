@@ -52,11 +52,19 @@ npm run preview   # preview the production build locally
 
 ```
 src/
-  app.html              # HTML shell (skip-to-content, sveltekit hooks)
+  app.html              # HTML shell (early theme script, sveltekit hooks)
   app.css               # Global styles, animations, theme system
 
   lib/
     types.ts            # Shared TypeScript interfaces
+    motion.ts           # The scroll behaviour the motion preference allows
+
+    chat/
+      requestFields.ts  # The ChatRequest fields a message sends, and their two builders
+    switches/
+      serverSwitch.ts   # A server setting shown as the server confirmed it, never as asked
+    settings/
+      catalog.ts        # Every settings section and group, and the old tab ids
 
     markdown/           # A reply's markdown as a closed node tree (no raw HTML)
       tree.ts           # marked's lexer (GFM, single newline = break) -> nodes, work bounded
@@ -191,7 +199,7 @@ CSS animations (all in `app.css`):
 
 ## Accessibility
 
-- Skip-to-content link in `app.html`
+- One skip link, in the root layout, to the page's single `main-content` landmark
 - `aria-live="polite"` on toast notifications
 - `role="dialog"` + `aria-modal` on all modals
 - Focus trap (Tab cycling) in ExportDialog and KeyboardShortcuts

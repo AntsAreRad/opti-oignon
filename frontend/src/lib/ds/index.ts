@@ -6,6 +6,7 @@ export { default as TextButton } from './TextButton.svelte';
 export { default as Input } from './Input.svelte';
 export { default as Card } from './Card.svelte';
 export { default as Modal } from './Modal.svelte';
+export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { default as Toast } from './Toast.svelte';
 export { default as Select } from './Select.svelte';
 export { default as Switch } from './Switch.svelte';

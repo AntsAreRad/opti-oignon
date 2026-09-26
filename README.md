@@ -149,11 +149,11 @@ bash scripts/smoke_test.sh
 # Type checking against the mypy baseline
 bash scripts/run_typecheck.sh
 
-# Frontend end-to-end tests (Playwright, mocked backend)
+# Frontend end-to-end tests (Playwright, against a running backend)
 bash scripts/run_e2e.sh
 ```
 
-The suite covers the backend modules and a set of Playwright scenarios (auth, chat, settings, RAG, security panel, and mobile-viewport variants). Security-critical modules have individual minimum coverage thresholds; see `.coveragerc` and `coverage_baseline.json`.
+The suite covers the backend modules. Three Playwright specs (`auth-refusal`, `health`, `security-mode`) drive a real browser against the served frontend and a running backend on port 8001, which they do not start. Each runs in a desktop and a phone-sized browser project, and none tests a mobile layout or reaches a model (see `frontend/tests/e2e/README.md`). Security-critical modules have individual minimum coverage thresholds; see `.coveragerc` and `coverage_baseline.json`.
 
 ## Development
 

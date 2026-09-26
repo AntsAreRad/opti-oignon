@@ -225,7 +225,12 @@
 			background-color: {dragOver ? 'var(--oo-bg-overlay)' : 'var(--oo-bg-elevated)'};"
 		data-testid="batch-drop-zone"
 	>
-		<div class="text-2xl mb-2" style="color: var(--oo-fg-muted);">&#128193;</div>
+		<div class="mb-2 flex justify-center" style="color: var(--oo-fg-muted);" aria-hidden="true">
+			<svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+				stroke-linecap="round" stroke-linejoin="round">
+				<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+			</svg>
+		</div>
 		<p class="text-sm" style="color: var(--oo-fg-secondary);">
 			Drag and drop files here or
 			<label class="underline cursor-pointer" style="color: var(--oo-acc-600);">

@@ -38,7 +38,7 @@
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Button, Card, Icon, EmptyState, InlineError } from '$lib/ds';
+	import { Button, Card, Icon, EmptyState, InlineError, ConfirmDialog, Input } from '$lib/ds';
 	import {
 		getSyncStatus,
 		listSyncPeers,
@@ -310,17 +310,41 @@
 		}
 	}
 
-	async function rename(peer: SyncPeer) {
-		const next = window.prompt('New label for this device', peer.label);
-		if (next === null) return;
+	// The peer being renamed, and the label the dialog edits.
+	let renaming: SyncPeer | null = null;
+	let renameLabel = '';
+	let renameBusy = false;
+	let renameError: string | null = null;
+
+	function rename(peer: SyncPeer) {
+		renameLabel = peer.label;
+		renameError = null;
+		renaming = peer;
+	}
+
+	function closeRename() {
+		renaming = null;
+		renameError = null;
+	}
+
+	async function runRename() {
+		const peer = renaming;
+		if (!peer || renameBusy) return;
+		renameBusy = true;
+		renameError = null;
 		busyPeer = peer.peer_id;
 		try {
-			await relabelPeer(peer.peer_id, next.trim());
+			await relabelPeer(peer.peer_id, renameLabel.trim());
+			renaming = null;
 			toastSuccess('Label updated');
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to relabel');
+			const message = e instanceof Error ? e.message : 'Failed to relabel';
+			// The dialog shows the failure while it is open; closed, a toast does.
+			if (renaming === peer) renameError = message;
+			else toastError(message);
 		} finally {
+			renameBusy = false;
 			busyPeer = null;
 		}
 	}
@@ -719,6 +743,20 @@
 
 	<RemoteChannelPanel {peers} />
 </section>
+
+<ConfirmDialog
+	open={renaming !== null}
+	title="Rename this device"
+	message="The label is how this device appears in the list of your devices."
+	confirmLabel="Save"
+	cancelLabel="Cancel"
+	busy={renameBusy}
+	error={renameError}
+	onConfirm={runRename}
+	onCancel={closeRename}
+>
+	<Input label="Device label" bind:value={renameLabel} autofocus />
+</ConfirmDialog>
 
 <style>
 	.sync-panel {

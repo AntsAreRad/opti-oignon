@@ -19,7 +19,6 @@
 
 	const dispatch = createEventDispatcher<{
 		switchBranch: { branchId: string | null };
-		fork: { branchId: string | null };
 	}>();
 
 	let collapsed = depth > 2;
@@ -56,10 +55,6 @@
 
 	function handleChildSwitch(e: CustomEvent<{ branchId: string | null }>) {
 		dispatch('switchBranch', e.detail);
-	}
-
-	function handleChildFork(e: CustomEvent<{ branchId: string | null }>) {
-		dispatch('fork', e.detail);
 	}
 </script>
 
@@ -139,7 +134,6 @@
 					{activeBranchId}
 					isRoot={false}
 					on:switchBranch={handleChildSwitch}
-					on:fork={handleChildFork}
 				/>
 			{/each}
 		</div>

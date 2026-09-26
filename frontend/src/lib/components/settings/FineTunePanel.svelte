@@ -18,6 +18,8 @@
 		runComparison,
 	} from '$lib/api/fineTune';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import type {
 		FineTuneExportResponse,
 		FineTunePreviewResponse,
@@ -154,14 +156,40 @@
 		}
 	}
 
-	async function handleUnregister(id: string, name: string) {
-		if (!confirm(`Unregister variant "${name}"? This also deletes comparison history.`)) return;
+	// The variant whose unregistering waits for an answer.
+	let pendingVariant: { id: string; name: string } | null = null;
+	let unregistering = false;
+	let unregisterError: string | null = null;
+
+	/** Asks before a variant is unregistered. */
+	function handleUnregister(id: string, name: string) {
+		unregisterError = null;
+		pendingVariant = { id, name };
+	}
+
+	function closeUnregister() {
+		pendingVariant = null;
+		unregisterError = null;
+	}
+
+	/** Unregisters the variant the dialog asked about. */
+	async function runUnregister() {
+		const variant = pendingVariant;
+		if (!variant || unregistering) return;
+		unregistering = true;
+		unregisterError = null;
 		try {
-			await unregisterVariant(id);
-			toastSuccess(`Variant "${name}" unregistered`);
+			await unregisterVariant(variant.id);
+			pendingVariant = null;
+			toastSuccess(`Variant "${variant.name}" unregistered`);
 			await loadVariants();
 		} catch (e) {
-			toastError(`Failed to unregister: ${e}`);
+			const message = parseApiError(e, 'unregistering the variant').message;
+			// The dialog shows the failure while it is open; closed, a toast does.
+			if (pendingVariant === variant) unregisterError = message;
+			else toastError(message);
+		} finally {
+			unregistering = false;
 		}
 	}
 
@@ -546,3 +574,18 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	open={pendingVariant !== null}
+	title="Unregister this variant?"
+	message={pendingVariant
+		? `"${pendingVariant.name}" is unregistered, and its comparison history is deleted with it.`
+		: ''}
+	confirmLabel="Unregister"
+	cancelLabel="Keep it"
+	danger
+	busy={unregistering}
+	error={unregisterError}
+	onConfirm={runUnregister}
+	onCancel={closeUnregister}
+/>

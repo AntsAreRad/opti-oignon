@@ -165,7 +165,7 @@
 				<PresetSelector />
 			</div>
 		</div>
-		<ContextBar />
+		<ContextBar on:openProject={(e) => goto('/projects/' + encodeURIComponent(e.detail))} />
 	</svelte:fragment>
 
 	<ErrorBoundary fallbackMessage="Chat failed to render">

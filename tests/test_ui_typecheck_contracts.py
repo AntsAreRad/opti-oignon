@@ -227,7 +227,7 @@ UX14_LEDGER = {
     'frontend/src/lib/components/settings/KnowledgeBasePanel.svelte': 1,
     'frontend/src/lib/components/settings/PluginsPanel.svelte': 5,
     'frontend/src/lib/components/settings/SecurityPanel.svelte': 1,
-    'frontend/src/lib/stores/chat.ts': 5,
+    'frontend/src/lib/stores/chat.ts': 4,
     'frontend/src/routes/settings/+page.svelte': 42,
 }
 

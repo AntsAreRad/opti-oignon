@@ -7,19 +7,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Icon from '$lib/ds/Icon.svelte';
+	import { getSandboxStatus } from '$lib/api/sandbox';
 
 	let backend = '';
-	let strictMode = false;
 	let loaded = false;
 
 	onMount(async () => {
 		try {
-			const resp = await fetch('/api/sandbox/status', { credentials: 'include' });
-			if (resp.ok) {
-				const data = await resp.json();
-				backend = data.isolation_backend || data.backend || 'unknown';
-				strictMode = data.strict_mode ?? false;
-			}
+			const status = await getSandboxStatus();
+			backend = status.isolation_backend || 'unknown';
 		} catch {
 			// Silently fail.
 		} finally {

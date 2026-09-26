@@ -26,6 +26,8 @@
 	export let autocomplete: string | undefined = undefined;
 	export let hideLabel = false;
 	export let rows = 3;
+	/** Marks the field for focus when a dialog holding it opens. */
+	export let autofocus = false;
 
 	const uid = `oo-input-${Math.random().toString(36).slice(2, 9)}`;
 	$: describedBy = error ? `${uid}-error` : hint ? `${uid}-hint` : undefined;
@@ -56,6 +58,7 @@
 			{required}
 			aria-invalid={!!error}
 			aria-describedby={describedBy}
+			data-autofocus={autofocus || undefined}
 			value={String(value)}
 			on:input={onInput}
 			on:change
@@ -81,6 +84,7 @@
 				autocomplete={autocomplete}
 				aria-invalid={!!error}
 				aria-describedby={describedBy}
+				data-autofocus={autofocus || undefined}
 				value={String(value)}
 				on:input={onInput}
 				on:change

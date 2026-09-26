@@ -7,6 +7,12 @@
   Responsive labels, unified style, ddgs availability check,
        model family grouping with parameter badges.
   Mobile responsive -- horizontal scroll overflow, touch-friendly min-height.
+  Think and Search are choices for the next messages. Cache, Cascade, Human,
+  Sandbox and Code are server-wide switches: each shows the state the server
+  confirmed, is dimmed and announces no state while that is unknown, and
+  names what the server refused, under the bar, where a state that could not
+  be read can be read again. Wipe asks first, naming the conversation it
+  asked about, in a dialog that shows why it failed if it does.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -17,32 +23,92 @@
 		availablePresets,
 		thinkingEnabled,
 		webSearchEnabled,
-		cacheEnabled,
-		cascadingEnabled,
-		promptEnhanceEnabled,
-		humanizeEnabled,
 		quickSandboxEnabled,
 		chatCodingEnabled,
 		loadOptions,
 	} from '$lib/stores/chatOptions';
-	import { activeConversationId } from '$lib/stores/conversations';
+	import { activeConversation, activeConversationId } from '$lib/stores/conversations';
 	import { workspaceBinding } from '$lib/stores/workspaceBinding';
-	import { getConversationBinding } from '$lib/api/sandbox';
+	import { getConversationBinding, getQuickSandboxStatus, setQuickSandbox } from '$lib/api/sandbox';
+	import { getSemCacheStatus, toggleSemCache } from '$lib/api/semanticCache';
+	import { getCascadingStatus, updateCascadingConfig } from '$lib/api/cascading';
+	import { getHumanizerConfig, updateHumanizerConfig } from '$lib/api/humanizer';
+	import { getChatCodingStatus, setChatCoding } from '$lib/api/codingAgent';
+	import { getSearchConfig } from '$lib/api/search';
+	import { getHardeningStatus, wipeConversation } from '$lib/api/hardening';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import { createServerSwitch, pressed } from '$lib/switches/serverSwitch';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
+	import InlineError from '$lib/ds/InlineError.svelte';
 
 	let loaded = false;
 
 	// Track whether duckduckgo-search is installed
 	let ddgsAvailable = true;
 
-	// Track whether quick sandbox is available
+	// Whether the semantic cache, the quick sandbox and the coding agent can
+	// run on the server, read with their state.
+	let cacheAvailable = true;
 	let qsAvailable = false;
-
-	// Track whether chat coding agent is available
 	let ccAvailable = false;
 
-	// Conversation wipe
+	// The server-wide switches. Each shows the state the server confirmed:
+	// unknown until it is read, unchanged until the server answers a change,
+	// and its error when the server refused or could not be reached. They
+	// reach the server through the API layer, which carries the CSRF header.
+	const cache = createServerSwitch({
+		label: 'Semantic cache',
+		read: async () => {
+			const status = await getSemCacheStatus();
+			cacheAvailable = status.available;
+			return status.enabled;
+		},
+		write: async () => (await toggleSemCache()).enabled,
+	});
+	const cascade = createServerSwitch({
+		label: 'Cascading',
+		read: async () => (await getCascadingStatus()).enabled,
+		write: async (next) => (await updateCascadingConfig({ enabled: next })).enabled,
+	});
+	const humanizer = createServerSwitch({
+		label: 'Output humanizer',
+		read: async () => (await getHumanizerConfig()).enabled,
+		write: async (next) => (await updateHumanizerConfig({ enabled: next })).enabled,
+	});
+	const sandbox = createServerSwitch({
+		label: 'Quick sandbox',
+		read: async () => {
+			const status = await getQuickSandboxStatus();
+			qsAvailable = status.available;
+			return status.enabled;
+		},
+		write: async (next) => (await setQuickSandbox(next)).enabled,
+		adopt: (value) => quickSandboxEnabled.set(value),
+		forget: () => quickSandboxEnabled.set(false),
+	});
+	const coding = createServerSwitch({
+		label: 'Coding agent',
+		read: async () => {
+			const status = await getChatCodingStatus();
+			ccAvailable = status.available;
+			return status.enabled;
+		},
+		write: async (next) => (await setChatCoding(next)).enabled,
+		adopt: (value) => chatCodingEnabled.set(value),
+		forget: () => chatCodingEnabled.set(false),
+	});
+
+	// Conversation wipe: asked first, about the conversation open when it was
+	// asked, and its failure shown.
 	let wipeAvailable = false;
+	let wipeOpen = false;
 	let wipeBusy = false;
+	let wipeError: string | null = null;
+	let wipeTarget: { id: string; title: string } | null = null;
+
+	// What turning one of the two exclusive defaults on did to the other,
+	// when the second change did not follow.
+	let exclusionNote: string | null = null;
 
 	// Group models by family for the dropdown
 	interface ModelGroup {
@@ -96,77 +162,36 @@
 	const inactiveStyle = 'background-color: var(--oo-bg-surface); color: var(--oo-fg-muted); border: 1px solid var(--oo-bg-surface);';
 	const disabledStyle = 'background-color: var(--oo-bg-surface); color: var(--oo-fg-muted); border: 1px solid var(--oo-bg-surface); opacity: 0.5; cursor: not-allowed;';
 
+	async function readSearchAvailability() {
+		try {
+			ddgsAvailable = (await getSearchConfig()).ddgs_available ?? true;
+		} catch {
+			// If the search configuration cannot be read, assume search is there.
+		}
+	}
+
+	async function readWipeAvailability() {
+		try {
+			wipeAvailable = (await getHardeningStatus()).conversation_wipe?.available ?? false;
+		} catch {
+			wipeAvailable = false;
+		}
+	}
+
 	onMount(async () => {
 		if ($availableModels.length === 0) {
 			await loadOptions();
 		}
-		// Load initial cache status
-		try {
-			const resp = await fetch('/api/cache/semcache/status');
-			if (resp.ok) {
-				const data = await resp.json();
-				cacheEnabled.set(data.enabled || false);
-			}
-		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// Load initial cascading status
-		try {
-			const resp = await fetch('/api/cascading/status');
-			if (resp.ok) {
-				const data = await resp.json();
-				cascadingEnabled.set(data.enabled || false);
-			}
-		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// Load initial humanizer status
-		try {
-			const resp = await fetch('/api/humanizer/config');
-			if (resp.ok) {
-				const data = await resp.json();
-				humanizeEnabled.set(data.enabled || false);
-			}
-		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		// Check if duckduckgo-search is available
-		try {
-			const resp = await fetch('/api/search/config');
-			if (resp.ok) {
-				const data = await resp.json();
-				ddgsAvailable = data.ddgs_available ?? true;
-			}
-		} catch {
-			// If search config endpoint unreachable, assume available
-		}
-		// Load quick sandbox status
-		try {
-			const resp = await fetch('/api/sandbox/quick/status');
-			if (resp.ok) {
-				const data = await resp.json();
-				qsAvailable = data.available ?? false;
-				quickSandboxEnabled.set(data.enabled ?? false);
-			}
-		} catch {
-			qsAvailable = false;
-		}
-		// Load chat coding agent status
-		try {
-			const resp = await fetch('/api/chat/coding/status');
-			if (resp.ok) {
-				const data = await resp.json();
-				ccAvailable = data.available ?? false;
-				chatCodingEnabled.set(data.enabled ?? false);
-			}
-		} catch {
-			ccAvailable = false;
-		}
-		// Check conversation wipe availability
-		try {
-			const resp = await fetch('/api/security/hardening/status', { credentials: 'include' });
-			if (resp.ok) {
-				const data = await resp.json();
-				wipeAvailable = data.conversation_wipe?.available ?? false;
-			}
-		} catch {
-			wipeAvailable = false;
-		}
 		loaded = true;
+		await Promise.all([
+			cache.load(),
+			cascade.load(),
+			humanizer.load(),
+			sandbox.load(),
+			coding.load(),
+			readSearchAvailability(),
+			readWipeAvailability(),
+		]);
 	});
 
 	function toggleThinking() {
@@ -178,109 +203,50 @@
 		webSearchEnabled.update((v) => !v);
 	}
 
-	async function toggleCache() {
-		try {
-			const resp = await fetch('/api/cache/semcache/toggle', { method: 'POST' });
-			if (resp.ok) {
-				const data = await resp.json();
-				cacheEnabled.set(data.enabled || false);
-			} else {
-				cacheEnabled.update((v) => !v);
-			}
-		} catch {
-			cacheEnabled.update((v) => !v);
-		}
-	}
-
-	async function toggleCascading() {
-		const newVal = !$cascadingEnabled;
-		try {
-			const resp = await fetch('/api/cascading/config', {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: newVal }),
-			});
-			if (resp.ok) {
-				const data = await resp.json();
-				cascadingEnabled.set(data.enabled || false);
-			} else {
-				cascadingEnabled.set(newVal);
-			}
-		} catch {
-			cascadingEnabled.set(newVal);
-		}
-	}
-
-	function togglePromptEnhance() {
-		promptEnhanceEnabled.update((v) => !v);
-	}
-
-	async function toggleHumanize() {
-		const newVal = !$humanizeEnabled;
-		try {
-			const resp = await fetch('/api/humanizer/config', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: newVal }),
-			});
-			if (resp.ok) {
-				const data = await resp.json();
-				humanizeEnabled.set(data.enabled || false);
-			} else {
-				humanizeEnabled.set(newVal);
-			}
-		} catch {
-			humanizeEnabled.set(newVal);
-		}
-	}
-
+	// The quick sandbox and the coding agent exclude each other: turning one
+	// on turns the other off first, on the server, and stops there if the
+	// server keeps it on. When the second change does not follow, the first
+	// is named, since it changed a server-wide default too.
 	async function toggleQuickSandbox() {
 		if (!qsAvailable) return;
-		// Mutual exclusion -- disable Code Agent when toggling Sandbox on
-		if (!$quickSandboxEnabled && $chatCodingEnabled) {
-			chatCodingEnabled.set(false);
+		exclusionNote = null;
+		let turnedOff = false;
+		if ($sandbox.value === false && $coding.value === true) {
+			await coding.toggle();
+			if (coding.current().value !== false) return;
+			turnedOff = true;
 		}
-		const newVal = !$quickSandboxEnabled;
-		try {
-			const resp = await fetch('/api/sandbox/quick/toggle', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: newVal }),
-			});
-			if (resp.ok) {
-				const data = await resp.json();
-				quickSandboxEnabled.set(data.enabled || false);
-			} else {
-				quickSandboxEnabled.set(newVal);
-			}
-		} catch {
-			quickSandboxEnabled.set(newVal);
+		await sandbox.toggle();
+		if (turnedOff && sandbox.current().value !== true) {
+			exclusionNote = 'The coding agent default was turned off first; the quick sandbox default did not turn on.';
 		}
 	}
 
 	async function toggleChatCoding() {
 		if (!ccAvailable) return;
-		// Mutual exclusion -- when Code Agent is ON, Sandbox is implicitly ON
-		// When toggling Code Agent on, disable standalone Sandbox toggle
-		const newVal = !$chatCodingEnabled;
-		if (newVal && $quickSandboxEnabled) {
-			quickSandboxEnabled.set(false);
+		exclusionNote = null;
+		let turnedOff = false;
+		if ($coding.value === false && $sandbox.value === true) {
+			await sandbox.toggle();
+			if (sandbox.current().value !== false) return;
+			turnedOff = true;
 		}
-		try {
-			const resp = await fetch('/api/chat/coding/toggle', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ enabled: newVal }),
-			});
-			if (resp.ok) {
-				const data = await resp.json();
-				chatCodingEnabled.set(data.enabled || false);
-			} else {
-				chatCodingEnabled.set(newVal);
-			}
-		} catch {
-			chatCodingEnabled.set(newVal);
+		await coding.toggle();
+		if (turnedOff && coding.current().value !== true) {
+			exclusionNote = 'The quick sandbox default was turned off first; the coding agent default did not turn on.';
 		}
+	}
+
+	// The style of a server switch's pill: dimmed while its state is unknown.
+	function switchStyle(value: boolean | null, available = true): string {
+		if (!available || value === null) return disabledStyle;
+		return value ? activeStyle : inactiveStyle;
+	}
+
+	// A server switch's tooltip: what it is, and that its state is not known
+	// while it is not.
+	function switchTitle(what: string, value: boolean | null): string {
+		return value === null ? `${what} (state not known yet)` : what;
 	}
 
 	// Compute search toggle tooltip
@@ -297,18 +263,44 @@
 		getConversationBinding
 	);
 
-	// Wipe current conversation
-	async function handleWipeConversation() {
-		const convId = $activeConversationId;
-		if (!convId || wipeBusy) return;
+	// The wipe is asked about the conversation open now: its id and title are
+	// kept, and the confirmation wipes that one, wherever the page is by then.
+	function askWipe() {
+		if (!$activeConversationId) return;
+		wipeTarget = {
+			id: String($activeConversationId),
+			title: $activeConversation?.title?.trim() || 'Untitled conversation',
+		};
+		wipeError = null;
+		wipeOpen = true;
+	}
+
+	// Closing leaves a running wipe running; its failure is then shown under
+	// the bar.
+	function closeWipe() {
+		wipeOpen = false;
+		if (!wipeBusy) wipeError = null;
+	}
+
+	// Another conversation opened while the question was asked: the question
+	// no longer names what is on the page, so it is withdrawn.
+	$: if (wipeOpen && !wipeBusy && wipeTarget && String($activeConversationId ?? '') !== wipeTarget.id) {
+		closeWipe();
+	}
+
+	async function runWipe() {
+		const target = wipeTarget;
+		if (!target || wipeBusy) return;
 		wipeBusy = true;
+		wipeError = null;
 		try {
-			await fetch(`/api/security/conversation-wipe/${encodeURIComponent(convId)}`, {
-				method: 'POST',
-				credentials: 'include',
-			});
-		} catch { /* best-effort: ignore if endpoint unavailable */ }
-		wipeBusy = false;
+			await wipeConversation(target.id);
+			wipeOpen = false;
+		} catch (e) {
+			wipeError = parseApiError(e, 'wiping the conversation').message;
+		} finally {
+			wipeBusy = false;
+		}
 	}
 </script>
 
@@ -401,15 +393,19 @@
 		<span class="hidden sm:inline">Search</span>
 	</button>
 
-	<!-- Toggle Cache -->
+	<!-- Semantic cache (server-wide) -->
 	<button
-		on:click={toggleCache}
+		on:click={() => cache.toggle()}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 			transition-all select-none"
-		style="{$cacheEnabled ? activeStyle : inactiveStyle}"
-		title="Toggle semantic cache (exact + embedding match)"
+		style={switchStyle($cache.value, cacheAvailable)}
+		title={cacheAvailable
+			? switchTitle('Semantic cache (exact + embedding match): a server-wide setting, until the server restarts', $cache.value)
+			: 'Semantic cache not available on the server'}
 		aria-label="Toggle semantic cache"
-		aria-pressed={$cacheEnabled}
+		aria-pressed={pressed($cache.value)}
+		aria-busy={$cache.pending}
+		disabled={!cacheAvailable || $cache.value === null || $cache.pending}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
 			<ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -419,15 +415,17 @@
 		<span class="hidden sm:inline">Cache</span>
 	</button>
 
-	<!-- Toggle Cascading -->
+	<!-- Cascading (server-wide, saved) -->
 	<button
-		on:click={toggleCascading}
+		on:click={() => cascade.toggle()}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 			transition-all select-none"
-		style="{$cascadingEnabled ? activeStyle : inactiveStyle}"
-		title="Toggle cascading inference (multi-tier model routing)"
+		style={switchStyle($cascade.value)}
+		title={switchTitle('Cascading inference (multi-tier model routing): a server-wide setting, saved', $cascade.value)}
 		aria-label="Toggle cascading inference"
-		aria-pressed={$cascadingEnabled}
+		aria-pressed={pressed($cascade.value)}
+		aria-busy={$cascade.pending}
+		disabled={$cascade.value === null || $cascade.pending}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
 			<path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -437,36 +435,17 @@
 		<span class="hidden sm:inline">Cascade</span>
 	</button>
 
-	<!-- Toggle Prompt Enhancement (Onion button) -->
+	<!-- Output humanizer (server-wide) -->
 	<button
-		on:click={togglePromptEnhance}
+		on:click={() => humanizer.toggle()}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 			transition-all select-none"
-		style="{$promptEnhanceEnabled ? activeStyle : inactiveStyle}"
-		title="Toggle prompt enhancement (optimize prompts before sending)"
-		aria-label="Toggle prompt enhancement"
-		aria-pressed={$promptEnhanceEnabled}
-	>
-		<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-			stroke-linecap="round" stroke-linejoin="round">
-			<ellipse cx="12" cy="14" rx="8" ry="7" />
-			<ellipse cx="12" cy="14" rx="5.5" ry="5" />
-			<ellipse cx="12" cy="14" rx="3" ry="3" />
-			<path d="M12 7V3" />
-			<path d="M10 4.5c1-1 3-1 4 0" />
-		</svg>
-		<span class="hidden sm:inline">Opti</span>
-	</button>
-
-	<!-- Toggle Humanize -->
-	<button
-		on:click={toggleHumanize}
-		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
-			transition-all select-none"
-		style="{$humanizeEnabled ? activeStyle : inactiveStyle}"
-		title="Toggle humanizer post-processing (make output more natural)"
+		style={switchStyle($humanizer.value)}
+		title={switchTitle('Humanizer post-processing (more natural output): a server-wide setting, until the server restarts', $humanizer.value)}
 		aria-label="Toggle humanizer"
-		aria-pressed={$humanizeEnabled}
+		aria-pressed={pressed($humanizer.value)}
+		aria-busy={$humanizer.pending}
+		disabled={$humanizer.value === null || $humanizer.pending}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"
 			stroke-linecap="round" stroke-linejoin="round">
@@ -475,16 +454,19 @@
 		<span class="hidden sm:inline">Human</span>
 	</button>
 
-	<!-- Toggle Quick Sandbox -->
+	<!-- Quick sandbox (server-wide default) -->
 	<button
 		on:click={toggleQuickSandbox}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 			transition-all select-none"
-		style="{!qsAvailable ? disabledStyle : ($quickSandboxEnabled ? activeStyle : inactiveStyle)}"
-		title={qsAvailable ? 'Toggle sandboxed code execution (isolate LLM tool calls)' : 'Sandbox not available (install bubblewrap)'}
+		style={switchStyle($sandbox.value, qsAvailable)}
+		title={qsAvailable
+			? switchTitle('Sandboxed code execution (isolate LLM tool calls): the server-wide default, until the server restarts', $sandbox.value)
+			: 'Sandbox not available (install bubblewrap)'}
 		aria-label="Toggle quick sandbox"
-		aria-pressed={$quickSandboxEnabled}
-		disabled={!qsAvailable}
+		aria-pressed={pressed($sandbox.value)}
+		aria-busy={$sandbox.pending || $coding.pending}
+		disabled={!qsAvailable || $sandbox.value === null || $sandbox.pending || $coding.pending}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"
 			stroke-linecap="round" stroke-linejoin="round">
@@ -497,18 +479,21 @@
 		<span class="hidden sm:inline">Sandbox</span>
 	</button>
 
-	<!-- Toggle Chat Coding Agent (sage accent to distinguish) -->
+	<!-- Coding agent (server-wide default; sage accent to distinguish) -->
 	<button
 		on:click={toggleChatCoding}
 		class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 			transition-all select-none"
-		style="{!ccAvailable ? disabledStyle : ($chatCodingEnabled
+		style="{$coding.value === true && ccAvailable
 			? 'background-color: var(--oo-sage-bg); color: var(--oo-sage); border: 1px solid var(--oo-sage-bg);'
-			: inactiveStyle)}"
-		title={ccAvailable ? 'Toggle coding agent (multi-turn plan/implement/test/fix in sandbox)' : 'Code Agent not available (install bubblewrap)'}
+			: switchStyle($coding.value, ccAvailable)}"
+		title={ccAvailable
+			? switchTitle('Coding agent (multi-turn plan/implement/test/fix in sandbox): the server-wide default, until the server restarts', $coding.value)
+			: 'Code Agent not available (install bubblewrap)'}
 		aria-label="Toggle chat coding agent"
-		aria-pressed={$chatCodingEnabled}
-		disabled={!ccAvailable}
+		aria-pressed={pressed($coding.value)}
+		aria-busy={$coding.pending || $sandbox.pending}
+		disabled={!ccAvailable || $coding.value === null || $coding.pending || $sandbox.pending}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"
 			stroke-linecap="round" stroke-linejoin="round">
@@ -541,13 +526,14 @@
 	{#if wipeAvailable && $activeConversationId}
 		<div class="w-px h-4 hidden sm:block" style="background-color: var(--oo-bd-default);" />
 		<button
-			on:click={handleWipeConversation}
+			on:click={askWipe}
 			class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs shrink-0
 				transition-all select-none"
 			style="background-color: var(--oo-bg-surface); color: var(--oo-fg-muted); border: 1px solid var(--oo-bg-surface);
 				{wipeBusy ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
 			title="Wipe conversation data from RAM (best-effort)"
 			aria-label="Wipe conversation from RAM"
+			aria-haspopup="dialog"
 			disabled={wipeBusy}
 		>
 			<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"
@@ -558,3 +544,34 @@
 		</button>
 	{/if}
 </div>
+
+<!-- What the server refused or could not say, under the bar; a state that
+     could not be read can be read again from here. -->
+{#if $cache.error || $cascade.error || $humanizer.error || $sandbox.error || $coding.error || exclusionNote || (wipeError && !wipeOpen)}
+	<div class="flex flex-col gap-1 px-1 pb-1">
+		<InlineError message={$cache.error} onRetry={$cache.value === null ? cache.load : undefined} retrying={$cache.pending} />
+		<InlineError message={$cascade.error} onRetry={$cascade.value === null ? cascade.load : undefined} retrying={$cascade.pending} />
+		<InlineError message={$humanizer.error} onRetry={$humanizer.value === null ? humanizer.load : undefined} retrying={$humanizer.pending} />
+		<InlineError message={$sandbox.error} onRetry={$sandbox.value === null ? sandbox.load : undefined} retrying={$sandbox.pending} />
+		<InlineError message={$coding.error} onRetry={$coding.value === null ? coding.load : undefined} retrying={$coding.pending} />
+		<InlineError message={exclusionNote} />
+		{#if !wipeOpen}
+			<InlineError message={wipeError} />
+		{/if}
+	</div>
+{/if}
+
+<ConfirmDialog
+	open={wipeOpen}
+	title="Wipe this conversation from memory?"
+	message={wipeTarget
+		? `"${wipeTarget.title}": its messages are zeroed in the server's memory, best-effort. This cannot be undone.`
+		: ''}
+	confirmLabel="Wipe"
+	cancelLabel="Keep it"
+	danger
+	busy={wipeBusy}
+	error={wipeError}
+	onConfirm={runWipe}
+	onCancel={closeWipe}
+/>

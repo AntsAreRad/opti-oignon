@@ -192,17 +192,21 @@ export interface SmartRouterConfig {
 
 // -- Chat --
 
+/** The chat request the web chat sends: the fields lib/chat/requestFields.ts
+ * fills, each a field of the server's ChatRequest. */
 export interface ChatRequest {
-	conversation_id: string | null;
+	conversation_id: string;
 	message: string;
 	model?: string;
 	preset?: string;
 	temperature?: number;
 	use_presets?: boolean;
-	think?: boolean;        // Mode reflexion
-	web_search?: boolean;   // Recherche web
-	images?: string[];      // Images base64 pour vision
-	prompt_enhance?: boolean; // Prompt optimization/enhancement
+	think?: boolean;
+	web_search?: boolean;
+	images?: string[];
+	quick_sandbox?: boolean;
+	chat_coding?: boolean;
+	exec_pipeline?: string;
 }
 
 export interface ChatToken {
@@ -1369,6 +1373,27 @@ export interface SandboxStatusResponse {
 	limit_nproc?: number | null;
 	limit_cpu_seconds?: number | null;
 	disk_soft_limit_bytes?: number | null;
+}
+
+/** The quick sandbox's server-wide default: whether requests that do not
+ * choose run their code in a throwaway sandbox. */
+export interface QuickSandboxStatusResponse {
+	enabled: boolean;
+	available: boolean;
+	auto_destroy_minutes: number;
+	max_concurrent_sessions: number;
+	active_sessions: number;
+}
+
+/** The chat coding agent's server-wide default. */
+export interface ChatCodingStatusResponse {
+	enabled: boolean;
+	available: boolean;
+	session_timeout_minutes: number;
+	max_concurrent_sessions: number;
+	active_sessions: number;
+	auto_test: boolean;
+	max_fix_retries: number;
 }
 
 export interface SandboxCreateRequest {

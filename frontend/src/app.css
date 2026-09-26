@@ -389,23 +389,6 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 /*  ACCESSIBILITY                                                      */
 /* ------------------------------------------------------------------ */
 
-/* Skip-to-content link */
-.skip-to-content {
-	position: absolute;
-	left: -9999px;
-	top: 0;
-	z-index: 9999;
-	padding: 0.5rem 1rem;
-	background: var(--oo-acc-500);
-	color: var(--oo-fg-on-accent);
-	font-size: var(--oo-text-sm);
-	border-radius: 0 0 var(--oo-radius-md) 0;
-	text-decoration: none;
-}
-.skip-to-content:focus {
-	left: 0;
-}
-
 /* Spec 7.9 -- single shared focus ring (resolves A4). Driven by the
    --oo-focus-ring-* tokens so width/offset stay consistent app-wide.
    Components that define their own focus style (e.g. inputs) override

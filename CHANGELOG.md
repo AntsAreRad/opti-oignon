@@ -874,6 +874,94 @@ package costs.
 
 ### Fixed
 
+- The chat composer's five server-wide switches -- semantic cache, cascading,
+  humanizer, quick sandbox and coding agent -- showed what they had asked for,
+  not what the server held. Each was a raw request without the CSRF header, so
+  Bulbe and multi-user mode refused it, and every button flipped its state
+  when the request failed. Each now goes through the API layer and
+  `lib/switches/serverSwitch.ts`: its state is unknown until the server has
+  been read, does not move until the server answers, and is then the state the
+  server answers, named when it is not the one asked for. A refusal (a 4xx)
+  keeps the state and is named with its status and the server's own reason; a
+  server error (a 5xx, which some of these routes answer after the change has
+  landed) and a failure to reach the server read the state again; a second
+  toggle while one is pending is refused. While a state is unknown the switch
+  is drawn dimmed, never as off, carries no pressed state for assistive
+  technology, and the per-message mirrors of the sandbox and coding defaults
+  forget it. What the server refused or could not say shows under the bar,
+  where a state that could not be read can be read again. The cache and
+  humanizer settings panels toggle the same way, and their switch is the only
+  control that changes the on/off state: Save sends the rest of the form, and
+  the switch reads the state again after it. Turning the quick sandbox or the
+  coding agent on turns the other off on the server first, where it used to
+  be turned off in the page only; when the second change does not follow, the
+  first is named.
+  The cascading client moved from raw requests to the API client, and the
+  quick sandbox and coding agent defaults gained theirs. The Opti button is
+  gone: the `prompt_enhance` field it set has no reader on the server (the
+  request's `optimize` field is another option and stays out of the composer).
+  Whether cache, cascading or the humanizer change a web chat at all is for
+  the machine to measure.
+- The chat options store built five keys the server's `ChatRequest` does not
+  have (`no_cache`, `cascading`, `speculative`, `prompt_enhance`,
+  `humanize`), and the chat store dropped them before sending, so the
+  composer's Cache, Cascade, Opti and Human choices never reached a request.
+  `lib/chat/requestFields.ts` now builds a message's options and its request
+  from `ChatRequest`'s fields only, sending an option only when it was chosen
+  (a temperature of 0 is a choice, an empty image list is not sent); both
+  chat stores build through it, and the frontend's `ChatRequest` type names
+  those fields and no other.
+- Wiping a conversation from memory ran on one click, without a question, and
+  swallowed its failure; wiping every conversation asked through the browser's
+  own dialog. Both now ask in `ConfirmDialog`, a design-system dialog on the
+  modal primitive (a native modal dialog, focus restored to its opener), which
+  holds its buttons while the action runs and shows in an alert why it failed.
+  The conversation wipe names the conversation it asks about and wipes that
+  one, and the question is withdrawn if another conversation opens meanwhile.
+  The browser's `confirm()` and `prompt()` are gone from the frontend:
+  deleting a document, a selection of documents or a collection, unregistering
+  a fine-tune variant, disabling remote access, revoking a client certificate
+  and renaming a synced device (a dialog with a field, focused on open, which
+  Enter confirms) ask in the same dialog. The modal primitive now focuses a
+  field marked for it before its close button, and disables that button while
+  an action runs.
+- Events that nobody heard are gone or heard: the per-message Fork button (the
+  chat path does not follow branches; forking stays in the branch explorer
+  above the thread), the up arrow's "edit the last message" (no page
+  listened), a branch tree's fork relay and the telemetry timeline's selection
+  event are removed, and the project badge in the context bar now opens its
+  project. Every message knows its conversation, and feedback is never
+  submitted without both its conversation and its message id (it went out with
+  an empty conversation id); without both, the thumbs are not shown.
+- One skip link, the root layout's (the HTML shell and the app shell each
+  carried their own), leads to one `main-content` landmark per page: the chat
+  page no longer doubles it, and the sign-in, registration and component
+  gallery pages gained theirs. Ctrl+K focuses the conversation search again:
+  the handler queried a placeholder the field no longer carries, and now
+  queries the field's `data-oo-search` attribute. Scrolling to a settings
+  group or to the end of a chat is smooth only when neither the motion
+  preference nor the system reduces motion (`lib/motion.ts`), and not when
+  that cannot be read.
+- Deleting the open conversation navigates within the app instead of reloading
+  the whole page. Five custom properties that components read and nothing
+  declared now resolve to the tokens they meant. Three pictographs in code
+  became drawn icons; a pipeline's own emoji is still shown. The error
+  boundary's "Report issue" link pointed at a vendor organisation's repository
+  and is removed. The settings page and the sidebar read one settings catalog
+  (`lib/settings/catalog.ts`), so the settings search now finds text size,
+  motion, the advanced appearance group and configuration maintenance, which
+  it missed. The live metrics overlay and the sandbox isolation badge read
+  through the API layer (`lib/api/liveMetrics.ts` is new). The README said the
+  Playwright specs ran against a mocked backend and covered chat, settings,
+  RAG and mobile variants; it now names the three specs, which need a running
+  backend.
+- Sixteen contracts. `cs4` of the cache surface suite, which looked for the
+  cache's path inside the control bar, is superseded by `cs8`, which holds the
+  frontend's side wherever the switch is shown. Raw requests outside the API
+  layer fall from 30 to 15, and raw requests in the API layer outside its
+  client from 68 to 65. Focus handling in the dialog, the CSRF refusal before
+  and after, and how the switches read in the browser are checked on the
+  machine, not here.
 - A vision request through the core daemon was answered blind: the remote
   core client took a request's images and never put them on the wire, and
   the daemon had no field for them. The client now sends them as given, the

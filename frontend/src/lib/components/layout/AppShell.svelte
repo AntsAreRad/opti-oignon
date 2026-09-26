@@ -120,9 +120,6 @@
 </script>
 
 <div class="h-viewport flex overflow-hidden" style="background-color: var(--oo-bg-base);">
-	<!-- Skip to content link for keyboard/screen reader users -->
-	<a href="#main-content" class="skip-to-content">Skip to content</a>
-
 	<!-- Route change announcements for screen readers -->
 	<div class="sr-only" aria-live="polite" aria-atomic="true" id="oo-route-announcer"></div>
 

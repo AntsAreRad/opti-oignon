@@ -1,7 +1,7 @@
 <!--
   ErrorBoundary.svelte
   Wraps child content and captures render errors.
-  Displays a friendly error message with retry button and optional report link.
+  Displays a friendly error message with a retry button.
   Usage: <ErrorBoundary><slot /></ErrorBoundary>
 -->
 <script lang="ts">
@@ -58,16 +58,6 @@
 				</svg>
 				Try again
 			</button>
-			<a
-				href="https://github.com/anthropics/opti-oignon/issues"
-				target="_blank"
-				rel="noopener noreferrer"
-				class="text-xs underline transition-colors"
-				style="color: var(--oo-fg-muted);"
-				aria-label="Report this issue on GitHub"
-			>
-				Report issue
-			</a>
 		</div>
 	</div>
 {:else}

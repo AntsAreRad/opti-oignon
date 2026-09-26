@@ -328,8 +328,12 @@
 									&#8681;
 								</button>
 							{/if}
-							<button class="sfm-btn-icon" title="Preview" on:click={() => handlePreview(file.path)}>
-								&#128065;
+							<button class="sfm-btn-icon" title="Preview" aria-label="Preview" on:click={() => handlePreview(file.path)}>
+								<svg class="sfm-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+									stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M2 12c2.5-4.5 6-7 10-7c4 0 7.5 2.5 10 7c-2.5 4.5-6 7-10 7c-4 0-7.5-2.5-10-7z" />
+									<circle cx="12" cy="12" r="3" />
+								</svg>
 							</button>
 						</div>
 					</div>
@@ -517,6 +521,12 @@
 	}
 
 	.sfm-btn-icon:hover { color: var(--oo-fg-primary); }
+
+	.sfm-glyph {
+		display: block;
+		width: 1.1em;
+		height: 1.1em;
+	}
 
 	/* File list */
 	.sfm-file-list {

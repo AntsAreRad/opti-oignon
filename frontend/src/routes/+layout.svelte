@@ -86,15 +86,15 @@
 	}
 
 	function handleToggleSearch() {
-		// Focus sidebar search field
-		const el = document.querySelector('input[placeholder="Search..."]');
+		// Focus the sidebar's search field, which carries data-oo-search
+		const el = document.querySelector('[data-oo-search]');
 		if (el instanceof HTMLInputElement) {
 			el.focus();
 		}
 	}
 </script>
 
-<!-- Global skip link (spec 8.9); targets the AppShell main landmark -->
+<!-- The one skip link; every page renders one main-content landmark for it -->
 <a href="#main-content" class="oo-skip-link">Skip to main content</a>
 
 <OnboardingOverlay />

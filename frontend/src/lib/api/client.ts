@@ -57,13 +57,22 @@ export class ApiError extends Error {
 	detail: string;
 	/** True if the error is a network/connection issue, false for HTTP status errors. */
 	isNetworkError: boolean;
+	/** The server's own reason for an HTTP error, as its body gave it; '' when none. */
+	serverDetail: string;
 
-	constructor(status: number, message: string, detail: string = '', isNetworkError: boolean = false) {
+	constructor(
+		status: number,
+		message: string,
+		detail: string = '',
+		isNetworkError: boolean = false,
+		serverDetail: string = ''
+	) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
 		this.detail = detail || message;
 		this.isNetworkError = isNetworkError;
+		this.serverDetail = serverDetail;
 	}
 }
 
@@ -176,7 +185,8 @@ async function handleResponse<T>(response: Response, path: string): Promise<T> {
 		}
 		maybeRedirectToLogin(response.status, path);
 		const detail = actionableMessage(response.status, serverDetail, path);
-		throw new ApiError(response.status, `API error ${response.status}`, detail, false);
+		const reason = typeof serverDetail === 'string' ? serverDetail : JSON.stringify(serverDetail);
+		throw new ApiError(response.status, `API error ${response.status}`, detail, false, reason);
 	}
 
 	// 204 No Content

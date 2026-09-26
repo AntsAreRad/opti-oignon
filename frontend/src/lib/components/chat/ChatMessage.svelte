@@ -9,7 +9,7 @@
   Displays feedback widget (thumbs up/down) on assistant messages.
   Retry button on last assistant message.
   Mobile responsive -- reduced padding.
-  Quick-branch fork button. An assistant reply renders its markdown through
+  An assistant reply renders its markdown through
   markdown/Markdown.svelte (a long finished reply collapses by whole blocks,
   each code block carries its own Copy, and the streaming caret follows the
   reply's last character); any other message, a user's or one of another
@@ -67,7 +67,7 @@
 		original_model: string;
 	};
 	export let routingReason: RoutingReasonFull | null = null;
-	// Conversation ID for quick fork
+	// The conversation the message belongs to, for the feedback widget.
 	export let conversationId: string = '';
 	// A finished message longer than this (in lines of source, about)
 	// collapses: a reply to its first whole blocks, plain text to its first
@@ -76,7 +76,6 @@
 
 	const dispatch = createEventDispatcher<{
 		retry: void;
-		fork: { messageId: number | string };
 	}>();
 
 	let copied = false;
@@ -129,8 +128,6 @@
 	// Collapsed, a long message keeps about this many lines (whole blocks, for
 	// a reply).
 	$: collapseKeep = Math.min(20, Math.floor(collapseThreshold / 10));
-	// Show fork button (not during streaming, message must have an id)
-	$: showForkButton = !isStreaming && message.id != null && conversationId;
 
 	function copyContent() {
 		navigator.clipboard.writeText(displayContent).then(() => {
@@ -142,13 +139,6 @@
 
 	function handleRetry() {
 		dispatch('retry');
-	}
-
-	// Quick fork from this message
-	function handleFork() {
-		if (message.id != null) {
-			dispatch('fork', { messageId: message.id });
-		}
 	}
 
 	onDestroy(() => {
@@ -326,7 +316,7 @@
 			</div>
 		{/if}
 
-		<!-- Boutons hover: copie + retry + fork -->
+		<!-- Hover actions: retry and copy (branches live in the branch explorer) -->
 		{#if displayContent && !isStreaming}
 			<div class="absolute -top-2 -right-2 flex items-center gap-0.5
 				opacity-0 group-hover:opacity-100 transition-opacity">
@@ -356,18 +346,6 @@
 						<Icon name="copy" size="sm" />
 					{/if}
 				</button>
-				<!-- Fork from this message -->
-				{#if showForkButton}
-					<button
-						on:click={handleFork}
-						class="p-1 rounded-md transition-colors"
-						style="color: var(--oo-fg-muted); background-color: var(--oo-bg-elevated); border: 1px solid var(--oo-bd-default);"
-						title="Fork conversation from this message"
-						aria-label="Fork from this message"
-					>
-						<Icon name="git-branch" size="sm" />
-					</button>
-				{/if}
 			</div>
 		{/if}
 	</div>

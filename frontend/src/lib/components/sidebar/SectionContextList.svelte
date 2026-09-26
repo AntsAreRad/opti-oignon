@@ -13,6 +13,7 @@
 	import NewConversationButton from '$lib/components/sidebar/NewConversationButton.svelte';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { getHistory } from '$lib/api/benchmarkV2';
+	import { SETTINGS_SECTIONS, resolveSection } from '$lib/settings/catalog';
 	import type { ProjectInfo, BenchmarkV2HistoryEntry } from '$lib/types';
 
 	export let onSelect: (id: string) => void = () => {};
@@ -30,42 +31,13 @@
 					? 'health'
 					: 'chat';
 
-	// Legacy ?tab= ids fold into the nine-section model so an old sidebar
-	// link still highlights the right section.
-	const LEGACY_TAB_TO_SECTION: Record<string, string> = {
-		quick: 'conversation',
-		presets: 'conversation',
-		prompt: 'conversation',
-		models: 'models',
-		analytics: 'performance',
-		performance: 'performance',
-		'fine-tune': 'data',
-		knowledge: 'knowledge',
-		plugins: 'plugins',
-		backup: 'data',
-		security: 'account',
-		advanced: 'performance'
-	};
-
-	// The nine consolidated settings sections (spec 5.5).
-	const settingsSections: { id: string; label: string; icon: string }[] = [
-		{ id: 'appearance', label: 'Appearance', icon: 'palette' },
-		{ id: 'account', label: 'Account & Security', icon: 'shield-check' },
-		{ id: 'conversation', label: 'Conversation & Chat', icon: 'messages-square' },
-		{ id: 'models', label: 'Models & Inference', icon: 'cpu' },
-		{ id: 'knowledge', label: 'Knowledge (RAG)', icon: 'book-open' },
-		{ id: 'plugins', label: 'Plugins & Extensions', icon: 'plug' },
-		{ id: 'performance', label: 'Performance & Telemetry', icon: 'activity' },
-		{ id: 'network', label: 'Network & Privacy', icon: 'globe' },
-		{ id: 'data', label: 'Backup & Data', icon: 'database' }
-	];
+	// The settings sections, and the one a ?section= or old ?tab= value
+	// opens, are the settings catalog's, so an old link still highlights the
+	// right section.
+	const settingsSections = SETTINGS_SECTIONS;
 
 	$: rawSection = $page.url?.searchParams.get('section') ?? $page.url?.searchParams.get('tab');
-	$: currentTab = rawSection
-		? settingsSections.some((s) => s.id === rawSection)
-			? rawSection
-			: (LEGACY_TAB_TO_SECTION[rawSection] ?? 'appearance')
-		: 'appearance';
+	$: currentTab = resolveSection(rawSection);
 
 	// --- Projects section context: search + Starred/All/Archived ---
 	let projectsLoaded = false;

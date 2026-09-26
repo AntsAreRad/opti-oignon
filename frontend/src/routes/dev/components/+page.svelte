@@ -91,7 +91,7 @@
 			</div>
 		</header>
 
-		<main class="dev-grid">
+		<main id="main-content" class="dev-grid">
 			<Card variant="raised" padding="md">
 				<h2>Button</h2>
 				<div class="row">

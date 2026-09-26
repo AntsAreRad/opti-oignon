@@ -13,6 +13,8 @@
 	import { onMount } from 'svelte';
 	import { listDocuments, listCollections, deleteDocument } from '$lib/api/rag';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import type { RAGCollection, RAGDocument } from '$lib/types';
 
 	/** Externally trigger a refresh (e.g. after batch ingest completes). */
@@ -129,24 +131,56 @@
 		}
 	}
 
-	/** Delete a single document with confirmation. */
-	async function handleDelete(doc: RAGDocument) {
+	// The document whose deletion waits for an answer, and the selection's.
+	let pendingDoc: RAGDocument | null = null;
+	let deletingDoc = false;
+	let deleteError: string | null = null;
+	let confirmBulk = false;
+
+	/** Asks before a single document is deleted. */
+	function handleDelete(doc: RAGDocument) {
+		deleteError = null;
+		pendingDoc = doc;
+	}
+
+	function closeDelete() {
+		pendingDoc = null;
+		deleteError = null;
+	}
+
+	/** Deletes the document the dialog asked about. */
+	async function runDelete() {
+		const doc = pendingDoc;
+		if (!doc || deletingDoc) return;
 		const name = shortName(doc.source_file);
-		if (!confirm(`Delete document "${name}" and its ${doc.chunk_count} chunks?`)) return;
+		deletingDoc = true;
+		deleteError = null;
 		try {
 			await deleteDocument(doc.doc_id);
+			pendingDoc = null;
 			toastSuccess(`Deleted "${name}"`);
 			await loadDocuments();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to delete document');
+			const message = parseApiError(e, 'deleting the document').message;
+			// The dialog shows the failure while it is open; closed, a toast does.
+			if (pendingDoc === doc) deleteError = message;
+			else toastError(message);
+		} finally {
+			deletingDoc = false;
 		}
 	}
 
-	/** Bulk delete selected documents. */
-	async function handleBulkDelete() {
+	/** Asks before the selected documents are deleted. */
+	function handleBulkDelete() {
+		if (selectedIds.size === 0) return;
+		confirmBulk = true;
+	}
+
+	/** Bulk delete selected documents, once confirmed. */
+	async function runBulkDelete() {
+		confirmBulk = false;
 		const count = selectedIds.size;
 		if (count === 0) return;
-		if (!confirm(`Delete ${count} selected document(s) and all their chunks?`)) return;
 
 		bulkDeleting = true;
 		let success = 0;
@@ -403,3 +437,29 @@
 		{/if}
 	{/if}
 </div>
+
+<ConfirmDialog
+	open={pendingDoc !== null}
+	title="Delete this document?"
+	message={pendingDoc
+		? `"${shortName(pendingDoc.source_file)}" and its ${pendingDoc.chunk_count} chunks leave the knowledge base.`
+		: ''}
+	confirmLabel="Delete"
+	cancelLabel="Keep it"
+	danger
+	busy={deletingDoc}
+	error={deleteError}
+	onConfirm={runDelete}
+	onCancel={closeDelete}
+/>
+
+<ConfirmDialog
+	open={confirmBulk}
+	title="Delete the selected documents?"
+	message={`${selectedIds.size} selected document(s) and all their chunks leave the knowledge base.`}
+	confirmLabel="Delete"
+	cancelLabel="Keep them"
+	danger
+	onConfirm={runBulkDelete}
+	onCancel={() => (confirmBulk = false)}
+/>

@@ -387,4 +387,12 @@ html:not(.dark) .oo-logo-adaptive {
 	--oo-accent-secondary: var(--oo-acc-400);
 	--oo-accent-bg: var(--oo-acc-100);
 	--oo-qr-bg: #FFFFFF;
+
+	/* Names components read that nothing declared: each resolves to the
+	   token it meant. */
+	--oo-fg-danger: var(--oo-error);
+	--oo-motion-default: var(--oo-motion-normal);
+	--oo-font-size-xs: var(--oo-text-xs);
+	--oo-font-size-sm: var(--oo-text-sm);
+	--oo-font-size-lg: var(--oo-text-lg);
 }

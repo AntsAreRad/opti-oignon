@@ -472,6 +472,17 @@ fail_under = 0
 # keeps every other assertion of ae2 word for word and pins the floor
 # re-measured under the current laws, 1281.
 #
+# cs4 of the cache surface suite (not the conversation schema's cs4 above)
+# held the frontend's side of the published prefix by requiring the prefix
+# inside the chat control bar, where it stood only in two raw requests. The
+# control bar now reaches the cache through the API layer, which spells the
+# prefix, so that literal is gone while the property holds. cs8 in the same
+# file keeps every other assertion of cs4 -- the API layer speaks the
+# prefix, no frontend file carries the legacy token, in either case -- and
+# pins what the move needs: every component that shows the cache switch
+# reaches it through the API layer and spells no path of its own, the list
+# computed rather than named, so the switch can move without a data edit.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -547,4 +558,5 @@ addopts = """
     --deselect=tests/test_allium_phonology_contracts.py::test_pn14_the_alphabet_and_its_features_are_one_table_and_the_table_list_is_the_lawfiles
     --deselect=tests/test_allium_equivalence_contracts.py::test_ae1_both_engines_answer_every_genome_request_with_the_same_bytes
     --deselect=tests/test_allium_equivalence_contracts.py::test_ae2_both_engines_answer_the_whole_decoder_corpus_with_the_same_bytes
+    --deselect=tests/test_cache_surface_contracts.py::test_cs4_the_frontend_cache_client_speaks_the_published_prefix
 """

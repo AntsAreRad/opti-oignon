@@ -14,6 +14,11 @@ while the interface broke. These contracts make the surface load-bearing:
   * CS4 -- the frontend cache client speaks the published prefix and
     carries no trace of the legacy token: the client/server contract is
     asserted on both sides, not assumed.
+  * CS8 -- the same property, wherever the cache switch is shown: the API
+    layer speaks the published prefix; every component that shows the
+    switch reaches it through the API layer and spells no path of its own
+    (the list is computed, and it is never empty); and no file of the
+    frontend carries the legacy token, in either case.
 
 The legacy token is assembled from fragments so it never appears in this
 file's source. Local-only. Runs under pytest; imports the application the
@@ -21,6 +26,7 @@ way the release-docs contracts do.
 """
 
 import json
+import re
 from pathlib import Path
 
 from opti_oignon.api.app import app
@@ -90,4 +96,52 @@ def test_cs4_the_frontend_cache_client_speaks_the_published_prefix():
         for token in (_LEGACY, _LEGACY.upper()):
             assert token not in text, (
                 f"legacy token {token!r} survives in {path.name}"
+            )
+
+
+# The component files of the frontend, and the ones that show the cache
+# switch: those that spell the cache's paths, call its API functions, or
+# label a control with its name.
+_FRONTEND = REPO / "frontend" / "src"
+_TEXT_KINDS = (".svelte", ".ts", ".js", ".css", ".html")
+_SHOWS_SWITCH = re.compile(
+    re.escape(_PREFIX) + r"|\b(?:toggleSemCache|getSemCacheStatus)\b"
+    r"|aria-label\s*=\s*[\"'][^\"']*semantic cache",
+    re.IGNORECASE,
+)
+_API_IMPORT = re.compile(r"""from\s*['"]\$lib/api/semanticCache['"]""")
+
+
+def test_cs8_every_view_of_the_cache_switch_goes_through_the_api_layer():
+    api_layer = _CLIENT_FILES[0].read_text(encoding="utf-8")
+    assert _PREFIX + "/" in api_layer, "the api layer does not call the published prefix"
+
+    sample = (
+        "<button aria-label=\"Toggle semantic cache\" on:click={t}>Cache</button>\n"
+        "<script>await fetch('" + _PREFIX + "/toggle');</script>"
+    )
+    assert _SHOWS_SWITCH.search(sample) and not _API_IMPORT.search(sample), (
+        "the census reads a view of the switch, and a raw path is not the api layer"
+    )
+    components = sorted(
+        path for path in _FRONTEND.rglob("*.svelte")
+        if _SHOWS_SWITCH.search(path.read_text(encoding="utf-8"))
+    )
+    assert components, "no component shows the cache switch: the census went blind"
+    for path in components:
+        text = path.read_text(encoding="utf-8")
+        name = path.relative_to(REPO).as_posix()
+        assert _API_IMPORT.search(text), f"{name} does not reach the cache through the api layer"
+        assert _PREFIX not in text, f"{name} spells the cache's path rather than calling the api layer"
+
+    texts = [
+        path for path in _FRONTEND.rglob("*")
+        if path.is_file() and path.suffix in _TEXT_KINDS
+    ]
+    assert len(texts) > 100, f"the census reads the frontend's files: {len(texts)}"
+    for path in texts:
+        text = path.read_text(encoding="utf-8")
+        for token in (_LEGACY, _LEGACY.upper()):
+            assert token not in text, (
+                f"legacy token {token!r} survives in {path.relative_to(REPO).as_posix()}"
             )

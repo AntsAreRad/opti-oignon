@@ -4,7 +4,10 @@
   implementations. Renders inside a native <dialog> via showModal()
   for a built-in focus trap; ESC and backdrop clicks route through the
   `open` state and `onClose`. drawer-right becomes drawer-bottom on
-  mobile (< 768px). Focus is restored to the opener on close.
+  mobile (< 768px). Focus is restored to the opener on close. On open,
+  focus goes to the element marked autofocus (or data-autofocus) when there
+  is one, else to the first focusable element. While `closable` is false
+  (an action is running), the close button is disabled.
 -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
@@ -17,6 +20,8 @@
 	export let size: 'sm' | 'md' | 'lg' | 'xl' = 'md';
 	export let closeOnBackdrop = true;
 	export let closeOnEsc = true;
+	/** Whether the header's close button can close the dialog now. */
+	export let closable = true;
 	export let onClose: () => void;
 
 	const uid = `oo-modal-${Math.random().toString(36).slice(2, 9)}`;
@@ -39,9 +44,14 @@
 		opener = (document.activeElement as HTMLElement) ?? null;
 		if (!dialogEl.open) dialogEl.showModal();
 		await tick();
-		const focusable = dialogEl.querySelector<HTMLElement>(
-			'[autofocus], button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-		);
+		// A marked element first, wherever it sits: a selector list alone
+		// would take the first match in document order, the header's close
+		// button.
+		const focusable =
+			dialogEl.querySelector<HTMLElement>('[autofocus], [data-autofocus]') ??
+			dialogEl.querySelector<HTMLElement>(
+				'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			);
 		focusable?.focus();
 	}
 
@@ -89,6 +99,7 @@
 				type="button"
 				class="oo-modal-close"
 				aria-label="Close dialog"
+				disabled={!closable}
 				on:click={requestClose}
 			>
 				<Icon name="x" size="sm" />

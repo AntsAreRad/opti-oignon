@@ -20,6 +20,8 @@
 		queryKnowledgeBase,
 	} from '$lib/api/rag';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import RAGDashboardPanel from './RAGDashboardPanel.svelte';
 	import BatchUpload from '$lib/components/rag/BatchUpload.svelte';
 	import IngestProgress from '$lib/components/rag/IngestProgress.svelte';
@@ -90,15 +92,41 @@
 		}
 	}
 
-	async function handleDelete(name: string) {
-		if (!confirm(`Delete collection "${name}" and all its documents?`)) return;
+	// The collection whose deletion waits for an answer.
+	let pendingCollection: string | null = null;
+	let deletingCollection = false;
+	let deleteError: string | null = null;
+
+	/** Asks before a collection is deleted. */
+	function handleDelete(name: string) {
+		deleteError = null;
+		pendingCollection = name;
+	}
+
+	function closeDelete() {
+		pendingCollection = null;
+		deleteError = null;
+	}
+
+	/** Deletes the collection the dialog asked about. */
+	async function runDelete() {
+		const name = pendingCollection;
+		if (!name || deletingCollection) return;
+		deletingCollection = true;
+		deleteError = null;
 		try {
 			await deleteCollection(name);
+			pendingCollection = null;
 			toastSuccess(`Collection "${name}" deleted`);
 			await loadCollections();
 			if (docManagerRef) docManagerRef.refresh();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to delete collection');
+			const message = parseApiError(e, 'deleting the collection').message;
+			// The dialog shows the failure while it is open; closed, a toast does.
+			if (pendingCollection === name) deleteError = message;
+			else toastError(message);
+		} finally {
+			deletingCollection = false;
 		}
 	}
 
@@ -439,3 +467,18 @@
 {#if activeSubTab === 'dashboard'}
 	<RAGDashboardPanel />
 {/if}
+
+<ConfirmDialog
+	open={pendingCollection !== null}
+	title="Delete this collection?"
+	message={pendingCollection
+		? `"${pendingCollection}" and all its documents leave the knowledge base.`
+		: ''}
+	confirmLabel="Delete"
+	cancelLabel="Keep it"
+	danger
+	busy={deletingCollection}
+	error={deleteError}
+	onConfirm={runDelete}
+	onCancel={closeDelete}
+/>

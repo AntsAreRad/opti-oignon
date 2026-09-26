@@ -8,9 +8,11 @@
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import {
 		conversations,
 		activeConversationId,
+		messages,
 		loading,
 		error,
 		loadConversations,
@@ -72,10 +74,14 @@
 	async function handleDelete(e: CustomEvent<{ id: string }>) {
 		const wasActive = $activeConversationId === e.detail.id;
 		await deleteConv(e.detail.id);
-		// After deleting, redirect if it was the active conversation
-		// or if no conversations remain.
+		// After deleting, go to the chat index if it was the active
+		// conversation or if no conversations remain: a client navigation,
+		// then nothing is active, even if the page still named the deleted
+		// conversation meanwhile and selected it again.
 		if (wasActive || $conversations.length === 0) {
-			window.location.href = '/chat';
+			await goto('/chat');
+			activeConversationId.set(null);
+			messages.set([]);
 		}
 	}
 
@@ -103,6 +109,7 @@
 				bind:value={searchQuery}
 				placeholder="Search... (Ctrl+K)"
 				aria-label="Search conversations"
+				data-oo-search
 				class="w-full text-xs pl-8 pr-3 py-1.5 rounded-md outline-none"
 				style="background-color: var(--oo-input-bg); color: var(--oo-fg-secondary);
 					border: 1px solid var(--oo-input-bd);"

@@ -298,8 +298,17 @@
 								on:click={() => showDetail(pipeline)}
 								class="flex-1 flex items-center gap-2.5 px-3 py-2.5 text-left min-w-0"
 							>
-								<!-- Emoji -->
-								<span class="text-base shrink-0">{pipeline.emoji || '🔗'}</span>
+								<!-- The pipeline's own emoji (user content), or a drawn link mark -->
+								{#if pipeline.emoji}
+									<span class="text-base shrink-0">{pipeline.emoji}</span>
+								{:else}
+									<svg class="w-4 h-4 shrink-0 text-surface-400" viewBox="0 0 24 24" fill="none"
+										stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+										stroke-linejoin="round" aria-hidden="true">
+										<path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1.5 1.5" />
+										<path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1.5-1.5" />
+									</svg>
+								{/if}
 
 								<div class="flex-1 min-w-0">
 									<div class="text-xs font-medium text-surface-200 truncate">{pipeline.name}</div>
@@ -563,7 +572,7 @@
 						<input id="create-emoji" type="text" bind:value={formEmoji} maxlength="4"
 							class="w-full bg-surface-800 border border-surface-700 rounded-md px-2.5 py-1.5
 								text-xs text-center focus:outline-none focus:ring-1 focus:ring-accent-500"
-							placeholder="🔗" />
+							placeholder="Optional" />
 					</div>
 				</div>
 				<div>

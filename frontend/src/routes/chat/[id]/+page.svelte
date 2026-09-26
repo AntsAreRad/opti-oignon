@@ -29,6 +29,7 @@
 		isCodingStream
 	} from '$lib/stores/chat';
 	import { getChatOptions } from '$lib/stores/chatOptions';
+	import { scrollBehavior } from '$lib/motion';
 	import { toastError } from '$lib/stores/notifications';
 	import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
 	import ChatInput from '$lib/components/chat/ChatInput.svelte';
@@ -88,7 +89,7 @@
 
 	function scrollToBottom() {
 		if (bottomSentinel && shouldAutoScroll) {
-			bottomSentinel.scrollIntoView({ behavior: 'smooth' });
+			bottomSentinel.scrollIntoView({ behavior: scrollBehavior() });
 		}
 	}
 
@@ -101,7 +102,7 @@
 		showScrollFab = scrollHeight - scrollTop - clientHeight > 300;
 	}
 
-	// FAB click handler -- smooth scroll to bottom
+	// FAB click handler -- scroll to bottom
 	function handleScrollFabClick() {
 		shouldAutoScroll = true;
 		showScrollFab = false;
@@ -124,10 +125,8 @@
 			attachedFiles = [];
 		}
 
-		// Include images in options if present
-		if (messageImages && messageImages.length > 0) {
-			(options as Record<string, unknown>).images = messageImages;
-		}
+		// Images travel with the options; an empty list is not sent.
+		options.images = messageImages;
 
 		await sendMessage(convId, messageText, options);
 		await tick();
@@ -195,7 +194,6 @@
 		bind:this={messagesContainer}
 		on:scroll={handleScroll}
 		class="flex-1 overflow-y-auto px-2 sm:px-4 py-6 touch-scroll"
-		id="main-content"
 		role="log"
 		aria-label="Chat messages"
 	>
@@ -223,6 +221,7 @@
 						>
 							<ChatMessage
 								message={msg}
+								conversationId={convId ?? ''}
 								searchMetadata={msg.id != null ? $searchMetadataMap.get(String(msg.id)) ?? null : null}
 								isLast={i === $messages.length - 1}
 								isRetrying={$isStreaming}
@@ -235,6 +234,7 @@
 					{#if $isStreaming && $streamingContent}
 						<ChatMessage
 							message={streamingPlaceholder}
+							conversationId={convId ?? ''}
 							isStreaming={true}
 							streamContent={$streamingContent}
 							streamThinking={$streamingThinking}
@@ -245,6 +245,7 @@
 					{:else if $isStreaming && $streamingThinking}
 						<ChatMessage
 							message={streamingPlaceholder}
+							conversationId={convId ?? ''}
 							isStreaming={true}
 							streamContent={''}
 							streamThinking={$streamingThinking}

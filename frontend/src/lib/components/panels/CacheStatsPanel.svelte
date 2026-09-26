@@ -2,7 +2,10 @@
   CacheStatsPanel -- Semantic Cache settings panel.
 
   Sections:
-  1. Enable/disable toggle + embeddings availability
+  1. Enable/disable toggle + embeddings availability. The toggle is the
+     server's switch: it shows the state the server confirmed, a third,
+     dimmed look with the word "Unknown" while that is not known, and is
+     the only control that changes it (the form below saves the rest).
   2. Hit rate gauge (exact vs semantic breakdown)
   3. Tokens saved counter + entry count bar
   4. Config sliders (TTL, threshold, max entries)
@@ -18,6 +21,8 @@
 		expireSemCache,
 	} from '$lib/api/semanticCache';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { createServerSwitch, pressed } from '$lib/switches/serverSwitch';
+	import InlineError from '$lib/ds/InlineError.svelte';
 	import type { SemCacheStats, SemCacheStatus } from '$lib/types';
 
 	// -------------------------------------------------------------------------
@@ -31,7 +36,6 @@
 	let stats: SemCacheStats | null = null;
 
 	// Config edits
-	let localEnabled = false;
 	let localThreshold = 0.92;
 	let localTtl = 3600;
 	let localMaxEntries = 1000;
@@ -44,11 +48,28 @@
 	let clearing = false;
 	let expiring = false;
 
+	// The cache switch shows the state the server confirmed, never the one
+	// it was asked for. It alone changes that state: the configuration form
+	// below saves everything else, and the switch reads the state again
+	// after a save.
+	const cacheSwitch = createServerSwitch({
+		label: 'Semantic cache',
+		read: async () => (await getSemCacheStatus()).enabled,
+		write: async () => {
+			status = await toggleSemCache();
+			stats = status.stats ?? null;
+			return status.enabled;
+		},
+	});
+
 	// -------------------------------------------------------------------------
 	// Load
 	// -------------------------------------------------------------------------
 
-	onMount(loadData);
+	onMount(() => {
+		void loadData();
+		void cacheSwitch.load();
+	});
 
 	async function loadData() {
 		loading = true;
@@ -57,7 +78,6 @@
 			status = await getSemCacheStatus();
 			stats = status.stats ?? null;
 			if (status.config) {
-				localEnabled = (status.config.enabled as boolean) ?? false;
 				localThreshold = (status.config.similarity_threshold as number) ?? 0.92;
 				localTtl = (status.config.ttl_seconds as number) ?? 3600;
 				localMaxEntries = (status.config.max_entries as number) ?? 1000;
@@ -77,21 +97,17 @@
 	// -------------------------------------------------------------------------
 
 	async function handleToggle() {
-		try {
-			status = await toggleSemCache();
-			localEnabled = status.enabled;
-			stats = status.stats ?? null;
-			toastSuccess(`Cache ${localEnabled ? 'enabled' : 'disabled'}`);
-		} catch (e) {
-			toastError(`Toggle failed: ${e}`);
+		if (savingConfig) return;
+		if ((await cacheSwitch.toggle()) === 'adopted') {
+			toastSuccess(`Cache ${cacheSwitch.current().value ? 'enabled' : 'disabled'}`);
 		}
 	}
 
 	async function handleSaveConfig() {
+		if ($cacheSwitch.pending) return;
 		savingConfig = true;
 		try {
 			status = await updateSemCacheConfig({
-				enabled: localEnabled,
 				similarity_threshold: localThreshold,
 				ttl_seconds: localTtl,
 				max_entries: localMaxEntries,
@@ -106,6 +122,7 @@
 		} finally {
 			savingConfig = false;
 		}
+		await cacheSwitch.load();
 	}
 
 	async function handleClear() {
@@ -153,6 +170,18 @@
 		if (seconds < 3600) return Math.round(seconds / 60) + 'min';
 		return (seconds / 3600).toFixed(1) + 'h';
 	}
+
+	// The switch's track and knob: on, off, or a third look while the state
+	// is unknown (dimmed, the knob in the middle), never drawn as off.
+	function trackStyle(value: boolean | null): string {
+		if (value === null) return 'background-color: var(--oo-bg-tertiary); opacity: 0.5;';
+		return value ? 'background-color: var(--oo-acc-500);' : 'background-color: var(--oo-bg-tertiary);';
+	}
+
+	function knobStyle(value: boolean | null): string {
+		const left = value === null ? '0.625rem' : value ? '1.125rem' : '0.125rem';
+		return `background-color: var(--oo-toggle-knob); left: ${left};`;
+	}
 </script>
 
 <div class="space-y-4">
@@ -171,29 +200,36 @@
 		{/if}
 	</div>
 
-	{#if loading}
-		<p class="text-xs" style="color: var(--oo-fg-muted);">Loading cache status...</p>
-	{:else if error}
-		<p class="text-xs" style="color: var(--oo-error);">{error}</p>
-	{:else}
-		<!-- 1. Enable toggle + embedding status -->
-		<div class="p-3 rounded-lg" style="background-color: var(--oo-bg-elevated); border: 1px solid var(--oo-bd-default);">
-			<div class="flex items-center justify-between mb-2">
-				<span class="text-xs" style="color: var(--oo-fg-secondary);">Cache Enabled</span>
+	<!-- 1. Enable toggle (the server's switch, read on its own) + embedding status -->
+	<div class="p-3 rounded-lg" style="background-color: var(--oo-bg-elevated); border: 1px solid var(--oo-bd-default);">
+		<div class="flex items-center justify-between mb-2">
+			<span class="text-xs" style="color: var(--oo-fg-secondary);">Cache Enabled</span>
+			<div class="flex items-center gap-2">
+				{#if $cacheSwitch.value === null}
+					<span class="text-xs">{$cacheSwitch.error ? 'Unknown' : 'Reading...'}</span>
+				{/if}
 				<button
 					on:click={handleToggle}
 					class="relative w-9 h-5 rounded-full transition-colors"
-					style="{localEnabled
-						? 'background-color: var(--oo-acc-500);'
-						: 'background-color: var(--oo-bg-tertiary);'}"
+					style={trackStyle($cacheSwitch.value)}
 					aria-label="Toggle cache"
+					aria-pressed={pressed($cacheSwitch.value)}
+					aria-busy={$cacheSwitch.pending}
+					disabled={$cacheSwitch.value === null || $cacheSwitch.pending || savingConfig}
 				>
 					<span
 						class="absolute top-0.5 w-4 h-4 rounded-full transition-transform"
-						style="background-color: var(--oo-toggle-knob); {localEnabled ? 'left: 1.125rem;' : 'left: 0.125rem;'}"
+						style={knobStyle($cacheSwitch.value)}
 					/>
 				</button>
 			</div>
+		</div>
+		<InlineError
+			message={$cacheSwitch.error}
+			onRetry={$cacheSwitch.value === null ? cacheSwitch.load : undefined}
+			retrying={$cacheSwitch.pending}
+		/>
+		{#if !loading && !error}
 			<div class="flex items-center gap-2 text-xs" style="color: var(--oo-fg-muted);">
 				<span class="inline-block w-2 h-2 rounded-full"
 					style="{stats?.embeddings_available
@@ -201,7 +237,14 @@
 						: 'background-color: var(--oo-error);'}"></span>
 				Embeddings: {stats?.embeddings_available ? stats.embedding_model : 'unavailable (exact-only mode)'}
 			</div>
-		</div>
+		{/if}
+	</div>
+
+	{#if loading}
+		<p class="text-xs" style="color: var(--oo-fg-muted);">Loading cache status...</p>
+	{:else if error}
+		<p class="text-xs" style="color: var(--oo-error);">{error}</p>
+	{:else}
 
 		<!-- 2. Hit rate breakdown -->
 		{#if stats}
@@ -329,10 +372,10 @@
 				</select>
 			</div>
 
-			<!-- Save config button -->
+			<!-- Save config button (the switch above owns the on/off state) -->
 			<button
 				on:click={handleSaveConfig}
-				disabled={savingConfig}
+				disabled={savingConfig || $cacheSwitch.pending}
 				class="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors"
 				style="background-color: var(--oo-btn-primary-bg); color: var(--oo-btn-primary-fg);
 					opacity: {savingConfig ? '0.5' : '1'};"

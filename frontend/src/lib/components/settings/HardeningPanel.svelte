@@ -16,12 +16,15 @@
 		type HardeningStatus,
 		type WipeAllResult,
 	} from '$lib/api/hardening';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 
 	let status: HardeningStatus | null = null;
 	let loading = true;
 	let error = '';
 
-	// Wipe state
+	// Wipe state: asked first, and its failure shown.
+	let confirmWipe = false;
 	let wiping = false;
 	let wipeResult: WipeAllResult | null = null;
 	let wipeError = '';
@@ -40,16 +43,30 @@
 		}
 	}
 
-	async function handleWipeAll() {
-		if (!confirm('Wipe ALL conversation buffers from RAM? This cannot be undone.')) return;
+	function askWipeAll() {
+		wipeError = '';
+		wipeResult = null;
+		confirmWipe = true;
+	}
+
+	// Closing while the wipe runs leaves it running; its failure is then
+	// shown beside the button.
+	function closeWipeAll() {
+		confirmWipe = false;
+		if (!wiping) wipeError = '';
+	}
+
+	async function runWipeAll() {
+		if (wiping) return;
 		wiping = true;
 		wipeError = '';
 		wipeResult = null;
 		try {
 			wipeResult = await wipeAllConversations();
+			confirmWipe = false;
 			await loadStatus();
-		} catch (e: any) {
-			wipeError = e?.message || 'Wipe failed';
+		} catch (e) {
+			wipeError = parseApiError(e, 'wiping the conversations').message;
 		} finally {
 			wiping = false;
 		}
@@ -113,8 +130,9 @@
 					<button
 						class="px-3 py-1 rounded text-xs font-medium transition-colors"
 						style="background-color: var(--oo-fg-error); color: white;"
-						on:click={handleWipeAll}
+						on:click={askWipeAll}
 						disabled={wiping}
+						aria-haspopup="dialog"
 					>
 						{wiping ? 'Wiping...' : 'Wipe All Conversations'}
 					</button>
@@ -123,7 +141,7 @@
 							Wiped {wipeResult.conversations_wiped} conversations ({wipeResult.total_fields_zeroed} fields zeroed)
 						</span>
 					{/if}
-					{#if wipeError}
+					{#if wipeError && !confirmWipe}
 						<span class="text-xs" style="color: var(--oo-fg-error);">{wipeError}</span>
 					{/if}
 				</div>
@@ -320,3 +338,16 @@
 
 	{/if}
 </div>
+
+<ConfirmDialog
+	open={confirmWipe}
+	title="Wipe every conversation from memory?"
+	message="Every conversation buffer the server holds is zeroed, best-effort. This cannot be undone."
+	confirmLabel="Wipe all"
+	cancelLabel="Keep them"
+	danger
+	busy={wiping}
+	error={wipeError || null}
+	onConfirm={runWipeAll}
+	onCancel={closeWipeAll}
+/>

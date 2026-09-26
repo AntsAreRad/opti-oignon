@@ -23,6 +23,8 @@
 		type RemoteAccessStatus,
 		type ClientCertInfo,
 	} from '$lib/api/remoteAccess';
+	import { parseApiError } from '$lib/api/errorHandler';
+	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 
 	let status: RemoteAccessStatus | null = null;
 	let loading = true;
@@ -93,14 +95,33 @@
 		}
 	}
 
-	async function handleDisable() {
-		if (!confirm('Disable remote access? The server will bind to localhost on next restart.')) return;
+	// Asked before remote access is disabled; the failure is shown in the
+	// dialog while it is open, and as the panel's error once it is closed.
+	let confirmDisable = false;
+	let disableError: string | null = null;
+
+	function handleDisable() {
+		disableError = null;
+		confirmDisable = true;
+	}
+
+	function closeDisable() {
+		confirmDisable = false;
+		disableError = null;
+	}
+
+	async function runDisable() {
+		if (disabling) return;
 		disabling = true;
+		disableError = null;
 		try {
 			await disableRemoteAccess();
+			confirmDisable = false;
 			await loadStatus();
-		} catch (e: any) {
-			error = e?.message || 'Failed to disable.';
+		} catch (e) {
+			const message = parseApiError(e, 'disabling remote access').message;
+			if (confirmDisable) disableError = message;
+			else error = message;
 		} finally {
 			disabling = false;
 		}
@@ -135,15 +156,35 @@
 		}
 	}
 
-	async function handleRevoke(name: string) {
-		if (!confirm(`Revoke certificate for "${name}"? This takes effect immediately.`)) return;
+	// The certificate whose revocation waits for an answer.
+	let pendingRevoke: string | null = null;
+	let revokeDialogError: string | null = null;
+
+	function handleRevoke(name: string) {
+		revokeDialogError = null;
+		pendingRevoke = name;
+	}
+
+	function closeRevoke() {
+		pendingRevoke = null;
+		revokeDialogError = null;
+	}
+
+	async function runRevoke() {
+		const name = pendingRevoke;
+		if (!name || revoking) return;
 		revoking = name;
 		revokeError = '';
+		revokeDialogError = null;
 		try {
 			await revokeClientCert(name);
+			pendingRevoke = null;
 			await loadStatus();
-		} catch (e: any) {
-			revokeError = e?.message || 'Revocation failed.';
+		} catch (e) {
+			const message = parseApiError(e, 'revoking the certificate').message;
+			// The dialog shows the failure while it is open; closed, the panel does.
+			if (pendingRevoke === name) revokeDialogError = message;
+			else revokeError = message;
 		} finally {
 			revoking = '';
 		}
@@ -376,3 +417,31 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	open={confirmDisable}
+	title="Disable remote access?"
+	message="The server binds to localhost only from its next restart."
+	confirmLabel="Disable"
+	cancelLabel="Keep it on"
+	danger
+	busy={disabling}
+	error={disableError}
+	onConfirm={runDisable}
+	onCancel={closeDisable}
+/>
+
+<ConfirmDialog
+	open={pendingRevoke !== null}
+	title="Revoke this certificate?"
+	message={pendingRevoke
+		? `The certificate for "${pendingRevoke}" stops working at once.`
+		: ''}
+	confirmLabel="Revoke"
+	cancelLabel="Keep it"
+	danger
+	busy={revoking !== ''}
+	error={revokeDialogError}
+	onConfirm={runRevoke}
+	onCancel={closeRevoke}
+/>

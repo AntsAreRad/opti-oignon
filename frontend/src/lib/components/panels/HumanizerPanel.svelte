@@ -2,7 +2,10 @@
   HumanizerPanel.svelte -- Humanizer settings panel.
 
   Sections:
-  1. Enable/disable toggle
+  1. Enable/disable toggle: the server's switch, which shows the state the
+     server confirmed, a third, dimmed look with the word "Unknown" while
+     that is not known, and is the only control that changes it (Save
+     sends the rest of the form)
   2. Mode selector (rewrite / logprobs / hybrid)
   3. Intensity selector (light / moderate / heavy)
   4. Formality selector (casual / neutral / formal)
@@ -18,6 +21,8 @@
 		getHumanizerStats,
 	} from '$lib/api/humanizer';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { createServerSwitch, pressed } from '$lib/switches/serverSwitch';
+	import InlineError from '$lib/ds/InlineError.svelte';
 	import type { HumanizerConfigResponse, HumanizerStatsResponse } from '$lib/types';
 
 	// -------------------------------------------------------------------------
@@ -28,7 +33,6 @@
 	let error = '';
 
 	let config: HumanizerConfigResponse | null = null;
-	let localEnabled = false;
 	let localMode = 'rewrite';
 	let localIntensity = 'moderate';
 	let localFormality = 'neutral';
@@ -40,6 +44,18 @@
 	// Stats
 	let stats: HumanizerStatsResponse | null = null;
 	let statsLoading = false;
+
+	// The enable switch shows the state the server confirmed, never the one
+	// it was asked for. It alone changes that state: Save sends the rest of
+	// the form, and the switch reads the state again after a save.
+	const humanizer = createServerSwitch({
+		label: 'Output humanizer',
+		read: async () => (await getHumanizerConfig()).enabled,
+		write: async (next) => {
+			config = await updateHumanizerConfig({ enabled: next });
+			return config.enabled;
+		},
+	});
 
 	const modes = [
 		{ value: 'rewrite', label: 'LLM Rewrite', desc: 'Prompt-based naturalness rewrite' },
@@ -63,14 +79,16 @@
 	// Load
 	// -------------------------------------------------------------------------
 
-	onMount(loadData);
+	onMount(() => {
+		void loadData();
+		void humanizer.load();
+	});
 
 	async function loadData() {
 		loading = true;
 		error = '';
 		try {
 			config = await getHumanizerConfig();
-			localEnabled = config.enabled;
 			localMode = config.mode;
 			localIntensity = config.intensity;
 			localFormality = config.formality;
@@ -101,6 +119,7 @@
 	// -------------------------------------------------------------------------
 
 	async function save() {
+		if ($humanizer.pending) return;
 		saving = true;
 		try {
 			const phrases = localBannedPhrases
@@ -109,7 +128,6 @@
 				.filter((p) => p.length > 0);
 
 			config = await updateHumanizerConfig({
-				enabled: localEnabled,
 				mode: localMode,
 				intensity: localIntensity,
 				formality: localFormality,
@@ -123,22 +141,60 @@
 		} finally {
 			saving = false;
 		}
+		await humanizer.load();
 	}
 
 	async function toggleEnabled() {
-		localEnabled = !localEnabled;
-		saving = true;
-		try {
-			config = await updateHumanizerConfig({ enabled: localEnabled });
-			toastSuccess(localEnabled ? 'Humanizer enabled' : 'Humanizer disabled');
-		} catch (e) {
-			localEnabled = !localEnabled;
-			toastError(`Failed to toggle: ${e}`);
-		} finally {
-			saving = false;
+		if (saving) return;
+		if ((await humanizer.toggle()) === 'adopted') {
+			toastSuccess(humanizer.current().value ? 'Humanizer enabled' : 'Humanizer disabled');
 		}
 	}
+
+	// The switch's track and knob: on, off, or a third look while the state
+	// is unknown (dimmed, the knob in the middle), never drawn as off.
+	function trackStyle(value: boolean | null): string {
+		if (value === null) return 'background-color: var(--oo-bg-overlay); opacity: 0.5;';
+		return `background-color: ${value ? 'var(--oo-acc-500)' : 'var(--oo-bg-overlay)'};`;
+	}
+
+	function knobStyle(value: boolean | null): string {
+		const shift = value === null ? '10px' : value ? '20px' : '0';
+		return `background-color: var(--oo-toggle-knob); transform: translateX(${shift});`;
+	}
 </script>
+
+<!-- Enable toggle: the server's switch, read on its own -->
+<div class="flex items-center justify-between mb-5">
+	<div>
+		<span class="text-sm font-medium" style="color: var(--oo-fg-primary);">Enable Humanizer</span>
+		<p class="text-xs" style="color: var(--oo-fg-muted);">Post-process LLM output for more natural language</p>
+	</div>
+	<div class="flex items-center gap-2">
+		{#if $humanizer.value === null}
+			<span class="text-xs">{$humanizer.error ? 'Unknown' : 'Reading...'}</span>
+		{/if}
+		<button
+			on:click={toggleEnabled}
+			class="relative w-10 h-5 rounded-full transition-colors"
+			style={trackStyle($humanizer.value)}
+			aria-label="Toggle humanizer"
+			aria-pressed={pressed($humanizer.value)}
+			aria-busy={$humanizer.pending}
+			disabled={$humanizer.value === null || $humanizer.pending || saving}
+		>
+			<span
+				class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform"
+				style={knobStyle($humanizer.value)}
+			></span>
+		</button>
+	</div>
+</div>
+<InlineError
+	message={$humanizer.error}
+	onRetry={$humanizer.value === null ? humanizer.load : undefined}
+	retrying={$humanizer.pending}
+/>
 
 {#if loading}
 	<div class="flex items-center gap-2 py-4">
@@ -151,26 +207,6 @@
 	</div>
 {:else}
 	<div class="space-y-5">
-
-		<!-- Enable toggle -->
-		<div class="flex items-center justify-between">
-			<div>
-				<span class="text-sm font-medium" style="color: var(--oo-fg-primary);">Enable Humanizer</span>
-				<p class="text-xs" style="color: var(--oo-fg-muted);">Post-process LLM output for more natural language</p>
-			</div>
-			<button
-				on:click={toggleEnabled}
-				class="relative w-10 h-5 rounded-full transition-colors"
-				style="background-color: {localEnabled ? 'var(--oo-acc-500)' : 'var(--oo-bg-overlay)'};"
-				aria-label="Toggle humanizer"
-				aria-pressed={localEnabled}
-			>
-				<span
-					class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform"
-					style="background-color: var(--oo-toggle-knob); transform: translateX({localEnabled ? '20px' : '0'});"
-				></span>
-			</button>
-		</div>
 
 		<!-- Mode -->
 		<div>
@@ -284,7 +320,7 @@
 		<div>
 			<button
 				on:click={save}
-				disabled={saving}
+				disabled={saving || $humanizer.pending}
 				class="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
 				style="background-color: var(--oo-acc-600); color: var(--oo-acc-50);"
 			>

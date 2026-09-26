@@ -11,6 +11,7 @@ import type { ChatConnection } from '$lib/api/chat';
 import { messages, loadConversations } from '$lib/stores/conversations';
 import { getMessages } from '$lib/api/conversations';
 import type { ChatStreamCallbacks } from '$lib/types';
+import { chatRequest, type ChatOptions } from '$lib/chat/requestFields';
 
 // -- Stores de streaming --
 
@@ -84,18 +85,7 @@ let activeConnection: ChatConnection | null = null;
 export async function sendMessage(
 	conversationId: string,
 	message: string,
-	options?: {
-		model?: string;
-		preset?: string;
-		temperature?: number;
-		usePresets?: boolean;
-		think?: boolean;
-		web_search?: boolean;
-		images?: string[];
-		quick_sandbox?: boolean;
-		chat_coding?: boolean;
-		exec_pipeline?: string;
-	}
+	options: ChatOptions = {}
 ): Promise<void> {
 	if (get(isStreaming)) return;
 
@@ -124,25 +114,9 @@ export async function sendMessage(
 	};
 	messages.update((msgs) => [...msgs, userMsg]);
 
-	// Construire la requete
-	const request: Record<string, unknown> = {
-		conversation_id: conversationId,
-		message,
-		model: options?.model,
-		preset: options?.preset,
-		temperature: options?.temperature,
-		use_presets: options?.usePresets,
-		think: options?.think,
-		web_search: options?.web_search,
-		quick_sandbox: options?.quick_sandbox,
-		chat_coding: options?.chat_coding,
-		// (PIP-06): the field existed in getChatOptions since but
-		// was dropped here; the backend ChatRequest now carries it.
-		exec_pipeline: options?.exec_pipeline,
-	};
-	if (options?.images && options.images.length > 0) {
-		request.images = options.images;
-	}
+	// The request: the conversation, the message, and every option that is a
+	// ChatRequest field (the builder drops any other key).
+	const request = chatRequest(conversationId, message, options);
 
 	const callbacks: ChatStreamCallbacks = {
 		onToken: (content: string) => {
