@@ -43,9 +43,14 @@ environment is replaced (the import footprint guard's probe, on purpose),
 and a process that is not Python started in a data place.
 ``tests/_data_firewall.py`` has what stays uncovered.
 
+The heap the collection built is frozen before any contract runs, so a
+collector pass does not rescan it inside a contract and charge that
+contract a pause it did not cause (PH3 holds it).
+
 Local-only (the public distribution ships no tests).
 """
 
+import gc
 import sys
 import urllib.request
 from pathlib import Path
@@ -69,7 +74,24 @@ def pytest_configure(config):
                     "the session refuses to run uncovered", returncode=REFUSED)
 
 
+def pytest_collection_finish(session):
+    """Freeze the heap the collection built, once, before any contract runs.
+
+    Every module of the suite is imported by then, and nearly all of it lives
+    until the session ends. Left in the collector's generations, it is
+    rescanned by each full pass, and a pass lands in whichever contract
+    happens to allocate past the threshold: measured over a full sweep, a
+    contract whose own work takes 0.03 s was charged a 1.2 s pause and failed
+    its time budget. Frozen, the long-lived heap is skipped by every pass,
+    and a contract's time is its own again. Garbage the contracts make is
+    still collected; only what existed at the end of collection is exempt.
+    """
+    gc.collect()
+    gc.freeze()
+
+
 def pytest_unconfigure(config):
+    gc.unfreeze()
     _FIREWALL.uncover_children()
     _FIREWALL.uninstall()
 

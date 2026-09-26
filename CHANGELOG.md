@@ -1400,6 +1400,19 @@ package costs.
   (nineteen cases); before the change the same call rewrote the key file it
   could not open, and wrote a new key through a link at the key path.
 
+- A contract's time is its own again. The test session now freezes the heap
+  its collection built -- every suite imported, most of it alive until the
+  end -- before the first contract runs, and thaws it when the session
+  ends. Left in the collector's generations, that heap was rescanned by
+  every full pass, and a pass landed in whichever contract happened to
+  cross the threshold: over a full sweep, a ratchet contract whose own work
+  takes 0.03 s was charged a 1.2 s pause and failed its 1.0 s time budget,
+  for a reason it never caused. Frozen, it took 0.03 s in the same sweep,
+  and the largest pause inside any contract fell from 1.9 s to 1.2 s.
+  Garbage the contracts make is still collected; no budget was loosened.
+  One contract, which also shows the probe failing when the freeze is
+  taken out.
+
 ## 2.2.0 -- 2026-07-28
 
 The semantic cache's published surface loses its legacy naming, which renames
