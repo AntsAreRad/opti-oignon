@@ -489,7 +489,7 @@
 	.drawing-hint {
 		margin: 0;
 		font-size: 0.85rem;
-		color: var(--oo-fg-secondary, gray);
+		color: var(--oo-fg-secondary);
 	}
 
 	.drawing-editor {
@@ -521,31 +521,31 @@
 		width: 1.9rem;
 		height: 1.9rem;
 		padding: 0;
-		border: 1px solid var(--oo-border-subtle, lightgray);
+		border: 1px solid var(--oo-border-subtle);
 		border-radius: 6px;
 		background: var(--oo-bg-elevated, transparent);
-		color: var(--oo-fg-secondary, gray);
+		color: var(--oo-fg-secondary);
 		cursor: pointer;
 	}
 
 	.drawing-tool.active,
 	.drawing-width.active {
-		border-color: var(--oo-accent, steelblue);
-		color: var(--oo-accent, steelblue);
+		border-color: var(--oo-accent);
+		color: var(--oo-accent);
 	}
 
 	.drawing-swatch {
 		width: 1.4rem;
 		height: 1.4rem;
 		padding: 0;
-		border: 2px solid var(--oo-border-subtle, lightgray);
+		border: 2px solid var(--oo-border-subtle);
 		border-radius: 50%;
 		cursor: pointer;
 	}
 
 	.drawing-swatch.active {
-		border-color: var(--oo-accent, steelblue);
-		outline: 2px solid var(--oo-accent, steelblue);
+		border-color: var(--oo-accent);
+		outline: 2px solid var(--oo-accent);
 		outline-offset: 1px;
 	}
 
@@ -560,9 +560,9 @@
 		height: auto;
 		touch-action: none;
 		cursor: crosshair;
-		border: 1px solid var(--oo-border-subtle, lightgray);
+		border: 1px solid var(--oo-border-subtle);
 		border-radius: 8px;
-		background: var(--oo-bg-base, white);
+		background: var(--oo-drawing-bg);
 	}
 
 	.drawing-actions {
@@ -586,7 +586,7 @@
 		flex-direction: column;
 		gap: 0.3rem;
 		padding: 0.4rem;
-		border: 1px solid var(--oo-border-subtle, lightgray);
+		border: 1px solid var(--oo-border-subtle);
 		border-radius: 8px;
 		background: var(--oo-bg-elevated, transparent);
 	}
@@ -596,14 +596,14 @@
 		aspect-ratio: 4 / 3;
 		object-fit: contain;
 		border-radius: 6px;
-		background: var(--oo-bg-base, white);
+		background: var(--oo-drawing-bg);
 	}
 
 	.drawing-thumb-empty {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: var(--oo-fg-secondary, gray);
+		color: var(--oo-fg-secondary);
 	}
 
 	.drawing-item-actions {

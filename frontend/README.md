@@ -52,12 +52,22 @@ npm run preview   # preview the production build locally
 
 ```
 src/
-  app.html              # HTML shell (early theme script, sveltekit hooks)
-  app.css               # Global styles, animations, theme system
+  app.html              # HTML shell (the theme pre-render, sveltekit hooks)
+  app.css               # Global styles: base, motion, focus ring, selection, forced colours
+
+  styles/
+    theme-day.css       # The day palette: its roles and its colour scheme
+    theme-night.css     # The night palette
+    theme-high-contrast.css  # The high contrast palette
+    theme.css           # The derivation layer: every app token from the roles, once
+    tokens.css          # Tokens without colour: fonts, text and space in rem, radii, motion
+    density.css         # The text and space scales of each density
 
   lib/
     types.ts            # Shared TypeScript interfaces
     motion.ts           # The scroll behaviour the motion preference allows
+    theme/
+      apply.ts          # The theme path: stored choices and the system -> the root's state
 
     chat/
       requestFields.ts  # The ChatRequest fields a message sends, and their two builders
@@ -92,7 +102,7 @@ src/
 
     stores/             # Svelte stores (6 stores)
       conversations.ts  # Conversation list, selection, messages, loading state
-      ui.ts             # Sidebar visibility, theme, global UI state
+      ui.ts             # Sidebar visibility, whether the palette shown is dark, reduced motion
       chat.ts           # Streaming state, current response, abort controller
       chatOptions.ts    # Model, temperature, system prompt, preset selection
       notifications.ts  # Toast notification queue
@@ -172,10 +182,33 @@ src/
 
 ## Styling
 
-The frontend uses Tailwind CSS utility classes with a custom dark/light theme system.
+The frontend uses Tailwind CSS utility classes over design tokens (the
+`--oo-*` custom properties). A component writes no hex and no named colour;
+the `rgba()` literals some components still hold are a debt a ratchet only
+lets fall.
 
-Theme switching is handled via the `dark` class on `<html>`. Custom CSS
-variables and overrides are defined in `app.css`.
+Three palettes -- day, night and high contrast -- each declare the same
+named roles (a ground, a surface, the text, the accent fill and its ink, a
+rule, ...) in `src/styles/theme-*.css`, under `[data-oo-theme="<id>"]`.
+`src/styles/theme.css` derives every app token from those roles, once, so a
+subtree carrying `data-oo-theme="night"` previews that palette with no
+colour of its own. Two tokens differ with the palette's scheme (the accent
+fill's hover and the dialog's scrim); each palette gives them in a rule of
+`theme.css` that names it. Tailwind's `surface-*` and `accent-*` utilities
+resolve to the same tokens (`tailwind.config.js` holds no colour).
+
+The accent fill is the ground of what carries text, with the on-accent ink
+on it; a mark that carries no text (a progress bar, a legend dot) is drawn
+in the mark token, and text on a status fill is the on-semantic ink.
+
+One module, `src/lib/theme/apply.ts`, decides what `<html>` carries: the
+palette ("Match system" by default: night, or day when the system asks for a
+light scheme, or high contrast when it asks for more contrast), the `dark`
+class, one density class, the root font size of the text size (92, 100, 109
+or 118 percent: every rem follows it), the motion classes and the componion
+switch. The inline script in `app.html` makes the same decisions before the
+first paint, and when it cannot run the static night palette on `<html>`
+stands. The preferences store stores an explicit choice and nothing else.
 
 CSS animations (all in `app.css`):
 - `message-in`: fade + slide-up for new messages (250ms)

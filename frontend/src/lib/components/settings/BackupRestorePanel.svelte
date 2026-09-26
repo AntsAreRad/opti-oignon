@@ -260,7 +260,7 @@
 				on:click={handleExport}
 				disabled={exporting || selectedSections.size === 0}
 				class="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
-				style="background-color: var(--oo-acc-500); color: var(--oo-fg-on-accent);"
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 			>
 				{#if exporting}
 					Exporting...
@@ -284,7 +284,7 @@
 			<div
 				class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
 				style="border-color: {dragOver
-					? 'var(--oo-acc-400)'
+					? 'var(--oo-acc-ink)'
 					: 'var(--oo-bd-subtle)'}; background-color: {dragOver
 					? 'var(--oo-bg-hover)'
 					: 'transparent'};"
@@ -346,7 +346,7 @@
 							on:click={() => { strategy = 'merge'; preview = null; }}
 							class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
 							style="{strategy === 'merge'
-								? 'background-color: var(--oo-acc-500); color: var(--oo-fg-on-accent);'
+								? 'background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);'
 								: 'background-color: var(--oo-bg-default); color: var(--oo-fg-secondary); border: 1px solid var(--oo-bd-subtle);'}"
 						>
 							Merge
@@ -355,7 +355,7 @@
 							on:click={() => { strategy = 'replace'; preview = null; }}
 							class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
 							style="{strategy === 'replace'
-								? 'background-color: var(--oo-warning); color: var(--oo-fg-on-accent);'
+								? 'background-color: var(--oo-warning); color: var(--oo-fg-on-semantic);'
 								: 'background-color: var(--oo-bg-default); color: var(--oo-fg-secondary); border: 1px solid var(--oo-bd-subtle);'}"
 						>
 							Replace
@@ -444,7 +444,7 @@
 									on:click={handleImport}
 									disabled={importing}
 									class="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-									style="background-color: var(--oo-acc-500); color: var(--oo-fg-on-accent);"
+									style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 								>
 									{importing ? 'Importing...' : `Apply Import (${strategy})`}
 								</button>

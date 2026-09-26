@@ -315,7 +315,7 @@
 	}
 
 	.sparkline-bar {
-		fill: var(--oo-acc-400);
+		fill: var(--oo-acc-fill);
 		opacity: 0.6;
 	}
 

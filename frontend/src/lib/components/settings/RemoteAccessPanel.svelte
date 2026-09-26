@@ -247,7 +247,7 @@
 			{#if status.remote_access_allowed}
 				<button
 					class="px-3 py-1.5 rounded text-xs transition-colors"
-					style="background-color: var(--oo-fg-error); color: white;"
+					style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 					on:click={handleDisable}
 					disabled={disabling}
 				>
@@ -269,7 +269,7 @@
 					/>
 					<button
 						class="px-3 py-1.5 rounded text-xs transition-colors"
-						style="background-color: var(--oo-tobacco); color: white;"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						on:click={handleEnable}
 						disabled={enabling || passphrase.length < 12}
 					>
@@ -302,7 +302,7 @@
 						<div class="flex justify-between">
 							<span>Days Until Expiry</span>
 							<span
-								style="color: {status.tls.days_until_expiry <= 30 ? 'var(--oo-fg-error)' : 'var(--oo-sage)'};"
+								style="color: {status.tls.days_until_expiry <= 30 ? 'var(--oo-fg-error)' : 'var(--oo-success)'};"
 							>
 								{status.tls.days_until_expiry}
 							</span>
@@ -347,7 +347,7 @@
 					</div>
 					<button
 						class="px-3 py-1.5 rounded text-xs transition-colors"
-						style="background-color: var(--oo-tobacco); color: white;"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						on:click={handleGenerateCert}
 						disabled={generating || !deviceName.trim() || certPassphrase.length < 8}
 					>

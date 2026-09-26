@@ -47,7 +47,7 @@
 			</span>
 
 			{#if isStreaming}
-				<span class="inline-block w-1 h-3 bg-accent-500/50 animate-pulse" />
+				<span class="inline-block w-1 h-3 bg-[var(--oo-acc-mark)] animate-pulse" />
 			{/if}
 
 			<!-- Confidence indicator -->

@@ -127,7 +127,7 @@
 		width: 24px;
 		height: 24px;
 		border-radius: 50%;
-		background-color: var(--oo-accent-primary);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 		font-size: 0.75rem;
 		font-weight: 600;

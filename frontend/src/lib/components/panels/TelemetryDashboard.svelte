@@ -257,15 +257,15 @@
 	}
 
 	.btn-secondary.active {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	.btn-primary {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	.btn-primary:hover {

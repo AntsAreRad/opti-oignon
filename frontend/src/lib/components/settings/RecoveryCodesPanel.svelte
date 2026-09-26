@@ -76,7 +76,7 @@
 			printWindow.document.write(`
 				<html><head><title>Opti-Oignon Recovery Codes</title>
 				<style>body{font-family:monospace;padding:2em;} h2{margin-bottom:0.5em;}
-				.codes{font-size:1.2em;line-height:2;} .warning{color:darkred;margin-top:1em;font-size:0.9em;}</style>
+				.codes{font-size:1.2em;line-height:2;} .warning{font-weight:bold;margin-top:1em;font-size:0.9em;}</style>
 				</head><body>
 				<h2>Opti-Oignon Recovery Codes</h2>
 				<pre class="codes">${content}</pre>
@@ -158,7 +158,7 @@
 			<div class="flex gap-2 flex-wrap">
 				<button
 					class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-					style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					on:click={copyAllCodes}
 				>
 					{copied ? 'Copied!' : 'Copy All'}
@@ -201,7 +201,7 @@
 					{/if}
 					<button
 						class="px-3 py-1.5 rounded text-xs font-medium"
-						style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						disabled={generating}
 						on:click={generateCodes}
 					>
@@ -218,7 +218,7 @@
 			{:else}
 				<button
 					class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-					style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					on:click={() => { confirmGenerate = remaining > 0; if (!confirmGenerate) generateCodes(); }}
 				>
 					{remaining > 0 ? 'Regenerate Codes' : 'Generate Recovery Codes'}

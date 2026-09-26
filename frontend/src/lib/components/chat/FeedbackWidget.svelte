@@ -80,7 +80,7 @@
 			on:click={() => handleThumb(1)}
 			disabled={submitting}
 			class="p-1 rounded-md transition-colors"
-			style="color: {feedbackState === 'up' ? 'var(--oo-acc-400)' : 'var(--oo-fg-muted)'};
+			style="color: {feedbackState === 'up' ? 'var(--oo-acc-ink)' : 'var(--oo-fg-muted)'};
 				background-color: {feedbackState === 'up' ? 'var(--oo-accent-bg)' : 'transparent'};"
 			title="Good response"
 			aria-label="Thumbs up"

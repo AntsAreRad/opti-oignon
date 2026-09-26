@@ -156,7 +156,7 @@
 	}
 	.oo-tab[data-variant='pill'][aria-selected='true'] {
 		color: var(--oo-fg-on-accent);
-		background-color: var(--oo-acc-500);
+		background-color: var(--oo-acc-fill);
 	}
 
 	.oo-tabpanel {

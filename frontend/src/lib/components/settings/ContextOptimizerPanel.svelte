@@ -244,7 +244,7 @@
 				on:click={toggleEnabled}
 				disabled={saving || !available}
 				class="shrink-0 ml-4 w-11 h-6 rounded-full transition-colors relative disabled:opacity-40"
-				style="background-color: {enabled ? 'var(--oo-success)' : 'var(--oo-bg-overlay)'};" aria-label="Toggle context optimizer"
+				style="background-color: {enabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};" aria-label="Toggle context optimizer"
 				title="{enabled ? 'Disable' : 'Enable'} context optimizer"
 			>
 				<span
@@ -275,7 +275,7 @@
 							disabled={saving}
 							class="px-3 py-2.5 rounded-lg text-left transition-all disabled:opacity-50"
 							style="background-color: {isActive ? 'var(--oo-acc-900)' : 'var(--oo-bg-elevated)'};
-								border: 1.5px solid {isActive ? 'var(--oo-acc-500)' : 'var(--oo-bd-subtle)'};"
+								border: 1.5px solid {isActive ? 'var(--oo-acc-ink)' : 'var(--oo-bd-subtle)'};"
 						>
 							<span class="text-xs font-medium block" style="color: var(--oo-fg-primary);">
 								{presetLabel(pName)}

@@ -333,7 +333,7 @@
 
 	.btn-save {
 		padding: 0.35rem 0.75rem;
-		background: var(--oo-acc-400);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 		border: none;
 		border-radius: 4px;
@@ -348,7 +348,8 @@
 	}
 
 	.btn-save:hover:not(:disabled) {
-		background: var(--oo-acc-300);
+		background: var(--oo-acc-fill-hover);
+		color: var(--oo-fg-on-accent);
 	}
 
 	.btn-cancel {

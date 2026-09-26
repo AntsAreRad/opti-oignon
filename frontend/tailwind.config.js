@@ -1,44 +1,108 @@
+/**
+ * Tailwind resolves to the design tokens: no colour is written here.
+ *
+ * The older `surface-*` and `accent-*` utilities keep their names but mean
+ * a role per kind of utility, so the same class reads right in every
+ * palette: a background is a ground or the accent fill, a text colour is
+ * one of the two text levels or the accent ink, a border is a quiet or a
+ * required boundary. An opacity modifier (`bg-surface-800/50`) mixes the
+ * token with transparent.
+ *
+ * The base layer Tailwind generates reads its colours from the theme too:
+ * the default border, the ring and its offset, and a field's placeholder,
+ * which the base layer takes from the gray 400 step. Each is a token here,
+ * so the base layer draws no colour of its own.
+ */
+
+/** A token, with Tailwind's opacity modifier applied by mixing. */
+function token(name) {
+	return `color-mix(in srgb, var(${name}) calc(<alpha-value> * 100%), transparent)`;
+}
+
+/** The same token for every step. */
+function steps(name, keys) {
+	return Object.fromEntries(keys.map((key) => [key, token(name)]));
+}
+
+const STEPS = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+
+const grounds = {
+	surface: {
+		...steps('--oo-bg-overlay', ['50', '100', '200', '300', '400', '500']),
+		600: token('--oo-bg-subtle'),
+		700: token('--oo-bg-overlay'),
+		800: token('--oo-bg-elevated'),
+		900: token('--oo-bg-base'),
+		950: token('--oo-sidebar-bg')
+	},
+	accent: {
+		...steps('--oo-acc-fill', STEPS),
+		// The lighter step is the fill's hover, as in `bg-accent-600 hover:bg-accent-500`.
+		500: token('--oo-acc-fill-hover'),
+		50: token('--oo-bg-tint-1'),
+		100: token('--oo-bg-tint-1'),
+		200: token('--oo-bg-tint-1'),
+		900: token('--oo-bg-tint-1')
+	}
+};
+
+const inks = {
+	surface: {
+		...steps('--oo-fg-primary', ['50', '100', '200']),
+		300: token('--oo-fg-secondary'),
+		400: token('--oo-fg-tertiary'),
+		500: token('--oo-fg-muted'),
+		600: token('--oo-fg-faint'),
+		...steps('--oo-fg-faint', ['700', '800', '900', '950'])
+	},
+	accent: steps('--oo-acc-ink', STEPS)
+};
+
+const boundaries = {
+	surface: {
+		...steps('--oo-bd-strong', ['50', '100', '200', '300', '400', '500']),
+		...steps('--oo-bd-default', ['600', '700']),
+		...steps('--oo-bd-subtle', ['800', '900', '950'])
+	},
+	accent: steps('--oo-focus-ink', STEPS)
+};
+
+/** The ring's default, with the ring opacity Tailwind applies to it. */
+function ring({ opacityValue }) {
+	return `color-mix(in srgb, var(--oo-focus-ink) calc(${opacityValue ?? 1} * 100%), transparent)`;
+}
+
 /** @type {import('tailwindcss').Config} */
 export default {
 	content: ['./src/**/*.{html,js,svelte,ts}'],
 	darkMode: 'class',
 	theme: {
 		extend: {
-			colors: {
-				surface: {
-					50:  '#F5F0EB',
-					100: '#EDE8E2',
-					200: '#E5DFD8',
-					300: '#DCD5CC',
-					400: '#D4CBC2',
-					500: '#ADA49B',
-					600: '#8C8279',
-					700: '#5C544C',
-					800: '#353230',
-					900: '#2A2725',
-					950: '#1A1816'
-				},
-				accent: {
-					50:  '#FDF6EE',
-					100: '#F8E8D4',
-					200: '#E8C9A0',
-					300: '#D4AC78',
-					400: '#C99A6D',
-					500: '#B07D56',
-					600: '#9A6B45',
-					700: '#7D5636',
-					800: '#614328',
-					900: '#4A321E'
-				}
-			},
+			backgroundColor: grounds,
+			gradientColorStops: grounds,
+			textColor: inks,
+			placeholderColor: inks,
+			colors: { gray: { 400: 'var(--oo-fg-muted)' } },
+			borderColor: { ...boundaries, DEFAULT: 'var(--oo-bd-default)' },
+			divideColor: boundaries,
+			outlineColor: boundaries,
+			ringColor: { ...boundaries, DEFAULT: ring },
+			ringOffsetColor: { ...grounds, DEFAULT: 'var(--oo-bg-surface)' },
 			fontFamily: {
-				sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
-				mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Consolas', 'monospace']
+				sans: ['var(--oo-font-sans)'],
+				mono: ['var(--oo-font-mono)'],
+				serif: ['var(--oo-font-serif)']
 			},
-			boxShadow: {
-				'soft-sm': '0 1px 2px rgba(0, 0, 0, 0.08)',
-				'soft-md': '0 4px 6px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06)',
-				'soft-lg': '0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.06)',
+			borderRadius: {
+				none: 'var(--oo-radius-none)',
+				sm: 'var(--oo-radius-sm)',
+				DEFAULT: 'var(--oo-radius-sm)',
+				md: 'var(--oo-radius-md)',
+				lg: 'var(--oo-radius-lg)',
+				xl: 'var(--oo-radius-xl)',
+				'2xl': 'var(--oo-radius-2xl)',
+				'3xl': 'var(--oo-radius-3xl)',
+				full: 'var(--oo-radius-full)'
 			}
 		}
 	},

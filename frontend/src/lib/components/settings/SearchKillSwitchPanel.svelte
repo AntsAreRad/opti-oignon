@@ -252,7 +252,7 @@
       </h3>
       <span
         class="text-xs px-2 py-1 rounded font-medium"
-        style="background-color: {isKilled ? 'var(--oo-fg-error)' : 'var(--oo-sage)'}; color: white;"
+        style="background-color: {isKilled ? 'var(--oo-fg-error)' : 'var(--oo-success)'}; color: var(--oo-fg-on-semantic);"
       >
         {isKilled ? 'KILLED' : 'ACTIVE'}
       </span>
@@ -262,7 +262,7 @@
     <div class="grid grid-cols-3 gap-3 mb-4">
       <div class="rounded p-3 text-center" style="background-color: var(--oo-bg-subtle);">
         <div class="text-xs mb-1" style="color: var(--oo-fg-muted);">Search</div>
-        <div class="text-sm font-semibold" style="color: {isKilled ? 'var(--oo-fg-error)' : 'var(--oo-sage)'};">
+        <div class="text-sm font-semibold" style="color: {isKilled ? 'var(--oo-fg-error)' : 'var(--oo-success)'};">
           {isKilled ? 'Disabled' : 'Enabled'}
         </div>
       </div>
@@ -325,7 +325,7 @@
             />
             <button
               class="px-4 py-2 rounded text-sm font-medium whitespace-nowrap"
-              style="background-color: var(--oo-fg-error); color: white;"
+              style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
               on:click={handleEngageKillSwitch}
               disabled={actionLoading}
             >
@@ -439,7 +439,7 @@
             <div class="flex gap-2">
               <button
                 class="px-4 py-2 rounded text-sm font-medium"
-                style="background-color: var(--oo-fg-warning); color: white;"
+                style="background-color: var(--oo-fg-warning); color: var(--oo-fg-on-semantic);"
                 on:click={handleConfirmReenable}
                 disabled={actionLoading || !confirmCode || !confirmPassword}
               >
@@ -471,7 +471,7 @@
         </span>
         <button
           class="relative w-9 h-5 rounded-full transition-colors"
-          style="background-color: {allowlistEnabled ? 'var(--oo-sage)' : 'var(--oo-bg-subtle)'}; border: 1px solid var(--oo-bd-subtle);"
+          style="background-color: {allowlistEnabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'}; border: 1px solid var(--oo-bd-subtle);"
           on:click={handleToggleAllowlist}
           disabled={domainSaving}
           title={allowlistEnabled ? 'Disable domain allowlist' : 'Enable domain allowlist'}
@@ -479,7 +479,7 @@
         >
           <span
             class="absolute top-0.5 rounded-full w-4 h-4 transition-transform"
-            style="background-color: white; left: {allowlistEnabled ? '1rem' : '0.125rem'};"
+            style="background-color: var(--oo-toggle-knob); left: {allowlistEnabled ? '1rem' : '0.125rem'};"
           ></span>
         </button>
       </div>
@@ -509,7 +509,7 @@
       />
       <button
         class="px-3 py-2 rounded text-sm font-medium"
-        style="background-color: var(--oo-sage); color: white;"
+        style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
         on:click={handleAddDomain}
         disabled={domainSaving || !newDomain.trim()}
       >
@@ -567,7 +567,7 @@
     <div class="flex gap-3">
       <div class="flex-1 rounded p-3" style="background-color: var(--oo-bg-subtle);">
         <div class="text-xs mb-1" style="color: var(--oo-fg-muted);">Status</div>
-        <div class="text-sm font-semibold" style="color: {circuitTripped ? 'var(--oo-fg-error)' : 'var(--oo-sage)'};">
+        <div class="text-sm font-semibold" style="color: {circuitTripped ? 'var(--oo-fg-error)' : 'var(--oo-success)'};">
           {circuitTripped ? 'TRIPPED' : 'Normal'}
         </div>
       </div>

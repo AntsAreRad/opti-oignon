@@ -4,9 +4,6 @@
 
 	.bv2-panel {
 		width: 100%;
-		--oo-radar-blue: oklch(0.75 0.08 220);
-		--oo-radar-sand: oklch(0.7 0.06 70);
-		--oo-radar-green: oklch(0.72 0.06 160);
 	}
 
 	.bv2-tabs {
@@ -94,7 +91,7 @@
 	}
 
 	.bv2-model-chip:hover { border-color: var(--oo-acc-300); }
-	.bv2-model-chip.selected { background: var(--oo-acc-50); border-color: var(--oo-acc-400); color: var(--oo-acc-600); }
+	.bv2-model-chip.selected { background: var(--oo-bg-tint-1); border-color: var(--oo-acc-ink); color: var(--oo-acc-ink); }
 
 	.bv2-toggle-row { display: flex; align-items: center; cursor: pointer; }
 
@@ -105,7 +102,7 @@
 		padding: 0.5rem 1.5rem;
 		font-size: 0.8rem;
 		font-weight: 500;
-		background: var(--oo-acc-500);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 		border: none;
 		border-radius: 6px;
@@ -114,7 +111,7 @@
 		margin-top: 0.5rem;
 	}
 
-	.bv2-run-btn:hover:not(:disabled) { background: var(--oo-acc-600); }
+	.bv2-run-btn:hover:not(:disabled) { background: var(--oo-acc-600); color: var(--oo-fg-on-accent); }
 	.bv2-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.bv2-btn-sm {
@@ -143,7 +140,7 @@
 
 	.bv2-progress-bar-fill {
 		height: 100%;
-		background: var(--oo-acc-400);
+		background: var(--oo-acc-mark);
 		transition: width 0.3s ease;
 		border-radius: 3px;
 	}
@@ -311,7 +308,7 @@
 		color: var(--oo-fg-tertiary);
 	}
 
-	.bv2-history-status.completed { color: var(--oo-acc-400); background: var(--oo-acc-50); }
+	.bv2-history-status.completed { color: var(--oo-acc-ink); background: var(--oo-bg-tint-1); }
 	.bv2-history-status.failed { color: var(--oo-error); background: var(--oo-error-bg); }
 
 	.bv2-history-date, .bv2-history-duration { color: var(--oo-fg-tertiary); font-size: 0.7rem; }
@@ -348,8 +345,8 @@
 		color: var(--oo-fg-tertiary);
 	}
 
-	.bv2-badge-active { color: var(--oo-acc-400); background: var(--oo-acc-50); }
-	.bv2-badge-custom { color: var(--oo-acc-400); background: var(--oo-acc-50); }
+	.bv2-badge-active { color: var(--oo-acc-ink); background: var(--oo-bg-tint-1); }
+	.bv2-badge-custom { color: var(--oo-acc-ink); background: var(--oo-bg-tint-1); }
 
 	/* -- Custom Profiles */
 	.bv2-profiles-header {
@@ -506,7 +503,7 @@
 	}
 
 	.bv2-btn:disabled { opacity: 0.5; cursor: default; }
-	.bv2-btn-primary { background: var(--oo-acc-400); color: var(--oo-bg-primary); }
+	.bv2-btn-primary { background: var(--oo-acc-fill); color: var(--oo-fg-on-accent); }
 	.bv2-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
 	.bv2-btn-secondary { background: var(--oo-bg-overlay); color: var(--oo-fg-secondary); }
 	.bv2-btn-secondary:hover:not(:disabled) { background: var(--oo-bd-subtle); }
@@ -602,7 +599,7 @@
 		gap: 0.375rem;
 	}
 
-	.bv2-test-poll-result.bv2-ok { background: var(--oo-acc-50); color: var(--oo-acc-400); }
+	.bv2-test-poll-result.bv2-ok { background: var(--oo-bg-tint-1); color: var(--oo-acc-ink); }
 	.bv2-test-poll-result.bv2-err { background: var(--oo-bg-overlay); color: var(--oo-error); }
 	.bv2-test-diff { color: var(--oo-fg-tertiary); }
 

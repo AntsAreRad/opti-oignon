@@ -1,9 +1,13 @@
 <!--
   ThemeSwitcher.svelte
-  Header palette quick-switcher (spec 8.4). One click to move between the
-  5 curated palettes without opening Settings, plus the 3 density modes.
-  Wired to the preferences store, which sets `data-oo-theme` +
-  `html.oo-density-*` and persists the choice.
+  Header palette quick-switcher. One click to move between the palette
+  choices ("Match system", day, night, high contrast) without opening
+  Settings, plus the three density modes. Wired to the preferences store,
+  which stores the choice and has the theme path apply it.
+
+  Each palette's preview is an element carrying that palette's attribute,
+  so it shows the palette's own tokens and no colour of its own; "Match
+  system" shows day and night side by side.
 
   Accessibility: a button (aria-haspopup, aria-expanded) opens a
   role="menu" with role="menuitemradio" options (single selection per
@@ -18,12 +22,11 @@
 		density,
 		setPalette,
 		setDensity,
-		PALETTES,
-		PALETTE_LABELS,
-		PALETTE_SWATCH,
+		CHOICES,
+		CHOICE_LABELS,
 		DENSITIES,
 		DENSITY_LABELS,
-		type ThemePalette,
+		type Choice,
 		type Density
 	} from '$lib/stores/preferences';
 
@@ -35,12 +38,12 @@
 
 	// Flat list of focusable items in DOM order: palettes then densities.
 	$: items = [
-		...PALETTES.map((value) => ({ kind: 'palette' as const, value })),
+		...CHOICES.map((value) => ({ kind: 'palette' as const, value })),
 		...DENSITIES.map((value) => ({ kind: 'density' as const, value }))
 	];
 
 	function selectedIndex(): number {
-		const i = PALETTES.indexOf($palette);
+		const i = CHOICES.indexOf($palette);
 		return i >= 0 ? i : 0;
 	}
 
@@ -68,7 +71,7 @@
 	function choose(index: number) {
 		const item = items[index];
 		if (!item) return;
-		if (item.kind === 'palette') setPalette(item.value as ThemePalette);
+		if (item.kind === 'palette') setPalette(item.value as Choice);
 		else setDensity(item.value as Density);
 		closeMenu();
 	}
@@ -138,7 +141,7 @@
 		class="oo-ts-trigger"
 		aria-haspopup="true"
 		aria-expanded={open}
-		aria-label="Theme: {PALETTE_LABELS[$palette]}, density: {DENSITY_LABELS[$density]}"
+		aria-label="Theme: {CHOICE_LABELS[$palette]}, density: {DENSITY_LABELS[$density]}"
 		title="Theme and density"
 		on:click={toggle}
 		on:keydown={onTriggerKeydown}
@@ -156,7 +159,7 @@
 			on:keydown={onMenuKeydown}
 		>
 			<p class="oo-ts-group-label" id="oo-ts-palette-label">Palette</p>
-			{#each PALETTES as p, i (p)}
+			{#each CHOICES as p, i (p)}
 				<button
 					bind:this={itemEls[i]}
 					type="button"
@@ -166,15 +169,15 @@
 					tabindex={activeIndex === i ? 0 : -1}
 					on:click={() => choose(i)}
 				>
-					<span
-						class="oo-ts-swatch"
-						style="background-color: {PALETTE_SWATCH[p].base}; border-color: {PALETTE_SWATCH[p]
-							.surface};"
-						aria-hidden="true"
-					>
-						<span class="oo-ts-swatch-dot" style="background-color: {PALETTE_SWATCH[p].fg};"></span>
+					<span class="oo-ts-swatch" aria-hidden="true">
+						{#if p === 'system'}
+							<span class="oo-ts-swatch-half" data-oo-theme="day"><span class="oo-ts-swatch-dot"></span></span>
+							<span class="oo-ts-swatch-half" data-oo-theme="night"><span class="oo-ts-swatch-dot"></span></span>
+						{:else}
+							<span class="oo-ts-swatch-half" data-oo-theme={p}><span class="oo-ts-swatch-dot"></span></span>
+						{/if}
 					</span>
-					<span class="oo-ts-item-label">{PALETTE_LABELS[p]}</span>
+					<span class="oo-ts-item-label">{CHOICE_LABELS[p]}</span>
 					{#if $palette === p}
 						<span class="oo-ts-check"><Icon name="check" size="sm" /></span>
 					{/if}
@@ -186,13 +189,13 @@
 			<p class="oo-ts-group-label" id="oo-ts-density-label">Density</p>
 			{#each DENSITIES as d, j (d)}
 				<button
-					bind:this={itemEls[PALETTES.length + j]}
+					bind:this={itemEls[CHOICES.length + j]}
 					type="button"
 					class="oo-ts-item"
 					role="menuitemradio"
 					aria-checked={$density === d}
-					tabindex={activeIndex === PALETTES.length + j ? 0 : -1}
-					on:click={() => choose(PALETTES.length + j)}
+					tabindex={activeIndex === CHOICES.length + j ? 0 : -1}
+					on:click={() => choose(CHOICES.length + j)}
 				>
 					<span class="oo-ts-density-glyph oo-ts-density-{d}" aria-hidden="true"></span>
 					<span class="oo-ts-item-label">{DENSITY_LABELS[d]}</span>
@@ -300,20 +303,25 @@
 	}
 
 	.oo-ts-swatch {
-		position: relative;
 		width: 18px;
 		height: 18px;
-		border-radius: var(--oo-radius-md);
-		border: 1px solid;
+		border-radius: var(--oo-radius-full);
+		overflow: hidden;
 		flex-shrink: 0;
+		display: inline-flex;
+	}
+	.oo-ts-swatch-half {
+		flex: 1;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		background-color: var(--oo-bg-base);
 	}
 	.oo-ts-swatch-dot {
 		width: 6px;
 		height: 6px;
 		border-radius: 50%;
+		background-color: var(--oo-fg-primary);
 	}
 
 	.oo-ts-density-glyph {
@@ -363,7 +371,7 @@
 
 	.oo-ts-check {
 		display: inline-flex;
-		color: var(--oo-acc-500);
+		color: var(--oo-acc-ink);
 	}
 
 	.oo-ts-sep {

@@ -670,9 +670,9 @@
 	.btn-sm:hover { background: var(--oo-bg-overlay); }
 	.btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 	.btn-sm.active {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	.btn-xs {
@@ -689,9 +689,9 @@
 	.btn-xs:hover { background: var(--oo-bg-overlay); }
 	.btn-xs:disabled { opacity: 0.4; cursor: not-allowed; }
 	.btn-xs.active {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	.btn-warn {
@@ -827,7 +827,7 @@
 	}
 
 	.bar-throughput {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-mark);
 	}
 
 	.bar-count {

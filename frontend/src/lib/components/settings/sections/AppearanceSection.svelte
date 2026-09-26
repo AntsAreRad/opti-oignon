@@ -4,33 +4,28 @@
 
   Appearance is the one new section: it did not exist among the 12 legacy
   tabs. It owns the visual preferences in the `preferences` store -- the
-  5 curated palettes, 3 density modes, the global typography scale, and the
-  motion preference -- and applies each immediately with a toast (spec 5.9
-  immediate-apply). Each group offers a reset-to-default (spec 5.9).
+  palette choice ("Match system", day, night, high contrast), 3 density
+  modes, the text size, and the motion preference -- and applies each
+  immediately with a toast (spec 5.9 immediate-apply). Each group offers a
+  reset-to-default (spec 5.9).
 
-  It also reintegrates the two orphan panels (spec 5.8, formerly mounted
-  nowhere): ThemeCustomizer (accent-color builder) and ShortcutSettings
-  (keyboard bindings), each opened in a right-side drawer. ThemeCustomizer
-  composes with the chosen palette -- it injects accent --oo-* variables on
-  top of the palette the store applies via data-oo-theme.
+  It also opens the keyboard bindings (ShortcutSettings) in a right-side
+  drawer.
 
-  Swatch colors come from PALETTE_SWATCH in the preferences store (a TS
-  module), so the chips carry each palette's identity without a raw hex
-  literal inside this component.
+  Each palette's preview is an element carrying that palette's attribute,
+  so it shows the palette's own tokens and no colour of its own; "Match
+  system" shows day and night side by side.
 -->
 <script lang="ts">
 	import SettingsGroup from '$lib/components/settings/SettingsGroup.svelte';
 	import Modal from '$lib/ds/Modal.svelte';
 	import Button from '$lib/ds/Button.svelte';
-	import ThemeCustomizer from '$lib/components/panels/ThemeCustomizer.svelte';
 	import ShortcutSettings from '$lib/components/settings/ShortcutSettings.svelte';
 	import {
 		palette,
-		PALETTES,
-		PALETTE_LABELS,
-		PALETTE_SWATCH,
+		CHOICES,
+		CHOICE_LABELS,
 		setPalette,
-		isDarkPalette,
 		density,
 		DENSITIES,
 		DENSITY_LABELS,
@@ -43,17 +38,17 @@
 		MOTION_PREFS,
 		MOTION_LABELS,
 		setMotionPref,
-		type ThemePalette,
+		type Choice,
 		type Density,
 		type TypeScale,
 		type MotionPref
 	} from '$lib/stores/preferences';
 	import { toastSuccess } from '$lib/stores/notifications';
 
-	function choosePalette(p: ThemePalette) {
+	function choosePalette(p: Choice) {
 		if ($palette === p) return;
 		setPalette(p);
-		toastSuccess(`Theme set to ${PALETTE_LABELS[p]}`);
+		toastSuccess(`Theme set to ${CHOICE_LABELS[p]}`);
 	}
 
 	function chooseDensity(d: Density) {
@@ -75,7 +70,7 @@
 	}
 
 	function resetTheme() {
-		setPalette('anthracite');
+		setPalette('system');
 		toastSuccess('Theme reset to default');
 	}
 	function resetDensity() {
@@ -97,13 +92,19 @@
 		spacious: 'Looser spacing, larger touch targets'
 	};
 
+	const PALETTE_HINT: Record<Choice, string> = {
+		system: 'Night, or day when your system is light; high contrast when it asks for more contrast',
+		day: 'Light',
+		night: 'Dark',
+		'high-contrast': 'Dark, strongest contrast'
+	};
+
 	const MOTION_HINT: Record<MotionPref, string> = {
 		system: 'Follow your operating system setting',
 		reduced: 'Minimize animations and transitions',
 		full: 'Keep animations even if the system asks for less'
 	};
 
-	let showThemeCustomizer = false;
 	let showShortcuts = false;
 </script>
 
@@ -111,12 +112,11 @@
 	<SettingsGroup
 		id="appearance-theme"
 		title="Theme"
-		description="The active palette applies instantly across the whole interface."
+		description="The palette applies instantly across the whole interface. Match system follows your system's light or dark setting, and its contrast setting."
 		onReset={resetTheme}
 	>
 		<div class="oo-swatch-grid" role="radiogroup" aria-label="Theme palette">
-			{#each PALETTES as p (p)}
-				{@const sw = PALETTE_SWATCH[p]}
+			{#each CHOICES as p (p)}
 				<button
 					type="button"
 					class="oo-swatch"
@@ -125,13 +125,17 @@
 					aria-checked={$palette === p}
 					on:click={() => choosePalette(p)}
 				>
-					<span class="oo-swatch-preview" style="background-color: {sw.base};">
-						<span class="oo-swatch-surface" style="background-color: {sw.surface};"></span>
-						<span class="oo-swatch-fg" style="background-color: {sw.fg};"></span>
+					<span class="oo-swatch-preview" aria-hidden="true">
+						{#if p === 'system'}
+							<span class="oo-swatch-half" data-oo-theme="day"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+							<span class="oo-swatch-half" data-oo-theme="night"><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+						{:else}
+							<span class="oo-swatch-half" data-oo-theme={p}><span class="oo-swatch-surface"></span><span class="oo-swatch-fg"></span></span>
+						{/if}
 					</span>
 					<span class="oo-swatch-meta">
-						<span class="oo-swatch-name">{PALETTE_LABELS[p]}</span>
-						<span class="oo-swatch-mode">{isDarkPalette(p) ? 'Dark' : 'Light'}</span>
+						<span class="oo-swatch-name">{CHOICE_LABELS[p]}</span>
+						<span class="oo-swatch-mode">{PALETTE_HINT[p]}</span>
 					</span>
 				</button>
 			{/each}
@@ -212,30 +216,15 @@
 	<SettingsGroup
 		id="appearance-advanced"
 		title="Advanced"
-		description="Fine-tune accent colors and keyboard shortcuts."
+		description="Keyboard shortcuts."
 	>
 		<div class="oo-adv-actions">
-			<Button variant="secondary" iconLeft="palette" on:click={() => (showThemeCustomizer = true)}>
-				Customize accent colors
-			</Button>
 			<Button variant="secondary" iconLeft="keyboard" on:click={() => (showShortcuts = true)}>
 				Keyboard shortcuts
 			</Button>
 		</div>
 	</SettingsGroup>
 </div>
-
-<Modal
-	open={showThemeCustomizer}
-	variant="drawer-right"
-	size="lg"
-	title="Customize accent colors"
-	onClose={() => (showThemeCustomizer = false)}
->
-	{#if showThemeCustomizer}
-		<ThemeCustomizer />
-	{/if}
-</Modal>
 
 <Modal
 	open={showShortcuts}
@@ -282,36 +271,44 @@
 	}
 
 	.oo-swatch-active {
-		border-color: var(--oo-accent);
+		border-color: var(--oo-acc-ink);
 		background-color: var(--oo-accent-bg);
 	}
 
 	.oo-swatch-preview {
-		position: relative;
 		width: 44px;
 		height: 32px;
 		border-radius: var(--oo-radius-sm);
 		border: 1px solid var(--oo-bd-default);
 		flex-shrink: 0;
 		overflow: hidden;
+		display: flex;
+	}
+
+	.oo-swatch-half {
+		position: relative;
+		flex: 1;
+		background-color: var(--oo-bg-base);
 	}
 
 	.oo-swatch-surface {
 		position: absolute;
-		left: 5px;
+		left: 4px;
 		top: 6px;
-		width: 22px;
-		height: 20px;
+		right: 4px;
+		height: 12px;
 		border-radius: 2px;
+		background-color: var(--oo-bg-surface);
 	}
 
 	.oo-swatch-fg {
 		position: absolute;
-		right: 6px;
-		bottom: 7px;
-		width: 12px;
+		left: 4px;
+		bottom: 6px;
+		width: 10px;
 		height: 4px;
 		border-radius: 2px;
+		background-color: var(--oo-fg-primary);
 	}
 
 	.oo-swatch-meta {
@@ -371,7 +368,7 @@
 	}
 
 	.oo-opt-active {
-		border-color: var(--oo-accent);
+		border-color: var(--oo-acc-ink);
 		background-color: var(--oo-accent-bg);
 	}
 

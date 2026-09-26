@@ -440,7 +440,7 @@
 		font-family: var(--oo-font-mono);
 		font-size: var(--oo-text-2xs);
 		background-color: var(--oo-msg-user-bg);
-		color: var(--oo-fg-on-accent);
+		color: var(--oo-fg-secondary);
 	}
 
 	.oo-settings-search {

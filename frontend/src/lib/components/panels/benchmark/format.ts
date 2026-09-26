@@ -8,7 +8,7 @@
 import type { BenchmarkV2ModelScore, BenchmarkV2TrendPoint } from '$lib/types';
 
 export function scoreColor(score: number): string {
-	if (score >= 0.8) return 'var(--oo-acc-400)';
+	if (score >= 0.8) return 'var(--oo-acc-ink)';
 	if (score >= 0.6) return 'var(--oo-fg-secondary)';
 	if (score >= 0.4) return 'var(--oo-fg-tertiary)';
 	return 'var(--oo-error)';
@@ -46,7 +46,7 @@ export function radarPoints(scores: BenchmarkV2ModelScore, radius: number): stri
 }
 
 export const radarLabels = ['Accuracy', 'Code', 'Structure', 'Speed'];
-export const radarColors = ['var(--oo-acc-400)', 'var(--oo-radar-blue)', 'var(--oo-radar-sand)', 'var(--oo-radar-green)'];
+export const radarColors = ['var(--oo-acc-mark)', 'var(--oo-radar-blue)', 'var(--oo-radar-sand)', 'var(--oo-radar-green)'];
 
 export function radarLabelPos(index: number, radius: number): { x: number; y: number } {
 	const n = 4;

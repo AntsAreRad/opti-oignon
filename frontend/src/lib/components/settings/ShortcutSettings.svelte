@@ -422,7 +422,7 @@
 	}
 
 	.binding-btn:focus-visible {
-		outline: 2px solid var(--oo-acc-500);
+		outline: 2px solid var(--oo-focus-ink);
 		outline-offset: 2px;
 	}
 
@@ -446,7 +446,7 @@
 	.rebinding-indicator {
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
-		background-color: var(--oo-acc-500);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 		font-size: 0.75rem;
 		font-family: var(--oo-font-mono);

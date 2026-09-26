@@ -252,7 +252,7 @@
 		background: var(--oo-bg-elevated);
 	}
 	.explorer-dir:focus-visible {
-		outline: 2px solid var(--oo-acc-500);
+		outline: 2px solid var(--oo-focus-ink);
 		outline-offset: -2px;
 	}
 	.entry-name {

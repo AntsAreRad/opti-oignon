@@ -323,7 +323,7 @@
 				</button>
 				<button
 					class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
-					style="background-color: var(--oo-accent); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					disabled={exporting}
 					on:click={handleExport}
 				>
@@ -352,7 +352,7 @@
 						</span>
 						<button
 							class="px-3 py-1 text-xs rounded-md"
-							style="background-color: var(--oo-accent); color: var(--oo-fg-on-accent);"
+							style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 							on:click={downloadExport}
 						>
 							Download
@@ -412,7 +412,7 @@
 					</div>
 					<button
 						class="w-full px-3 py-1.5 text-xs font-medium rounded-md"
-						style="background-color: var(--oo-accent); color: var(--oo-fg-on-accent);"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						disabled={registering}
 						on:click={handleRegister}
 					>
@@ -488,7 +488,7 @@
 					/>
 					<button
 						class="w-full px-3 py-1.5 text-xs font-medium rounded-md"
-						style="background-color: var(--oo-accent); color: var(--oo-fg-on-accent);"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						disabled={comparing}
 						on:click={handleCompare}
 					>

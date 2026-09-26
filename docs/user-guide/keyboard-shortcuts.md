@@ -9,7 +9,7 @@
 | `Ctrl+B` | Toggle sidebar | Navigation |
 | `Ctrl+K` | Search conversations | Navigation |
 | `Ctrl+,` | Open settings | Navigation |
-| `Ctrl+Shift+T` | Toggle theme (dark/light) | UI |
+| `Ctrl+Shift+T` | Switch between the day and night palettes | UI |
 | `Ctrl+Shift+E` | Export conversation | Chat |
 | `?` | Show keyboard shortcuts | Help |
 | `Escape` | Close dialog or panel | UI |

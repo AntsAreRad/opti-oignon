@@ -53,9 +53,9 @@
 	.oo-switch {
 		position: relative;
 		flex-shrink: 0;
-		border: 1px solid var(--oo-bd-strong);
+		border: 1px solid var(--oo-switch-off);
 		border-radius: var(--oo-radius-full);
-		background-color: var(--oo-bg-overlay);
+		background-color: var(--oo-switch-off);
 		cursor: pointer;
 		padding: 0;
 		transition:
@@ -70,9 +70,11 @@
 		width: 32px;
 		height: 18px;
 	}
+	/* The track when on is the accent ink, not the fill: the knob (the
+	   surface) is under 3:1 on the day fill. */
 	.oo-switch[aria-checked='true'] {
-		background-color: var(--oo-acc-500);
-		border-color: var(--oo-acc-500);
+		background-color: var(--oo-switch-on);
+		border-color: var(--oo-switch-on);
 	}
 	.oo-switch:disabled {
 		opacity: 0.55;

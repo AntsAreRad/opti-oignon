@@ -21,7 +21,7 @@
 		? 'var(--oo-fg-warning)'
 		: warningLevel === 'medium'
 			? 'var(--oo-fg-muted)'
-			: 'var(--oo-sage)';
+			: 'var(--oo-success)';
 
 	$: tooltip = hasInferenceContent
 		? `${pluginName}: has inference_content permission (can access conversation data)`

@@ -336,7 +336,7 @@
 							style="background-color: var(--oo-bg-overlay);">
 							<div
 								class="h-full rounded-full transition-all duration-300"
-								style="width: {currentJob.progress * 100}%; background-color: var(--oo-acc-500);"
+								style="width: {currentJob.progress * 100}%; background-color: var(--oo-acc-mark);"
 							/>
 						</div>
 						<p class="text-[10px]" style="color: var(--oo-fg-muted);">

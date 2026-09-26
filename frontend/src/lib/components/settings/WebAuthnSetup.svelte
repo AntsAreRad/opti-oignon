@@ -202,7 +202,7 @@
 		{#if webauthnAvailable && !showRegisterForm}
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-				style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 				on:click={() => { showRegisterForm = true; registerError = ''; registerSuccess = ''; }}
 			>
 				Register New Key
@@ -238,7 +238,7 @@
 				/>
 				<button
 					class="px-4 py-2 rounded text-sm font-medium transition-colors"
-					style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					disabled={registerLoading}
 					on:click={beginRegistration}
 				>
@@ -306,7 +306,7 @@
 							<div class="flex gap-1">
 								<button
 									class="px-2 py-1 rounded text-xs"
-									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-accent);"
+									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 									disabled={deletingId === cred.credential_id}
 									on:click={() => deleteCredential(cred.credential_id)}
 								>

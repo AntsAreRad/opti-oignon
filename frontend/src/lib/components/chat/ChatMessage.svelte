@@ -189,7 +189,7 @@
 						fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path d="M9 5l7 7-7 7" />
 					</svg>
-					Thinking{#if isStreaming}<span class="inline-block w-1 h-3 ml-1 animate-cursor-blink" style="background-color: var(--oo-acc-400); opacity: 0.5;" />{/if}
+					Thinking{#if isStreaming}<span class="inline-block w-1 h-3 ml-1 animate-cursor-blink" style="background-color: var(--oo-acc-mark);" />{/if}
 				</summary>
 				<div class="px-2.5 pb-2 text-xs leading-relaxed whitespace-pre-wrap pt-1.5 max-h-60 overflow-y-auto"
 					style="color: var(--oo-fg-tertiary); border-top: 1px solid var(--oo-bd-subtle);">

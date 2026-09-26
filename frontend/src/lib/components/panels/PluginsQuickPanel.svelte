@@ -124,7 +124,7 @@
 							on:click={() => handleToggle(plugin)}
 							disabled={!!toggling[plugin.name]}
 							class="shrink-0 ml-2 w-9 h-5 rounded-full transition-colors relative"
-							style="background-color: {plugin.state === 'enabled' ? 'var(--oo-success)' : 'var(--oo-bg-overlay)'};"
+							style="background-color: {plugin.state === 'enabled' ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};"
 							title="{plugin.state === 'enabled' ? 'Disable' : 'Enable'} {plugin.name}"
 						>
 							<span

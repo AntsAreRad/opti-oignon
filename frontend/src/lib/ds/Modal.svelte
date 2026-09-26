@@ -128,14 +128,14 @@
 		color: var(--oo-fg-primary);
 	}
 	.oo-modal::backdrop {
-		background: rgba(0, 0, 0, 0.5);
+		background: var(--oo-scrim);
 	}
 
 	.oo-modal-panel {
 		display: flex;
 		flex-direction: column;
 		background-color: var(--oo-bg-elevated);
-		border: 1px solid var(--oo-bd-default);
+		border: 1px solid var(--oo-edge);
 		box-shadow: var(--oo-shadow-lg);
 		max-height: 90vh;
 		overflow: hidden;

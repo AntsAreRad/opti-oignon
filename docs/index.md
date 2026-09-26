@@ -19,8 +19,11 @@ locally on your hardware.
 - **Bulbe mode** -- maximum security with localhost-only socket binding
 - **Red team engine** -- LLM-powered automated security auditing with
   scheduled runs and regression detection
-- **Theme engine** -- user-defined accent colors with WCAG AA contrast
-  validation and live preview
+- **Palettes** -- day, night and high contrast; every pair of text and
+  ground the design lists, and every one a component sets together, checked
+  against WCAG AA by a static census (the browser's rendering is checked on
+  the machine); "Match system" follows the system's light or dark setting
+  and its contrast setting
 - **Keyboard shortcuts** -- 6 default bindings, customizable, cheat sheet overlay
 - **Streaming** -- SSE backpressure, connection pooling, chunked RAG transfer
 - **CI/CD** -- GitHub Actions pipeline with release signing and Docker support

@@ -228,7 +228,7 @@
 		font-family: var(--oo-font-sans);
 		color: var(--oo-fg-primary);
 		background-color: var(--oo-bg-input);
-		border: 1px solid var(--oo-bd-default);
+		border: 1px solid var(--oo-input-bd);
 		border-radius: var(--oo-radius-md);
 	}
 	.oo-field-control[data-size='sm'] {

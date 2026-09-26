@@ -149,7 +149,7 @@
 				<div class="p-2 space-y-1">
 					{#each pipelines as pipeline}
 						<div class="group flex items-center rounded-lg transition-colors" style="background-color: {$selectedExecPipeline === pipeline.id ? 'var(--oo-warning-bg)' : 'transparent'};">
-							<button on:click={() => selectForChat(pipeline)} class="p-1.5 ml-1 rounded shrink-0" style="color: {$selectedExecPipeline === pipeline.id ? 'var(--oo-acc-400)' : 'var(--oo-fg-faint)'};" title={$selectedExecPipeline === pipeline.id ? 'Deselect' : 'Use'}>
+							<button on:click={() => selectForChat(pipeline)} class="p-1.5 ml-1 rounded shrink-0" style="color: {$selectedExecPipeline === pipeline.id ? 'var(--oo-acc-ink)' : 'var(--oo-fg-faint)'};" title={$selectedExecPipeline === pipeline.id ? 'Deselect' : 'Use'}>
 								<svg class="w-3.5 h-3.5" fill={$selectedExecPipeline === pipeline.id ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
 							</button>
 							<button on:click={() => showDetail(pipeline)} class="flex-1 flex items-center gap-2 px-2 py-2.5 text-left min-w-0">
@@ -196,7 +196,7 @@
 						<div><label class="block text-xs mb-1" style="color: var(--oo-fg-tertiary);">Description</label><textarea bind:value={formDescription} rows="2" class="w-full rounded-md px-2.5 py-1.5 text-xs outline-none resize-y" style="background-color: var(--oo-input-bg); color: var(--oo-fg-secondary); border: 1px solid var(--oo-input-bd);" /></div>
 						<div><div class="text-xs mb-2" style="color: var(--oo-fg-tertiary);">Steps ({formSteps.length})</div><PipelineEditor steps={formSteps} {stepTypes} on:change={handleStepsChange} /></div>
 						<div class="flex gap-2 pt-2">
-							<button on:click={handleUpdate} disabled={saving} class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md disabled:opacity-50" style="background-color: var(--oo-acc-500); color: white;">{saving ? 'Saving...' : 'Save'}</button>
+							<button on:click={handleUpdate} disabled={saving} class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md disabled:opacity-50" style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);">{saving ? 'Saving...' : 'Save'}</button>
 							<button on:click={() => { editMode = false; }} class="px-3 py-1.5 text-xs font-medium rounded-md" style="background-color: var(--oo-bg-elevated); color: var(--oo-fg-secondary);">Cancel</button>
 						</div>
 					</div>
@@ -209,7 +209,7 @@
 				<div><label class="block text-xs mb-1" style="color: var(--oo-fg-tertiary);">Name</label><input type="text" bind:value={formName} class="w-full rounded-md px-2.5 py-1.5 text-xs outline-none" style="background-color: var(--oo-input-bg); color: var(--oo-fg-secondary); border: 1px solid var(--oo-input-bd);" placeholder="My Pipeline" /></div>
 				<div><label class="block text-xs mb-1" style="color: var(--oo-fg-tertiary);">Description</label><textarea bind:value={formDescription} rows="2" class="w-full rounded-md px-2.5 py-1.5 text-xs outline-none resize-y" style="background-color: var(--oo-input-bg); color: var(--oo-fg-secondary); border: 1px solid var(--oo-input-bd);" placeholder="What does this pipeline do?" /></div>
 				<div><div class="text-xs mb-2" style="color: var(--oo-fg-tertiary);">Steps ({formSteps.length})</div><PipelineEditor steps={formSteps} {stepTypes} on:change={handleStepsChange} /></div>
-				<button on:click={handleCreate} disabled={saving || !formId.trim() || !formName.trim() || formSteps.length === 0} class="w-full px-3 py-2 text-xs font-medium rounded-md disabled:opacity-50" style="background-color: var(--oo-acc-500); color: white;">{saving ? 'Creating...' : 'Create Pipeline'}</button>
+				<button on:click={handleCreate} disabled={saving || !formId.trim() || !formName.trim() || formSteps.length === 0} class="w-full px-3 py-2 text-xs font-medium rounded-md disabled:opacity-50" style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);">{saving ? 'Creating...' : 'Create Pipeline'}</button>
 			</div>
 		{/if}
 	</div>

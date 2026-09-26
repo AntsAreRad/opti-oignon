@@ -218,15 +218,15 @@
 						on:click={() => { selectedPresetId = preset.id; }}
 						class="w-full text-left px-4 py-3 rounded-lg transition-all"
 						style="background-color: {selectedPresetId === preset.id ? 'var(--oo-acc-900)' : 'var(--oo-bg-elevated)'};
-							border: 1.5px solid {selectedPresetId === preset.id ? 'var(--oo-acc-500)' : 'var(--oo-bd-subtle)'};
+							border: 1.5px solid {selectedPresetId === preset.id ? 'var(--oo-acc-ink)' : 'var(--oo-bd-subtle)'};
 							{selectedPresetId === preset.id ? 'box-shadow: 0 0 12px var(--oo-msg-user-bg);' : ''}"
 					>
 						<div class="flex items-center gap-3">
 							<!-- Icon -->
 							<div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-								style="background-color: {selectedPresetId === preset.id ? 'var(--oo-acc-600)' : 'var(--oo-bg-overlay)'};">
+								style="background-color: {selectedPresetId === preset.id ? 'var(--oo-acc-600)' : 'var(--oo-bg-overlay)'}; color: {selectedPresetId === preset.id ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-tertiary)'};">
 								<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke-width="1.8"
-									stroke="{selectedPresetId === preset.id ? 'var(--oo-acc-50)' : 'var(--oo-fg-tertiary)'}">
+									stroke="currentColor">
 									<path d="{presetIconSvg(preset.icon)}" />
 								</svg>
 							</div>
@@ -314,14 +314,14 @@
 			<button on:click={handleApply}
 				disabled={!selectedPresetId}
 				class="px-5 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-40"
-				style="background-color: var(--oo-acc-500); color: var(--oo-acc-50);
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);
 					{selectedPresetId ? 'box-shadow: 0 2px 12px var(--oo-msg-user-bd);' : ''}">
 				Apply {presets.find(p => p.id === selectedPresetId)?.name ?? ''} Preset
 			</button>
 		{:else if step === 'done'}
 			<button on:click={handleClose}
 				class="px-5 py-2 rounded-lg text-sm font-medium"
-				style="background-color: var(--oo-acc-500); color: var(--oo-acc-50);
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);
 					box-shadow: 0 2px 12px var(--oo-msg-user-bd);">
 				Get Started
 			</button>
@@ -344,8 +344,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: radial-gradient(circle, var(--oo-acc-500) 0%, var(--oo-acc-700) 100%);
-		box-shadow: 0 0 24px var(--oo-acc-400);
+		background: radial-gradient(circle, var(--oo-acc-fill-hover) 0%, var(--oo-acc-fill) 100%);
+		color: var(--oo-fg-on-accent);
+		box-shadow: 0 0 24px var(--oo-acc-fill);
 	}
 	.ob-logo {
 		width: 4rem;

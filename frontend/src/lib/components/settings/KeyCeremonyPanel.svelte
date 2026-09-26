@@ -184,7 +184,7 @@
 			{#if encStatus}
 				<div class="grid grid-cols-2 gap-2 text-xs">
 					<div style="color: var(--oo-fg-muted);">State</div>
-					<div style="color: {encStatus.enabled ? 'var(--oo-sage)' : 'var(--oo-fg-warning)'};">
+					<div style="color: {encStatus.enabled ? 'var(--oo-success)' : 'var(--oo-fg-warning)'};">
 						{encStatus.enabled ? 'Active' : 'Not configured'}
 					</div>
 
@@ -199,7 +199,7 @@
 						<div class="font-mono" style="color: var(--oo-fg-secondary);">{encStatus.crypto_backend}</div>
 
 						<div style="color: var(--oo-fg-muted);">Memory Protection</div>
-						<div style="color: {encStatus.secure_bytes_active ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+						<div style="color: {encStatus.secure_bytes_active ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 							{encStatus.secure_bytes_active ? 'SecureBytes active' : 'Standard'}
 							{#if encStatus.key_mlocked}
 								<span class="ml-1" style="color: var(--oo-sage);">(mlock)</span>
@@ -303,7 +303,7 @@
 							</button>
 							<button
 								class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-								style="background-color: {canProceedPassphrase ? 'var(--oo-tobacco)' : 'var(--oo-bg-tertiary)'}; color: {canProceedPassphrase ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-muted)'};"
+								style="background-color: {canProceedPassphrase ? 'var(--oo-acc-fill)' : 'var(--oo-bg-tertiary)'}; color: {canProceedPassphrase ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-muted)'};"
 								disabled={!canProceedPassphrase}
 								on:click={goToConfirm}
 							>
@@ -345,7 +345,7 @@
 							</button>
 							<button
 								class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-								style="background-color: {passphraseMatch ? 'var(--oo-tobacco)' : 'var(--oo-bg-tertiary)'}; color: {passphraseMatch ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-muted)'};"
+								style="background-color: {passphraseMatch ? 'var(--oo-acc-fill)' : 'var(--oo-bg-tertiary)'}; color: {passphraseMatch ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-muted)'};"
 								disabled={!passphraseMatch || setupInProgress}
 								on:click={confirmSetup}
 							>
@@ -384,7 +384,7 @@
 
 				<div class="grid grid-cols-2 gap-2 text-xs mb-3">
 					<div style="color: var(--oo-fg-muted);">Library (liboqs)</div>
-					<div style="color: {pqcStatus.available ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+					<div style="color: {pqcStatus.available ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 						{pqcStatus.available ? 'Installed' : 'Not installed'}
 					</div>
 
@@ -392,17 +392,17 @@
 					<div class="font-mono" style="color: var(--oo-fg-secondary);">{pqcStatus.algorithm}</div>
 
 					<div style="color: var(--oo-fg-muted);">Config Enabled</div>
-					<div style="color: {pqcStatus.config_enabled ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+					<div style="color: {pqcStatus.config_enabled ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 						{pqcStatus.config_enabled ? 'Yes' : 'No'}
 					</div>
 
 					<div style="color: var(--oo-fg-muted);">Signing Active</div>
-					<div style="color: {pqcStatus.effective_enabled ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+					<div style="color: {pqcStatus.effective_enabled ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 						{pqcStatus.effective_enabled ? 'Yes' : 'No'}
 					</div>
 
 					<div style="color: var(--oo-fg-muted);">Keypair</div>
-					<div style="color: {pqcStatus.keypair_exists ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+					<div style="color: {pqcStatus.keypair_exists ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 						{pqcStatus.keypair_exists ? 'Available' : 'Not generated'}
 						{#if pqcStatus.public_key_size}
 							<span class="font-mono ml-1" style="color: var(--oo-fg-faint);">
@@ -417,7 +417,7 @@
 						{#if !pqcStatus.keypair_exists}
 							<button
 								class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-								style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+								style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 								disabled={pqcGenerating}
 								on:click={handleGeneratePqcKeys}
 							>

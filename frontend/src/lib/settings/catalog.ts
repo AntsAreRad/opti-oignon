@@ -168,11 +168,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 // render. Their ids are the ids of the SettingsGroup each introduction
 // renders, so a deep link scrolls to them.
 export const INLINE_GROUPS: InlineGroup[] = [
-	{ sectionId: 'appearance', id: 'appearance-theme', title: 'Theme', description: 'Active palette and light/dark mode.', synonyms: ['dark mode', 'light mode', 'palette', 'colors', 'anthracite', 'parchment', 'slate', 'linen', 'high contrast'] },
+	{ sectionId: 'appearance', id: 'appearance-theme', title: 'Theme', description: 'Match system, day, night or high contrast.', synonyms: ['dark mode', 'light mode', 'palette', 'colors', 'day', 'night', 'high contrast', 'match system'] },
 	{ sectionId: 'appearance', id: 'appearance-density', title: 'Density', description: 'Compact, comfortable or spacious spacing.', synonyms: ['spacing', 'compact', 'comfortable', 'spacious'] },
 	{ sectionId: 'appearance', id: 'appearance-typography', title: 'Text size', description: 'Scales every text size across the app. Composes with density.', synonyms: ['font size', 'text size', 'typography', 'zoom', 'scale'] },
 	{ sectionId: 'appearance', id: 'appearance-motion', title: 'Motion', description: 'How much the interface animates.', synonyms: ['animation', 'reduce motion', 'reduced motion', 'transitions'] },
-	{ sectionId: 'appearance', id: 'appearance-advanced', title: 'Advanced', description: 'Fine-tune accent colors and keyboard shortcuts.', synonyms: ['accent', 'colors', 'keyboard shortcuts', 'shortcuts'] },
+	{ sectionId: 'appearance', id: 'appearance-advanced', title: 'Advanced', description: 'Keyboard shortcuts.', synonyms: ['keyboard shortcuts', 'shortcuts'] },
 	{ sectionId: 'conversation', id: 'conversation-system-preset', title: 'System preset', description: 'One-click hardware-tier infrastructure preset.', synonyms: ['quick', 'hardware', 'tier', 'minimal', 'balanced', 'power'] },
 	{ sectionId: 'conversation', id: 'conversation-defaults', title: 'Defaults for new conversations', description: 'Default model, temperature, code execution, memory injection.', synonyms: ['quick', 'default model', 'temperature', 'code execution', 'memory injection'] },
 	{ sectionId: 'conversation', id: 'conversation-config-maintenance', title: 'Configuration', description: 'Reload configuration from disk or re-run the first-time setup.', synonyms: ['reload', 'config', 'setup', 'first run', 'onboarding'] },

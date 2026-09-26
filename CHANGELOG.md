@@ -717,6 +717,102 @@ package costs.
   from the lock with `npm ci` too. `scripts/dev_frontend.sh` and
   `scripts/run_e2e.sh` still install only when `node_modules` is missing:
   run `npm ci` yourself before them after this pull.
+- The interface has three palettes, day, night and high contrast, and one
+  way to reach them. Each palette is one file of 26 named roles and its
+  colour scheme (`frontend/src/styles/theme-{day,night,high-contrast}.css`,
+  under `[data-oo-theme="<id>"]`), and one derivation layer
+  (`styles/theme.css`) maps every token a component reads onto those roles,
+  once; the Anthracite, Parchment, Slate and Linen files are gone, and the
+  high contrast palette is a new, warmer dark set rather than pure black.
+  The choices are "Match system" (the default: night, day when the system
+  asks for a light scheme, and high contrast whenever it asks for more
+  contrast, whatever its scheme), Day, Night and High contrast. What was
+  stored before migrates without a write: Anthracite and Slate become Night,
+  Parchment and Linen Day, and a light or dark theme stored alone becomes
+  Match system when it is what the system shows anyway, and Day or Night
+  otherwise. One module, `lib/theme/apply.ts`, resolves the stored choices
+  and the system into what `<html>` carries (the palette, the `dark`
+  class, one density class, the root font size, the motion classes and the
+  componion switch) and writes nothing else; the inline script in
+  `app.html` makes the same decisions before the first paint, inside a
+  try/catch, over a static night palette that stands when it cannot run, and
+  sets the browser's theme-color to the palette's ground. A contract runs
+  both over 1,500 combinations of stored values, system settings, blocked
+  storage and text sizes and requires the same root. Under Match system a
+  change of the system's scheme or contrast applies at once. Nothing stores
+  the old binary theme any more (the root layout rewrote it on every visit,
+  so following the system stopped after the first one), and the palette
+  choice is stored only when the user makes it. At startup the old key is
+  removed where it decides nothing (a palette was chosen, or it is what the
+  system shows); where it still pins (unlike the system), the choice it
+  means is held for the visit, so a change of the system does not move the
+  choice shown. The accent colour builder is
+  retired, with its API module; custom accents it saved were never applied
+  at startup, and the server's theme endpoint is untouched. The theme
+  switcher, the appearance settings and the component gallery preview a
+  palette as an element carrying its attribute, with no colour of their
+  own.
+  Text size is now the root font size (92, 100, 109 or 118 percent), and
+  the text and space tokens are in rem, so it scales every one of them and
+  the multiplier token is gone; sizes in px (the Tailwind px text classes,
+  fixed widths, touch targets) do not follow it, by design, and the
+  composer's field keeps a 16 px floor. Compact density no longer sets text
+  under 12 px. Radii follow a rounder scale (8 to 30 px, and 999 for a
+  pill), and the font stacks name IBM Plex Sans and Mono and Source Serif 4
+  first (each falls back to the system's fonts until they are shipped).
+  Tailwind's `rounded-sm` and `rounded` now mean 8 px (they meant 2 and
+  4), so small swatches read rounder.
+  `tailwind.config.js` holds no colour: its `surface-*` and `accent-*`
+  utilities resolve, per kind of utility, to a ground, one of the two text
+  levels, a boundary, the accent fill or the accent ink, their opacity
+  modifier mixing the token with transparent, and the base layer Tailwind
+  generates draws in tokens too (the default border, the ring and its
+  offset, and a field's placeholder, which was a gray under 3:1 on the day
+  surface); the light-mode override layer
+  in `app.css` (106 rules, two of which painted the accent's 20% and 30%
+  tints with the error and the success washes) is deleted. The accent's ink is no longer used as a fill:
+  surfaces that carry text use the accent fill with the text colour made for
+  it, and the text on a status fill (a danger button, a revoke button, the
+  tool-approval pill) is the on-semantic ink, where the on-accent ink gave
+  2.3:1 in day. A mark that carries no text -- a progress bar, a chart bar,
+  a legend dot, the streaming caret -- is drawn in a new mark token, the
+  accent's ink, which reaches 3:1 on every ground, where the day fill gave
+  2.0 to 2.5; a second mark token draws a second series beside it. A
+  switch's track when on uses the ink too (the knob is under 3:1 on the day
+  fill), and every hand-made switch draws its tracks in the switch tokens,
+  where the knob, in the surface colour, could sit on a track of that same
+  colour. The field primitives draw their edge in the rule colour, a
+  boundary that must be seen. The accent fill's hover and the dialog's
+  scrim differ with the palette and are given by a rule naming each
+  palette, not by `light-dark()`, which browsers before 2024 do not compute.
+  White and black are gone from components (a caption on an image
+  sits on the surface, a backdrop on a new scrim token). Outside the palette
+  files no hex colour stands but the QR code's white ground, which a
+  drawing's light page now reads too, and the pre-render's theme-color map;
+  no named colour and no colour function stands either, but the `rgba()`
+  literals left in 20 components (53), a debt its ratchet only lets fall.
+  The focus ring, the components' own included, is drawn in the
+  focus ink and no longer changes a control's corners; selected text, native
+  checkboxes and the forced-colours mode are declared; cards, dialogs and
+  tooltips are separated from their ground by tone, and draw an edge only in
+  high contrast and under forced colours. Every pair of text and ground the
+  design lists -- 327 over the three palettes -- reaches its WCAG ratio, as
+  evaluated from the role files through the derivation layer by a checker
+  that must catch a planted low pair; so does every pair of a ground and a
+  text colour a component sets together in one rule or on one element (a
+  static census that follows a conditional's branches, a class list a
+  script holds and the Tailwind names; a child's text on its parent's
+  ground is not followed). Hex colours outside the palette files
+  fall from 304 to the two exceptions above, named white and black from 39
+  to none, and the accent's ink used as a fill from 91 (with 60 reads no
+  census could place) to none, counted under every name the derivation
+  layer gives the ink. Twenty-seven contracts. The wiring half of `ux11`, whose last
+  assertion named the preferences store as the writer of the motion classes,
+  is superseded by `ds20`. How the three palettes look, the 4% hover wash,
+  forced colours, axe in each palette, the x-large text size on a phone, the
+  colours a browser computes (owed, and reported as a skip until recorded)
+  and the Tailwind opacity modifier's `calc()` inside `color-mix()` on the
+  phone's and the desktop's browsers are checked on the machine, not here.
 - `think=False` now reaches Ollama. The registry declared `think: bool =
   False` and sent `think` only when it was true, so a model that thinks by
   default thought whatever the caller said -- through the agentic pipelines

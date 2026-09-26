@@ -1,93 +1,119 @@
 /*
- * theme.css -- Opti-Oignon design-system orchestrator.
+ * theme.css -- the derivation layer.
  *
- * Imports the split token files, then declares the default-mode
- * foundation (Anthracite for dark, Parchment for light) inline together
- * with the retained legacy component tokens and the backward-compat alias
- * layer. The five preset palettes live in theme-<name>.css; the alias
- * layer (spec 4.2) is transitional and will be removed once consumers
- * migrate off the legacy names.
+ * Imports the invariant tokens, the three palettes and density, then maps
+ * every app token (the --oo-* names components read) onto the palette's
+ * roles, once: a role, a mix of roles, or a value that carries no colour.
+ * Components read app tokens, never a role and never a literal colour.
  *
- * Convention: --oo-{category}-{variant}  (bg / fg / bd / acc).
+ * The selector is [data-oo-theme], not :root. A custom property whose value
+ * is var(--a) is resolved on the element that declares it, and its children
+ * inherit the result. Declared on the root alone, the app tokens would keep
+ * the root palette's colours inside a subtree that names another palette;
+ * declared on every element carrying the attribute, they derive again
+ * there, so a preview of a palette is an element with data-oo-theme="night"
+ * and no colour of its own. <html> carries the attribute from the first
+ * paint.
+ *
+ * Two tokens differ with the palette's scheme, the accent fill's hover and
+ * the veil behind a dialog; each palette gives them in the rule after the
+ * block that names it, and nowhere else. Like the block, that rule applies
+ * to the root and to any subtree.
+ *
+ * The accent fill is the ground of what carries text (a button, a chip)
+ * with the on-accent ink on it. A mark that carries no text (a progress
+ * bar, a legend dot, the streaming caret) is drawn in the mark token, the
+ * accent's ink, which reaches 3:1 on every ground where the fill does not
+ * in day; the second mark token draws a second series beside it. The
+ * switch track, when on, is the accent ink for the same reason: the knob
+ * (the surface) is under 3:1 on the day fill. The status washes are for
+ * status primitives on the surface or the page ground; text on a status
+ * fill is the on-semantic ink.
+ *
+ * One colour literal remains, the QR code's white ground: a QR code needs a
+ * light quiet zone whatever the palette, and a drawing keeps its own light
+ * page (its ground reads the same white).
  */
 
 @import './tokens.css';
-@import './theme-anthracite.css';
-@import './theme-parchment.css';
-@import './theme-slate.css';
-@import './theme-linen.css';
+@import './theme-day.css';
+@import './theme-night.css';
 @import './theme-high-contrast.css';
 @import './density.css';
 
-:root,
-html.dark {
-	/* -- Anthracite foundation (default dark) -- */
-	--oo-bg-base: #1F1F22;
-	--oo-bg-surface: #27272A;
-	--oo-bg-elevated: #303034;
-	--oo-bg-overlay: #3A3A3E;
-	--oo-bg-subtle: #1A1A1D;
-	--oo-bg-hover: #34343A;
-	--oo-bg-active: #3E3E45;
-	--oo-fg-primary: #ECE9E3;
-	--oo-fg-secondary: #B5B1A9;
-	--oo-fg-tertiary: #928D85;
-	/* A2 (spec 4.5): --oo-fg-muted passes AA-large only on some surfaces.
-	   Reserve it for tertiary information at >=14px; never use for body
-	   text below 14px or on --oo-bg-elevated. */
-	--oo-fg-muted: #8C8881;
-	/* A1 (spec 4.5): --oo-fg-decorative is intentionally low-contrast and
-	   DECORATIVE ONLY (dividers, faint glyphs, placeholder ornaments). It
-	   fails AA and must never carry essential text. The legacy
-	   --oo-fg-faint name aliases it (see below) and inherits this rule. */
-	--oo-fg-decorative: #4A4A4C;
-	--oo-fg-on-accent: #1F1F22;
-	--oo-bd-subtle: #2A2A2D;
-	--oo-bd-default: #2E2E32;
-	--oo-bd-strong: #48484C;
-	--oo-acc-50: #FDF6EE;
-	--oo-acc-100: #F8E8D4;
-	--oo-acc-200: #E8C9A0;
-	--oo-acc-300: #D4AC78;
-	--oo-acc-400: #C48838;
-	--oo-acc-500: #C48838;
-	--oo-acc-600: #A87030;
-	--oo-acc-700: #7D5636;
-	--oo-acc-800: #614328;
-	--oo-acc-900: #4A321E;
-	--oo-success: #86A189;
-	--oo-success-bg: rgba(134, 161, 137, 0.16);
-	--oo-success-bd: rgba(134, 161, 137, 0.24);
-	--oo-warning: #D2C0A0;
-	--oo-warning-bg: rgba(210, 192, 160, 0.16);
-	--oo-warning-bd: rgba(210, 192, 160, 0.24);
-	--oo-error: #D88679;
-	--oo-error-bg: rgba(216, 134, 121, 0.16);
-	--oo-error-bd: rgba(216, 134, 121, 0.24);
-	--oo-info: #8AABBF;
-	--oo-info-bg: rgba(138, 171, 191, 0.16);
-	--oo-info-bd: rgba(138, 171, 191, 0.24);
+[data-oo-theme] {
+	/* -- Grounds -- */
+	--oo-bg-base: var(--oo-role-bg);
+	--oo-bg-surface: var(--oo-role-surface);
+	--oo-bg-elevated: var(--oo-role-surface);
+	--oo-bg-overlay: var(--oo-role-surface-2);
+	--oo-bg-subtle: var(--oo-role-sunken);
+	--oo-bg-hover: color-mix(in srgb, var(--oo-role-text) 4%, transparent);
+	--oo-bg-active: var(--oo-bg-hover);
+	--oo-bg-tint-1: var(--oo-role-tint-1);
+	--oo-bg-tint-2: var(--oo-role-tint-2);
+	--oo-bg-tint-3: var(--oo-role-tint-3);
+	--oo-bg-code: var(--oo-role-code-bg);
 
-	/* -- Legacy background aliases (component back-compat) -- */
-	--oo-bg-primary: var(--oo-bg-base);
-	--oo-bg-secondary: var(--oo-bg-surface);
-	--oo-bg-tertiary: var(--oo-bg-elevated);
-	--oo-bg-surface-raised: var(--oo-bg-elevated);
-	--oo-bg-input: var(--oo-bg-elevated);
-	--oo-fg-faint: var(--oo-fg-decorative);
-	--oo-fg-on-semantic: #ECE9E3;
-	--oo-accent-primary: var(--oo-acc-500);
+	/* -- Text: two levels -- */
+	--oo-fg-primary: var(--oo-role-text);
+	--oo-fg-secondary: var(--oo-role-text-muted);
+	--oo-fg-tertiary: var(--oo-role-text-muted);
+	--oo-fg-muted: var(--oo-role-text-muted);
+	--oo-fg-faint: var(--oo-role-text-muted);
+	--oo-fg-decorative: var(--oo-role-rule-soft);
+	--oo-fg-on-accent: var(--oo-role-on-primary);
+	--oo-fg-on-semantic: var(--oo-role-surface);
+	--oo-fg-stop: var(--oo-role-stop-ink);
 
-	/* -- Dual accent: sage (content) / tobacco -- */
-	--oo-sage: #86A189;
-	--oo-sage-bg: rgba(134, 161, 137, 0.12);
-	--oo-sage-bd: rgba(134, 161, 137, 0.18);
-	--oo-pine: #7A857C;
-	--oo-tobacco: #C48838;
-	--oo-tobacco-bg: rgba(196, 136, 56, 0.10);
-	--oo-tobacco-bd: rgba(196, 136, 56, 0.15);
+	/* -- Boundaries -- */
+	--oo-bd-subtle: var(--oo-role-rule-soft);
+	--oo-bd-default: var(--oo-role-rule-soft);
+	--oo-bd-strong: var(--oo-role-rule);
+	--oo-edge: var(--oo-role-edge);
+	--oo-focus-ink: var(--oo-role-primary-ink);
 
-	/* -- Semantic aliases -- */
+	/* -- Accent: the fill, and the inks -- */
+	--oo-acc-fill: var(--oo-role-primary);
+	--oo-acc-fill-hover: var(--oo-acc-600);
+	--oo-acc-ink: var(--oo-role-primary-ink);
+	--oo-acc-ink-2: var(--oo-role-secondary-ink);
+	--oo-acc-mark: var(--oo-role-primary-ink);
+	--oo-acc-mark-2: var(--oo-role-secondary-ink);
+	--oo-acc-50: var(--oo-role-on-primary);
+	--oo-acc-100: var(--oo-role-tint-1);
+	--oo-acc-200: var(--oo-role-tint-1);
+	--oo-acc-300: var(--oo-role-primary-ink);
+	--oo-acc-400: var(--oo-role-primary-ink);
+	--oo-acc-500: var(--oo-role-primary-ink);
+	--oo-acc-700: var(--oo-role-primary-ink);
+	--oo-acc-800: var(--oo-role-tint-1);
+	--oo-acc-900: var(--oo-role-tint-1);
+	--oo-accent: var(--oo-role-primary-ink);
+	--oo-accent-primary: var(--oo-role-primary-ink);
+	--oo-accent-secondary: var(--oo-role-primary-ink);
+	--oo-tobacco: var(--oo-role-primary-ink);
+	--oo-sage: var(--oo-role-primary-ink);
+	--oo-accent-bg: var(--oo-role-tint-1);
+	--oo-sage-bg: var(--oo-role-tint-1);
+	--oo-tobacco-bg: var(--oo-role-tint-1);
+	--oo-sage-bd: color-mix(in srgb, var(--oo-role-primary-ink) 25%, transparent);
+	--oo-tobacco-bd: color-mix(in srgb, var(--oo-role-primary-ink) 25%, transparent);
+
+	/* -- Status: inks, and washes for status primitives -- */
+	--oo-success: var(--oo-role-success-ink);
+	--oo-success-bg: color-mix(in srgb, var(--oo-role-success-ink) 12%, transparent);
+	--oo-success-bd: color-mix(in srgb, var(--oo-role-success-ink) 40%, transparent);
+	--oo-warning: var(--oo-role-warn-ink);
+	--oo-warning-bg: color-mix(in srgb, var(--oo-role-warn-tone) 14%, transparent);
+	--oo-warning-bd: color-mix(in srgb, var(--oo-role-warn-tone) 45%, transparent);
+	--oo-error: var(--oo-role-stop-ink);
+	--oo-error-bg: color-mix(in srgb, var(--oo-role-stop-ink) 12%, transparent);
+	--oo-error-bd: color-mix(in srgb, var(--oo-role-stop-ink) 40%, transparent);
+	--oo-info: var(--oo-role-syn-keyword);
+	--oo-info-bg: color-mix(in srgb, var(--oo-role-syn-keyword) 12%, transparent);
+	--oo-info-bd: color-mix(in srgb, var(--oo-role-syn-keyword) 40%, transparent);
+	--oo-status-ok: var(--oo-role-status-ok);
 	--oo-status-success: var(--oo-success);
 	--oo-status-warning: var(--oo-warning);
 	--oo-status-error: var(--oo-error);
@@ -95,242 +121,136 @@ html.dark {
 	--oo-err-bg: var(--oo-error-bg);
 	--oo-err-bd: var(--oo-error-bd);
 
-	/* -- Component-specific -- */
-	--oo-sidebar-bg: #1C1C1E;
-	--oo-header-bg: #1F1F22;
-	--oo-panel-bg: #1C1C1E;
-	--oo-input-bg: #27272A;
-	--oo-input-bd: #2E2E32;
-	--oo-input-focus: rgba(196, 136, 56, 0.35);
-	--oo-toggle-knob: #ECE9E3;
+	/* -- Components -- */
+	--oo-sidebar-bg: var(--oo-role-bg);
+	--oo-header-bg: var(--oo-role-surface);
+	--oo-panel-bg: var(--oo-role-surface);
+	--oo-input-bg: var(--oo-role-surface);
+	--oo-input-bd: var(--oo-role-rule);
+	--oo-input-focus: var(--oo-focus-ink);
+	--oo-switch-on: var(--oo-role-primary-ink);
+	--oo-switch-off: var(--oo-role-rule);
+	--oo-toggle-knob: var(--oo-role-surface);
 	--oo-surface-600: var(--oo-bg-subtle);
 	--oo-surface-700: var(--oo-bg-overlay);
 	--oo-surface-800: var(--oo-bg-elevated);
+	--oo-bg-surface-raised: var(--oo-role-surface);
+	--oo-bg-input: var(--oo-role-surface);
+	--oo-pet-ground: var(--oo-role-tint-2);
 
-	/* -- Message bubbles -- */
-	--oo-msg-user-bg: rgba(196, 136, 56, 0.06);
-	--oo-msg-user-bd: rgba(196, 136, 56, 0.06);
-	--oo-msg-user-fg: #ECE9E3;
-	--oo-msg-bot-bg: #27272A;
+	/* -- Messages: the user's on the sunken ground, the reply on none -- */
+	--oo-msg-user-bg: var(--oo-role-sunken);
+	--oo-msg-user-bd: transparent;
+	--oo-msg-user-fg: var(--oo-role-text);
+	--oo-msg-bot-bg: transparent;
 	--oo-msg-bot-bd: transparent;
-	--oo-msg-bot-fg: #B5B1A9;
+	--oo-msg-bot-fg: var(--oo-role-text);
 
 	/* -- Buttons -- */
-	--oo-btn-primary-bg: #C48838;
-	--oo-btn-primary-fg: #1F1F22;
-	--oo-btn-primary-hover: #A87030;
-	--oo-btn-secondary-bg: #2E2E32;
-	--oo-btn-secondary-fg: #ECE9E3;
-	--oo-btn-secondary-hover: #3A3A3C;
-	--oo-btn-ghost-fg: #928D85;
+	--oo-btn-primary-bg: var(--oo-acc-fill);
+	--oo-btn-primary-fg: var(--oo-role-on-primary);
+	--oo-btn-primary-hover: var(--oo-acc-fill-hover);
+	--oo-btn-secondary-bg: var(--oo-role-surface-2);
+	--oo-btn-secondary-fg: var(--oo-role-text);
+	--oo-btn-secondary-hover: color-mix(in srgb, var(--oo-role-text) 7%, var(--oo-role-surface-2));
+	--oo-btn-ghost-fg: var(--oo-role-text-muted);
 	--oo-btn-ghost-bg: transparent;
-	--oo-btn-ghost-hover: #2E2E32;
+	--oo-btn-ghost-hover: var(--oo-bg-hover);
 
-	/* -- Pipeline badges -- */
-	--oo-pipe-direct: #8AABBF;
-	--oo-pipe-tools: #A890B8;
-	--oo-pipe-think: #C48838;
-	--oo-pipe-search: #86A189;
-	--oo-pipe-code: #D2C0A0;
-	--oo-pipe-reason: #C4889A;
-	--oo-pipe-consensus: #9098C0;
-	--oo-pipe-correct: #80B8A8;
+	/* -- Pipeline, category and chart inks -- */
+	--oo-pipe-direct: var(--oo-role-syn-keyword);
+	--oo-pipe-tools: var(--oo-role-secondary-ink);
+	--oo-pipe-think: var(--oo-role-primary-ink);
+	--oo-pipe-search: var(--oo-role-success-ink);
+	--oo-pipe-code: var(--oo-role-warn-ink);
+	--oo-pipe-reason: color-mix(in srgb, var(--oo-role-stop-ink) 50%, var(--oo-role-secondary-ink));
+	--oo-pipe-consensus: var(--oo-role-text-muted);
+	--oo-pipe-correct: var(--oo-role-syn-name);
+	--oo-cat-purple: var(--oo-role-secondary-ink);
+	--oo-cat-orange: var(--oo-role-warn-ink);
+	--oo-cat-pink: color-mix(in srgb, var(--oo-role-stop-ink) 50%, var(--oo-role-secondary-ink));
+	--oo-radar-blue: var(--oo-role-syn-keyword);
+	--oo-radar-sand: var(--oo-role-warn-ink);
+	--oo-radar-green: var(--oo-role-success-ink);
+	--oo-code-keyword: var(--oo-role-syn-keyword);
+	--oo-code-name: var(--oo-role-syn-name);
 
-	/* -- Category colors -- */
-	--oo-cat-blue: #8AABBF;
-	--oo-cat-blue-bg: rgba(138, 171, 191, 0.12);
-	--oo-cat-blue-bd: rgba(138, 171, 191, 0.20);
-	--oo-cat-purple: #A890B8;
-	--oo-cat-purple-bg: rgba(168, 144, 184, 0.12);
-	--oo-cat-purple-bd: rgba(168, 144, 184, 0.20);
-	--oo-cat-emerald: #86A189;
-	--oo-cat-emerald-bg: rgba(134, 161, 137, 0.12);
-	--oo-cat-emerald-bd: rgba(134, 161, 137, 0.18);
-	--oo-cat-orange: #C48838;
-	--oo-cat-orange-bg: rgba(196, 136, 56, 0.10);
-	--oo-cat-orange-bd: rgba(196, 136, 56, 0.18);
-	--oo-cat-pink: #C4889A;
-	--oo-cat-pink-bg: rgba(196, 136, 154, 0.12);
-	--oo-cat-pink-bd: rgba(196, 136, 154, 0.20);
-	--oo-cat-yellow: #D2C0A0;
-	--oo-cat-yellow-bg: rgba(210, 192, 160, 0.12);
-	--oo-cat-gray: #928D85;
-	--oo-cat-gray-bg: rgba(146, 141, 133, 0.12);
+	/* -- Scrollbar and shadows -- */
+	--oo-scrollbar-thumb: color-mix(in srgb, var(--oo-role-rule) 45%, var(--oo-role-rule-soft));
+	--oo-scrollbar-hover: var(--oo-role-rule);
+	--oo-shadow-c1: var(--oo-role-shadow-1);
+	--oo-shadow-c2: var(--oo-role-shadow-2);
+	--oo-shadow-xs: 0 1px 2px var(--oo-shadow-c1);
+	--oo-shadow-sm: 0 1px 2px var(--oo-shadow-c1), 0 8px 24px var(--oo-shadow-c1);
+	--oo-shadow-md: 0 2px 6px var(--oo-shadow-c1), 0 14px 36px var(--oo-shadow-c2);
+	--oo-shadow-lg: 0 2px 6px var(--oo-shadow-c1), 0 14px 36px var(--oo-shadow-c2);
+	--oo-shadow-inner: none;
+	--oo-qr-bg: #FFFFFF;
+	/* A drawing keeps its own colours (a dark pen on a light page), so its
+	   ground is the QR code's white in every palette. */
+	--oo-drawing-bg: var(--oo-qr-bg);
 
-	/* -- Radar chart -- */
-	--oo-radar-blue: #8AABBF;
-	--oo-radar-sand: #C48838;
-	--oo-radar-green: #86A189;
-
-	/* -- Scrollbar -- */
-	--oo-scrollbar-thumb: #3A3A3E;
-	--oo-scrollbar-hover: #48484C;
-
-	/* -- Shadows (dark, spec 7.6) -- */
-	--oo-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
-	--oo-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.40);
-	--oo-shadow-md: 0 4px 8px rgba(0, 0, 0, 0.45);
-	--oo-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.50);
-	--oo-shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.30);
-
-	/* -- Transition aliases (resolve to motion tokens) -- */
-	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
-	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
-	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
-
-	/* -- Reply renderer (provisional: re-derived when the palettes become roles) -- */
-	--oo-bg-code: var(--oo-bg-subtle);
-	--oo-code-keyword: var(--oo-info);
-	--oo-code-name: var(--oo-success);
-	--oo-font-serif: 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
-}
-
-html:not(.dark) {
-	/* -- Parchment foundation (default light) -- */
-	--oo-bg-base: #E5DECE;
-	--oo-bg-surface: #DDD5C3;
-	--oo-bg-elevated: #ECE5D6;
-	--oo-bg-overlay: #D2CAB8;
-	--oo-bg-subtle: #D8D0BE;
-	--oo-bg-hover: #D6CEBC;
-	--oo-bg-active: #CFC6B3;
-	--oo-fg-primary: #2D2C2A;
-	--oo-fg-secondary: #4D4842;
-	--oo-fg-tertiary: #555049;
-	--oo-fg-muted: #6E675E;
-	--oo-fg-decorative: #B8B1A4;
-	--oo-fg-on-accent: #F0EBE4;
-	--oo-bd-subtle: #CFC8BC;
-	--oo-bd-default: #BEB7AB;
-	--oo-bd-strong: #A8A298;
-	--oo-acc-50: #F5EDE4;
-	--oo-acc-100: #EAD8C4;
-	--oo-acc-200: #D4B48A;
-	--oo-acc-300: #B8925E;
-	--oo-acc-400: #7A4E1E;
-	--oo-acc-500: #7A4E1E;
-	--oo-acc-600: #5E3C15;
-	--oo-acc-700: #4E3012;
-	--oo-acc-800: #3D250E;
-	--oo-acc-900: #2E1B0A;
-	--oo-success: #3D5240;
-	--oo-success-bg: rgba(61, 82, 64, 0.12);
-	--oo-success-bd: rgba(61, 82, 64, 0.20);
-	--oo-warning: #5E5030;
-	--oo-warning-bg: rgba(94, 80, 48, 0.12);
-	--oo-warning-bd: rgba(94, 80, 48, 0.20);
-	--oo-error: #7A3E34;
-	--oo-error-bg: rgba(122, 62, 52, 0.12);
-	--oo-error-bd: rgba(122, 62, 52, 0.20);
-	--oo-info: #2E5A6E;
-	--oo-info-bg: rgba(46, 90, 110, 0.12);
-	--oo-info-bd: rgba(46, 90, 110, 0.20);
-
-	/* -- Legacy background aliases -- */
+	/* -- Older names, each an alias of the token it meant -- */
 	--oo-bg-primary: var(--oo-bg-base);
 	--oo-bg-secondary: var(--oo-bg-surface);
 	--oo-bg-tertiary: var(--oo-bg-elevated);
-	--oo-bg-surface-raised: var(--oo-bg-overlay);
-	--oo-bg-input: var(--oo-bg-elevated);
-	--oo-fg-faint: var(--oo-fg-decorative);
-	--oo-fg-on-semantic: #F0EBE4;
-	--oo-accent-primary: var(--oo-acc-500);
+	--oo-bg: var(--oo-bg-base);
+	--oo-bg-default: var(--oo-bg-base);
+	--oo-bg-sunken: var(--oo-bg-subtle);
+	--oo-bg-error: var(--oo-error-bg);
+	--oo-bg-warning: var(--oo-warning-bg);
+	--oo-bg-success: var(--oo-success-bg);
+	--oo-surface: var(--oo-bg-surface);
+	--oo-surface-hover: var(--oo-bg-hover);
+	--oo-card-bg: var(--oo-bg-surface);
+	--oo-overlay-bg: var(--oo-bg-overlay);
+	--oo-text-primary: var(--oo-fg-primary);
+	--oo-text-secondary: var(--oo-fg-secondary);
+	--oo-text-tertiary: var(--oo-fg-tertiary);
+	--oo-text-on-accent: var(--oo-fg-on-accent);
+	--oo-fg-error: var(--oo-error);
+	--oo-fg-warning: var(--oo-warning);
+	--oo-fg-success: var(--oo-success);
+	--oo-fg-danger: var(--oo-error);
+	--oo-danger: var(--oo-error);
+	--oo-danger-bg: var(--oo-error-bg);
+	--oo-danger-bd: var(--oo-error-bd);
+	--oo-border: var(--oo-bd-default);
+	--oo-border-default: var(--oo-bd-default);
+	--oo-border-subtle: var(--oo-bd-subtle);
+	--oo-border-hover: var(--oo-bd-strong);
+	--oo-bd-soft: var(--oo-bd-subtle);
+}
 
-	--oo-sage: #3D5240;
-	--oo-sage-bg: rgba(61, 82, 64, 0.12);
-	--oo-sage-bd: rgba(61, 82, 64, 0.20);
-	--oo-pine: #334836;
-	--oo-tobacco: #7A4E1E;
-	--oo-tobacco-bg: rgba(122, 78, 30, 0.12);
-	--oo-tobacco-bd: rgba(122, 78, 30, 0.18);
+/* ------------------------------------------------------------------ */
+/*  What differs with the palette's scheme                             */
+/* ------------------------------------------------------------------ */
+/* The accent fill's hover (--oo-acc-600, read as --oo-acc-fill-hover) is
+   lighter than the fill in every palette: mixed toward the surface in a
+   light palette, toward the text in a dark one. The veil behind a dialog
+   or an open drawer darkens a light page and deepens a dark one. */
+[data-oo-theme="day"] {
+	--oo-acc-600: color-mix(in srgb, var(--oo-role-primary) 80%, var(--oo-role-surface));
+	--oo-scrim: color-mix(in srgb, var(--oo-role-text) 40%, transparent);
+}
 
-	--oo-status-success: var(--oo-success);
-	--oo-status-warning: var(--oo-warning);
-	--oo-status-error: var(--oo-error);
-	--oo-err-fg: var(--oo-error);
-	--oo-err-bg: var(--oo-error-bg);
-	--oo-err-bd: var(--oo-error-bd);
+[data-oo-theme="night"],
+[data-oo-theme="high-contrast"] {
+	--oo-acc-600: color-mix(in srgb, var(--oo-role-primary) 85%, var(--oo-role-text));
+	--oo-scrim: color-mix(in srgb, var(--oo-role-sunken) 70%, transparent);
+}
 
-	--oo-sidebar-bg: #CAC3B7;
-	--oo-header-bg: #B5AFA5;
-	--oo-panel-bg: #CAC3B7;
-	--oo-input-bg: #ECE5D6;
-	--oo-input-bd: #BEB7AB;
-	--oo-input-focus: rgba(122, 78, 30, 0.35);
-	--oo-toggle-knob: #ECE5D6;
-	--oo-surface-600: var(--oo-bg-subtle);
-	--oo-surface-700: var(--oo-bg-overlay);
-	--oo-surface-800: var(--oo-bg-elevated);
-
-	--oo-msg-user-bg: rgba(61, 82, 64, 0.14);
-	--oo-msg-user-bd: rgba(61, 82, 64, 0.18);
-	--oo-msg-user-fg: #2D2C2A;
-	--oo-msg-bot-bg: #ECE5D6;
-	--oo-msg-bot-bd: #CFC8BC;
-	--oo-msg-bot-fg: #2D2C2A;
-
-	--oo-btn-primary-bg: #3D5240;
-	--oo-btn-primary-fg: #F0EBE4;
-	--oo-btn-primary-hover: #334836;
-	--oo-btn-secondary-bg: #C8C0B4;
-	--oo-btn-secondary-fg: #2D2C2A;
-	--oo-btn-secondary-hover: #BEB7AB;
-	--oo-btn-ghost-fg: #4D4842;
-	--oo-btn-ghost-bg: transparent;
-	--oo-btn-ghost-hover: #D2CAB8;
-
-	--oo-pipe-direct: #2E5A6E;
-	--oo-pipe-tools: #5E4570;
-	--oo-pipe-think: #7A4E1E;
-	--oo-pipe-search: #3D5240;
-	--oo-pipe-code: #5E5030;
-	--oo-pipe-reason: #703848;
-	--oo-pipe-consensus: #404870;
-	--oo-pipe-correct: #2E6858;
-
-	--oo-cat-blue: #2E5A6E;
-	--oo-cat-blue-bg: rgba(46, 90, 110, 0.10);
-	--oo-cat-blue-bd: rgba(46, 90, 110, 0.18);
-	--oo-cat-purple: #5E4570;
-	--oo-cat-purple-bg: rgba(94, 69, 112, 0.10);
-	--oo-cat-purple-bd: rgba(94, 69, 112, 0.18);
-	--oo-cat-emerald: #3D5240;
-	--oo-cat-emerald-bg: rgba(61, 82, 64, 0.10);
-	--oo-cat-emerald-bd: rgba(61, 82, 64, 0.18);
-	--oo-cat-orange: #7A4E1E;
-	--oo-cat-orange-bg: rgba(122, 78, 30, 0.10);
-	--oo-cat-orange-bd: rgba(122, 78, 30, 0.18);
-	--oo-cat-pink: #703848;
-	--oo-cat-pink-bg: rgba(112, 56, 72, 0.10);
-	--oo-cat-pink-bd: rgba(112, 56, 72, 0.18);
-	--oo-cat-yellow: #5E5030;
-	--oo-cat-yellow-bg: rgba(94, 80, 48, 0.10);
-	--oo-cat-gray: #4D4842;
-	--oo-cat-gray-bg: rgba(77, 72, 66, 0.10);
-
-	--oo-radar-blue: #2E5A6E;
-	--oo-radar-sand: #7A4E1E;
-	--oo-radar-green: #3D5240;
-
-	--oo-scrollbar-thumb: #BEB7AB;
-	--oo-scrollbar-hover: #B5AFA5;
-
-	/* -- Shadows (light, spec 7.6) -- */
-	--oo-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
-	--oo-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.08);
-	--oo-shadow-md: 0 4px 8px rgba(0, 0, 0, 0.10);
-	--oo-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.14);
-	--oo-shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.06);
-
+/* ------------------------------------------------------------------ */
+/*  Names that carry no colour: the same in every palette              */
+/* ------------------------------------------------------------------ */
+:root {
 	--oo-transition-fast: var(--oo-motion-fast) var(--oo-ease-default);
 	--oo-transition-normal: var(--oo-motion-normal) var(--oo-ease-default);
 	--oo-transition-slow: var(--oo-motion-slow) var(--oo-ease-default);
-
-	/* -- Reply renderer (provisional: re-derived when the palettes become roles) -- */
-	--oo-bg-code: var(--oo-bg-subtle);
-	--oo-code-keyword: var(--oo-info);
-	--oo-code-name: var(--oo-success);
-	--oo-font-serif: 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
+	--oo-motion-default: var(--oo-motion-normal);
+	--oo-font-size-xs: var(--oo-text-xs);
+	--oo-font-size-sm: var(--oo-text-sm);
+	--oo-font-size-lg: var(--oo-text-lg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -342,57 +262,4 @@ html.dark .oo-logo-adaptive,
 }
 html:not(.dark) .oo-logo-adaptive {
 	filter: none;
-}
-
-/* ------------------------------------------------------------------ */
-/*  LEGACY ALIAS LAYER -- resolves the 30 undeclared-but-used          */
-/*  variables from spec 4.2. Transitional; removed later.              */
-/* ------------------------------------------------------------------ */
-:root {
-	/* Radius re-declared for orchestrator self-sufficiency; canonical
-	   source is tokens.css (spec 7.5). Values kept identical. */
-	--oo-radius-none: 0;
-	--oo-radius-sm: 4px;
-	--oo-radius-md: 8px;
-	--oo-radius-lg: 12px;
-	--oo-radius-xl: 16px;
-	--oo-radius-full: 9999px;
-
-	--oo-text-primary: var(--oo-fg-primary);
-	--oo-text-secondary: var(--oo-fg-secondary);
-	--oo-text-tertiary: var(--oo-fg-tertiary);
-	--oo-text-on-accent: var(--oo-fg-on-accent);
-	--oo-fg-error: var(--oo-error);
-	--oo-fg-warning: var(--oo-warning);
-	--oo-fg-success: var(--oo-success);
-	--oo-border: var(--oo-bd-default);
-	--oo-border-default: var(--oo-bd-default);
-	--oo-border-subtle: var(--oo-bd-subtle);
-	--oo-border-hover: var(--oo-bd-strong);
-	--oo-bd-soft: var(--oo-bd-subtle);
-	--oo-surface: var(--oo-bg-surface);
-	--oo-surface-hover: var(--oo-bg-hover);
-	--oo-card-bg: var(--oo-bg-surface);
-	--oo-overlay-bg: var(--oo-bg-overlay);
-	--oo-bg: var(--oo-bg-base);
-	--oo-bg-default: var(--oo-bg-base);
-	--oo-bg-sunken: var(--oo-bg-subtle);
-	--oo-bg-error: var(--oo-error-bg);
-	--oo-bg-warning: var(--oo-warning-bg);
-	--oo-bg-success: var(--oo-success-bg);
-	--oo-danger: var(--oo-error);
-	--oo-danger-bg: var(--oo-error-bg);
-	--oo-danger-bd: var(--oo-error-bd);
-	--oo-accent: var(--oo-acc-500);
-	--oo-accent-secondary: var(--oo-acc-400);
-	--oo-accent-bg: var(--oo-acc-100);
-	--oo-qr-bg: #FFFFFF;
-
-	/* Names components read that nothing declared: each resolves to the
-	   token it meant. */
-	--oo-fg-danger: var(--oo-error);
-	--oo-motion-default: var(--oo-motion-normal);
-	--oo-font-size-xs: var(--oo-text-xs);
-	--oo-font-size-sm: var(--oo-text-sm);
-	--oo-font-size-lg: var(--oo-text-lg);
 }

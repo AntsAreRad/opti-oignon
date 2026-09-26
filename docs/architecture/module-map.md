@@ -139,4 +139,4 @@ styling uses `--oo-*` CSS variables (no hardcoded hex colors).
 
 Key components (~137 total) include the chat interface, settings
 panels, benchmark dashboard, plugin marketplace, RAG management,
-red team dashboard, and theme engine.
+red team dashboard, and the appearance settings.

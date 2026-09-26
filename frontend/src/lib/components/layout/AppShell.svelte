@@ -136,7 +136,7 @@
 	<!-- Overlay mobile (panel) -->
 	{#if $isPanelOpen && isMobile}
 		<button
-			class="fixed inset-0 bg-black/50 z-40 md:hidden"
+			class="fixed inset-0 bg-[var(--oo-scrim)] z-40 md:hidden"
 			on:click={closePanel}
 			aria-label="Close panel"
 		/>

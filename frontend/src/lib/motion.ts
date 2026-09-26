@@ -1,9 +1,9 @@
 /**
  * The scroll behaviour the motion preference allows.
  *
- * The motion preference (stores/preferences.ts) marks the root element with
- * one of two classes: a choice to reduce motion, or a choice of full motion
- * whatever the system says. With neither, the system's reduced-motion
+ * The theme path (lib/theme/apply.ts) marks the root element with one of
+ * two classes, from the motion preference: a choice to reduce motion, or a
+ * choice of full motion whatever the system says. With neither, the system's reduced-motion
  * setting decides. Scrolling is smooth only when nothing reduces motion,
  * and it is not smooth when the environment cannot be read (no document).
  *

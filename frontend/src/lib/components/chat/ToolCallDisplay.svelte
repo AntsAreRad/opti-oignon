@@ -136,7 +136,7 @@
 					<!-- Running status -->
 					{#if call.status === 'executing'}
 						<span class="text-surface-500 flex items-center gap-1">
-							<span class="inline-block w-1 h-3 bg-accent-500/50 animate-pulse" />
+							<span class="inline-block w-1 h-3 bg-[var(--oo-acc-mark)] animate-pulse" />
 							running
 						</span>
 					{/if}

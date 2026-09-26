@@ -8,7 +8,7 @@
 
 	export let branchId: string | null = null;
 	export let name: string = 'Main';
-	export let color: string = 'var(--oo-accent)';
+	export let color: string = 'var(--oo-acc-mark)';
 	export let messageCount: number = 0;
 	export let lastActivity: string = '';
 	export let forkMessageId: number | null = null;
@@ -167,7 +167,7 @@
 	}
 
 	.tree-node-row:focus-visible {
-		outline: 2px solid var(--oo-accent);
+		outline: 2px solid var(--oo-focus-ink);
 		outline-offset: -2px;
 	}
 

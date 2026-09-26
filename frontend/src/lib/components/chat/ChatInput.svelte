@@ -275,13 +275,13 @@
 						style="border: 1px solid var(--oo-bd-default);"
 					/>
 					<span class="absolute bottom-0 left-0 right-0 text-center text-[9px]
-						bg-black/60 text-surface-300 rounded-b-xl py-0.5 truncate px-0.5">
+						bg-surface-800/80 text-surface-200 rounded-b-xl py-0.5 truncate px-0.5">
 						{formatSize(img.size_bytes)}
 					</span>
 					<button
 						on:click|stopPropagation={() => removeImage(i)}
 						class="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center
-							rounded-full bg-[var(--oo-error)]/80 text-[var(--oo-fg-on-semantic)] text-xs
+							rounded-full bg-[var(--oo-error)] text-[var(--oo-fg-on-semantic)] text-xs
 							opacity-0 group-hover:opacity-100 transition-opacity"
 						title="Remove image"
 					>
@@ -336,7 +336,7 @@
 				style="background-color: var(--oo-input-bg); color: var(--oo-fg-primary);
 					padding: 0.625rem 1rem; border: 1px solid var(--oo-input-bd);
 					line-height: {LINE_HEIGHT}px; max-height: {MAX_ROWS * LINE_HEIGHT}px;
-					font-family: var(--oo-font-sans); font-size: 16px;"
+					font-family: var(--oo-font-sans); font-size: max(16px, var(--oo-text-md));"
 			/>
 		</div>
 

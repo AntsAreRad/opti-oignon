@@ -241,7 +241,7 @@
 			<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
 				{#each ['off', 'tor', 'custom'] as mode}
 					<button
-						style="padding: 0.4rem 0.75rem; border-radius: var(--oo-radius-md); border: 1px solid {localMode === mode ? 'var(--oo-accent-primary)' : 'var(--oo-bd-default)'}; background: {localMode === mode ? 'var(--oo-accent-primary)' : 'var(--oo-bg-tertiary)'}; color: {localMode === mode ? 'var(--oo-bg-surface)' : 'var(--oo-fg-secondary)'}; cursor: pointer; font-size: 0.8rem; font-weight: 500;"
+						style="padding: 0.4rem 0.75rem; border-radius: var(--oo-radius-md); border: 1px solid {localMode === mode ? 'var(--oo-acc-fill)' : 'var(--oo-bd-default)'}; background: {localMode === mode ? 'var(--oo-acc-fill)' : 'var(--oo-bg-tertiary)'}; color: {localMode === mode ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-secondary)'}; cursor: pointer; font-size: 0.8rem; font-weight: 500;"
 						on:click={() => localMode = mode}
 					>
 						{modeLabel(mode)}
@@ -296,7 +296,7 @@
 		<!-- Save + Check buttons -->
 		<div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
 			<button
-				style="padding: 0.4rem 0.9rem; border-radius: var(--oo-radius-md); background: var(--oo-accent-primary); color: var(--oo-bg-surface); border: none; cursor: pointer; font-size: 0.8rem; font-weight: 500; opacity: {saving ? 0.6 : 1};"
+				style="padding: 0.4rem 0.9rem; border-radius: var(--oo-radius-md); background: var(--oo-acc-fill); color: var(--oo-fg-on-accent); border: none; cursor: pointer; font-size: 0.8rem; font-weight: 500; opacity: {saving ? 0.6 : 1};"
 				on:click={saveConfig}
 				disabled={saving}
 			>

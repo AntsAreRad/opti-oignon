@@ -26,7 +26,9 @@
 <style>
 	.oo-card {
 		background-color: var(--oo-bg-surface);
-		border: 1px solid var(--oo-bd-default);
+		/* Separated from its ground by tone; the edge shows only where tone
+		   cannot carry the boundary (high contrast, forced colours). */
+		border: 1px solid var(--oo-edge);
 		border-radius: var(--oo-radius-lg);
 		color: var(--oo-fg-primary);
 	}

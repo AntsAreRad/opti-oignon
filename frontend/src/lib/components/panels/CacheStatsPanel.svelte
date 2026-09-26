@@ -175,7 +175,7 @@
 	// is unknown (dimmed, the knob in the middle), never drawn as off.
 	function trackStyle(value: boolean | null): string {
 		if (value === null) return 'background-color: var(--oo-bg-tertiary); opacity: 0.5;';
-		return value ? 'background-color: var(--oo-acc-500);' : 'background-color: var(--oo-bg-tertiary);';
+		return value ? 'background-color: var(--oo-switch-on);' : 'background-color: var(--oo-switch-off);';
 	}
 
 	function knobStyle(value: boolean | null): string {
@@ -272,10 +272,10 @@
 				<!-- Hit rate bar -->
 				<div class="h-2 rounded-full overflow-hidden flex" style="background-color: var(--oo-bg-tertiary);">
 					{#if stats.exact_hit_rate > 0}
-						<div class="h-full" style="width: {stats.exact_hit_rate * 100}%; background-color: var(--oo-acc-500);"></div>
+						<div class="h-full" style="width: {stats.exact_hit_rate * 100}%; background-color: var(--oo-acc-mark);"></div>
 					{/if}
 					{#if stats.semantic_hit_rate > 0}
-						<div class="h-full" style="width: {stats.semantic_hit_rate * 100}%; background-color: var(--oo-acc-300);"></div>
+						<div class="h-full" style="width: {stats.semantic_hit_rate * 100}%; background-color: var(--oo-acc-mark-2);"></div>
 					{/if}
 				</div>
 			</div>
@@ -296,7 +296,7 @@
 					</div>
 					<!-- Entry count bar -->
 					<div class="h-1.5 rounded-full mt-1" style="background-color: var(--oo-bg-tertiary);">
-						<div class="h-full rounded-full" style="width: {Math.min(100, (stats.total_entries / stats.max_entries) * 100)}%; background-color: var(--oo-acc-500);"></div>
+						<div class="h-full rounded-full" style="width: {Math.min(100, (stats.total_entries / stats.max_entries) * 100)}%; background-color: var(--oo-acc-mark);"></div>
 					</div>
 				</div>
 			</div>

@@ -245,7 +245,7 @@
 				</div>
 			</div>
 			<div>
-				<span class="text-lg font-bold" style="color: {isBulbe ? 'var(--oo-fg-error)' : 'var(--oo-sage)'};">
+				<span class="text-lg font-bold" style="color: {isBulbe ? 'var(--oo-fg-error)' : 'var(--oo-success)'};">
 					{isBulbe ? 'Bulbe' : 'Daily'}
 				</span>
 				<p class="text-xs mt-0.5" style="color: var(--oo-fg-muted);">
@@ -263,13 +263,13 @@
 			<div class="flex gap-3 text-xs mb-4" style="color: var(--oo-fg-muted);">
 				<span>
 					Sources:
-					<span style="color: {status.sources_agree ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};">
+					<span style="color: {status.sources_agree ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
 						{status.sources_agree ? 'aligned' : 'MISMATCH'}
 					</span>
 				</span>
 				<span>
 					HMAC:
-					<span style="color: {status.hmac_valid ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};">
+					<span style="color: {status.hmac_valid ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
 						{status.hmac_valid ? 'valid' : 'INVALID'}
 					</span>
 				</span>
@@ -289,7 +289,7 @@
 				{#if !isBulbe}
 					<button
 						class="px-4 py-2 rounded text-sm font-medium transition-colors"
-						style="background-color: var(--oo-fg-error); color: white;"
+						style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 						on:click={handleEscalate}
 						disabled={actionLoading}
 					>
@@ -388,7 +388,7 @@
 						<div class="flex gap-2">
 							<button
 								class="px-4 py-2 rounded text-sm font-medium"
-								style="background-color: var(--oo-fg-warning); color: white;"
+								style="background-color: var(--oo-fg-warning); color: var(--oo-fg-on-semantic);"
 								on:click={handleConfirmDowngrade}
 								disabled={actionLoading || !confirmCode || !confirmPassword}
 							>
@@ -527,7 +527,7 @@
 
 	.mode-core.bulbe {
 		background-color: var(--oo-fg-error);
-		color: white;
+		color: var(--oo-fg-on-semantic);
 		border-color: var(--oo-fg-error);
 	}
 

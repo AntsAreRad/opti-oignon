@@ -1,0 +1,39 @@
+/*
+ * theme-day.css -- the day palette: its roles and its colour scheme.
+ * A light, warm, matte set.
+ *
+ * Declared under [data-oo-theme="day"], so it applies to the root and to any
+ * subtree: a preview of this palette is an element carrying the attribute.
+ * Components never read a role; styles/theme.css derives every app token
+ * from these roles, once, for every palette.
+ */
+
+[data-oo-theme="day"] {
+	color-scheme: light;
+	--oo-role-bg: #F2EDE4;                      /* the page ground */
+	--oo-role-surface: #FAF7F1;                 /* cards, the composer, menus */
+	--oo-role-surface-2: #EAE3D7;               /* a raised or secondary surface */
+	--oo-role-sunken: #E5DDD0;                  /* a recessed ground (the user's message) */
+	--oo-role-tint-1: #D9E1CF;                  /* the accent tint */
+	--oo-role-tint-2: #ECD8D1;                  /* the warm tint (the componion's ground) */
+	--oo-role-tint-3: #D4DDE3;                  /* the cool tint */
+	--oo-role-text: #37312B;                    /* body text */
+	--oo-role-text-muted: #645A4F;              /* secondary text */
+	--oo-role-primary: #94A583;                 /* the accent fill */
+	--oo-role-on-primary: #1F2919;              /* text on the accent fill */
+	--oo-role-primary-ink: #4B5E43;             /* the accent as an ink (links, focus, the switch track) */
+	--oo-role-secondary-ink: #714C6E;           /* the second ink */
+	--oo-role-rule: #837869;                    /* a boundary that must be seen (fields, the switch track when off) */
+	--oo-role-rule-soft: #E2DACD;               /* a quiet boundary */
+	--oo-role-code-bg: #EEE8DE;                 /* the ground of code */
+	--oo-role-syn-keyword: #405E78;             /* code keywords; the info ink */
+	--oo-role-syn-name: #44603D;                /* code names */
+	--oo-role-stop-ink: #93463A;                /* stop and error */
+	--oo-role-status-ok: #678A5A;               /* a healthy status mark */
+	--oo-role-shadow-1: rgba(86, 70, 52, 0.07); /* the near shadow */
+	--oo-role-shadow-2: rgba(86, 70, 52, 0.12); /* the far shadow */
+	--oo-role-warn-ink: #77591D;                /* warning text */
+	--oo-role-warn-tone: #B08A3E;               /* the warning wash (washes only, never text) */
+	--oo-role-success-ink: #4F5E42;             /* success text */
+	--oo-role-edge: transparent;                /* the border of tone-only containers */
+}

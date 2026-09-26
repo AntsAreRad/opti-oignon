@@ -107,7 +107,7 @@
 						<span class="text-xs font-mono px-2 py-0.5 rounded" style="background-color: var(--oo-bg-subtle); color: var(--oo-fg-primary);">
 							{req.tool_name}
 						</span>
-						<span class="text-xs px-1.5 py-0.5 rounded font-medium capitalize" style="background-color: {riskColor(req.risk_level)}; color: var(--oo-fg-on-accent);">
+						<span class="text-xs px-1.5 py-0.5 rounded font-medium capitalize" style="background-color: {riskColor(req.risk_level)}; color: var(--oo-fg-on-semantic);">
 							{req.risk_level}
 						</span>
 						{#if req.timeout_remaining > 0}
@@ -149,7 +149,7 @@
 		border-radius: var(--oo-radius-full);
 		font-size: var(--oo-text-xs);
 		font-weight: 500;
-		color: var(--oo-fg-on-accent);
+		color: var(--oo-fg-on-semantic);
 		background-color: var(--oo-warning);
 		border: none;
 		cursor: pointer;
@@ -159,7 +159,7 @@
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: var(--oo-radius-full);
-		background-color: var(--oo-fg-on-accent);
+		background-color: var(--oo-fg-on-semantic);
 		animation: oo-approval-pulse 1.4s ease-in-out infinite;
 	}
 	@keyframes oo-approval-pulse {

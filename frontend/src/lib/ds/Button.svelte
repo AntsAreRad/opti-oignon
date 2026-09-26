@@ -143,13 +143,14 @@
 
 	/* Variants */
 	.oo-btn[data-variant='primary'] {
-		background-color: var(--oo-acc-500);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-acc-500);
+		border-color: var(--oo-acc-fill);
 	}
 	.oo-btn[data-variant='primary']:hover:not(:disabled):not([aria-disabled='true']) {
-		background-color: var(--oo-acc-600);
-		border-color: var(--oo-acc-600);
+		background-color: var(--oo-acc-fill-hover);
+		color: var(--oo-fg-on-accent);
+		border-color: var(--oo-acc-fill-hover);
 	}
 
 	.oo-btn[data-variant='secondary'] {
@@ -174,7 +175,7 @@
 
 	.oo-btn[data-variant='danger'] {
 		background-color: var(--oo-error);
-		color: var(--oo-fg-on-accent);
+		color: var(--oo-fg-on-semantic);
 		border-color: var(--oo-error);
 	}
 	.oo-btn[data-variant='danger']:hover:not(:disabled):not([aria-disabled='true']) {

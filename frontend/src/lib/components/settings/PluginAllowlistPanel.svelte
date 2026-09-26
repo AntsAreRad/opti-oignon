@@ -194,7 +194,7 @@
       </h3>
       <span
         class="text-xs px-2 py-1 rounded font-medium"
-        style="background-color: {bulbeMode ? 'var(--oo-fg-error)' : 'var(--oo-sage)'}; color: white;"
+        style="background-color: {bulbeMode ? 'var(--oo-fg-error)' : 'var(--oo-success)'}; color: var(--oo-fg-on-semantic);"
       >
         {bulbeMode ? 'ENFORCED' : 'INACTIVE'}
       </span>
@@ -272,7 +272,7 @@
                         <div class="flex justify-end gap-1">
                           <button
                             class="px-2 py-0.5 rounded text-xs"
-                            style="background-color: var(--oo-fg-error); color: white;"
+                            style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
                             on:click={() => handleRevokePlugin(entry.plugin_id)}
                             disabled={revokeLoading}
                           >
@@ -327,7 +327,7 @@
                 <div class="flex gap-1">
                   <button
                     class="px-2 py-0.5 rounded text-xs"
-                    style="background-color: var(--oo-fg-error); color: white;"
+                    style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
                     on:click={() => handleRevokeBatch(bId)}
                     disabled={revokeLoading}
                   >
@@ -396,7 +396,7 @@
                   {#each plugin.permissions as perm}
                     <span
                       class="text-xs px-1.5 py-0.5 rounded"
-                      style="background-color: var(--oo-fg-warning); color: white;"
+                      style="background-color: var(--oo-fg-warning); color: var(--oo-fg-on-semantic);"
                     >
                       {perm}
                     </span>
@@ -442,7 +442,7 @@
         <div class="flex gap-2">
           <button
             class="px-4 py-2 rounded text-sm font-medium"
-            style="background-color: var(--oo-fg-warning); color: white;"
+            style="background-color: var(--oo-fg-warning); color: var(--oo-fg-on-semantic);"
             on:click={handleApproveBatch}
             disabled={actionLoading || !approvePassword}
           >

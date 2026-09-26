@@ -156,7 +156,7 @@
 	<!-- Drop zone / upload area -->
 	<div
 		class="relative rounded-lg border-2 border-dashed transition-colors text-center py-6 px-4"
-		style="border-color: {dragging ? 'var(--oo-acc-500)' : 'var(--oo-bd-subtle)'};
+		style="border-color: {dragging ? 'var(--oo-acc-ink)' : 'var(--oo-bd-subtle)'};
 			background-color: {dragging ? 'var(--oo-warning-bg)' : 'transparent'};"
 		on:dragenter={handleDragEnter}
 		on:dragover={handleDragOver}
@@ -172,7 +172,7 @@
 				<span class="text-xs" style="color: var(--oo-fg-muted);">{uploadProgress}</span>
 			</div>
 		{:else}
-			<svg class="w-8 h-8 mx-auto mb-2" style="color: {dragging ? 'var(--oo-acc-400)' : 'var(--oo-fg-faint)'};"
+			<svg class="w-8 h-8 mx-auto mb-2" style="color: {dragging ? 'var(--oo-acc-ink)' : 'var(--oo-fg-faint)'};"
 				fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 				<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
 			</svg>

@@ -58,8 +58,8 @@
 
 	function scoreColor(score: number): string {
 		if (score >= 8) return 'var(--oo-success)';
-		if (score >= 5) return 'var(--oo-acc-400)';
-		if (score >= 3) return 'var(--oo-acc-600)';
+		if (score >= 5) return 'var(--oo-acc-ink)';
+		if (score >= 3) return 'var(--oo-warning)';
 		return 'var(--oo-error)';
 	}
 

@@ -99,7 +99,7 @@
 		padding: var(--oo-space-2) var(--oo-space-3);
 		background-color: var(--oo-bg-overlay);
 		color: var(--oo-fg-primary);
-		border: 1px solid var(--oo-bd-default);
+		border: 1px solid var(--oo-edge);
 		border-radius: var(--oo-radius-sm);
 		box-shadow: var(--oo-shadow-md);
 		font-size: var(--oo-text-xs);

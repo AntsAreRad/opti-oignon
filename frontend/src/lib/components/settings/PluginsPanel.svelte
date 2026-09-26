@@ -346,13 +346,13 @@
 								on:click|stopPropagation={() => handleToggle(plugin)}
 								class="relative w-10 h-5 rounded-full transition-colors"
 								style="background-color: {plugin.state === 'enabled'
-									? 'var(--oo-acc-600)'
-									: 'var(--oo-bg-overlay)'};"
+									? 'var(--oo-switch-on)'
+									: 'var(--oo-switch-off)'};"
 								title="{plugin.state === 'enabled' ? 'Disable' : 'Enable'} plugin"
 							>
 								<span
 									class="absolute top-0.5 w-4 h-4 rounded-full transition-transform"
-									style="background-color: var(--oo-fg-on-accent);
+									style="background-color: var(--oo-toggle-knob);
 										transform: translateX({plugin.state === 'enabled' ? '22px' : '2px'});"
 								></span>
 							</button>

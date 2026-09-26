@@ -1,44 +1,22 @@
 <!--
   /dev/components -- design-system primitive gallery (spec 10.12).
   Development-only (import.meta.env.DEV). Lets us verify the 10
-  primitives across the 5 themes and 3 densities. Not a user route.
+  primitives across the three palettes and three densities. Not a user
+  route. The gallery is a preview: its root carries the palette attribute
+  and the density class, and the page's own root is left as the theme path
+  set it.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { Button, Input, Card, Modal, Select, Switch, Tabs, Tooltip, Icon } from '$lib/ds';
 	import Toast from '$lib/ds/Toast.svelte';
 	import { addToast } from '$lib/stores/notifications';
 	import type { SelectOption, TabItem } from '$lib/ds';
+	import { CHOICE_LABELS, DENSITIES, PALETTES, type Density, type Palette } from '$lib/theme/apply';
 
 	const isDev = import.meta.env.DEV;
 
-	const themes = [
-		{ id: 'anthracite', label: 'Anthracite' },
-		{ id: 'parchment', label: 'Parchment' },
-		{ id: 'slate', label: 'Slate' },
-		{ id: 'linen', label: 'Linen' },
-		{ id: 'high-contrast', label: 'High Contrast' }
-	];
-	const densities = ['compact', 'comfortable', 'spacious'] as const;
-
-	let theme = 'anthracite';
-	let density: (typeof densities)[number] = 'comfortable';
-
-	function applyTheme(t: string) {
-		theme = t;
-		document.documentElement.setAttribute('data-oo-theme', t);
-	}
-	function applyDensity(d: (typeof densities)[number]) {
-		density = d;
-		const el = document.documentElement;
-		densities.forEach((x) => el.classList.remove(`oo-density-${x}`));
-		el.classList.add(`oo-density-${d}`);
-	}
-
-	onMount(() => {
-		applyTheme(theme);
-		applyDensity(density);
-	});
+	let theme: Palette = 'night';
+	let density: Density = 'comfortable';
 
 	// Demo state
 	let modalOpen = false;
@@ -68,22 +46,22 @@
 </script>
 
 {#if isDev}
-	<div class="dev-root">
+	<div class="dev-root oo-density-{density}" data-oo-theme={theme}>
 		<Toast />
 
 		<header class="dev-header">
 			<h1>Design System — Primitives</h1>
 			<div class="dev-controls">
 				<div class="dev-seg" role="group" aria-label="Theme">
-					{#each themes as t}
-						<button class="dev-chip" class:active={theme === t.id} on:click={() => applyTheme(t.id)}>
-							{t.label}
+					{#each PALETTES as t}
+						<button class="dev-chip" class:active={theme === t} on:click={() => (theme = t)}>
+							{CHOICE_LABELS[t]}
 						</button>
 					{/each}
 				</div>
 				<div class="dev-seg" role="group" aria-label="Density">
-					{#each densities as d}
-						<button class="dev-chip" class:active={density === d} on:click={() => applyDensity(d)}>
+					{#each DENSITIES as d}
+						<button class="dev-chip" class:active={density === d} on:click={() => (density = d)}>
 							{d}
 						</button>
 					{/each}
@@ -240,7 +218,7 @@
 		color: var(--oo-fg-primary);
 	}
 	.dev-chip.active {
-		background-color: var(--oo-acc-500);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 	}
 	.dev-grid {

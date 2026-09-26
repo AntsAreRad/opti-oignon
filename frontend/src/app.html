@@ -1,20 +1,81 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-oo-theme="night" class="dark">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="theme-color" content="#1F1A17" />
 		<title>Opti-Oignon</title>
 		<link rel="icon" type="image/x-icon" href="/favicon.ico" />
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
 		<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
 		<script>
-			// Apply theme immediately to prevent flash of wrong theme
-			(function() {
-				var stored = localStorage.getItem('oo-theme');
-				var isDark = stored === 'light' ? false
-					: stored === 'dark' ? true
-					: !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
-				if (isDark) document.documentElement.classList.add('dark');
+			// The theme path before the first paint, so no page shows a
+			// palette it will not keep. It makes the decisions of
+			// lib/theme/apply.ts from the same keys, and a contract runs both
+			// over every stored value and system setting and requires the
+			// same root. When it cannot run, the static night palette on
+			// <html> stands and the tokens still exist.
+			(function () {
+				try {
+					// Each palette's ground, for the browser's theme-color.
+					var colours = { day: '#F2EDE4', night: '#1F1A17', 'high-contrast': '#0B0A09' };
+					var choices = ['system', 'day', 'night', 'high-contrast'];
+					var retired = { anthracite: 'night', slate: 'night', parchment: 'day', linen: 'day' };
+					var densities = ['compact', 'comfortable', 'spacious'];
+					var sizes = { small: '92%', 'default': '100%', large: '109%', 'x-large': '118%' };
+					var own = Object.prototype.hasOwnProperty;
+					var store = null;
+					try {
+						store = window.localStorage;
+					} catch (e) {
+						store = null;
+					}
+					var read = function (key) {
+						try {
+							return store ? store.getItem(key) : null;
+						} catch (e) {
+							return null;
+						}
+					};
+					var asks = function (query) {
+						try {
+							return !!(typeof window.matchMedia === 'function' && window.matchMedia(query).matches);
+						} catch (e) {
+							return false;
+						}
+					};
+					var light = asks('(prefers-color-scheme: light)');
+					var palette = read('oo-palette');
+					var theme = read('oo-theme');
+					var choice = 'system';
+					if (choices.indexOf(palette) >= 0) choice = palette;
+					else if (palette !== null && own.call(retired, palette)) choice = retired[palette];
+					else if (theme === 'light' || theme === 'dark') {
+						choice = theme === (light ? 'light' : 'dark') ? 'system' : theme === 'light' ? 'day' : 'night';
+					}
+					var shown = choice;
+					if (choice === 'system') {
+						shown = asks('(prefers-contrast: more)') ? 'high-contrast' : light ? 'day' : 'night';
+					}
+					var density = read('oo-density');
+					if (densities.indexOf(density) < 0) density = 'comfortable';
+					var size = read('oo-type-scale');
+					var motion = read('oo-motion');
+
+					var root = document.documentElement;
+					root.setAttribute('data-oo-theme', shown);
+					root.classList.toggle('dark', shown !== 'day');
+					for (var i = 0; i < densities.length; i++) root.classList.remove('oo-density-' + densities[i]);
+					root.classList.add('oo-density-' + density);
+					root.style.setProperty('font-size', size !== null && own.call(sizes, size) ? sizes[size] : '100%');
+					root.classList.toggle('oo-reduce-motion', motion === 'reduced');
+					root.classList.toggle('oo-motion-full', motion === 'full');
+					root.setAttribute('data-oo-componion', read('oo-componion') === 'off' ? 'off' : 'on');
+					var meta = document.querySelector('meta[name="theme-color"]');
+					if (meta) meta.setAttribute('content', colours[shown]);
+				} catch (e) {
+					// The static night palette stands.
+				}
 			})();
 		</script>
 		%sveltekit.head%

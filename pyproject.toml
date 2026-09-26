@@ -483,6 +483,19 @@ fail_under = 0
 # reaches it through the API layer and spells no path of its own, the list
 # computed rather than named, so the switch can move without a data edit.
 #
+# The wiring half of ux11 (tests/test_ui_repairs_contracts.py) ended on an
+# assertion that the preferences store sets the two motion classes the
+# scroll behaviour reads. The store no longer writes the root element: the
+# theme path (lib/theme/apply.ts) and the pre-render in app.html alone set
+# the palette, the dark class, the density, the root font size, the motion
+# classes and the componion switch, so that literal is gone while the
+# property holds. ds20 in tests/test_design_tokens_contracts.py keeps every
+# other assertion of that half -- no literal smooth scrolling outside
+# lib/motion.ts, every scroll option taken from scrollBehavior() and
+# imported from lib/motion -- and pins the property where it now lives: the
+# classes the theme path sets for each motion choice, run under Node, are
+# exactly the ones motion.ts reads. The node half of ux11 stays selected.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -559,4 +572,5 @@ addopts = """
     --deselect=tests/test_allium_equivalence_contracts.py::test_ae1_both_engines_answer_every_genome_request_with_the_same_bytes
     --deselect=tests/test_allium_equivalence_contracts.py::test_ae2_both_engines_answer_the_whole_decoder_corpus_with_the_same_bytes
     --deselect=tests/test_cache_surface_contracts.py::test_cs4_the_frontend_cache_client_speaks_the_published_prefix
+    --deselect=tests/test_ui_repairs_contracts.py::test_ux11_scrolling_is_smooth_only_where_motion_is_allowed[wiring]
 """

@@ -25,7 +25,7 @@
 		direct: 'var(--oo-pipe-direct)',
 		tools: 'var(--oo-pipe-tools)',
 		think: 'var(--oo-pipe-think)',
-		think_tools: 'var(--oo-acc-300)',
+		think_tools: 'var(--oo-pipe-think)',
 		web_search: 'var(--oo-pipe-search)',
 		code_verify: 'var(--oo-pipe-code)',
 		reasoning: 'var(--oo-pipe-reason)',
@@ -170,7 +170,7 @@
 				<!-- Step number + color indicator -->
 				<span
 					class="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-mono shrink-0"
-					style="background-color: {getStepColor(step.step_type)}20; color: {getStepColor(step.step_type)};"
+					style="background-color: color-mix(in srgb, {getStepColor(step.step_type)} 12%, transparent); color: {getStepColor(step.step_type)};"
 				>
 					{i + 1}
 				</span>

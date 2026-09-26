@@ -131,7 +131,7 @@
 		font-family: var(--oo-font-sans);
 		color: var(--oo-fg-primary);
 		background-color: var(--oo-bg-input);
-		border: 1px solid var(--oo-bd-default);
+		border: 1px solid var(--oo-input-bd);
 		border-radius: var(--oo-radius-md);
 		transition:
 			border-color var(--oo-motion-fast) var(--oo-ease-default),

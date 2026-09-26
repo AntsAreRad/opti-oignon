@@ -414,9 +414,9 @@
 	.btn-zoom:hover { background: var(--oo-bg-overlay); }
 	.btn-zoom:disabled { opacity: 0.4; cursor: not-allowed; }
 	.btn-zoom.active {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	/* Legend */

@@ -435,7 +435,7 @@
 							{#if confirmDeleteId === preset.id}
 								<button
 									on:click={() => handleDelete(preset.id)}
-									class="px-2 py-1 rounded bg-[var(--oo-error-bg)] hover:bg-[var(--oo-error)] text-[var(--oo-error)] text-xs"
+									class="px-2 py-1 rounded bg-[var(--oo-error-bg)] hover:bg-[var(--oo-error)] text-[var(--oo-error)] hover:text-[var(--oo-fg-on-semantic)] text-xs"
 								>
 									Confirm
 								</button>

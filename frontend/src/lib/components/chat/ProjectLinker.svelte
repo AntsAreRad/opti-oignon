@@ -133,7 +133,7 @@
 								style="color: var(--oo-fg-primary);"
 							>
 								<svg class="w-3.5 h-3.5 shrink-0"
-									style="color: {proj.id === linkedProjectId ? 'var(--oo-acc-400)' : 'var(--oo-fg-faint)'};"
+									style="color: {proj.id === linkedProjectId ? 'var(--oo-acc-ink)' : 'var(--oo-fg-faint)'};"
 									fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 									<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
 								</svg>

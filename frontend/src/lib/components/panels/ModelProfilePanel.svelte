@@ -226,7 +226,15 @@
 	function scoreColor(score: number): string {
 		if (score >= 0.8) return 'var(--oo-success)';
 		if (score >= 0.6) return 'var(--oo-warning)';
-		if (score >= 0.4) return 'var(--oo-acc-400)';
+		if (score >= 0.4) return 'var(--oo-acc-ink)';
+		return 'var(--oo-error)';
+	}
+
+	/** A score's bar: the colour of its text, the accent drawn as a mark. */
+	function scoreFill(score: number): string {
+		if (score >= 0.8) return 'var(--oo-success)';
+		if (score >= 0.6) return 'var(--oo-warning)';
+		if (score >= 0.4) return 'var(--oo-acc-mark)';
 		return 'var(--oo-error)';
 	}
 
@@ -282,7 +290,7 @@
 					<button
 						on:click={toggleEnabled}
 						class="relative w-9 h-5 rounded-full transition-colors"
-						style="background-color: {config?.enabled ? 'var(--oo-acc-500)' : 'var(--oo-bd-default)'};" aria-label="Toggle model profile"
+						style="background-color: {config?.enabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};" aria-label="Toggle model profile"
 					>
 						<span
 							class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform"
@@ -302,8 +310,8 @@
 							on:click={() => setSpeedPreference(pref)}
 							class="px-2 py-0.5 rounded text-xs transition-colors"
 							style="{config.speed_preference === pref
-								? 'background-color: var(--oo-acc-500); color: white;'
-								: 'background-color: var(--oo-bd-default); color: var(--oo-fg-tertiary);'}"
+								? 'background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);'
+								: 'background-color: var(--oo-bg-overlay); color: var(--oo-fg-secondary);'}"
 						>
 							{pref}
 						</button>
@@ -312,7 +320,7 @@
 						on:click={handleSaveConfig}
 						disabled={saving}
 						class="ml-auto px-2 py-0.5 rounded text-xs transition-colors"
-						style="background-color: var(--oo-bd-default); color: var(--oo-fg-tertiary);"
+						style="background-color: var(--oo-bg-overlay); color: var(--oo-fg-secondary);"
 					>
 						{saving ? 'Saving...' : 'Save config'}
 					</button>
@@ -382,7 +390,7 @@
 							? 'var(--oo-info-bg)'
 							: 'var(--oo-panel-bg)'};
 							border: 1px solid {selectedModel === profile.name
-							? 'var(--oo-acc-500)'
+							? 'var(--oo-acc-ink)'
 							: 'var(--oo-bd-default)'};"
 					>
 						<div class="flex items-center gap-2 mb-1">
@@ -409,7 +417,7 @@
 									<div class="flex items-center gap-1">
 										<span class="text-xs truncate max-w-16" style="color: var(--oo-fg-tertiary);">{task}</span>
 										<div class="w-12 h-1.5 rounded-full overflow-hidden" style="background-color: var(--oo-bd-default);">
-											<div class="h-full rounded-full" style="width: {scoreBarWidth(score)}; background-color: {scoreColor(score)};" />
+											<div class="h-full rounded-full" style="width: {scoreBarWidth(score)}; background-color: {scoreFill(score)};" />
 										</div>
 									</div>
 								{/each}
@@ -438,7 +446,7 @@
 							on:click={() => handleAutoDetect(selectedProfile.name)}
 							disabled={detecting === selectedProfile.name}
 							class="px-2 py-1 rounded text-xs"
-							style="background-color: var(--oo-bd-default); color: var(--oo-fg-tertiary);"
+							style="background-color: var(--oo-bg-overlay); color: var(--oo-fg-secondary);"
 						>
 							{detecting === selectedProfile.name ? 'Detecting...' : 'Auto-detect'}
 						</button>
@@ -452,7 +460,7 @@
 						<button
 							on:click={closeDetail}
 							class="px-2 py-1 rounded text-xs"
-							style="background-color: var(--oo-bd-default); color: var(--oo-fg-tertiary);"
+							style="background-color: var(--oo-bg-overlay); color: var(--oo-fg-secondary);"
 						>
 							Close
 						</button>
@@ -512,7 +520,7 @@
 									<div class="flex-1 h-3 rounded-full overflow-hidden"
 										style="background-color: var(--oo-bd-default);">
 										<div class="h-full rounded-full transition-all"
-											style="width: {scoreBarWidth(score)}; background-color: {scoreColor(score)};" />
+											style="width: {scoreBarWidth(score)}; background-color: {scoreFill(score)};" />
 									</div>
 									<input
 										type="range" min="0" max="1" step="0.05"

@@ -48,7 +48,7 @@
 	$: barColor =
 		usagePercent > 90 ? 'bg-[var(--oo-error)]' :
 		usagePercent > 70 ? 'bg-[var(--oo-warning)]' :
-		'bg-accent-500';
+		'bg-[var(--oo-acc-mark)]';
 
 	// Compact token formatting
 	function formatTokens(n: number): string {

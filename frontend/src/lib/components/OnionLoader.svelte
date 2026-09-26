@@ -3,12 +3,12 @@
   Animated onion loading indicator. The onion spins on its Y-axis with
   occasional bumps causing a subtle vertical bounce with squash-on-landing.
   Replaces dot-spinner in streaming, benchmark, and coding agent.
-  Default color changed to tobacco. Removed road line for cleaner look.
+  Default colour: the accent ink. Removed road line for cleaner look.
   CSS keyframes only, no JS animation loop.
 -->
 <script lang="ts">
 	export let size: number = 24;
-	export let color: string = 'var(--oo-tobacco)';
+	export let color: string = 'var(--oo-acc-ink)';
 	export let label: string = '';
 </script>
 

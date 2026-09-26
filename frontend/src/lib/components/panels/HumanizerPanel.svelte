@@ -155,7 +155,7 @@
 	// is unknown (dimmed, the knob in the middle), never drawn as off.
 	function trackStyle(value: boolean | null): string {
 		if (value === null) return 'background-color: var(--oo-bg-overlay); opacity: 0.5;';
-		return `background-color: ${value ? 'var(--oo-acc-500)' : 'var(--oo-bg-overlay)'};`;
+		return `background-color: ${value ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};`;
 	}
 
 	function knobStyle(value: boolean | null): string {

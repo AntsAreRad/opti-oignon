@@ -234,7 +234,7 @@
 					<button
 						on:click={() => { localEnabled = !localEnabled; }}
 						class="shrink-0 ml-4 w-11 h-6 rounded-full transition-colors relative"
-						style="background-color: {localEnabled ? 'var(--oo-success)' : 'var(--oo-bg-overlay)'};"
+						style="background-color: {localEnabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};"
 					>
 						<span
 							class="absolute top-0.5 w-5 h-5 rounded-full transition-all"

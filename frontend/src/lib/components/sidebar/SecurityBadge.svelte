@@ -33,7 +33,7 @@
 
 	function gradeColor(g: string): string {
 		if (g.startsWith('A')) return 'var(--oo-success)';
-		if (g.startsWith('B')) return 'var(--oo-accent)';
+		if (g.startsWith('B')) return 'var(--oo-acc-ink)';
 		if (g === 'C') return 'var(--oo-warning)';
 		return 'var(--oo-error)';
 	}

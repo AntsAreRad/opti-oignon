@@ -1,46 +1,40 @@
 /*
- * theme-high-contrast.css -- High Contrast preset (dark).
- * Generated for from the design-token contract (spec 7.3).
- * Declares the full 38-token foundation schema.
+ * theme-high-contrast.css -- the high-contrast palette: its roles and its colour scheme.
+ * A dark, warm set whose boundaries are drawn: shadows vanish on it, so
+ * tone-only containers carry the edge border.
+ *
+ * Declared under [data-oo-theme="high-contrast"], so it applies to the root and to any
+ * subtree: a preview of this palette is an element carrying the attribute.
+ * Components never read a role; styles/theme.css derives every app token
+ * from these roles, once, for every palette.
  */
 
-:root[data-oo-theme="high-contrast"] {
-	--oo-bg-base: #000000;
-	--oo-bg-surface: #0A0A0A;
-	--oo-bg-elevated: #141414;
-	--oo-bg-overlay: #1E1E1E;
-	--oo-bg-subtle: #000000;
-	--oo-bg-hover: #1A1A1A;
-	--oo-bg-active: #242424;
-	--oo-fg-primary: #FFFFFF;
-	--oo-fg-secondary: #D6D6D6;
-	--oo-fg-tertiary: #B8B8B8;
-	--oo-fg-muted: #A8A8A8;
-	--oo-fg-decorative: #6A6A6A;
-	--oo-fg-on-accent: #000000;
-	--oo-bd-subtle: #2A2A2A;
-	--oo-bd-default: #3A3A3A;
-	--oo-bd-strong: #6A6A6A;
-	--oo-acc-50: #FFF4E5;
-	--oo-acc-100: #FFEACB;
-	--oo-acc-200: #FFDDAC;
-	--oo-acc-300: #FFCE87;
-	--oo-acc-400: #FFBE63;
-	--oo-acc-500: #FFB347;
-	--oo-acc-600: #D6963C;
-	--oo-acc-700: #AD7A30;
-	--oo-acc-800: #855D25;
-	--oo-acc-900: #61441B;
-	--oo-success: #7CE07C;
-	--oo-success-bg: rgba(124, 224, 124, 0.16);
-	--oo-success-bd: rgba(124, 224, 124, 0.24);
-	--oo-warning: #FFD27A;
-	--oo-warning-bg: rgba(255, 210, 122, 0.16);
-	--oo-warning-bd: rgba(255, 210, 122, 0.24);
-	--oo-error: #FF8A7A;
-	--oo-error-bg: rgba(255, 138, 122, 0.16);
-	--oo-error-bd: rgba(255, 138, 122, 0.24);
-	--oo-info: #8FD0FF;
-	--oo-info-bg: rgba(143, 208, 255, 0.16);
-	--oo-info-bd: rgba(143, 208, 255, 0.24);
+[data-oo-theme="high-contrast"] {
+	color-scheme: dark;
+	--oo-role-bg: #0B0A09;                      /* the page ground */
+	--oo-role-surface: #151311;                 /* cards, the composer, menus */
+	--oo-role-surface-2: #1D1A17;               /* a raised or secondary surface */
+	--oo-role-sunken: #000000;                  /* a recessed ground (the user's message) */
+	--oo-role-tint-1: #1B2616;                  /* the accent tint */
+	--oo-role-tint-2: #2A1B1D;                  /* the warm tint (the componion's ground) */
+	--oo-role-tint-3: #172128;                  /* the cool tint */
+	--oo-role-text: #FFFFFF;                    /* body text */
+	--oo-role-text-muted: #E3DCD2;              /* secondary text */
+	--oo-role-primary: #CFE6B4;                 /* the accent fill */
+	--oo-role-on-primary: #0B1206;              /* text on the accent fill */
+	--oo-role-primary-ink: #C2E3A2;             /* the accent as an ink (links, focus, the switch track) */
+	--oo-role-secondary-ink: #EACBF2;           /* the second ink */
+	--oo-role-rule: #B3A99D;                    /* a boundary that must be seen (fields, the switch track when off) */
+	--oo-role-rule-soft: #7A7167;               /* a quiet boundary */
+	--oo-role-code-bg: #17140F;                 /* the ground of code */
+	--oo-role-syn-keyword: #A9D5FF;             /* code keywords; the info ink */
+	--oo-role-syn-name: #C8EDA6;                /* code names */
+	--oo-role-stop-ink: #FFB4A6;                /* stop and error */
+	--oo-role-status-ok: #9EDC86;               /* a healthy status mark */
+	--oo-role-shadow-1: rgba(0, 0, 0, 0.60);    /* the near shadow */
+	--oo-role-shadow-2: rgba(0, 0, 0, 0.80);    /* the far shadow */
+	--oo-role-warn-ink: #F4D38A;                /* warning text */
+	--oo-role-warn-tone: #F4D38A;               /* the warning wash (washes only, never text) */
+	--oo-role-success-ink: #B9E6A3;             /* success text */
+	--oo-role-edge: #7A7167;                    /* the border of tone-only containers */
 }

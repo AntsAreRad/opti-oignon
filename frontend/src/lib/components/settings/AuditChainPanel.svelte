@@ -176,7 +176,7 @@
 				<div class="flex items-center gap-2">
 					{#if status?.chain_valid}
 						<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-							style="background-color: var(--oo-sage); color: var(--oo-bg-primary);">
+							style="background-color: var(--oo-success); color: var(--oo-fg-on-semantic);">
 							&#10003; Intact
 						</span>
 					{:else}
@@ -220,7 +220,7 @@
 		<div class="flex gap-2 flex-wrap">
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-				style="background-color: var(--oo-tobacco); color: var(--oo-bg-primary);"
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 				on:click={handleVerify}
 				disabled={verifying}
 			>
@@ -244,7 +244,7 @@
 		<!-- Verify Result -->
 		{#if verifyResult}
 			<div class="rounded-lg p-3 text-sm"
-				style="background-color: var(--oo-card-bg); border: 1px solid {verifyResult.chain_valid ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};">
+				style="background-color: var(--oo-card-bg); border: 1px solid {verifyResult.chain_valid ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
 				{#if verifyResult.chain_valid}
 					<span style="color: var(--oo-sage);">&#10003;</span>
 					Chain verified: {verifyResult.total_entries} entries, all hashes valid.

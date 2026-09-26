@@ -252,8 +252,8 @@
 						aria-label={localEnabled ? 'Disable learned router' : 'Enable learned router'}
 						class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40"
 						style="{localEnabled
-							? 'background-color: var(--oo-acc-500);'
-							: 'background-color: var(--oo-surface-600);'}"
+							? 'background-color: var(--oo-switch-on);'
+							: 'background-color: var(--oo-switch-off);'}"
 					>
 						<span
 							class="inline-block h-3.5 w-3.5 transform rounded-full bg-[var(--oo-toggle-knob)] shadow transition-transform"
@@ -303,7 +303,7 @@
 					<div class="h-1.5 rounded-full" style="background-color: var(--oo-surface-600);">
 						<div
 							class="h-1.5 rounded-full transition-all"
-							style="background-color: var(--oo-acc-500); width: {Math.min(100, (status.sample_count / status.min_training_samples) * 100)}%"
+							style="background-color: var(--oo-acc-mark); width: {Math.min(100, (status.sample_count / status.min_training_samples) * 100)}%"
 						/>
 					</div>
 					<p class="text-xs mt-1" style="color: var(--oo-fg-tertiary);">
@@ -383,7 +383,7 @@
 					on:click={handleTrain}
 					disabled={training || status.sample_count < status.min_training_samples}
 					class="px-4 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
-					style="background-color: var(--oo-acc-600); color: white;"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					title={status.sample_count < status.min_training_samples
 						? `Need ${status.min_training_samples - status.sample_count} more samples`
 						: 'Retrain classifier on all stored samples'}
@@ -447,7 +447,7 @@
 					on:click={handleClassify}
 					disabled={classifying || !testQuery.trim()}
 					class="px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50"
-					style="background-color: var(--oo-acc-600); color: white;"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 				>
 					{classifying ? '…' : 'Classify'}
 				</button>
@@ -577,7 +577,7 @@
 							<div class="h-2 rounded-full overflow-hidden" style="background-color: var(--oo-surface-600);">
 								<div
 									class="h-full rounded-full transition-all"
-									style="background-color: var(--oo-acc-500); width: {pct(metrics.learned_ratio)}"
+									style="background-color: var(--oo-acc-mark); width: {pct(metrics.learned_ratio)}"
 								/>
 							</div>
 						</div>

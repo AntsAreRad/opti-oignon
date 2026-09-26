@@ -10,8 +10,8 @@
 	import KeyboardShortcuts from '$lib/components/ui/KeyboardShortcuts.svelte';
 	import OnboardingOverlay from '$lib/components/ui/OnboardingOverlay.svelte';
 	import Toast from '$lib/ds/Toast.svelte';
-	import { darkMode, initTheme, toggleTheme, toggleSidebar } from '$lib/stores/ui';
-	import { initPreferences } from '$lib/stores/preferences';
+	import { initReducedMotion, toggleSidebar } from '$lib/stores/ui';
+	import { initPreferences, toggleDayNight } from '$lib/stores/preferences';
 	import { activeConversationId, activeConversation, createNewConversation } from '$lib/stores/conversations';
 	import { toastError } from '$lib/stores/notifications';
 	import { initAuth, authLoading, currentUser, isSingleUserMode } from '$lib/stores/auth';
@@ -19,17 +19,13 @@
 	/** Auth public routes that don't require login. */
 	const PUBLIC_ROUTES = ['/login', '/register'];
 
-	// Theme persistence: sync store with localStorage on mount
+	// The appearance choices were applied before the first paint; this
+	// applies them again with the stores and follows the system from now on.
 	onMount(() => {
-		initTheme();
-		initPreferences();
+		const stopFollowing = initPreferences();
+		initReducedMotion();
 		initAuth();
-
-		// Persist theme changes to localStorage
-		const unsub = darkMode.subscribe((v) => {
-			localStorage.setItem('oo-theme', v ? 'dark' : 'light');
-		});
-		return unsub;
+		return stopFollowing;
 	});
 
 	// Auth guard: redirect to /login if multi-user mode and not authenticated
@@ -104,7 +100,7 @@
 	onExportConversation={handleExportConversation}
 	onGoToSettings={handleGoToSettings}
 	onToggleSearch={handleToggleSearch}
-	onToggleTheme={toggleTheme}
+	onToggleTheme={toggleDayNight}
 	onToggleSidebar={toggleSidebar}
 />
 

@@ -199,7 +199,7 @@
 			<button
 				on:click={toggleAutoRefresh}
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-				style="background-color: {autoRefresh ? 'var(--oo-acc-500)' : 'var(--oo-btn-secondary-bg)'};
+				style="background-color: {autoRefresh ? 'var(--oo-acc-fill)' : 'var(--oo-btn-secondary-bg)'};
 					   color: {autoRefresh ? 'var(--oo-btn-primary-fg)' : 'var(--oo-btn-secondary-fg)'};"
 			>
 				Auto {autoRefresh ? 'ON' : 'OFF'}
@@ -281,8 +281,7 @@
 								<!-- p50 bar -->
 								<div class="h-3 rounded-sm"
 									style="width: {latencyBarWidth(stats.p50, maxLatency)};
-										   background-color: var(--oo-acc-400);
-										   opacity: 0.6;"
+										   background-color: var(--oo-acc-mark);"
 									title="p50: {formatMs(stats.p50)}" />
 								<!-- p95 extension -->
 								<div class="h-3 rounded-sm"
@@ -305,7 +304,7 @@
 				</div>
 				<div class="flex gap-4 mt-2 text-xs" style="color: var(--oo-fg-tertiary);">
 					<span class="flex items-center gap-1">
-						<span class="w-3 h-2 rounded-sm inline-block" style="background-color: var(--oo-acc-400); opacity: 0.6;" />
+						<span class="w-3 h-2 rounded-sm inline-block" style="background-color: var(--oo-acc-mark);" />
 						p50
 					</span>
 					<span class="flex items-center gap-1">
@@ -338,7 +337,7 @@
 								style="background-color: var(--oo-bg-surface);">
 								<div class="h-full rounded-full transition-all duration-300"
 									style="width: {utilizationWidth(fraction)};
-										   background-color: var(--oo-acc-500);" />
+										   background-color: var(--oo-acc-mark);" />
 							</div>
 							<span class="text-xs w-12 text-right shrink-0" style="color: var(--oo-fg-tertiary);">
 								{(fraction * 100).toFixed(0)}%
@@ -396,7 +395,7 @@
 								   border-left: 3px solid {severityColor(rec.severity)};">
 							<div class="flex items-center gap-2 mb-0.5">
 								<span class="text-xs font-medium px-1.5 py-0.5 rounded"
-									style="background-color: {severityColor(rec.severity)}20;
+									style="background-color: color-mix(in srgb, {severityColor(rec.severity)} 12%, transparent);
 										   color: {severityColor(rec.severity)};">
 									{rec.severity}
 								</span>

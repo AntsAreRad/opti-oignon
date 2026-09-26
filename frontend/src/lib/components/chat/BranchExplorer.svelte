@@ -269,7 +269,7 @@
 					>
 						<span
 							class="branch-dot"
-							style="background-color: var(--oo-accent);"
+							style="background-color: var(--oo-acc-mark);"
 						></span>
 						<span class="branch-name">Main</span>
 					</button>
@@ -506,7 +506,7 @@
 		height: 1.125rem;
 		padding: 0 0.25rem;
 		border-radius: 999px;
-		background: var(--oo-accent);
+		background: var(--oo-acc-fill);
 		color: var(--oo-text-on-accent);
 		font-size: 0.6875rem;
 		font-weight: 600;
@@ -584,8 +584,8 @@
 	.fork-btn {
 		padding: 0.3rem 0.75rem;
 		border-radius: 6px;
-		border: 1px solid var(--oo-accent);
-		background: var(--oo-accent);
+		border: 1px solid var(--oo-acc-fill);
+		background: var(--oo-acc-fill);
 		color: var(--oo-text-on-accent);
 		font-size: 0.8125rem;
 		font-weight: 500;

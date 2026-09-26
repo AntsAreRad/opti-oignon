@@ -100,13 +100,13 @@
 				<div class="space-y-2 text-xs" style="color: var(--oo-fg-secondary);">
 					<div class="flex justify-between">
 						<span>Auto-wipe on close</span>
-						<span style="color: {status.conversation_wipe.auto_wipe_on_close ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+						<span style="color: {status.conversation_wipe.auto_wipe_on_close ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 							{status.conversation_wipe.auto_wipe_on_close ? 'Enabled' : 'Disabled'}
 						</span>
 					</div>
 					<div class="flex justify-between">
 						<span>Bulbe per-turn wipe</span>
-						<span style="color: {status.conversation_wipe.bulbe_wipe_per_turn ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+						<span style="color: {status.conversation_wipe.bulbe_wipe_per_turn ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 							{status.conversation_wipe.bulbe_wipe_per_turn ? 'Enabled' : 'Disabled'}
 						</span>
 					</div>
@@ -120,7 +120,7 @@
 					</div>
 					<div class="flex justify-between">
 						<span>memset() available</span>
-						<span style="color: {status.conversation_wipe.memset_available ? 'var(--oo-sage)' : 'var(--oo-fg-warning)'};">
+						<span style="color: {status.conversation_wipe.memset_available ? 'var(--oo-success)' : 'var(--oo-fg-warning)'};">
 							{status.conversation_wipe.memset_available ? 'Yes' : 'No (best-effort only)'}
 						</span>
 					</div>
@@ -129,7 +129,7 @@
 				<div class="mt-3 flex items-center gap-2">
 					<button
 						class="px-3 py-1 rounded text-xs font-medium transition-colors"
-						style="background-color: var(--oo-fg-error); color: white;"
+						style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 						on:click={askWipeAll}
 						disabled={wiping}
 						aria-haspopup="dialog"
@@ -180,7 +180,7 @@
 					</div>
 					<div class="flex justify-between">
 						<span>Log sanitization</span>
-						<span style="color: {status.ollama_log.sanitization_enabled ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+						<span style="color: {status.ollama_log.sanitization_enabled ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 							{status.ollama_log.sanitization_enabled ? 'Enabled' : 'Disabled'}
 						</span>
 					</div>
@@ -229,7 +229,7 @@
 					{#if status.swap.swap_enabled}
 						<div class="flex justify-between">
 							<span>All devices encrypted</span>
-							<span style="color: {status.swap.encrypted ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};">
+							<span style="color: {status.swap.encrypted ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
 								{status.swap.encrypted ? 'Yes' : 'No'}
 							</span>
 						</div>
@@ -238,7 +238,7 @@
 								{#each status.swap.devices as dev}
 									<div class="flex justify-between">
 										<span class="font-mono">{dev.device}</span>
-										<span style="color: {dev.encrypted ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};">
+										<span style="color: {dev.encrypted ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
 											{dev.encrypted ? 'encrypted' : 'PLAIN'}
 										</span>
 									</div>
@@ -279,7 +279,7 @@
 									{status.network.dns.protocol}
 								</span>
 								{#if status.network.dns.encrypted}
-									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-sage);"></span>
+									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-status-ok);"></span>
 								{:else}
 									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-fg-warning);"></span>
 								{/if}
@@ -296,7 +296,7 @@
 									<span class="font-mono" style="color: var(--oo-fg-muted);">
 										{status.network.proxy.reachable ? 'Connected' : 'Unreachable'}
 									</span>
-									<span class="w-2 h-2 rounded-full" style="background-color: {status.network.proxy.reachable ? 'var(--oo-sage)' : 'var(--oo-fg-error)'};"></span>
+									<span class="w-2 h-2 rounded-full" style="background-color: {status.network.proxy.reachable ? 'var(--oo-status-ok)' : 'var(--oo-fg-error)'};"></span>
 								{:else}
 									<span style="color: var(--oo-fg-muted);">Not configured</span>
 									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-fg-muted);"></span>
@@ -314,7 +314,7 @@
 									{status.network.ports.total} total, {status.network.ports.unexpected} unexpected
 								</span>
 								{#if status.network.ports.unexpected === 0}
-									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-sage);"></span>
+									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-status-ok);"></span>
 								{:else}
 									<span class="w-2 h-2 rounded-full" style="background-color: var(--oo-fg-warning);"></span>
 								{/if}

@@ -1,47 +1,51 @@
 /**
- * Preferences store -- palette + density + status footer.
+ * Preferences store -- the appearance choices and the status footer.
  *
- * Source of truth for the 5 curated palettes (spec 7.3) and the 3
- * density modes (spec 7.2). Applies `data-oo-theme` and a single
- * `html.oo-density-*` class to the document root, and keeps the legacy
- * `.dark` class and the `darkMode` store in sync so every pre
- * consumer stays correct. Persisted to localStorage.
+ * The palette choice ("Match system", day, night or high contrast), the
+ * density, the text size and the motion choice are stored here when the
+ * user makes them, and nowhere else. What the root element carries is
+ * decided and written by the theme path, lib/theme/apply.ts: every change
+ * here resolves the stored choices again and applies the result, and the
+ * Svelte stores below follow what was applied. Under "Match system" the
+ * theme path also follows the system's colour scheme and contrast.
  *
- * The 5 theme files raise their `:root[data-oo-theme="..."]` selectors to
- * a higher specificity than the inline default-mode blocks in theme.css,
- * so setting `data-oo-theme` is authoritative for all five palettes.
+ * A choice the browser cannot store (blocked storage) still applies for the
+ * rest of the visit: it is kept in memory and read before storage.
  */
 
 import { writable, get } from 'svelte/store';
 import { darkMode, prefersReducedMotion } from './ui';
+import {
+	CHOICES,
+	CHOICE_LABELS,
+	DENSITIES,
+	TEXT_SIZES,
+	MOTIONS,
+	PALETTE_KEY,
+	DENSITY_KEY,
+	TEXT_SIZE_KEY,
+	MOTION_KEY,
+	applyTo,
+	browserEnvironment,
+	browserStorage,
+	followSystem,
+	resolve,
+	retireLegacyTheme,
+	type Choice,
+	type Density,
+	type Motion,
+	type Palette,
+	type Resolved,
+	type StorageReader,
+	type TextSize
+} from '$lib/theme/apply';
 
-export type ThemePalette = 'anthracite' | 'parchment' | 'slate' | 'linen' | 'high-contrast';
-export type Density = 'compact' | 'comfortable' | 'spacious';
-/** Global typography scale (multiplier on every --oo-text-* token). */
-export type TypeScale = 'small' | 'default' | 'large' | 'x-large';
-/** Motion preference: follow the OS, force reduced, or force full motion. */
-export type MotionPref = 'system' | 'reduced' | 'full';
-
-/** All selectable palettes, in display order. */
-export const PALETTES: ThemePalette[] = [
-	'anthracite',
-	'parchment',
-	'slate',
-	'linen',
-	'high-contrast'
-];
-
-/** Human-readable labels for the palettes. */
-export const PALETTE_LABELS: Record<ThemePalette, string> = {
-	anthracite: 'Anthracite',
-	parchment: 'Parchment',
-	slate: 'Slate',
-	linen: 'Linen',
-	'high-contrast': 'High Contrast'
-};
-
-/** All density modes, in display order. */
-export const DENSITIES: Density[] = ['compact', 'comfortable', 'spacious'];
+export { CHOICES, CHOICE_LABELS, DENSITIES };
+export type { Choice, Density, Palette };
+/** The text size: the root font size every rem follows. */
+export type TypeScale = TextSize;
+/** Motion preference: follow the system, force reduced, or force full motion. */
+export type MotionPref = Motion;
 
 /** Density labels. */
 export const DENSITY_LABELS: Record<Density, string> = {
@@ -50,10 +54,10 @@ export const DENSITY_LABELS: Record<Density, string> = {
 	spacious: 'Spacious'
 };
 
-/** All typography scales, in display order. */
-export const TYPE_SCALES: TypeScale[] = ['small', 'default', 'large', 'x-large'];
+/** All text sizes, in display order. */
+export const TYPE_SCALES: TypeScale[] = TEXT_SIZES;
 
-/** Typography scale labels. */
+/** Text size labels. */
 export const TYPE_SCALE_LABELS: Record<TypeScale, string> = {
 	small: 'Small',
 	default: 'Default',
@@ -61,16 +65,8 @@ export const TYPE_SCALE_LABELS: Record<TypeScale, string> = {
 	'x-large': 'Extra large'
 };
 
-/** Multiplier applied to every --oo-text-* token via --oo-type-scale. */
-export const TYPE_SCALE_VALUE: Record<TypeScale, number> = {
-	small: 0.92,
-	default: 1,
-	large: 1.09,
-	'x-large': 1.18
-};
-
 /** All motion preferences, in display order. */
-export const MOTION_PREFS: MotionPref[] = ['system', 'reduced', 'full'];
+export const MOTION_PREFS: MotionPref[] = MOTIONS;
 
 /** Motion preference labels. */
 export const MOTION_LABELS: Record<MotionPref, string> = {
@@ -79,189 +75,152 @@ export const MOTION_LABELS: Record<MotionPref, string> = {
 	full: 'Full motion'
 };
 
-/**
- * Preview colors per palette, mirrored from the theme files. Kept here (a
- * TS module, not a .svelte file) so the ThemeSwitcher chips can show each
- * palette's identity without the current theme's tokens overriding them,
- * and without raw hex inside a component.
- */
-export const PALETTE_SWATCH: Record<ThemePalette, { base: string; surface: string; fg: string }> = {
-	anthracite: { base: '#1F1F22', surface: '#27272A', fg: '#ECE9E3' },
-	parchment: { base: '#E5DECE', surface: '#DDD5C3', fg: '#2D2C2A' },
-	slate: { base: '#1A1E24', surface: '#22272F', fg: '#E4E8EC' },
-	linen: { base: '#EAEBE7', surface: '#E3E4E0', fg: '#22272D' },
-	'high-contrast': { base: '#000000', surface: '#0A0A0A', fg: '#FFFFFF' }
+const FOOTER_KEY = 'oo-status-footer';
+
+/** Choices made in this visit, read before the browser's storage. */
+const chosen = new Map<string, string>();
+
+const stored: StorageReader = {
+	getItem(key: string): string | null {
+		const made = chosen.get(key);
+		if (made !== undefined) return made;
+		const storage = browserStorage();
+		try {
+			return storage ? storage.getItem(key) : null;
+		} catch {
+			return null;
+		}
+	}
 };
 
-/** Palettes that should carry the `.dark` class (logo filter + legacy dark styles). */
-const DARK_PALETTES: ReadonlySet<ThemePalette> = new Set<ThemePalette>([
-	'anthracite',
-	'slate',
-	'high-contrast'
-]);
+const initial = resolve(stored, browserEnvironment());
 
-const PALETTE_KEY = 'oo-palette';
-const DENSITY_KEY = 'oo-density';
-const FOOTER_KEY = 'oo-status-footer';
-const TYPE_SCALE_KEY = 'oo-type-scale';
-const MOTION_KEY = 'oo-motion';
-/** Legacy binary-theme key, kept coherent for any pre-reader. */
-const LEGACY_THEME_KEY = 'oo-theme';
-
-function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
-	if (typeof localStorage === 'undefined') return null;
-	const v = localStorage.getItem(key) as T | null;
-	return v && allowed.includes(v) ? v : null;
-}
-
-/** Whether a palette is a dark palette. */
-export function isDarkPalette(p: ThemePalette): boolean {
-	return DARK_PALETTES.has(p);
-}
-
-function initialPalette(): ThemePalette {
-	const stored = readStored<ThemePalette>(PALETTE_KEY, PALETTES);
-	if (stored) return stored;
-	// Continuity with the pre-binary preference.
-	if (typeof localStorage !== 'undefined') {
-		const legacy = localStorage.getItem(LEGACY_THEME_KEY);
-		if (legacy === 'light') return 'parchment';
-		if (legacy === 'dark') return 'anthracite';
-	}
-	if (
-		typeof window !== 'undefined' &&
-		window.matchMedia &&
-		window.matchMedia('(prefers-color-scheme: light)').matches
-	) {
-		return 'parchment';
-	}
-	return 'anthracite';
-}
-
-function initialDensity(): Density {
-	return readStored<Density>(DENSITY_KEY, DENSITIES) ?? 'comfortable';
-}
+/** The palette choice. */
+export const palette = writable<Choice>(initial.choice);
+/** The palette on screen: the choice, or what "Match system" resolved to. */
+export const shownPalette = writable<Palette>(initial.theme);
+/** Currently selected density. */
+export const density = writable<Density>(initial.density);
+/** Currently selected text size. */
+export const typeScale = writable<TypeScale>(initial.size);
+/** Currently selected motion preference. */
+export const motionPref = writable<MotionPref>(initial.motion);
+/** Whether the optional status footer is shown. */
+export const statusFooterVisible = writable<boolean>(initialFooter());
 
 function initialFooter(): boolean {
-	if (typeof localStorage === 'undefined') return true;
-	const v = localStorage.getItem(FOOTER_KEY);
-	return v === null ? true : v === 'true';
-}
-
-function initialTypeScale(): TypeScale {
-	return readStored<TypeScale>(TYPE_SCALE_KEY, TYPE_SCALES) ?? 'default';
-}
-
-function initialMotion(): MotionPref {
-	return readStored<MotionPref>(MOTION_KEY, MOTION_PREFS) ?? 'system';
-}
-
-/** Currently selected palette. */
-export const palette = writable<ThemePalette>(initialPalette());
-/** Currently selected density. */
-export const density = writable<Density>(initialDensity());
-/** Whether the optional status footer is shown (spec 8.5). */
-export const statusFooterVisible = writable<boolean>(initialFooter());
-/** Currently selected typography scale. */
-export const typeScale = writable<TypeScale>(initialTypeScale());
-/** Currently selected motion preference. */
-export const motionPref = writable<MotionPref>(initialMotion());
-
-/** Apply the palette to <html>: data-oo-theme + sync .dark + darkMode store. */
-function applyPalette(p: ThemePalette, animate = true): void {
-	if (typeof document === 'undefined') return;
-	const html = document.documentElement;
-	const dark = isDarkPalette(p);
-	const reduced = get(prefersReducedMotion);
-	if (animate && !reduced) html.classList.add('theme-transitioning');
-	html.setAttribute('data-oo-theme', p);
-	html.classList.toggle('dark', dark);
-	darkMode.set(dark);
-	if (animate && !reduced) {
-		setTimeout(() => html.classList.remove('theme-transitioning'), 350);
+	const storage = browserStorage();
+	try {
+		const value = storage ? storage.getItem(FOOTER_KEY) : null;
+		return value === null ? true : value === 'true';
+	} catch {
+		return true;
 	}
 }
 
-/** Apply the density to <html>: a single oo-density-* class. */
-function applyDensity(d: Density): void {
-	if (typeof document === 'undefined') return;
-	const html = document.documentElement;
-	DENSITIES.forEach((x) => html.classList.remove(`oo-density-${x}`));
-	html.classList.add(`oo-density-${d}`);
-}
-
-/** Apply the typography scale: a single --oo-type-scale multiplier on <html>. */
-function applyTypeScale(t: TypeScale): void {
-	if (typeof document === 'undefined') return;
-	document.documentElement.style.setProperty('--oo-type-scale', String(TYPE_SCALE_VALUE[t]));
-}
-
-/**
- * Apply the motion preference. `oo-reduce-motion` forces reduction regardless
- * of the OS; `oo-motion-full` opts out of the prefers-reduced-motion media
- * query (app.css scopes it to `html:not(.oo-motion-full)`). The
- * prefersReducedMotion store is kept in sync so JS-driven animations (the
- * theme-transition flag) honor the choice too.
- */
-function applyMotion(m: MotionPref): void {
-	if (typeof document === 'undefined') return;
-	const html = document.documentElement;
-	html.classList.toggle('oo-reduce-motion', m === 'reduced');
-	html.classList.toggle('oo-motion-full', m === 'full');
-	if (m === 'reduced') {
-		prefersReducedMotion.set(true);
-	} else if (m === 'full') {
-		prefersReducedMotion.set(false);
-	} else if (typeof window !== 'undefined' && window.matchMedia) {
+/** The stores follow what the theme path applied. */
+function follow(resolved: Resolved): void {
+	palette.set(resolved.choice);
+	shownPalette.set(resolved.theme);
+	density.set(resolved.density);
+	typeScale.set(resolved.size);
+	motionPref.set(resolved.motion);
+	darkMode.set(resolved.dark);
+	if (resolved.motion === 'reduced') prefersReducedMotion.set(true);
+	else if (resolved.motion === 'full') prefersReducedMotion.set(false);
+	else if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
 		prefersReducedMotion.set(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 	}
 }
 
-/** Select a palette: update the store, the document, and localStorage. */
-export function setPalette(p: ThemePalette): void {
-	palette.set(p);
-	applyPalette(p, true);
-	if (typeof localStorage !== 'undefined') {
-		localStorage.setItem(PALETTE_KEY, p);
-		localStorage.setItem(LEGACY_THEME_KEY, isDarkPalette(p) ? 'dark' : 'light');
+/** Resolves every stored choice again and applies it, with a short colour
+ * transition when asked and motion is allowed. */
+function applyNow(animate = false): void {
+	const resolved = resolve(stored, browserEnvironment());
+	if (typeof document !== 'undefined') {
+		const root = document.documentElement;
+		const transition = animate && !get(prefersReducedMotion);
+		if (transition) root.classList.add('theme-transitioning');
+		applyTo(root, resolved);
+		if (transition) setTimeout(() => root.classList.remove('theme-transitioning'), 350);
+	}
+	follow(resolved);
+}
+
+/** Choose a palette: kept, stored, and applied. */
+export function setPalette(choice: Choice): void {
+	chosen.set(PALETTE_KEY, choice);
+	try {
+		localStorage.setItem(PALETTE_KEY, choice);
+	} catch {
+		// Kept for this visit only.
+	}
+	applyNow(true);
+}
+
+/** Switch between the day and the night palettes: from day to night, and
+ * from night or high contrast to day. */
+export function toggleDayNight(): void {
+	setPalette(get(shownPalette) === 'day' ? 'night' : 'day');
+}
+
+/** Choose a density: kept, stored, and applied. */
+export function setDensity(choice: Density): void {
+	chosen.set(DENSITY_KEY, choice);
+	try {
+		localStorage.setItem(DENSITY_KEY, choice);
+	} catch {
+		// Kept for this visit only.
+	}
+	applyNow();
+}
+
+/** Choose a text size: kept, stored, and applied. */
+export function setTypeScale(choice: TypeScale): void {
+	chosen.set(TEXT_SIZE_KEY, choice);
+	try {
+		localStorage.setItem(TEXT_SIZE_KEY, choice);
+	} catch {
+		// Kept for this visit only.
+	}
+	applyNow();
+}
+
+/** Choose a motion preference: kept, stored, and applied. */
+export function setMotionPref(choice: MotionPref): void {
+	chosen.set(MOTION_KEY, choice);
+	try {
+		localStorage.setItem(MOTION_KEY, choice);
+	} catch {
+		// Kept for this visit only.
+	}
+	applyNow();
+}
+
+/** Show or hide the optional status footer, and store the choice. */
+export function setStatusFooterVisible(visible: boolean): void {
+	statusFooterVisible.set(visible);
+	try {
+		localStorage.setItem(FOOTER_KEY, String(visible));
+	} catch {
+		// Kept for this visit only.
 	}
 }
 
-/** Select a density: update the store, the document, and localStorage. */
-export function setDensity(d: Density): void {
-	density.set(d);
-	applyDensity(d);
-	if (typeof localStorage !== 'undefined') localStorage.setItem(DENSITY_KEY, d);
-}
-
-/** Toggle the optional status footer and persist the choice. */
-export function setStatusFooterVisible(v: boolean): void {
-	statusFooterVisible.set(v);
-	if (typeof localStorage !== 'undefined') localStorage.setItem(FOOTER_KEY, String(v));
-}
-
-/** Select a typography scale: update the store, the document, and localStorage. */
-export function setTypeScale(t: TypeScale): void {
-	typeScale.set(t);
-	applyTypeScale(t);
-	if (typeof localStorage !== 'undefined') localStorage.setItem(TYPE_SCALE_KEY, t);
-}
-
-/** Select a motion preference: update the store, the document, and localStorage. */
-export function setMotionPref(m: MotionPref): void {
-	motionPref.set(m);
-	applyMotion(m);
-	if (typeof localStorage !== 'undefined') localStorage.setItem(MOTION_KEY, m);
-}
-
 /**
- * Initialize palette + density + typography + motion on the document at
- * startup, without the transition flash. Call once from the root layout
- * after initTheme().
+ * Applies the stored choices at startup, without the transition, and
+ * follows the system from then on. Returns the function that stops
+ * following. Call once from the root layout.
+ *
+ * First the older binary theme is retired where it decides nothing; where
+ * it is still a pin (unlike the system), the choice it means is held for
+ * the visit, so a change of the system does not move the choice shown, and
+ * choosing Match system stores it.
  */
-export function initPreferences(): void {
-	applyPalette(get(palette), false);
-	applyDensity(get(density));
-	applyTypeScale(get(typeScale));
-	applyMotion(get(motionPref));
+export function initPreferences(): () => void {
+	const pinned = retireLegacyTheme(browserStorage(), browserEnvironment());
+	if (pinned !== null && !chosen.has(PALETTE_KEY)) chosen.set(PALETTE_KEY, pinned);
+	applyNow();
+	if (typeof document === 'undefined') return () => {};
+	return followSystem(stored, browserEnvironment(), document.documentElement, follow);
 }

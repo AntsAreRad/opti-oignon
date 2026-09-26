@@ -104,8 +104,16 @@
 	}
 
 	function gradeColor(g: string): string {
-		if (g.startsWith('A')) return 'var(--oo-sage)';
-		if (g.startsWith('B')) return 'var(--oo-tobacco)';
+		if (g.startsWith('A')) return 'var(--oo-success)';
+		if (g.startsWith('B')) return 'var(--oo-acc-ink)';
+		if (g === 'C') return 'var(--oo-fg-warning)';
+		return 'var(--oo-fg-error)';
+	}
+
+	/** The grade's bar: the colour of its letter, the accent drawn as a mark. */
+	function gradeFill(g: string): string {
+		if (g.startsWith('A')) return 'var(--oo-success)';
+		if (g.startsWith('B')) return 'var(--oo-acc-mark)';
 		if (g === 'C') return 'var(--oo-fg-warning)';
 		return 'var(--oo-fg-error)';
 	}
@@ -205,7 +213,7 @@
 			<div class="w-full h-2 rounded-full mb-4" style="background-color: var(--oo-bg-tertiary);">
 				<div
 					class="h-2 rounded-full transition-all duration-500"
-					style="width: {(score / maxScore) * 100}%; background-color: {gradeColor(grade)};"
+					style="width: {(score / maxScore) * 100}%; background-color: {gradeFill(grade)};"
 				></div>
 			</div>
 
@@ -242,7 +250,7 @@
 				</svg>
 				<span class="text-sm font-medium" style="color: var(--oo-fg-primary);">JWT Cookies</span>
 			</div>
-			<p class="text-xs" style="color: {cookieMode ? 'var(--oo-sage)' : 'var(--oo-fg-warning)'};">
+			<p class="text-xs" style="color: {cookieMode ? 'var(--oo-success)' : 'var(--oo-fg-warning)'};">
 				{cookieMode ? 'httpOnly cookies active' : 'Using localStorage (less secure)'}
 			</p>
 		</div>
@@ -256,7 +264,7 @@
 				<span class="text-sm font-medium" style="color: var(--oo-fg-primary);">Encryption</span>
 			</div>
 			{#if encryptionStatus}
-				<p class="text-xs" style="color: {encryptionStatus.enabled ? 'var(--oo-sage)' : 'var(--oo-fg-muted)'};">
+				<p class="text-xs" style="color: {encryptionStatus.enabled ? 'var(--oo-success)' : 'var(--oo-fg-muted)'};">
 					{encryptionStatus.enabled ? 'Data-at-rest encryption active' : 'Not configured'}
 				</p>
 			{:else}

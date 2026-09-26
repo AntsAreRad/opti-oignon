@@ -59,8 +59,8 @@
 	// -- Helpers --
 	function scoreColor(score: number): string {
 		if (score >= 8) return 'var(--oo-success)';
-		if (score >= 5) return 'var(--oo-acc-400)';
-		if (score >= 3) return 'var(--oo-acc-600)';
+		if (score >= 5) return 'var(--oo-acc-ink)';
+		if (score >= 3) return 'var(--oo-warning)';
 		return 'var(--oo-error)';
 	}
 
@@ -410,7 +410,7 @@
 
 	.progress-bar {
 		height: 100%;
-		background: var(--oo-acc-400);
+		background: var(--oo-acc-mark);
 		border-radius: 3px;
 		transition: width 0.3s ease;
 	}

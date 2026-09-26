@@ -1,4 +1,4 @@
-/* Opti-Oignon -- Global styles: Palette v4e + theme transitions */
+/* Opti-Oignon -- global styles: base, motion, focus, selection, forced colours */
 
 @import './styles/theme.css';
 @import './styles/responsive.css';
@@ -127,152 +127,6 @@ html.oo-reduce-motion *::after {
 }
 
 /* ------------------------------------------------------------------ */
-/*  LIGHT MODE SURFACE OVERRIDES (Tailwind class compatibility)        */
-/*  Maps Tailwind surface-* and accent-* classes to theme variables    */
-/*  so existing dark-mode Tailwind classes work in light mode.         */
-/*  All values reference CSS variables -- no hardcoded hex.             */
-/* ------------------------------------------------------------------ */
-
-html:not(.dark) .bg-surface-950 { background-color: var(--oo-sidebar-bg); }
-html:not(.dark) .bg-surface-900 { background-color: var(--oo-bg-base); }
-html:not(.dark) .bg-surface-800 { background-color: var(--oo-bg-elevated); }
-html:not(.dark) .bg-surface-700 { background-color: var(--oo-bg-overlay); }
-html:not(.dark) .bg-surface-800\/50 { background-color: color-mix(in srgb, var(--oo-bg-elevated) 50%, transparent); }
-html:not(.dark) .bg-surface-800\/60 { background-color: color-mix(in srgb, var(--oo-bg-elevated) 60%, transparent); }
-html:not(.dark) .bg-surface-900\/50 { background-color: color-mix(in srgb, var(--oo-bg-base) 50%, transparent); }
-
-html:not(.dark) .text-surface-100 { color: var(--oo-fg-primary); }
-html:not(.dark) .text-surface-200 { color: var(--oo-fg-primary); }
-html:not(.dark) .text-surface-300 { color: var(--oo-fg-secondary); }
-html:not(.dark) .text-surface-400 { color: var(--oo-fg-tertiary); }
-html:not(.dark) .text-surface-500 { color: var(--oo-fg-muted); }
-html:not(.dark) .text-surface-600 { color: var(--oo-fg-faint); }
-html:not(.dark) .text-white { color: var(--oo-fg-primary); }
-
-html:not(.dark) .border-surface-600 { border-color: var(--oo-bd-default); }
-html:not(.dark) .border-surface-700 { border-color: var(--oo-bd-default); }
-html:not(.dark) .border-surface-800 { border-color: var(--oo-bd-subtle); }
-html:not(.dark) .border-surface-700\/50 { border-color: color-mix(in srgb, var(--oo-bd-default) 50%, transparent); }
-html:not(.dark) .border-surface-700\/30 { border-color: color-mix(in srgb, var(--oo-bd-default) 30%, transparent); }
-html:not(.dark) .border-surface-800\/50 { border-color: color-mix(in srgb, var(--oo-bd-subtle) 50%, transparent); }
-
-/* Hover states in light mode */
-html:not(.dark) .hover\:bg-surface-800:hover { background-color: var(--oo-bg-overlay); }
-html:not(.dark) .hover\:bg-surface-700:hover { background-color: var(--oo-bg-subtle); }
-html:not(.dark) .hover\:bg-surface-600:hover { background-color: var(--oo-bg-subtle); }
-html:not(.dark) .hover\:bg-surface-800\/50:hover { background-color: color-mix(in srgb, var(--oo-bg-overlay) 50%, transparent); }
-html:not(.dark) .hover\:text-surface-200:hover { color: var(--oo-fg-primary); }
-html:not(.dark) .hover\:text-surface-300:hover { color: var(--oo-fg-secondary); }
-html:not(.dark) .hover\:text-surface-400:hover { color: var(--oo-fg-tertiary); }
-
-/* Accent overrides light mode */
-html:not(.dark) .text-accent-300 { color: var(--oo-acc-500); }
-html:not(.dark) .text-accent-400 { color: var(--oo-acc-400); }
-html:not(.dark) .text-accent-500 { color: var(--oo-acc-500); }
-html:not(.dark) .bg-accent-500\/15 { background-color: var(--oo-msg-user-bg); }
-html:not(.dark) .bg-accent-600 { background-color: var(--oo-acc-400); }
-html:not(.dark) .bg-accent-600\/20 { background-color: var(--oo-error-bg); }
-html:not(.dark) .bg-accent-600\/30 { background-color: var(--oo-success-bg); }
-html:not(.dark) .hover\:bg-accent-500:hover { background-color: var(--oo-acc-500); }
-html:not(.dark) .hover\:bg-accent-600\/30:hover { background-color: var(--oo-msg-user-bg); }
-html:not(.dark) .border-accent-500 { border-color: var(--oo-acc-400); }
-html:not(.dark) .border-accent-500\/40 { border-color: var(--oo-input-focus); }
-html:not(.dark) .border-accent-600\/50 { border-color: var(--oo-input-focus); }
-html:not(.dark) .focus\:border-accent-600\/50:focus { border-color: var(--oo-input-focus); }
-html:not(.dark) .focus\:ring-accent-600\/20:focus { --tw-ring-color: var(--oo-input-focus); }
-html:not(.dark) .focus\:border-accent-500:focus { border-color: var(--oo-acc-400); }
-html:not(.dark) .focus\:border-surface-500:focus { border-color: var(--oo-fg-muted); }
-html:not(.dark) .hover\:text-accent-400:hover { color: var(--oo-acc-400); }
-html:not(.dark) .hover\:text-accent-300:hover { color: var(--oo-acc-500); }
-
-/* Verification + correction badges */
-html:not(.dark) .bg-green-900\/30 { background-color: var(--oo-success-bg); }
-html:not(.dark) .text-green-400 { color: var(--oo-success); }
-html:not(.dark) .border-green-800\/40 { border-color: var(--oo-success-bd); }
-html:not(.dark) .bg-amber-900\/30 { background-color: var(--oo-warning-bg); }
-html:not(.dark) .text-amber-400 { color: var(--oo-warning); }
-html:not(.dark) .border-amber-800\/40 { border-color: var(--oo-warning-bd); }
-html:not(.dark) .bg-red-900\/30 { background-color: var(--oo-error-bg); }
-html:not(.dark) .text-red-400 { color: var(--oo-error); }
-html:not(.dark) .border-red-800 { border-color: var(--oo-error-bd); }
-html:not(.dark) .text-red-300 { color: var(--oo-error); }
-html:not(.dark) .bg-red-600\/20 { background-color: var(--oo-error-bg); }
-html:not(.dark) .hover\:bg-red-600\/30:hover { background-color: var(--oo-error-bg); }
-html:not(.dark) .hover\:text-red-400:hover { color: var(--oo-error); }
-
-/* Additional Tailwind color class overrides for light mode */
-html:not(.dark) .bg-green-500 { background-color: var(--oo-success); }
-html:not(.dark) .bg-green-900 { background-color: var(--oo-success-bg); }
-html:not(.dark) .border-green-500 { border-color: var(--oo-success-bd); }
-html:not(.dark) .border-green-700 { border-color: var(--oo-success-bd); }
-html:not(.dark) .border-green-800 { border-color: var(--oo-success-bd); }
-html:not(.dark) .text-green-300 { color: var(--oo-success); }
-html:not(.dark) .text-emerald-300 { color: var(--oo-success); }
-html:not(.dark) .text-emerald-400 { color: var(--oo-success); }
-html:not(.dark) .bg-emerald-500 { background-color: var(--oo-success); }
-html:not(.dark) .bg-emerald-950 { background-color: var(--oo-success-bg); }
-html:not(.dark) .border-emerald-800 { border-color: var(--oo-success-bd); }
-html:not(.dark) .bg-emerald-400 { background-color: var(--oo-success); }
-
-html:not(.dark) .bg-red-500 { background-color: var(--oo-error); }
-html:not(.dark) .bg-red-600 { background-color: var(--oo-error); }
-html:not(.dark) .bg-red-700 { background-color: var(--oo-error); }
-html:not(.dark) .bg-red-800 { background-color: var(--oo-error-bg); }
-html:not(.dark) .bg-red-900 { background-color: var(--oo-error-bg); }
-html:not(.dark) .bg-red-950 { background-color: var(--oo-error-bg); }
-html:not(.dark) .bg-red-400 { background-color: var(--oo-error); }
-html:not(.dark) .text-red-100 { color: var(--oo-error); }
-html:not(.dark) .border-red-700 { border-color: var(--oo-error-bd); }
-html:not(.dark) .border-red-800 { border-color: var(--oo-error-bd); }
-
-html:not(.dark) .bg-amber-400 { background-color: var(--oo-warning); }
-html:not(.dark) .bg-amber-500 { background-color: var(--oo-warning); }
-html:not(.dark) .text-amber-300 { color: var(--oo-warning); }
-html:not(.dark) .border-amber-500 { border-color: var(--oo-warning-bd); }
-
-html:not(.dark) .bg-yellow-500 { background-color: var(--oo-warning); }
-html:not(.dark) .bg-yellow-900 { background-color: var(--oo-warning-bg); }
-html:not(.dark) .text-yellow-300 { color: var(--oo-warning); }
-html:not(.dark) .text-yellow-400 { color: var(--oo-warning); }
-html:not(.dark) .border-yellow-700 { border-color: var(--oo-warning-bd); }
-
-html:not(.dark) .bg-blue-400 { background-color: var(--oo-info); }
-html:not(.dark) .bg-blue-500 { background-color: var(--oo-info); }
-html:not(.dark) .text-blue-300 { color: var(--oo-info); }
-html:not(.dark) .text-blue-400 { color: var(--oo-info); }
-
-html:not(.dark) .bg-purple-500 { background-color: var(--oo-cat-purple); }
-html:not(.dark) .text-purple-400 { color: var(--oo-cat-purple); }
-
-html:not(.dark) .bg-orange-500 { background-color: var(--oo-cat-orange); }
-html:not(.dark) .text-orange-400 { color: var(--oo-cat-orange); }
-
-html:not(.dark) .bg-pink-500 { background-color: var(--oo-cat-pink); }
-html:not(.dark) .text-pink-400 { color: var(--oo-cat-pink); }
-
-html:not(.dark) .bg-gray-500 { background-color: var(--oo-fg-muted); }
-html:not(.dark) .text-gray-400 { color: var(--oo-fg-tertiary); }
-
-/* Active conversation in light mode */
-html:not(.dark) .bg-surface-700.text-white {
-	background-color: var(--oo-msg-user-bg);
-	color: var(--oo-fg-primary);
-}
-
-/* Code blocks in light mode */
-html:not(.dark) pre code {
-	background-color: transparent;
-}
-html:not(.dark) .bg-surface-900.rounded-lg {
-	background-color: var(--oo-bg-elevated);
-	border-color: var(--oo-bd-subtle);
-}
-
-/* Overlay in light mode */
-html:not(.dark) .bg-black\/50 { background-color: rgba(0, 0, 0, 0.3); }
-html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
-
-/* ------------------------------------------------------------------ */
 /*  SCROLLBAR                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -389,14 +243,39 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 /*  ACCESSIBILITY                                                      */
 /* ------------------------------------------------------------------ */
 
-/* Spec 7.9 -- single shared focus ring (resolves A4). Driven by the
-   --oo-focus-ring-* tokens so width/offset stay consistent app-wide.
-   Components that define their own focus style (e.g. inputs) override
-   this but reuse the same tokens. */
+/* One shared focus ring, drawn in the focus ink. Driven by the
+   --oo-focus-ring-* tokens so width and offset stay consistent app-wide;
+   components that draw their own focus style reuse the same tokens. It
+   sets no radius: an outline follows the control's own corners, so focus
+   never changes a control's shape. */
 :focus-visible {
-	outline: var(--oo-focus-ring-width, 2px) solid var(--oo-acc-500);
+	outline: var(--oo-focus-ring-width, 2px) solid var(--oo-focus-ink);
 	outline-offset: var(--oo-focus-ring-offset, 2px);
-	border-radius: var(--oo-radius-sm);
+}
+
+/* Selected text, and native checkboxes, radios and ranges, in the accent. */
+::selection {
+	background-color: var(--oo-bg-tint-1);
+	color: var(--oo-fg-primary);
+}
+
+:root {
+	accent-color: var(--oo-acc-ink);
+}
+
+/* Forced colours (a system high-contrast mode) replace every colour; the
+   containers separated by tone alone keep a visible edge, and the focus
+   ring stays drawn. */
+@media (forced-colors: active) {
+	.oo-card,
+	.oo-modal-panel,
+	.oo-tip {
+		border-color: CanvasText;
+	}
+
+	:focus-visible {
+		outline-color: Highlight;
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -454,7 +333,7 @@ html:not(.dark) .bg-black\/60 { background-color: rgba(0, 0, 0, 0.4); }
 	left: var(--oo-space-3);
 	z-index: var(--oo-z-toast);
 	padding: var(--oo-space-2) var(--oo-space-4);
-	background-color: var(--oo-acc-500);
+	background-color: var(--oo-acc-fill);
 	color: var(--oo-fg-on-accent);
 	border-radius: var(--oo-radius-md);
 	font-size: var(--oo-text-sm);

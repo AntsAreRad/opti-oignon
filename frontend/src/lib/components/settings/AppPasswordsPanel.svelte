@@ -130,7 +130,7 @@
 		{#if !showCreate && !createdPassword}
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-				style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 				on:click={() => { showCreate = true; error = ''; }}
 			>
 				Create App Password
@@ -172,7 +172,7 @@
 					</code>
 					<button
 						class="shrink-0 px-3 py-2 rounded text-xs font-medium transition-colors"
-						style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 						on:click={copyPassword}
 					>
 						{copied ? 'Copied!' : 'Copy'}
@@ -209,7 +209,7 @@
 				/>
 				<button
 					class="px-4 py-2 rounded text-sm font-medium transition-colors"
-					style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					disabled={creating || !newLabel.trim()}
 					on:click={createPassword}
 				>
@@ -254,7 +254,7 @@
 							<div class="flex gap-1">
 								<button
 									class="px-2 py-1 rounded text-xs"
-									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-accent);"
+									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 									disabled={revoking === pw.password_id}
 									on:click={() => revokePassword(pw.password_id)}
 								>

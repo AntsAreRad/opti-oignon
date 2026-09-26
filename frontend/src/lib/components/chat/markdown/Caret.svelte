@@ -16,6 +16,6 @@
 		height: 1.1em;
 		margin-left: 1px;
 		vertical-align: text-bottom;
-		background-color: var(--oo-acc-400);
+		background-color: var(--oo-acc-mark);
 	}
 </style>

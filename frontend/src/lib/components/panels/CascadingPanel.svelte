@@ -291,7 +291,7 @@
 		<!-- Save button -->
 		<button on:click={handleSave}
 			class="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-			style="background-color: var(--oo-acc-400); color: var(--oo-bg-primary);"
+			style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 			disabled={saving}>
 			{saving ? 'Saving...' : 'Save Configuration'}
 		</button>

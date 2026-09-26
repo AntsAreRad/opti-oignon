@@ -394,7 +394,7 @@
 	}
 
 	.oo-preset-icon-current {
-		background-color: var(--oo-accent);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 	}
 
@@ -423,7 +423,7 @@
 	}
 
 	.oo-preset-tag-active {
-		background-color: var(--oo-accent);
+		background-color: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
 	}
 

@@ -55,7 +55,7 @@
 		<div class="flex items-center gap-2 px-3 py-1.5"
 			style="border-bottom: 1px solid var(--oo-bd-subtle);">
 			<div class="w-2 h-2 rounded-full animate-pulse"
-				style="background-color: var(--oo-sage);" />
+				style="background-color: var(--oo-status-ok);" />
 			<span style="color: var(--oo-sage); font-weight: 500;">
 				Code Agent
 			</span>
@@ -76,7 +76,7 @@
 							</svg>
 						{:else if i === implementedFiles.length}
 							<div class="w-3 h-3 mt-0.5 flex-shrink-0 rounded-full animate-pulse"
-								style="background-color: var(--oo-sage); opacity: 0.6;" />
+								style="background-color: var(--oo-status-ok); opacity: 0.6;" />
 						{:else}
 							<div class="w-3 h-3 mt-0.5 flex-shrink-0 rounded-full"
 								style="background-color: var(--oo-bg-base); border: 1px solid var(--oo-bd-subtle);" />

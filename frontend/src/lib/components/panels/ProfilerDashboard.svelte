@@ -336,9 +336,9 @@
 	}
 
 	.btn-secondary.active {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-fill);
 		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-accent-primary);
+		border-color: var(--oo-acc-fill);
 	}
 
 	.btn-secondary:disabled {
@@ -512,12 +512,12 @@
 	}
 
 	.bar-prompt {
-		background: var(--oo-accent-primary);
+		background: var(--oo-acc-mark);
 		height: 100%;
 	}
 
 	.bar-gen {
-		background: var(--oo-acc-400);
+		background: var(--oo-acc-mark-2);
 		height: 100%;
 	}
 
@@ -548,8 +548,8 @@
 		display: inline-block;
 	}
 
-	.dot-prompt { background: var(--oo-accent-primary); }
-	.dot-gen { background: var(--oo-acc-400); }
+	.dot-prompt { background: var(--oo-acc-mark); }
+	.dot-gen { background: var(--oo-acc-mark-2); }
 	.dot-overhead { background: var(--oo-warning); opacity: 0.6; }
 
 	/* Recent requests table */

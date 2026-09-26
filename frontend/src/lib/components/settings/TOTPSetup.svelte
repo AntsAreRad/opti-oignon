@@ -187,7 +187,7 @@
 						<span class="text-xs" style="color: var(--oo-fg-warning);">Are you sure?</span>
 						<button
 							class="px-2 py-1 rounded text-xs"
-							style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-accent);"
+							style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
 							disabled={disableLoading}
 							on:click={disableTotp}
 						>
@@ -313,7 +313,7 @@
 				</p>
 				<button
 					class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-					style="background-color: var(--oo-tobacco); color: var(--oo-fg-on-accent);"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					on:click={beginSetup}
 				>
 					Set Up Authenticator

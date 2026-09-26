@@ -170,16 +170,16 @@
 
 	function extensionColor(ext: string): string {
 		const colors: Record<string, string> = {
-			'.py': 'bg-[var(--oo-info)]/20 text-[var(--oo-info)]',
-			'.r': 'bg-[var(--oo-success)]/20 text-[var(--oo-success)]',
-			'.R': 'bg-[var(--oo-success)]/20 text-[var(--oo-success)]',
-			'.js': 'bg-[var(--oo-warning)]/20 text-[var(--oo-warning)]',
-			'.ts': 'bg-[var(--oo-info)]/20 text-[var(--oo-info)]',
-			'.json': 'bg-[var(--oo-cat-orange)]/20 text-[var(--oo-cat-orange)]',
-			'.md': 'bg-[var(--oo-cat-purple)]/20 text-[var(--oo-cat-purple)]',
-			'.csv': 'bg-[var(--oo-success)]/20 text-[var(--oo-success)]',
-			'.sh': 'bg-[var(--oo-fg-muted)]/20 text-[var(--oo-fg-tertiary)]',
-			'.pdf': 'bg-[var(--oo-error)]/20 text-[var(--oo-error)]',
+			'.py': 'bg-[var(--oo-info)]/12 text-[var(--oo-info)]',
+			'.r': 'bg-[var(--oo-success)]/12 text-[var(--oo-success)]',
+			'.R': 'bg-[var(--oo-success)]/12 text-[var(--oo-success)]',
+			'.js': 'bg-[var(--oo-warning)]/12 text-[var(--oo-warning)]',
+			'.ts': 'bg-[var(--oo-info)]/12 text-[var(--oo-info)]',
+			'.json': 'bg-[var(--oo-cat-orange)]/12 text-[var(--oo-cat-orange)]',
+			'.md': 'bg-[var(--oo-cat-purple)]/12 text-[var(--oo-cat-purple)]',
+			'.csv': 'bg-[var(--oo-success)]/12 text-[var(--oo-success)]',
+			'.sh': 'bg-[var(--oo-fg-muted)]/12 text-[var(--oo-fg-tertiary)]',
+			'.pdf': 'bg-[var(--oo-error)]/12 text-[var(--oo-error)]',
 		};
 		return colors[ext] || 'bg-surface-700 text-surface-300';
 	}

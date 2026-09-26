@@ -246,7 +246,7 @@
 					<label
 						for="compression-toggle"
 						class="block w-10 h-6 rounded-full cursor-pointer transition-colors"
-						style="background-color: {enabled ? 'var(--oo-acc-500)' : 'var(--oo-bg-tertiary)'}; border: 1px solid {enabled ? 'var(--oo-acc-500)' : 'var(--oo-bd-default)'};"
+						style="background-color: {enabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'}; border: 1px solid {enabled ? 'var(--oo-switch-on)' : 'var(--oo-switch-off)'};"
 					>
 						<span
 							class="absolute top-1 left-1 w-4 h-4 rounded-full bg-[var(--oo-toggle-knob)] transition-transform"
@@ -267,7 +267,7 @@
 							<button
 								on:click={() => { strategy = s; handleStrategyChange(); }}
 								class="px-3 py-2 rounded text-xs text-left transition-colors"
-								style="background-color: {strategy === s ? 'var(--oo-msg-user-bg)' : 'var(--oo-bg-tertiary)'}; border: 1px solid {strategy === s ? 'var(--oo-acc-500)' : 'var(--oo-bd-default)'}; color: {strategy === s ? 'var(--oo-acc-400)' : 'var(--oo-fg-secondary)'};"
+								style="background-color: {strategy === s ? 'var(--oo-msg-user-bg)' : 'var(--oo-bg-tertiary)'}; border: 1px solid {strategy === s ? 'var(--oo-acc-ink)' : 'var(--oo-bd-default)'}; color: {strategy === s ? 'var(--oo-acc-ink)' : 'var(--oo-fg-secondary)'};"
 								disabled={saving}
 							>
 								<div class="font-medium">{strategyLabel(s)}</div>
@@ -374,7 +374,7 @@
 					on:click={loadStats}
 					disabled={loadingStats || !statsConvId.trim()}
 					class="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
-					style="background-color: var(--oo-acc-500); color: white;"
+					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 				>
 					{loadingStats ? 'Loading…' : 'Load'}
 				</button>
@@ -451,7 +451,7 @@
 						on:click={handleSearch}
 						disabled={searching || !searchQuery.trim() || !searchConvId.trim()}
 						class="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50 shrink-0"
-						style="background-color: var(--oo-acc-500); color: white;"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
 					>
 						{searching ? 'Searching…' : 'Search'}
 					</button>

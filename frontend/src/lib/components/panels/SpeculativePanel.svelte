@@ -254,7 +254,7 @@
 		<button
 			on:click={handleSave}
 			disabled={saving}
-			style="padding: 0.5rem 1rem; font-size: 0.8125rem; font-weight: 500; background: var(--oo-accent-primary); color: var(--oo-fg-on-accent); border: none; border-radius: var(--oo-radius-sm); cursor: pointer; opacity: {saving ? 0.6 : 1};"
+			style="padding: 0.5rem 1rem; font-size: 0.8125rem; font-weight: 500; background: var(--oo-acc-fill); color: var(--oo-fg-on-accent); border: none; border-radius: var(--oo-radius-sm); cursor: pointer; opacity: {saving ? 0.6 : 1};"
 		>
 			{saving ? 'Saving...' : 'Save configuration'}
 		</button>

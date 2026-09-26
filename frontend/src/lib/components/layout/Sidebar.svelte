@@ -13,7 +13,7 @@
 	import SecurityBadge from '$lib/components/sidebar/SecurityBadge.svelte';
 	import Icon from '$lib/ds/Icon.svelte';
 	import { darkMode } from '$lib/stores/ui';
-	import { setPalette } from '$lib/stores/preferences';
+	import { toggleDayNight } from '$lib/stores/preferences';
 
 	export let onSelect: (id: string) => void = () => {};
 	export let onCreate: () => void = () => {};
@@ -34,11 +34,6 @@
 		} catch { /* best-effort: ignore if endpoint unavailable */ }
 	});
 
-	// Palette-aware quick toggle: switch to the light/dark default palette.
-	// (The full palette picker lives in the header ThemeSwitcher.)
-	function quickToggleTheme() {
-		setPalette($darkMode ? 'parchment' : 'anthracite');
-	}
 
 	const navLinks: { href: string; label: string; icon: string }[] = [
 		{ href: '/chat', label: 'Chat', icon: 'message-square' },
@@ -110,11 +105,11 @@
 			<SecurityBadge />
 		</div>
 		<button
-			on:click={quickToggleTheme}
+			on:click={toggleDayNight}
 			class="p-1.5 rounded-md transition-colors touch-target"
 			style="color: var(--oo-fg-muted);"
-			title={$darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-			aria-label={$darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+			title={$darkMode ? 'Switch to the day palette' : 'Switch to the night palette'}
+			aria-label={$darkMode ? 'Switch to the day palette' : 'Switch to the night palette'}
 		>
 			{#if $darkMode}
 				<Icon name="sun" size="sm" />

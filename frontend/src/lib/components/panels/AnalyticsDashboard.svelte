@@ -213,7 +213,7 @@
 							<div
 								class="flex-1 rounded-t-sm transition-all"
 								style="height: {trendBarHeight(point.count, maxCount)}%;
-									background-color: {point.count > 0 ? 'var(--oo-acc-500)' : 'var(--oo-bd-default)'};"
+									background-color: {point.count > 0 ? 'var(--oo-acc-mark)' : 'var(--oo-bd-default)'};"
 								title="{point.count} requests, avg {formatMs(point.avg_response_time_ms)}"
 							/>
 						{/each}
@@ -240,7 +240,7 @@
 							<div class="h-1.5 rounded-full overflow-hidden" style="background-color: var(--oo-bg-base);">
 								<div
 									class="h-full rounded-full transition-all"
-									style="width: {barWidth(count, maxModelCount)}%; background-color: var(--oo-acc-500);"
+									style="width: {barWidth(count, maxModelCount)}%; background-color: var(--oo-acc-mark);"
 								/>
 							</div>
 						</div>
