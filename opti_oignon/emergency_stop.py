@@ -14,7 +14,8 @@ Semantics:
   ordered stop steps, each fail-tolerant: a failing step is logged and
   recorded, and the sequence continues -- the machine must end quiet even
   if one primitive errors. The sequence: cancel in-flight generations
-  (executor + agentic executor), cancel agent runs, stop the coding
+  (every live call of the executor and the agentic executor, and every live
+  chat turn), cancel agent runs, stop the coding
   background run, unload models on every registered inference backend
   (frees VRAM and halts compute; no privileges needed -- stopping a
   systemd-managed Ollama service stays a documented host action), destroy
@@ -47,6 +48,7 @@ per-step fail-tolerance).
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -72,7 +74,11 @@ _last_resume: dict[str, Any] | None = None
 # ---------------------------------------------------------------------------
 
 def _resolve_executors() -> list[Any]:
-    """The generation executors carrying a cooperative ``cancel()``."""
+    """The generation executors carrying a cooperative ``cancel()``.
+
+    The live chat turns join them when the chat routes are loaded. They are
+    looked up, never imported: without the routes there is no chat turn.
+    """
     found: list[Any] = []
     try:
         from opti_oignon.executor import executor as _ex
@@ -86,6 +92,11 @@ def _resolve_executors() -> list[Any]:
             found.append(_aex)
     except Exception:
         pass
+    _turns = getattr(
+        sys.modules.get("opti_oignon.api.routes_chat"), "live_chat_turns", None,
+    )
+    if _turns is not None:
+        found.append(_turns)
     return found
 
 

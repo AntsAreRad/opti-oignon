@@ -133,6 +133,10 @@ except ImportError:
 # Feature flag
 # ---------------------------------------------------------------------------
 
+# How often a coding turn waiting for the previous turn of its conversation
+# looks at its own stop.
+_TURN_POLL_S = 0.1
+
 CHAT_CODING_AVAILABLE = SANDBOX_AVAILABLE and FILE_TOOLS_AVAILABLE
 
 # ---------------------------------------------------------------------------
@@ -453,7 +457,7 @@ class ChatCodingSession:
         self._mgr = sandbox_mgr or _default_sandbox_manager
         self._config = config or _load_config()
         self._llm_call = llm_call
-        self._is_rich_llm = False  # detected on first call
+        self._is_rich_llm = False  # detected per turn, on the turn's callable
 
         # Sandbox state
         self._sandbox_session: SandboxSession | None = None
@@ -471,10 +475,20 @@ class ChatCodingSession:
         self._turn_history: list[dict[str, str]] = []
         self._last_compression_result = None
 
+        # One coding turn at a time per session: the per-turn state below
+        # belongs to the turn holding this lock (distinct from _lock, which
+        # guards file writes).
+        self._turn_lock = threading.Lock()
+
         # Per-turn feature state (set by execute_task)
         self._turn_images: list[str] | None = None
         self._turn_web_search: bool = False
         self._turn_think: bool = False
+        # The turn's own stop and model callback; the session's llm_call
+        # is a default that belongs to no turn.
+        self._turn_should_stop: Callable[[], bool] | None = None
+        self._turn_llm_call = None
+        self._turn_rich: bool | None = None
 
         # Last call metadata (tool calls, vision, plugins from last LLM call)
         self._last_tool_calls: list[dict[str, Any]] = []
@@ -849,18 +863,25 @@ class ChatCodingSession:
 
     # -- LLM interaction ------------------------------------------------------
 
-    def _detect_rich_callback(self) -> bool:
-        """Detect whether the llm_call is a rich callback or simple.
+    def _stopped(self) -> bool:
+        """Whether the turn in progress has been stopped."""
+        return bool(self._turn_should_stop and self._turn_should_stop())
+
+    def _detect_rich_callback(self, fn=None) -> bool:
+        """Detect whether a callback is a rich callback or simple.
 
         Rich: (messages, model, LLMCallContext) -> LLMCallResult
         Simple: (prompt, system, model) -> str
+
+        ``fn`` defaults to the session's callback.
         """
-        if self._llm_call is None:
+        fn = self._llm_call if fn is None else fn
+        if fn is None:
             return False
         # Check via type hints or duck-typing on first call
         import inspect
         try:
-            sig = inspect.signature(self._llm_call)
+            sig = inspect.signature(fn)
             params = list(sig.parameters.keys())
             # Rich callback has 3 params: messages, model, context
             # Simple callback has 3 params: prompt, system, model
@@ -899,11 +920,17 @@ class ChatCodingSession:
 
         Returns:
             LLMCallResult with text response and metadata.
+
+        The turn's own callback is used when it brought one, the session's
+        default otherwise. A stopped turn makes no model call.
         """
-        if self._llm_call is None:
+        fn = self._turn_llm_call or self._llm_call
+        if fn is None:
             return LLMCallResult(
                 error="No LLM callable provided to ChatCodingSession"
             )
+        if self._stopped():
+            return LLMCallResult(error="stopped")
 
         # Build messages with full conversation context
         messages = self._build_conversation_messages(
@@ -912,12 +939,12 @@ class ChatCodingSession:
             model=model,
         )
 
-        # Detect callback type on first call
-        if not hasattr(self, "_callback_detected"):
-            self._is_rich_llm = self._detect_rich_callback()
-            self._callback_detected = True
+        # Detect the callback type once per turn, on the turn's callable
+        if self._turn_rich is None:
+            self._turn_rich = self._detect_rich_callback(fn)
+            self._is_rich_llm = self._turn_rich
 
-        if self._is_rich_llm:
+        if self._turn_rich:
             # Rich callback: pass full messages + context with all features
             ctx = LLMCallContext(
                 images=self._turn_images if phase == "implement" else None,
@@ -927,7 +954,7 @@ class ChatCodingSession:
                 conversation_id=self._conversation_id,
             )
             try:
-                result = self._llm_call(messages, model, ctx)
+                result = fn(messages, model, ctx)
                 # Capture metadata from the pipeline
                 if hasattr(result, "tool_calls"):
                     self._last_tool_calls = result.tool_calls or []
@@ -955,7 +982,7 @@ class ChatCodingSession:
                 augmented_system += "\n\n" + "\n\n".join(system_extras)
 
             try:
-                text = self._llm_call(prompt, augmented_system, model)
+                text = fn(prompt, augmented_system, model)
                 return LLMCallResult(text=text)
             except Exception as exc:
                 logger.warning(
@@ -1082,6 +1109,9 @@ class ChatCodingSession:
             impl_prompt, system, model, phase="implement"
         )
         response = impl_result.text or ""
+        if self._stopped():
+            # A stopped call's text is never applied as files.
+            return response
 
         # Emit vision and tool call info from implementation
         if impl_result.vision_meta:
@@ -1222,6 +1252,8 @@ class ChatCodingSession:
         attempt = 0
 
         while attempt < retries:
+            if self._stopped():
+                return False
             attempt += 1
             yield CodingEvent(
                 "coding_fix",
@@ -1250,6 +1282,9 @@ class ChatCodingSession:
                 fix_prompt, system, model, phase="fix"
             )
             response = fix_result.text or ""
+            if self._stopped():
+                # Neither the files of a stopped call nor its test command.
+                return False
 
             # Apply fixes
             file_pattern = re.compile(
@@ -1303,6 +1338,8 @@ class ChatCodingSession:
         images: list[str] | None = None,
         web_search: bool = False,
         think: bool = False,
+        should_stop: Callable[[], bool] | None = None,
+        llm_call: "RichLLMCall | SimpleLLMCall | None" = None,
     ) -> Generator[CodingEvent, None, dict[str, Any]]:
         """Execute a coding task as part of the ongoing conversation.
 
@@ -1323,6 +1360,16 @@ class ChatCodingSession:
                 analyzes the images and injects the description.
             web_search: Enable web search for documentation lookup.
             think: Enable chain-of-thought reasoning mode.
+            should_stop: The turn's stop. Checked between phases, before
+                each model call and in the fix loop; a stopped turn writes
+                no file from a stopped call, is recorded as stopped with
+                the files written, and ends with a ``coding_done`` whose
+                data carries ``stopped`` and ``stopped_during``.
+            llm_call: The turn's own model callback; the session's is a
+                default that belongs to no turn.
+
+        One coding turn runs per session at a time: a second turn waits,
+        watching its own stop, until the first has ended.
 
         Yields:
             CodingEvent instances for streaming.
@@ -1330,6 +1377,65 @@ class ChatCodingSession:
         Returns:
             Result dict with summary, files, test status, etc.
         """
+        if not self._turn_lock.acquire(blocking=False):
+            yield CodingEvent(
+                "coding_status",
+                content="Waiting for the previous coding turn of this conversation to stop",
+            )
+            while not self._turn_lock.acquire(timeout=_TURN_POLL_S):
+                if should_stop is not None and should_stop():
+                    waited = {"stopped": True, "stopped_during": "waiting"}
+                    yield CodingEvent("coding_done", data=waited, content="Stopped")
+                    return waited
+        try:
+            self._turn_should_stop = should_stop
+            self._turn_llm_call = llm_call
+            self._turn_rich = None
+            return (yield from self._execute_task_locked(
+                message, model, directives, images, web_search, think,
+            ))
+        finally:
+            self._turn_should_stop = None
+            self._turn_llm_call = None
+            self._turn_rich = None
+            self._turn_images = None
+            self._turn_web_search = False
+            self._turn_think = False
+            self._turn_lock.release()
+
+    def _finish_stopped(
+        self,
+        message: str,
+        model: str,
+        result: dict[str, Any],
+        phase: str,
+    ) -> Generator[CodingEvent, None, dict[str, Any]]:
+        """End a stopped turn: record it with the files written, then say so."""
+        files = list(self._sandbox_state.files)
+        result["stopped"] = True
+        result["stopped_during"] = phase
+        result["files_written"] = files
+        result["summary"] = f"Stopped during {phase}"
+        self._update_cumulative_summary(message, f"Stopped during {phase}")
+        self._save_turn_to_conversation(
+            message,
+            f"[Code Agent - Turn {result['turn']}]\n"
+            f"Stopped during {phase}. Files written: {', '.join(files) or 'none'}",
+            model,
+        )
+        yield CodingEvent("coding_done", data=result, content="Stopped")
+        return result
+
+    def _execute_task_locked(
+        self,
+        message: str,
+        model: str,
+        directives: TurnDirectives | None,
+        images: list[str] | None,
+        web_search: bool,
+        think: bool,
+    ) -> Generator[CodingEvent, None, dict[str, Any]]:
+        """The body of ``execute_task``, run while holding the turn lock."""
         if directives is None:
             directives = parse_directives(message)
 
@@ -1399,6 +1505,8 @@ class ChatCodingSession:
                 plan_text = e.value or ""
             result["plan"] = plan_text
             full_response_parts.append(f"Plan:\n{plan_text}")
+            if self._stopped():
+                return (yield from self._finish_stopped(message, model, result, "plan"))
 
             if directives.plan_only:
                 result["summary"] = "Plan generated (plan-only mode)"
@@ -1426,6 +1534,8 @@ class ChatCodingSession:
                 yield event
         except StopIteration as e:
             impl_response = e.value or ""  # noqa: F841
+        if self._stopped():
+            return (yield from self._finish_stopped(message, model, result, "implement"))
 
         # Update files list from sandbox
         current_files = self._list_sandbox_files()  # noqa: F841
@@ -1452,6 +1562,8 @@ class ChatCodingSession:
                 test_passed, test_output = e.value
 
             result["test_passed"] = test_passed
+            if self._stopped():
+                return (yield from self._finish_stopped(message, model, result, "test"))
 
             # -- PHASE 4: FIX (if tests failed and not skipped) ----------------
             if not test_passed and not directives.skip_fix:
@@ -1469,6 +1581,8 @@ class ChatCodingSession:
                     result["test_passed"] = test_passed
 
                 result["fix_attempts"] = fix_retries
+                if self._stopped():
+                    return (yield from self._finish_stopped(message, model, result, "fix"))
 
         # -- DONE -------------------------------------------------------------
         if test_passed is True:
@@ -1500,11 +1614,6 @@ class ChatCodingSession:
             + "\n".join(full_response_parts)
         )
         self._save_turn_to_conversation(message, assistant_content, model)
-
-        # Clear per-turn feature state
-        self._turn_images = None
-        self._turn_web_search = False
-        self._turn_think = False
 
         yield CodingEvent(
             "coding_done",

@@ -582,6 +582,14 @@ fail_under = 0
 # its host's, and that the capacity floor reads the loaders together with the
 # panels the hosts import (38 + 4, at least 40). ux17's wiring half stays.
 #
+# e6 of the ledger emission suite stopped the executor's call by setting the
+# executor's process-wide cancellation flag by its private name. The flag
+# carried the defect this change removes (one flag for every call, cleared by
+# each new call), so the attribute is gone and the spelling became false while
+# the property held. It stays in the tree word for word; the replacement is e13
+# in the same file, which stops the call through the executor's public
+# cancel().
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -670,4 +678,5 @@ addopts = """
     --deselect=tests/test_ui_repairs_contracts.py::test_ux16_every_selector_a_global_shortcut_queries_is_rendered
     --deselect=tests/test_shell_contracts.py::test_sh10_export_is_one_shell_level_dialog_opened_through_its_store
     --deselect=tests/test_ui_repairs_contracts.py::test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[node]
+    --deselect=tests/test_executor_ledger_emission_contracts.py::test_e6_mid_stream_cancellation_is_one_cancelled_record
 """

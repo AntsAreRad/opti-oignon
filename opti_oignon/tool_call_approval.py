@@ -264,6 +264,18 @@ class ToolCallApprovalManager:
         with self._lock:
             return self._resolve(approval_id, ApprovalStatus.DENIED, user_id)
 
+    def withdraw(self, approval_id: str, reason: str = "turn_stopped") -> bool:
+        """Withdraw a pending tool call on behalf of its own stopped turn.
+
+        The request is denied and leaves the queue at once, and its waiter
+        is released. This resolves on behalf of the request's own turn,
+        never of a person: ``reason`` is recorded as the resolver in both
+        audits, as ``clear_all`` already does. Returns False when the
+        request is no longer pending.
+        """
+        with self._lock:
+            return self._resolve(approval_id, ApprovalStatus.DENIED, reason)
+
     def _resolve(
         self,
         approval_id: str,

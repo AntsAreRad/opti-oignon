@@ -204,24 +204,170 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-# Registre des flags d'annulation par conversation
-# Each conversation en cours a un threading.Event
-_cancel_events: dict[str, threading.Event] = {}
-_cancel_lock = threading.Lock()
+# How often a stream function looks again at a thread it waits for, and how
+# often a thread-side wait looks at its turn's stop. The granularity at which
+# a stop is seen, not a behaviour to tune.
+_ROUTE_POLL_S = 0.05
+_THREAD_POLL_S = 0.1
 
 
-def _get_cancel_event(conversation_id: str) -> threading.Event:
-    """Retrieve or create a cancellation Event for a conversation."""
-    with _cancel_lock:
-        if conversation_id not in _cancel_events:
-            _cancel_events[conversation_id] = threading.Event()
-        return _cancel_events[conversation_id]
+class ChatTurn:
+    """One chat turn's stop and results. Made per turn, never reused."""
+
+    __slots__ = ("conversation_id", "stop", "results")
+
+    def __init__(self, conversation_id: str) -> None:
+        self.conversation_id = conversation_id
+        self.stop = threading.Event()
+        self.results: dict = {}
 
 
-def _cleanup_cancel_event(conversation_id: str) -> None:
-    """Delete the cancellation Event after generation ends."""
-    with _cancel_lock:
-        _cancel_events.pop(conversation_id, None)
+# The live turns, by conversation. A turn with no conversation id is kept
+# apart, so no Stop request can name it.
+_live_turns: dict[str, set[ChatTurn]] = {}
+_anonymous_turns: set[ChatTurn] = set()
+_turns_lock = threading.Lock()
+
+
+def _open_turn(conversation_id: str) -> ChatTurn:
+    """Create and register a live turn."""
+    turn = ChatTurn(conversation_id)
+    with _turns_lock:
+        if conversation_id:
+            _live_turns.setdefault(conversation_id, set()).add(turn)
+        else:
+            _anonymous_turns.add(turn)
+    return turn
+
+
+def _close_turn(turn: ChatTurn) -> None:
+    """Remove exactly this turn from the registry."""
+    with _turns_lock:
+        _anonymous_turns.discard(turn)
+        turns = _live_turns.get(turn.conversation_id)
+        if turns is not None:
+            turns.discard(turn)
+            if not turns:
+                del _live_turns[turn.conversation_id]
+
+
+def _stop_conversation_turns(conversation_id: str) -> int:
+    """Set the stop of every live turn of one conversation; how many there were."""
+    with _turns_lock:
+        turns = list(_live_turns.get(conversation_id, ()))
+    for turn in turns:
+        turn.stop.set()
+    return len(turns)
+
+
+class LiveChatTurns:
+    """Every live chat turn, for the emergency stop alone."""
+
+    def cancel(self) -> int:
+        """Set the stop of every live chat turn, anonymous ones included."""
+        with _turns_lock:
+            turns = [t for group in _live_turns.values() for t in group]
+            turns.extend(_anonymous_turns)
+        for turn in turns:
+            turn.stop.set()
+        return len(turns)
+
+
+live_chat_turns = LiveChatTurns()
+
+
+async def _await_until(predicate, timeout: float) -> bool:
+    """Wait for ``predicate()`` without holding the event loop.
+
+    Returns whether it became true before the deadline.
+    """
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(_ROUTE_POLL_S)
+    return True
+
+
+def _await_approval(done: threading.Event, stop: threading.Event, timeout: float) -> bool:
+    """Wait on the generation thread for a decision, the turn's stop, or the deadline.
+
+    Returns whether the decision arrived.
+    """
+    deadline = time.monotonic() + timeout
+    while not done.is_set() and not stop.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        done.wait(min(_THREAD_POLL_S, remaining))
+    return done.is_set()
+
+
+def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, timeout: float):
+    """The Bulbe approval gate of one turn, bound to that turn's stop.
+
+    ``manager`` is the approval queue, ``emit`` receives the pending and
+    resolved events for the socket, and ``timeout`` bounds the wait. The
+    hook blocks the generation thread until a person decides, the turn is
+    stopped, or the deadline passes (an auto-deny). A stopped turn's pending
+    request is withdrawn on its behalf, so it leaves the queue and no person
+    is named, and a decision that lands after the stop never runs the tool.
+    """
+
+    def _approval_hook(tool_name: str, arguments: dict) -> bool:
+        """Block until a person decides, the turn stops, or the deadline."""
+        aid, event = manager.submit(
+            conversation_id=conversation_id,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+        pending = manager._pending.get(aid, None)
+        emit(("tool_call_pending", {
+            "approval_id": aid,
+            "tool_name": tool_name,
+            "arguments_summary": pending and pending.arguments_summary or "",
+            "risk_level": pending and pending.risk_level or "low",
+        }))
+        _await_approval(event, turn.stop, timeout)
+        status = manager.get_status(aid)
+        if turn.stop.is_set() and status == _ApprovalStatus.PENDING:
+            withdraw = getattr(manager, "withdraw", None)
+            if callable(withdraw):
+                withdraw(aid, "turn_stopped")
+            status = manager.get_status(aid)
+        approved = (
+            status is not None
+            and status == _ApprovalStatus.APPROVED
+            and not turn.stop.is_set()
+        )
+        emit(("tool_call_resolved", {
+            "approval_id": aid,
+            "tool_name": tool_name,
+            "approved": approved,
+        }))
+        return approved
+
+    return _approval_hook
+
+
+async def _watch_disconnect(websocket, turn: ChatTurn) -> None:
+    """Stop the turn as soon as its client disconnects.
+
+    The client sends nothing after its request, so this reader consumes no
+    client message: the only thing it can receive is the disconnect. It
+    never sends, and it catches every exception, so cancelling it leaves
+    nothing to retrieve.
+    """
+    try:
+        while not turn.stop.is_set():
+            message = await websocket.receive()
+            if not isinstance(message, dict):
+                return
+            if message.get("type") == "websocket.disconnect":
+                turn.stop.set()
+                return
+    except (Exception, asyncio.CancelledError):
+        return
 
 
 def _resolve_model_and_route(message: str, request: ChatRequest):
@@ -302,6 +448,33 @@ async def _stream_response(
     message: str,
     request: ChatRequest,
 ) -> None:
+    """Stream one chat turn: open it, run it, and always close it.
+
+    The turn owns its stop and its results. Closing it sets its stop, so a
+    generation still running after an abnormal exit is never left without
+    one. When the socket can be read, a watcher stops the turn as soon as
+    the client disconnects.
+    """
+    turn = _open_turn(conversation_id)
+    watcher = None
+    if callable(getattr(websocket, "receive", None)):
+        watcher = asyncio.ensure_future(_watch_disconnect(websocket, turn))
+    try:
+        await _stream_turn(websocket, conversation_id, message, request, turn)
+    finally:
+        turn.stop.set()
+        if watcher is not None:
+            watcher.cancel()
+        _close_turn(turn)
+
+
+async def _stream_turn(
+    websocket: WebSocket,
+    conversation_id: str,
+    message: str,
+    request: ChatRequest,
+    turn: ChatTurn,
+) -> None:
     """Generate and stream the LLM response via WebSocket.
 
     Orchestre le routage, l'appel a l'executor, et l'envoi
@@ -320,13 +493,6 @@ async def _stream_response(
     if routing_error or routing is None:
         await _send_token(websocket, "error", routing_error or "Routing failed")
         return
-
-    # Preparer l'annulation
-    cancel_event = _get_cancel_event(conversation_id)
-    cancel_event.clear()
-
-    # Resetr l'executor
-    executor.reset()
 
     # Activate quick sandbox mode if requested
     _qs_session = None
@@ -390,7 +556,11 @@ async def _stream_response(
             or _code_prefix
             or (cc_requested is None and _chat_coding_manager.enabled)
         )
-        if cc_enabled and _chat_coding_manager.available:
+        # The coding agent keeps one session, with its sandbox and history,
+        # per conversation. A reply with no conversation has no session of
+        # its own (every such reply would share one), so it runs as a plain
+        # chat reply, as it does when the agent is unavailable.
+        if cc_enabled and _chat_coding_manager.available and conversation_id:
             _cc_active = True
             # When Code Agent is ON, Quick Sandbox is implicitly disabled
             # (the coding session owns its own sandbox)
@@ -431,8 +601,8 @@ async def _stream_response(
             request=request,
             routing=routing,
             start_time=start_time,
+            turn=turn,
         )
-        _cleanup_cancel_event(conversation_id)
         return
 
     # Executer la generation dans un thread (l'executor est synchrone)
@@ -545,7 +715,8 @@ async def _stream_response(
                 # PipelineRunner (the seam, finished). The runner resets
                 # and drives the agentic executor per step; the approval gate
                 # (EX-02) is forwarded so Bulbe semantics hold per step.
-                _agentic_executor.reset()
+                # The turn travels with the run: its stop is checked
+                # between steps and reaches the step in progress.
                 gen = get_pipeline_runner().execute(
                     pipeline=_exec_pipeline_obj,
                     message=message,
@@ -556,10 +727,10 @@ async def _stream_response(
                     on_reasoning_step=_on_reasoning_step_callback,
                     on_consensus_model=_on_consensus_model_callback,
                     approval_fn=_approval_fn,
+                    run=turn,
                 )
             elif use_agentic:
-                # Execution via AgenticExecutor
-                _agentic_executor.reset()
+                # Execution via AgenticExecutor, under this turn
                 gen = _agentic_executor.execute(
                     message=message,
                     routing=routing,
@@ -581,6 +752,7 @@ async def _stream_response(
                     on_status=_on_status,
                     # EX-02: per-request tool-approval gate
                     approval_fn=_approval_fn,
+                    run=turn,
                 )
             else:
                 # Execution classique via Executor
@@ -594,13 +766,13 @@ async def _stream_response(
                     think=request.think if request.think else False,
                     web_search=request.web_search if request.web_search else False,
                     images=_images,
+                    run=turn,
                 )
+            _stopped_seen = False
             for chunk in gen:
-                if cancel_event.is_set():
-                    if use_agentic:
-                        _agentic_executor.cancel()
-                    else:
-                        executor.cancel()
+                if turn.stop.is_set():
+                    # The executors hold this turn's stop themselves.
+                    _stopped_seen = True
                     chunks.append(("cancel", None))
                     break
                 if chunk:
@@ -646,8 +818,12 @@ async def _stream_response(
                         full_response += chunk
                         chunks.append(("chunk", chunk))
 
+            # A stage that yields nothing returns on a stop: say so.
+            if turn.stop.is_set() and not _stopped_seen:
+                chunks.append(("cancel", None))
+
             # Emit vision delegation completion if it occurred
-            _vm = getattr(executor, 'last_vision_meta', {})
+            _vm = turn.results.get("vision_meta") or {}
             if _vm.get("delegated"):
                 chunks.append(("vision_delegation", {
                     "status": "done",
@@ -700,44 +876,17 @@ async def _stream_response(
         try:
             policy = _get_security_policy()
             if getattr(policy, "tool_call_approval_required", False):
-                _conv_id = conversation_id or ""
-
-                def _approval_hook(tool_name: str, arguments: dict) -> bool:
-                    """Block until human approves or 30s timeout (auto-deny)."""
-                    aid, event = _tool_call_approval.submit(
-                        conversation_id=_conv_id,
-                        tool_name=tool_name,
-                        arguments=arguments,
-                    )
-                    # Emit pending event to WebSocket via chunks
-                    chunks.append(("tool_call_pending", {
-                        "approval_id": aid,
-                        "tool_name": tool_name,
-                        "arguments_summary": _tool_call_approval._pending.get(aid, None)
-                            and _tool_call_approval._pending[aid].arguments_summary or "",
-                        "risk_level": _tool_call_approval._pending.get(aid, None)
-                            and _tool_call_approval._pending[aid].risk_level or "low",
-                    }))
-                    # Wait for approval (blocks this thread)
-                    from opti_oignon.tool_call_approval import DEFAULT_TIMEOUT_SECONDS
-                    event.wait(timeout=DEFAULT_TIMEOUT_SECONDS + 2)
-                    status = _tool_call_approval.get_status(aid)
-                    approved = (
-                        status is not None
-                        and status == _ApprovalStatus.APPROVED
-                    )
-                    # Emit resolution event
-                    chunks.append(("tool_call_resolved", {
-                        "approval_id": aid,
-                        "tool_name": tool_name,
-                        "approved": approved,
-                    }))
-                    return approved
+                from opti_oignon.tool_call_approval import DEFAULT_TIMEOUT_SECONDS
 
                 # EX-02: bind the gate to this request instead of
                 # mutating the shared singleton. _approval_fn is forwarded to
                 # the executor call, which threads it down to _execute_tool.
-                _approval_fn = _approval_hook
+                # The gate blocks the generation thread until a decision or
+                # this turn's stop, and emits its events through the chunks.
+                _approval_fn = _make_approval_hook(
+                    _tool_call_approval, turn, conversation_id or "",
+                    chunks.append, DEFAULT_TIMEOUT_SECONDS + 2,
+                )
                 logger.info("Tool call approval gate armed (Bulbe mode)")
         except Exception as exc:
             logger.warning("Failed to install tool call approval hook: %s", exc)
@@ -795,12 +944,10 @@ async def _stream_response(
                 conversation_id[:8] if conversation_id else "?",
                 _bp_dropped,
             )
-            cancel_event.set()
-            executor.cancel()
-            generation_done.wait(timeout=5.0)
+            turn.stop.set()
+            await _await_until(generation_done.is_set, 5.0)
             if _qs_active and _tool_registry is not None:
                 _tool_registry.set_quick_sandbox_mode(False)
-            _cleanup_cancel_event(conversation_id)
             return
 
         # Send les chunks en attente
@@ -813,24 +960,20 @@ async def _stream_response(
                 alive = await _send_token(websocket, "token", content)
                 _last_send_time = time.time()
                 if not alive:
-                    cancel_event.set()
-                    executor.cancel()
-                    generation_done.wait(timeout=5.0)
+                    turn.stop.set()
+                    await _await_until(generation_done.is_set, 5.0)
                     if _qs_active and _tool_registry is not None:
                         _tool_registry.set_quick_sandbox_mode(False)
-                    _cleanup_cancel_event(conversation_id)
                     return
             elif event_type == "thinking":
                 # Send the thinking content over the WebSocket
                 thinking_content += content
                 alive = await _send_token(websocket, "thinking", content)
                 if not alive:
-                    cancel_event.set()
-                    executor.cancel()
-                    generation_done.wait(timeout=5.0)
+                    turn.stop.set()
+                    await _await_until(generation_done.is_set, 5.0)
                     if _qs_active and _tool_registry is not None:
                         _tool_registry.set_quick_sandbox_mode(False)
-                    _cleanup_cancel_event(conversation_id)
                     return
             elif event_type == "cancel":
                 await _send_token(websocket, "token", "\n\n[Generation cancelled]")
@@ -930,7 +1073,6 @@ async def _stream_response(
                 await _send_token(websocket, "error", content)
                 if _qs_active and _tool_registry is not None:
                     _tool_registry.set_quick_sandbox_mode(False)
-                _cleanup_cancel_event(conversation_id)
                 return
 
         # Wait briefly before rechecking.
@@ -956,27 +1098,19 @@ async def _stream_response(
                     # slow client and cancel a legitimate long generation.
                     _bp_last_consumer_time = time.time()
                 except Exception:
-                    cancel_event.set()
-                    executor.cancel()
+                    turn.stop.set()
+                    if _qs_active and _tool_registry is not None:
+                        _tool_registry.set_quick_sandbox_mode(False)
                     return
 
-    # Attendre la fin du thread
-    gen_thread.join(timeout=10.0)
+    # Wait for the generation thread to end, without holding the loop
+    await _await_until(lambda: not gen_thread.is_alive(), 10.0)
 
     # Calculer la duration
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # Emit code verification results
-    # Retrieve from AgenticExecutor if used, otherwise from Executor
-    _verification_results = []
-    if use_agentic and _agentic_executor is not None:
-        _verification_results = _agentic_executor.last_verification_results or []
-    elif (
-        EXECUTOR_AVAILABLE
-        and executor is not None
-        and hasattr(executor, 'last_verification_results')
-    ):
-        _verification_results = executor.last_verification_results or []
+    # Emit code verification results: this turn's own
+    _verification_results = turn.results.get("verification_results") or []
 
     for vr in _verification_results:
         await _send_token(websocket, "verification", "", metadata={
@@ -988,30 +1122,16 @@ async def _stream_response(
             "execution_output": vr.execution_output[:500] if vr.execution_output else "",
         })
 
-    # Emit tool call results (those not already emitted in real-time)
-    # Les appels emis via callback sont already envoyes; ici on emet ceux de l'executor legacy
-    if (
-        not use_agentic
-        and TOOL_EXECUTOR_AVAILABLE
-        and _tool_executor is not None
-        and hasattr(executor, '_last_tool_calls')
-        and executor._last_tool_calls
-    ):
-        for tc in executor._last_tool_calls:
-            await _send_token(websocket, "tool_call", "", metadata={
-                "tool_name": tc.tool_name,
-                "arguments": tc.arguments,
-                "status": "complete" if tc.success else "error",
-                "result_preview": tc.result[:500] if tc.result else "",
-                "execution_time": tc.execution_time,
-                "success": tc.success,
-                "reasoning": tc.reasoning,
-            })
-
     # Fire post_inference hooks -- plugins can annotate/modify the response
-    # redact_sensitive=True applies per-plugin data redaction
+    # redact_sensitive=True applies per-plugin data redaction. A stopped
+    # partial reply is neither annotated nor extended.
     plugin_annotations: list[dict] = []
-    if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("post_inference"):
+    if (
+        PLUGIN_HOOKS_AVAILABLE
+        and _hook_manager
+        and not turn.stop.is_set()
+        and _hook_manager.has_hooks("post_inference")
+    ):
         try:
             post_report = _hook_manager.execute(
                 "post_inference",
@@ -1051,7 +1171,7 @@ async def _stream_response(
         "conversation_id": conversation_id,
         "model": routing.model,
         "duration_ms": duration_ms,
-        "cancelled": cancel_event.is_set(),
+        "cancelled": turn.stop.is_set(),
         # Routing reason in the done payload as well
         "routing_reason": routing.routing_reason,
     }
@@ -1062,7 +1182,7 @@ async def _stream_response(
             "slow_warnings": _bp_slow_logged,
         }
     # Include vision delegation info in done metadata
-    _final_vision_meta = getattr(executor, 'last_vision_meta', {})
+    _final_vision_meta = turn.results.get("vision_meta") or {}
     if _final_vision_meta.get("delegated"):
         done_metadata["vision_delegation"] = {
             "vision_model": _final_vision_meta.get("vision_model", ""),
@@ -1074,14 +1194,14 @@ async def _stream_response(
     # PIP-06: record which execution pipeline ran, if any
     if _exec_pipeline_obj is not None:
         done_metadata["exec_pipeline"] = _exec_pipeline_obj.id
-    # Add the agentic information
+    # Add the agentic information: this turn's own results
     if use_agentic and _agentic_executor is not None:
-        done_metadata["pipeline"] = _agentic_executor.last_pipeline
-        done_metadata["tool_calls_count"] = len(_agentic_executor.last_tool_calls)
-        done_metadata["verifications_count"] = len(_agentic_executor.last_verification_results)
+        done_metadata["pipeline"] = turn.results.get("pipeline") or PIPELINE_DIRECT
+        done_metadata["tool_calls_count"] = len(turn.results.get("tool_calls") or [])
+        done_metadata["verifications_count"] = len(turn.results.get("verification_results") or [])
         # Add the reasoning information
-        if _agentic_executor.last_reasoning_result is not None:
-            rr = _agentic_executor.last_reasoning_result
+        rr = turn.results.get("reasoning_result")
+        if rr is not None:
             done_metadata["reasoning"] = {
                 "strategy": rr.strategy,
                 "steps_count": len(rr.steps),
@@ -1089,8 +1209,8 @@ async def _stream_response(
                 "total_duration_ms": rr.total_duration_ms,
             }
         # Add the self-correction information
-        if _agentic_executor.last_correction_result is not None:
-            cr = _agentic_executor.last_correction_result
+        cr = turn.results.get("correction_result")
+        if cr is not None:
             done_metadata["correction"] = {
                 "was_corrected": cr.was_corrected,
                 "iterations_performed": cr.iterations_performed,
@@ -1124,7 +1244,6 @@ async def _stream_response(
             logger.warning("Quick sandbox deactivation failed: %s", exc)
     # EX-02: the approval gate was request-scoped (passed into the
     # executor call), so there is no shared singleton attribute to reset here.
-    _cleanup_cancel_event(conversation_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1134,8 +1253,13 @@ async def _stream_response(
 def _build_rich_llm_callback(
     routing,
     conversation_id: str,
+    turn: ChatTurn | None = None,
 ):
     """Build a rich LLM callback that wraps the full chat pipeline.
+
+    With a turn, each executor call carries that turn as its run and the
+    read stops as soon as the turn is stopped; without one, the callback
+    belongs to no turn (the session keeps it as its default).
 
     The returned callback gives the coding agent access to:
     - Vision delegation: images analyzed by vision-capable model
@@ -1226,8 +1350,12 @@ def _build_rich_llm_callback(
                 web_search=False,  # already handled above
                 images=_images,
                 system_prompt_suffix=coding_system,
+                **({"run": turn} if turn is not None else {}),
             )
             for chunk in gen:
+                if turn is not None and turn.stop.is_set():
+                    # A stopped call is never drained.
+                    break
                 if isinstance(chunk, tuple):
                     if chunk[0] == "thinking":
                         result.thinking += chunk[1]
@@ -1283,12 +1411,14 @@ async def _stream_chat_coding(
     request: "ChatRequest",
     routing,
     start_time: float,
+    turn: ChatTurn,
 ) -> None:
     """Execute the chat coding agent and stream CodingEvents via WebSocket.
 
     Replaces the normal generation flow when chat_coding is active.
     The coding agent runs plan -> implement -> test -> fix in its sandbox,
-    with full pipeline capabilities at each LLM call.
+    with full pipeline capabilities at each LLM call. The turn's stop
+    reaches the agent between phases and before each model call.
     """
     import asyncio
 
@@ -1296,17 +1426,23 @@ async def _stream_chat_coding(
         await _send_token(websocket, "error", "Chat coding agent not available")
         return
 
-    # Build the rich LLM callback
+    # The session keeps a callback that belongs to no turn; this turn's
+    # calls go through its own callback, which carries the turn.
+    default_callback = _build_rich_llm_callback(
+        routing=routing,
+        conversation_id=conversation_id,
+    )
     rich_callback = _build_rich_llm_callback(
         routing=routing,
         conversation_id=conversation_id,
+        turn=turn,
     )
 
     # Get or create a coding session for this conversation
     try:
         session = _chat_coding_manager.get_or_create_session(
             conversation_id=conversation_id,
-            llm_call=rich_callback,
+            llm_call=default_callback,
         )
     except RuntimeError as exc:
         await _send_token(websocket, "error", str(exc))
@@ -1340,6 +1476,8 @@ async def _stream_chat_coding(
                 images=request.images if request else None,
                 web_search=bool(request.web_search) if request else False,
                 think=bool(request.think) if request else False,
+                should_stop=turn.stop.is_set,
+                llm_call=rich_callback,
             )
             for event in gen:
                 events.append(event)
@@ -1377,7 +1515,8 @@ async def _stream_chat_coding(
                 full_response_text = event.content
             elif event_type == "coding_error":
                 await _send_token(websocket, "error", event.content)
-                execution_done.wait(timeout=5.0)
+                turn.stop.set()
+                await _await_until(execution_done.is_set, 5.0)
                 return
 
             alive = await _send_token(
@@ -1385,11 +1524,12 @@ async def _stream_chat_coding(
             )
             _last_send_time = time.time()
             if not alive:
-                execution_done.wait(timeout=5.0)
+                turn.stop.set()
+                await _await_until(execution_done.is_set, 5.0)
                 return
 
         if not execution_done.is_set():
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(_ROUTE_POLL_S)
             if time.time() - _last_send_time > 10.0:
                 try:
                     await websocket.send_json({
@@ -1397,9 +1537,11 @@ async def _stream_chat_coding(
                     })
                     _last_send_time = time.time()
                 except Exception:
+                    turn.stop.set()
+                    await _await_until(execution_done.is_set, 5.0)
                     return
 
-    coding_thread.join(timeout=10.0)
+    await _await_until(lambda: not coding_thread.is_alive(), 10.0)
 
     # Send "done" with sandbox metadata
     duration_ms = int((time.time() - start_time) * 1000)
@@ -1409,7 +1551,7 @@ async def _stream_chat_coding(
         "conversation_id": conversation_id,
         "model": routing.model,
         "duration_ms": duration_ms,
-        "cancelled": False,
+        "cancelled": turn.stop.is_set(),
         "routing_reason": routing.routing_reason,
         "chat_coding": True,
         "coding_result": final_result,
@@ -1417,16 +1559,15 @@ async def _stream_chat_coding(
         "sandbox_session_id": session.session_id,
         "sandbox_files": sandbox_files,
         "sandbox_files_created": list(session.sandbox_state.files),
-        "turn_count": session.turn_count,
+        # This turn's own figures, from its coding_done: a later turn of the
+        # conversation may already be running on the session.
+        "turn_count": final_result.get("turn"),
     }
 
-    if hasattr(session, '_last_vision_meta') and session._last_vision_meta:
-        done_metadata["vision_delegation"] = session._last_vision_meta
-    if (
-        hasattr(session, '_last_plugin_annotations')
-        and session._last_plugin_annotations
-    ):
-        done_metadata["plugin_annotations"] = session._last_plugin_annotations
+    if final_result.get("vision_meta"):
+        done_metadata["vision_delegation"] = final_result["vision_meta"]
+    if final_result.get("plugin_annotations"):
+        done_metadata["plugin_annotations"] = final_result["plugin_annotations"]
 
     await _send_token(
         websocket, "done", full_response_text, metadata=done_metadata
@@ -1663,29 +1804,27 @@ async def chat_retry(websocket: WebSocket) -> None:
 
 @router.post("/cancel")
 async def cancel_generation(body: ChatCancelRequest) -> dict:
-    """Annule une generation en cours pour une conversation donnee.
+    """Stop every live reply of one conversation, and nothing else.
 
-    Positionne le flag d'annulation que la boucle de streaming verifie.
+    Sets the stop of each turn of this conversation that is still running;
+    turns of other conversations, and calls that belong to no turn, are not
+    touched. Answers 404 when the conversation has no live turn. A reply is
+    stopped between model calls in the reasoning, consensus, self-correction
+    and tool stages, and between phases of the coding agent.
     """
     conv_id = body.conversation_id
-    with _cancel_lock:
-        event = _cancel_events.get(conv_id)
+    stopped = _stop_conversation_turns(conv_id)
 
-    if event is None:
+    if stopped == 0:
         return JSONResponse(
             status_code=404,
             content={"detail": "No active generation for this conversation"},
         )
 
-    event.set()
-    # Annuler also cote executor (pour interrompre ollama.chat)
-    if EXECUTOR_AVAILABLE and executor is not None:
-        executor.cancel()
-    # Annuler also l'executeur agentique
-    if AGENTIC_EXECUTOR_AVAILABLE and _agentic_executor is not None:
-        _agentic_executor.cancel()
-
-    logger.info(f"Annulation demandee pour conversation {conv_id[:8]}...")
+    logger.info(
+        "Stop requested for conversation %s: %d live turn(s)",
+        conv_id[:8], stopped,
+    )
     return {"status": "cancelled", "conversation_id": conv_id}
 
 

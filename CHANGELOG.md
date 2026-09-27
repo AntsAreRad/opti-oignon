@@ -1554,6 +1554,68 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A chat turn's stop, callbacks and results belonged to the
+  process, not to the turn. The executor kept one stop flag for every call,
+  set by any conversation's Stop and cleared by the next call of any
+  conversation; the agentic executor kept each call's four callbacks on
+  itself; the tool loop kept its direct answer and its native decision in
+  shared slots; and the route built each turn's `done` payload from the
+  singletons' last results. With two turns at once -- a phone and a tab, or
+  two users when single-user mode is off -- one conversation's socket
+  carried another's tool calls, with their arguments and the first 500
+  characters of their results; its `done` carried the other's tool, reasoning
+  and correction figures and vision model; and its reply could be the text of
+  the other's direct answer. A Stop stopped every conversation's reply; a
+  reply started after a Stop cleared it, so the stopped reply's model went on
+  generating, unread, holding its admission ticket; a closed tab was noticed
+  only at the next send or keepalive ping, up to 10 s later, and then held
+  the event loop for up to 5 s, pausing every other stream and request; and
+  a stopped reply read to its end (the coding agent's calls, the first phase
+  of self-correction) was saved, captured into memory and cached. Each chat
+  turn now owns its stop and its results: the route opens a turn per
+  request and hands it to the executor, the agentic executor, the pipeline
+  runner and every stage, the `done` payload and the vision and
+  verification events are read from it, and Stop stops the live turns of
+  its own conversation and nothing else (a turn with no conversation cannot
+  be named; two tabs on one conversation both stop). A closed socket is
+  noticed at once by a reader that only ever receives the disconnect, and
+  stops its own turn; the stream functions no longer wait on a thread while
+  holding the loop (a census of their spelled waits, sleeps and timed
+  queue reads). The executor sees a stop while the model has sent nothing,
+  prefill included, before and after its admission, and before its stream
+  opens; a stopped call is never saved, captured, curated, cached or
+  measured, and leaves exactly one cancelled ledger record, also when its
+  caller closes it. The stop now reaches the reasoning strategies, the
+  consensus wait (no merge follows) and both self-correction phases, the
+  tool loop (its decisions, the tools it salvages from a narrated answer,
+  and its final answer) and the second phase of think+tools, the pipeline
+  runner and code verification, each before its next model call: a call
+  already in flight is not cut short, and whether the model server stops
+  working on it is not yet measured. Tools that ran stay in the
+  conversation's tool history, also when the turn is stopped while its
+  answer streams. The coding agent stops between phases, never writes the
+  files of a stopped call and records the stopped turn with the files it
+  wrote; its model callback is now the turn's, not the first turn's, a
+  second `/code` turn of a conversation waits until the first has ended,
+  and a reply with no conversation no longer runs the coding agent, whose
+  one session, workspace and history every such reply shared. In Bulbe mode
+  a stopped turn's tool approval is withdrawn at once, the audit names
+  `turn_stopped`, not a person, as the resolver, and an approval that lands
+  after the Stop runs nothing. The emergency stop also reaches every live
+  chat turn. Still open, each for its own change: the quick sandbox's mode
+  is process-wide, so it arms tools for every concurrent turn, including
+  turns that did not enable it, and a second turn's tools run in the first
+  turn's workspace, or on the host once the first turn ends; the tool
+  approval queue is one queue for every conversation and user, and the
+  Stop route has no owner check in multi-user mode; a self-correction
+  stopped during its correction keeps its first draft saved, as a finished
+  step of a stopped multi-step pipeline keeps its output; the context
+  statistics are the last call's, whichever conversation it served; a
+  timed-out reply is still saved and cached; and the consensus route and
+  the plugin hooks still run on the event loop. Fourteen contracts, one of
+  which supersedes a contract that stopped the executor through its private
+  flag.
+
 - [SECURITY] The children of a test session reached the maintainer's data,
   and so did the session's own pathlib listings. The data firewall covered
   the test process only: under `strace -f` over a full sweep, 25 child

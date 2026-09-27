@@ -28,6 +28,17 @@ sequenceDiagram
     F->>U: Render markdown
 ```
 
+Each chat turn owns its stop and its results. The route opens a turn per
+request and hands it down: the executor, the agentic executor, the pipeline
+runner and every stage read that turn's stop and write that turn's results,
+and the `done` payload is built from them. No turn reads another turn's
+state from the executors; their `last_*` properties are only the last
+call's figures, for the context and health views, and a direct caller of
+the conversation builder that passes no prompt budget still gets the last
+call's (the executor always passes its own). A stopped call leaves nothing
+saved or cached. Stop ends the live turns of one conversation; a closed
+socket ends its own turn; the emergency stop is the only broadcast.
+
 
 ## Pipeline selection
 

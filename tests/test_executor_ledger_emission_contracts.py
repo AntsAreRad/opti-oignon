@@ -10,7 +10,9 @@ One record per call, whichever exit is taken. A plain completion, a
 cache hit served before generation, an admission refusal, an offline
 enqueue, a mid-stream cancellation, a timeout, a backend error -- each
 path leaves exactly one row, labelled with its outcome, carrying a fresh
-request id and the figures that were on hand at that exit. The token
+request id and the figures that were on hand at that exit. A stop reaches
+the call through the executor's public ``cancel()``, which stops every
+live call of the instance; the call's own run carries the stop it reads. The token
 fields of a single-turn completion are pinned to the arithmetic of the
 estimator fallback, so a drift in what gets measured is a red contract,
 not a quiet skew. The counter's label upgrade is pinned from both sides:
@@ -324,6 +326,28 @@ def test_e6_mid_stream_cancellation_is_one_cancelled_record():
         def side_effect_stream():
             yield {"message": {"content": "Hi"}}
             ex._cancel_event.set()
+            yield {"message": {"content": " more"}}
+            yield {"message": {"content": " again"}}
+
+        scripted.stream_factory = side_effect_stream
+        chunks, (refined, response) = _drive(
+            ex.execute("What is a monoid?", _routing(), refine=False)
+        )
+        assert "[Generation cancelled]" in response
+        assert len(recorder.records) == 1
+        assert recorder.records[0]["outcome"] == "cancelled"
+    finally:
+        restore()
+
+
+def test_e13_a_mid_stream_cancel_is_one_cancelled_record():
+    mod, scripted, recorder, restore = _load()
+    try:
+        ex = mod.Executor()
+
+        def side_effect_stream():
+            yield {"message": {"content": "Hi"}}
+            ex.cancel()
             yield {"message": {"content": " more"}}
             yield {"message": {"content": " again"}}
 

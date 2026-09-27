@@ -255,6 +255,11 @@ Now fully develop this approach into a comprehensive answer. Be thorough and wel
 # MOTEUR DE RAISONNEMENT
 # =============================================================================
 
+def _stop_requested(should_stop: Callable[[], bool] | None) -> bool:
+    """Whether the turn this run belongs to has been stopped."""
+    return should_stop is not None and bool(should_stop())
+
+
 class ReasoningEngine:
     """Moteur de raisonnement multi-strategies.
 
@@ -341,6 +346,15 @@ class ReasoningEngine:
             logger.error(f"LLM call failed ({_model}): {e}")
             raise
 
+    def _finish_stopped(
+        self, result: ReasoningResult, start_time: float, model: str,
+    ) -> ReasoningResult:
+        """Close a run stopped between model calls: what it has, marked."""
+        result.total_duration_ms = int((time.time() - start_time) * 1000)
+        result.metadata = {"model": model, "stopped": True}
+        self._last_result = result
+        return result
+
     def _parse_json_response(self, text: str) -> Any:
         """Parse une reponse JSON du LLM, avec nettoyage.
 
@@ -387,12 +401,15 @@ class ReasoningEngine:
     # Strategie 1: Decompose-and-Solve
     # ----------------------------------------------------------------
 
+    # should_stop is checked before every model call; a stopped run
+    # returns the steps it has, marked metadata["stopped"].
     def decompose_and_solve(
         self,
         question: str,
         model: str | None = None,
         max_steps: int | None = None,
         on_step: Callable | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ReasoningResult:
         """Decompose a request into sub-steps and solve them sequentially.
 
@@ -411,6 +428,8 @@ class ReasoningEngine:
         _max_steps = max_steps or self._config.max_sub_steps
 
         result = ReasoningResult(strategy="decompose")
+        if _stop_requested(should_stop):
+            return self._finish_stopped(result, start_time, _model)
 
         # Phase 1: Decomposition de la question
         decompose_prompt = _DECOMPOSE_PROMPT.format(max_steps=_max_steps)
@@ -440,6 +459,8 @@ class ReasoningEngine:
         # Phase 2: Resoudre each sous-etape
         previous_context = ""
         for i, step_data in enumerate(sub_steps):
+            if _stop_requested(should_stop):
+                return self._finish_stopped(result, start_time, _model)
             step_start = time.time()
             step_title = step_data.get("title", f"Step {i + 1}")
             step_question = step_data.get("question", question)
@@ -492,6 +513,8 @@ class ReasoningEngine:
             original_question=question,
             steps_context=steps_context,
         )
+        if _stop_requested(should_stop):
+            return self._finish_stopped(result, start_time, _model)
 
         try:
             final_answer = self._call_llm(
@@ -530,8 +553,12 @@ class ReasoningEngine:
         model: str | None = None,
         n_branches: int | None = None,
         on_step: Callable | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ReasoningResult:
         """Explore N candidate approaches and select the best.
+
+        ``should_stop`` is checked before every model call; a stopped run
+        returns the steps it has, marked ``metadata["stopped"]``.
 
         Args:
             question: Question a resoudre
@@ -547,6 +574,8 @@ class ReasoningEngine:
         _n_branches = n_branches or self._config.tree_branches
 
         result = ReasoningResult(strategy="tree_of_thought")
+        if _stop_requested(should_stop):
+            return self._finish_stopped(result, start_time, _model)
 
         # Phase 1: Generer les approches
         gen_prompt = _TREE_GENERATE_PROMPT.format(
@@ -591,6 +620,8 @@ class ReasoningEngine:
         # Phase 2: Evaluer each branche
         branches: list[TreeBranch] = []
         for i, bd in enumerate(branches_data):
+            if _stop_requested(should_stop):
+                return self._finish_stopped(result, start_time, _model)
             eval_start = time.time()  # noqa: F841
             approach = bd.get("approach", f"Approach {i + 1}")
 
@@ -645,6 +676,8 @@ class ReasoningEngine:
         # Phase 3: Selectionner la meilleure branche et l'elaborer
         best_branch = max(branches, key=lambda b: b.score) if branches else None
 
+        if best_branch is not None and _stop_requested(should_stop):
+            return self._finish_stopped(result, start_time, _model)
         if best_branch is not None:
             elab_prompt = _TREE_ELABORATE_PROMPT.format(
                 question=question,
@@ -704,12 +737,15 @@ class ReasoningEngine:
     # Strategie 3: Self-Consistency
     # ----------------------------------------------------------------
 
+    # should_stop is checked before every run; a stopped run returns the
+    # runs it has, marked metadata["stopped"].
     def self_consistency(
         self,
         question: str,
         model: str | None = None,
         n_runs: int | None = None,
         on_step: Callable | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ReasoningResult:
         """Execute the same request N times and measure coherence.
 
@@ -734,6 +770,8 @@ class ReasoningEngine:
         variance = self._config.temperature_variance
 
         for i in range(_n_runs):
+            if _stop_requested(should_stop):
+                return self._finish_stopped(result, start_time, _model)
             run_start = time.time()
             # Temperature variee autour de la base
             temp = base_temp + (i - _n_runs // 2) * variance
@@ -854,6 +892,7 @@ class ReasoningEngine:
         strategy: str | None = None,
         model: str | None = None,
         on_step: Callable | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> Generator:
         """Execute reasoning and yield results for streaming.
 
@@ -868,6 +907,9 @@ class ReasoningEngine:
                 or None to use config.default_strategy
             model: Model to use
             on_step: Optional callback for each step
+            should_stop: The turn's stop, checked before every model call.
+                A stopped run yields its steps and ``reasoning_done`` but no
+                final text.
         """
         # Resolve the strategy from config when the caller
         # does not force one, so tree_of_thought / self_consistency are
@@ -888,12 +930,14 @@ class ReasoningEngine:
                 question=question,
                 model=model,
                 on_step=_step_callback,
+                should_stop=should_stop,
             )
         elif _strategy == "self_consistency":
             reasoning_result = self.self_consistency(
                 question=question,
                 model=model,
                 on_step=_step_callback,
+                should_stop=should_stop,
             )
         else:
             # Default: decompose_and_solve
@@ -901,6 +945,7 @@ class ReasoningEngine:
                 question=question,
                 model=model,
                 on_step=_step_callback,
+                should_stop=should_stop,
             )
 
         # Yield les etapes individuelles
@@ -911,7 +956,7 @@ class ReasoningEngine:
         yield ("reasoning_done", reasoning_result)
 
         # Yield la reponse texte pour le streaming normal
-        if reasoning_result.final_answer:
+        if reasoning_result.final_answer and not reasoning_result.metadata.get("stopped"):
             yield reasoning_result.final_answer
 
     # ----------------------------------------------------------------

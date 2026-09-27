@@ -22,6 +22,35 @@ The chat interface supports:
   branch explorer above the thread
 
 
+## Stopping a reply
+
+Stop ends this conversation's reply and nothing else. Replies in other
+conversations, and requests from a paired phone, go on.
+
+- The reply on screen stops at once. The reasoning, consensus,
+  self-correction and tool stages stop before their next model call: a
+  call already in flight in one of those stages is not cut short, and the
+  stop takes effect when it returns. Whether the model server itself stops
+  working on a stopped call is not yet measured.
+- The coding agent stops between phases and never writes files from a
+  stopped reply. A test command already running finishes. The turn is
+  recorded as stopped, with the files it wrote. A new `/code` message in
+  the same conversation waits until the previous one has stopped. A reply
+  that has no conversation does not run the coding agent.
+- In Bulbe mode, a tool waiting for approval is denied and withdrawn from
+  the approval list when its reply is stopped, and an approval given after
+  the Stop does not run the tool.
+- Tools that already ran stay in the conversation's tool history, so the
+  next reply knows what they did.
+- Closing the tab stops the reply as Stop does.
+- A stopped reply is not saved; the page keeps the partial text. Two
+  exceptions remain: in self-correction, the first draft, written before
+  the correction starts and not shown, is saved even when the correction
+  is stopped; in a pipeline of several steps, each step that finished
+  before the Stop keeps its output.
+- The emergency stop still stops everything at once.
+
+
 ## Pipelines
 
 Opti-Oignon routes each query through one of nine pipeline types,

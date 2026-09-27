@@ -526,6 +526,7 @@ class PipelineRunner:
         on_consensus_model: Callable | None = None,
         on_correction_step: Callable | None = None,
         approval_fn: Callable | None = None,
+        run: Any = None,
     ) -> Generator:
         """Run the pipeline step by step.
 
@@ -550,6 +551,10 @@ class PipelineRunner:
             on_correction_step: Callback for corrections
             approval_fn: Per-request tool-approval gate forwarded to the
                 executor at every step
+            run: The turn this run belongs to. Its stop is checked before
+                every step, and the run is handed to each step's call, so a
+                stop reaches the stage in progress. Without a run each step
+                is called exactly as before.
 
         Yields:
             Streaming chunks (str or tuples)
@@ -578,6 +583,11 @@ class PipelineRunner:
                     f"step {step_idx + 1}/{len(pipeline.steps)}"
                 )
                 yield "\n[ERR] Pipeline aborted: emergency stop engaged"
+                return
+
+            # The turn was stopped: no further step starts. The caller
+            # reports the stop.
+            if run is not None and run.stop.is_set():
                 return
 
             # Evaluer la condition de l'etape
@@ -704,6 +714,7 @@ class PipelineRunner:
                     on_correction_step=on_correction_step,
                     # The per-request approval gate holds at every step
                     approval_fn=approval_fn,
+                    **({"run": run} if run is not None else {}),
                 ):
                     # Collecter la sortie texte
                     if isinstance(chunk, str):

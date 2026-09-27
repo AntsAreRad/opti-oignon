@@ -30,6 +30,7 @@ import queue
 import threading
 import time
 import uuid
+import weakref
 from collections.abc import Callable, Generator
 from typing import Any, Optional
 
@@ -756,6 +757,27 @@ Return ONLY the improved question, nothing else."""
 # EXECUTOR CLASS
 # =============================================================================
 
+# How often a waiting call looks at its stop, and how often it yields the
+# empty keepalive while the model has sent nothing. The granularity at
+# which a stop is seen, not a behaviour to tune.
+_STOP_POLL_S = 0.1
+_KEEPALIVE_S = 2.0
+
+# The budget argument's "not given" marker: None is a real value (a call
+# whose own budget is unknown) and must not fall back to another call's.
+_UNSET = object()
+
+
+class _Run:
+    """A call's own stop and results, when the caller brings no run."""
+
+    __slots__ = ("stop", "results")
+
+    def __init__(self) -> None:
+        self.stop = threading.Event()
+        self.results: dict = {}
+
+
 class Executor:
     """
     Execute LLM queries with refinement and streaming.
@@ -770,7 +792,11 @@ class Executor:
 
     def __init__(self):
         """Initialize the executor."""
-        self._cancel_event = threading.Event()
+        # The stop of every live call, so cancel() reaches them all. Only
+        # Events are held, weakly: a call that is dropped leaves the set on
+        # its own, and a turn keeps its Event reachable while it lives.
+        self._live_stops: weakref.WeakSet = weakref.WeakSet()
+        self._live_lock = threading.Lock()
         self._current_task: str | None = None
         self._last_refined_question: str | None = None
         self._last_context_check: ContextCheck | None = None
@@ -1477,6 +1503,7 @@ class Executor:
         current_message: str,
         model: str,
         volatile_block: str | None = None,
+        prompt_budget: Any = _UNSET,
     ) -> tuple[list[dict[str, str]], int, dict[str, Any]]:
         """Build the full messages array with conversation history.
 
@@ -1499,6 +1526,10 @@ class Executor:
             conversation_id: UUID of the conversation
             current_message: Current user message to append
             model: Model name (for token estimation and limits)
+            prompt_budget: The calling request's own prompt budget, None
+                when it has none. ``execute`` always passes it, so a call
+                never compresses on another call's budget. Left out, the
+                budget of the instance's last call is used (direct callers).
 
         Returns:
             Tuple of (messages_list, total_token_estimate, window_stats)
@@ -1592,12 +1623,14 @@ class Executor:
         # The full archive in SQLite is never modified; compression only
         # affects what goes into the prompt.
         self._last_compression_result = None
+        if prompt_budget is _UNSET:
+            prompt_budget = self._last_prompt_budget
         if (
             self.compression_enabled
             and history
-            and self._last_prompt_budget is not None
+            and prompt_budget is not None
         ):
-            budget_history_tokens = self._last_prompt_budget.history_tokens
+            budget_history_tokens = prompt_budget.history_tokens
             if history_tokens > budget_history_tokens:
                 try:
                     compressed = _conversation_compressor.compress(
@@ -1771,6 +1804,7 @@ class Executor:
         no_cache: bool = False,
         persist: bool = True,
         capability_block: str | None = None,
+        run: Any = None,
     ) -> Generator[str, None, tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -1801,6 +1835,15 @@ class Executor:
                 which appends a tool-output block after this call) pass False
                 to avoid a duplicated user message and a truncated assistant
                 message.
+            run: The turn this call belongs to: any object with ``stop`` (a
+                ``threading.Event``) and ``results`` (a dict). The chat route
+                passes its turn and the agentic executor its own; the call
+                stops when that stop is set and writes its per-call results
+                (``vision_meta``, ``verification_results``) into that dict.
+                With no run the call owns a private one. ``cancel()`` is the
+                emergency broadcast that sets the stop of every live call.
+                A stopped call saves, captures, caches and records nothing,
+                even when its caller reads it to the end.
 
         Yields:
             Response chunks in streaming. When think=True, thinking chunks
@@ -1813,7 +1856,10 @@ class Executor:
             The return value is also stored in self.last_refined_question
             for easy retrieval after iteration completes.
         """
-        self._cancel_event.clear()
+        _call_run = run if run is not None else _Run()
+        stop, _run_results = _call_run.stop, _call_run.results
+        with self._live_lock:
+            self._live_stops.add(stop)
         self._current_task = routing.task_type
         self._last_context_check = None
         self._last_compression_result = None  # reset per-call
@@ -1829,11 +1875,16 @@ class Executor:
             "caller": "chat",
         }
 
+        # One record per call: a call closed by its caller after a stop
+        # emits from the close, and must not emit a second time.
+        _ledger_sent = [False]
+
         def _emit_ledger(outcome: str, **extra) -> None:
             fields = dict(_ledger_base)
             fields["outcome"] = outcome
             fields["duration_ms"] = (time.time() - _ledger_t0) * 1000.0
             fields.update(extra)
+            _ledger_sent[0] = True
             _ledger_record(fields)
 
         def status(msg: str) -> None:
@@ -1937,6 +1988,7 @@ class Executor:
                     on_status=on_status,
                 )
                 self._last_vision_meta = _vision_meta
+                _run_results["vision_meta"] = _vision_meta
             except Exception as exc:
                 logger.warning("Vision delegation failed: %s", exc)
                 # Continue with original question and images on failure
@@ -1969,15 +2021,16 @@ class Executor:
         # Store refined question in instance for later retrieval
         self._last_refined_question = refined_question
 
-        if self._cancel_event.is_set():
-            yield "[Cancelled]"
+        if stop.is_set():
             _emit_ledger("cancelled")
+            yield "[Cancelled]"
             return refined_question, "[Cancelled]"
 
         # Step 2: Get system prompt
         # Use prompt template engine when available and enabled
         _template_temp_override = None
         self._last_prompt_budget = None
+        _turn_budget = None
         _active_project_id = None  # always initialize for optimizer access
 
         if (
@@ -2014,19 +2067,20 @@ class Executor:
                 _template_temp_override = template.temperature_override
 
             # Calculate token budget
-            self._last_prompt_budget = _prompt_budget_manager.calculate_budget(
+            _turn_budget = _prompt_budget_manager.calculate_budget(
                 model=routing.model,
                 project_active=_active_project_id is not None,
             )
+            self._last_prompt_budget = _turn_budget
 
             logger.debug(
                 f"template='{template.task_type}' source={template.source}, "
-                f"budget={self._last_prompt_budget.total_window}t "
-                f"(sys={self._last_prompt_budget.system_tokens}/"
-                f"proj={self._last_prompt_budget.project_tokens}/"
-                f"hist={self._last_prompt_budget.history_tokens}/"
-                f"user={self._last_prompt_budget.user_tokens}/"
-                f"res={self._last_prompt_budget.reserve_tokens})"
+                f"budget={_turn_budget.total_window}t "
+                f"(sys={_turn_budget.system_tokens}/"
+                f"proj={_turn_budget.project_tokens}/"
+                f"hist={_turn_budget.history_tokens}/"
+                f"user={_turn_budget.user_tokens}/"
+                f"res={_turn_budget.reserve_tokens})"
             )
         else:
             # Fallback: use original hardcoded prompt system
@@ -2268,6 +2322,10 @@ class Executor:
         # fallback paths rebind exactly once.
         _volatile_tail = "".join(_volatile_parts)
         _identity_from_optimizer = False
+        # This call's own window figures, for its ledger row: the instance
+        # mirrors below are the last call's, which may be another turn's.
+        _turn_window_stats: dict = {}
+        _turn_opt_report = None
 
         if use_conversation:
             # Use context optimizer when active (replaces manual pipeline)
@@ -2302,6 +2360,7 @@ class Executor:
                     messages = opt_result.messages
                     context_tokens = opt_result.total_tokens
                     self._last_optimization_report = opt_result.report
+                    _turn_opt_report = opt_result.report
                     system_prompt = opt_result.system_prompt
                     _identity_from_optimizer = True
 
@@ -2317,6 +2376,7 @@ class Executor:
                         "duration_ms": rpt.duration_ms,
                     }
                     self._last_window_stats = window_stats
+                    _turn_window_stats = window_stats
 
                     status(
                         f"[>] Optimizer: {len(messages)-2} messages, "
@@ -2338,8 +2398,10 @@ class Executor:
                         volatile_block=(
                             _volatile_tail if _stable_prefix_active else None
                         ),
+                        prompt_budget=_turn_budget,
                     )
                     self._last_window_stats = window_stats
+                    _turn_window_stats = window_stats
             else:
                 messages, context_tokens, window_stats = self._build_conversation_messages(
                     system_prompt=system_prompt,
@@ -2349,9 +2411,11 @@ class Executor:
                     volatile_block=(
                         _volatile_tail if _stable_prefix_active else None
                     ),
+                    prompt_budget=_turn_budget,
                 )
                 # Store the stats for external access (context bar UI)
                 self._last_window_stats = window_stats
+                _turn_window_stats = window_stats
 
             # Multi-turn status with trimming info (A3)
             if not _s123_optimizer_active:
@@ -2374,6 +2438,7 @@ class Executor:
                 messages.append({"role": "system", "content": _volatile_tail})
             messages.append({"role": "user", "content": user_content})
             self._last_window_stats = {}
+            _turn_window_stats = {}
 
         # From here on, ``system_prompt`` is the identity view again: the
         # head plus the relocated tail, byte-equal to the historical
@@ -2391,12 +2456,12 @@ class Executor:
         _ledger_tokens: dict = {"token_method": "estimated"}
         try:
             if use_conversation:
-                _ws = self._last_window_stats or {}
+                _ws = _turn_window_stats or {}
                 if (
                     _ws.get("preset") is not None
-                    and self._last_optimization_report is not None
+                    and _turn_opt_report is not None
                 ):
-                    _rpt = self._last_optimization_report
+                    _rpt = _turn_opt_report
                     _by_zone = {z.zone: z.actual_tokens for z in _rpt.zones}
                     _ledger_tokens.update(
                         tokens_system=_by_zone.get("system"),
@@ -2565,6 +2630,15 @@ class Executor:
 
         # Step 4: Execute with streaming (with keepalive for Gradio)
 
+        # A stop that arrived during retrieval, compression, a web search or
+        # the cache lookup ends the call here: nothing is queued offline, no
+        # stream is opened and no admission ticket is taken.
+        if stop.is_set():
+            self._current_task = None
+            _emit_ledger("cancelled", **_ledger_tokens)
+            yield "[Cancelled]"
+            return refined_question, "[Cancelled]"
+
         # Offline check -- if Ollama is unreachable, enqueue for later
         if (
             NETWORK_MANAGER_AVAILABLE
@@ -2654,6 +2728,14 @@ class Executor:
             )
             return refined_question, refusal_msg
 
+        # A stop that arrived during the admission (a snapshot of the loaded
+        # models, an eviction perhaps) ends the call before any stream opens.
+        if stop.is_set():
+            self._current_task = None
+            _emit_ledger("cancelled", **_ledger_tokens)
+            yield "[Cancelled]"
+            return refined_question, "[Cancelled]"
+
         full_response = ""
         start_time = time.time()
 
@@ -2741,6 +2823,11 @@ class Executor:
                             logger.debug(
                                 f"slot affinity unavailable this turn: {_slot_exc}"
                             )
+                    # A stop seen here, before the stream opens, costs no
+                    # prefill: the finally below still releases the ticket.
+                    if stop.is_set():
+                        chunk_queue.put(("cancel", None))
+                        return
                     stream_iter = backend.stream(
                         model=routing.model,
                         messages=messages,
@@ -2751,7 +2838,7 @@ class Executor:
                     )
 
                     for chunk in stream_iter:
-                        if self._cancel_event.is_set():
+                        if stop.is_set():
                             chunk_queue.put(("cancel", None))
                             break
 
@@ -2786,58 +2873,82 @@ class Executor:
         stream_thread_obj = threading.Thread(target=stream_thread, daemon=True)
         stream_thread_obj.start()
 
-        # Process chunks with keepalive
-        last_yield_time = time.time()
+        # Process chunks with keepalive. The queue is polled at the stop's
+        # granularity, so a stop is seen while the model has sent nothing
+        # (during prefill too), not only when a chunk arrives.
+        _last_keepalive = time.time()
         thinking_buffer = ""
         _ledger_outcome = "completed"
-        while True:
-            try:
-                # Wait for chunk with timeout (keeps Gradio connection alive)
-                event_type, content = chunk_queue.get(timeout=2.0)
+        try:
+            while True:
+                try:
+                    event_type, content = chunk_queue.get(timeout=_STOP_POLL_S)
 
-                if event_type == "done":
-                    break
-                elif event_type == "thinking":
-                    # Emit the thinking content as a tuple
-                    thinking_buffer += content
-                    yield ("thinking", content)
-                    last_yield_time = time.time()
-                elif event_type == "chunk":
-                    full_response += content
-                    yield content
-                    last_yield_time = time.time()  # noqa: F841
-                elif event_type == "cancel":
-                    full_response += "\n\n[Generation cancelled]"
-                    yield "\n\n[Generation cancelled]"
-                    _ledger_outcome = "cancelled"
-                    break
-                elif event_type == "timeout":
-                    full_response += "\n\n[Timeout reached]"
-                    yield "\n\n[Timeout reached]"
-                    _ledger_outcome = "timeout"
-                    break
+                    if event_type == "done":
+                        break
+                    elif event_type == "thinking":
+                        # Emit the thinking content as a tuple
+                        thinking_buffer += content
+                        yield ("thinking", content)
+                    elif event_type == "chunk":
+                        full_response += content
+                        yield content
+                    elif event_type == "cancel":
+                        _ledger_outcome = "cancelled"
+                        full_response += "\n\n[Generation cancelled]"
+                        yield "\n\n[Generation cancelled]"
+                        break
+                    elif event_type == "timeout":
+                        _ledger_outcome = "timeout"
+                        full_response += "\n\n[Timeout reached]"
+                        yield "\n\n[Timeout reached]"
+                        break
 
-            except queue.Empty:
-                # No chunk received, yield keepalive to prevent Gradio timeout
-                elapsed = time.time() - start_time
-                # Yield empty string to keep connection alive (invisible to user)
-                # But log progress for debugging
-                logger.debug(f"Keepalive: waiting for model response... ({elapsed:.0f}s)")
-                # Don't yield visible text, just keep the generator active
-                yield ""
+                except queue.Empty:
+                    if stop.is_set():
+                        _ledger_outcome = "cancelled"
+                        full_response += "\n\n[Generation cancelled]"
+                        yield "\n\n[Generation cancelled]"
+                        break
+                    # No chunk received: every _KEEPALIVE_S, yield an empty
+                    # string to keep the connection alive (invisible to the
+                    # user), and log progress for debugging.
+                    if time.time() - _last_keepalive >= _KEEPALIVE_S:
+                        _last_keepalive = time.time()
+                        elapsed = time.time() - start_time
+                        logger.debug(f"Keepalive: waiting for model response... ({elapsed:.0f}s)")
+                        yield ""
+        except GeneratorExit:
+            # The caller closed the call. After a stop it leaves exactly one
+            # cancelled record; closed without a stop it leaves none.
+            if stop.is_set() and not _ledger_sent[0]:
+                _emit_ledger("cancelled", **_ledger_tokens)
+            raise
 
-        # Wait for thread to finish
-        stream_thread_obj.join(timeout=5.0)
+        # A stopped call does not wait for the model: its producer sees the
+        # stop at its next chunk and releases the stream and the admission
+        # ticket on its own. Its error, if it raises one after the stop, is
+        # not this call's to report.
+        if _ledger_outcome == "cancelled":
+            _thread_error = None
+        else:
+            stream_thread_obj.join(timeout=5.0)
+            _thread_error = thread_result["error"]
 
         # Check for thread errors
-        if thread_result["error"]:
-            error_msg = f"\n\n[ERR] Error: {thread_result['error']}"
+        if _thread_error:
+            error_msg = f"\n\n[ERR] Error: {_thread_error}"
             full_response += error_msg
             yield error_msg
-            status(f"[ERR] Error: {thread_result['error']}")
+            status(f"[ERR] Error: {_thread_error}")
         else:
             elapsed = time.time() - start_time
             status(f"[OK] Completed in {elapsed:.1f}s")
+
+        # A cancelled call leaves no answer behind: nothing measured, saved,
+        # captured, curated or cached, even when its caller reads it to the
+        # end. A timed-out reply keeps the historical behaviour.
+        _answered = _ledger_outcome != "cancelled"
 
         # Record performance metrics (non-blocking)
         if (
@@ -2845,7 +2956,8 @@ class Executor:
             and _performance_monitor is not None
             and _performance_monitor.enabled
             and full_response
-            and not thread_result["error"]
+            and not _thread_error
+            and _answered
         ):
             try:
                 # Estimate token counts from text lengths (chars / 4)
@@ -2865,7 +2977,7 @@ class Executor:
 
         # Step 5: Multi-turn save (NEW: v1.3.0)
         # Save messages to conversation after full reception
-        if use_conversation and persist and full_response and not thread_result["error"]:
+        if use_conversation and persist and full_response and not _thread_error and _answered:
             try:
                 conversation_manager.add_message(
                     conversation_id, "user", user_content
@@ -2914,7 +3026,8 @@ class Executor:
         if (
             cache_key
             and full_response
-            and not thread_result["error"]
+            and not _thread_error
+            and _answered
             and RESPONSE_CACHE_AVAILABLE
             and _response_cache is not None
             and _response_cache.enabled
@@ -2955,7 +3068,8 @@ class Executor:
         if (
             not no_cache
             and full_response
-            and not thread_result["error"]
+            and not _thread_error
+            and _answered
             and not use_conversation
             and SEMANTIC_CACHE_AVAILABLE
             and _semantic_cache is not None
@@ -2981,6 +3095,7 @@ class Executor:
         # SECURITY: Skip when sandbox mode is active to prevent
         # LLM-generated code from being auto-executed on the host.
         self._last_verification_results = []
+        _run_results["verification_results"] = []
         _sandbox_mode_active = False
         try:
             from .tool_registry import tool_registry as _tr
@@ -2997,8 +3112,9 @@ class Executor:
             and _verification_engine is not None
             and _verification_engine.available
             and full_response
-            and not thread_result["error"]
-            and not self._cancel_event.is_set()
+            and not _thread_error
+            and _answered
+            and not stop.is_set()
             and not _sandbox_mode_active
         ):
             try:
@@ -3011,6 +3127,7 @@ class Executor:
                 )
                 if vresults:
                     self._last_verification_results = vresults
+                    _run_results["verification_results"] = vresults
                     # Log the result
                     for vr in vresults:
                         logger.info(
@@ -3036,10 +3153,10 @@ class Executor:
             except Exception as _count_err:
                 logger.debug("Exact count at completion skipped: %s", _count_err)
         _emit_ledger(
-            "error" if thread_result["error"] else _ledger_outcome,
+            "error" if _thread_error else _ledger_outcome,
             **_ledger_final,
             cache_stored=bool(
-                cache_key and full_response and not thread_result["error"]
+                cache_key and full_response and not _thread_error and _answered
             ),
             retrieval_count=_ledger_retrieval_count,
             retrieval_top_score=_ledger_retrieval_top,
@@ -3436,17 +3553,20 @@ class Executor:
     # -------------------------------------------------------------------------
 
     def cancel(self) -> None:
-        """Cancel current generation."""
-        self._cancel_event.set()
-        logger.info("Cancellation requested")
+        """Stop every live call of this executor: the emergency broadcast.
 
-    def is_cancelled(self) -> bool:
-        """Check if cancellation was requested."""
-        return self._cancel_event.is_set()
+        A turn stops through its own run (``execute(..., run=...)``); this
+        reaches every call at once, whoever it belongs to, and is what the
+        emergency stop calls.
+        """
+        with self._live_lock:
+            stops = list(self._live_stops)
+        for stop in stops:
+            stop.set()
+        logger.info("Cancellation requested for %d live call(s)", len(stops))
 
     def reset(self) -> None:
-        """Reset executor state."""
-        self._cancel_event.clear()
+        """Reset the last call's mirrors; no call's stop is touched."""
         self._current_task = None
         self._last_refined_question = None
         self._last_context_check = None

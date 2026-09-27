@@ -18,7 +18,7 @@ Author: Leon
 import logging
 import time
 from collections.abc import Callable, Generator
-from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,6 +48,9 @@ def _resolve_backend(model: str):
         return get_backend_registry().resolve_backend(model)
     except Exception:  # noqa: BLE001 - a broken registry is absence
         return None
+
+# How often a parallel query looks at its turn's stop while it waits.
+_STOP_POLL_S = 0.1
 
 # Conditional import of model profiles
 try:
@@ -348,6 +351,7 @@ class ConsensusEngine:
         models: list[str] | None = None,
         temperature: float | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[ModelResponse]:
         """Query several models in parallel via threading.
 
@@ -356,6 +360,10 @@ class ConsensusEngine:
             models: Liste de models (default: config.default_models)
             temperature: Temperature (default: config.temperature)
             on_model_done: Callback called when a model finishes
+            should_stop: The turn's stop. Checked while the query waits: a
+                stopped query stops waiting and returns the responses it
+                has. The model calls still in flight finish on their own
+                threads and their answers are discarded.
 
         Returns:
             List of each model's responses
@@ -368,40 +376,65 @@ class ConsensusEngine:
 
         responses: list[ModelResponse] = []
 
-        with ThreadPoolExecutor(max_workers=len(_models)) as pool:
+        pool = ThreadPoolExecutor(max_workers=len(_models))
+        shut = False
+        try:
             futures = {
                 pool.submit(self._query_model, m, messages, _temp): m
                 for m in _models
             }
+            pending = set(futures)
+            deadline = time.monotonic() + self._config.timeout_per_model + 10
 
-            for future in as_completed(futures, timeout=self._config.timeout_per_model + 10):
-                model_name = futures[future]
-                try:
-                    resp = future.result(timeout=self._config.timeout_per_model)
-                    responses.append(resp)
-                    if on_model_done:
-                        try:
-                            on_model_done(resp)
-                        except Exception:
-                            pass
-                except TimeoutError:
-                    logger.warning(f"Timeout for model {model_name}")
-                    responses.append(ModelResponse(
-                        model=model_name,
-                        content="",
-                        success=False,
-                        error="timeout",
-                    ))
-                except Exception as e:
-                    logger.warning(f"Future error {model_name}: {e}")
-                    responses.append(ModelResponse(
-                        model=model_name,
-                        content="",
-                        success=False,
-                        error=str(e),
-                    ))
+            while pending:
+                if should_stop is not None and should_stop():
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    shut = True
+                    return responses
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    pool.shutdown(wait=True)
+                    shut = True
+                    raise TimeoutError(
+                        f"{len(pending)} (of {len(futures)}) futures unfinished"
+                    )
+                done, pending = wait(
+                    pending, timeout=min(remaining, _STOP_POLL_S),
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    model_name = futures[future]
+                    try:
+                        resp = future.result(timeout=self._config.timeout_per_model)
+                        responses.append(resp)
+                        if on_model_done:
+                            try:
+                                on_model_done(resp)
+                            except Exception:
+                                pass
+                    except TimeoutError:
+                        logger.warning(f"Timeout for model {model_name}")
+                        responses.append(ModelResponse(
+                            model=model_name,
+                            content="",
+                            success=False,
+                            error="timeout",
+                        ))
+                    except Exception as e:
+                        logger.warning(f"Future error {model_name}: {e}")
+                        responses.append(ModelResponse(
+                            model=model_name,
+                            content="",
+                            success=False,
+                            error=str(e),
+                        ))
 
-        return responses
+            pool.shutdown(wait=True)
+            shut = True
+            return responses
+        finally:
+            if not shut:
+                pool.shutdown(wait=False, cancel_futures=True)
 
     # ----------------------------------------------------------------
     # Comparison of the responses
@@ -680,6 +713,7 @@ class ConsensusEngine:
         system_prompt: str | None = None,
         temperature: float | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ConsensusResult:
         """Execute the full multi-model consensus.
 
@@ -694,6 +728,10 @@ class ConsensusEngine:
             system_prompt: Optional system prompt
             temperature: Temperature (default: config.temperature)
             on_model_done: Callback when a model finishes
+            should_stop: The turn's stop. A consensus stopped during its
+                query runs no strategy and no merge: the result carries the
+                responses it has, their comparison, an empty selection and
+                ``metadata["stopped"]``.
 
         Returns:
             ConsensusResult complet
@@ -715,10 +753,27 @@ class ConsensusEngine:
             models=models,
             temperature=temperature,
             on_model_done=on_model_done,
+            should_stop=should_stop,
         )
 
         # 2) Compare the responses
         comparison = self.compare_responses(responses)
+
+        if should_stop is not None and should_stop():
+            result = ConsensusResult(
+                strategy=_strategy,
+                individual_responses=responses,
+                comparison=comparison,
+                total_duration_ms=int((time.time() - start_time) * 1000),
+                metadata={
+                    "models_queried": [r.model for r in responses],
+                    "average_agreement": comparison.average_agreement,
+                    "strategy_used": _strategy,
+                    "stopped": True,
+                },
+            )
+            self._last_result = result
+            return result
 
         # 3) Apply the strategy
         if _strategy == STRATEGY_WEIGHTED_VOTE:
@@ -767,6 +822,7 @@ class ConsensusEngine:
         strategy: str | None = None,
         system_prompt: str | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> Generator:
         """Execute consensus and yield results for streaming.
 
@@ -781,6 +837,8 @@ class ConsensusEngine:
             strategy: Consensus strategy
             system_prompt: Optional system prompt
             on_model_done: Callback additionnel
+            should_stop: The turn's stop; a stopped consensus yields its
+                responses and ``consensus_done`` but no text.
 
         Yields:
             Chunks de streaming
@@ -798,6 +856,7 @@ class ConsensusEngine:
             strategy=strategy,
             system_prompt=system_prompt,
             on_model_done=_model_callback,
+            should_stop=should_stop,
         )
 
         # Yield each model response
@@ -808,7 +867,7 @@ class ConsensusEngine:
         yield ("consensus_done", result)
 
         # Yield the selected response as tokens
-        if result.selected_response:
+        if result.selected_response and not result.metadata.get("stopped"):
             yield result.selected_response
 
     # ----------------------------------------------------------------

@@ -759,6 +759,10 @@ class SelfCorrectionEngine:
     # Boucle d'auto-correction
     # -----------------------------------------------------------------
 
+    # should_stop is the turn's stop, checked before each model check and at
+    # the top of each correction iteration. A stopped run makes no further
+    # model call and returns the best response so far, with the scores
+    # measured so far.
     def correct(
         self,
         user_message: str,
@@ -766,6 +770,7 @@ class SelfCorrectionEngine:
         model: str | None = None,
         use_llm: bool = True,
         max_iterations: int | None = None,
+        should_stop=None,
     ) -> SelfCorrectionResult:
         """Execute le processus complet d'auto-correction.
 
@@ -792,18 +797,28 @@ class SelfCorrectionEngine:
         fact_result = None
         quality_result = None
 
+        def _stopped() -> bool:
+            return should_stop is not None and bool(should_stop())
+
+        stopped = False
         if self._config.check_instructions:
-            compliance_result = self.check_compliance(
-                user_message, response, _model, use_llm=use_llm,
-            )
+            stopped = _stopped()
+            if not stopped:
+                compliance_result = self.check_compliance(
+                    user_message, response, _model, use_llm=use_llm,
+                )
 
-        if self._config.check_facts and use_llm:
-            fact_result = self.check_facts(response, model=_model)
+        if not stopped and self._config.check_facts and use_llm:
+            stopped = _stopped()
+            if not stopped:
+                fact_result = self.check_facts(response, model=_model)
 
-        if self._config.check_quality:
-            quality_result = self.check_quality(
-                user_message, response, use_llm=use_llm, model=_model,
-            )
+        if not stopped and self._config.check_quality:
+            stopped = _stopped()
+            if not stopped:
+                quality_result = self.check_quality(
+                    user_message, response, use_llm=use_llm, model=_model,
+                )
 
         compliance_score = compliance_result.score if compliance_result else 1.0
         quality_score = quality_result.overall_score if quality_result else 1.0
@@ -814,7 +829,7 @@ class SelfCorrectionEngine:
             or quality_score < self._config.quality_threshold
         )
 
-        if not needs_correction or not use_llm or self._backend_for(None) is None:
+        if stopped or not needs_correction or not use_llm or self._backend_for(None) is None:
             duration = int((time.time() - start_time) * 1000)
             return SelfCorrectionResult(
                 original_response=response,
@@ -839,6 +854,8 @@ class SelfCorrectionEngine:
         best_score = (compliance_score + quality_score) / 2
 
         for i in range(1, _max_iter + 1):
+            if _stopped():
+                break
             iter_start = time.time()
 
             # Generer la correction
@@ -922,11 +939,13 @@ class SelfCorrectionEngine:
             model_used=_model,
         )
 
+    # should_stop is the turn's stop, handed to correct().
     def execute_self_correction(
         self,
         user_message: str,
         response: str,
         model: str | None = None,
+        should_stop=None,
     ) -> Generator:
         """Execute l'auto-correction en mode streaming.
 
@@ -948,6 +967,7 @@ class SelfCorrectionEngine:
             response=response,
             model=model,
             use_llm=True,
+            should_stop=should_stop,
         )
 
         # Emettre les etapes de correction

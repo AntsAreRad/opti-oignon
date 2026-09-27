@@ -37,7 +37,9 @@ Author: Leon
 
 import logging
 import os
+import threading
 import time
+import weakref
 from collections.abc import Callable, Generator
 from typing import Any
 
@@ -575,6 +577,74 @@ def _ensure_tool_capable_model(model, routing):
 # AGENTIC EXECUTOR
 # =============================================================================
 
+class _Turn:
+    """One execute() call: its stop, its results and its hooks.
+
+    Built from the caller's run when it brings one (its ``stop`` when that
+    is a ``threading.Event``, its ``results`` when that is a dict), fresh
+    otherwise. It satisfies the executor's run protocol, so the executor's
+    stop is the turn's and its per-call results land in the turn's dict.
+    Nothing of a turn is ever stored on the shared instance.
+    """
+
+    __slots__ = ("stop", "results", "on_tool_call", "on_reasoning_step",
+                 "on_consensus_model", "on_correction_step")
+
+    def __init__(
+        self,
+        run=None,
+        *,
+        on_tool_call: Callable | None = None,
+        on_reasoning_step: Callable | None = None,
+        on_consensus_model: Callable | None = None,
+        on_correction_step: Callable | None = None,
+    ) -> None:
+        stop = getattr(run, "stop", None)
+        results = getattr(run, "results", None)
+        self.stop = stop if isinstance(stop, threading.Event) else threading.Event()
+        self.results = results if isinstance(results, dict) else {}
+        self.on_tool_call = on_tool_call
+        self.on_reasoning_step = on_reasoning_step
+        self.on_consensus_model = on_consensus_model
+        self.on_correction_step = on_correction_step
+
+    def stopped(self) -> bool:
+        """Whether this turn has been stopped."""
+        return self.stop.is_set()
+
+    def emit_tool_call(self, tool_call_result) -> None:
+        """Signal a tool call to this turn's hook; its errors never propagate."""
+        if self.on_tool_call is not None:
+            try:
+                self.on_tool_call(tool_call_result)
+            except Exception as e:
+                logger.warning(f"tool_call callback error: {e}")
+
+    def emit_reasoning_step(self, step) -> None:
+        """Signal a reasoning step to this turn's hook."""
+        if self.on_reasoning_step is not None:
+            try:
+                self.on_reasoning_step(step)
+            except Exception as e:
+                logger.debug(f"reasoning_step callback failed: {e}")
+
+    def emit_consensus_model(self, model_resp) -> None:
+        """Signal one consensus model's response to this turn's hook."""
+        if self.on_consensus_model is not None:
+            try:
+                self.on_consensus_model(model_resp)
+            except Exception as e:
+                logger.debug(f"consensus_model callback failed: {e}")
+
+    def emit_correction_step(self, step_info) -> None:
+        """Signal a self-correction step to this turn's hook."""
+        if self.on_correction_step is not None:
+            try:
+                self.on_correction_step(step_info)
+            except Exception as e:
+                logger.debug(f"correction_step callback failed: {e}")
+
+
 class AgenticExecutor:
     """Unified agentic executor.
 
@@ -656,10 +726,18 @@ class AgenticExecutor:
         self._tool_call_history: dict[str, list] = {}
         self._max_history_per_conversation: int = 20
 
-        # Callback for real-time events (tool calls, etc.)
+        # Default hooks, used only by an internal pipeline called without a
+        # turn (tests call them directly). execute() never stores a hook
+        # here: each call's hooks travel on its own turn.
         self._on_tool_call: Callable | None = None
-        # Callback for the reasoning steps
         self._on_reasoning_step: Callable | None = None
+        self._on_consensus_model: Callable | None = None
+        self._on_correction_step: Callable | None = None
+
+        # The stop of every live call, so cancel() reaches them all. Only
+        # the Events are held, weakly: a turn keeps its own reachable.
+        self._live_stops: weakref.WeakSet = weakref.WeakSet()
+        self._live_lock = threading.Lock()
 
     # -----------------------------------------------------------------
     # Public properties
@@ -1066,6 +1144,7 @@ class AgenticExecutor:
         use_llm_analysis: bool = False,
         approval_fn: Callable[[str, dict], bool] | None = None,
         optimize: bool | None = None,
+        run=None,
     ) -> Generator:
         """Execute with intelligent pipeline selection.
 
@@ -1108,11 +1187,25 @@ class AgenticExecutor:
                 Bound to this call rather than to a shared
                 singleton attribute, so concurrent Bulbe sessions cannot
                 clobber or drop each other's gate.
+            run: The turn this call belongs to (the chat route's turn, or
+                the pipeline runner's): its ``stop`` stops every stage of
+                this call and its ``results`` dict receives this call's
+                results. With no run the call owns a private one. The
+                hooks above belong to this call alone.
 
         Yields:
             Response chunks (str or tuples)
         """
         start_time = time.time()
+        turn = _Turn(
+            run,
+            on_tool_call=on_tool_call,
+            on_reasoning_step=on_reasoning_step,
+            on_consensus_model=on_consensus_model,
+            on_correction_step=on_correction_step,
+        )
+        with self._live_lock:
+            self._live_stops.add(turn.stop)
 
         # Reset the results of the last execution
         self._last_tool_calls = []
@@ -1129,10 +1222,18 @@ class AgenticExecutor:
         self._last_cascade_result = None
         # Last speculative result
         self._last_speculative_result = None
-        self._on_tool_call = on_tool_call
-        self._on_reasoning_step = on_reasoning_step
-        self._on_consensus_model = on_consensus_model
-        self._on_correction_step = on_correction_step
+        # This call's own results, the ones its caller reads.
+        turn.results.update(
+            pipeline=PIPELINE_DIRECT,
+            tool_calls=[],
+            verification_hints=0,
+            verification_results=[],
+            reasoning_result=None,
+            consensus_result=None,
+            correction_result=None,
+            cascade_result=None,
+            speculative_result=None,
+        )
 
         # Check the base executor is available
         if self._executor is None:
@@ -1143,9 +1244,11 @@ class AgenticExecutor:
         # speculative pipeline directly (mutually exclusive with cascading)
         if speculative is True and self.speculative_available:
             self._last_pipeline = PIPELINE_SPECULATIVE
+            turn.results["pipeline"] = PIPELINE_SPECULATIVE
             logger.info("AgenticExecutor: explicit speculative, pipeline=speculative")
             yield from self._execute_speculative_pipeline(
                 message, routing, conversation_id, on_status,
+                turn=turn,
             )
             duration = time.time() - start_time
             logger.info(
@@ -1158,9 +1261,11 @@ class AgenticExecutor:
         # the cascading pipeline directly
         if cascading is True and self.cascading_available:
             self._last_pipeline = PIPELINE_CASCADING
+            turn.results["pipeline"] = PIPELINE_CASCADING
             logger.info("AgenticExecutor: explicit cascading, pipeline=cascading")
             yield from self._execute_cascading_pipeline(
                 message, routing, conversation_id, on_status,
+                turn=turn,
             )
             duration = time.time() - start_time
             logger.info(
@@ -1173,9 +1278,11 @@ class AgenticExecutor:
         # the self_correct pipeline directly
         if self_correct is True and self.self_correction_available:
             self._last_pipeline = PIPELINE_SELF_CORRECT
+            turn.results["pipeline"] = PIPELINE_SELF_CORRECT
             logger.info("AgenticExecutor: explicit self_correct, pipeline=self_correct")
             yield from self._execute_self_correct_pipeline(
                 message, routing, conversation_id, on_status,
+                turn=turn,
             )
             duration = time.time() - start_time
             logger.info(
@@ -1188,11 +1295,13 @@ class AgenticExecutor:
         # the consensus pipeline directly without classification
         if consensus is True and self.consensus_available:
             self._last_pipeline = PIPELINE_CONSENSUS
+            turn.results["pipeline"] = PIPELINE_CONSENSUS
             logger.info("AgenticExecutor: explicit consensus, pipeline=consensus")
             yield from self._execute_consensus_pipeline(
                 message, routing, conversation_id, on_status,
                 models=consensus_models,
                 strategy=consensus_strategy,
+                turn=turn,
             )
             duration = time.time() - start_time
             logger.info(
@@ -1279,6 +1388,7 @@ class AgenticExecutor:
             capabilities_armed=request_manifest is not None,
         )
         self._last_pipeline = pipeline
+        turn.results["pipeline"] = pipeline
 
         logger.info(
             f"AgenticExecutor: pipeline={pipeline}, "
@@ -1290,19 +1400,19 @@ class AgenticExecutor:
             yield from self._execute_tools_pipeline(
                 message, routing, conversation_id, on_status,
                 approval_fn=approval_fn, model_override=effective_model,
-                manifest=request_manifest,
+                manifest=request_manifest, turn=turn,
             )
 
         elif pipeline == PIPELINE_THINK_TOOLS:
             yield from self._execute_think_tools_pipeline(
                 message, routing, conversation_id, on_status,
                 approval_fn=approval_fn, model_override=effective_model,
-                manifest=request_manifest,
+                manifest=request_manifest, turn=turn,
             )
 
         elif pipeline == PIPELINE_REASONING:
             yield from self._execute_reasoning_pipeline(
-                message, routing, conversation_id, on_status,
+                message, routing, conversation_id, on_status, turn=turn,
             )
 
         elif pipeline == PIPELINE_THINK:
@@ -1311,6 +1421,7 @@ class AgenticExecutor:
                 think=True, web_search=False,
                 verify_code=classification.get("is_code", False),
                 capability_block=_manifest_prompt_block(request_manifest),
+                turn=turn,
             )
 
         elif pipeline == PIPELINE_WEB_SEARCH:
@@ -1319,6 +1430,7 @@ class AgenticExecutor:
                 think=False, web_search=True,
                 verify_code=False,
                 capability_block=_manifest_prompt_block(request_manifest),
+                turn=turn,
             )
 
         elif pipeline == PIPELINE_CODE_VERIFY:
@@ -1327,6 +1439,7 @@ class AgenticExecutor:
                 think=False, web_search=False,
                 verify_code=True,
                 capability_block=_manifest_prompt_block(request_manifest),
+                turn=turn,
             )
 
         else:
@@ -1336,15 +1449,16 @@ class AgenticExecutor:
                 think=False, web_search=False,
                 verify_code=False,
                 capability_block=_manifest_prompt_block(request_manifest),
+                turn=turn,
             )
 
         duration = time.time() - start_time
         logger.info(
             f"AgenticExecutor: finished in {duration:.2f}s, "
             f"pipeline={pipeline}, "
-            f"tool_calls={len(self._last_tool_calls)}, "
-            f"verifications={len(self._last_verification_results)}, "
-            f"correction_hints={self._last_verification_hints}"
+            f"tool_calls={len(turn.results.get('tool_calls') or [])}, "
+            f"verifications={len(turn.results.get('verification_results') or [])}, "
+            f"correction_hints={turn.results.get('verification_hints', 0)}"
         )
 
     # -----------------------------------------------------------------
@@ -1361,6 +1475,7 @@ class AgenticExecutor:
         web_search: bool = False,
         verify_code: bool = False,
         capability_block: str | None = None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Direct pipeline: LLM call via the existing Executor.
 
@@ -1369,6 +1484,7 @@ class AgenticExecutor:
         block is supplied it is threaded to the Executor so the optimizer
         can pin it above the compressed history.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         full_response = ""
 
         try:
@@ -1382,6 +1498,7 @@ class AgenticExecutor:
                 web_search=web_search,
                 on_status=on_status,
                 capability_block=capability_block,
+                run=turn,
             )
             for chunk in gen:
                 if chunk:
@@ -1399,20 +1516,23 @@ class AgenticExecutor:
             yield f"\n\n[Error: {e}]"
             return
 
-        # Transfer verification results from the executor
-        if hasattr(self._executor, 'last_verification_results'):
-            self._last_verification_results = self._executor.last_verification_results
+        # The executor wrote this call's verification results into the turn.
+        own = turn.results.get("verification_results") or []
+        self._last_verification_results = own
+        turn.results["verification_results"] = own
 
         # Additional code verification when requested and not already done
         if (
             verify_code
-            and not self._last_verification_results
+            and not own
             and self.verification_available
             and full_response
+            and not turn.stopped()
         ):
             self._run_code_verification(
                 full_response, message,
                 getattr(routing, 'model', self._default_model),
+                turn=turn,
             )
 
     def _execute_tools_pipeline(
@@ -1424,6 +1544,7 @@ class AgenticExecutor:
         approval_fn: Callable[[str, dict], bool] | None = None,
         model_override: str | None = None,
         manifest=None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Tools pipeline: ReAct loop via the ToolExecutor.
 
@@ -1434,12 +1555,16 @@ class AgenticExecutor:
         threaded from execute() and forwarded to
         execute_with_tools; the previous dispatch dropped it and this
         method then raised an unbound-name error into its fallback.
+        A stopped turn keeps the record of the tools that ran (the next
+        turn must know their effects) and saves nothing, also when its
+        caller closes it while the answer is streaming.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         if not self.tool_executor_available:
             # Fall back to the direct pipeline
             logger.warning("ToolExecutor unavailable, falling back to direct")
             yield from self._execute_direct_pipeline(
-                message, routing, conversation_id, on_status,
+                message, routing, conversation_id, on_status, turn=turn,
             )
             return
 
@@ -1458,14 +1583,25 @@ class AgenticExecutor:
                 # chunk as it is generated; tool activity flows live through
                 # on_tool_call. The generator's return value carries the
                 # result used for history and persistence.
+                # The calls that ran are also gathered as they are signalled:
+                # a caller that closes this call while the answer streams (a
+                # Stop, a closed tab) never reads the stream's result, and the
+                # next turn must still know what the tools did.
+                ran: list = []
+
+                def _on_call(call) -> None:
+                    ran.append(call)
+                    turn.emit_tool_call(call)
+
                 stream = self._tool_executor.stream_with_tools(
                     message=message,
                     model=model,
                     conversation_messages=conv_messages,
                     tool_history=prior_tool_history if prior_tool_history else None,
                     approval_fn=approval_fn,
-                    on_tool_call=self._emit_tool_call,
+                    on_tool_call=_on_call,
                     manifest=manifest,
+                    should_stop=turn.stopped,
                 )
                 full_response = ""
                 result = None
@@ -1477,15 +1613,31 @@ class AgenticExecutor:
                             yield chunk
                 except StopIteration as stop:
                     result = stop.value
+                except GeneratorExit:
+                    # Closed by the caller: the answer is abandoned, the
+                    # record of the tools that ran is kept, nothing is saved.
+                    try:
+                        stream.close()
+                    except Exception as exc:
+                        logger.debug(f"Closing the tool stream failed: {exc}")
+                    calls = list(ran)
+                    self._last_tool_calls = calls
+                    turn.results["tool_calls"] = calls
+                    self._record_tool_calls(conversation_id, calls)
+                    raise
 
                 if result is not None:
-                    self._last_tool_calls = list(result.tool_calls)
-                    self._last_verification_hints = getattr(
-                        result, "verification_hints", 0,
-                    )
+                    calls = list(result.tool_calls)
+                    hints = getattr(result, "verification_hints", 0)
+                    self._last_tool_calls = calls
+                    self._last_verification_hints = hints
+                    turn.results["tool_calls"] = calls
+                    turn.results["verification_hints"] = hints
                     self._record_tool_calls(conversation_id, result.tool_calls)
                     full_response = result.response or full_response
 
+                if turn.stopped():
+                    return
                 self._save_to_conversation(
                     conversation_id, message, full_response, model,
                 )
@@ -1499,18 +1651,23 @@ class AgenticExecutor:
                 approval_fn=approval_fn,
                 # Live progress: each tool call is signalled as it executes,
                 # not batched after the loop finishes.
-                on_tool_call=self._emit_tool_call,
+                on_tool_call=turn.emit_tool_call,
                 manifest=manifest,
+                should_stop=turn.stopped,
             )
 
             # Store the tool calls
-            self._last_tool_calls = list(result.tool_calls)
-            self._last_verification_hints = getattr(
-                result, "verification_hints", 0,
-            )
+            calls = list(result.tool_calls)
+            hints = getattr(result, "verification_hints", 0)
+            self._last_tool_calls = calls
+            self._last_verification_hints = hints
+            turn.results["tool_calls"] = calls
+            turn.results["verification_hints"] = hints
 
             # Record tool calls in per-conversation history
             self._record_tool_calls(conversation_id, result.tool_calls)
+            if turn.stopped():
+                return
 
             # Yield the final response
             if result.response:
@@ -1525,7 +1682,7 @@ class AgenticExecutor:
             logger.error(f"Tools pipeline error: {e}")
             # Fall back to the direct pipeline
             yield from self._execute_direct_pipeline(
-                message, routing, conversation_id, on_status,
+                message, routing, conversation_id, on_status, turn=turn,
             )
 
     def _execute_think_tools_pipeline(
@@ -1537,14 +1694,18 @@ class AgenticExecutor:
         approval_fn: Callable[[str, dict], bool] | None = None,
         model_override: str | None = None,
         manifest=None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Think+tools pipeline: thinking first, then tools when needed.
 
         Combines the think mode with tool use for complex requests
         that need both reasoning and execution.
         approval_fn is the per-invocation tool-approval gate,
-        threaded from execute() into the tools phase.
+        threaded from execute() into the tools phase. A turn stopped during
+        phase 1 runs no tool phase; a turn stopped during phase 2 keeps the
+        record of the tools that ran and saves nothing.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         # Phase 1: direct call with think mode for the reasoning pass
         full_response = ""
         # Lot 5: the tool phase (Phase 2 below) honors the optimize-selected
@@ -1568,6 +1729,7 @@ class AgenticExecutor:
                 on_status=on_status,
                 persist=False,
                 capability_block=_manifest_prompt_block(manifest),
+                run=turn,
             )
             for chunk in gen:
                 if chunk:
@@ -1582,6 +1744,9 @@ class AgenticExecutor:
         except Exception as e:
             logger.error(f"Think phase error in think+tools pipeline: {e}")
             yield f"\n\n[Error during thinking: {e}]"
+            return
+
+        if turn.stopped():
             return
 
         # Phase 2: run the tools. With a capability manifest the phase is
@@ -1611,20 +1776,23 @@ class AgenticExecutor:
                     approval_fn=approval_fn,
                     # Live progress: each tool call is signalled as it
                     # executes, not batched after the loop finishes.
-                    on_tool_call=self._emit_tool_call,
+                    on_tool_call=turn.emit_tool_call,
                     manifest=manifest,
+                    should_stop=turn.stopped,
                 )
-                self._last_tool_calls = list(result.tool_calls)
-                self._last_verification_hints = getattr(
-                    result, "verification_hints", 0,
-                )
+                calls = list(result.tool_calls)
+                hints = getattr(result, "verification_hints", 0)
+                self._last_tool_calls = calls
+                self._last_verification_hints = hints
+                turn.results["tool_calls"] = calls
+                turn.results["verification_hints"] = hints
 
                 # Record tool calls in per-conversation history
                 self._record_tool_calls(conversation_id, result.tool_calls)
 
                 # When the tools produced results, append them (and fold them
                 # into full_response so the final save persists the tool output)
-                if result.tool_calls and result.response:
+                if not turn.stopped() and result.tool_calls and result.response:
                     yield "\n\n"
                     yield result.response
                     full_response += "\n\n" + result.response
@@ -1632,15 +1800,18 @@ class AgenticExecutor:
             except Exception as e:
                 logger.warning(f"Tools phase failed (think+tools): {e}")
 
-        # Transfer the verifications from the executor
-        if hasattr(self._executor, 'last_verification_results'):
-            self._last_verification_results = self._executor.last_verification_results
+        # The executor wrote this call's verification results into the turn.
+        own = turn.results.get("verification_results") or []
+        self._last_verification_results = own
+        turn.results["verification_results"] = own
 
         # Persist the full turn (reasoning + any tool output). The Executor's
         # internal save was suppressed (persist=False) so this single save owns
         # the complete assistant message. _save_to_conversation no-ops on an
         # empty response, so a Phase 1 hard error (which returns early above)
-        # persists nothing here.
+        # persists nothing here. A stopped turn is not saved.
+        if turn.stopped():
+            return
         self._save_to_conversation(conversation_id, message, full_response, model)
 
     def _execute_reasoning_pipeline(
@@ -1649,31 +1820,26 @@ class AgenticExecutor:
         routing: Any,
         conversation_id: str | None,
         on_status: Callable | None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Reasoning pipeline: multi-step decomposition and solving.
 
         Uses the ReasoningEngine to decompose the request into
         sub-steps, solve them sequentially, then synthesize a final
         response. Steps are emitted via the on_reasoning_step callback.
+        The engine checks the turn's stop before every model call.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         if not self.reasoning_available:
             # Fall back to the think pipeline
             logger.warning("ReasoningEngine unavailable, falling back to think")
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status,
-                think=True, web_search=False, verify_code=False,
+                think=True, web_search=False, verify_code=False, turn=turn,
             )
             return
 
         model = getattr(routing, 'model', self._default_model)
-
-        def _on_step(step):
-            """Internal callback emitting the reasoning steps."""
-            if self._on_reasoning_step is not None:
-                try:
-                    self._on_reasoning_step(step)
-                except Exception as e:
-                    logger.debug(f"reasoning_step callback failed: {e}")
 
         try:
             gen = self._reasoning_engine.execute_reasoning(
@@ -1683,7 +1849,8 @@ class AgenticExecutor:
                 # "decompose" and leaving the other strategies unreachable.
                 strategy=None,
                 model=model,
-                on_step=_on_step,
+                on_step=turn.emit_reasoning_step,
+                should_stop=turn.stopped,
             )
 
             full_response = ""
@@ -1694,13 +1861,16 @@ class AgenticExecutor:
                         yield ("reasoning_step", chunk_data)
                     elif chunk_type == "reasoning_done":
                         self._last_reasoning_result = chunk_data
+                        turn.results["reasoning_result"] = chunk_data
                         yield ("reasoning_done", chunk_data)
                 else:
                     # Final response text
                     full_response += chunk
                     yield chunk
 
-            # Save to the conversation
+            # Save to the conversation (a stopped turn is not saved)
+            if turn.stopped():
+                return
             self._save_to_conversation(
                 conversation_id, message, full_response, model,
             )
@@ -1710,7 +1880,7 @@ class AgenticExecutor:
             # Fall back to the direct pipeline with think
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status,
-                think=True, web_search=False, verify_code=False,
+                think=True, web_search=False, verify_code=False, turn=turn,
             )
 
     # -----------------------------------------------------------------
@@ -1725,37 +1895,33 @@ class AgenticExecutor:
         on_status: Callable | None,
         models: list[str] | None = None,
         strategy: str | None = None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Consensus pipeline: query N models and merge.
 
         Uses the ConsensusEngine to query several models in parallel,
-        compare the responses, and select the best one.
+        compare the responses, and select the best one. A stopped turn
+        stops waiting for the models, merges nothing and saves nothing.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         if not self.consensus_available:
             # Fall back to the direct pipeline
             logger.warning("ConsensusEngine unavailable, falling back to direct")
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status,
-                think=False, web_search=False, verify_code=False,
+                think=False, web_search=False, verify_code=False, turn=turn,
             )
             return
 
         model = getattr(routing, 'model', self._default_model)
-
-        def _on_model_done(model_resp):
-            """Internal callback emitting the individual responses."""
-            if self._on_consensus_model is not None:
-                try:
-                    self._on_consensus_model(model_resp)
-                except Exception as e:
-                    logger.debug(f"consensus_model callback failed: {e}")
 
         try:
             gen = self._consensus_engine.execute_consensus(
                 query=message,
                 models=models,
                 strategy=strategy,
-                on_model_done=_on_model_done,
+                on_model_done=turn.emit_consensus_model,
+                should_stop=turn.stopped,
             )
 
             full_response = ""
@@ -1766,13 +1932,16 @@ class AgenticExecutor:
                         yield ("consensus_model_done", chunk_data)
                     elif chunk_type == "consensus_done":
                         self._last_consensus_result = chunk_data
+                        turn.results["consensus_result"] = chunk_data
                         yield ("consensus_done", chunk_data)
                 else:
                     # Selected response text
                     full_response += chunk
                     yield chunk
 
-            # Save to the conversation
+            # Save to the conversation (a stopped turn is not saved)
+            if turn.stopped():
+                return
             self._save_to_conversation(
                 conversation_id, message, full_response, model,
             )
@@ -1782,7 +1951,7 @@ class AgenticExecutor:
             # Fall back to the direct pipeline
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status,
-                think=False, web_search=False, verify_code=False,
+                think=False, web_search=False, verify_code=False, turn=turn,
             )
 
     # -----------------------------------------------------------------
@@ -1795,6 +1964,7 @@ class AgenticExecutor:
         routing: Any,
         conversation_id: str | None,
         on_status: Callable | None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Self-correction pipeline: generate then correct.
 
@@ -1803,13 +1973,18 @@ class AgenticExecutor:
         3. Return the best version
 
         Falls back to direct when the SelfCorrectionEngine is
-        unavailable.
+        unavailable. A turn stopped during phase 1 never reaches the
+        engine; the engine checks the stop before each model call; a
+        stopped turn gets no fallback reply and skips this pipeline's save.
+        Phase 1 saves its draft through the executor, as it always has, so
+        a turn stopped during phase 2 keeps that draft saved.
         """
+        turn = turn if turn is not None else self._legacy_turn()
         if not self.self_correction_available:
             logger.warning("SelfCorrectionEngine unavailable, falling back to direct")
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status,
-                think=False, web_search=False, verify_code=False,
+                think=False, web_search=False, verify_code=False, turn=turn,
             )
             return
 
@@ -1830,6 +2005,7 @@ class AgenticExecutor:
                 think=False,
                 web_search=False,
                 on_status=on_status,
+                run=turn,
             )
             for chunk in gen:
                 if chunk:
@@ -1841,6 +2017,9 @@ class AgenticExecutor:
         except Exception as e:
             logger.error(f"Initial generation error: {e}")
             yield f"\n\n[Error: {e}]"
+            return
+
+        if turn.stopped():
             return
 
         if not initial_response:
@@ -1856,6 +2035,7 @@ class AgenticExecutor:
                 user_message=message,
                 response=initial_response,
                 model=model,
+                should_stop=turn.stopped,
             )
 
             full_response = ""
@@ -1864,25 +2044,27 @@ class AgenticExecutor:
                     chunk_type, chunk_data = chunk
                     if chunk_type == "correction_step":
                         yield ("correction_step", chunk_data)
-                        if self._on_correction_step is not None:
-                            try:
-                                self._on_correction_step(chunk_data)
-                            except Exception as e:
-                                logger.debug(f"correction_step callback failed: {e}")
+                        turn.emit_correction_step(chunk_data)
                     elif chunk_type == "correction_done":
                         self._last_correction_result = chunk_data
+                        turn.results["correction_result"] = chunk_data
                         yield ("correction_done", chunk_data)
                 else:
                     full_response += chunk
                     yield chunk
 
-            # Save to the conversation
+            # Save the corrected reply (skipped on a stopped turn)
+            if turn.stopped():
+                return
             self._save_to_conversation(
                 conversation_id, message, full_response, model,
             )
 
         except Exception as e:
             logger.error(f"self_correct pipeline error: {e}")
+            # A stopped turn gets no fallback reply and saves nothing.
+            if turn.stopped():
+                return
             # Fallback: stream the initial response
             yield initial_response
             self._save_to_conversation(
@@ -1895,9 +2077,14 @@ class AgenticExecutor:
 
     def _run_code_verification(
         self, response_text: str, question: str, model: str,
+        turn: _Turn | None = None,
     ) -> None:
-        """Run the code verification over the response."""
-        if not self.verification_available:
+        """Run the code verification over the response.
+
+        Never starts on a stopped turn; its results are the turn's.
+        """
+        turn = turn if turn is not None else self._legacy_turn()
+        if not self.verification_available or turn.stopped():
             return
 
         try:
@@ -1909,6 +2096,7 @@ class AgenticExecutor:
             )
             if results:
                 self._last_verification_results = results
+                turn.results["verification_results"] = results
                 for vr in results:
                     logger.info(
                         f"AgenticExecutor verification ({vr.language}): "
@@ -1917,13 +2105,19 @@ class AgenticExecutor:
         except Exception as e:
             logger.warning(f"Code verification failed: {e}")
 
-    def _emit_tool_call(self, tool_call_result) -> None:
-        """Signal a tool call via the callback."""
-        if self._on_tool_call is not None:
-            try:
-                self._on_tool_call(tool_call_result)
-            except Exception as e:
-                logger.warning(f"tool_call callback error: {e}")
+    def _legacy_turn(self) -> _Turn:
+        """A turn for an internal pipeline called without one.
+
+        Its hooks are the instance's default hooks, which only a test sets;
+        execute() always hands its own turn, so no call relays through them.
+        """
+        return _Turn(
+            None,
+            on_tool_call=self._on_tool_call,
+            on_reasoning_step=self._on_reasoning_step,
+            on_consensus_model=self._on_consensus_model,
+            on_correction_step=self._on_correction_step,
+        )
 
     def _get_conversation_context(
         self, conversation_id: str | None,
@@ -2004,6 +2198,7 @@ class AgenticExecutor:
         routing: Any,
         conversation_id: str | None,
         on_status: Callable | None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Cascading pipeline -- route through progressive tiers.
 
@@ -2023,6 +2218,8 @@ class AgenticExecutor:
                 task_type=getattr(routing, "task_type", None),
             )
             self._last_cascade_result = result
+            if turn is not None:
+                turn.results["cascade_result"] = result
 
             if result.final_response:
                 yield result.final_response
@@ -2061,6 +2258,7 @@ class AgenticExecutor:
         routing: Any,
         conversation_id: str | None,
         on_status: Callable | None,
+        turn: _Turn | None = None,
     ) -> Generator:
         """Speculative pipeline -- draft-verify pattern.
 
@@ -2080,6 +2278,8 @@ class AgenticExecutor:
                 task_type=getattr(routing, "task_type", None),
             )
             self._last_speculative_result = result
+            if turn is not None:
+                turn.results["speculative_result"] = result
 
             if result.final_response:
                 yield result.final_response
@@ -2126,10 +2326,19 @@ class AgenticExecutor:
         self._last_speculative_result = None
         self._on_tool_call = None
         self._on_reasoning_step = None
+        self._on_consensus_model = None
         self._on_correction_step = None
 
     def cancel(self) -> None:
-        """Cancel the in-flight execution by delegating to the executor."""
+        """Stop every live call of this executor: the emergency broadcast.
+
+        A turn stops through its own run; this reaches every call at once,
+        then asks the base executor to stop every call of its own.
+        """
+        with self._live_lock:
+            stops = list(self._live_stops)
+        for stop in stops:
+            stop.set()
         if self._executor is not None and hasattr(self._executor, 'cancel'):
             self._executor.cancel()
 

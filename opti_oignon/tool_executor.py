@@ -18,6 +18,7 @@ Author: Leon
 
 import json
 import logging
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -395,6 +396,9 @@ class ToolExecutor:
         max_tool_retries: int = 2,
         tool_transcript: str | None = None,
     ):
+        # The per-turn slots below live per thread: one turn's loop runs on
+        # one thread, so each slot belongs to the turn using it.
+        self._turn_slots = threading.local()
         self.registry = registry or _default_registry
         self.structured_engine = structured_engine or _structured_engine
         self.max_tool_calls = max_tool_calls
@@ -437,7 +441,44 @@ class ToolExecutor:
         # reuse it as the final answer instead of paying a second
         # generation. Reset at the start of every tool loop and drained by
         # the caller, so it never leaks across turns.
-        self._pending_direct_answer: str | None = None
+        self._pending_direct_answer = None
+
+    def _slots(self):
+        slots = self.__dict__.get("_turn_slots")
+        if slots is None:
+            slots = threading.local()
+            self.__dict__["_turn_slots"] = slots
+        return slots
+
+    @property
+    def _pending_direct_answer(self) -> str | None:
+        """The current turn's stashed direct answer; None on a thread that never wrote.
+
+        Held per thread, because the shared executor serves every turn: one
+        turn's decision and its drain run on one thread (inside one
+        ``next()`` of the stream, or one ``execute_with_tools`` call). A
+        loop moved across threads, or onto an event loop, must carry this
+        slot explicitly instead.
+        """
+        return getattr(self._slots(), "pending_direct_answer", None)
+
+    @_pending_direct_answer.setter
+    def _pending_direct_answer(self, value: str | None) -> None:
+        self._slots().pending_direct_answer = value
+
+    @property
+    def _last_native_response(self):
+        """The current turn's last native decision payload, per thread.
+
+        None on a thread that never decided. Same reasoning as the direct
+        answer slot: the decision that wrote it and the read that follows
+        run on the turn's own thread.
+        """
+        return getattr(self._slots(), "last_native_response", None)
+
+    @_last_native_response.setter
+    def _last_native_response(self, value) -> None:
+        self._slots().last_native_response = value
 
     def should_use_tools(self, message: str, model: str = None) -> bool:
         """Determine if the request would benefit from tool usage.
@@ -510,6 +551,7 @@ class ToolExecutor:
         approval_fn: Callable[[str, dict], bool] | None = None,
         on_tool_call: Callable[["ToolCallResult"], None] | None = None,
         manifest=None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ToolExecutionResult:
         """Execute a ReAct loop: plan -> tool -> observe -> respond.
 
@@ -529,6 +571,11 @@ class ToolExecutor:
                 loop, so a caller can surface live activity instead of
                 waiting for the final answer. Callback errors are logged
                 and never interrupt the loop.
+            should_stop: The turn's stop, checked before each model call
+                (each decision, the second call inside a decision, the
+                salvage's candidate and the final generation) and before
+                each tool, salvaged ones included. A stopped turn returns
+                the calls made so far with an empty response.
 
         Returns:
             ToolExecutionResult with final response and call history
@@ -548,10 +595,20 @@ class ToolExecutor:
             message, _model, conversation_messages, tool_history,
             approval_fn, on_tool_call,
             **({"manifest": manifest} if manifest is not None else {}),
+            **({"should_stop": should_stop} if should_stop is not None else {}),
         )
         if fatal is not None:
             return ToolExecutionResult(
                 response=fatal,
+                tool_calls=tool_calls,
+                model=_model,
+                total_time=time.time() - start_time,
+                verification_hints=verification_hints,
+            )
+        if should_stop is not None and should_stop():
+            self._pending_direct_answer = None
+            return ToolExecutionResult(
+                response="",
                 tool_calls=tool_calls,
                 model=_model,
                 total_time=time.time() - start_time,
@@ -567,6 +624,16 @@ class ToolExecutor:
                 message, _model, context_messages, tool_calls,
                 tool_results_context, approval_fn, on_tool_call,
                 **({"candidate": _candidate} if _candidate is not None else {}),
+                **({"should_stop": should_stop} if should_stop is not None else {}),
+            )
+        if should_stop is not None and should_stop():
+            # Stopped during the salvage: no final generation.
+            return ToolExecutionResult(
+                response="",
+                tool_calls=tool_calls,
+                model=_model,
+                total_time=time.time() - start_time,
+                verification_hints=verification_hints,
             )
         if final_response is None:
             final_response = self._generate_final_response(
@@ -601,6 +668,7 @@ class ToolExecutor:
         approval_fn: Callable[[str, dict], bool] | None = None,
         on_tool_call: Callable[["ToolCallResult"], None] | None = None,
         manifest=None,
+        should_stop: Callable[[], bool] | None = None,
     ):
         """Streaming variant of ``execute_with_tools``.
 
@@ -609,7 +677,8 @@ class ToolExecutor:
         chunk by chunk instead of returning it in one block. Echoed internal
         markers are filtered incrementally, so the user never sees them even
         transiently. The generator's return value is the ToolExecutionResult;
-        its ``response`` equals exactly the emitted text.
+        its ``response`` equals exactly the emitted text. A stopped turn
+        yields nothing more once its loop ends.
         """
         start_time = time.time()
         _model = model or self.default_model
@@ -626,11 +695,21 @@ class ToolExecutor:
             message, _model, conversation_messages, tool_history,
             approval_fn, on_tool_call,
             **({"manifest": manifest} if manifest is not None else {}),
+            **({"should_stop": should_stop} if should_stop is not None else {}),
         )
         if fatal is not None:
             yield fatal
             return ToolExecutionResult(
                 response=fatal,
+                tool_calls=tool_calls,
+                model=_model,
+                total_time=time.time() - start_time,
+                verification_hints=verification_hints,
+            )
+        if should_stop is not None and should_stop():
+            self._pending_direct_answer = None
+            return ToolExecutionResult(
+                response="",
                 tool_calls=tool_calls,
                 model=_model,
                 total_time=time.time() - start_time,
@@ -646,6 +725,16 @@ class ToolExecutor:
                 message, _model, context_messages, tool_calls,
                 tool_results_context, approval_fn, on_tool_call,
                 **({"candidate": _candidate} if _candidate is not None else {}),
+                **({"should_stop": should_stop} if should_stop is not None else {}),
+            )
+        if should_stop is not None and should_stop():
+            # Stopped during the salvage: nothing is streamed.
+            return ToolExecutionResult(
+                response="",
+                tool_calls=tool_calls,
+                model=_model,
+                total_time=time.time() - start_time,
+                verification_hints=verification_hints,
             )
 
         emitted: list[str] = []
@@ -701,6 +790,7 @@ class ToolExecutor:
         approval_fn: Callable[[str, dict], bool] | None,
         on_tool_call: Callable[["ToolCallResult"], None] | None,
         manifest=None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> tuple[
         list["ToolCallResult"], list[str], list[dict], list[dict],
         str | None, int,
@@ -717,6 +807,8 @@ class ToolExecutor:
         salvage path and the verification hint, so a native-mode run
         degrades coherently when the native path is unavailable mid-loop;
         the message builders pick one representation at build time.
+        ``should_stop`` is the turn's stop: it is checked before each
+        decision and before each tool, and a stop ends the loop normally.
         """
         tool_calls: list[ToolCallResult] = []
 
@@ -788,7 +880,10 @@ class ToolExecutor:
         # Injections actually performed, threaded into the result so the
         # caller's instrumentation reports what really played.
         verification_hints = 0
+        stopped = False
         for iteration in range(self.max_tool_calls):
+            if should_stop is not None and should_stop():
+                break
             # Forwarded only when a manifest exists: the no-manifest call
             # keeps its exact historical shape, so anything wrapping the
             # decision hook stays compatible unchanged.
@@ -796,6 +891,7 @@ class ToolExecutor:
                 message, _model, context_messages, tool_results_context,
                 native_transcript=native_transcript,
                 **({"manifest": manifest} if manifest is not None else {}),
+                **({"should_stop": should_stop} if should_stop is not None else {}),
             )
             if not decisions:
                 if not verification_done and tool_calls:
@@ -818,6 +914,9 @@ class ToolExecutor:
             retryable_failure = False
             spin_detected = False
             for tool_name, arguments in decisions:
+                if should_stop is not None and should_stop():
+                    stopped = True
+                    break
                 signature = _call_signature(tool_name, arguments)
                 if signature in recent_signatures:
                     logger.info(
@@ -851,7 +950,7 @@ class ToolExecutor:
                         hard_stop = True
                     break
                 recent_signatures.append(signature)
-            if spin_detected:
+            if stopped or spin_detected:
                 break
             if hard_stop:
                 break
@@ -912,6 +1011,7 @@ class ToolExecutor:
         approval_fn: Callable[[str, dict], bool] | None,
         on_tool_call: Callable[["ToolCallResult"], None] | None,
         candidate: str | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> str | None:
         """Layer 2b -- deterministic salvage when no tool fired.
 
@@ -927,6 +1027,11 @@ class ToolExecutor:
         second generation. The transpile safety net still runs on it, so a
         narrated tool action is executed exactly as before; only the
         redundant generation is skipped.
+
+        ``should_stop`` is the turn's stop: a salvaged tool never runs once
+        it is set, so a Stop pressed while the candidate was being generated
+        executes nothing; None is then returned and the caller, which checks
+        the stop again, makes no final generation either.
         """
         if candidate is not None:
             logger.info(
@@ -949,6 +1054,8 @@ class ToolExecutor:
             len(salvaged),
         )
         for tool_name, arguments in salvaged:
+            if should_stop is not None and should_stop():
+                break
             call_result = self._execute_tool(
                 tool_name, arguments, "intent-transpiled",
                 approval_fn=approval_fn,
@@ -1022,6 +1129,7 @@ class ToolExecutor:
         force: bool = False,
         native_transcript: list[dict] | None = None,
         manifest=None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> list[tuple[str, dict]]:
         """Decide which tool(s) to call next; an empty list means stop.
 
@@ -1031,6 +1139,9 @@ class ToolExecutor:
         but ``force`` is set, an enum-constrained format= schema (no "none")
         guarantees a selection. Non-capable models, or any failure, fall back to
         the existing format= ToolDecision path with unchanged behavior.
+        ``should_stop`` is the turn's stop: once the native call returns, a
+        stopped turn makes no second model call (neither the forced one nor
+        the fallback), and its caller runs no tool.
         """
         # With a capability manifest the decision sees ITS tool set -- the
         # per-request truth (mode, killswitch, overrides already applied);
@@ -1061,6 +1172,8 @@ class ToolExecutor:
             calls = self._native_tool_decision(
                 messages, model, native_tool_schemas(available),
             )
+            if should_stop is not None and should_stop():
+                return calls
             resp = self._last_native_response
             if resp is not None:
                 if calls:

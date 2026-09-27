@@ -489,7 +489,7 @@ def census_tree(repo, scan_paths=None):
 # nothing comes off this ledger; a file that grows is a regression.
 LEDGER = {
     "opti_oignon/api/routes_artifacts.py": 5,
-    "opti_oignon/api/routes_chat.py": 17,
+    "opti_oignon/api/routes_chat.py": 13,
     "opti_oignon/api/routes_conversations.py": 4,
     "opti_oignon/api/routes_pipelines.py": 10,
     "opti_oignon/api/routes_presets.py": 7,
