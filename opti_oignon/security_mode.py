@@ -383,6 +383,21 @@ def _write_yaml_mode(mode: str) -> None:
 # Audit logging
 # ---------------------------------------------------------------------------
 
+def _file_signature(path: Path) -> tuple | None:
+    """A file's identity and last change, as the mode cache compares it; None when absent.
+
+    A stat that fails otherwise is its own signature, by its error, so the
+    file is read again once it can be stated.
+    """
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return ("unstatable", exc.errno)
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
 def _audit_log(event: str, severity: str = "INFO", **details: Any) -> None:
     """Log a security audit event.
 
@@ -445,13 +460,32 @@ class SecurityModeManager:
         self._downgrade_attempts: list[float] = []  # timestamps
         self._cached_mode: str | None = None
         self._cached_policy: ModePolicy | None = None
+        # The signatures of security.yaml and the lockfile the cached mode was
+        # read from; either one changing means the mode is read again.
+        self._cached_signature: tuple | None = None
 
     # -- Current state -------------------------------------------------------
 
     def get_current_mode(self) -> str:
-        """Return the current security mode, fail-secure on mismatch."""
-        if self._cached_mode is not None:
+        """Return the current security mode, fail-secure on mismatch.
+
+        The mode is kept with the signature of both files it was read from
+        (device, inode, size, modification and change times; an absent file
+        is None). Each call stats the two files and reads them again when
+        either signature differs, so a mode another process wrote is the mode
+        read next. Whether a same-size rewrite within one timestamp tick is
+        seen depends on how finely the kernel stamps the change time; the
+        change time is in the signature for that case.
+        """
+        signature = (_file_signature(_SECURITY_YAML), _file_signature(_LOCKFILE_PATH))
+        if self._cached_mode is not None and signature == self._cached_signature:
             return self._cached_mode
+
+        # Re-read. The signature is taken before the files are read, so a
+        # write landing during the read is seen on the next call; the cache
+        # is cleared first, so a read that raises leaves nothing stale behind.
+        self._cached_mode = None
+        self._cached_signature = signature
 
         yaml_mode = _read_yaml_mode()
         lockfile = _read_lockfile()
@@ -547,6 +581,7 @@ class SecurityModeManager:
         """Force re-read from disk on next access."""
         self._cached_mode = None
         self._cached_policy = None
+        self._cached_signature = None
 
     # -- Escalation (Daily -> Bulbe) ----------------------------------------
 

@@ -113,6 +113,7 @@ from _registry_bridge import seed_registry  # noqa: E402
 
 BUDGET_S = {
     "test_ks1_an_engaged_switch_is_read_engaged_by_every_reader": 2.0,
+    "test_ks6_an_engaged_switch_is_read_engaged_by_every_reader_the_web_gate_among_them": 2.0,
     "test_ks2_no_web_request_leaves_the_process_outside_daily": 2.0,
     "test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed": 2.0,
     "test_ks4_web_results_reach_a_model_only_inside_the_untrusted_envelope": 2.0,
@@ -124,6 +125,7 @@ BUDGET_S = {
 _PKG = REPO / "opti_oignon"
 _RAG = "opti_oignon.rag_sanitizer"
 _KS = "opti_oignon.search_killswitch"
+_WG = "opti_oignon.web_gate"
 _WS = "opti_oignon.web_search"
 _SM = "opti_oignon.security_mode"
 _CM = "opti_oignon.capability_manifest"
@@ -141,6 +143,7 @@ _RR = "opti_oignon.api.routes_rag"
 _SOURCES = {
     _RAG: source("rag_sanitizer.py"),
     _KS: source("search_killswitch.py"),
+    _WG: source("web_gate.py"),
     _WS: source("web_search.py"),
     _CM: source("capability_manifest.py"),
     _MW: source("api", "security_mode_middleware.py"),
@@ -353,7 +356,8 @@ def _window(tmp_path, names, *, mode="daily", results=_THREE, flag_on=False, see
         third["chromadb"] = None
         third["chromadb.config"] = None
     all_seeded.update(seeded or {})
-    targets = {name: _SOURCES[name] for name in _ORDER if name in names}
+    # The web search imports the web gate at module scope: the gate comes with it.
+    targets = {name: _SOURCES[name] for name in _ORDER if name in names or (name == _WG and _WS in names)}
     state = tmp_path / state_name
     with _entries(**third):
         loaded, restore = isolate(
@@ -742,11 +746,38 @@ class _Net:
         socket.socket.connect = lambda sock, address: self._refuse(address)
         socket.socket.connect_ex = lambda sock, address: self._refuse(address)
         socket.socket.bind = lambda sock, address: self._bind(address)
+        # A host without IPv6 refuses to make an IPv6 socket at all, before any
+        # bind: the probe then reads "not held" whatever ``local`` says. A
+        # datagram socket of a family the host lacks is stood in for, and its
+        # bind answers from ``local`` like any other, on every host.
+        real, net = socket.socket, self
+
+        class _Probe:
+            def __init__(self, family):
+                self.family = family
+
+            def bind(self, address):
+                net._bind(address)
+
+            def close(self):
+                pass
+
+        class _Sockets(real):
+            def __new__(cls, family=-1, type=-1, proto=-1, fileno=None):
+                try:
+                    return real(family, type, proto, fileno)
+                except OSError as exc:
+                    if exc.errno == errno.EAFNOSUPPORT and type == socket.SOCK_DGRAM:
+                        return _Probe(family)
+                    raise
+
+        socket.socket = _Sockets
         for name in proxies:
             del os.environ[name]
         try:
             yield self
         finally:
+            socket.socket = real
             os.environ.update(proxies)
             for name, value in saved.items():
                 setattr(socket, name, value)
@@ -993,6 +1024,117 @@ def test_ks1_an_engaged_switch_is_read_engaged_by_every_reader(tmp_path):
     assert scanned >= 5, scanned
     assert {
         "capability_manifest.py", "executor.py", "api/security_mode_middleware.py", "web_search.py",
+    } <= callers, sorted(callers)
+
+    # c8 -- the status route: an unavailable switch is not "enabled".
+    handler = _function(_routes_tree(), "get_search_killswitch_status")
+    unavailable = [
+        node for node in ast.walk(handler)
+        if isinstance(node, ast.If) and "SEARCH_KILLSWITCH_AVAILABLE" in ast.unparse(node.test)
+    ]
+    assert unavailable, "the route names its unavailable branch"
+    answers = [
+        value for node in unavailable for ret in ast.walk(node) if isinstance(ret, ast.Return)
+        and isinstance(ret.value, ast.Dict)
+        for key, value in zip(ret.value.keys, ret.value.values)
+        if isinstance(key, ast.Constant) and key.value == "search_enabled"
+    ]
+    assert len(answers) == 1, answers
+    assert isinstance(answers[0], ast.Constant) and answers[0].value is False, ast.unparse(answers[0])
+
+
+# ---------------------------------------------------------------------------
+# KS6 -- an engaged switch is read engaged by every reader, the web gate among
+# them. It replaces KS1 word for word but for the census of callers, which
+# names web_gate.py: the gate's question moved there, and web_search.py
+# re-exports it.
+# ---------------------------------------------------------------------------
+def test_ks6_an_engaged_switch_is_read_engaged_by_every_reader_the_web_gate_among_them(tmp_path):
+    names = (_RAG, _KS, _WS, _CM, _MW, _WRAPPER, _OPT, _DEDUP, _EX)
+    with _window(tmp_path, names) as w:
+        ks, ws, cm, mw = (w.mods[n] for n in (_KS, _WS, _CM, _MW))
+
+        # c2 -- witness, run first: never engaged, every reader lets search
+        # through and the searcher makes its request.
+        assert cm._web_search_killed() is False
+        manifest = cm.build_manifest(model="m", registry=_Registry())
+        assert "web_search" in [t.name for t in manifest.tools], manifest.excluded
+        assert mw._is_kill_switch_engaged() is False
+        stub = _stub_engine(({"title": "T1", "snippet": "S1", "url": "http://local/1"},))
+        with _entry(_WS, stub):
+            _turn(w)
+        assert len(stub.calls) == 1, "control: an open switch lets the chat search"
+        made = len(w.fake.constructions)
+        assert ws.web_searcher.search("an open switch"), "control: the searcher answers"
+        assert len(w.fake.constructions) == made + 1
+
+        # c1 -- the real switch, engaged.
+        ks.search_killswitch.kill(reason="manual")
+        assert cm._web_search_killed() is True, "the manifest reads the engaged switch"
+        manifest = cm.build_manifest(model="m", registry=_Registry())
+        assert manifest.excluded.get("web_search") == cm.REASON_KILLSWITCH, manifest.excluded
+        assert "web_search" not in [t.name for t in manifest.tools]
+        assert mw._is_kill_switch_engaged() is True, "the middleware reads the engaged switch"
+        assert _executor_skips(w), "the chat reads the engaged switch"
+        made = len(w.fake.constructions)
+        _out, exc = _attempt(lambda: ws.web_searcher.search("after the kill"))
+        assert len(w.fake.constructions) == made, "no request leaves once engaged"
+        assert _refusal(ws, exc) == "kill_switch"
+
+        # c3 -- a switch that raises reads engaged.
+        raising = types.ModuleType(_KS)
+        raising.search_killswitch = SimpleNamespace(is_killed=_raise_runtime, is_enabled=_raise_runtime)
+        with _entry(_KS, raising):
+            assert cm._web_search_killed() is True
+            assert mw._is_kill_switch_engaged() is True
+            assert _executor_skips(w)
+
+        # c4 -- a switch whose own import fails reads engaged.
+        broken = types.ModuleType(_KS)
+
+        def _missing(name):
+            raise ModuleNotFoundError("No module named 'yaml'", name="yaml")
+
+        broken.__getattr__ = _missing
+        with _entry(_KS, broken):
+            assert cm._web_search_killed() is True
+            assert mw._is_kill_switch_engaged() is True
+            assert _executor_skips(w)
+
+        # c5 -- an absent switch module reads not engaged to the readers; the
+        # searcher refuses on its own.
+        with _entry(_KS, None):
+            assert cm._web_search_killed() is False
+            assert mw._is_kill_switch_engaged() is False
+            made = len(w.fake.constructions)
+            _out, exc = _attempt(lambda: ws.web_searcher.search("an absent switch"))
+            assert len(w.fake.constructions) == made
+            assert _refusal(ws, exc) == "unreadable"
+
+        # c6 -- the form: plain methods, never properties.
+        for attr in _SWITCH_READS:
+            static = inspect.getattr_static(ks.SearchKillSwitch, attr)
+            assert isinstance(static, types.FunctionType), (attr, static)
+
+    # c7 -- every read of the switch is a call, in the switch and in every
+    # module that imports it; the web gate is among the callers.
+    planted = "from opti_oignon.search_killswitch import search_killswitch\nif search_killswitch.is_killed:\n    pass\n"
+    assert _bare_switch_reads(planted)[0], "witness: a bare read is flagged"
+    callers = set()
+    scanned = 0
+    for path in _package_files(_PKG):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "search_killswitch" not in text:
+            continue
+        scanned += 1
+        rel = path.relative_to(_PKG).as_posix()
+        bare, called = _bare_switch_reads(text, own_module=(rel == "search_killswitch.py"))
+        assert bare == [], (rel, bare)
+        if any(attr == "is_killed" for attr, _line in called):
+            callers.add(rel)
+    assert scanned >= 5, scanned
+    assert {
+        "capability_manifest.py", "executor.py", "api/security_mode_middleware.py", "web_gate.py",
     } <= callers, sorted(callers)
 
     # c8 -- the status route: an unavailable switch is not "enabled".

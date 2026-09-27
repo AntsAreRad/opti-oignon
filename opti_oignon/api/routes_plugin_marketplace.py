@@ -260,11 +260,16 @@ def browse_marketplace(
     offset: int = Query(0, ge=0, description="Pagination offset"),
     refresh: bool = Query(False, description="Force refresh from remote index"),
 ) -> dict:
-    """Browse available plugins from the marketplace index."""
+    """Browse available plugins from the marketplace index.
+
+    A stale index is refreshed on its own only when the configuration's
+    ``index.auto_refresh`` allows it; ``refresh=true`` always asks. A refresh
+    the web gate refuses serves the cached listing.
+    """
     index = _get_index()
 
     # Optionally refresh from remote
-    if refresh or index.is_stale:
+    if refresh or (index.is_stale and getattr(index, "auto_refresh", True)):
         try:
             index.refresh_from_remote(force=refresh)
         except Exception as exc:
@@ -327,7 +332,11 @@ def search_marketplace(
 
 @router.post("/marketplace/install", response_model=RemoteInstallResponse)
 def install_from_url(req: RemoteInstallRequest) -> dict:
-    """Install a plugin from a remote URL."""
+    """Install a plugin from a remote URL.
+
+    Refused outside Daily mode and while the kill switch is engaged; the
+    archive is fetched from a public address only.
+    """
     installer = _get_installer()
 
     result = installer.install_from_url(

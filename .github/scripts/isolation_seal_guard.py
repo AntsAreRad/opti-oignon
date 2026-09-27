@@ -94,8 +94,6 @@ LEDGER = {
     "test_memory_dedup_coordination_contracts.py": "b16e34e24fe635238977c1b93a7af1a11f1fb0512f82389114d494b30b61c599",
     "test_memory_migration.py": "ea82e89f2bbd829a5a3fab45701ed5ba113141f27868c56c76818735315bfd5d",
     "test_memory_routes.py": "a36b22f66ab267a0823cc4170e88b9a4fff76e73453479aca2ed25eb11f56179",
-    "test_model_download_digest_pin_contracts.py": "4de3c0f479820d8a0fad1cc0396c12dc1c75f35d112325538077245314064606",
-    "test_model_download_ssrf_defense_contracts.py": "22023f571b55f89ff85eacd50fb572eb661fa5336d3dc010624af81f823cfb44",
     "test_model_load_provenance_gate_contracts.py": "c4e75ec32157b841560d410be48396c7a90314eaacf441d089cb0a3fbfe029af",
     "test_model_provenance_contracts.py": "c6322f55667dc27828b6fef85e183e8896893c009658666deadaa262bb6c12c3",
     "test_note_update_store_contracts.py": "96120eb74ba29182a3fc6facb89a294b5d691befd7a2dd0f2250f20ba7e604e6",

@@ -128,12 +128,19 @@ def get_gguf_model_info(filename: str) -> dict:
 
 @router.post("/gguf/download", response_model=GGUFDownloadResponse)
 def download_gguf_model(request: GGUFDownloadRequest) -> dict:
-    """Download a GGUF model from a direct URL."""
+    """Download a GGUF model from a direct URL.
+
+    Refused with 403 outside Daily mode and while the kill switch is engaged;
+    fetched from a public address only, and written as a .gguf inside a model
+    directory.
+    """
     if not MODEL_MANAGER_AVAILABLE:
         raise HTTPException(
             status_code=503,
             detail="Model manager not available",
         )
+
+    from ..egress import EgressRefused
 
     manager = get_model_manager()
 
@@ -156,6 +163,8 @@ def download_gguf_model(request: GGUFDownloadRequest) -> dict:
             provenance=result.get("provenance", {}),
         ).model_dump()
 
+    except EgressRefused as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

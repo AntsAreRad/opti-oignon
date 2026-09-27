@@ -35,6 +35,7 @@ import base64
 import json
 import logging
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +91,46 @@ def _resolve_mechanism(module: Any) -> str | None:
     return None
 
 
+def _liboqs_candidates() -> list[str]:
+    """Where liboqs-python itself looks for the liboqs shared library, in its order.
+
+    The loader's names first, then ``$OQS_INSTALL_PATH`` (or ``~/_oqs``) with
+    ``lib/liboqs.so`` and ``lib64/liboqs.so``.
+    """
+    import ctypes.util
+    import os
+
+    found = [located for located in (ctypes.util.find_library(name) for name in ("oqs", "liboqs")) if located]
+    root = os.environ.get("OQS_INSTALL_PATH") or os.path.join(os.path.expanduser("~"), "_oqs")
+    found += [os.path.join(root, sub, "liboqs.so") for sub in ("lib", "lib64")]
+    return found
+
+
+def _liboqs_loadable() -> bool:
+    """Whether one of the candidates loads as a shared library."""
+    import ctypes
+
+    for candidate in _liboqs_candidates():
+        try:
+            ctypes.CDLL(candidate)
+        except OSError:
+            continue
+        return True
+    return False
+
+
+# Importing liboqs-python when its shared library is nowhere makes the package
+# clone and build liboqs from GitHub, at import. So the package is imported
+# only when the library loads, or when it is already in the module cache (a
+# module, or None), where importing it runs no code.
+_LIBRARY_ABSENT = (
+    "the liboqs shared library was not found; importing liboqs-python would try "
+    "to clone and build it from GitHub, so it is not imported"
+)
+
 try:
+    if "oqs" not in sys.modules and not _liboqs_loadable():
+        raise ModuleNotFoundError(_LIBRARY_ABSENT, name="oqs")
     import oqs  # type: ignore[import-untyped]
 
     PQC_MECHANISM = _resolve_mechanism(oqs)
@@ -118,14 +158,22 @@ try:
     else:
         PQC_AVAILABLE = True
         logger.info("PQC signatures available (liboqs mechanism: %s)", PQC_MECHANISM)
-except ImportError:
-    PQC_UNAVAILABLE_REASON = (
-        "liboqs-python is not installed. Install with: "
-        "pip install 'opti-oignon[pqc]'"
-    )
+except ImportError as exc:
+    if str(exc) == _LIBRARY_ABSENT:
+        PQC_UNAVAILABLE_REASON = _LIBRARY_ABSENT[0].upper() + _LIBRARY_ABSENT[1:] + "."
+    else:
+        PQC_UNAVAILABLE_REASON = (
+            "liboqs-python is not installed. Install with: "
+            "pip install 'opti-oignon[pqc]'"
+        )
     # Not info. Under Bulbe, and wherever the operator asked for signing, this
     # is the root of trust being absent, and the boot will refuse on it.
     logger.warning("PQC signatures unavailable -- %s", PQC_UNAVAILABLE_REASON)
+except SystemExit:
+    # liboqs-python calls sys.exit when it cannot load or build its library;
+    # an import must not end the process that asked for it.
+    PQC_UNAVAILABLE_REASON = "liboqs-python exited while loading its library."
+    logger.critical("PQC signatures unavailable -- %s", PQC_UNAVAILABLE_REASON)
 except Exception as exc:  # pragma: no cover - defensive
     PQC_UNAVAILABLE_REASON = f"PQC signature init failed: {exc}"
     logger.critical("PQC signature init failed: %s", exc)

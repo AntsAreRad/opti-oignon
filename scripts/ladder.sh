@@ -23,17 +23,21 @@ purge() { find . -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/nul
 
 t0() {
   head_ "t0  syntax, imports, lint"
+  # Every Python file git tracks, and every new one it does not ignore; the
+  # data places are never opened. An empty list is a failure, not a pass.
   if python3 - <<'PY'
-import ast,pathlib,sys
+import ast,os,subprocess,sys
+listed=subprocess.run(["git","ls-files","--cached","--others","--exclude-standard","*.py"],capture_output=True,text=True,check=True).stdout.split("\n")
+files=[p for p in listed if p and os.path.isfile(p) and not p.startswith(("data/","opti_oignon/data/"))]
 bad=[]
-for p in list(pathlib.Path('opti_oignon').rglob('*.py'))+list(pathlib.Path('tests').rglob('*.py'))+list(pathlib.Path('scripts').rglob('*.py')):
-    try: ast.parse(p.read_text(errors='ignore'))
+for p in files:
+    try: ast.parse(open(p,encoding="utf-8",errors="ignore").read())
     except SyntaxError as e: bad.append(f"{p}:{e.lineno}")
-print("parse errors:", len(bad))
+print(f"parse errors: {len(bad)} in {len(files)} Python file(s)")
 [print("   ",b) for b in bad[:10]]
-sys.exit(1 if bad else 0)
+sys.exit(1 if bad or not files else 0)
 PY
-  then pass "every tracked Python file parses"; else fail "syntax errors above"; fi
+  then pass "every tracked or new Python file parses"; else fail "syntax errors above, or no file found"; fi
 
   if command -v ruff >/dev/null 2>&1; then
     out=$(ruff check . --output-format=concise 2>/dev/null); rc=$?

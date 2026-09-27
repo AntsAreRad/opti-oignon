@@ -37,39 +37,14 @@ Local-only. Runs under pytest or the __main__ runner.
 """
 
 import hashlib
-import importlib.util
 import sys
 import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-
-class _IsolationGuard:
-    """Refuse every project submodule the test did not seed.
-
-    A stand-in package whose ``__path__`` is empty isolates the tree only
-    while the parent path is the sole way to resolve a submodule. That
-    assumption breaks wherever the project is installed in editable mode:
-    such an install registers a finder that answers on the module NAME and
-    ignores the parent path, so a real submodule resolves behind the test's
-    back -- silently importing live code. This guard sits ahead of every
-    finder and refuses the names that were not seeded, so a load behaves
-    identically whether the project is installed or not.
-    """
-
-    _PREFIX = "opti_oignon."
-
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(self._PREFIX):
-            raise ModuleNotFoundError(
-                f"not seeded in the isolation window: {fullname}",
-                name=fullname,
-            )
-        return None
-
+from _isolation import isolate, source  # noqa: E402
 
 _BODY = b"GGUF" + bytes(range(256)) * 40
 _NAME = "pinned-model-Q4_K_M.gguf"
@@ -96,55 +71,49 @@ class _FakeResponse:
         return False
 
 
+def _open_front_door():
+    """The front door, answering open: the downloader's own checks are what is read."""
+    egress = types.ModuleType("opti_oignon.egress")
+
+    class EgressRefused(RuntimeError):
+        pass
+
+    egress.EgressRefused = EgressRefused
+    egress.require_web = lambda label: None
+    egress.web_refusal = lambda label="Web request": None
+    return egress
+
+
+def _public_addresses():
+    """The page fetch's address check, finding nothing: the downloader's own rule decides."""
+    web_search = types.ModuleType("opti_oignon.web_search")
+    web_search.address_refusal = lambda address, hop=0: None
+    return web_search
+
+
 def _load(*, provenance=None, body: bytes = _BODY):
-    """Load model_manager in isolation; returns (module, restore).
+    """Load model_manager in the shared isolation window; returns (module, restore).
 
     The network seam and the SSRF pre-check are replaced: this suite is about
     the digest, and re-testing the SSRF guard here would only make a probe on
-    one surface redden the other.
+    one surface redden the other. The front door answers open. The provenance
+    module is the stand-in given, or it is proven unreachable.
     """
-    keys = (
-        "opti_oignon",
-        "opti_oignon.model_manager",
-        "opti_oignon.model_provenance",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    guard = _IsolationGuard()
-    sys.meta_path.insert(0, guard)
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    # Blocked with None rather than merely left unseeded: Python reads
-    # sys.modules ahead of every finder, so a real module cached by an earlier
-    # test would resolve behind the meta-path guard's back.
-    sys.modules["opti_oignon.model_provenance"] = None
-
+    seeded = {"opti_oignon.egress": _open_front_door(), "opti_oignon.web_search": _public_addresses()}
+    blocked = ()
     if provenance is not None:
-        sys.modules["opti_oignon.model_provenance"] = provenance
-        pkg.model_provenance = provenance
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.model_manager", _OO / "model_manager.py",
+        seeded["opti_oignon.model_provenance"] = provenance
+    else:
+        blocked = ("opti_oignon.model_provenance",)
+    loaded, restore = isolate(
+        targets={"opti_oignon.model_manager": source("model_manager.py")},
+        seeded=seeded,
+        blocked=blocked,
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.model_manager"] = mod
-    spec.loader.exec_module(mod)
-    pkg.model_manager = mod
+    mod = loaded["opti_oignon.model_manager"]
 
     mod.urlopen_ssrf_safe = lambda url, **kw: _FakeResponse(body)
     mod.ModelManager._validate_download_url = staticmethod(lambda url: None)
-
-    def restore():
-        if guard in sys.meta_path:
-            sys.meta_path.remove(guard)
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
 
     return mod, restore
 

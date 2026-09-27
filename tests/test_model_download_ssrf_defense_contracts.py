@@ -37,80 +37,56 @@ clause:
 
 Injectable seams (resolver=, opener=) carry the tests; no test performs real
 network access. Local-only (the public distribution ships no tests). Runs
-under pytest or directly via the __main__ runner. Loading follows the house
-idiom: canonical dotted names, an empty-path package stand-in, and a
-meta-path guard sealing the isolation window.
+under pytest or directly via the __main__ runner. Loading goes through the
+shared isolation window, with the front door answering open and the page
+fetch's address check finding nothing.
 """
 
-import importlib.util
 import socket
 import sys
 import traceback
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
-class _IsolationGuard:
-    """Refuse every project submodule the test did not seed.
+def _open_front_door():
+    """The front door, answering open: the downloader's own checks are what is read."""
+    egress = types.ModuleType("opti_oignon.egress")
 
-    A stand-in package whose ``__path__`` is empty isolates the tree only
-    while the parent path is the sole way to resolve a submodule. That
-    assumption breaks wherever the project is installed in editable mode:
-    such an install registers a finder that answers on the module NAME and
-    ignores the parent path, so a real submodule resolves behind the test's
-    back -- silently importing live code. This guard sits ahead of every
-    finder and refuses the names that were not seeded, so a load behaves
-    identically whether the project is installed or not.
-    """
+    class EgressRefused(RuntimeError):
+        pass
 
-    _PREFIX = "opti_oignon."
+    egress.EgressRefused = EgressRefused
+    egress.require_web = lambda label: None
+    egress.web_refusal = lambda label="Web request": None
+    return egress
 
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith(self._PREFIX):
-            raise ModuleNotFoundError(
-                f"not seeded in the isolation window: {fullname}",
-                name=fullname,
-            )
-        return None
+
+def _public_addresses():
+    """The page fetch's address check, finding nothing: the downloader's own rule decides."""
+    web_search = types.ModuleType("opti_oignon.web_search")
+    web_search.address_refusal = lambda address, hop=0: None
+    return web_search
 
 
 # ---------------------------------------------------------------------------
-# Isolated loading of the model manager (stdlib-only imports at module top,
-# so no sibling project module needs seeding).
+# Loading of the model manager, through the shared isolation window.
 # ---------------------------------------------------------------------------
 def _load():
-    """Load model_manager in isolation; returns (module, restore)."""
-    keys = ("opti_oignon", "opti_oignon.model_manager")
-    saved = {k: sys.modules.get(k) for k in keys}
+    """Load model_manager in the shared isolation window; returns (module, restore).
 
-    guard = _IsolationGuard()
-    sys.meta_path.insert(0, guard)
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.model_manager", _OO / "model_manager.py",
+    The front door answers open and the page fetch's address check finds
+    nothing, so what the contracts read is the downloader's own rule.
+    """
+    loaded, restore = isolate(
+        targets={"opti_oignon.model_manager": source("model_manager.py")},
+        seeded={"opti_oignon.egress": _open_front_door(), "opti_oignon.web_search": _public_addresses()},
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.model_manager"] = mod
-    spec.loader.exec_module(mod)
-    pkg.model_manager = mod
-
-    def restore():
-        if guard in sys.meta_path:
-            sys.meta_path.remove(guard)
-        for key, value in saved.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
-
-    return mod, restore
+    return loaded["opti_oignon.model_manager"], restore
 
 
 # ---------------------------------------------------------------------------

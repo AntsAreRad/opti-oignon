@@ -60,7 +60,9 @@ function of another module; a class or other capitalised name imported
 from the package that is in fact a submodule; a local endpoint, or a cloud
 URL, assembled from pieces none of which names an endpoint or the cloud
 host; a local endpoint posted with a transport the list below does not
-name, such as ``urllib3``, ``primp`` or ``subprocess`` (none does today).
+name, such as ``urllib3``, ``primp`` or ``subprocess`` (the context manager
+runs the ``ollama`` CLI, which reaches the server's show endpoint; the egress
+census guard counts it).
 
 RATCHET, in the shape of the isolation-seal guard and for the same reason: a
 ratchet that only counts is a ratchet on the count. Every owed module carries

@@ -244,6 +244,11 @@ def _bulbe_refusal_for(label: str, endpoint: str | None, where: str = "") -> str
     return f"Bulbe mode: {label} requests stay on this machine; refusing {endpoint}{where}"
 
 
+def local_refusal(label: str, endpoint: str | None, where: str = "") -> str | None:
+    """The local rule, by its public name: why a request to ``endpoint`` may not leave now, or None."""
+    return _bulbe_refusal_for(label, endpoint, where)
+
+
 def _connect_only_timeout(seconds: float) -> Any:
     """A transport timeout that bounds the connection and leaves reads unbounded."""
     import httpx

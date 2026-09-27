@@ -112,44 +112,7 @@ logger = logging.getLogger(__name__)
 # THE REQUEST GATE
 # =============================================================================
 
-_REFUSALS = {
-    "kill_switch": "Web search is refused: the search kill switch is engaged.",
-    "mode": "Web search is refused outside Daily mode.",
-    "unreadable": "Web search is refused: the kill switch cannot be read.",
-}
-
-
-class WebSearchRefused(RuntimeError):
-    """A web request refused by the gate, carrying the refusal by name."""
-
-    def __init__(self, refusal: str):
-        super().__init__(_REFUSALS[refusal])
-        self.refusal = refusal
-
-
-def search_refusal() -> str | None:
-    """Why no web request may leave the process now, or None.
-
-    ``kill_switch`` while the switch is engaged; ``unreadable`` when it cannot
-    be read, its module absent included; ``mode`` in any mode but exactly
-    ``"daily"``, and when the mode cannot be read. Both are asked at every
-    request: the switch reads its record again, and the mode answers from
-    the process's cache, which a mode change made in this process
-    refreshes.
-    """
-    try:
-        from opti_oignon.search_killswitch import search_killswitch
-        if search_killswitch.is_killed():
-            return "kill_switch"
-    except Exception:
-        return "unreadable"
-    try:
-        from opti_oignon.security_mode import get_current_mode
-        mode = get_current_mode()
-    except Exception:
-        return "mode"
-    return None if isinstance(mode, str) and mode == "daily" else "mode"
-
+from .web_gate import _REFUSALS, WebSearchRefused, search_refusal  # noqa: F401  (re-export)
 
 # =============================================================================
 # SEARCH RESULT DATACLASS
@@ -1348,6 +1311,23 @@ def _local_class(address: str, links: list, hop: int) -> str | None:
     return None
 
 
+def address_refusal(address: str, hop: int = 0) -> str | None:
+    """Why an address is not reached, by the name of its class, or None for a public one.
+
+    The one check every request that leaves for the web applies to each
+    address it would connect to: an address that is not public, then this
+    machine's own and the networks on its links, read from its tables now.
+
+    Raises:
+        DestinationRefused: This machine's network tables cannot be read, or
+            whether it holds the address cannot be told.
+    """
+    found = _address_class(address)
+    if found is None:
+        found = _local_class(address, _link_networks(hop), hop)
+    return found
+
+
 def _gate() -> None:
     """The web gate, for a page fetch: raise its refusal by name, or return."""
     refusal = search_refusal()
@@ -1398,14 +1378,10 @@ def _checked_addresses(host: str, port: int, hop: int) -> list[str]:
         answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except (OSError, UnicodeError) as exc:
         raise _Failure(f"the host name does not resolve ({exc})") from None
-    addresses, links = [], None
+    addresses = []
     for _family, _kind, _proto, _name, sockaddr in answers:
         address = str(sockaddr[0])
-        found = _address_class(address)
-        if found is None:
-            if links is None:
-                links = _link_networks(hop)
-            found = _local_class(address, links, hop)
+        found = address_refusal(address, hop)
         if found is not None:
             raise DestinationRefused(f"{_refused(hop)}: the host resolves to a non-public address ({found}).")
         if address not in addresses:
@@ -1582,6 +1558,7 @@ def fetch_page(
     max_bytes: int = 5 * 1024 * 1024,
     user_agent: str = "Opti-Oignon RAG/1.0",
     allowed_ports=(),
+    decode: bool = True,
 ) -> FetchedPage:
     """Fetch one web page behind the web gate, from a public address only.
 
@@ -1592,7 +1569,8 @@ def fetch_page(
     ports to 80 and 443; ``max_bytes`` caps the body as it is read;
     ``timeout`` is one budget for the whole fetch, in seconds. The text is
     decoded with the charset the page names when it is one of the web's
-    encodings, UTF-8 otherwise.
+    encodings, UTF-8 otherwise; with ``decode`` false it is left empty and
+    the bytes are the answer, as for an archive.
 
     Raises:
         PageFetchRefused: The gate refused, before any request of this fetch
@@ -1632,7 +1610,7 @@ def fetch_page(
         content_type, body = page
         return FetchedPage(
             url=current, status=status, content_type=content_type, body=body,
-            text=body.decode(_charset(content_type), errors="replace"),
+            text=body.decode(_charset(content_type), errors="replace") if decode else "",
         )
     raise DestinationRefused(f"Refused: more than {MAX_REDIRECTS} redirects.")
 

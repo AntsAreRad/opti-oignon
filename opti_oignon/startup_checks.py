@@ -326,8 +326,8 @@ def _check_pqc_primitive() -> CheckItem:
     reason = posture["reason"] or "the signature primitive did not resolve"
     tips = [
         "Install the signature library: pip install 'opti-oignon[pqc]'",
-        "Check what the library offers: python -c "
-        '"import oqs; print(oqs.get_enabled_sig_mechanisms())"',
+        "Check that the liboqs shared library is found: python -c "
+        "\"import ctypes.util; print(ctypes.util.find_library('oqs'))\"",
     ]
 
     if posture["degraded"]:

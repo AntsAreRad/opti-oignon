@@ -13,8 +13,51 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+# The marketplace configuration; its ``install`` section is read at each
+# installer's construction, key by key.
+_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "plugin_marketplace.yaml"
+
+_INSTALL_DEFAULTS: dict[str, Any] = {
+    "allow_remote_install": True,
+    "max_download_size_mb": 50,
+    "require_hash": False,
+    "timeout_s": 120,
+}
+
+
+def _install_config() -> dict[str, Any]:
+    """The ``install`` settings: each missing or unusable value falls back to its default.
+
+    A value that is present and unusable (a wrong type, a size or a timeout
+    that is not positive) is logged with the default that replaces it.
+    """
+    section: Any = {}
+    try:
+        import yaml
+
+        with open(_CONFIG_PATH, encoding="utf-8") as fh:
+            section = (yaml.safe_load(fh) or {}).get("install") or {}
+    except Exception as exc:
+        logger.warning("Plugin install configuration cannot be read (%s); the defaults apply.", exc)
+    if not isinstance(section, dict):
+        logger.warning("Plugin install configuration is not a mapping; the defaults apply.")
+        section = {}
+    config = {}
+    for key, default in _INSTALL_DEFAULTS.items():
+        value = section.get(key, default)
+        if isinstance(default, bool):
+            usable = isinstance(value, bool)
+        else:
+            usable = isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        if not usable:
+            logger.warning("install.%s = %r is not usable; the default %r applies.", key, value, default)
+            value = default
+        config[key] = value
+    return config
 
 
 class PluginInstallError(Exception):
@@ -34,8 +77,9 @@ class RemotePluginInstaller:
         PluginLoader instance for loading after install.
     index : optional
         PluginIndex instance for download tracking.
-    max_download_size_mb : int
-        Maximum download size in MB (safety limit).
+    max_download_size_mb : int, optional
+        Maximum download size in MB (safety limit); the configuration's
+        ``install.max_download_size_mb`` when not given.
     """
 
     def __init__(
@@ -44,13 +88,15 @@ class RemotePluginInstaller:
         registry: Any = None,
         loader: Any = None,
         index: Any = None,
-        max_download_size_mb: int = 50,
+        max_download_size_mb: int | None = None,
     ) -> None:
         self._plugins_dir = Path(plugins_dir)
         self._registry = registry
         self._loader = loader
         self._index = index
-        self._max_bytes = max_download_size_mb * 1024 * 1024
+        self._config = _install_config()
+        size = self._config["max_download_size_mb"] if max_download_size_mb is None else max_download_size_mb
+        self._max_bytes = int(size * 1024 * 1024)
         self._plugins_dir.mkdir(parents=True, exist_ok=True)
 
     # -----------------------------------------------------------------
@@ -85,6 +131,9 @@ class RemotePluginInstaller:
         tmp_dir = None
         target_dir = None
         try:
+            # Refusals come before anything else: nothing is fetched or written.
+            self._admit(expected_sha256)
+
             # Normalize GitHub repo URLs
             download_url = self._normalize_url(url)
 
@@ -227,49 +276,77 @@ class RemotePluginInstaller:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # -----------------------------------------------------------------
+    # Admission
+    # -----------------------------------------------------------------
+
+    def _admit(self, expected_sha256: str) -> None:
+        """Refuse an install before any request: turned off, a digest missing, the web gate.
+
+        Raises PluginInstallError carrying the refusal's text. The web gate
+        is asked through the front door; a front door that cannot be imported
+        refuses as well.
+        """
+        if not self._config["allow_remote_install"]:
+            raise PluginInstallError(
+                "Remote plugin install is turned off: install.allow_remote_install is false."
+            )
+        if self._config["require_hash"] and not expected_sha256:
+            raise PluginInstallError(
+                "A sha256 digest is required to install a plugin from a URL: "
+                "install.require_hash is true."
+            )
+        from opti_oignon.egress import EgressRefused, require_web
+
+        try:
+            require_web("Plugin install")
+        except EgressRefused as exc:
+            raise PluginInstallError(str(exc)) from None
+
+    # -----------------------------------------------------------------
     # URL normalization
     # -----------------------------------------------------------------
 
     def _normalize_url(self, url: str) -> str:
         """Normalize a URL for downloading.
 
-        Handles GitHub repository URLs by appending archive path.
+        A GitHub repository URL (the host exactly ``github.com``, a path of
+        two segments) becomes the archive of its main branch; every other URL
+        is fetched as given.
         """
         url = url.strip()
-
-        # GitHub repo URL pattern: https://github.com/user/repo
-        # Convert to zip download
-        if "github.com" in url and not url.endswith(
-            (".zip", ".tar.gz", ".tgz")
-        ):
-            # Strip trailing slash and .git
-            clean = url.rstrip("/")
-            if clean.endswith(".git"):
-                clean = clean[:-4]
-            # Check it is not already an archive URL
-            if "/archive/" not in clean and "/releases/" not in clean:
-                return f"{clean}/archive/refs/heads/main.zip"
-
-        return url
+        parts = urlsplit(url)
+        if (parts.hostname or "").lower() != "github.com":
+            return url
+        path = parts.path.rstrip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        segments = [segment for segment in path.split("/") if segment]
+        if len(segments) != 2 or path.endswith((".zip", ".tar.gz", ".tgz")):
+            return url
+        return f"{parts.scheme}://{parts.netloc}/{segments[0]}/{segments[1]}/archive/refs/heads/main.zip"
 
     # -----------------------------------------------------------------
     # Download
     # -----------------------------------------------------------------
 
     def _download(self, url: str, dest_dir: Path) -> Path:
-        """Download a file from URL to dest_dir.
+        """Download a file from URL to dest_dir, through the page fetch.
+
+        The page fetch asks the web gate before every request and after every
+        read, and reaches a public address only. The file is named after the
+        last segment of the URL asked for, never after a redirect's.
 
         Returns the path to the downloaded file.
         Raises PluginInstallError on failure.
         """
-        try:
-            import urllib.error
-            import urllib.request
-        except ImportError:
-            raise PluginInstallError("urllib not available for downloading")
+        from opti_oignon.web_search import (
+            DestinationRefused,
+            PageFetchFailed,
+            PageFetchRefused,
+            fetch_page,
+        )
 
-        # Determine filename from URL
-        filename = url.rstrip("/").split("/")[-1]
+        filename = urlsplit(url).path.rstrip("/").split("/")[-1]
         if not filename or len(filename) > 200:
             filename = "plugin_archive"
         # Ensure a proper extension
@@ -279,45 +356,20 @@ class RemotePluginInstaller:
         dest_path = dest_dir / filename
 
         try:
-            req = urllib.request.Request(
+            page = fetch_page(
                 url,
-                headers={"User-Agent": "Opti-Oignon-PluginInstaller/1.0"},
+                timeout=self._config["timeout_s"],
+                max_bytes=self._max_bytes,
+                user_agent="Opti-Oignon-PluginInstaller/1.0",
+                decode=False,
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                # Check content length
-                content_length = resp.headers.get("Content-Length")
-                if content_length and int(content_length) > self._max_bytes:
-                    raise PluginInstallError(
-                        f"Download too large: {int(content_length)} bytes "
-                        f"(max {self._max_bytes})"
-                    )
+        except (PageFetchRefused, DestinationRefused, PageFetchFailed) as exc:
+            raise PluginInstallError(str(exc)) from None
+        if page.status != 200:
+            raise PluginInstallError(f"HTTP status {page.status} downloading {url}")
+        dest_path.write_bytes(page.body)
 
-                # Download in chunks with size limit
-                total = 0
-                with open(dest_path, "wb") as fh:
-                    while True:
-                        chunk = resp.read(65536)
-                        if not chunk:
-                            break
-                        total += len(chunk)
-                        if total > self._max_bytes:
-                            raise PluginInstallError(
-                                f"Download exceeds max size ({self._max_bytes} bytes)"
-                            )
-                        fh.write(chunk)
-
-        except PluginInstallError:
-            raise
-        except urllib.error.HTTPError as exc:
-            raise PluginInstallError(
-                f"HTTP error downloading {url}: {exc.code} {exc.reason}"
-            ) from exc
-        except Exception as exc:
-            raise PluginInstallError(
-                f"Failed to download {url}: {exc}"
-            ) from exc
-
-        logger.debug("Downloaded %d bytes to %s", total, dest_path)
+        logger.debug("Downloaded %d bytes to %s", len(page.body), dest_path)
         return dest_path
 
     # -----------------------------------------------------------------

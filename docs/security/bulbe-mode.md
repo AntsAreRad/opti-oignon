@@ -88,9 +88,6 @@ What this does not cover, each named with the work that owns it:
   is in the application's environment, nothing at run time would stop
   one that did: keep it out of that environment, and set
   `OLLAMA_NO_CLOUD=1` where the Ollama server runs.
-- **A second long-lived process** -- the mode is read from a cache each
-  process keeps, refreshed by a mode change made in that process; another
-  process keeps the mode it read when it started.
 - **Name resolution time** -- a page fetch's time budget does not bound the
   system resolver, whose own timeouts do.
 - **The router's public address, reached back from inside** -- a page may
@@ -102,15 +99,69 @@ What this does not cover, each named with the work that owns it:
   still refused, its links are not known. A kernel set to bind to any
   address (`ip_nonlocal_bind`) makes every address read as this machine's,
   and every page fetch is refused.
-- **Other outbound fetches** -- the plugin marketplace's index refresh
-  (`GET /api/plugins/marketplace`) and its install download
-  (`POST /api/plugins/marketplace/install`) fetch through `urllib` with no
-  mode check and no destination check, and the Bulbe middleware's install
-  refusal names `/api/plugins/install` and
-  `/api/plugin-marketplace/install`, not the marketplace's path; the model
-  downloader (`POST /api/backends/gguf/download`) checks its destinations
-  but not the mode. Those belong to plugin confinement and the model
-  manager.
+
+
+## Every outbound request
+
+A request that leaves the process asks a gate first, by the class of where
+it goes:
+
+- **The web** -- a host the platform does not own. It may leave only in
+  exactly Daily mode with the search kill switch released: the web gate
+  above. Where the platform holds the connection, it reaches a public
+  address only, by the page fetch's rules.
+- **This machine** -- loopback, `localhost`, an unspecified address, or the
+  process itself. The local rule answers: in Daily mode every endpoint is
+  let through; in any other mode only this machine is.
+- **The operator's own services elsewhere** -- a private or link-local
+  address, named by the operator. The local rule answers them as it answers
+  any endpoint off this machine.
+- **Peers** -- the Veilid peers, reached through the local veilid-server,
+  under their own gate, in exactly Daily mode.
+
+The front door, `opti_oignon/egress.py`, asks these gates for every caller
+that is not a gate itself: it has no rule of its own, and a gate it cannot
+import is a refusal. What asks the web gate today:
+
+- **The web search and the page fetch**, as described above.
+- **The plugin marketplace's install** (`POST /api/plugins/marketplace/install`)
+  -- refused outside Daily mode and while the switch is engaged or cannot be
+  read, in its own words, before anything is fetched or written. The archive
+  comes through the page fetch, so from a public address only, as bytes,
+  named after the URL asked for. `install.allow_remote_install`,
+  `install.max_download_size_mb`, `install.require_hash` and
+  `install.timeout_s` in `plugin_marketplace.yaml` are read.
+- **The marketplace's index refresh** -- the same gate and the same fetch;
+  a refusal keeps the cached listing and serves it. The listing refreshes a
+  stale index on its own only when `index.auto_refresh` is true.
+- **The model downloader** (`POST /api/backends/gguf/download`) -- the gate
+  before it starts, before every redirect and after every block it reads; a
+  refusal answers 403 and leaves no partial file. It refuses every address
+  the page fetch refuses, and writes only a `.gguf`, named by the last
+  segment of the name it is given, inside a configured model directory.
+- **The web-only routes, in Bulbe** -- the marketplace install, the GGUF
+  download and the model pull (`POST /api/model-lifecycle/pull`) are refused
+  by the middleware before their handler, with 403 and the web gate's words.
+  The middleware decides on the path the router matches, by whole segments,
+  and admits `/api/health` itself, not the routes below it.
+- **The mode** -- every gate reads the mode that `security.yaml` and the
+  lockfile hold: each read stats both files and reads them again when either
+  changed, so a mode another process writes is the next one read.
+- **The signature library** -- liboqs-python is imported only when its
+  shared library loads; without it the package would clone and build liboqs
+  from GitHub.
+
+Not yet: the egress census guard counts every network sink in the package,
+and 48 of them, in 15 modules its ledger names, still leave without asking
+the web gate. They are the model lifecycle (the pull in Daily mode, its
+callers other than the route, and the update check), the external vector
+stores (Pinecone, Qdrant, Weaviate) and the local one, code that runs with
+the network (the code executor, the sandbox, plugin workers, the dependency
+monitor), the Ollama command line the context manager runs, the core
+client, the token counter, the terminal interface and the Veilid client.
+The local rule does not yet look at an environment proxy: a proxy named in
+the application's environment still carries the requests to Ollama and to
+a llama-server.
 
 
 ## Enabling Bulbe mode

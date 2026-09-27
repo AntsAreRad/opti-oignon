@@ -590,6 +590,13 @@ fail_under = 0
 # in the same file, which stops the call through the executor's public
 # cancel().
 #
+# ks1 of the web-gates suite counts the modules that call the search kill
+# switch and names web_search.py among them. The web gate (its refusals, its
+# exception and the question itself) moved word for word to web_gate.py,
+# which web_search.py re-exports, so the call now sits there while the
+# property held. It stays in the tree word for word; the replacement is ks6 in
+# the same file, which names web_gate.py in its place.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -679,4 +686,5 @@ addopts = """
     --deselect=tests/test_shell_contracts.py::test_sh10_export_is_one_shell_level_dialog_opened_through_its_store
     --deselect=tests/test_ui_repairs_contracts.py::test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[node]
     --deselect=tests/test_executor_ledger_emission_contracts.py::test_e6_mid_stream_cancellation_is_one_cancelled_record
+    --deselect=tests/test_search_gates_contracts.py::test_ks1_an_engaged_switch_is_read_engaged_by_every_reader
 """

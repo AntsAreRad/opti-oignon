@@ -1620,6 +1620,50 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] Every outbound request of the plugin marketplace and of the
+  model downloader asks the web gate, and every gate reads the security mode
+  from disk. Until now:
+  - the marketplace installed a plugin from any URL in any mode, and
+    refreshed its index the same way, through `urllib` with no destination
+    check. Both now fetch through the page fetch: refused outside Daily mode
+    and while the search kill switch is engaged or cannot be read, before
+    any request, and reaching a public address only. The install reads
+    `install.allow_remote_install`, `install.max_download_size_mb`,
+    `install.require_hash` and the new `install.timeout_s`; the index reads
+    the new `index.timeout_s` and `index.max_bytes`, and the listing
+    refreshes a stale index on its own only when `index.auto_refresh`
+    allows it. The GitHub shorthand is rewritten for the host `github.com`
+    itself, not for a URL that merely contains the name.
+  - the model downloader answered to no mode and wrote wherever its request
+    named. It now asks the gate before it starts, before every redirect and
+    after every block; a refusal answers 403 and removes the partial file.
+    It refuses every address the page fetch refuses (shared address space,
+    site-local, this machine's own, a network on its links) and writes only
+    a `.gguf`, named by the last segment of its name, inside a configured
+    model directory.
+  - each process kept the mode it first read. Every read now stats
+    `security.yaml` and the lockfile and reads them again when either
+    changed, so a mode another process writes is the next one read.
+  - the Bulbe middleware matched paths by string prefix on the request's
+    own path: `/api/searchx` was refused as a search, a path under a mount
+    prefix was not, and two of its entries named no route. It now matches
+    whole segments on the path the router reads, refuses the three routes
+    that only reach the web (the marketplace install, the GGUF download,
+    the model pull) with 403 before their handler, and admits `/api/health`
+    itself, not the routes below it.
+  - importing the signature module imported liboqs-python even where its
+    shared library was nowhere, which makes the package clone and build it
+    from GitHub. It is now imported only when its library loads, and an exit
+    while it loads is caught.
+
+  A new guard, `egress_census_guard.py`, counts every network sink in the
+  package: 30 sites in 3 gated modules, 48 still owed in 15 modules named in
+  its ledger, which may only shrink. Those 48 are not gated yet: the model
+  lifecycle (the pull in Daily mode, its other callers, the update check),
+  the external and local vector stores, code that runs with the network, the
+  Ollama command line, the core client, the token counter, the terminal
+  interface and the Veilid client. The local rule does not yet look at an
+  environment proxy.
 - [SECURITY] A chat turn's stop, callbacks and results belonged to the
   process, not to the turn. The executor kept one stop flag for every call,
   set by any conversation's Stop and cleared by the next call of any

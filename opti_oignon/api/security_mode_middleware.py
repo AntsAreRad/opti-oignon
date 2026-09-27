@@ -7,6 +7,8 @@ the current Daily/Bulbe mode.  Sits in the middleware stack alongside
 the SecurityHeadersMiddleware.
 
 In **Bulbe** mode:
+  - Refuse the routes that only reach the web (the marketplace install, the
+    GGUF download, the model pull) before their handler
   - Block search endpoints if kill switch is engaged
   - Enforce cookie-only auth (reject Bearer tokens)
   - Apply stricter rate limits via response headers
@@ -24,35 +26,59 @@ restrictive), matching the network bind guard and the Veilid gate.
 import logging
 from typing import Any
 
+from starlette._utils import get_route_path
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
-# Paths that are always allowed (auth flow, health checks, static)
+# Paths that are always allowed (auth flow, mode management, the schema),
+# each with every path below it.
 _ALWAYS_ALLOWED_PREFIXES = (
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/status",
     "/api/auth/refresh",
-    "/api/health",
     "/api/security/mode",
     "/docs",
     "/openapi.json",
 )
 
+# Paths that are always allowed exactly, and nothing below them: the health
+# check, not the benchmark routes that live under it.
+_ALWAYS_ALLOWED_EXACT = ("/api/health",)
+
 # Search-related path prefixes (blocked in Bulbe when kill switch engaged)
-_SEARCH_PREFIXES = (
-    "/api/search",
-    "/api/web-search",
-)
+_SEARCH_PREFIXES = ("/api/search",)
 
 # Plugin install path prefixes (blocked in Bulbe without allowlist)
-_PLUGIN_INSTALL_PREFIXES = (
-    "/api/plugins/install",
-    "/api/plugin-marketplace/install",
+_PLUGIN_INSTALL_PREFIXES = ("/api/plugins/install",)
+
+# Routes whose only purpose is a request to the web, by method and exact route
+# path: refused in Bulbe before their handler, in the web gate's words.
+_WEB_ROUTES = (
+    ("POST", "/api/plugins/marketplace/install"),
+    ("POST", "/api/backends/gguf/download"),
+    ("POST", "/api/model-lifecycle/pull"),
 )
+
+_WEB_REFUSED_FALLBACK = "Web requests are refused outside Daily mode."
+
+
+def _matches(path: str, prefix: str) -> bool:
+    """Whether ``path`` is ``prefix`` or lies below it, by whole path segments."""
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def _web_refused_text() -> str:
+    """The web gate's refusal text for a mode that is not Daily."""
+    try:
+        from opti_oignon.web_gate import _REFUSALS
+
+        return _REFUSALS["mode"]
+    except Exception:
+        return _WEB_REFUSED_FALLBACK
 
 
 def _get_security_mode():
@@ -102,8 +128,9 @@ def _is_plugin_allowed(request: Request) -> bool:
         # Try to extract plugin_id from query params or path
         plugin_id = request.query_params.get("plugin_id", "")
         if not plugin_id:
-            # Attempt to extract from path: /api/plugins/install/{plugin_id}
-            parts = request.url.path.strip("/").split("/")
+            # Attempt to extract from path: /api/plugins/install/{plugin_id},
+            # the path the router reads (the mount prefix removed).
+            parts = get_route_path(request.scope).strip("/").split("/")
             if len(parts) >= 4:
                 plugin_id = parts[3]
         if plugin_id:
@@ -169,8 +196,13 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         logger.info("Security mode middleware registered")
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
-        """Process request through mode-specific security checks."""
-        path = request.url.path
+        """Process request through mode-specific security checks.
+
+        Every decision is made on the path the router matches: the request's
+        path with the application's mount prefix removed, compared by whole
+        segments.
+        """
+        path = get_route_path(request.scope)
 
         # RA-01: deny a revoked client certificate before anything else. Local
         # requests carry no client certificate, so this is a no-op for them.
@@ -179,8 +211,10 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
             return revoked_response
 
         # Always allow certain paths (auth, health, mode management)
+        if path in _ALWAYS_ALLOWED_EXACT:
+            return await call_next(request)
         for prefix in _ALWAYS_ALLOWED_PREFIXES:
-            if path.startswith(prefix):
+            if _matches(path, prefix):
                 return await call_next(request)
 
         # Load current mode and policy
@@ -226,9 +260,22 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # 1. Block search endpoints if kill switch is engaged
+        # 1. Refuse the web-only routes before their handler: in Bulbe no
+        #    request leaves for the web, and these routes make nothing else.
+        if (request.method, path) in _WEB_ROUTES:
+            logger.warning("Bulbe: refused a web-only route: %s %s", request.method, path)
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": _web_refused_text(),
+                    "mode": "bulbe",
+                    "restriction": "web_refused",
+                },
+            )
+
+        # 1b. Block search endpoints if kill switch is engaged
         for prefix in _SEARCH_PREFIXES:
-            if path.startswith(prefix):
+            if _matches(path, prefix):
                 if _is_kill_switch_engaged():
                     logger.warning(
                         "Bulbe: blocked search request (kill switch engaged): %s",
@@ -265,7 +312,7 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
 
         # 3. Block plugin install without allowlist
         for prefix in _PLUGIN_INSTALL_PREFIXES:
-            if path.startswith(prefix) and request.method in ("POST", "PUT"):
+            if _matches(path, prefix) and request.method in ("POST", "PUT"):
                 if getattr(policy, "plugin_allowlist_required", True):
                     if not _is_plugin_allowed(request):
                         logger.warning(

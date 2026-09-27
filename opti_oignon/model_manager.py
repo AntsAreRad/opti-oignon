@@ -28,7 +28,7 @@ import socket
 import struct
 import threading
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -400,7 +400,14 @@ def _resolve_validated_ips(hostname: str, port: int, *, resolver) -> list[str]:
     Returns the list of resolved IPs (all confirmed routable). Rejecting when
     *any* resolved address is internal is intentionally strict: it removes the
     rebinding window where one of several A records points inside.
+
+    An address is refused when it is private or internal, and also when the
+    page fetch's own check (``web_search.address_refusal``) names a class for
+    it: shared address space, site-local, this machine, a network on one of
+    its links. The downloader and the page fetch refuse the same addresses.
     """
+    from opti_oignon.web_search import address_refusal
+
     try:
         infos = resolver(hostname, port)
     except socket.gaierror as exc:
@@ -413,6 +420,12 @@ def _resolve_validated_ips(hostname: str, port: int, *, resolver) -> list[str]:
             raise ValueError(
                 f"Download URL resolves to private/internal IP "
                 f"({hostname} -> {ip_str}). This may be an SSRF attempt."
+            )
+        found = address_refusal(ip_str)
+        if found is not None:
+            raise ValueError(
+                f"Download URL resolves to a non-public address "
+                f"({hostname} -> {ip_str}: {found}). This may be an SSRF attempt."
             )
         ips.append(ip_str)
     if not ips:
@@ -562,8 +575,13 @@ def urlopen_ssrf_safe(
     re-validating and re-pinning every hop; the connection is pinned to the
     validated IP. resolver and opener are injectable for testing; the defaults
     use socket.getaddrinfo and a pinned HTTPS/HTTP connection.
+
+    The web gate is asked through the front door before every hop is
+    resolved; a refusal raises ``egress.EgressRefused``.
     """
     from urllib.parse import urljoin
+
+    from opti_oignon.egress import require_web
 
     resolver = resolver or socket.getaddrinfo
     opener = opener or _default_pinned_opener
@@ -572,6 +590,7 @@ def urlopen_ssrf_safe(
     current = url
     hops = 0
     while True:
+        require_web("Model download")
         _scheme, _host, _port, pinned_ip = _validate_and_resolve(
             current, resolver=resolver
         )
@@ -825,6 +844,44 @@ class ModelManager:
         """
         _validate_and_resolve(url, resolver=socket.getaddrinfo)
 
+    @staticmethod
+    def _gguf_name(filename: str) -> str:
+        """The name a download is saved under: its last path segment, ending in .gguf.
+
+        ``../x.gguf`` and ``/tmp/x.gguf`` save as ``x.gguf``, ``a/b.gguf`` as
+        ``b.gguf``, ``x.pth`` as ``x.pth.gguf``. A name that is empty, ``.``
+        or ``..`` once reduced is refused with ValueError.
+        """
+        name = PurePosixPath(str(filename)).name
+        if name in ("", ".", ".."):
+            raise ValueError(f"Download filename {filename!r} names no file")
+        return name if name.endswith(".gguf") else f"{name}.gguf"
+
+    def _model_directory(self, target_dir: str | None) -> Path:
+        """The directory a download is written to, inside a configured model directory.
+
+        No ``target_dir`` means the default directory. A given one must
+        resolve inside one of the model directories or the default one, each
+        resolved too, so a link out of a model directory is refused with the
+        rest. Returns the resolved directory; raises ValueError naming the
+        configured directories otherwise.
+        """
+        if not target_dir:
+            if self._default_dir is None:
+                raise ValueError(
+                    "No target directory specified and no default_dir configured"
+                )
+            return self._default_dir
+        roots = [d for d in (*self._model_dirs, self._default_dir) if d is not None]
+        wanted = Path(target_dir).expanduser().resolve()
+        for root in roots:
+            if wanted.is_relative_to(root.resolve()):
+                return wanted
+        listed = ", ".join(str(root) for root in roots) or "none is configured"
+        raise ValueError(
+            f"Download directory {target_dir} is not inside a model directory ({listed})"
+        )
+
     def download_model(
         self,
         url: str,
@@ -857,28 +914,33 @@ class ModelManager:
         Returns:
             Dict with download result info, including the computed sha256 and
             the outcome of enrolling it in the provenance manifest.
+
+        Raises:
+            EgressRefused: The web gate refused, before the first request, at a
+                redirect or after a block; the partial file is removed.
+            ValueError: The URL, the name or the directory is refused, before
+                any request.
         """
+        from opti_oignon.egress import EgressRefused, require_web
+
+        # The web gate first, through the front door: nothing is resolved,
+        # fetched or written when it refuses.
+        require_web("Model download")
+
+        # The write path: a .gguf named by its last segment, inside a model
+        # directory. Checked before the URL is resolved.
+        if filename is None:
+            filename = url.split("?")[0].split("/")[-1]
+        filename = self._gguf_name(filename)
+        save_dir = self._model_directory(target_dir)
+
         # Audit fix: SSRF protection. urlopen_ssrf_safe (below)
         # re-validates and pins every redirect hop, so neither redirect
         # following nor DNS rebinding can reach an internal address. This
         # call is the early-reject gate for the initial URL.
         self._validate_download_url(url)
 
-        # Determine target path
-        save_dir = Path(target_dir) if target_dir else self._default_dir
-        if save_dir is None:
-            raise ValueError(
-                "No target directory specified and no default_dir configured"
-            )
         save_dir.mkdir(parents=True, exist_ok=True)
-
-        if filename is None:
-            # Extract filename from URL
-            url_path = url.split("?")[0]
-            filename = url_path.split("/")[-1]
-            if not filename.endswith(".gguf"):
-                filename = f"{filename}.gguf"
-
         target_path = save_dir / filename
 
         if target_path.exists():
@@ -927,6 +989,9 @@ class ModelManager:
                         block = response.read(block_size)
                         if not block:
                             break
+                        # The gate again after every block: a mode changed
+                        # during the download stops it.
+                        require_web("Model download")
                         out_file.write(block)
                         downloaded += len(block)
 
@@ -991,6 +1056,12 @@ class ModelManager:
             logger.info("Download completed: %s (%s)", filename, _format_size(downloaded))
             return result
 
+        except EgressRefused:
+            # A refusal is raised, not reported: the route answers it as such.
+            logger.warning("Download refused by the web gate: %s", url)
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
         except ValueError as exc:
             # SSRF rejection (private IP, redirect to private, rebinding) or
             # a malformed URL surfaced mid-download.

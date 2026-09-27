@@ -16,6 +16,10 @@ index:
   # Auto-refresh index on marketplace page load
   auto_refresh: true
 
+  # Time budget of one refresh, in seconds, and the largest index read
+  timeout_s: 15
+  max_bytes: 5242880
+
 # Remote installation settings
 install:
   # Allow installing plugins from remote URLs
@@ -24,7 +28,10 @@ install:
   # Maximum download size in MB
   max_download_size_mb: 50
 
-  # Auto-enable plugins after remote install
+  # Time budget of one archive download, in seconds
+  timeout_s: 120
+
+  # Not read: each install request's own auto_enable decides.
   auto_enable: false
 
   # Require SHA-256 hash verification for remote installs

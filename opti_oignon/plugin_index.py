@@ -30,6 +30,47 @@ DEFAULT_CACHE_TTL_SECONDS = 3600
 # Default GitHub index URL (placeholder -- user configures their own)
 DEFAULT_INDEX_URL = ""
 
+# The marketplace configuration; its ``index`` section is read at each
+# index's construction, key by key.
+_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "plugin_marketplace.yaml"
+
+_INDEX_DEFAULTS: dict[str, Any] = {
+    "auto_refresh": True,
+    "timeout_s": 15,
+    "max_bytes": 5 * 1024 * 1024,
+}
+
+
+def _index_config() -> dict[str, Any]:
+    """The ``index`` settings the refresh reads: each missing or unusable value falls back to its default.
+
+    A value that is present and unusable (a wrong type, a timeout or a size
+    that is not positive) is logged with the default that replaces it.
+    """
+    section: Any = {}
+    try:
+        import yaml
+
+        with open(_CONFIG_PATH, encoding="utf-8") as fh:
+            section = (yaml.safe_load(fh) or {}).get("index") or {}
+    except Exception as exc:
+        logger.warning("Plugin index configuration cannot be read (%s); the defaults apply.", exc)
+    if not isinstance(section, dict):
+        logger.warning("Plugin index configuration is not a mapping; the defaults apply.")
+        section = {}
+    config = {}
+    for key, default in _INDEX_DEFAULTS.items():
+        value = section.get(key, default)
+        if isinstance(default, bool):
+            usable = isinstance(value, bool)
+        else:
+            usable = isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        if not usable:
+            logger.warning("index.%s = %r is not usable; the default %r applies.", key, value, default)
+            value = default
+        config[key] = value
+    return config
+
 
 @dataclass
 class IndexEntry:
@@ -112,6 +153,13 @@ class PluginIndex:
         self._db_path = Path(db_path)
         self._index_url = index_url
         self._cache_ttl = cache_ttl
+        self._config = _index_config()
+        # Whether the listing route refreshes a stale index on its own.
+        self.auto_refresh: bool = self._config["auto_refresh"]
+        # The web gate's last refusal of a refresh, in its words; set only
+        # when the front door refuses.
+        self.last_refusal: str | None = None
+        self._refusals_logged: set[str] = set()
         self._last_refresh: float = 0.0
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -398,17 +446,34 @@ class PluginIndex:
             logger.debug("No remote index URL configured")
             return 0
 
+        # The web gate, through the front door: a refusal keeps the cached
+        # index and is kept, in its words, as the last refusal. A front door
+        # that cannot be imported refuses as well.
         try:
-            import urllib.error
-            import urllib.request
+            from opti_oignon.egress import web_refusal
 
-            req = urllib.request.Request(
+            refused = web_refusal("Plugin index refresh")
+        except Exception:
+            refused = ("unreadable", "Plugin index refresh is refused: the web gate cannot be asked.")
+        if refused is not None:
+            self.last_refusal = refused[1]
+            if refused[1] not in self._refusals_logged:
+                self._refusals_logged.add(refused[1])
+                logger.warning("%s The cached index is kept.", refused[1])
+            return 0
+
+        try:
+            from opti_oignon.web_search import fetch_page
+
+            page = fetch_page(
                 self._index_url,
-                headers={"User-Agent": "Opti-Oignon-PluginIndex/1.0"},
+                timeout=self._config["timeout_s"],
+                max_bytes=int(self._config["max_bytes"]),
+                user_agent="Opti-Oignon-PluginIndex/1.0",
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw = resp.read().decode("utf-8")
-                data = json.loads(raw)
+            if page.status != 200:
+                raise ValueError(f"HTTP status {page.status}")
+            data = json.loads(page.text)
         except Exception as exc:
             logger.warning("Failed to fetch remote plugin index: %s", exc)
             return 0
@@ -499,7 +564,7 @@ try:
     try:
         import yaml as _yaml
 
-        _mp_cfg_path = Path(__file__).parent / "config" / "plugin_marketplace.yaml"
+        _mp_cfg_path = _CONFIG_PATH
         if _mp_cfg_path.exists():
             with open(_mp_cfg_path, encoding="utf-8") as _fh:
                 _mp_cfg = _yaml.safe_load(_fh) or {}
