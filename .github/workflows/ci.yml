@@ -113,6 +113,13 @@ jobs:
       - name: Run native bridge concordance (declarations against exports)
         run: python scripts/native_bridge_concordance.py
 
+      # A gate protects only the calls that ask it. This census reads the
+      # package's source, installs nothing and takes no base: every network
+      # sink must be behind a gate, exempt by name, or counted in the
+      # guard's own ledger, which may only shrink.
+      - name: Run egress census guard (every network sink gated, owed or exempt)
+        run: python .github/scripts/egress_census_guard.py
+
   # -------------------------------------------------------------------
   # Isolation -- the test windows, under BOTH install layouts
   #
