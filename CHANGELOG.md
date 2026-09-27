@@ -914,6 +914,71 @@ package costs.
   from the lock with `npm ci` too. `scripts/dev_frontend.sh` and
   `scripts/run_e2e.sh` still install only when `node_modules` is missing:
   run `npm ci` yourself before them after this pull.
+- The merge guards read the native crates. `public_clean_guard.py` and
+  `comment_only_guard.py` covered five published trees and `rust/` was not
+  one of them, and `public_language_guard.py` read Python alone: the 10,598
+  lines added under `rust/` since `origin/main` (10,472 of them in 22 `.rs`
+  files) reached none of them, a contract running the clean guard's patterns
+  over the two crates in the meantime. All three read `rust/` now. The
+  release recipes' non-ASCII and nomenclature censuses take their trees
+  from the clean guard and so reach `rust/` as well, but they charge only
+  the paths a release manifest lists, and the tracked manifest lists no
+  `rust/` path yet: until one does, they charge nothing there. A contract
+  holds every tracked file under `rust/` to printable ASCII, tab and newline
+  instead, the rule one source directory of the engine already had. The
+  clean guard is a regex over added lines and needed one entry in its list.
+  The other two needed a Rust lexer, which lives in the comment-only guard
+  and which the language guard loads by path, so the two read a Rust file
+  the same way: block comments nest, a raw string holds any quote behind
+  its hashes, an apostrophe opens a char, a lifetime or a label by what
+  follows it, an identifier glued to a literal is that literal's suffix and
+  never the prefix of a raw string, one byte-order mark and a shebang line
+  are skipped by the compiler's own rule, and only a CR LF pair ends a line.
+  Each of those, got wrong, turns every quote after it round and reads code
+  as comment, so that a changed value passes as a purged comment or a French
+  sentence as code; each was measured on a file the compiler accepts. A
+  comment removed from between two tokens leaves a space, so a purge cannot
+  fuse two names into one, and a comment, string or char the lexer cannot
+  close is refused by the comment-only guard and reported unparsable by the
+  language guard. The language guard reads one file kind per tree, `.py`
+  under the Python trees and `.rs` under `rust/`; it skips Cargo's build
+  directory (a `target` beside a `Cargo.toml`, where a third-party build
+  script writes Rust sources of its own), reads a `//` comment line by line
+  and a run of `///` or `//!` lines, a block comment and the value of a
+  `doc` attribute as one passage each (the value only inside an attribute,
+  a `concat!` of strings included; a `format!` argument named `doc` is
+  data), and names `rust/` unreadable, failing the run, when the lexer
+  cannot be loaded. The comment-only guard now refuses a TOML file holding a
+  multi-line string, since its hash model would read the lines of the value
+  as comments and the crates' `Cargo.toml` files are in its reach. The debt
+  found under `rust/` was zero -- no internal nomenclature, no French in 405
+  passages, no character outside ASCII in the 26 tracked files -- so no
+  ledger gains an entry.
+- The clean and language guards read every added line of a diff, and all of
+  it. Both read `git diff` in text mode and cut it with `splitlines`, which
+  also breaks a line at a lone CR, a vertical tab or a form feed: the rest
+  of that added line came back without its `+` and was never read, so an
+  internal code placed after one passed the clean guard, in every tree. And
+  both took any line opening with `+++ ` for a file header, which is what an
+  added line whose own text opens with `++ ` looks like in a diff: its code
+  was never read, and the language guard handed the hunks after it to
+  another path. The diff is now read as bytes, cut at newlines alone, and a
+  header is recognised only before a file's first hunk. On the current diff
+  over `origin/main` (97,615 added lines) both readers return exactly what
+  they returned before.
+- Still outside the guards: TOML comments and string literals (data, as in
+  Python) for the language guard, the prose of the TypeScript, Svelte,
+  Kotlin and shell trees, any file under `rust/` that is not `.rs` (a
+  module a `#[path]` attribute points at, a file an `include!` or an
+  `include_str!` pulls in), and a doc a macro assembles out of its
+  arguments. A doc comment is free in the comment-only guard, like an
+  internal docstring, although a fenced example in one is compiled and run
+  by `cargo test`; the crates hold none today. Under `rust/`, as in every
+  tree outside Python, the line-level prover accepts a line whose literal
+  lost its code while the code beside it changed, and a movement it cannot
+  attribute is NOT JUDGED, which does not fail the run: for a Rust file the
+  comment-only guard fails only on a source it cannot lex. A renamed file
+  escapes it, in every tree.
 - The interface has three palettes, day, night and high contrast, and one
   way to reach them. Each palette is one file of 26 named roles and its
   colour scheme (`frontend/src/styles/theme-{day,night,high-contrast}.css`,
@@ -1291,10 +1356,11 @@ package costs.
   or more engines it picks at random among DuckDuckGo, Bing, Google, Brave,
   Mojeek, Yahoo, Yandex and Mullvad, and every result is still labelled
   "duckduckgo". Which engines to use is left as it was.
-- `public_clean_guard.py`, `published_prose_guard.py`, `summary_fidelity_guard.py`
-  and `red_team_guard.py` are unchanged in this cycle and continue to gate
-  merges. `isolation_seal_guard.py` and `public_language_guard.py` changed only
-  in their sealed ledgers, which fell as debt was paid.
+- `published_prose_guard.py`, `summary_fidelity_guard.py` and
+  `red_team_guard.py` are unchanged in this cycle and continue to gate
+  merges. `isolation_seal_guard.py` changed only in its sealed ledger, which
+  fell as debt was paid, and so did the ledger of `public_language_guard.py`,
+  which with `public_clean_guard.py` now reads `rust/` as well (above).
 
 ### Fixed
 

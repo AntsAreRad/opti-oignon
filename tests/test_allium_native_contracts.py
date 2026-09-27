@@ -12,8 +12,10 @@ no unsafe code, nothing but ASCII, and no internal planning vocabulary.
   * AN2 -- the Rust engine's sources hold no float type, no ``std::``, no
     ``unsafe`` beyond the attribute that forbids it, no ``HashMap``, no
     byte outside ASCII and no planning code, and every source file is read.
-  * AN3 -- the clean guard's patterns, run over both native crates while
-    the guards do not scan ``rust/``, find nothing, and every file is read.
+  * AN3 -- the clean guard's patterns, run over every whole file of both
+    native crates, their locks included, find nothing, and every file is
+    read. The guard itself reads ``rust/`` too, but only the lines a diff
+    adds; this is the standing zero it does not measure.
   * AN4 -- the locks agree: every package the engine's lock pins is pinned
     at the same version in the native core's lock, which links the engine.
   * AN5 -- the native call releases the GIL: a Python thread counts while a

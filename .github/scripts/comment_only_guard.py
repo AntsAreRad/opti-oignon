@@ -3,10 +3,10 @@
 
 Removing internal nomenclature from the published trees is a large, dull,
 mechanical edit spread over hundreds of files -- exactly the shape of diff
-nobody reads line by line. The test suites do not cover that risk: they run
-over two of the five published trees, and none of them pins a log message, a
-CLI banner or an endpoint description. A green run after such an edit means
-almost nothing.
+nobody reads line by line. The test suites do not cover that risk: they reach
+only some of the published trees, and none of them pins a log message, a CLI
+banner or an endpoint description. A green run after such an edit means almost
+nothing.
 
 So this guard does not test. It PROVES, by construction, and only where the
 risk actually is:
@@ -28,6 +28,17 @@ Two shape provers, because the published trees have nothing in common:
   * Everything else -- the source with exactly the comment byte spans
     removed, found by a per-file state machine that also tracks quotes, so a
     comment marker inside a string or a URL is never mistaken for a comment.
+    Rust is read by a lexer of its own, written after the compiler's: its
+    block comments nest, a raw string holds any quote behind its hashes, an
+    apostrophe opens a char, a lifetime or a label by what follows it, an
+    identifier glued to a literal is its suffix, a leading byte-order mark
+    and a shebang line are skipped as the compiler skips them, and only a
+    CR LF pair ends a line. A comment, string or char it cannot close is
+    refused, never guessed. Doc comments are comments there, free like an
+    internal docstring; a fenced example in a doc comment of a library crate
+    is compiled and run by ``cargo test``, so that freedom is a known gap,
+    stated rather than closed. A TOML file holding a multi-line string is
+    refused: the hash model cannot tell its lines from comments.
 
 TWO families of docstring are deliberately NOT neutralised, because the
 framework publishes both verbatim into the generated API schema: the
@@ -47,8 +58,10 @@ A file that cannot be parsed or read is REFUSED, never assumed equivalent: a
 prover that stays silent on what it failed to understand proves nothing.
 
 The pure helpers (``debt_count``, ``python_shape``, ``comment_free``,
-``shape``, ``verdict``) are import-safe and unit-tested; ``main`` performs
-the git scan and exits non-zero on any refusal.
+``shape``, ``verdict``, ``rust_tokens``) are import-safe and unit-tested;
+``main`` performs the git scan and exits non-zero on any refusal. The
+public-language guard loads this file by path for ``rust_tokens`` and
+``rust_text``, so the two guards read a Rust file the same way.
 Usage: ``comment_only_guard.py [BASE_REF]`` (default base ref: origin/main).
 """
 
@@ -67,9 +80,10 @@ _HERE = Path(__file__).resolve().parent
 
 # Trees this guard covers: the same published trees the clean guard scans.
 # The vocabulary is not restated here -- it is imported from the clean guard
-# below, so the two can never drift apart.
+# below, so the two can never drift apart. The list of trees is restated, and
+# a contract holds it equal to the clean guard's.
 _SCAN_PATHS = (
-    "opti_oignon/", "tests/", "frontend/", "scripts/", "android/",
+    "opti_oignon/", "tests/", "frontend/", "scripts/", "android/", "rust/",
 )
 
 _DEFAULT_BASE_REF = "origin/main"
@@ -82,6 +96,8 @@ _C_LIKE = frozenset({
 _MARKUP_LIKE = frozenset({".svelte", ".html"})
 _HASH_LIKE = frozenset({".sh", ".bash", ".yml", ".yaml", ".toml", ".cfg",
                         ".ini"})
+# Rust is none of the above: see ``rust_tokens``.
+_RUST_LIKE = frozenset({".rs"})
 
 # Decorator attributes that mark a function as a web route handler. Its
 # docstring is published in the generated API schema, so it is not free.
@@ -344,19 +360,401 @@ def _comment_spans(text, markup=False, hash_style=False):
     return spans
 
 
+# ----------------------------------------------------------------- Rust ---
+#
+# Rust is not C, and a C-style model is wrong about it in three places: its
+# block comments nest, its raw strings hold any quote behind a count of
+# hashes, and its apostrophe opens a char, a lifetime or a loop label
+# depending on what follows. Measured on the crates, the C-style model agreed
+# with a real Rust lexer on every comment character only by luck -- ninety-
+# five lines carry an odd number of lifetime apostrophes and none of them
+# happened to carry a comment after them -- and on planted lines it read code
+# as comment behind a nested block, behind a raw string holding an odd quote,
+# and behind a lifetime followed by a string holding an apostrophe. So Rust
+# gets a lexer of its own, written after the compiler's own rules. A byte it
+# does not understand stays shape, never comment, and a comment, string or
+# char it cannot close raises instead of being guessed.
+#
+# The compiler's rules include the ones that are easy to miss, because each
+# of them, got wrong, turns every quote after it round and so reads code as
+# comment: an identifier glued to a literal is that literal's suffix and
+# never the prefix of a raw string; the source starts after one byte-order
+# mark, and a first line opening with ``#!`` is a shebang unless the next
+# token that is not whitespace or a plain comment is ``[``; and only a CR LF
+# pair is a line break, a lone CR staying inside the comment that holds it.
+
+
+class RustUnterminated(ValueError):
+    """A Rust comment, string or char runs to the end of the source."""
+
+    def __init__(self, what, offset):
+        super().__init__(f"unterminated {what} at offset {offset}")
+        self.offset = offset
+
+
+# Token kinds ``rust_tokens`` reports. Every other byte is code.
+RUST_COMMENTS = frozenset({
+    "line", "doc_outer", "doc_inner",
+    "block", "block_doc_outer", "block_doc_inner",
+})
+RUST_DOCS = frozenset({
+    "doc_outer", "doc_inner", "block_doc_outer", "block_doc_inner",
+    "doc_attr",
+})
+
+# The characters the compiler counts as whitespace (Unicode's
+# Pattern_White_Space). Python's ``str.isspace`` counts more -- the four
+# separators from 0x1C to 0x1F among them -- and a character the compiler
+# reads as a stray token is not one to skip over.
+_RUST_WHITESPACE = frozenset(
+    "\t\n\r " + "".join(
+        chr(point) for point in (0x0B, 0x0C, 0x85, 0x200E, 0x200F, 0x2028,
+                                 0x2029)
+    )
+)
+_RUST_BOM = chr(0xFEFF)
+
+
+def rust_text(data):
+    """A Rust source's bytes as the compiler reads them: ``str``.
+
+    Strict UTF-8, and only a CR LF pair becomes a newline. Python's universal
+    newlines would make a lone CR a line break as well, while the compiler
+    keeps it inside the comment that carries it: a line comment would end
+    early here, and what follows the CR -- a sentence, or a quote that turns
+    every string after it round -- would be read as code. Both guards read
+    Rust through this function, the base side and the working tree alike.
+    """
+    return data.decode("utf-8").replace("\r\n", "\n")
+
+
+def _rust_ident_start(char):
+    """True for a character that may begin a Rust identifier."""
+    return char == "_" or char.isidentifier()
+
+
+def _rust_ident_continue(char):
+    """True for a character that may continue a Rust identifier."""
+    return bool(char) and ("_" + char).isidentifier()
+
+
+def _rust_line_kind(text, index):
+    """Kind of the line comment opened at ``index``: ``////`` is plain."""
+    if text.startswith("//!", index):
+        return "doc_inner"
+    if text.startswith("///", index) and not text.startswith("////", index):
+        return "doc_outer"
+    return "line"
+
+
+def _rust_block_kind(text, index):
+    """Kind of the block comment opened at ``index``: ``/**/``, ``/***`` plain."""
+    if text.startswith("/*!", index):
+        return "block_doc_inner"
+    if (text.startswith("/**", index)
+            and text[index + 3:index + 4] not in ("*", "/")):
+        return "block_doc_outer"
+    return "block"
+
+
+def _rust_block_end(text, start):
+    """End of the block comment opened at ``start``; nested to any depth."""
+    depth, cursor, size = 1, start + 2, len(text)
+    while depth:
+        if cursor >= size:
+            raise RustUnterminated("block comment", start)
+        if text.startswith("/*", cursor):
+            depth += 1
+            cursor += 2
+        elif text.startswith("*/", cursor):
+            depth -= 1
+            cursor += 2
+        else:
+            cursor += 1
+    return cursor
+
+
+def _rust_start(text):
+    """Offset where the compiler starts reading ``text``.
+
+    Past one byte-order mark, which the compiler drops. Then a first line
+    opening with ``#!`` is a shebang, skipped to the end of its line, unless
+    the first token after the ``#!`` that is neither whitespace nor a plain
+    comment is ``[``: then it opens an inner attribute and is read as code.
+    Whitespace is the compiler's set, and a doc comment is a token, not
+    trivia. A plain block comment left open there ends the compiler's look
+    ahead without a ``[``, so the line is a shebang, as it is to the compiler.
+    """
+    index = 1 if text.startswith(_RUST_BOM) else 0
+    if not text.startswith("#!", index):
+        return index
+    cursor, size = index + 2, len(text)
+    while cursor < size:
+        if text[cursor] in _RUST_WHITESPACE:
+            cursor += 1
+        elif (text.startswith("//", cursor)
+              and _rust_line_kind(text, cursor) == "line"):
+            end = text.find("\n", cursor)
+            cursor = size if end == -1 else end
+        elif (text.startswith("/*", cursor)
+              and _rust_block_kind(text, cursor) == "block"):
+            try:
+                cursor = _rust_block_end(text, cursor)
+            except RustUnterminated:
+                break
+        else:
+            break
+    if text.startswith("[", cursor):
+        return index
+    end = text.find("\n", index)
+    return size if end == -1 else end
+
+
+def _rust_suffix(text, cursor):
+    """End of the suffix glued to a literal that ends at ``cursor``.
+
+    The compiler reads an identifier right after a literal as the literal's
+    suffix -- ``1u8``, and on a string ``"a"r``, which it rejects later, if
+    at all: inside a macro's input it never does. Read as a word instead,
+    an ``r``, ``br`` or ``cr`` there would open a raw string the compiler
+    never sees, and every quote after it would change sides.
+    """
+    size = len(text)
+    if cursor < size and _rust_ident_start(text[cursor]):
+        cursor += 1
+        while cursor < size and _rust_ident_continue(text[cursor]):
+            cursor += 1
+    return cursor
+
+
+def _rust_string(text, start, cursor, tokens, kind):
+    """Lex a string whose body begins at ``cursor``; return where it ends."""
+    size = len(text)
+    while cursor < size:
+        char = text[cursor]
+        if char == '"':
+            tokens.append((kind, start, cursor + 1))
+            return _rust_suffix(text, cursor + 1)
+        cursor += 2 if char == "\\" else 1
+    raise RustUnterminated("string", start)
+
+
+def _rust_raw(text, start, cursor, tokens, kind):
+    """Lex a raw string whose hashes begin at ``cursor``; None if it is not one."""
+    hashes = cursor
+    while text.startswith("#", hashes):
+        hashes += 1
+    if not text.startswith('"', hashes):
+        return None
+    close = '"' + "#" * (hashes - cursor)
+    stop = text.find(close, hashes + 1)
+    if stop == -1:
+        raise RustUnterminated("raw string", start)
+    end = stop + len(close)
+    tokens.append((kind, start, end))
+    return _rust_suffix(text, end)
+
+
+def _rust_single_quoted(text, quote):
+    """End of the char or byte char whose opening quote is at ``quote``."""
+    size = len(text)
+    cursor = quote + 1
+    first = text[cursor:cursor + 1]
+    if first and first != "\\" and text.startswith("'", cursor + 1):
+        return cursor + 2
+    while cursor < size:
+        char = text[cursor]
+        if char == "'":
+            return cursor + 1
+        if char == "/" or (char == "\n" and not text.startswith("'", cursor + 1)):
+            break
+        cursor += 2 if char == "\\" else 1
+    raise RustUnterminated("char", quote)
+
+
+def _rust_quote(text, start, tokens):
+    """Lex what an apostrophe at ``start`` opens; return where it ends.
+
+    A char when an escape follows, or one character and a closing quote,
+    and then its suffix; a lifetime or a label when a name follows and no
+    quote closes it; a raw lifetime, ``'r#name``, whole and never closed; a
+    char spelled with a whole name when a quote does close it (the compiler
+    reads it so, with no suffix, then rejects it). Only a char is a token: a
+    lifetime is code.
+    """
+    size = len(text)
+    first = text[start + 1:start + 2]
+    second = text[start + 2:start + 3]
+    if second != "'" and first and (_rust_ident_start(first) or "0" <= first <= "9"):
+        raw = (first == "r" and second == "#"
+               and _rust_ident_start(text[start + 3:start + 4]))
+        cursor = start + 4 if raw else start + 2
+        while cursor < size and _rust_ident_continue(text[cursor]):
+            cursor += 1
+        if not raw and text.startswith("'", cursor):
+            tokens.append(("char", start, cursor + 1))
+            return cursor + 1
+        return cursor
+    end = _rust_single_quoted(text, start)
+    tokens.append(("char", start, end))
+    return _rust_suffix(text, end)
+
+
+def rust_tokens(text):
+    """``[(kind, start, end), ...]`` for every comment and literal in Rust.
+
+    Offsets index ``text``. Comment kinds: ``line`` (``//``, and ``////``
+    and more), ``doc_outer`` (``///``), ``doc_inner`` (``//!``), ``block``,
+    ``block_doc_outer`` (``/**``, but not ``/**/`` nor ``/***``) and
+    ``block_doc_inner`` (``/*!``); block comments nest to any depth. Literal
+    kinds: ``string`` (with the ``b`` and ``c`` prefixes), ``raw_string``
+    (``r``, ``br``, ``cr``, any count of hashes), ``char`` (and byte char),
+    and ``doc_attr`` for a string, raw or not, inside the value of a ``doc``
+    attribute -- ``#[doc = ...]``, ``#![doc = ...]``, or ``doc = ...`` in
+    the list of an attribute such as ``cfg_attr``, up to the comma or the
+    bracket that ends it, so a ``concat!`` of strings is doc as a whole; a
+    ``doc = "..."`` anywhere else, a named ``format!`` argument, is data. A
+    literal's suffix, a lifetime, a label and a raw identifier are code, and
+    so are a leading byte-order mark and a shebang line.
+
+    Raises ``RustUnterminated`` for a block comment, string, raw string or
+    char that is never closed.
+    """
+    tokens, recent = [], []
+    # One flag per open bracket, parenthesis or brace: whether it lies
+    # inside an attribute. And the depth of the doc value being read.
+    inside, doc = [], None
+    index, size = _rust_start(text), len(text)
+    while index < size:
+        char = text[index]
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            end = size if end == -1 else end
+            tokens.append((_rust_line_kind(text, index), index, end))
+            index = end
+            continue
+        if text.startswith("/*", index):
+            end = _rust_block_end(text, index)
+            tokens.append((_rust_block_kind(text, index), index, end))
+            index = end
+            continue
+        documented = doc is not None
+        if char == '"':
+            index = _rust_string(text, index, index + 1, tokens,
+                                 "doc_attr" if documented else "string")
+            recent.append('"')
+            continue
+        if char == "'":
+            index = _rust_quote(text, index, tokens)
+            recent.append("'")
+            continue
+        if "0" <= char <= "9" or _rust_ident_start(char):
+            end = index + 1
+            while end < size and _rust_ident_continue(text[end]):
+                end += 1
+            word = text[index:end]
+            if word in ("r", "br", "cr") and text[end:end + 1] in ('"', "#"):
+                raw = _rust_raw(text, index, end, tokens,
+                                "doc_attr" if documented else "raw_string")
+                if raw is not None:
+                    recent.append('"')
+                    index = raw
+                    continue
+                if (word == "r" and text.startswith("#", end)
+                        and _rust_ident_start(text[end + 1:end + 2])):
+                    # A raw identifier, ``r#name``: code.
+                    end += 1
+                    while end < size and _rust_ident_continue(text[end]):
+                        end += 1
+                    word = text[index + 2:end]
+            elif word in ("b", "c") and text.startswith('"', end):
+                index = _rust_string(text, index, end + 1, tokens,
+                                     "doc_attr" if documented else "string")
+                recent.append('"')
+                continue
+            elif word == "b" and text.startswith("'", end):
+                stop = _rust_single_quoted(text, end)
+                tokens.append(("char", index, stop))
+                recent.append("'")
+                index = _rust_suffix(text, stop)
+                continue
+            recent.append(word)
+            index = end
+            continue
+        if char in "[({":
+            opens = char == "[" and (recent[-1:] == ["#"]
+                                     or recent[-2:] == ["#", "!"])
+            inside.append(opens or (bool(inside) and inside[-1]))
+        elif char in "])}":
+            if inside:
+                inside.pop()
+            if doc is not None and len(inside) < doc:
+                doc = None
+        elif char == ",":
+            if doc is not None and len(inside) == doc:
+                doc = None
+        elif (char == "=" and not text.startswith("=", index + 1)
+              and inside and inside[-1] and recent[-1:] == ["doc"]
+              and recent[-2:-1] in (["["], ["("], [","])):
+            doc = len(inside)
+        if not char.isspace():
+            recent.append(char)
+        if len(recent) > 8:
+            del recent[:-4]
+        index += 1
+    return tokens
+
+
+def _rust_comment_free_lines(text):
+    """Rust ``text`` as lines with every comment removed, trailing space cut.
+
+    Lines are split on newlines alone, as the compiler counts them. A comment
+    that held a newline leaves its newlines, so no line moves. A comment
+    between two tokens it separated leaves a space, so the purge cannot fuse
+    two names into one and call that no change.
+    """
+    try:
+        tokens = rust_tokens(text)
+    except RustUnterminated as exc:
+        raise ShapeUnavailable(f"cannot lex: {exc}") from exc
+    pieces, last = [], 0
+    for kind, start, end in tokens:
+        if kind not in RUST_COMMENTS:
+            continue
+        pieces.append(text[last:start])
+        breaks = text.count("\n", start, end)
+        if breaks:
+            pieces.append("\n" * breaks)
+        elif (start and not text[start - 1].isspace()
+              and end < len(text) and not text[end].isspace()):
+            pieces.append(" ")
+        last = end
+    pieces.append(text[last:])
+    return [line.rstrip() for line in "".join(pieces).split("\n")]
+
+
 def _comment_free_lines(path, text):
     """``text`` as lines with every comment byte removed, trailing space cut.
 
     An unrecognised suffix gets no comment model at all, so every byte stays
     shape. That is the fail-closed direction: a file this guard cannot even
     tokenise is never treated as though its comments were understood.
+
+    A TOML file holding a multi-line string is refused instead: the hash
+    model ends every string at its line, so a ``#`` on a later line of a
+    triple-quoted value would be read as a comment while TOML reads it as
+    the value itself.
     """
     suffix = Path(path).suffix
+    if suffix in _RUST_LIKE:
+        return _rust_comment_free_lines(text)
     if suffix in _MARKUP_LIKE:
         spans = _comment_spans(text, markup=True)
     elif suffix in _C_LIKE:
         spans = _comment_spans(text)
     elif suffix in _HASH_LIKE:
+        if suffix == ".toml" and ('"""' in text or "'''" in text):
+            raise ShapeUnavailable("a multi-line TOML string is not modelled")
         spans = _comment_spans(text, hash_style=True)
     else:
         spans = {}
@@ -899,12 +1297,26 @@ def _changed_paths(base_ref):
 
 
 def _blob_at(base_ref, path):
-    """File content at ``base_ref``; ``None`` when it did not exist there."""
+    """File content at ``base_ref``; ``None`` when it did not exist there.
+
+    A Rust file is read as the compiler reads it (``rust_text``); every
+    other file keeps the universal newlines it has always been read with.
+    """
+    rust = Path(path).suffix in _RUST_LIKE
     result = subprocess.run(
         ["git", "show", f"{base_ref}:{path}"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=not rust, check=False,
     )
-    return None if result.returncode != 0 else result.stdout
+    if result.returncode != 0:
+        return None
+    return rust_text(result.stdout) if rust else result.stdout
+
+
+def _worktree_text(path):
+    """The working-tree file at ``path``, read as ``_blob_at`` reads the base."""
+    if Path(path).suffix in _RUST_LIKE:
+        return rust_text(Path(path).read_bytes())
+    return Path(path).read_text(encoding="utf-8")
 
 
 def main(argv=None):
@@ -922,7 +1334,7 @@ def main(argv=None):
         if before is None:
             continue
         try:
-            after = Path(path).read_text(encoding="utf-8")
+            after = _worktree_text(path)
         except (OSError, UnicodeDecodeError):
             continue
         if debt_count(after, clean_guard) >= debt_count(before, clean_guard):
@@ -941,8 +1353,8 @@ def main(argv=None):
     # Printed before any verdict, so an absence of checking is never folded
     # into a line that reads as a check that passed.
     if unjudged:
-        print("comment-only guard: NOT JUDGED -- no analyser for these files, "
-              "the check belongs elsewhere:")
+        print("comment-only guard: NOT JUDGED -- the shape moved and no "
+              "prover could attribute it, the check belongs elsewhere:")
         for path in unjudged:
             print(f"  {path}")
 

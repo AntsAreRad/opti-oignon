@@ -2,10 +2,10 @@
 """Public-clean guard: reject internal session nomenclature in added lines.
 
 No published tree may carry internal session nomenclature -- not the Python
-ones alone, but the frontend, the operator scripts and the mobile tree as
-well, so that each of them is born clean rather than cleaned later. This
-guard scans the ADDED lines of a diff over those trees and fails when a line
-introduces:
+ones alone, but the frontend, the operator scripts, the mobile tree and the
+native crates as well, so that each of them is born clean rather than cleaned
+later. This guard scans the ADDED lines of a diff over those trees and fails
+when a line introduces:
 
   * a session code -- the letter S followed by two-to-four digits as a
     standalone token; or
@@ -83,12 +83,14 @@ _PROCESS_WORDS = tuple(
 #
 # Every tree that ships is here, not the Python ones alone. The detector is a
 # regex over added lines and knows nothing about syntax, so a tree of
-# TypeScript, shell or Kotlin is guarded on exactly the same terms as a tree
-# of Python: leaving a shipped tree out would be a choice, never a technical
-# limit. Diff-only, so the standing debt in these trees is not charged --
-# what is charged is any new instance arriving on an added line.
+# TypeScript, shell, Kotlin or Rust is guarded on exactly the same terms as a
+# tree of Python: leaving a shipped tree out would be a choice, never a
+# technical limit. Diff-only, so the standing debt in these trees is not
+# charged -- what is charged is any new instance arriving on an added line.
+# The comment-only guard covers these same trees, and the release recipes
+# read their perimeter from this list.
 _SCAN_PATHS = (
-    "opti_oignon/", "tests/", "frontend/", "scripts/", "android/",
+    "opti_oignon/", "tests/", "frontend/", "scripts/", "android/", "rust/",
 )
 
 _DEFAULT_BASE_REF = "origin/main"
@@ -131,25 +133,38 @@ def _added_lines_with_paths(base_ref):
 
     Uses a zero-context unified diff so only genuinely added content is
     considered. The path is the post-image file each added line belongs to.
+
+    The diff is read as bytes and cut at newlines alone. Text mode and
+    ``splitlines`` also break a line at a lone CR, a vertical tab or a form
+    feed, and the rest of that added line came back without its ``+`` and
+    was never read: a code placed after one of them passed. And a line is a
+    file header only between a ``diff --git`` line and the first hunk: inside
+    a hunk, an added line whose own text opens with ``++ `` reads ``+++ ``
+    and was taken for a header, its code never read.
     """
     cmd = [
         "git", "diff", "--unified=0", "--no-color", base_ref,
         "--", *_SCAN_PATHS,
     ]
     # Fixed argv, no shell: safe.
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, check=False,
-    )
+    result = subprocess.run(cmd, capture_output=True, check=False)
     pairs = []
     current_path = None
-    for line in result.stdout.splitlines():
-        if line.startswith("+++ "):
+    in_hunk = False
+    for line in result.stdout.decode("utf-8").split("\n"):
+        if line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if not in_hunk and line.startswith("+++ "):
             path = line[4:].strip()
             if path.startswith("b/"):
                 path = path[2:]
             current_path = None if path == "/dev/null" else path
             continue
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if in_hunk and line.startswith("+"):
             pairs.append((current_path, line[1:]))
     return pairs
 

@@ -350,8 +350,9 @@ def test_l15_a_tree_the_guard_cannot_read_is_named():
 
 
 # ---------------------------------------------------------------------------
-# l16 -- the census reads Python and nothing else, and that is deliberate:
-#        French prose in a neighbouring file of another language is NOT seen
+# l16 -- a tree with no reader of its own is read for Python alone, and that
+#        is deliberate: French prose in a neighbouring file of another
+#        language is NOT seen (``rust/`` is the one tree read for ``.rs``)
 # ---------------------------------------------------------------------------
 def test_l16_the_census_reads_python_and_nothing_else():
     guard, restore = _load()
