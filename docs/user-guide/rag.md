@@ -6,7 +6,8 @@ Opti-Oignon's RAG system lets you ingest documents into project-specific
 collections and query them during conversations. Documents are chunked,
 embedded locally (via Ollama), and stored in ChromaDB vector collections.
 
-All processing stays local -- no data leaves your machine.
+All processing stays local -- no data leaves your machine. The one
+exception is ingesting a web page by URL, which fetches that page.
 
 
 ## Creating a project
@@ -43,6 +44,23 @@ Content-Type: multipart/form-data
 file: <uploaded file>
 collection: ecology
 ```
+
+### From a web page
+
+```
+POST /api/rag/ingest/url
+{"url": "https://example.org/article", "collection": "ecology"}
+```
+
+The page is fetched, its readable text extracted (navigation, scripts and
+boilerplate stripped), chunked and ingested like a file. This is the one
+ingestion that reaches the network, so it goes through the web search's
+gate: refused outside Daily mode and while the search kill switch is
+engaged, and when `web_ingestion.enabled` in `rag.yaml` is not true. It is
+fetched only from a public address -- never this machine or its local
+network -- with its redirects, size and time bounded. It connects
+directly: the web search's proxy, Tor included, is not used for it. See
+[Bulbe mode](../security/bulbe-mode.md#web-search).
 
 ### Parallel ingestion
 

@@ -31,6 +31,88 @@ When Bulbe mode is active, the following constraints apply:
   (advisory only, does not block startup even in Bulbe mode)
 
 
+## Web search
+
+In Bulbe mode the platform's web search sends nothing. The searcher
+behind the chat, the tools and the proxy health check opens one gate at
+every request point -- the search itself and the proxy check's Tor exit
+lookup -- and the gate asks the security mode first: anything but Daily
+is refused by name, before any cached result is read, and a refusal is
+never retried. The capability manifest does not offer the web tool.
+
+The knowledge base's page ingestion, `POST /api/rag/ingest/url`, fetches
+through the same gate, asked again before each redirect and after every
+read of the page: outside Daily mode, and while the switch is engaged or
+cannot be read, it is refused by name before any host name is resolved,
+or where the reading stands, and nothing is recorded. It is refused the
+same way when `web_ingestion.enabled` in `rag.yaml` is anything but true.
+In Daily mode it reaches only a public address. User information in the
+URL, a scheme other than http or https, a port other than 80 and 443
+unless `rag.yaml` names it under `web_ingestion.allowed_ports`, and a host
+that resolves to a loopback, private, link-local, site-local, unspecified,
+multicast, reserved or shared (carrier-grade NAT) address -- an IPv4
+address carried inside IPv6 included -- are refused. So are, on an IPv6
+network where every device has a global address, this machine's own
+addresses (a datagram socket binds only to an address the machine holds,
+and the bind sends nothing) and any address on a network the machine
+reaches without a gateway: its IPv6 addresses' prefixes and its on-link
+routes, read from `/proc/net` at every request. A route without a gateway
+counts as a link, a VPN's included, so a tunnel that routes a wide prefix
+to its interface makes that prefix refused. The host is resolved once per
+request and the connection goes only to answers that were checked, in the
+resolver's order, so a name whose answer changes in between cannot steer
+it to this machine or the local network; the request still names the host,
+and TLS verifies that name. At most three redirects are followed, each
+checked as the first request, and a redirect from https to http is
+followed as a browser follows it. The page's size is capped as it is read,
+and one time budget covers the whole fetch. The fetch connects directly: a
+proxy named in the environment is not used, and neither is the web
+search's own proxy (`web_search.yaml`), so the page's server sees this
+machine's address even when searches go through Tor.
+
+The search kill switch is recorded under `data/` and holds across
+restarts; every reader treats a switch it cannot read as engaged.
+Re-enabling it is refused in Bulbe mode. The tool registry's legacy view
+and the agent's toolset still list `web_search` while the switch is
+engaged in Daily mode; a call is refused by the same gate, and the
+refusal is named in the tool result.
+
+What this does not cover, each named with the work that owns it:
+
+- **Code run by the code executor** -- its network is not confined; that
+  belongs to the sandbox work.
+- **Plugins** -- they are not confined; that belongs to plugin
+  confinement.
+- **Ollama's cloud search and fetch** -- no module calls them, and the
+  registry-funnel guard refuses a module that would. If `OLLAMA_API_KEY`
+  is in the application's environment, nothing at run time would stop
+  one that did: keep it out of that environment, and set
+  `OLLAMA_NO_CLOUD=1` where the Ollama server runs.
+- **A second long-lived process** -- the mode is read from a cache each
+  process keeps, refreshed by a mode change made in that process; another
+  process keeps the mode it read when it started.
+- **Name resolution time** -- a page fetch's time budget does not bound the
+  system resolver, whose own timeouts do.
+- **The router's public address, reached back from inside** -- a page may
+  name the address the router shows the internet, which the router may
+  answer itself (hairpin NAT); this machine cannot tell that address from
+  any other public one. Nor is a network-specific NAT64 prefix read as
+  carrying an IPv4 address: only the well-known `64:ff9b::/96` is.
+- **A platform without `/proc/net`** -- the machine's own addresses are
+  still refused, its links are not known. A kernel set to bind to any
+  address (`ip_nonlocal_bind`) makes every address read as this machine's,
+  and every page fetch is refused.
+- **Other outbound fetches** -- the plugin marketplace's index refresh
+  (`GET /api/plugins/marketplace`) and its install download
+  (`POST /api/plugins/marketplace/install`) fetch through `urllib` with no
+  mode check and no destination check, and the Bulbe middleware's install
+  refusal names `/api/plugins/install` and
+  `/api/plugin-marketplace/install`, not the marketplace's path; the model
+  downloader (`POST /api/backends/gguf/download`) checks its destinations
+  but not the mode. Those belong to plugin confinement and the model
+  manager.
+
+
 ## Enabling Bulbe mode
 
 ### From the UI

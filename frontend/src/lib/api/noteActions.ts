@@ -2,16 +2,16 @@
  * Typed API client for the note selection-action surface (N.3).
  *
  * From a note selection the user runs one local action -- fact-check, develop,
- * summarize, rewrite, make-checklist -- or the Daily-only fact-check-with-web,
- * over the single per-user endpoint POST /api/notes/actions/run. The selected
+ * summarize, rewrite, make-checklist -- none reaching the web, over the
+ * single per-user endpoint POST /api/notes/actions/run. The selected
  * text is wrapped as untrusted context by the backend (note_actions); this
  * client never interprets it. The action values mirror the backend ACTION_*
  * string constants exactly.
  *
  * The runner never raises: every outcome (ok / refused / a clean failure)
- * crosses the wire as a structured NoteActionResult with HTTP 200. A web action
- * outside Daily returns a structured refusal (refused=true), never a silent
- * local downgrade.
+ * crosses the wire as a structured NoteActionResult with HTTP 200. No action
+ * needs the web today; a later sourced verifier, run outside Daily, would
+ * return a structured refusal (refused=true), never a silent local downgrade.
  */
 
 import { apiPost } from './client';
@@ -19,7 +19,6 @@ import { apiPost } from './client';
 /** The selection actions, matching the backend ACTION_* constants. */
 export type NoteActionKind =
 	| 'fact_check'
-	| 'fact_check_web'
 	| 'develop'
 	| 'summarize'
 	| 'rewrite'
@@ -30,14 +29,13 @@ export interface NoteActionDef {
 	kind: NoteActionKind;
 	/** Button label (active voice, sentence case). */
 	label: string;
-	/** True for the Daily-only web action; refused outside Daily. */
+	/** True for a Daily-only web action (none today); refused outside Daily. */
 	requiresWeb: boolean;
 }
 
 /** The selection actions offered in the UI, in display order. */
 export const NOTE_ACTIONS: NoteActionDef[] = [
-	{ kind: 'fact_check', label: 'Fact-check', requiresWeb: false },
-	{ kind: 'fact_check_web', label: 'Fact-check with web', requiresWeb: true },
+	{ kind: 'fact_check', label: 'Fact-check (no sources)', requiresWeb: false },
 	{ kind: 'develop', label: 'Develop', requiresWeb: false },
 	{ kind: 'summarize', label: 'Summarize', requiresWeb: false },
 	{ kind: 'rewrite', label: 'Rewrite', requiresWeb: false },

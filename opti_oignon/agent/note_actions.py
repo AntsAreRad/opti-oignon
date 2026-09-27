@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""LLM-from-note selection actions (N.3): the agent-side selection-action surface.
+"""LLM-from-note selection actions: the agent-side selection-action surface.
 
 From a note selection the user asks one of five local actions -- fact-check,
-develop, summarize, rewrite, make-checklist -- or the Daily-only
-fact-check-with-web. The selected text is wrapped as untrusted data via
+develop, summarize, rewrite, make-checklist. None reaches the web today: the
+fact-check works from the model's own knowledge, without sources, and its
+label says so. The selected text is wrapped as untrusted data via
 :mod:`opti_oignon.agent.untrusted_context` (the anti-injection
 core), so injection-looking note text cannot steer the model: the action's
 instruction is the only trusted message, the selection rides the user role inside
@@ -17,13 +18,13 @@ Design notes:
   surface is driven by the user selecting text and choosing an action, not by the
   model's tool-calling. It defines no ``ToolSchema`` and registers nothing in the
   agent tool registry, so it grows no schema-count or allowlist pin.
-- Mode and egress. The five local actions run in both Daily and Bulbe (they reach
-  no network). fact-check-with-web needs web egress and is Daily-only: the runner
-  refuses it with a structured result (never a silent local downgrade) outside
-  Daily. The egress itself rides ``web_search`` (in ``NETWORK_TOOLS``, forbidden
-  in Bulbe); this gate is the surface's own refusal so the model is never invoked
-  for a web action outside Daily. The mode resolution is fail-secure: an
-  undeterminable mode is treated as Bulbe.
+- Mode and egress. The five actions are local and run in both Daily and Bulbe
+  (they reach no network). A web action would need egress and be Daily-only:
+  none exists today, so ``WEB_ACTIONS`` is empty, and a later sourced verifier
+  joins it and inherits the runner's gate, which refuses it with a structured
+  result (never a silent local downgrade) outside Daily, before the model is
+  invoked. The mode resolution is fail-secure: an undeterminable mode is
+  treated as Bulbe.
 - Dependency injection. The model client is a one-shot inference seam the caller
   injects -- a callable taking the built messages and returning the completion
   text (or an object exposing ``stream``). The agent loop is likewise invoked
@@ -65,9 +66,8 @@ MODE_BULBE = "bulbe"
 # untrusted_context to a safe tag attribute).
 SOURCE_NOTE = "note"
 
-# The action names. Five local, one web-only.
+# The action names. All five are local.
 ACTION_FACT_CHECK = "fact_check"
-ACTION_FACT_CHECK_WEB = "fact_check_web"
 ACTION_DEVELOP = "develop"
 ACTION_SUMMARIZE = "summarize"
 ACTION_REWRITE = "rewrite"
@@ -83,9 +83,10 @@ LOCAL_ACTIONS: frozenset[str] = frozenset(
     }
 )
 
-# Web-egress actions: Daily-only. Kept a set so a later web-backed action joins
-# here and inherits the same gate without touching the runner.
-WEB_ACTIONS: frozenset[str] = frozenset({ACTION_FACT_CHECK_WEB})
+# Web-egress actions: Daily-only. Empty: no action reaches the web today. The
+# set stays as the mechanism a sourced verifier, one that searches and cites
+# for real, joins later, and so inherits the Daily gate.
+WEB_ACTIONS: frozenset[str] = frozenset()
 
 ALL_ACTIONS: frozenset[str] = LOCAL_ACTIONS | WEB_ACTIONS
 
@@ -96,12 +97,9 @@ _ACTION_INSTRUCTIONS: dict[str, str] = {
         "You are fact-checking the user's note. Assess the factual accuracy of "
         "the claims in the untrusted-data block below using only your own "
         "knowledge. Do not browse the web. List each notable claim with a "
-        "verdict (supported, unsupported, or uncertain) and a brief reason."
-    ),
-    ACTION_FACT_CHECK_WEB: (
-        "You are fact-checking the user's note with web search. Verify the "
-        "claims in the untrusted-data block below against current web sources "
-        "and cite them. List each notable claim with a verdict and its source."
+        "verdict (supported, unsupported, or uncertain) and a brief reason. "
+        "Do not cite sources, references, links or URLs, and do not claim to "
+        "have looked anything up."
     ),
     ACTION_DEVELOP: (
         "You are developing an idea from the user's note. Expand and deepen the "
@@ -283,7 +281,7 @@ def make_note_action_runner(
                     ok=False,
                     refused=True,
                     reason=(
-                        "fact-check-with-web requires Daily mode; refused in "
+                        "this action needs web access and Daily mode; refused in "
                         + mode
                         + " mode."
                     ),

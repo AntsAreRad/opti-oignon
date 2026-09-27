@@ -3,8 +3,35 @@
 WEB SEARCH MODULE - Opti-Oignon
 ================================
 
-DuckDuckGo-based web search with caching, rate limiting, token-budgeted
-formatting, SOCKS5/Tor proxy support, and PII sanitization.
+Web search through the ddgs package, with caching, rate limiting,
+token-budgeted formatting, SOCKS5/Tor proxy support, and PII sanitization.
+With its default backend, ddgs sends the query to Wikipedia and to one or
+more engines it picks at random among DuckDuckGo, Bing, Google, Brave,
+Mojeek, Yahoo, Yandex and Mullvad; every result is labelled "duckduckgo"
+all the same.
+
+Every request this module makes -- a search, the proxy health check and its
+Tor exit lookup -- opens one gate first, ahead of the cache. The gate refuses
+while the search kill switch is engaged or cannot be read, and in any
+security mode but exactly "daily", a mode that cannot be read included. A
+refusal raises ``WebSearchRefused``, which names it, and it is never retried.
+The search class is bound privately and constructed in one place,
+``WebSearcher._ddgs``; nothing else in the package names it. The kill
+switch's domain allowlist and its injection circuit breaker act on every real
+search, cached results included.
+
+``fetch_page`` fetches one web page for the knowledge base behind the same
+gate, asked again before each redirect and after every read of the body,
+and refused by name as ``PageFetchRefused``. It reaches only a public
+address: user information, a scheme other than http or https, a port other
+than 80 and 443 unless the configuration names it, and a host that resolves
+to a loopback, private, link-local, site-local, unspecified, multicast,
+reserved or shared address are refused, an IPv4 address inside IPv6 read as
+the address it carries; so are an address this machine holds and one on a
+network its routing tables reach without a gateway. The host is resolved
+once per request and the connection goes only to addresses that were
+checked; at most three redirects are followed, each checked as the first;
+the body and the time are capped.
 
 This module provides the search layer used by the ReAct integration (Session 6)
 to inject web search results into LLM conversations.
@@ -25,11 +52,20 @@ Author: Leon
 __version__ = "1.8.4"
 __author__ = "Leon"
 
+import codecs
+import errno
 import hashlib
+import http.client
+import ipaddress
 import logging
+import socket
+import ssl
+import struct
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote, urljoin, urlsplit
 
 # =============================================================================
 # CONDITIONAL IMPORTS
@@ -37,7 +73,7 @@ from pathlib import Path
 
 try:
     # New package name (ddgs >= 7.0)
-    from ddgs import DDGS
+    from ddgs import DDGS as _DDGS
     DDGS_AVAILABLE = True
     DuckDuckGoSearchException = Exception
     RatelimitException = Exception
@@ -45,7 +81,7 @@ try:
 except ImportError:
     try:
         # Legacy package name (duckduckgo_search < 7.0)
-        from duckduckgo_search import DDGS  # type: ignore[no-redef]
+        from duckduckgo_search import DDGS as _DDGS  # type: ignore[no-redef]
         from duckduckgo_search.exceptions import (
             DuckDuckGoSearchException,
             RatelimitException,
@@ -54,7 +90,7 @@ except ImportError:
         DDGS_AVAILABLE = True
     except ImportError:
         DDGS_AVAILABLE = False
-        DDGS = None
+        _DDGS = None
         DuckDuckGoSearchException = Exception
         RatelimitException = Exception
         TimeoutException = Exception
@@ -70,6 +106,49 @@ except ImportError:
     _default_pii = None
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# THE REQUEST GATE
+# =============================================================================
+
+_REFUSALS = {
+    "kill_switch": "Web search is refused: the search kill switch is engaged.",
+    "mode": "Web search is refused outside Daily mode.",
+    "unreadable": "Web search is refused: the kill switch cannot be read.",
+}
+
+
+class WebSearchRefused(RuntimeError):
+    """A web request refused by the gate, carrying the refusal by name."""
+
+    def __init__(self, refusal: str):
+        super().__init__(_REFUSALS[refusal])
+        self.refusal = refusal
+
+
+def search_refusal() -> str | None:
+    """Why no web request may leave the process now, or None.
+
+    ``kill_switch`` while the switch is engaged; ``unreadable`` when it cannot
+    be read, its module absent included; ``mode`` in any mode but exactly
+    ``"daily"``, and when the mode cannot be read. Both are asked at every
+    request: the switch reads its record again, and the mode answers from
+    the process's cache, which a mode change made in this process
+    refreshes.
+    """
+    try:
+        from opti_oignon.search_killswitch import search_killswitch
+        if search_killswitch.is_killed():
+            return "kill_switch"
+    except Exception:
+        return "unreadable"
+    try:
+        from opti_oignon.security_mode import get_current_mode
+        mode = get_current_mode()
+    except Exception:
+        return "mode"
+    return None if isinstance(mode, str) and mode == "daily" else "mode"
 
 
 # =============================================================================
@@ -137,7 +216,8 @@ class SearchResultSanitizer:
     """
 
     def __init__(self, config: dict | None = None):
-        self._config = config or _load_search_safety_config()
+        # An empty configuration is a configuration: only None reads the file.
+        self._config = config if config is not None else _load_search_safety_config()
         self._enabled = self._config.get("enabled", True)
         self._max_snippet_length = self._config.get("max_snippet_length", 500)
         self._max_title_length = self._config.get("max_title_length", 200)
@@ -176,6 +256,10 @@ class SearchResultSanitizer:
     def clear_audit_log(self) -> None:
         """Clear the audit log."""
         self._audit_log.clear()
+
+    def absorb_audit_log(self, entries: list[dict]) -> None:
+        """Append another sanitizer's detections, as the security events route reads them."""
+        self._audit_log.extend(dict(entry) for entry in entries)
 
     def _clean_text(self, text: str, max_length: int, field_name: str) -> str:
         """Apply all sanitization layers to a text field.
@@ -406,6 +490,62 @@ class WebSearcher:
             )
 
     # -------------------------------------------------------------------------
+    # The gate
+    # -------------------------------------------------------------------------
+
+    def _require_open(self) -> None:
+        """Raise ``WebSearchRefused`` unless a web request may leave now."""
+        refusal = search_refusal()
+        if refusal is not None:
+            raise WebSearchRefused(refusal)
+
+    def _ddgs(self, **kwargs):
+        """The one construction of the search class, behind the gate."""
+        self._require_open()
+        return _DDGS(**kwargs)
+
+    def _allowed(self, results: list[SearchResult]) -> list[SearchResult]:
+        """The results the kill switch's domain allowlist lets through.
+
+        Applied on the way out, so an allowlist change reaches cached results
+        too. When the allowlist cannot be read, nothing passes.
+        """
+        try:
+            from opti_oignon.search_killswitch import search_killswitch
+            kept = list(search_killswitch.filter_results(results))
+        except Exception as exc:
+            logger.warning(
+                "Search results withheld: the domain allowlist cannot be read (%s).",
+                exc.__class__.__name__,
+            )
+            return []
+        withheld = len(results) - len(kept)
+        if withheld:
+            logger.info(
+                "Domain allowlist withheld %d of %d search result(s).",
+                withheld, len(results),
+            )
+        return kept
+
+    @staticmethod
+    def _record_injection(sanitizer: "SearchResultSanitizer") -> None:
+        """Feed the circuit breaker once for a search whose results carried an injection.
+
+        Pattern names only: never the query, a snippet or a URL.
+        """
+        log = sanitizer.get_audit_log()
+        if not log:
+            return
+        patterns = sorted({str(entry.get("pattern", "")) for entry in log})
+        try:
+            from opti_oignon.search_killswitch import search_killswitch
+            search_killswitch.record_injection(details="patterns: " + ", ".join(patterns))
+        except Exception as exc:
+            logger.warning(
+                "Search injection could not be recorded (%s).", exc.__class__.__name__,
+            )
+
+    # -------------------------------------------------------------------------
     # Proxy configuration
     # -------------------------------------------------------------------------
 
@@ -450,12 +590,13 @@ class WebSearcher:
         )
 
         try:
+            self._require_open()
             start = time.monotonic()
             if not DDGS_AVAILABLE:
                 status.error = "duckduckgo-search not installed"
                 return status
 
-            ddgs = DDGS(
+            ddgs = self._ddgs(
                 proxy=self.config.proxy,
                 timeout=self.config.proxy_timeout,
             )
@@ -479,6 +620,7 @@ class WebSearcher:
 
     def _get_tor_exit_ip(self) -> str | None:
         """Attempt to retrieve Tor exit node IP via a check service."""
+        self._require_open()
         try:
             import json
             import urllib.request
@@ -552,18 +694,23 @@ class WebSearcher:
         max_results: int | None = None,
     ) -> list[SearchResult]:
         """
-        Search the web via DuckDuckGo with optional proxy and PII sanitization.
+        Search the web through the ddgs package, which with its default backend
+        sends the query to Wikipedia and to one or more engines it picks at
+        random, with optional proxy and PII sanitization.
 
         Args:
             query: Search query string
             max_results: Maximum number of results (default from config)
 
         Returns:
-            List of SearchResult objects (may be empty on error)
+            List of SearchResult objects the domain allowlist lets through
+            (may be empty on error)
 
         Raises:
+            WebSearchRefused: When the gate refuses, before the cache is read
             RuntimeError: If ddgs/duckduckgo-search is not installed
         """
+        self._require_open()
         if not DDGS_AVAILABLE:
             raise RuntimeError(
                 "Search package not installed. "
@@ -588,7 +735,7 @@ class WebSearcher:
         if cached is not None:
             self._stats["cache_hits"] += 1
             logger.debug(f"Cache hit for: {sanitized_query!r}")
-            return cached
+            return self._allowed(cached)
 
         self._stats["cache_misses"] += 1
 
@@ -599,12 +746,14 @@ class WebSearcher:
         results = self._search_with_retry(sanitized_query, max_results)
 
         if results is not None:
+            # The circuit breaker may just have tripped on these results.
+            self._require_open()
             self._put_in_cache(cache_key, results)
             logger.info(
                 f"Search complete: {sanitized_query!r} -> {len(results)} result(s)"
                 f"{' (via proxy)' if self.proxy_configured else ''}"
             )
-            return results
+            return self._allowed(results)
 
         return []
 
@@ -633,7 +782,7 @@ class WebSearcher:
                     ddgs_kwargs["proxy"] = self.config.proxy
                     self._stats["proxy_searches"] += 1
 
-                ddgs = DDGS(**ddgs_kwargs)
+                ddgs = self._ddgs(**ddgs_kwargs)
                 raw_results = ddgs.text(
                     query,
                     region=self.config.region,
@@ -651,11 +800,20 @@ class WebSearcher:
                         source="duckduckgo",
                     ))
 
-                # Sanitize results against prompt injection
-                results = get_search_sanitizer().sanitize_results(results)
+                # Sanitize results against prompt injection, on an instance of
+                # this search's own so the breaker counts this search exactly;
+                # its detections then join the shared log the security events
+                # route reads.
+                shared = get_search_sanitizer()
+                sanitizer = SearchResultSanitizer(config=shared._config)
+                results = sanitizer.sanitize_results(results)
+                shared.absorb_audit_log(sanitizer.get_audit_log())
+                self._record_injection(sanitizer)
 
                 return results
 
+            except WebSearchRefused:
+                raise
             except RatelimitException as e:
                 last_error = e
                 logger.warning(
@@ -931,6 +1089,552 @@ class WebSearcher:
             f"ddgs={'OK' if DDGS_AVAILABLE else 'missing'}"
             f"{proxy_info}>"
         )
+
+
+# =============================================================================
+# ONE WEB PAGE, BEHIND THE SAME GATE
+# =============================================================================
+#
+# The knowledge base ingests a web page by URL. The fetch opens the gate
+# above before every request, a redirect included, and after every read of
+# the body, and reaches only a public address: the host is resolved once per
+# request, every answer must be public -- neither this machine's nor on one
+# of its links -- and the connection goes only to answers that were checked,
+# in the resolver's order, so a name whose answer changes in between cannot
+# steer it inside. The request still names the URL's host, and TLS verifies
+# that name. A redirect is followed by hand and checked exactly as the first
+# request, at most MAX_REDIRECTS times. The body is capped as it is read, and
+# one time budget covers the whole fetch: a timer cuts a socket that stalls
+# past it. Name resolution itself is bounded by the system resolver's own
+# timeouts, not by that budget.
+
+_PAGE_REFUSALS = {
+    "kill_switch": "Fetching a web page is refused: the search kill switch is engaged.",
+    "mode": "Fetching a web page is refused outside Daily mode.",
+    "unreadable": "Fetching a web page is refused: the search kill switch cannot be read.",
+}
+_WEB_PORTS = {"http": 80, "https": 443}
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# A fixed policy bound, not a setting: each redirect is one more destination
+# to check, and three cover the common http-to-https and canonical-host hops.
+MAX_REDIRECTS = 3
+_READ_CHUNK = 64 * 1024
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+# This machine's own network tables, read at every request: its IPv6
+# addresses with their prefixes, and the routes it reaches without a gateway.
+# A platform without such a table has none to read; one that cannot be read
+# refuses the fetch.
+_LINK_TABLES = {
+    "addresses6": "/proc/net/if_inet6",
+    "routes6": "/proc/net/ipv6_route",
+    "routes4": "/proc/net/route",
+}
+_RTF_UP, _RTF_GATEWAY, _RTF_REJECT = 0x0001, 0x0002, 0x0200
+_VISIBLE_ASCII = "".join(chr(code) for code in range(0x21, 0x7F))
+# The encodings a web page may name -- those of the WHATWG Encoding Standard
+# that Python decodes -- by Python's own name for them.
+_PAGE_ENCODINGS = frozenset(codecs.lookup(name).name for name in (
+    "utf-8", "utf-16", "utf-16-le", "utf-16-be", "ascii", "latin-1",
+    "iso8859-2", "iso8859-3", "iso8859-4", "iso8859-5", "iso8859-6", "iso8859-7", "iso8859-8",
+    "iso8859-10", "iso8859-13", "iso8859-14", "iso8859-15", "iso8859-16",
+    "cp866", "cp874", "cp1250", "cp1251", "cp1252", "cp1253", "cp1254", "cp1255", "cp1256",
+    "cp1257", "cp1258", "koi8-r", "koi8-u", "mac-roman", "mac-cyrillic",
+    "gbk", "gb18030", "big5", "euc-jp", "iso2022-jp", "shift-jis", "euc-kr",
+))
+
+# The fetch's clock, read at every step of its time budget.
+_clock = time.monotonic
+
+
+class PageFetchRefused(RuntimeError):
+    """A page fetch refused by the web gate, carrying the refusal by name."""
+
+    def __init__(self, refusal: str):
+        super().__init__(_PAGE_REFUSALS[refusal])
+        self.refusal = refusal
+
+
+class DestinationRefused(ValueError):
+    """A URL, or a redirect, whose destination a page fetch does not reach."""
+
+
+class PageFetchFailed(ValueError):
+    """A fetch that was allowed and brought no page back."""
+
+
+@dataclass
+class FetchedPage:
+    """One page: where it came from after redirects, its type, its bytes and its text."""
+
+    url: str
+    status: int
+    content_type: str
+    body: bytes
+    text: str
+
+
+class _TimedOut(Exception):
+    """The fetch's time budget ran out."""
+
+
+class _TooLarge(Exception):
+    """The body passed the size cap."""
+
+
+class _Failure(Exception):
+    """Why an allowed request brought no page back; the caller names the URL."""
+
+
+def _carried(ip):
+    """The IPv4 address an IPv6 address carries (mapped, or behind the NAT64 prefix), or None."""
+    if ip.version != 6:
+        return None
+    inner = ip.ipv4_mapped
+    if inner is None and ip in _NAT64_PREFIX:
+        inner = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return inner
+
+
+def _address_class(address: str) -> str | None:
+    """The class of a non-public address, or None for a public one.
+
+    An IPv4 address inside IPv6 (mapped, or behind the NAT64 prefix) is read
+    as the IPv4 address it carries. Anything the standard library does not
+    call global is refused, under the most precise name it has; so is the
+    deprecated IPv6 site-local range, which the standard library calls global.
+    """
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return "unreadable"
+    inner = _carried(ip)
+    if inner is not None:
+        found = _address_class(str(inner))
+        return None if found is None else f"{found}, an IPv4 address inside IPv6"
+    if ip.is_unspecified:
+        return "unspecified"
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_link_local:
+        return "link-local"
+    if ip.version == 6 and ip.is_site_local:
+        return "site-local"
+    if ip.is_multicast:
+        return "multicast"
+    if ip.version == 4 and ip in _SHARED_ADDRESS_SPACE:
+        return "shared address space"
+    if ip.is_reserved:
+        return "reserved"
+    if ip.is_private:
+        return "private"
+    if not ip.is_global:
+        return "not global"
+    return None
+
+
+def _refused(hop: int) -> str:
+    return "Refused" if hop == 0 else f"Refused at redirect {hop}"
+
+
+def _held_here(ip) -> bool | None:
+    """Whether this machine holds the address, or None when that cannot be told.
+
+    A datagram socket binds to an address only when the machine holds it;
+    the bind sends nothing.
+    """
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    try:
+        probe = socket.socket(family, socket.SOCK_DGRAM)
+    except OSError as exc:
+        return False if exc.errno == errno.EAFNOSUPPORT else None
+    try:
+        probe.bind((str(ip), 0))
+    except OSError as exc:
+        return False if exc.errno == errno.EADDRNOTAVAIL else None
+    finally:
+        probe.close()
+    return True
+
+
+def _native4(value: int) -> str:
+    """An IPv4 address the kernel's route table prints as a native 32-bit number."""
+    return str(ipaddress.IPv4Address(struct.pack("=I", value)))
+
+
+def _addresses6(lines: list[str]) -> list:
+    """Each IPv6 address of this machine, as the network its prefix names."""
+    found = []
+    for line in lines:
+        fields = line.split()
+        if not fields:
+            continue
+        if len(fields) < 6 or len(fields[0]) != 32:
+            raise ValueError(line)
+        address = ipaddress.IPv6Address(int(fields[0], 16))
+        found.append(ipaddress.IPv6Network((address, int(fields[2], 16)), strict=False))
+    return found
+
+
+def _routes6(lines: list[str]) -> list:
+    """The IPv6 networks this machine reaches without a gateway, every table's."""
+    found = []
+    for line in lines:
+        fields = line.split()
+        if not fields:
+            continue
+        if len(fields) < 10 or len(fields[0]) != 32 or len(fields[4]) != 32:
+            raise ValueError(line)
+        prefix, flags = int(fields[1], 16), int(fields[8], 16)
+        if prefix == 0 or int(fields[4], 16) != 0 or not flags & _RTF_UP or flags & (_RTF_GATEWAY | _RTF_REJECT):
+            continue
+        found.append(ipaddress.IPv6Network((ipaddress.IPv6Address(int(fields[0], 16)), prefix), strict=False))
+    return found
+
+
+def _routes4(lines: list[str]) -> list:
+    """The IPv4 networks this machine reaches without a gateway."""
+    found = []
+    for line in lines:
+        fields = line.split()
+        if not fields or fields[0] == "Iface":
+            continue
+        if len(fields) < 8:
+            raise ValueError(line)
+        destination, gateway, flags, mask = (int(fields[i], 16) for i in (1, 2, 3, 7))
+        if mask == 0 or gateway != 0 or not flags & _RTF_UP or flags & (_RTF_GATEWAY | _RTF_REJECT):
+            continue
+        found.append(ipaddress.IPv4Network((_native4(destination), _native4(mask)), strict=False))
+    return found
+
+
+def _link_networks(hop: int) -> list:
+    """The networks on this machine's links, read from its tables now."""
+    networks = []
+    for table, parse in (("addresses6", _addresses6), ("routes6", _routes6), ("routes4", _routes4)):
+        try:
+            with open(_LINK_TABLES[table], encoding="ascii") as handle:
+                lines = handle.read().splitlines()
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError) as exc:
+            raise DestinationRefused(
+                f"{_refused(hop)}: this machine's network table {table} cannot be read ({exc}), "
+                "so no address can be checked against its links."
+            ) from None
+        try:
+            networks += parse(lines)
+        except (ValueError, struct.error):
+            raise DestinationRefused(
+                f"{_refused(hop)}: this machine's network table {table} cannot be read "
+                "(a line does not parse), so no address can be checked against its links."
+            ) from None
+    return networks
+
+
+def _local_class(address: str, links: list, hop: int) -> str | None:
+    """Why a public address is still not reached -- this machine, or a link of it -- or None."""
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    ip = _carried(ip) or ip
+    held = _held_here(ip)
+    if held is None:
+        raise DestinationRefused(f"{_refused(hop)}: whether {ip} is this machine's own address cannot be told.")
+    if held:
+        return "this machine"
+    for network in links:
+        if network.version == ip.version and ip in network:
+            return f"local network, on the link {network}"
+    return None
+
+
+def _gate() -> None:
+    """The web gate, for a page fetch: raise its refusal by name, or return."""
+    refusal = search_refusal()
+    if refusal is not None:
+        raise PageFetchRefused(refusal)
+
+
+def _destination(url: str, ports: frozenset, hop: int) -> tuple[str, str, int, str]:
+    """(scheme, host, port, request target) of a URL a fetch may try.
+
+    Refuses a backslash, whitespace or a control character anywhere in the
+    URL (a browser reads such a URL otherwise), a scheme other than http or
+    https, user information, and a port other than 80 and 443 unless the
+    configuration names it.
+    """
+    where = _refused(hop)
+    if any(ch == chr(0x5C) or ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        raise DestinationRefused(f"{where}: the URL carries a backslash, a space or a control character.")
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    if scheme not in _WEB_PORTS:
+        raise DestinationRefused(
+            f"{where}: only http and https are fetched, not {scheme or 'a URL without a scheme'}."
+        )
+    if "@" in parts.netloc:
+        raise DestinationRefused(f"{where}: the URL carries user information.")
+    host = parts.hostname
+    if not host:
+        raise DestinationRefused(f"{where}: the URL names no host.")
+    try:
+        port = parts.port
+    except ValueError:
+        raise DestinationRefused(f"{where}: the URL's port cannot be read.") from None
+    port = _WEB_PORTS[scheme] if port is None else port
+    if port not in (80, 443) and port not in ports:
+        raise DestinationRefused(
+            f"{where}: port {port} is not fetched; only 80 and 443, and the ports the configuration allows."
+        )
+    target = quote(parts.path or "/", safe=_VISIBLE_ASCII)
+    if parts.query:
+        target += "?" + quote(parts.query, safe=_VISIBLE_ASCII)
+    return scheme, host, port, target
+
+
+def _checked_addresses(host: str, port: int, hop: int) -> list[str]:
+    """The addresses a request may connect to: every answer checked, in the resolver's order."""
+    try:
+        answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError) as exc:
+        raise _Failure(f"the host name does not resolve ({exc})") from None
+    addresses, links = [], None
+    for _family, _kind, _proto, _name, sockaddr in answers:
+        address = str(sockaddr[0])
+        found = _address_class(address)
+        if found is None:
+            if links is None:
+                links = _link_networks(hop)
+            found = _local_class(address, links, hop)
+        if found is not None:
+            raise DestinationRefused(f"{_refused(hop)}: the host resolves to a non-public address ({found}).")
+        if address not in addresses:
+            addresses.append(address)
+    if not addresses:
+        raise _Failure("the host name does not resolve")
+    return addresses
+
+
+def _connect_checked(addresses: list[str], port: int, deadline: float) -> socket.socket:
+    """A socket to the first checked address that answers, in order, within the budget.
+
+    Only the addresses this request checked are tried, as the resolver
+    ordered them; the name is never resolved again.
+    """
+    failure = None
+    for address in addresses:
+        remaining = deadline - _clock()
+        if remaining <= 0:
+            raise _TimedOut()
+        try:
+            return socket.create_connection((address, port), remaining)
+        except OSError as exc:
+            failure = exc
+    raise failure
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """A connection to an address the fetch checked; the request still names the URL's host."""
+
+    def __init__(self, host: str, port: int, addresses: list[str], deadline: float):
+        super().__init__(host, port, timeout=max(deadline - _clock(), 0.001))
+        self._addresses = list(addresses)
+        self._deadline = deadline
+        self._live = None
+        self._expired = False
+
+    def connect(self):
+        self.sock = self._live = _connect_checked(self._addresses, self.port, self._deadline)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """The same over TLS: the certificate is verified against the URL's host name."""
+
+    def __init__(self, host: str, port: int, addresses: list[str], deadline: float, context: ssl.SSLContext):
+        super().__init__(host, port, timeout=max(deadline - _clock(), 0.001), context=context)
+        self._addresses = list(addresses)
+        self._deadline = deadline
+        self._live = None
+        self._expired = False
+
+    def connect(self):
+        raw = _connect_checked(self._addresses, self.port, self._deadline)
+        tls = self._context.wrap_socket(raw, server_hostname=self.host, do_handshake_on_connect=False)
+        self._live = tls
+        tls.do_handshake()
+        self.sock = tls
+
+
+def _tls_context() -> ssl.SSLContext:
+    """Certificates verified, against the host name the URL names."""
+    return ssl.create_default_context()
+
+
+def _expire(connection) -> None:
+    """The time budget ran out: mark the request and cut its socket, which wakes a stalled read."""
+    connection._expired = True
+    live = connection._live
+    if live is not None:
+        try:
+            live.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+def _read_capped(connection, response, deadline: float, max_bytes: int) -> bytes:
+    """The body, read at most one socket read at a time, within the cap and the budget.
+
+    The gate is asked again after every read: a mode that leaves Daily, or a
+    switch engaged, while the page is read stops the reading there. The
+    reading ends when the response is complete: its socket may be closed by
+    then, the server having closed the connection, so nothing is asked of it
+    once the response says so. A body that ends before its declared length
+    is a failure, not a page.
+    """
+    chunks, total = [], 0
+    while not response.isclosed():
+        remaining = deadline - _clock()
+        if remaining <= 0 or connection._expired:
+            raise _TimedOut()
+        if connection._live is not None:
+            connection._live.settimeout(remaining)
+        chunk = response.read1(_READ_CHUNK)
+        _gate()
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise _TooLarge()
+        chunks.append(chunk)
+    if connection._expired:
+        raise _TimedOut()
+    if response.length:
+        raise _Failure("the connection closed before the declared length was read")
+    return b"".join(chunks)
+
+
+def _one_request(scheme, host, port, target, addresses, headers, deadline, max_bytes):
+    """One GET to a checked address: (status, Location or None, (content type, body) or None)."""
+    remaining = deadline - _clock()
+    if remaining <= 0:
+        raise _TimedOut()
+    if scheme == "https":
+        connection = _PinnedHTTPSConnection(host, port, addresses, deadline, _tls_context())
+    else:
+        connection = _PinnedHTTPConnection(host, port, addresses, deadline)
+    watch = threading.Timer(remaining, _expire, args=(connection,))
+    watch.daemon = True
+    watch.start()
+    try:
+        try:
+            connection.connect()
+            if connection._expired:
+                raise _TimedOut()
+            connection.request("GET", target, headers=headers)
+            response = connection.getresponse()
+            status = response.status
+            if status in _REDIRECT_STATUSES:
+                return status, response.getheader("Location") or "", None
+            if status >= 400:
+                raise _Failure(f"the server answered {status} {response.reason}".rstrip())
+            encoding = (response.getheader("Content-Encoding") or "identity").strip().lower()
+            if encoding != "identity":
+                raise _Failure(f"the server sent a compressed body ({encoding}) though none was accepted")
+            # A length that is not ASCII digits is a length unknown, as the
+            # response itself reads it.
+            declared = (response.getheader("Content-Length") or "").strip()
+            if declared.isascii() and declared.isdigit() and int(declared) > max_bytes:
+                raise _TooLarge()
+            body = _read_capped(connection, response, deadline, max_bytes)
+            return status, None, (response.getheader("Content-Type") or "", body)
+        except (OSError, http.client.HTTPException):
+            if connection._expired or deadline <= _clock():
+                raise _TimedOut() from None
+            raise
+    finally:
+        watch.cancel()
+        connection.close()
+
+
+def _charset(content_type: str) -> str:
+    """The charset a Content-Type names, when it is one of the web's encodings; UTF-8 otherwise.
+
+    A codec that is no text encoding (``hex``, ``zlib``), or one the web
+    does not use (``punycode``, whose decoding is quadratic, ``idna``,
+    ``rot13``), names nothing a page is read with.
+    """
+    for parameter in content_type.split(";")[1:]:
+        name, _sep, value = parameter.partition("=")
+        if name.strip().lower() == "charset":
+            candidate = value.strip().strip("\"'")
+            try:
+                found = codecs.lookup(candidate).name
+            except (LookupError, ValueError):
+                break
+            return found if found in _PAGE_ENCODINGS else "utf-8"
+    return "utf-8"
+
+
+def fetch_page(
+    url: str,
+    *,
+    timeout: float = 30,
+    max_bytes: int = 5 * 1024 * 1024,
+    user_agent: str = "Opti-Oignon RAG/1.0",
+    allowed_ports=(),
+) -> FetchedPage:
+    """Fetch one web page behind the web gate, from a public address only.
+
+    Every request, the first and each redirect's, opens the gate, is checked
+    for its destination, resolves the host once and connects only to the
+    addresses it checked, the next one tried when one does not answer; the
+    gate is asked again after every read of the body. ``allowed_ports`` adds
+    ports to 80 and 443; ``max_bytes`` caps the body as it is read;
+    ``timeout`` is one budget for the whole fetch, in seconds. The text is
+    decoded with the charset the page names when it is one of the web's
+    encodings, UTF-8 otherwise.
+
+    Raises:
+        PageFetchRefused: The gate refused, before any request of this fetch
+            or of one of its redirects, or while the body was read.
+        DestinationRefused: The URL or a redirect names a destination a
+            fetch does not reach, or more than MAX_REDIRECTS redirects, or
+            this machine's network tables cannot be read to tell.
+        PageFetchFailed: A request was allowed and brought no page back.
+    """
+    ports = frozenset(
+        port for port in allowed_ports
+        if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536
+    )
+    budget = float(timeout)
+    deadline = _clock() + budget
+    headers = {"User-Agent": user_agent, "Accept": "*/*", "Connection": "close"}
+    current = url
+    for hop in range(MAX_REDIRECTS + 1):
+        _gate()
+        scheme, host, port, target = _destination(current, ports, hop)
+        try:
+            addresses = _checked_addresses(host, port, hop)
+            status, location, page = _one_request(scheme, host, port, target, addresses, headers, deadline, max_bytes)
+        except _TooLarge:
+            raise PageFetchFailed(f"Page too large: more than {max_bytes} bytes.") from None
+        except _TimedOut:
+            raise PageFetchFailed(f"Failed to fetch URL {current}: no complete answer within {budget:g} s.") from None
+        except _Failure as failure:
+            raise PageFetchFailed(f"Failed to fetch URL {current}: {failure}.") from None
+        except (OSError, http.client.HTTPException) as exc:
+            raise PageFetchFailed(f"Failed to fetch URL {current}: {exc}") from None
+        if page is None:
+            if not location:
+                raise DestinationRefused(f"Refused at redirect {hop + 1}: the answer names no Location.")
+            current = urljoin(current, location.strip())
+            continue
+        content_type, body = page
+        return FetchedPage(
+            url=current, status=status, content_type=content_type, body=body,
+            text=body.decode(_charset(content_type), errors="replace"),
+        )
+    raise DestinationRefused(f"Refused: more than {MAX_REDIRECTS} redirects.")
 
 
 # =============================================================================

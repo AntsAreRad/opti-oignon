@@ -49,13 +49,6 @@ except ImportError:
 
 RAG_STORE_AVAILABLE = CHROMADB_AVAILABLE
 
-REQUESTS_AVAILABLE = False
-try:
-    import requests as _requests_lib
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    _requests_lib = None  # type: ignore[assignment]
-
 
 # =========================================================================
 # DATA STRUCTURES
@@ -436,6 +429,18 @@ class _RAGDatabase:
 # =========================================================================
 # VECTOR STORE
 # =========================================================================
+
+class WebIngestionDisabled(RuntimeError):
+    """Page ingestion refused by the configuration's own switch, by name."""
+
+    refusal = "disabled"
+
+    def __init__(self):
+        super().__init__(
+            "Ingesting a web page is refused: web_ingestion.enabled in rag.yaml is not true; "
+            "nothing was fetched."
+        )
+
 
 class RAGVectorStore:
     """
@@ -1067,7 +1072,10 @@ class RAGVectorStore:
         Fetch a web page, extract readable text, chunk, and ingest.
 
         Uses a readability-style approach: strip nav/ads/boilerplate,
-        extract main content, chunk, embed, store.
+        extract main content, chunk, embed, store. The page is fetched
+        through the web search module's page fetcher, behind the web gate
+        and from a public address only (see ``_fetch_page``); nothing is
+        recorded, not even the collection, until the page is in hand.
 
         Args:
             url: The URL to fetch.
@@ -1079,47 +1087,39 @@ class RAGVectorStore:
             IngestedDocument record.
 
         Raises:
-            RuntimeError: If requests library is not available.
-            ValueError: If the URL is invalid or fetch fails.
+            RuntimeError: If the page fetcher is not available, or its gate
+                refuses (outside Daily mode, or with the search kill switch
+                engaged or unreadable), or ``web_ingestion.enabled`` in
+                ``rag.yaml`` is anything but true
+                (``WebIngestionDisabled``); a refusal carries its name.
+            ValueError: If the URL is invalid, its destination is refused,
+                the page is too large, or the fetch fails.
         """
-        if not REQUESTS_AVAILABLE:
-            raise RuntimeError("requests library not installed. Install with: pip install requests")
+        # Validate URL
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Invalid URL scheme: {parsed.scheme}. Only http/https supported.")
+
+        # Load web ingestion config; its own switch is asked before any
+        # request, and a value that is not true refuses.
+        web_cfg = self._load_web_config()
+        if web_cfg.get("enabled", True) is not True:
+            raise WebIngestionDisabled()
+
+        # Fetch page
+        page = self._fetch_page(url, web_cfg)
 
         collection = collection or self.DEFAULT_COLLECTION
         doc_id = doc_id or uuid.uuid4().hex[:12]
 
         self.db.create_collection(collection)
 
-        # Load web ingestion config
-        web_cfg = self._load_web_config()
-
-        # Validate URL
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"Invalid URL scheme: {parsed.scheme}. Only http/https supported.")
-
-        # Fetch page
-        try:
-            resp = _requests_lib.get(
-                url,
-                timeout=web_cfg.get("timeout", 30),
-                headers={"User-Agent": web_cfg.get("user_agent", "Opti-Oignon RAG/1.0")},
-                allow_redirects=True,
-            )
-            resp.raise_for_status()
-        except Exception as exc:
-            raise ValueError(f"Failed to fetch URL {url}: {exc}") from exc
-
-        max_size = web_cfg.get("max_page_size", 5 * 1024 * 1024)
-        if len(resp.content) > max_size:
-            raise ValueError(f"Page too large: {len(resp.content)} bytes (max {max_size})")
-
         # Extract text
-        content_type = resp.headers.get("content-type", "")
-        if "html" in content_type.lower() or resp.text.strip().startswith("<"):
-            text = self._extract_html_text(resp.text, web_cfg)
+        content_type = page.content_type
+        if "html" in content_type.lower() or page.text.strip().startswith("<"):
+            text = self._extract_html_text(page.text, web_cfg)
         else:
-            text = resp.text
+            text = page.text
 
         min_len = web_cfg.get("min_text_length", 100)
         if not text or len(text.strip()) < min_len:
@@ -1145,6 +1145,26 @@ class RAGVectorStore:
             collection=collection,
             doc_id=doc_id,
             metadata={**(metadata or {}), "url": url, "domain": parsed.netloc},
+        )
+
+    @staticmethod
+    def _fetch_page(url: str, web_cfg: dict[str, Any]):
+        """Fetch ``url`` through the page fetcher, with the configured bounds.
+
+        The fetcher opens the web gate before every request and reaches only
+        a public address; the store asks nothing of the network itself.
+        """
+        try:
+            from opti_oignon.web_search import fetch_page
+        except ImportError as exc:
+            raise RuntimeError("The page fetcher is not available; nothing was fetched.") from exc
+        ports = web_cfg.get("allowed_ports") or ()
+        return fetch_page(
+            url,
+            timeout=web_cfg.get("timeout", 30),
+            max_bytes=web_cfg.get("max_page_size", 5 * 1024 * 1024),
+            user_agent=web_cfg.get("user_agent", "Opti-Oignon RAG/1.0"),
+            allowed_ports=tuple(ports) if isinstance(ports, (list, tuple)) else (),
         )
 
     @staticmethod

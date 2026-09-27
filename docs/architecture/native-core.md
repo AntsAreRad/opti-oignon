@@ -60,7 +60,13 @@ context, memory recall -- goes through the registry's `embed` and
 registry too, refusing any backend whose `endpoint` -- where its requests
 actually go -- is not on the local host. The launcher's liveness probe is
 the one exemption, by name: asking whether a process answers is not an
-inference request. The
+inference request. The guard also counts Ollama's cloud search and fetch:
+the client's `web_search` and `web_fetch`, the `/api/web_search` and
+`/api/web_fetch` paths, and a URL on the cloud host to post from. None is
+called, and a module that reaches them in any spelling the census knows is
+refused, the exempt launcher included; the spellings it does not know --
+a name assembled at run time, a client handed over from another module --
+are listed in the guard. The
 resident core process is the next step, Python first behind the same
 surface, then Rust by strangling, as the memory's native core was born.
 

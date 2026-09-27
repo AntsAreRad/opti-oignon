@@ -1269,7 +1269,9 @@ class DomainAllowlistUpdate(BaseModel):
 async def get_search_killswitch_status() -> dict[str, Any]:
     """Return the current search kill switch status."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
-        return {"available": False, "search_enabled": True}
+        # The web searcher refuses when it cannot read the switch, so an
+        # unavailable switch is not an enabled one.
+        return {"available": False, "search_enabled": False}
     status = search_killswitch.status()
     status["available"] = True
     return status
@@ -1326,7 +1328,12 @@ async def confirm_search_reenable(body: SearchReenableConfirm) -> dict[str, Any]
                 password_valid = verify_password(body.password, user.password_hash)
                 user_id = user.user_id
     except Exception:
-        password_valid = True
+        # A password that cannot be checked is not a valid one: the ceremony
+        # is the only way back once the switch is recorded engaged.
+        raise HTTPException(
+            status_code=503,
+            detail="The password cannot be verified; search stays disabled.",
+        )
 
     if not password_valid:
         raise HTTPException(status_code=401, detail="Invalid password")
@@ -1344,6 +1351,8 @@ async def confirm_search_reenable(body: SearchReenableConfirm) -> dict[str, Any]
             code = 425
         elif error in ("invalid_code", "invalid_request"):
             code = 403
+        elif error == "not_recorded":
+            code = 503
         else:
             code = 400
         raise HTTPException(status_code=code, detail=result.get("message", ""))
@@ -1363,14 +1372,20 @@ async def update_domain_allowlist(body: DomainAllowlistUpdate) -> dict[str, Any]
     """Update the server-enforced domain allowlist."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Kill switch not available")
-    search_killswitch.set_domain_allowlist(
+    result = search_killswitch.set_domain_allowlist(
         enabled=body.enabled,
         domains=body.domains,
     )
+    if not result.get("persisted"):
+        raise HTTPException(
+            status_code=503,
+            detail="The allowlist could not be recorded; the previous one still applies.",
+        )
     return {
         "success": True,
         "enabled": body.enabled,
-        "domains": body.domains,
+        "domains": result["domains"],
+        "refused": result["refused"],
     }
 
 
@@ -1379,7 +1394,7 @@ async def update_domain_allowlist(body: DomainAllowlistUpdate) -> dict[str, Any]
 #
 # A panic control that makes the machine quiet immediately, plus a resume.
 # An availability/safety control, NOT a security boundary: explicitly
-# distinct from the search kill switch above (a module unload whose
+# distinct from the search kill switch above (a recorded state whose
 # re-enable requires a ceremony). Resume needs no ceremony; authentication
 # is still required (the router-level auth dependency applies).
 # =========================================================================

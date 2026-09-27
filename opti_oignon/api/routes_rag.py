@@ -422,7 +422,15 @@ def ingest_url(request: IngestURLRequest) -> dict:
     Ingest a web page by URL.
 
     Fetches the page, extracts readable text (stripping nav, ads,
-    boilerplate), chunks, embeds, and stores.
+    boilerplate), chunks, embeds, and stores. Refused outside Daily mode,
+    while the search kill switch is engaged, and when web ingestion is not
+    enabled in the configuration (403), or when the switch cannot be read
+    (503); a refusal while the page is read records nothing. Only a public
+    address is fetched, over http or https on port 80 or 443 or a port the
+    configuration allows: user information, a loopback, private, link-local
+    or other non-public destination, this machine's own address or one on
+    its local network, and more than three redirects are refused (400), each
+    redirect checked as the first request.
     """
     store = _get_store()
 
@@ -444,7 +452,12 @@ def ingest_url(request: IngestURLRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        # A refusal carries its name: the web gate's policy and the
+        # configuration's own switch are a 403, a switch that cannot be read
+        # a 503 like any unavailable part.
+        refusal = getattr(exc, "refusal", None)
+        status = 403 if refusal in ("mode", "kill_switch", "disabled") else 503
+        raise HTTPException(status_code=status, detail=str(exc))
     except Exception as exc:
         logger.error("URL ingestion failed for %s: %s", request.url, exc)
         raise HTTPException(status_code=500, detail=f"URL ingestion failed: {exc}")

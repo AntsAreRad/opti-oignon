@@ -5,7 +5,7 @@ runner over HTTP.
 The agent-side selection-action surface
 (``opti_oignon.agent.note_actions``): from a note selection the user asks one of
 five local actions -- fact-check, develop, summarize, rewrite, make-checklist --
-or the Daily-only fact-check-with-web. This module is the HTTP surface the
+none reaching the web. This module is the HTTP surface the
 SvelteKit notes UI (N.2 proper) calls: a single per-user ``POST`` that runs one
 selection action and returns the structured result for the UI to show alongside
 the note and insert. Registered on the app exactly like ``notes_router``.
@@ -29,12 +29,13 @@ Design notes:
   coerces it directly, rather than the loop's ``{"message": {"content"}}`` stream
   shape. The builder is a FastAPI dependency seam so tests inject a fake client
   through ``app.dependency_overrides`` and ollama is never invoked in-container.
-- Daily-only web gate. The web action needs egress and is Daily-only. The gate is
-  enforced at the route by injecting the live security mode (fail-secure to
-  Bulbe) into the runner's ``mode_provider``: ``note_actions`` then returns a
-  structured refusal (``refused=True``) for a web action outside Daily, never a
-  silent local downgrade, and this route returns that refusal verbatim. The mode
-  is a dependency seam so tests drive Daily / Bulbe directly.
+- Daily-only web gate. No action reaches the web today; a later sourced
+  verifier would need egress and be Daily-only. The gate is kept at the route by
+  injecting the live security mode (fail-secure to Bulbe) into the runner's
+  ``mode_provider``: ``note_actions`` then returns a structured refusal
+  (``refused=True``) for a web action outside Daily, never a silent local
+  downgrade, and this route returns that refusal verbatim. The mode is a
+  dependency seam so tests drive Daily / Bulbe directly.
 - The runner never raises; its structured ``NoteActionResult`` crosses the wire
   as ``NoteActionResultSchema`` (ok / refused / a clean failure all carried in
   the body). The one HTTP error code is the availability guard (503), mirroring

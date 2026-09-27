@@ -7,12 +7,12 @@ Provides advisory checks for network security posture:
   1. **DNS encryption** -- detect DoH/DoT via systemd-resolved or
      resolv.conf configuration.
   2. **Proxy configuration** -- verify SOCKS5 proxy availability
-     (e.g. Tor) for Bulbe mode with web search.
+     (e.g. Tor) for web search in Daily mode.
   3. **Listening ports** -- report unexpected open ports on the host
      that could expose the application.
 
-All checks are **advisory** (non-blocking) except: in Bulbe mode with
-web search re-enabled, the SOCKS5 proxy is enforced for search requests.
+All checks are **advisory** (non-blocking). Web search is refused
+outside Daily mode, so Bulbe mode sends no search to proxy.
 
 Configuration (security.yaml)
 ------------------------------
@@ -355,7 +355,7 @@ def get_full_network_status() -> dict[str, Any]:
         )
     if not proxy.configured:
         warnings.append(
-            "No SOCKS proxy configured. Recommended for Bulbe mode with web search."
+            "No SOCKS proxy configured. Recommended for web search in Daily mode."
         )
     elif not proxy.reachable:
         warnings.append(

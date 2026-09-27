@@ -2,8 +2,8 @@
 """Emergency stop: panic control that makes the machine quiet, plus resume.
 
 An availability/safety control, NOT a security boundary. It is explicitly
-distinct from the web-search kill switch (a module unload whose
-re-enable requires a multi-factor ceremony): resume here needs no ceremony.
+distinct from the web-search kill switch (a recorded state whose
+re-enable requires a ceremony): resume here needs no ceremony.
 Authentication is still required at the route layer (routes_security).
 
 Semantics:

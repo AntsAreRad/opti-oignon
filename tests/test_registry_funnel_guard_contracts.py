@@ -118,11 +118,37 @@ passed as clean.
     that returns it: a request on its result is a site, and on the real
     tree the funnel's heads are seen again while nothing outside it has one.
 
+The client also carries Ollama's cloud search and fetch, which post a query
+to ollama.com under an account key and have no head on the backend contract.
+They are counted like a request, in every spelling the census knows:
+
+  * RF29 -- ``web_search`` and ``web_fetch`` are sites on the module, a
+    client, a bound receiver or an imported name, through a submodule
+    import, ``import_module`` or ``__import__`` with a constant, and
+    ``getattr``; on the real tree nothing outside the funnel reaches them,
+    and the funnel itself uses neither. The spellings a review found
+    unseen are sites too: a star import, the import functions reached or
+    renamed otherwise, a ``sys.modules`` lookup, every binding form (an
+    unpacking, a walrus, a loop or ``with`` target, a default, an argument,
+    a container, a class attribute, a lambda), and a chain rooted at an
+    import call or at what ``getattr`` hands back.
+  * RF30 -- ``/api/web_search`` and ``/api/web_fetch`` are raw sites, and
+    they and the cloud host count even in a module that imports no HTTP
+    transport; a path is read without its fragment, surrounding spaces or
+    percent encoding, and as a server routes it -- bytes, dot segments,
+    repeated slashes, a host written with a Unicode full stop; the cloud
+    host counts as a place to post from, never as a link to a page; an
+    exemption or a raw ledger entry excuses local endpoints only; the
+    funnel spells none of them, and the entry point refuses both kinds by
+    name.
+
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
 """
 
+import ast
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -722,6 +748,371 @@ def test_rf28_the_census_follows_the_client_through_a_function_that_returns_it()
         )
         outside = {n: guard.count_sites(t) for n, t in files.items() if n != "opti_oignon/inference_backend.py"}
         assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RF29-RF30 -- Ollama's cloud search and fetch
+# ---------------------------------------------------------------------------
+_FUNNEL_NAME = "opti_oignon/inference_backend.py"
+
+
+def _modules():
+    """The estate as the guard reads it, walked without listing the package's data directory.
+
+    The data directory holds no module, and a walk into it is a path the
+    test session's firewall has to keep off the maintainer's data.
+    """
+    data = _PACKAGE / "data"
+    out = []
+    for dirpath, dirnames, filenames in os.walk(_PACKAGE):
+        here = Path(dirpath)
+        dirnames[:] = sorted(d for d in dirnames if here / d != data and d != "__pycache__")
+        for name in sorted(filenames):
+            if name.endswith(".py"):
+                path = here / name
+                out.append((path.relative_to(REPO).as_posix(), path.read_text(encoding="utf-8", errors="ignore")))
+    return out
+_CLOUD_CALL = "import ollama\n\ndef look(q):\n    return ollama.web_search(q)\n"
+_CLOUD_CLIENT = "import ollama\n\ndef fetch(u):\n    c = ollama.Client()\n    return c.web_fetch(u)\n"
+_CLOUD_UNCALLED = "from ollama import web_search as ws\n\nHANDLER = ws\n"
+_CLOUD_ATTRIBUTE = (
+    "import ollama\n\nclass C:\n    def __init__(self, c=None):\n        self._c = c or ollama\n\n"
+    "    def fetch(self, u):\n        return self._c.web_fetch(u)\n"
+)
+_CLOUD_COLLISION = "from opti_oignon import web_search\n\ndef look(q):\n    return web_search.search(q)\n"
+_CLOUD_LOCAL_DEF = "def web_search(q):\n    return []\n\ndef look(q):\n    return web_search(q)\n"
+_CLOUD_PROSE = '"""Calls ollama.web_search and ollama.web_fetch."""\n\ndef look(q):\n    return None\n'
+_SUB_FROM = "from ollama._client import Client\n\ndef look(q):\n    return Client().web_search(q)\n"
+_SUB_AS = "import ollama._client as oc\n\ndef fetch(u):\n    return oc.Client().web_fetch(u)\n"
+_SUB_DOTTED = "import ollama._client\n\ndef make():\n    return ollama._client.Client()\n"
+_SUB_NAME = "from ollama import _client\n\ndef make():\n    return _client.Client()\n"
+_SUB_ALONE = "import ollama._types\n\nX = 1\n"
+_DYN_IMPORT_MODULE = (
+    "import importlib\n\ndef look(q):\n    o = importlib.import_module('ollama')\n    return o.web_search(q)\n"
+)
+_DYN_DUNDER = "def fetch(u):\n    return __import__('ollama').web_fetch(u)\n"
+_DYN_GETATTR = "import ollama\n\ndef look(q):\n    return getattr(ollama, 'web_search')(q)\n"
+_DYN_GETATTR_NAME = "import ollama\n\ndef look(name, q):\n    return getattr(ollama, name)(q)\n"
+_DYN_GETATTR_PULL = "import ollama\n\ndef fetch(m):\n    return getattr(ollama, 'pull')(m)\n"
+_DYN_GETATTR_OTHER = "def look(obj, q):\n    return getattr(obj, 'web_search')(q)\n"
+_IMPORT_SPELLINGS = {
+    "a star import": "from ollama import *  # noqa: F403\n\ndef look(q):\n    return Client().web_search(q)\n",
+    "a star import, the async client": "from ollama import *  # noqa: F403\n\ndef f(u):\n    return AsyncClient().web_fetch(u)\n",
+    "importlib.__import__": "import importlib\n\nimportlib.__import__('ollama').web_search('q')\n",
+    "builtins.__import__": "import builtins\n\nbuiltins.__import__('ollama').web_fetch('u')\n",
+    "a renamed import_module": "from importlib import import_module as load\n\nload('ollama').web_search('q')\n",
+    "a renamed __import__": "from builtins import __import__ as load\n\nload('ollama').web_fetch('u')\n",
+    "a keyword argument": "import importlib\n\nimportlib.import_module(name='ollama').web_search('q')\n",
+    "a sys.modules lookup": "import sys\n\nsys.modules['ollama'].web_search('q')\n",
+    "a sys.modules get": "import sys\n\nsys.modules.get('ollama').web_fetch('u')\n",
+}
+_IMPORT_OTHER_PACKAGE = "import importlib\n\nimportlib.import_module('json').dumps({})\n"
+_BINDING_SPELLINGS = {
+    "an unpacking": "import ollama\n\na, b = ollama, 1\na.web_search('q')\n",
+    "a walrus": "import ollama\n\n(c := ollama).web_search('q')\n",
+    "a for target": "import ollama\n\nfor c in (ollama,):\n    c.web_search('q')\n",
+    "a comprehension target": "import ollama\n\n[c.web_fetch('u') for c in [ollama]]\n",
+    "a with target": (
+        "import ollama\nfrom contextlib import nullcontext\n\n"
+        "with nullcontext(ollama) as c:\n    c.web_search('q')\n"
+    ),
+    "a parameter default": "import ollama\n\ndef f(c=ollama):\n    return c.web_search('q')\n",
+    "a lambda that returns it": "import ollama\n\nf = lambda: ollama\nf().web_search('q')\n",
+    "a lambda parameter": "import ollama\n\n(lambda m: m.web_search('q'))(ollama)\n",
+    "an argument to a function of the module": (
+        "import ollama\n\ndef f(m):\n    return m.web_search('q')\n\nf(ollama)\n"
+    ),
+    "an argument to a method of the module": (
+        "import ollama\n\nclass K:\n    def f(self, m):\n        return m.web_fetch('u')\n\nK().f(ollama)\n"
+    ),
+    "a list element": "import ollama\n\nd = [ollama]\nd[0].web_fetch('u')\n",
+    "a mapping value": "import ollama\n\nd = {'c': ollama}\nd['c'].web_search('q')\n",
+    "a class attribute": "import ollama\n\nclass H:\n    client = ollama\n\nH.client.web_search('q')\n",
+    "a class attribute read on self": (
+        "import ollama\n\nclass K:\n    c = ollama\n\n    def f(self):\n        return self.c.web_search('q')\n"
+    ),
+    "a class of the module given the client": (
+        "import ollama\n\nclass W:\n    def __init__(self, c):\n        self.c = c\n\n"
+        "    def ask(self, q):\n        return self.c.web_search(q)\n\nW(ollama).ask('q')\n"
+    ),
+    "an instance wrapping the client": "import ollama\n\nclass W:\n    pass\n\nw = W(ollama)\nw.web_search('q')\n",
+    "a cast": "import ollama\nfrom typing import Any, cast\n\nc = cast(Any, ollama)\nc.web_search('q')\n",
+    "a comprehension that yields it": "import ollama\n\nclients = [c for c in [ollama]]\nclients[0].web_fetch('u')\n",
+}
+_NOT_THE_CLIENT = {
+    "what a request returns": (
+        "import ollama\n\ndef f(m, key):\n    for chunk in ollama.pull(m, stream=True):\n"
+        "        getattr(chunk, key)\n"
+    ),
+    "a context manager given something else": (
+        "from contextlib import nullcontext\n\nwith nullcontext(1) as c:\n    c.web_search('q')\n"
+    ),
+}
+_CHAIN_SPELLINGS = {
+    "getattr of a private name": "import ollama\n\ngetattr(ollama, '_client').web_search('q')\n",
+    "a chain on import_module": "import importlib\n\nimportlib.import_module('ollama')._client.web_search('q')\n",
+    "a chain on __import__": "__import__('ollama')._client.web_fetch('u')\n",
+    "a chain on a name bound to an import": (
+        "import importlib\n\no = importlib.import_module('ollama')\no._client.web_search('q')\n"
+    ),
+    "a chain on a name bound to the module": "import ollama\n\nc = ollama\nc._client.web_search('q')\n",
+}
+
+
+def test_rf29_the_cloud_search_and_fetch_are_sites_in_every_spelling_the_census_knows():
+    guard, restore = _load()
+    try:
+        # c1 -- the module, a client, an imported name, a bound receiver.
+        assert guard.count_sites(_CLOUD_CALL) == 1, "a cloud search on the module is a site"
+        assert guard.count_sites(_CLOUD_CLIENT) == 2, "the client class, and the fetch made on it"
+        assert guard.count_sites(_CLOUD_UNCALLED) == 1, "an imported search handed on uncalled"
+        assert guard.count_sites(_CLOUD_ATTRIBUTE) == 1, "a fetch through a bound receiver"
+        assert guard.count_sites(_CLOUD_COLLISION) == 0, "the application's own web_search module is not the client"
+        assert guard.count_sites(_CLOUD_LOCAL_DEF) == 0, "a local function of the same name is not the client"
+        assert guard.count_sites(_CLOUD_PROSE) == 0, "prose never counts"
+
+        # c2 -- through the client's submodules.
+        assert guard.count_sites(_SUB_FROM) == 1, "a class imported from a submodule"
+        assert guard.count_sites(_SUB_AS) == 1, "a submodule bound to an alias"
+        assert guard.count_sites(_SUB_DOTTED) == 1, "a dotted submodule import binds the package"
+        assert guard.count_sites(_SUB_NAME) == 1, "a submodule imported by name from the package"
+        assert guard.count_sites(_SUB_ALONE) == 0, "a submodule import that reaches nothing counted is not a site"
+
+        # c3 -- dynamic access with a constant.
+        assert guard.count_sites(_DYN_IMPORT_MODULE) == 1, "import_module with a constant returns the client"
+        assert guard.count_sites(_DYN_DUNDER) == 1, "__import__ with a constant returns the client"
+        assert guard.count_sites(_DYN_GETATTR) == 1, "getattr with a counted name"
+        assert guard.count_sites(_DYN_GETATTR_NAME) == 1, "getattr with a name that cannot be read is charged"
+        assert guard.count_sites(_DYN_GETATTR_PULL) == 0, "model management stays uncounted through getattr"
+        assert guard.count_sites(_DYN_GETATTR_OTHER) == 0, "getattr on an unrelated object is not the client"
+
+        # c4 -- the sets, and a violation by name.
+        assert {"web_search", "web_fetch"} <= set(guard._CLIENT_CALLS)
+        assert guard.find_violations([("opti_oignon/cloud.py", _CLOUD_CALL)]) == ["opti_oignon/cloud.py"]
+
+        # c5 -- the real tree: nothing outside the funnel reaches them, and
+        # the funnel's own count owes nothing to the two names.
+        files = dict(_modules())
+        outside = {n: guard.count_sites(t) for n, t in files.items() if n != _FUNNEL_NAME}
+        assert len(outside) > 300, len(outside)
+        assert sum(outside.values()) == 0, {k: v for k, v in outside.items() if v}
+        funnel = files[_FUNNEL_NAME]
+        full = guard.count_sites(funnel)
+        assert full >= 9, "control: the funnel's heads are seen"
+        guard._CLIENT_CALLS = frozenset(guard._CLIENT_CALLS) - {"web_search", "web_fetch"}
+        assert guard.count_sites(funnel) == full, "the funnel reaches neither cloud method"
+        spelled = [
+            node.attr for node in ast.walk(ast.parse(funnel))
+            if isinstance(node, ast.Attribute) and node.attr in ("web_search", "web_fetch")
+        ]
+        assert spelled == [], spelled
+    finally:
+        restore()
+
+    # A fresh guard: the clause above narrowed the counted names.
+    guard, restore = _load()
+    try:
+        # c6 -- every way the package is imported by name.
+        for label, text in _IMPORT_SPELLINGS.items():
+            assert guard.count_sites(text) >= 1, label
+        assert guard.count_sites(_IMPORT_OTHER_PACKAGE) == 0, "import_module of another package is not the client"
+
+        # c7 -- every way a name is bound to the client.
+        for label, text in _BINDING_SPELLINGS.items():
+            assert guard.count_sites(text) >= 1, label
+        for label, text in _NOT_THE_CLIENT.items():
+            assert guard.count_sites(text) == 0, label
+
+        # c8 -- an attribute chain rooted at an import call, at a name
+        # assigned from one, or at what getattr hands back.
+        for label, text in _CHAIN_SPELLINGS.items():
+            assert guard.count_sites(text) >= 1, label
+    finally:
+        restore()
+
+
+_RAW_CLOUD = (
+    "import httpx\n\ndef look(q):\n"
+    "    return httpx.post('https://ollama.com/api/web_search', json={'query': q})\n"
+)
+_RAW_CLOUD_FSTRING = (
+    "import requests\n\ndef fetch(host, u):\n"
+    "    return requests.post(f'{host}/api/web_fetch', json={'url': u})\n"
+)
+_RAW_CLOUD_APP_ROUTE = (
+    "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
+    "@router.get('/api/search/config')\ndef config():\n    return {}\n"
+)
+_RAW_CLOUD_LONGER = "import httpx\n\ndef h(u):\n    return httpx.get(f'{u}/api/web_search/help')\n"
+_RAW_NO_TRANSPORT_HOST = "URL = 'https://ollama.com/api/web_fetch'\n"
+_RAW_NO_TRANSPORT_PATH = "def target(host):\n    return f'{host}/api/web_fetch'\n"
+_RAW_URLLIB3 = "import urllib3\n\nURL = 'https://ollama.com/api/web_fetch'\n"
+_RAW_NO_TRANSPORT_LOCAL = "PATH = '/api/chat'\n"
+_RAW_FRAGMENT = "U = 'http://127.0.0.1:11434/api/web_search#x'\n"
+_RAW_SPACE = "U = 'http://127.0.0.1:11434/api/web_fetch '\n"
+_RAW_PERCENT = "U = 'http://127.0.0.1:11434/api/web%5Fsearch'\n"
+_RAW_HOST_PIECES = "BASE = 'https://ollama.com/api/' + 'web_search'\n"
+_RAW_HOST_PROSE = '"""Talks to ollama.com when asked."""\n\nX = 1\n'
+# Non-ASCII characters are built, never typed.
+_FULL_STOP = chr(0x3002)
+_RAW_ROUTED_FORMS = {
+    "a bytes cloud path": "import requests\n\nrequests.post(b'http://127.0.0.1:11434/api/web_search')\n",
+    "a bytes cloud host": "U = b'https://ollama.com/api/'\n",
+    "dot segments": "import requests\n\nrequests.post('http://127.0.0.1:11434/api/x/../web_search')\n",
+    "a dot segment": "import httpx\n\nhttpx.post('https://example.org/api/./web_fetch')\n",
+    "a repeated slash": "U = '/api//web_search'\n",
+    "a Unicode full stop in the host": "import httpx\n\nhttpx.post('https://ollama" + _FULL_STOP + "com/api/x')\n",
+}
+_RAW_BYTES_LOCAL = "import requests\n\nrequests.post(b'http://127.0.0.1:11434/api/chat')\n"
+_RAW_LOCAL_DOTS = "import requests\n\nrequests.post('http://127.0.0.1:11434/api/x/../chat')\n"
+_RAW_BYTES_NO_TRANSPORT = "P = b'/api/chat'\n"
+_RAW_CLOUD_BASES = {
+    "a base URL": "BASE = 'https://ollama.com'\n",
+    "the host alone": "HOST = 'ollama.com'\n",
+    "a subdomain under /api": "B = 'https://www.ollama.com/api/'\n",
+    "the compatible API": "B = 'https://ollama.com/v1/chat/completions'\n",
+    "a capitalised host": "import requests\n\nrequests.post('https://OLLAMA.COM/api/x')\n",
+    "a URL inside a sentence": "MSG = 'posting to https://ollama.com/api/web_search now'\n",
+}
+_RAW_CLOUD_LINKS = {
+    "a download link in a message": "MSG = 'Install Ollama from https://ollama.com/download'\n",
+    "a library page": "L = 'https://ollama.com/library/llama3'\n",
+    "the host named in prose": "MSG = 'see ollama.com for details'\n",
+    "another host's search path": "import httpx\n\nhttpx.get('https://example.org/api/web_search/help')\n",
+}
+_RAW_CLOUD_IN_LAUNCHER = (
+    "\n\ndef cloud(q):\n    import requests\n"
+    "    return requests.post('https://ollama.com/api/web_search', json={'query': q})\n"
+)
+
+
+def test_rf30_the_cloud_paths_and_host_are_raw_sites_and_the_entry_point_refuses_them(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        # c1 -- the cloud endpoints, spelled with a transport.
+        assert guard.count_raw_sites(_RAW_CLOUD) == 1, "a cloud search posted with httpx"
+        assert guard.count_raw_sites(_RAW_CLOUD_FSTRING) == 1, "a cloud fetch in an f-string behind requests"
+        assert guard.count_raw_sites(_RAW_CLOUD_APP_ROUTE) == 0, "the application's search route is another path"
+        assert guard.count_raw_sites(_RAW_CLOUD_LONGER) == 0, "a path that only begins with the endpoint"
+        assert {"/api/web_search", "/api/web_fetch"} <= set(guard._RAW_ENDPOINTS)
+
+        # c2 -- without a transport the cloud paths still count; the local
+        # rule is unchanged.
+        assert guard.count_raw_sites(_RAW_NO_TRANSPORT_HOST) == 1, "the client posts with a transport of its own"
+        assert guard.count_raw_sites(_RAW_NO_TRANSPORT_PATH) == 1, "a cloud path needs no transport to count"
+        assert guard.count_raw_sites(_RAW_URLLIB3) == 1, "a transport the list does not name"
+        assert guard.count_raw_sites(_RAW_NO_TRANSPORT_LOCAL) == 0, "a local endpoint still needs a transport"
+
+        # c3 -- a path is read without its fragment, spaces or percent encoding.
+        assert guard.count_raw_sites(_RAW_FRAGMENT) == 1, "a fragment does not hide the path"
+        assert guard.count_raw_sites(_RAW_SPACE) == 1, "a trailing space does not hide the path"
+        assert guard.count_raw_sites(_RAW_PERCENT) == 1, "percent encoding does not hide the path"
+
+        # c4 -- the cloud host counts in pieces, never in prose.
+        assert guard.count_raw_sites(_RAW_HOST_PIECES) >= 1, "the host names the cloud"
+        assert guard.count_raw_sites(_RAW_HOST_PROSE) == 0, "a docstring is prose"
+
+        # c5 -- the funnel spells none of them.
+        assert set(guard._CLOUD_ENDPOINTS) == {"/api/web_search", "/api/web_fetch"}
+        assert guard._CLOUD_HOST == "ollama.com"
+        funnel = _PACKAGE.joinpath("inference_backend.py").read_text(encoding="utf-8")
+        tree = ast.parse(funnel)
+        prose = guard._docstring_nodes(tree)
+        constants = [
+            node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose
+        ]
+        assert len(constants) > 50, len(constants)
+        cloud = [
+            c for c in constants
+            if "ollama.com" in c or c.split("?")[0].split("#")[0].strip().rstrip("/").endswith(
+                ("/api/web_search", "/api/web_fetch")
+            )
+        ]
+        assert cloud == [], cloud
+    finally:
+        restore()
+
+    # c6 -- the entry point refuses both kinds by name.
+    guard, restore = _load()
+    try:
+        control = tmp_path / "control" / "opti_oignon"
+        control.mkdir(parents=True)
+        (control / "routed.py").write_text(_ROUTED, encoding="utf-8")
+        (control / "ui.py").write_text(_RAW_URLLIB, encoding="utf-8")
+        assert guard.main(["guard", str(control.parent)]) == 0, "control: the launcher alone is exempt"
+        capsys.readouterr()
+
+        client_tree = tmp_path / "client" / "opti_oignon"
+        client_tree.mkdir(parents=True)
+        (client_tree / "cloud.py").write_text(_CLOUD_CALL, encoding="utf-8")
+        (client_tree / "ui.py").write_text(_RAW_URLLIB, encoding="utf-8")
+        assert guard.main(["guard", str(client_tree.parent)]) == 1
+        refused = capsys.readouterr().out
+        heading = refused.find("reach the client")
+        assert heading >= 0 and refused.find("opti_oignon/cloud.py", heading) > heading, refused
+
+        raw_tree = tmp_path / "raw" / "opti_oignon"
+        raw_tree.mkdir(parents=True)
+        (raw_tree / "poster.py").write_text(_RAW_CLOUD, encoding="utf-8")
+        (raw_tree / "ui.py").write_text(_RAW_URLLIB, encoding="utf-8")
+        assert guard.main(["guard", str(raw_tree.parent)]) == 1
+        refused = capsys.readouterr().out
+        assert "opti_oignon/poster.py" in refused and "HTTP" in refused, refused
+
+        # The repository, read as the guard reads it but without listing the
+        # package's data directory, which holds no module.
+        guard._estate = lambda root: _modules()
+        assert guard.main(["guard", str(REPO)]) == 0
+        assert "0 module(s) owed" in capsys.readouterr().out
+    finally:
+        restore()
+
+    # c7 -- a path is read as a server would route it: bytes, dot segments,
+    # repeated slashes, and a host written with a Unicode full stop.
+    guard, restore = _load()
+    try:
+        for label, text in _RAW_ROUTED_FORMS.items():
+            assert guard.count_raw_sites(text) == 1, label
+        assert guard.count_raw_sites(_RAW_BYTES_LOCAL) == 1, "a bytes local endpoint behind a transport"
+        assert guard.count_raw_sites(_RAW_LOCAL_DOTS) == 1, "a local endpoint behind dot segments"
+        assert guard.count_raw_sites(_RAW_BYTES_NO_TRANSPORT) == 0, "a local endpoint still needs a transport"
+
+        # c8 -- the cloud host counts as a place to post from, never as a
+        # link to a page on it.
+        for label, text in _RAW_CLOUD_BASES.items():
+            assert guard.count_raw_sites(text) == 1, label
+        for label, text in _RAW_CLOUD_LINKS.items():
+            assert guard.count_raw_sites(text) == 0, label
+
+        # c9 -- an exemption or a raw ledger entry excuses local endpoints
+        # only: a cloud site in the excused module is refused by name, and
+        # an exemption is stale on its local endpoints alone.
+        exempt = "opti_oignon/ui.py"
+        assert sorted(guard.RAW_EXEMPT) == [exempt]
+        launcher = _RAW_URLLIB + _RAW_CLOUD_IN_LAUNCHER
+        assert guard.find_raw_violations([(exempt, _RAW_URLLIB)]) == [], "control: the probe alone is exempt"
+        assert guard.find_cloud_violations([(exempt, _RAW_URLLIB)]) == [], "control: no cloud site, nothing refused"
+        assert guard.find_cloud_violations([(exempt, launcher)]) == [exempt], "an exemption does not cover the cloud"
+        assert guard.find_stale_raw_exemptions([(exempt, _RAW_CLOUD_IN_LAUNCHER)]) == [exempt], (
+            "an exemption that spells only the cloud no longer spells what it was granted for"
+        )
+        owed = "opti_oignon/owed.py"
+        guard.RAW_LEDGER = {owed: guard.digest(_RAW_CLOUD)}
+        assert guard.find_raw_violations([(owed, _RAW_CLOUD)]) == [], "the ledger answers for its local debt"
+        assert guard.find_cloud_violations([(owed, _RAW_CLOUD)]) == [owed], "a ledger entry does not cover the cloud"
+        guard.RAW_LEDGER = {}
+        tree = tmp_path / "launcher" / "opti_oignon"
+        tree.mkdir(parents=True)
+        (tree / "ui.py").write_text(launcher, encoding="utf-8")
+        (tree / "routed.py").write_text(_ROUTED, encoding="utf-8")
+        capsys.readouterr()
+        assert guard.main(["guard", str(tree.parent)]) == 1
+        refused = capsys.readouterr().out
+        heading = refused.find("Cloud search and fetch")
+        assert heading >= 0 and refused.find(exempt, heading) > heading, refused
     finally:
         restore()
 

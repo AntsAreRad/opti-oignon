@@ -70,12 +70,25 @@ def _get_security_mode():
 
 
 def _is_kill_switch_engaged() -> bool:
-    """Check if the web search kill switch is currently engaged."""
+    """Check if the web search kill switch is currently engaged.
+
+    Fail-closed on a switch that cannot be read: a switch whose own import
+    fails, or whose read raises, reads engaged. Only the switch module itself
+    being absent reads not engaged, because the web searcher then refuses on
+    its own.
+    """
     try:
         from opti_oignon.search_killswitch import search_killswitch
-        return search_killswitch.is_killed()
+    except ModuleNotFoundError as exc:
+        if exc.name == "opti_oignon.search_killswitch":
+            return False
+        return True
     except Exception:
-        return False
+        return True
+    try:
+        return bool(search_killswitch.is_killed())
+    except Exception:
+        return True
 
 
 def _is_plugin_allowed(request: Request) -> bool:

@@ -521,6 +521,21 @@ fail_under = 0
 # addresses are resolved by lib/nav/legacy.ts); and it adds that the hub
 # alone loads the panels.
 #
+# a23 to a26 of the RAG store suite pinned the store's own client library as
+# the transport of a URL ingestion: a23 that the store refuses without it,
+# a24 to a26 the oversize refusal, the short page and the ingested page, each
+# through a stand-in for that library. The store now fetches through the web
+# search module's page fetcher, which opens the web gate before every request
+# and reaches only a public address, and it holds no client of its own: a24
+# to a26 are false as written, and a23 would pass only because its window
+# does not seed the fetcher, not for the reason it names. a28 in the same
+# file keeps a23's property (no fetcher, a named refusal, and nothing
+# recorded); a29 keeps a24's (the configured cap reaches the fetcher, and a
+# refused page records nothing), whose streamed cap ud2 in the search-gates
+# suite pins; a30 and a31 keep every assertion of a25 and a26 word for word,
+# through a stand-in for the fetcher, and a31 adds that the text chunked is
+# the page's readable text.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -601,4 +616,8 @@ addopts = """
     --deselect=tests/test_ui_primitives_contracts.py::test_pr6_a_side_panel_is_a_region_beside_the_page_resized_by_keys[host]
     --deselect=tests/test_ui_repairs_contracts.py::test_ux13_every_settings_group_is_in_the_catalog_and_nowhere_else[node]
     --deselect=tests/test_ui_repairs_contracts.py::test_ux13_every_settings_group_is_in_the_catalog_and_nowhere_else[wiring]
+    --deselect=tests/test_rag_store_contracts.py::test_a23_ingest_url_requires_requests
+    --deselect=tests/test_rag_store_contracts.py::test_a24_ingest_url_rejects_oversize_page
+    --deselect=tests/test_rag_store_contracts.py::test_a25_ingest_url_short_text_records_zero_chunk_doc
+    --deselect=tests/test_rag_store_contracts.py::test_a26_ingest_url_happy_path_chunks_and_tags_domain
 """

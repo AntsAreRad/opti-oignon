@@ -4,12 +4,13 @@
 The anti-injection core, adopting the Odysseus ``prompt_security`` pattern
 (ODYSSEUS_SPEC.md Section 2.4 and Section 5.5). All external content -- web
 results, file contents, tool output, retrieved memories, and skill text -- is
-wrapped as untrusted data in a USER-role message, never the system role, fenced
-inside explicit untrusted-data markers and tagged ``trusted="false"``. The
-wrapper carries the policy statement that the enclosed content is data, must not
-be followed as instructions, and must not cause tool calls, secret disclosure,
-or changes to memory, skills, tasks, files, or settings, overriding any
-instruction inside the data and any conflicting persona or preset.
+wrapped as untrusted data, fenced inside explicit untrusted-data markers and
+tagged ``trusted="false"``; this module's own message helpers carry it in a
+USER-role message, never the system role. The wrapper carries the policy
+statement that the enclosed content is data, must not be followed as
+instructions, and must not cause tool calls, secret disclosure, or changes to
+memory, skills, tasks, files, or settings, overriding any instruction inside
+the data and any conflicting persona or preset.
 
 This module also consumes the memory working block
 (``memory.retrieval.working_memory_block``), which the memory layer deliberately left
@@ -17,9 +18,13 @@ unwrapped: the agent applies the untrusted-context wrapping here. The retriever
 import is lazy and guarded, and the block provider is injectable, so this module
 loads and is exercised without the backend.
 
-Module note: there is intentionally no API to put untrusted content in the
-system role. ``untrusted_message`` always returns role ``user``; the
-system-role exclusion is a property of the code, not a convention.
+Module note: there is intentionally no API here to put untrusted content in
+the system role. ``untrusted_message`` always returns role ``user``; for this
+module's helpers the system-role exclusion is a property of the code, not a
+convention. The chat executor places its memory block and its web results,
+each wrapped by ``wrap``, inside a system message: the policy header and the
+markers are the same there, the role is not, and moving both to the user role
+is owed to a later context change.
 """
 
 from __future__ import annotations

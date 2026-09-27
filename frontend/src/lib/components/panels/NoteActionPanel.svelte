@@ -2,7 +2,7 @@
   NoteActionPanel.svelte (Notes feature N.3 selection-action UI)
   The selection-action surface for the Notes editor. Given a text selection from
   the note body, it runs one local action -- fact-check, develop, summarize,
-  rewrite, make-checklist -- or the Daily-only fact-check-with-web, over
+  rewrite, make-checklist -- none reaching the web, over
   POST /api/notes/actions/run (the runNoteAction client). The selection is
   wrapped as untrusted context by the backend (note_actions); this panel never
   interprets it. The structured result is shown alongside: ok carries the model

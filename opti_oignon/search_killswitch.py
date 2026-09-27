@@ -1,36 +1,63 @@
 #!/usr/bin/env python3
 """
-Web Search Hardware Kill Switch for Opti-Oignon.
+Web search kill switch for Opti-Oignon.
 
-When the kill switch is engaged:
-  1. The ``WebSearcher`` singleton is destroyed
-  2. ``ddgs`` / ``duckduckgo_search`` are purged from ``sys.modules``
-  3. The search code path is removed from memory entirely -- not just flagged
+The switch is a recorded state. Engaging it writes
+``data/.search_killswitch.json`` (mode 0600, replaced atomically), and every
+check reads that record again, so an engaged switch holds across a restart
+and is seen by every process that shares ``data/``. It is read at every check
+by the web searcher's request gate, the capability manifest, the chat
+executor and the Bulbe middleware. A record that cannot be read -- malformed,
+another version, a link, a directory, a FIFO, or larger than 64 KiB -- reads
+engaged. A missing record reads as never engaged: anyone who can write
+``data/`` can delete it and so re-enable search, the same exposure as the
+security mode's lockfile, and a missing ``data/`` (an unmounted volume) reads
+as never engaged too.
 
-Re-enabling requires the same multi-factor ceremony as mode degradation
-(visual code + password + 2FA + cooldown).  In **Bulbe mode**, search
-CANNOT be re-enabled at all (hardcoded restriction).
+Engaging needs no ceremony. When the record cannot be written, the switch
+stays engaged in this process, says the state will not survive a restart,
+and the next kill retries the write. Only the re-enable ceremony may record
+"not engaged"; every other writer reads the record again under the lock and
+keeps an engaged record engaged. A process that could not record its kill
+stays engaged until its own ceremony, a restart, or a later write of its
+own that records the engaged state; until then it holds even after another
+process records a re-enable.
 
-Circuit breaker: if >= 3 injection attempts are detected within 10 minutes,
-search is automatically disabled.  Re-enabling requires the full ceremony.
+Re-enabling needs the visual code and the cooldown, checked here, and the
+administrator's password, checked by the API route, which refuses when it
+cannot read the auth manager. The visual code is served over the API, so it
+proves an API session, not physical presence. The 2FA code the route accepts
+is not verified. In Bulbe mode re-enabling is refused.
 
-Domain allowlist: when search is active, only results from approved domains
-are passed through.  The allowlist is server-enforced (not LLM-side).
-
-Security derives from module unloading and the ceremony gate, not from
-obscurity.  An attacker who reads this code cannot re-enable search
-without the encryption key and human physical presence (Kerckhoffs).
+The domain allowlist is recorded in the same file. The web searcher applies
+it, and feeds the circuit breaker, on every real search, cached results
+included. An enabled allowlist naming no domain passes nothing. Entries are
+normalised to host names, and one that is not a host name is refused by
+name; a URL a browser would read differently from the host it names never
+passes an enabled allowlist. The circuit breaker engages the switch after
+three searches whose results carried a detected injection within ten
+minutes (both configurable).
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import secrets
-import sys
+import stat
+import tempfile
+import threading
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - not a POSIX system: the thread lock alone
+    fcntl = None
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +72,15 @@ DEFAULT_INJECTION_WINDOW = 600  # 10 minutes
 # Re-enable ceremony cooldown
 REENABLE_COOLDOWN_SECONDS = 300  # 5 minutes
 
-# Modules to purge when search is killed
-_SEARCH_MODULES = frozenset({
-    "ddgs",
-    "duckduckgo_search",
-    "duckduckgo_search.exceptions",
-    "duckduckgo_search.ddgs",
-    "duckduckgo_search.duckduckgo_search",
-})
+# The recorded state, beside the security mode's lockfile. Read at call time,
+# never at import: loading this module touches nothing under data/.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_STATE_PATH = _PROJECT_ROOT / "data" / ".search_killswitch.json"
+_STATE_VERSION = 1
+_STATE_MAX_BYTES = 64 * 1024
+
+# What a host name in the allowlist may be made of, once normalised.
+_HOST_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789.-")
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +89,7 @@ _SEARCH_MODULES = frozenset({
 
 @dataclass
 class KillSwitchState:
-    """Current state of the search kill switch."""
-    search_enabled: bool = True
+    """What this process holds besides the record: the ceremony and the breaker."""
     killed_at: float = 0.0
     killed_by: str = ""
     kill_reason: str = ""
@@ -81,12 +108,31 @@ class DomainAllowlist:
     domains: list[str] = field(default_factory=list)
 
     def is_allowed(self, url: str) -> bool:
-        """Check if a URL's domain is in the allowlist."""
-        if not self.enabled or not self.domains:
-            return True  # No allowlist = all allowed
+        """Whether a result URL passes the allowlist.
+
+        A disabled allowlist passes everything; an enabled one naming no
+        domain passes nothing. A URL carrying a backslash, whitespace or a
+        control character, a scheme other than http or https, or userinfo
+        never passes: a browser would read it differently from the host
+        name parsed here.
+        """
+        if not self.enabled:
+            return True
+        if not self.domains:
+            return False
         try:
             from urllib.parse import urlparse
-            parsed = urlparse(url)
+
+            text = str(url)
+            if "\\" in text or any(
+                ch.isspace() or unicodedata.category(ch) in ("Cc", "Cf") for ch in text
+            ):
+                return False
+            parsed = urlparse(text)
+            if parsed.scheme.lower() not in ("http", "https"):
+                return False
+            if "@" in parsed.netloc:
+                return False
             hostname = parsed.hostname or ""
             for domain in self.domains:
                 if hostname == domain or hostname.endswith(f".{domain}"):
@@ -96,23 +142,69 @@ class DomainAllowlist:
             return False
 
 
+def _normalise_domains(domains: Any) -> tuple[list[str], list[str]]:
+    """Host names from allowlist entries, and the entries refused.
+
+    An entry is lowercased and stripped; a leading scheme, anything from the
+    first slash, a leading ``*.`` and a trailing dot are removed. An entry
+    that is then empty is dropped; one that still carries a character a host
+    name cannot hold is refused, as it was given. Duplicates are dropped and
+    the order kept.
+    """
+    kept: list[str] = []
+    refused: list[str] = []
+    for raw in list(domains or []):
+        entry = str(raw).strip().lower()
+        for scheme in ("http://", "https://"):
+            if entry.startswith(scheme):
+                entry = entry[len(scheme):]
+                break
+        entry = entry.split("/", 1)[0]
+        if entry.startswith("*."):
+            entry = entry[2:]
+        entry = entry.strip(".")
+        if not entry:
+            continue
+        if not set(entry) <= _HOST_CHARS:
+            refused.append(str(raw))
+            continue
+        if entry not in kept:
+            kept.append(entry)
+    return kept, refused
+
+
+def _allowlist_in(record: dict) -> DomainAllowlist | None:
+    """The allowlist a well-formed record carries, or None when it is malformed."""
+    value = record.get("domain_allowlist")
+    if not isinstance(value, dict):
+        return None
+    enabled = value.get("enabled")
+    domains = value.get("domains")
+    if not isinstance(enabled, bool) or not isinstance(domains, list):
+        return None
+    if not all(isinstance(d, str) for d in domains):
+        return None
+    return DomainAllowlist(enabled=enabled, domains=list(domains))
+
+
 # ---------------------------------------------------------------------------
 # SearchKillSwitch
 # ---------------------------------------------------------------------------
 
 class SearchKillSwitch:
-    """Manages the web search kill switch.
+    """Manages the web search kill switch as a recorded state."""
 
-    The kill switch physically removes the search module from memory
-    rather than using a boolean flag.  This prevents any code path
-    from accidentally or maliciously invoking search.
-    """
-
-    def __init__(self) -> None:
+    def __init__(self, state_path: Path | None = None) -> None:
         self._state = KillSwitchState()
         self._injection_timestamps: list[float] = []
-        self._domain_allowlist = DomainAllowlist()
+        self._state_path = state_path
+        self._lock = threading.RLock()
+        # Engaged here while the record could not say so.
+        self._latched = False
+        self._cache: tuple[tuple, tuple[bool, dict | None]] | None = None
+        self._warned: set[tuple] = set()
         self._config = self._load_config()
+        self._config_allowlist = DomainAllowlist()
         self._apply_config()
 
     def _load_config(self) -> dict[str, Any]:
@@ -131,73 +223,245 @@ class SearchKillSwitch:
         return {}
 
     def _apply_config(self) -> None:
-        """Apply configuration values."""
+        """The allowlist that applies while nothing is recorded."""
         allowlist_cfg = self._config.get("domain_allowlist", {})
         if isinstance(allowlist_cfg, dict):
-            self._domain_allowlist.enabled = allowlist_cfg.get("enabled", False)
-            self._domain_allowlist.domains = allowlist_cfg.get("domains", [])
+            self._config_allowlist.enabled = bool(allowlist_cfg.get("enabled", False))
+            self._config_allowlist.domains = _normalise_domains(
+                allowlist_cfg.get("domains", [])
+            )[0]
+
+    # -- The record ----------------------------------------------------------
+
+    def _path(self) -> Path:
+        return Path(self._state_path or _STATE_PATH)
+
+    def _unreadable(self, key: tuple, path: Path, reason: str) -> tuple[bool, None]:
+        if key not in self._warned:
+            self._warned.add(key)
+            logger.warning(
+                "Search kill switch: the record at %s cannot be read (%s); "
+                "search stays disabled.", path, reason,
+            )
+        return True, None
+
+    def _read_record(self) -> tuple[bool, dict | None]:
+        """Read the record: (engaged, the record or None).
+
+        A missing record was never engaged. Anything that is not a regular
+        file of at most 64 KiB holding a version-1 record with a boolean
+        ``engaged`` reads engaged. No link is followed.
+        """
+        path = self._path()
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            return False, None
+        except OSError as exc:
+            return self._unreadable(("lstat", exc.__class__.__name__), path, exc.__class__.__name__)
+        key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+        if not stat.S_ISREG(st.st_mode):
+            return self._unreadable(key, path, "not a regular file")
+        if st.st_size > _STATE_MAX_BYTES:
+            return self._unreadable(key, path, "larger than 64 KiB")
+        cached = self._cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        result = self._parse(path, st, key)
+        self._cache = (key, result)
+        return result
+
+    def _parse(self, path: Path, st: os.stat_result, key: tuple) -> tuple[bool, dict | None]:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            return self._unreadable(key, path, exc.__class__.__name__)
+        try:
+            opened = os.fstat(fd)
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
+                return self._unreadable(key, path, "replaced while read")
+            data = b""
+            while len(data) <= _STATE_MAX_BYTES:
+                chunk = os.read(fd, _STATE_MAX_BYTES + 1 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        except OSError as exc:
+            return self._unreadable(key, path, exc.__class__.__name__)
+        finally:
+            os.close(fd)
+        if len(data) > _STATE_MAX_BYTES:
+            return self._unreadable(key, path, "larger than 64 KiB")
+        try:
+            record = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            return self._unreadable(key, path, "not a JSON record")
+        if not isinstance(record, dict):
+            return self._unreadable(key, path, "not a JSON object")
+        version = record.get("version")
+        if type(version) is not int or version != _STATE_VERSION:
+            return self._unreadable(key, path, "another version")
+        if not isinstance(record.get("engaged"), bool):
+            return self._unreadable(key, path, "engaged is not a boolean")
+        return record["engaged"], record
+
+    def _applied(self, engaged: bool, record: dict | None) -> DomainAllowlist:
+        """The allowlist that applies, one rule.
+
+        The record's when it is readable and holds a well-formed one; the
+        configuration's when there is no record; enabled with no domain --
+        nothing passes -- when the record is unreadable or its allowlist is
+        malformed.
+        """
+        if record is not None:
+            return _allowlist_in(record) or DomainAllowlist(enabled=True, domains=[])
+        if engaged:
+            return DomainAllowlist(enabled=True, domains=[])
+        return DomainAllowlist(
+            enabled=self._config_allowlist.enabled,
+            domains=list(self._config_allowlist.domains),
+        )
+
+    def _commit(self, build: Callable[[bool, dict | None], dict]) -> bool:
+        """Write the record ``build`` returns from the record as it stands.
+
+        Called under the thread lock. The record is read again after the
+        cross-process lock is held, written to a unique temporary file in the
+        same directory and moved into place. Returns False when anything
+        could not be written; nothing is changed then.
+        """
+        path = self._path()
+        tmp: str | None = None
+        lock_fd: int | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lock_fd = os.open(
+                str(path) + ".lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600,
+            )
+            if fcntl is not None:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            self._cache = None
+            record = build(*self._read_record())
+            fd, tmp = tempfile.mkstemp(
+                dir=path.parent, prefix=".search_killswitch.", suffix=".tmp",
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(record, fh, sort_keys=True)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+            tmp = None
+            return True
+        except OSError as exc:
+            logger.warning(
+                "Search kill switch: the state could not be recorded at %s (%s).",
+                path, exc.__class__.__name__,
+            )
+            return False
+        finally:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            if lock_fd is not None:
+                os.close(lock_fd)
+            self._cache = None
+
+    @staticmethod
+    def _make_record(
+        *,
+        engaged: bool,
+        allowlist: DomainAllowlist,
+        killed_at: float | None = None,
+        killed_by: str | None = None,
+        kill_reason: str | None = None,
+        breaker: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "version": _STATE_VERSION,
+            "engaged": bool(engaged),
+            "killed_at": killed_at,
+            "killed_by": killed_by,
+            "kill_reason": kill_reason,
+            "circuit_breaker_tripped": bool(breaker),
+            "domain_allowlist": {
+                "enabled": bool(allowlist.enabled),
+                "domains": list(allowlist.domains),
+            },
+        }
+
+    def _keep_engaged(self, engaged: bool, record: dict | None) -> dict[str, Any]:
+        """The record a writer other than the ceremony leaves.
+
+        Engaged stays engaged: the record's state, or this process's latch,
+        whichever says engaged. Only the ceremony records "not engaged".
+        """
+        still = self._latched or engaged
+        if record is not None and record["engaged"] == still:
+            return dict(record)
+        latched = self._latched
+        return self._make_record(
+            engaged=still,
+            allowlist=self._applied(engaged, record),
+            killed_at=self._state.killed_at if latched else None,
+            killed_by=self._state.killed_by if latched else None,
+            kill_reason=self._state.kill_reason if latched else None,
+            breaker=self._state.circuit_breaker_tripped if latched else False,
+        )
 
     # -- Kill / restore ------------------------------------------------------
 
-    @property
-    def is_enabled(self) -> bool:
-        """Whether web search is currently enabled."""
-        return self._state.search_enabled
-
-    @property
     def is_killed(self) -> bool:
-        """Whether the kill switch has been engaged."""
-        return not self._state.search_enabled
+        """Whether the kill switch is engaged: recorded, unreadable, or latched here."""
+        return self._latched or self._read_record()[0]
+
+    def is_enabled(self) -> bool:
+        """Whether web search may run."""
+        return not self.is_killed()
 
     def kill(
         self,
         user_id: str = "system",
         reason: str = "manual",
     ) -> dict[str, Any]:
-        """Engage the kill switch.  Destroys the search module.
+        """Engage the kill switch and record it.
 
-        Adding security (killing search) requires no ceremony.
+        Adding security (killing search) requires no ceremony. When the record
+        cannot be written, search stays disabled in this process and the next
+        kill retries the write.
         """
-        if self.is_killed:
-            return {
-                "success": True,
-                "already_killed": True,
-                "message": "Search already disabled",
-            }
+        with self._lock:
+            engaged, record = self._read_record()
+            if engaged and record is not None and not self._latched:
+                return {
+                    "success": True,
+                    "already_killed": True,
+                    "persisted": True,
+                    "message": "Search already disabled",
+                }
 
-        # 1. Destroy the WebSearcher singleton
-        try:
-            from opti_oignon import web_search
-            if hasattr(web_search, "web_searcher"):
-                searcher = web_search.web_searcher
-                # Call cleanup if available
-                if hasattr(searcher, "close"):
-                    try:
-                        searcher.close()
-                    except Exception:
-                        pass
-                web_search.web_searcher = None  # type: ignore[assignment]
-                web_search.web_search_engine = None  # type: ignore[assignment]
-            # Remove the convenience functions
-            web_search.DDGS_AVAILABLE = False
-        except ImportError:
-            pass
+            now = time.time()
+            self._latched = True
+            self._state.killed_at = now
+            self._state.killed_by = user_id
+            self._state.kill_reason = reason
 
-        # 2. Purge search modules from sys.modules
-        purged = []
-        for mod_name in list(sys.modules.keys()):
-            top = mod_name.split(".")[0]
-            if top in ("ddgs", "duckduckgo_search"):
-                del sys.modules[mod_name]
-                purged.append(mod_name)
+            def build(on_disk: bool, current: dict | None) -> dict[str, Any]:
+                return self._make_record(
+                    engaged=True,
+                    allowlist=self._applied(on_disk, current),
+                    killed_at=now,
+                    killed_by=user_id,
+                    kill_reason=reason,
+                    breaker=self._state.circuit_breaker_tripped,
+                )
 
-        # 3. Update state
-        self._state.search_enabled = False
-        self._state.killed_at = time.time()
-        self._state.killed_by = user_id
-        self._state.kill_reason = reason
+            persisted = self._commit(build)
+            if persisted:
+                # The record holds the state now.
+                self._latched = False
 
-        # Audit
         try:
             from opti_oignon.security_mode import _audit_log
             _audit_log(
@@ -205,22 +469,24 @@ class SearchKillSwitch:
                 severity="WARNING",
                 user_id=user_id,
                 reason=reason,
-                modules_purged=purged,
+                persisted=persisted,
             )
         except Exception:
             pass
 
         logger.warning(
-            "Search kill switch ENGAGED by %s (reason: %s). "
-            "Purged %d modules.",
-            user_id, reason, len(purged),
+            "Search kill switch ENGAGED by %s (reason: %s); recorded: %s.",
+            user_id, reason, persisted,
         )
 
-        return {
-            "success": True,
-            "message": "Search disabled and modules purged from memory",
-            "modules_purged": purged,
-        }
+        if persisted:
+            message = "Search disabled; the state is recorded and holds across restarts."
+        else:
+            message = (
+                "Search disabled in this process; the state could not be recorded "
+                "and will not survive a restart."
+            )
+        return {"success": True, "persisted": persisted, "message": message}
 
     def request_reenable(self, user_id: str) -> dict[str, Any]:
         """Start the re-enable ceremony.
@@ -242,7 +508,7 @@ class SearchKillSwitch:
         except ImportError:
             pass
 
-        if self.is_enabled:
+        if self.is_enabled():
             return {
                 "success": True,
                 "pending": False,
@@ -282,9 +548,11 @@ class SearchKillSwitch:
         visual_code: str,
         user_id: str,
     ) -> dict[str, Any]:
-        """Confirm the re-enable ceremony.
+        """Confirm the re-enable ceremony and record it.
 
-        Password and 2FA are verified by the caller (API route).
+        Password and 2FA are the caller's (API route). This is the only
+        writer that records "not engaged"; when that cannot be recorded,
+        search stays disabled.
         """
         import hmac as _hmac
 
@@ -334,11 +602,27 @@ class SearchKillSwitch:
                 "message": "Invalid confirmation code",
             }
 
-        # Re-enable search
-        self._state.search_enabled = True
-        self._state.reenable_pending = False
-        self._state.circuit_breaker_tripped = False
-        self._injection_timestamps.clear()
+        with self._lock:
+            def build(on_disk: bool, current: dict | None) -> dict[str, Any]:
+                return self._make_record(
+                    engaged=False,
+                    allowlist=self._applied(on_disk, current),
+                )
+
+            if not self._commit(build):
+                return {
+                    "success": False,
+                    "error": "not_recorded",
+                    "message": "The re-enable could not be recorded; search stays disabled.",
+                }
+            self._latched = False
+            self._state.reenable_pending = False
+            self._state.circuit_breaker_tripped = False
+            self._state.killed_at = 0.0
+            self._state.killed_by = ""
+            self._state.kill_reason = ""
+            self._state.injection_count = 0
+            self._injection_timestamps.clear()
 
         try:
             from opti_oignon.security_mode import _audit_log
@@ -354,7 +638,7 @@ class SearchKillSwitch:
 
         return {
             "success": True,
-            "message": "Search re-enabled. Module will reload on next use.",
+            "message": "Search re-enabled.",
         }
 
     def cancel_reenable(self) -> dict[str, Any]:
@@ -367,7 +651,7 @@ class SearchKillSwitch:
     # -- Circuit breaker -----------------------------------------------------
 
     def record_injection(self, details: str = "") -> dict[str, Any]:
-        """Record a detected search injection attempt.
+        """Record a search whose results carried a detected injection.
 
         If the threshold is exceeded, auto-kill search.
         """
@@ -420,22 +704,47 @@ class SearchKillSwitch:
 
     @property
     def domain_allowlist(self) -> DomainAllowlist:
-        return self._domain_allowlist
+        """The allowlist that applies now, read from the record."""
+        return self._applied(*self._read_record())
 
     def set_domain_allowlist(
         self, enabled: bool, domains: list[str] | None = None
-    ) -> None:
-        """Update the domain allowlist."""
-        self._domain_allowlist.enabled = enabled
-        if domains is not None:
-            self._domain_allowlist.domains = domains
+    ) -> dict[str, Any]:
+        """Record the domain allowlist.
+
+        Entries are normalised to host names and those that are not host
+        names are refused by name. The switch's engaged state is kept as the
+        record has it. Returns ``{"persisted", "domains", "refused"}``; when
+        nothing could be recorded, the previous allowlist still applies.
+        """
+        with self._lock:
+            if domains is None:
+                normalised, refused = list(self.domain_allowlist.domains), []
+            else:
+                normalised, refused = _normalise_domains(domains)
+            wanted = DomainAllowlist(enabled=bool(enabled), domains=normalised)
+
+            def build(on_disk: bool, current: dict | None) -> dict[str, Any]:
+                kept = self._keep_engaged(on_disk, current)
+                kept["domain_allowlist"] = {
+                    "enabled": wanted.enabled,
+                    "domains": list(wanted.domains),
+                }
+                return kept
+
+            persisted = self._commit(build)
+            if persisted and self._latched:
+                # The record now says engaged: it holds what the latch held.
+                self._latched = False
+        return {"persisted": persisted, "domains": normalised, "refused": refused}
 
     def filter_results(self, results: list[Any]) -> list[Any]:
-        """Filter search results through the domain allowlist.
+        """Filter search results through the domain allowlist that applies.
 
         Each result must have a .url or ['url'] attribute.
         """
-        if not self._domain_allowlist.enabled:
+        allowlist = self.domain_allowlist
+        if not allowlist.enabled:
             return results
 
         filtered = []
@@ -443,7 +752,7 @@ class SearchKillSwitch:
             url = getattr(r, "url", None)
             if url is None and isinstance(r, dict):
                 url = r.get("url", "")
-            if url and self._domain_allowlist.is_allowed(url):
+            if url and allowlist.is_allowed(url):
                 filtered.append(r)
         return filtered
 
@@ -451,18 +760,32 @@ class SearchKillSwitch:
 
     def status(self) -> dict[str, Any]:
         """Return full kill switch status for the API."""
+        engaged, record = self._read_record()
+        latched = self._latched
+        killed = latched or engaged
+        if latched or record is None:
+            killed_at = self._state.killed_at if latched else None
+            killed_by = self._state.killed_by if latched else None
+            kill_reason = self._state.kill_reason if latched else None
+            tripped = self._state.circuit_breaker_tripped if latched else False
+        else:
+            killed_at = record.get("killed_at") if killed else None
+            killed_by = record.get("killed_by") if killed else None
+            kill_reason = record.get("kill_reason") if killed else None
+            tripped = record.get("circuit_breaker_tripped") is True
+        allowlist = self._applied(engaged, record)
         return {
-            "search_enabled": self._state.search_enabled,
-            "killed_at": self._state.killed_at if self.is_killed else None,
-            "killed_by": self._state.killed_by if self.is_killed else None,
-            "kill_reason": self._state.kill_reason if self.is_killed else None,
-            "circuit_breaker_tripped": self._state.circuit_breaker_tripped,
+            "search_enabled": not killed,
+            "killed_at": killed_at,
+            "killed_by": killed_by,
+            "kill_reason": kill_reason,
+            "circuit_breaker_tripped": tripped,
             "injection_count": self._state.injection_count,
             "reenable_pending": self._state.reenable_pending,
             "domain_allowlist": {
-                "enabled": self._domain_allowlist.enabled,
-                "domain_count": len(self._domain_allowlist.domains),
-                "domains": self._domain_allowlist.domains,
+                "enabled": allowlist.enabled,
+                "domain_count": len(allowlist.domains),
+                "domains": list(allowlist.domains),
             },
         }
 

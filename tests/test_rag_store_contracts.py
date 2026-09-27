@@ -25,10 +25,12 @@ contract-visible change and not a silent drift.
 
 Ingestion records even the empty case: a document that produced no chunks is
 still written, so it stays visible and deletable rather than vanishing. URL
-ingestion admits only http/https at the scheme gate and refuses an oversize page
--- the network-facing guards, pinned as-is; their wider gaps (no block on
-private or loopback targets, a size cap applied only after the body is already
-in memory) are carried findings for a security cycle, not defects fixed here.
+ingestion admits only http/https at its own scheme gate, then fetches through
+the page fetcher of the web search module and nothing else: the fetcher holds
+the web gate, the public-destination rules, the redirect checks and the size
+and time caps (pinned by the search-gates suite), and the store hands it the
+bounds its configuration names. A fetch that fails or is refused records
+nothing, not even the collection.
 
 The connection factory is the seam: every DB touch flows through the module's
 ``safe_connect``. When that seam's backing module is unreachable the store falls
@@ -43,10 +45,14 @@ so no real weight-loading code is ever touched by these contracts.
 """
 
 import hashlib
+import os
+import socket
 import sqlite3
 import sys
 import types
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,15 +69,17 @@ _BLOCKED = [
 ]
 
 
-def _load(*, seed_db_utils=True):
+def _load(*, seed_db_utils=True, blocked_extra=(), seeded_extra=None):
     """Load rag_store in isolation.
 
     With ``seed_db_utils`` the connection seam resolves to a stand-in whose
     ``safe_connect`` is a plain sqlite connection; without it the name is
     blocked so the module's own fallback path is exercised instead.
+    ``blocked_extra`` and ``seeded_extra`` add to the window, for the page
+    fetcher the store reaches lazily.
     """
-    seeded = {}
-    blocked = list(_BLOCKED)
+    seeded = dict(seeded_extra or {})
+    blocked = list(_BLOCKED) + list(blocked_extra)
     if seed_db_utils:
         du = types.ModuleType("opti_oignon.db_utils")
         du.safe_connect = lambda p, **kw: sqlite3.connect(str(p), **kw)
@@ -821,5 +829,179 @@ def test_a27_get_rag_store_is_a_singleton(tmp_path):
         assert s1.data_dir == (tmp_path / "a"), (
             "the second call's data_dir is ignored once the instance exists"
         )
+    finally:
+        restore()
+
+
+# =========================================================================
+# ingest_url -- the store's half of the page fetch
+# =========================================================================
+# a23-a26 pinned a client library of the store's own as its transport; the
+# store now fetches through the web search module's page fetcher, which holds
+# the gate, the destination rules and the caps. These pin what is left to the
+# store: it refuses without the fetcher, hands it the configured bounds,
+# records nothing when a fetch fails, and turns a page into a document as
+# before. No test here reaches the network: every name lookup and connection
+# is refused and recorded while an ingestion runs.
+
+_ABSENT = object()
+
+
+@contextmanager
+def _no_network():
+    """Refuse and record every lookup and connection; set environment proxies aside."""
+    attempts = []
+
+    def _refuse(*args, **kwargs):
+        attempts.append(args[:2])
+        raise OSError("no network in a contract")
+
+    saved = {name: getattr(socket, name) for name in ("getaddrinfo", "create_connection")}
+    own = {name: socket.socket.__dict__.get(name, _ABSENT) for name in ("connect", "connect_ex")}
+    proxies = {name: value for name, value in os.environ.items() if name.lower().endswith("_proxy")}
+    socket.getaddrinfo = _refuse
+    socket.create_connection = _refuse
+    socket.socket.connect = _refuse
+    socket.socket.connect_ex = _refuse
+    for name in proxies:
+        del os.environ[name]
+    try:
+        yield attempts
+    finally:
+        os.environ.update(proxies)
+        for name, value in saved.items():
+            setattr(socket, name, value)
+        for name, value in own.items():
+            if value is _ABSENT:
+                delattr(socket.socket, name)
+            else:
+                setattr(socket.socket, name, value)
+
+
+class _FakeFetcher:
+    """The page fetcher: records every call, answers a page or raises."""
+
+    def __init__(self, page=None, exc=None):
+        self.page = page
+        self.exc = exc
+        self.calls = []
+
+    def module(self):
+        mod = types.ModuleType("opti_oignon.web_search")
+
+        def fetch_page(url, **kwargs):
+            self.calls.append((url, kwargs))
+            if self.exc is not None:
+                raise self.exc
+            return self.page
+
+        mod.fetch_page = fetch_page
+        return mod
+
+
+class _TextChunker(_FakeChunker):
+    """The fake chunker, also keeping the text it is given."""
+
+    def __init__(self):
+        super().__init__()
+        self.texts = []
+
+    def chunk_text(self, text, source=None, file_type=None, doc_id=None):
+        self.texts.append(text)
+        return super().chunk_text(text, source=source, file_type=file_type, doc_id=doc_id)
+
+
+def _fetched(text, content_type="text/html"):
+    return SimpleNamespace(url="https://site.example/article", status=200, content_type=content_type,
+                           body=text.encode("utf-8"), text=text)
+
+
+def _nothing_recorded(store):
+    return store.db.list_documents() == [] and store.db.list_collections() == []
+
+
+def test_a28_ingest_url_refuses_by_name_without_its_page_fetcher(tmp_path):
+    rs, restore = _load(blocked_extra=("opti_oignon.web_search",))
+    try:
+        store = _store(rs, tmp_path)
+        store._chroma = _FakeChroma()
+        with _no_network() as attempts:
+            with pytest.raises(RuntimeError, match="page fetcher"):
+                store.ingest_url("http://example.com/page", collection="web")
+        assert attempts == [], attempts
+        assert _nothing_recorded(store), "a fetch that could not start records nothing"
+    finally:
+        restore()
+
+
+def test_a29_ingest_url_hands_the_fetcher_its_configured_bounds_and_a_refusal_records_nothing(tmp_path):
+    fetcher = _FakeFetcher(exc=ValueError("Page too large: more than 1000 bytes"))
+    rs, restore = _load(seeded_extra={"opti_oignon.web_search": fetcher.module()})
+    try:
+        store = _store(rs, tmp_path)
+        store._chroma = _FakeChroma()
+        store._load_web_config = lambda: {"max_page_size": 1000, "timeout": 7, "user_agent": "UA/1",
+                                          "allowed_ports": [8080], "min_text_length": 100}
+        with _no_network() as attempts:
+            with pytest.raises(ValueError, match="Page too large"):
+                store.ingest_url("http://example.com/big", collection="web")
+        assert attempts == [], attempts
+        assert len(fetcher.calls) == 1, fetcher.calls
+        url, kwargs = fetcher.calls[0]
+        assert url == "http://example.com/big"
+        assert (kwargs["timeout"], kwargs["max_bytes"], kwargs["user_agent"]) == (7, 1000, "UA/1"), kwargs
+        assert tuple(kwargs["allowed_ports"]) == (8080,), kwargs
+        assert _nothing_recorded(store), "a refused fetch records nothing, not even the collection"
+
+        store._load_web_config = lambda: {}
+        fetcher.calls.clear()
+        with _no_network():
+            with pytest.raises(ValueError):
+                store.ingest_url("http://example.com/big")
+        _url, kwargs = fetcher.calls[0]
+        assert (kwargs["timeout"], kwargs["max_bytes"], kwargs["user_agent"]) == (
+            30, 5 * 1024 * 1024, "Opti-Oignon RAG/1.0"), kwargs
+        assert tuple(kwargs["allowed_ports"]) == (), kwargs
+    finally:
+        restore()
+
+
+def test_a30_ingest_url_short_text_records_zero_chunk_doc_through_the_fetcher(tmp_path):
+    fetcher = _FakeFetcher(page=_fetched("hi", content_type="text/plain"))
+    rs, restore = _load(seeded_extra={"opti_oignon.web_search": fetcher.module()})
+    try:
+        store = _store(rs, tmp_path)
+        store._chroma = _FakeChroma()
+        store._load_web_config = lambda: {"max_page_size": 10_000, "min_text_length": 100}
+        with _no_network() as attempts:
+            doc = store.ingest_url("http://example.com/page", collection="web")
+        assert attempts == [] and len(fetcher.calls) == 1, (attempts, fetcher.calls)
+        assert doc.chunk_count == 0 and doc.file_type == "html"
+        assert doc.metadata.get("url") == "http://example.com/page"
+        assert doc.metadata.get("domain") == "example.com"
+        assert store.db.get_document(doc.doc_id) is not None
+    finally:
+        restore()
+
+
+def test_a31_ingest_url_happy_path_chunks_readable_text_and_tags_domain(tmp_path):
+    page = "<html><body><nav>Menu</nav><p>" + "content here " * 20 + "</p></body></html>"
+    fetcher = _FakeFetcher(page=_fetched(page))
+    rs, restore = _load(seeded_extra={"opti_oignon.web_search": fetcher.module()})
+    try:
+        store = _store(rs, tmp_path)
+        coll = _FakeCollection()
+        store._chroma = _FakeChroma({"web": coll})
+        store._embedder = _FakeEmbedder()
+        store._chunker = _TextChunker()
+        store._load_web_config = lambda: {"max_page_size": 100_000, "min_text_length": 5}
+        with _no_network() as attempts:
+            doc = store.ingest_url("https://site.example/article", collection="web")
+        assert attempts == [] and len(fetcher.calls) == 1, (attempts, fetcher.calls)
+        assert doc.chunk_count >= 1
+        assert doc.metadata.get("domain") == "site.example"
+        assert doc.file_type == "text", "delegates to ingest_text with file_type=text"
+        text = store._chunker.texts[-1]
+        assert "content here" in text and "Menu" not in text and "<p>" not in text, text[:80]
     finally:
         restore()

@@ -27,8 +27,8 @@ Design notes:
   dangerous; an indeterminate verification never asserts support.
 - No egress, no mode gate. Verification reads only the supplied source plus the
   local model and reaches no network, so the role runs identically in Daily and
-  Bulbe with no mode resolution and no web action (unlike the N.3
-  fact-check-with-web action). There is deliberately no mode provider.
+  Bulbe with no mode resolution and no web action. There is deliberately no
+  mode provider.
 - Dependency injection. The model client is a one-shot inference seam the caller
   injects (a callable over the built messages, or an object exposing
   ``stream``). An un-injected verifier reports a clean failure rather than
@@ -45,6 +45,8 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -85,9 +87,12 @@ _VERIFY_INSTRUCTION = (
 )
 
 # Verdict markers, scanned fail-secure. Unsupported and uncertain are checked
-# before supported because "unsupported" contains "supported" as a substring;
-# the lead is authoritative, with a whole-text unsupported override but never a
-# whole-text supported promotion.
+# before supported because "unsupported" contains "supported" as a substring.
+# The lead decides unsupported and uncertain; support needs the whole reply,
+# since the instruction asks for the verdict word first and the reason after
+# it, often on the next line. When the reply is not support, an unsupported
+# marker anywhere in it makes it unsupported; there is never a whole-text
+# supported promotion.
 _UNSUPPORTED_MARKERS = (
     "unsupported",
     "not supported",
@@ -113,14 +118,57 @@ _UNCERTAIN_MARKERS = (
     "ambiguous",
     "maybe",
 )
-_SUPPORTED_MARKERS = (
-    "supported",
-    "support the claim",
-    "supports the claim",
-    "confirm",
-    "consistent with",
-    "corroborat",
+
+# Support is read from the opening word alone, never from a substring: a
+# reply that merely contains "confirm" or "consistent with" is as likely to
+# say "does not confirm" or "inconsistent with". A reply is supported only
+# when its first line opens with the verdict word the instruction asks for,
+# and no line of it carries a negation cue, a hedge or an unsupported marker.
+#
+# Markdown emphasis, a quote marker, a list dash or a heading may come before
+# the word, and so may one "verdict:" or "answer:" label. A word it only
+# begins -- "SUPPORTED-ish" -- is not the verdict word.
+_LEAD_NOISE = " \t*_#>-`"
+_LEAD_LABEL = re.compile(r"(?:verdict|answer)\s*[:\-]\s*")
+_OPENS_SUPPORTED = re.compile(r"supported\b")
+_COMPOUND = re.compile(r"[-'][^\W\d_]")
+
+# Every apostrophe a model or a keyboard produces is read as the ASCII one,
+# every hyphen as the ASCII hyphen, and a soft hyphen, which a renderer
+# hides, is dropped.
+_APOSTROPHES = tuple(chr(c) for c in (0x2018, 0x2019, 0x02BC, 0x0060, 0x00B4, 0x2032, 0xFF07))
+_HYPHENS = {c: "-" for c in (0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xFE63, 0xFF0D)}
+_HYPHENS[0x00AD] = None
+# A negating prefix on a word of support negates it: "unconfirmed",
+# "inconsistent", "disagrees", "mismatch", "untrue", "inaccurate". Written
+# with a hyphen it is joined to its word; written apart, it is joined when a
+# word of support follows.
+_NEGATING_PREFIXES = ("un", "in", "non", "dis", "mis")
+_POSITIVE_STEMS = (
+    "confirm", "consistent", "corroborat", "support", "verif", "prov",
+    "substantiat", "agree", "correct", "accura", "valid", "true", "exact",
+    "match", "back",
 )
+_JOINED_PREFIX = re.compile(r"\b(un|in|non|dis|mis)-+(?=[^\W\d_])")
+_SPACED_PREFIX = re.compile(r"\b(un|non|dis|mis)\s+(?=(?:" + "|".join(_POSITIVE_STEMS) + r"))")
+_TOKEN = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*")
+# Negation and refusal cue words, English then French, read without accents.
+_NEGATION_WORDS = frozenset({
+    "not", "no", "never", "nothing", "none", "neither", "nor", "without",
+    "cannot", "fail", "fails", "failed", "lack", "lacks", "lacking",
+    "unable", "impossible", "hardly", "barely", "false", "deny", "denies",
+    "denied", "nope", "nah", "wrong", "wrongly", "silent", "otherwise",
+    "contrary", "opposite", "absent",
+    "ne", "pas", "jamais", "rien", "aucun", "aucune", "non", "sans", "ni",
+    "faux", "fausse", "contraire", "infirme", "infirment", "infirmer",
+    "contredit", "contredisent", "errone", "erronee", "errones", "erronees",
+})
+# Contractions written without their apostrophe.
+_BARE_CONTRACTIONS = frozenset({
+    "dont", "doesnt", "didnt", "isnt", "arent", "wasnt", "werent", "cant",
+    "couldnt", "wont", "wouldnt", "shouldnt", "hasnt", "havent", "hadnt",
+    "aint", "mustnt", "neednt",
+})
 
 
 @dataclass
@@ -150,14 +198,86 @@ def _has(markers: tuple[str, ...], hay: str) -> bool:
     return any(m in hay for m in markers)
 
 
+def _fold(text: str) -> str:
+    """Apostrophes, hyphens and compatibility forms folded, lowercased.
+
+    Apostrophes are folded before and after NFKC, which splits one of them
+    into a space and a combining accent.
+    """
+    for mark in _APOSTROPHES:
+        text = text.replace(mark, "'")
+    text = unicodedata.normalize("NFKC", text.translate(_HYPHENS)).translate(_HYPHENS)
+    for mark in _APOSTROPHES:
+        text = text.replace(mark, "'")
+    return text.lower()
+
+
+def _opens_with_supported(lead: str) -> bool:
+    """True when the lead's first word is SUPPORTED and no question mark follows it."""
+    text = _fold(lead).lstrip(_LEAD_NOISE)
+    label = _LEAD_LABEL.match(text)
+    if label:
+        text = text[label.end():].lstrip(_LEAD_NOISE)
+    opening = _OPENS_SUPPORTED.match(text)
+    if not opening or _COMPOUND.match(text, opening.end()):
+        return False
+    rest = text[opening.end():].lstrip(_LEAD_NOISE)
+    return not rest.startswith("?")
+
+
+def _unaccented(word: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", word) if not unicodedata.combining(c))
+
+
+def _mixed_script(word: str) -> bool:
+    """A word mixing ASCII letters with letters of another script cannot be read."""
+    if not any("a" <= c <= "z" for c in word):
+        return False
+    return any(
+        c.isalpha() and not ("a" <= c <= "z") and not unicodedata.name(c, "").startswith("LATIN")
+        for c in word
+    )
+
+
+def _negated(text: str) -> bool:
+    """True when the text carries a negation or refusal cue, or a word it cannot read."""
+    text = _fold(text)
+    text = _JOINED_PREFIX.sub(r"\1", text)
+    text = _SPACED_PREFIX.sub(r"\1", text)
+    for token in _TOKEN.findall(text):
+        if _mixed_script(token):
+            return True
+        word = _unaccented(token)
+        if word.endswith("n't") or word.startswith("n'"):
+            return True
+        for part in [word, *word.split("'")]:
+            if part in _NEGATION_WORDS or part in _BARE_CONTRACTIONS:
+                return True
+            for prefix in _NEGATING_PREFIXES:
+                if part.startswith(prefix) and part[len(prefix):].startswith(_POSITIVE_STEMS):
+                    return True
+    return False
+
+
+def _qualified(reply: str) -> bool:
+    """True when any line of the reply negates, hedges or says unsupported."""
+    return _negated(reply) or _has(_UNCERTAIN_MARKERS, reply) or _has(_UNSUPPORTED_MARKERS, reply)
+
+
 def normalize_verdict(text: Any) -> str:
     """Map free-text model output to a verdict, fail-secure to uncertain.
 
-    The lead (first line) is authoritative; unsupported and uncertain are tested
-    before supported so the "unsupported" substring is never read as support.
-    When the lead carries no verdict word, only an explicit whole-text
-    unsupported signal moves off uncertain -- an ambiguous reply is never
-    promoted to supported.
+    The lead (first line) decides unsupported and uncertain, tested before
+    supported so the "unsupported" substring is never read as support. A
+    reply is supported only when its lead opens with the word SUPPORTED --
+    markdown or a "verdict:" label allowed before it, no question mark after
+    it, not a longer word it begins -- and no line of the reply carries a
+    negation cue (English or French, whatever the apostrophe or the hyphen,
+    a negating prefix on a word of support, a word mixing scripts), a hedge
+    or an unsupported marker: the reason often comes on the next line. Any
+    other reply is uncertain, or unsupported when an explicit unsupported
+    signal appears anywhere in it; an ambiguous reply is never promoted to
+    supported.
     """
     if text is None or not str(text).strip():
         return VERDICT_UNCERTAIN
@@ -167,7 +287,7 @@ def normalize_verdict(text: Any) -> str:
         return VERDICT_UNSUPPORTED
     if _has(_UNCERTAIN_MARKERS, head):
         return VERDICT_UNCERTAIN
-    if _has(_SUPPORTED_MARKERS, head):
+    if _opens_with_supported(head) and not _qualified(low):
         return VERDICT_SUPPORTED
     if _has(_UNSUPPORTED_MARKERS, low):
         return VERDICT_UNSUPPORTED

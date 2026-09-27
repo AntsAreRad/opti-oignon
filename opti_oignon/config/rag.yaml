@@ -37,7 +37,8 @@ retrieval:
 
 # -- Web ingestion -----------------------------------------------------------
 web_ingestion:
-  # Enable web page ingestion feature
+  # Web page ingestion. Anything but true refuses it by name, before any
+  # request.
   enabled: true
   # Request timeout (seconds)
   timeout: 30
@@ -45,6 +46,10 @@ web_ingestion:
   max_page_size: 5242880  # 5 MB
   # User-Agent header for HTTP requests
   user_agent: "Opti-Oignon RAG/1.0 (knowledge-base ingestion)"
+  # Ports fetched besides 80 and 443 (none by default). A page is fetched only
+  # from a public address, never this machine or its local network, whatever
+  # the port.
+  allowed_ports: []
   # Respect robots.txt (best-effort)
   respect_robots_txt: false
   # Minimum text length after extraction (chars) to accept a page

@@ -1245,6 +1245,52 @@ package costs.
   schema). All of it is in English now, the published prose digest is
   recorded again, and the English-only ledger falls from 320 French spans
   in 33 files to 295 in 18: a file paid down to nothing comes off it.
+- The note action "Fact-check with web" is removed. It searched nothing:
+  one model call was asked to verify a selection "against current web
+  sources and cite them", an invitation to invent citations under a label
+  that promised a web check. A sourced verifier, one that searches and cites
+  for real, is future work. `WEB_ACTIONS` stays, empty, as the mechanism it
+  will join, with the Daily gate it will inherit. The old id
+  `fact_check_web` is refused as an unknown action, by the runner and by the
+  route, before any model call; nothing stored it, and the frontend drops
+  the entry with it. The local "Fact-check" is labelled "Fact-check (no
+  sources)", so no action reads as sourced, and its instruction now also
+  forbids citing sources, references, links or URLs and claiming to have
+  looked anything up: a check with no source cannot invent one either.
+- `registry_funnel_guard.py` counts Ollama's cloud search and fetch: the
+  client's `web_search` and `web_fetch` like a request, and the paths
+  `/api/web_search` and `/api/web_fetch`, and a URL on ollama.com whose path
+  is empty or under `/api` or `/v1`, as raw sites in any module, with or
+  without a transport of its own; a link to a page on the site, such as the
+  download page in an error message, is not one. An exemption or a raw
+  ledger entry excuses local endpoints only: a cloud site is refused by
+  name in every module outside the funnel, the exempt launcher included.
+  The census now follows the client through a submodule import, a star
+  import, `import_module` and `__import__` with a constant however they are
+  reached or renamed, a `sys.modules` lookup, and `getattr` (a name it
+  cannot read is charged, `pull` is not); through an unpacking, a walrus, a
+  loop or `with` target, a parameter default, an argument passed to a
+  function, a method or a class of the same module, a call given it, a
+  container or a comprehension, a class attribute and a lambda; and along
+  any attribute chain rooted at one of those. A value is bound to the
+  client when it evaluates to it -- what a request returns is not the
+  client -- and names are not scoped, which can only over-count. A path is
+  read as a server routes it: bytes decoded, percent encoding, surrounding
+  spaces, the query, the fragment, dot segments and repeated slashes, and
+  a host written with a Unicode full stop. Over the 396 modules of the tree
+  nothing outside the funnel reaches them, and the funnel's own count is
+  unchanged at 12: no ledger entry, no exemption. Its docstring names what
+  a syntax census still cannot see: a name built at run time or read
+  through `vars`, `__dict__`, `globals`, `attrgetter`, `methodcaller`,
+  `exec` or `eval`, a client handed to or received from another module, a
+  capitalised name imported from the package that is in fact a submodule,
+  a local endpoint or a cloud URL assembled from pieces none of which names
+  it, a local endpoint posted with a transport the guard does not list.
+- The web search docs and docstrings say which engines receive a query: the
+  `ddgs` package with its default backend sends it to Wikipedia and to one
+  or more engines it picks at random among DuckDuckGo, Bing, Google, Brave,
+  Mojeek, Yahoo, Yandex and Mullvad, and every result is still labelled
+  "duckduckgo". Which engines to use is left as it was.
 - `public_clean_guard.py`, `published_prose_guard.py`, `summary_fidelity_guard.py`
   and `red_team_guard.py` are unchanged in this cycle and continue to gate
   merges. `isolation_seal_guard.py` and `public_language_guard.py` changed only
@@ -1596,6 +1642,183 @@ package costs.
   key in the unprotected format stays unwrapped at rest. Seven contracts
   (nineteen cases); before the change the same call rewrote the key file it
   could not open, and wrote a new key through a link at the key path.
+- [SECURITY] The search kill switch was read as off everywhere. `is_killed`
+  was a property and its three readers -- the capability manifest, the chat
+  executor and the Bulbe middleware -- called it, caught the `TypeError` and
+  read "not engaged"; engaging it stopped a chat search only because it
+  nulled the searcher, which then failed as "Web search failed". It lived in
+  memory, so a restart disengaged it, and after the re-enable ceremony the
+  searcher stayed nulled and answered "Search package not installed" until
+  a restart. The status route answered `search_enabled: true` when the
+  switch was unavailable. The switch is now a recorded state,
+  `data/.search_killswitch.json` (mode 0600, written through a unique
+  temporary file under a thread lock and a file lock, and replaced
+  atomically), read at every check: by the searcher's request gate, the
+  manifest, the executor and the middleware. A record that is malformed,
+  of another version, a link, a directory, a FIFO or over 64 KiB reads
+  engaged; a missing one reads never engaged, so deleting it re-enables
+  search, as deleting the mode's lockfile does. A kill that cannot be
+  recorded holds in the process, says it will not survive a restart, and
+  is written by the next kill; only the ceremony records "not engaged", and
+  every other writer keeps an engaged record engaged. A reader treats a
+  switch that raises, or whose own import fails, as engaged; only the
+  switch module itself being absent reads not engaged, and the searcher
+  then refuses on its own. A process whose kill could not be recorded gives
+  its latch up once a later write of its own records the engaged state.
+  Loading the module reads nothing. The status route answers
+  `search_enabled: false` when the switch is unavailable, and an unrecorded
+  re-enable is a 503. The tool registry's legacy view and the agent's
+  toolset still list `web_search` while the switch is engaged in Daily
+  mode; a call is refused by the gate, which names the refusal in the tool
+  result.
+- [SECURITY] A web search left the process in Bulbe mode, and so did the
+  proxy health check with its Tor exit lookup: nothing asked the mode
+  before a request. Every request point of the searcher -- the search class
+  and the Tor exit lookup -- now opens a gate first, ahead of the cache: it
+  refuses while the switch is engaged or cannot be
+  read, and in any mode but exactly `daily`, a mode that cannot be read
+  included, with `WebSearchRefused` naming why. The retry loop re-raises the
+  refusal from its first handler (every exception class of the `ddgs`
+  package is `Exception`, so the rate-limit handler used to take anything),
+  the search class is bound privately and constructed in one place, and a
+  chat turn names the refusal in its status line. The mode is read from the
+  process's cache, which a mode change made in the same process refreshes:
+  a long-lived second process still keeps the mode it read at start.
+- [SECURITY] The knowledge base's page ingestion, `POST /api/rag/ingest/url`,
+  fetched any URL in every mode, Bulbe included: it checked the scheme
+  only, followed redirects without checking them, and refused neither this
+  machine (the model server, the core daemon, the API itself) nor the local
+  network. The store now fetches through `web_search.fetch_page`, behind
+  the same gate, asked again before each redirect and after every read of
+  the body: outside Daily mode, or with the switch engaged, the route
+  refuses by name with a 403 (a 503 when the switch cannot be read) before
+  any host name is resolved, or where the reading stands, and nothing is
+  recorded, not even the collection. `web_ingestion.enabled` in `rag.yaml`,
+  which nothing read, now refuses the same way (403) when it is anything
+  but true. In Daily mode the fetch reaches only a public address: user
+  information, a scheme other than http or https, a port other than 80 and
+  443 unless `web_ingestion.allowed_ports` in `rag.yaml` names it (none
+  does by default), and a host resolving to a loopback, private,
+  link-local, site-local, unspecified, multicast, reserved or shared
+  (carrier-grade NAT) address, an IPv4 address carried inside IPv6
+  included, are refused by name with a 400. On an IPv6 network, where the
+  router, the other devices and this machine all hold global addresses,
+  this machine's own addresses and every address on a network it reaches
+  without a gateway (its prefixes and on-link routes, read from `/proc/net`
+  at each request) are refused too; the router's public address reached
+  back through the router (hairpin NAT) cannot be told from any other and
+  is not. The host is resolved once per request and the connection goes
+  only to answers that were checked, in the resolver's order, the request
+  still naming the host and TLS verifying that name; at most three
+  redirects are followed, each checked as the first. The body is capped as
+  it is read (a declared length over the cap is refused before the body),
+  one time budget covers the whole fetch, and a timer cuts a socket that
+  stalls past it; name resolution is bounded by the system resolver alone.
+  A public page in Daily mode is ingested as before, with three
+  differences: a body sent compressed although identity was asked for is
+  refused by name; a page whose Content-Type names no charset, or one that
+  is not among the web's encodings, is read as UTF-8 (the old client read
+  a `text/*` page with no charset as Latin-1, JSON as UTF-8, guessed the
+  others, and fell back to UTF-8 only for a name Python did not know); and
+  the fetch connects directly, never through a proxy named in the
+  environment. As before, the web search's own proxy is not used, and a
+  redirected page is recorded under the URL asked for. The store holds no
+  client library of its own any more.
+- [SECURITY] Chat and tool-loop web results reached the model as bare text,
+  with an instruction to use them. Both now carry the listing inside the
+  untrusted-data envelope, source `web`, with the platform's sentence
+  outside it, and withhold it, saying so, when the wrapper cannot be loaded.
+  In the chat the block still rides a system message, the head or the
+  volatile tail, as the memory block does: the policy header and the markers
+  are the same there, the role is not, and moving both to the user role is
+  owed to a later context change. The agent loop already wrapped every
+  observation.
+- [SECURITY] The domain allowlist and the injection circuit breaker had no
+  caller: the settings panel's "server-enforced" allowlist filtered nothing
+  and the breaker never counted. The searcher now applies the allowlist to
+  every result list it returns, cached results included, and feeds the
+  breaker once per search whose results carried a detected injection,
+  counted on a sanitizer instance of that search's own, with pattern names
+  only -- never the query, a snippet or a URL; its detections still join
+  the shared log the security events route lists, and it carries the shared
+  configuration, an empty one included, without reading the file again.
+  The sanitizer used alone, as the red-team harness uses it, never reaches
+  the breaker. A breaker trip is recorded like any kill: it holds across a
+  restart, and only the re-enable ceremony clears it, so three searches in
+  ten minutes whose results match an injection pattern -- pages about
+  prompt injection included -- disable search until an administrator
+  re-enables it. How often that happens is owed to the machine. The allowlist is
+  recorded with the switch and survives a restart; an enabled allowlist
+  naming no domain passes nothing (it used to pass everything); entries are
+  normalised to host names and the rest refused by name, and a result URL
+  with a backslash, whitespace, a control character, userinfo or a scheme
+  other than http or https never passes. The route answers the normalised
+  list, and a 503 when nothing could be recorded.
+- [SECURITY] The re-enable ceremony took any password when the auth manager
+  could not be read. It now refuses with a 503. The 2FA code it accepts is
+  still not verified, and the visual code is served over the API, so it
+  proves an API session, not physical presence; the switch's docstring says
+  both.
+- The claim verifier behind `/api/claims/verify` and the answer and citation
+  routes read "The source does not confirm the claim.", "This is not
+  consistent with the source." and twenty-six other negated or hedged
+  replies as supported: a lead containing "confirm", "consistent with" or
+  "corroborat" anywhere was promoted. A reply is now supported only when
+  its first line opens with SUPPORTED -- markdown, a quote marker or a
+  "verdict:" label may come before it, a question mark may not follow it,
+  and it may not be the start of a longer word -- and no line of the reply
+  carries a negation cue, a hedge or an unsupported marker: the reason the
+  instruction asks for often comes on the next line. A cue is read in
+  English or French, whatever the apostrophe or the hyphen (a soft hyphen
+  included), contracted without an apostrophe, carried by a negating prefix
+  on a word of support ("unsubstantiated", "disagrees", "mismatch",
+  "inaccurate"), or named outright ("wrong", "otherwise", "silent",
+  "contraire", "infirme"); a word mixing scripts is not read as anything
+  else. The rest is uncertain, or unsupported when the reply says so
+  anywhere. The cost is pinned: "The source confirms the claim." and a
+  SUPPORTED reply that says "no rounding" are uncertain now, and "Nothing
+  contradicts it." on the reason line reads unsupported. How often that
+  happens with a real model is owed to the machine.
+
+  Nine contracts, each red at birth on its property. 153 directed
+  mutations prove them as they stand, each restored byte-exact: 63 from
+  the first build, each turning its contract red; 66 after a review, whose
+  added clauses were each red on the code before its fixes, one per clause
+  and each red in the clause it names; and 24 on the note-action contract,
+  also red in the clause each names. That contract was rewritten when the
+  action was removed rather than renamed, and the nine mutations that
+  proved its withdrawn version no longer count; six of its eleven clauses
+  were red before the code changed, the other five are proven by their
+  mutations alone. The page ingestion adds five clauses to the Bulbe
+  contract, two contracts of fourteen clauses for the destinations and the
+  bounds, and four RAG store contracts that supersede the four which
+  pinned the store's own client library (deselected by name); on the code
+  before the change the route resolved and connected in Bulbe, with the
+  switch engaged, to a host resolving to loopback, with user information
+  and to port 11434, and the store went around the fetcher, while the
+  redirect, pinning and page clauses, on which the old client could not be
+  driven, and the bounds, absent then, were proven by their mutations
+  alone. A review then found the fetch failing on the most common real
+  answer -- a body of declared length on a connection the server closes,
+  over a real socket pair: "Bad file descriptor" -- and reaching an IPv6
+  home network's router and this machine; the clauses added for those, for
+  the site-local range, the gate while the body is read, the next checked
+  answer, the page's charset and the ingestion's own switch were each red
+  on the code before its fix. Every clause of the page ingestion is proven
+  by mutation against the code as it stands: 31 mutations, each red in the
+  clause it names and restored byte-exact. Measured here, in the
+  container: the manifest read the engaged switch as off, a search in Bulbe
+  constructed the search class, the chat head carried the bare listing, a
+  three-result search under a one-domain allowlist returned all three, and
+  the verifier promoted all 28 negated phrasings. Owed to the machine: a
+  real chat turn with web search (the envelope, the engines that received
+  the query), a restart with the switch engaged, the refusal in Bulbe
+  through the running API, a real page ingested by URL in Daily mode and a
+  loopback, private or local-network URL refused through the running API
+  (the machine's own `/proc/net` tables read, an IPv6 router refused), the
+  rate of strict verdicts, whether real pages about prompt injection trip
+  the breaker, and `OLLAMA_API_KEY` absent from
+  the API's environment with `OLLAMA_NO_CLOUD=1` on the host.
 
 - A contract's time is its own again. The test session now freezes the heap
   its collection built -- every suite imported, most of it alive until the

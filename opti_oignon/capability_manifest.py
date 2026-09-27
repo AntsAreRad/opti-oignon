@@ -120,14 +120,23 @@ def _resolve_mode() -> tuple[str, bool]:
 def _web_search_killed() -> bool:
     """Whether the web-search killswitch is engaged.
 
-    Fail-open on probe failure, mirroring the enforcement middleware: an
-    absent killswitch module means the feature is not killed.
+    Fail-closed on a switch that cannot be read: a switch whose own import
+    fails, or whose read raises, reads engaged. Only the switch module itself
+    being absent reads not engaged, because the web searcher then refuses on
+    its own.
     """
     try:
         from .search_killswitch import search_killswitch
+    except ModuleNotFoundError as exc:
+        if exc.name == "opti_oignon.search_killswitch":
+            return False
+        return True
+    except Exception:
+        return True
+    try:
         return bool(search_killswitch.is_killed())
     except Exception:
-        return False
+        return True
 
 
 def _model_tool_capable(model: str) -> bool:

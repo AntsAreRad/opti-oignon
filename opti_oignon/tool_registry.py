@@ -465,7 +465,13 @@ def _handle_web_search(query: str, max_results: int = 5) -> str:
                 f"   URL: {r.url}\n"
                 f"   {r.snippet}"
             )
-        return "\n\n".join(formatted)
+        # Web text reaches the model only as untrusted data; without the
+        # wrapper it is withheld, never handed on bare.
+        try:
+            from opti_oignon.agent.untrusted_context import SOURCE_WEB, wrap
+        except Exception:
+            return "Web search results withheld: the untrusted-data wrapper is unavailable."
+        return wrap("\n\n".join(formatted), source=SOURCE_WEB)
     except Exception as e:
         return f"Web search error: {e}"
 
