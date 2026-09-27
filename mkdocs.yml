@@ -105,6 +105,7 @@ nav:
       - Security Layers: architecture/security-layers.md
       - Onion Memory: architecture/onion-memory.md
       - Core and Packs: architecture/native-core.md
+      - Fact Check: architecture/fact-check.md
   - Project Notes:
       - Demo Scenarios: demo_scenarios.md
       - Branch Protection: BRANCH_PROTECTION.md

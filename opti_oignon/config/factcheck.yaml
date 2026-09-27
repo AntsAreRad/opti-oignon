@@ -1,0 +1,18 @@
+# The fact-check core (opti_oignon/factcheck). Read lazily; any other shape is
+# refused by name. Every number here is a proposal, not a measurement.
+
+# The version of the rules this core applies; a file naming another is refused.
+rules_version: 1
+
+limits:
+  max_claim_chars: 600          # a longer sentence is out of scope, "too_long"
+  min_quote_chars: 12           # a passage shorter than this, after the fold, is never located
+  max_chunk_chars: 20000        # a longer chunk is refused, "chunk_too_large"
+  max_items: 64                 # sources past this, in sorted order, are "over_budget"
+  max_chunks_per_item: 32       # chunks past this, in sorted order, are "over_budget"
+  max_total_chars: 2000000      # characters read per check; sources past it are "over_budget"
+  max_occurrences: 16           # occurrences of one passage located before the rest are cut
+
+canary:
+  # A failing canary builds a checker that refuses every call, naming the failing items.
+  refuse_on_failure: true

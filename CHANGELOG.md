@@ -109,6 +109,72 @@ package costs.
   phone's keyboard, and the latency of a search on a real store are
   checked on the machine.
 
+- A fact-check core, `opti_oignon/factcheck`, that decides whether a claim is
+  supported by the evidence it is handed, and says "supported" in one case
+  only: a whole sentence of an admitted source, valid at the date the claim is
+  about, restated verbatim under a fixed fold (typographic quotes, dashes,
+  spaces, ligatures and the ellipsis; never case, digits or NFKC), located
+  again by the host in a chunk whose SHA-256 it recomputes, in a window that
+  does not qualify it. "Supported" means supported by that passage of that
+  source, read on that date. Everything else is "not enough evidence" with
+  every reason found, or "out of scope" with its reason; a claim inside a
+  longer sentence ("It is false that ...", or the tail of a sentence cut at
+  an initial such as "George W."), a moved negation, one digit, one added word
+  or a splice of two sentences is never supported, and no evidence is never
+  "contradicted", a verdict this core does not give at all. The window a
+  source sentence is read in is its heading path, the heading its store
+  gives, its lead-ins (a parent list item, a label set above a paragraph, a
+  raw HTML heading), and the sentences or list items beside it: a qualifying
+  word ("Myths", "wrongly", "refuted"), a denial, struck-through text, an
+  attribution, or a frame of condition, forecast, narrower population or
+  negation set above it blocks support, the marker and its place recorded;
+  so does a context a chunk may have cut. A model's words are never evidence:
+  a model or unknown author, a model-quoted range, a search excerpt, a source
+  without consent and a retracted one are refused by name and recorded. A
+  past decision of the owner that his drift ledger shows replaced is
+  "conflicting, superseded", with both dates, on the ledger as it really
+  stores supersession (a link to the successor and no end date, so the end is
+  derived from the successor's start, and a successor with no date, or dated
+  before what it replaced, lets the replaced decision stand at no date); a
+  present state that was replaced, and a decision carrying its own date, are
+  "no longer held"; a decision replaced more than once is dated by the one
+  that holds, each one in between named with its date. The owner's pronouns
+  are rewritten by who wrote each side, and only the opening subject, its
+  auxiliary and that person's possessives: the assistant's "You decided ..."
+  and its French form are the owner's own claims, while "we pay you" never
+  equals "you pay us" and the assistant's own "I" is never the owner. A claim
+  about the present found only in undated sources, or in sources dated after
+  the date it is about, is not enough evidence; every verdict line shows each
+  cited source's own date, or "undated", beside the date read and the date the
+  claim is checked for, and a decision supported at a past date says when it
+  was replaced since. A check for a date after the day it runs is refused.
+  Markdown answers become one claim per sentence with offsets into the answer,
+  and what is not checked (code, headings, tables, images, struck-through
+  text, markup the reader does not know) comes back with its reason and is
+  counted in the per-answer summary, which has no percentage and leads with
+  the most severe verdict. Every verdict is a record in canonical JSON with no
+  float, its id the SHA-256 of that JSON, the same in whatever order the
+  sources come, with the digests of the rules and the configuration; a replay
+  says whether the record reproduces, or whether a source or the rules
+  changed; the record calls itself a digest, not a signature. Every verdict
+  other than "supported" sets the claim as written beside each passage
+  examined, each differing run of words named: a sentence one number away is
+  shown with that number beside the claim's. A canary of 101 planted errors
+  and positive controls, in English and French, runs through the checker's own
+  check at every construction; one item out of place and the checker refuses
+  every call, naming it. The vocabulary is closed for the whole design, so
+  later readers (numbers and dates with their precision, restricted
+  contradictions, a calibrated entailment model) add rules, not words. The
+  core imports the standard library alone at module level, reaches no model,
+  store or network, and nothing in the application imports it yet;
+  `opti_oignon/config/factcheck.yaml` holds its limits, all proposals. In the
+  container the canary runs in 0.07 s and a check over 2,000,000
+  characters in 0.30 s on plain text and 0.88 s on markdown
+  notes, 0.79 s and 1.31 s when every sentence
+  of them restates the claim; the machine's figures are owed.
+  `docs/architecture/fact-check.md` says what it decides, what it never says
+  and what it cannot see. Seventeen contracts, each red at birth only by the
+  package's absence and proven by its directed mutations.
 - One shell for the whole interface, and two spaces in it. Use holds the
   pages a person works in (chats, notes, projects, preferences) and the
   Workshop holds the operator pages, all under `/workshop`: system status,
