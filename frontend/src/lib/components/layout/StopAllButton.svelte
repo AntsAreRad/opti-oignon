@@ -2,11 +2,12 @@
   StopAllButton.svelte
   The emergency stop, and the only stop control: the shell mounts it where
   it stays one tap away at every width (the status card, the collapsed
-  rail, the phone header), and the approvals drawer, a modal dialog that
-  makes the rest of the page inert, holds one of its own. It makes the
-  machine quiet: it cancels generations and runs, unloads models, destroys
-  sandboxes and stops the sync node. Resuming needs no ceremony (sign-in is
-  still required).
+  rail, the phone header), and a modal dialog, which makes the rest of the
+  page inert, holds one of its own: the approvals drawer in its foot, the
+  command palette, the list of shortcuts and the export dialog in their
+  head, where a phone's keyboard never covers it. It makes the machine quiet: it cancels generations and
+  runs, unloads models, destroys sandboxes and stops the sync node.
+  Resuming needs no ceremony (sign-in is still required).
 
   It always renders, in one of three states read from the estop store
   (lib/stores/estop.ts, the one poller): available, and it opens its
@@ -17,6 +18,13 @@
 
   The confirmation keeps the two actions (stop, or stop and switch to
   Bulbe), a polite live region for what changed, and the steps that failed.
+  `askToConfirm()` opens it and puts focus on its first action: the command
+  palette's Stop all entry calls it, and nothing ever stops without the
+  reader's own press. `refusal` says, to a parent that binds it, why the
+  confirmation cannot be asked for now (everything is stopped already, or
+  the server cannot stop), so the palette lists its entry disabled with the
+  same words; this control stays the one reader of the stop's state. Escape shuts the confirmation and nothing else: the
+  dialog it sits in stays open.
   It is fixed to the viewport and placed from the button while it is open
   (floating-ui, as a menu is), so no clipping box cuts it: not the 72 px
   rail, not the card, not a dialog's panel. Several copies may be on
@@ -24,7 +32,8 @@
   error.
 
   Placement: `card` beside the backend's name, `rail` stacked in the 72 px
-  rail, `header` in the phone header, `dialog` in a dialog's foot. On a
+  rail, `header` in the phone header, `dialog` in a dialog's foot,
+  `dialog-head` in a dialog's head. On a
   touch screen (the phone header, or `large`) every button is a 44 px
   target, the confirmation's actions and Resume included.
 -->
@@ -36,15 +45,21 @@
 	import { estop, engageStop, resumeStop } from '$lib/stores/estop';
 
 	/** Where the control sits, which sets its shape and where its confirmation opens. */
-	export let placement: 'card' | 'rail' | 'header' | 'dialog' = 'card';
+	export let placement: 'card' | 'rail' | 'header' | 'dialog' | 'dialog-head' = 'card';
 	/** A 44 px target, for a touch screen; the phone header's always is. */
 	export let large = false;
+	/**
+	 * Why the confirmation cannot be asked for now, in words, or null when it
+	 * can: written here, for a parent that binds it (bind:refusal).
+	 */
+	export let refusal: string | null = null;
 
 	const OPENS: Record<typeof placement, Placement> = {
 		card: 'top-end',
 		rail: 'right-end',
 		header: 'bottom-end',
-		dialog: 'top-end'
+		dialog: 'top-end',
+		'dialog-head': 'bottom-end'
 	};
 
 	let confirming = false;
@@ -56,6 +71,11 @@
 	let stopFollowing: (() => void) | undefined;
 
 	$: unavailable = $estop.available === false;
+	$: refusal = $estop.stopped
+		? 'Everything is stopped already'
+		: unavailable
+			? 'Emergency stop unavailable on this server'
+			: null;
 	$: touch = placement === 'header' || large;
 	$: actionSize = (touch ? 'lg' : 'sm') as 'lg' | 'sm';
 	$: triggerSize = (touch ? 'lg' : 'md') as 'lg' | 'md';
@@ -89,6 +109,17 @@
 		confirming = !confirming;
 	}
 
+	/**
+	 * Opens the confirmation and puts focus on its first action, when the
+	 * stop can be asked for; the stop itself waits for the reader's press.
+	 */
+	export async function askToConfirm(): Promise<void> {
+		if (refusal !== null || $estop.busy) return;
+		confirming = true;
+		await tick();
+		sheet?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+	}
+
 	async function engage(dropToBulbe: boolean) {
 		acted = true;
 		const answered = await engageStop(dropToBulbe);
@@ -105,8 +136,13 @@
 		if (event.target instanceof Node && !wrapper.contains(event.target)) confirming = false;
 	}
 
+	// Escape shuts the confirmation alone: the key goes no further, so the
+	// dialog around it, the palette and the phone's drawer stay open.
 	function closeOnEscape(event: KeyboardEvent) {
-		if (confirming && event.key === 'Escape') confirming = false;
+		if (!confirming || event.key !== 'Escape') return;
+		confirming = false;
+		event.preventDefault();
+		event.stopPropagation();
 	}
 </script>
 

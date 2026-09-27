@@ -55,7 +55,10 @@ The modules and the names the contracts read:
 
   * NV1 -- the sidebar and the route announcer (and the command palette,
     once there is one) import the table, and no other file declares a list
-    of destination links.
+    of destination links. Superseded by NV25 (deselected by name in
+    ``pyproject.toml``): it asked every file under the palette's two
+    directories to import the table, where the palette's pure modules take
+    what they rank as an argument.
   * NV2 -- every ready destination has a page, a destination that is not
     ready has none, and every page is a destination, a page inside one,
     sign-in, registration or the component gallery; the Workshop settings
@@ -108,6 +111,12 @@ The modules and the names the contracts read:
   * NV24 -- no copy of the interface, no text the application writes for a
     developer and no document sends the reader to the old settings page
     ("go to Settings", "the Settings page", "Settings >").
+  * NV25 -- NV1, with the command palette read where it lists the
+    destinations: the sidebar, the route announcer and the palette's
+    component exist and import the table, and no other file declares a list
+    of destination links. The palette's pure modules (its ranking, its
+    registry of commands, its sources) hold no list and are handed the
+    table's entries by the component.
 
 Every census carries a standing positive fixture, a sample it must find,
 so a probe gone blind turns red instead of reading a clean zero. The node
@@ -161,6 +170,7 @@ BUDGET_S = {
     "test_nv22_every_query_a_page_answers_is_produced_by_the_interface": 1.0,
     "test_nv23_every_page_of_both_spaces_has_a_heading_of_level_one": 1.0,
     "test_nv24_no_copy_and_no_document_sends_the_reader_to_the_old_settings_page": 2.0,
+    "test_nv25_one_destination_table_read_by_the_sidebar_the_announcer_and_the_palette": 1.0,
 }
 
 _SRC = "frontend/src"
@@ -1658,6 +1668,36 @@ def test_nv24_no_copy_and_no_document_sends_the_reader_to_the_old_settings_page(
         f"copy and documents that send the reader to the old settings page (Preferences or the "
         f"Workshop now): {found}"
     )
+
+
+# ---------------------------------------------------------------------------
+# NV25 -- one destination table, read by the sidebar, the announcer and the palette
+# ---------------------------------------------------------------------------
+# The command palette's component: it lists the destinations, so it reads
+# them from the table; its pure modules are handed them.
+_PALETTE_COMPONENT = f"{_SRC}/lib/components/palette/CommandPalette.svelte"
+
+
+def test_nv25_one_destination_table_read_by_the_sidebar_the_announcer_and_the_palette():
+    assert _destination_list(*_LIST_SAMPLE) == 4, (
+        "the census reads href values, object keys and startsWith arguments"
+    )
+    assert _destination_list(f"{_SRC}/lib/sample/One.ts", "go('/chat'); x = { href: '/notes' };") == 1
+
+    lists = {
+        path: count
+        for path in files(_SCRIPTS, exclude=(_DESTINATIONS, _LEGACY))
+        if (count := _destination_list(path, read(path))) >= 3
+    }
+    assert not lists, (
+        f"lists of destinations declared outside the table (distinct paths each): {lists}"
+    )
+
+    readers = [_SIDEBAR, _ROOT_LAYOUT, _PALETTE_COMPONENT]
+    absent = [path for path in readers if not (REPO / path).is_file()]
+    assert not absent, f"the readers of the table exist: {absent}"
+    missing = [path for path in readers if _DESTINATIONS not in _imports(path)]
+    assert not missing, f"these read their destinations from the table: {missing}"
 
 
 if __name__ == "__main__":

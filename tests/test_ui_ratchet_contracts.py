@@ -1774,7 +1774,6 @@ UR11_LEDGER = {
     'frontend/src/lib/components/settings/sections/ConversationDefaults.svelte': 2,
     'frontend/src/lib/components/ui/ErrorBoundary.svelte': 1,
     'frontend/src/lib/components/ui/FeatureUnavailable.svelte': 1,
-    'frontend/src/lib/components/ui/KeyboardShortcuts.svelte': 2,
     'frontend/src/lib/components/ui/OnboardingOverlay.svelte': 6,
     'frontend/src/lib/components/ui/SkeletonLoader.svelte': 2,
     'frontend/src/routes/(app)/(use)/chat/[id]/+page.svelte': 3,

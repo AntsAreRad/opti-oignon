@@ -8,6 +8,10 @@
   focus goes to the element marked autofocus (or data-autofocus) when there
   is one, else to the first focusable element. While `closable` is false
   (an action is running), the close button is disabled.
+
+  The `actions` slot sits in the head, before the close button: a dialog
+  of the shell puts Stop all there, at the top, where a phone's keyboard
+  never covers it. On a touch screen the close button is a 44 px target.
 -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
@@ -95,15 +99,20 @@
 	<div class="oo-modal-panel" data-variant={effectiveVariant} data-size={size}>
 		<header class="oo-modal-header">
 			<h2 id={`${uid}-title`} class="oo-modal-title">{title}</h2>
-			<button
-				type="button"
-				class="oo-modal-close"
-				aria-label="Close dialog"
-				disabled={!closable}
-				on:click={requestClose}
-			>
-				<Icon name="x" size="sm" />
-			</button>
+			<div class="oo-modal-head-end">
+				{#if $$slots.actions}
+					<slot name="actions" />
+				{/if}
+				<button
+					type="button"
+					class="oo-modal-close"
+					aria-label="Close dialog"
+					disabled={!closable}
+					on:click={requestClose}
+				>
+					<Icon name="x" size="sm" />
+				</button>
+			</div>
 		</header>
 
 		<div class="oo-modal-body">
@@ -204,6 +213,12 @@
 		font-weight: 600;
 		color: var(--oo-fg-primary);
 	}
+	.oo-modal-head-end {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: var(--oo-space-2);
+	}
 	.oo-modal-close {
 		display: inline-flex;
 		align-items: center;
@@ -220,6 +235,13 @@
 	.oo-modal-close:hover {
 		background-color: var(--oo-bg-hover);
 		color: var(--oo-fg-primary);
+	}
+	/* A finger needs a 44 px target; a mouse keeps the small one. */
+	@media (pointer: coarse) {
+		.oo-modal-close {
+			width: 44px;
+			height: 44px;
+		}
 	}
 	.oo-modal-body {
 		padding: var(--oo-space-5);

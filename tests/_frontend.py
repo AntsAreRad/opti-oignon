@@ -145,6 +145,13 @@ HELD: list[str] = [
     "frontend/src/lib/components/settings/NetworkReachability.svelte",
     "frontend/src/lib/stores/estopState.ts",
     "frontend/src/routes/(app)/[...missing]/+page.ts",
+    "frontend/src/lib/palette/",
+    "frontend/src/lib/components/palette/",
+    "frontend/src/lib/stores/palette.ts",
+    "frontend/src/lib/components/ui/KeyboardShortcuts.svelte",
+    "frontend/src/lib/stores/shortcutsHelp.ts",
+    "frontend/src/lib/stores/shortcutKeys.ts",
+    "frontend/src/lib/stores/notificationCenter.ts",
 ]
 """Files held to the surface rules: separation by tone and space rather than
 by lines, matte surfaces, sentence-case labels, selection never by colour
@@ -159,8 +166,13 @@ and route groups' layouts and the redirects of the old addresses; the chats
 index and the module that builds its requests; the settings search and
 the catalog it reads; what the old header held, moved into Preferences (the
 palette switcher, the account menu, the notification history); the network
-page's reachability; the stop's pure read rules; and the catch-all that
-answers an address no page serves."""
+page's reachability; the stop's pure read rules; the catch-all that
+answers an address no page serves; and the command palette: its modules
+(its ranking, its registry of commands, its sources, its runner, what its
+list says), its dialog and its store, with the shortcut handler that runs
+the same commands, the store of its list of shortcuts, the store of the
+keys each command runs by, and the store of the notification history's
+panel, which one of those commands opens."""
 
 
 def held_files(held=None, *, root=REPO):

@@ -1,228 +1,147 @@
 <!--
   KeyboardShortcuts.svelte
-  Global keyboard shortcut handler + help overlay.
-  Mounted in root layout to cover the entire application.
-  Supports custom bindings loaded from backend.
-  The help overlay now uses the shared <Modal> primitive (native
-  dialog focus trap, Escape and backdrop handling).
+  The keyboard's shortcuts, and the list of them. Mounted once, by the root
+  layout, so the keys work on every page.
+
+  Every shortcut is a command of the registry (lib/palette/commands.ts):
+  the handler starts from the registry's bound commands, applies over them
+  the keys the reader chose (kept by the server, and sent again by the
+  shortcut settings when they change), and runs every command through the
+  runner (lib/palette/run.ts), which refuses a command where it cannot run
+  before any handler does: behind an open palette or list of shortcuts, a
+  key runs only what closes them. It holds no handler of its own, sends no
+  event of its own, and reads nothing of the page's markup. The keys it
+  runs are written to their store (lib/stores/shortcutKeys.ts), where the
+  command palette and the sidebar read the keys they show.
+
+  A key the application binds with a modifier is the application's, run or
+  refused. A plain key (? and Escape) is left to the field being typed in,
+  and, refused, keeps its default action: an Escape that closes no dialog
+  of ours still closes the native dialog it was pressed in.
+
+  The list of shortcuts is a ds Modal, open while its store says so
+  (lib/stores/shortcutsHelp.ts). Open, it holds Stop all in its head, like
+  every modal dialog of the shell: the page under it is inert.
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { KeyboardShortcut } from '$lib/types';
 	import { Modal } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import {
+		COMMANDS,
+		bindingLabel,
+		chosenBindings,
+		defaultShortcuts,
+		type ChosenKeys,
+		type DefaultShortcut
+	} from '$lib/palette/commands';
+	import { runCommand } from '$lib/palette/run';
+	import { shortcutsHelp, closeShortcutsHelp } from '$lib/stores/shortcutsHelp';
+	import { shortcutKeys } from '$lib/stores/shortcutKeys';
+	import { isPhone } from '$lib/stores/ui';
 
-	export let onNewConversation: (() => void) | null = null;
-	export let onExportConversation: (() => void) | null = null;
-	export let onGoToSettings: (() => void) | null = null;
-	export let onToggleSearch: (() => void) | null = null;
-	export let onToggleTheme: (() => void) | null = null;
-	export let onToggleSidebar: (() => void) | null = null;
+	/** The reader's own keys, by action, as the server keeps them. */
+	let chosen: Record<string, ChosenKeys> = {};
 
-	let showHelp = false;
+	$: bindings = chosenBindings(COMMANDS, chosen);
+	$: shortcutKeys.set(bindings);
+	$: shortcuts = defaultShortcuts(COMMANDS, bindings);
+	$: paletteKeys = shortcuts.find((s) => s.action === 'search_conversations');
 
-	// Default shortcut definitions
-	const defaultShortcuts: KeyboardShortcut[] = [
-		{ key: 'n', ctrl: true, description: 'New conversation', action: 'new_chat' },
-		{ key: 'Enter', ctrl: true, description: 'Send message', action: 'send_message' },
-		{ key: 'b', ctrl: true, description: 'Toggle sidebar', action: 'toggle_sidebar' },
-		{ key: 'k', ctrl: true, description: 'Focus context-list search', action: 'search_conversations' },
-		{ key: ',', ctrl: true, description: 'Open settings', action: 'open_settings' },
-		{ key: 't', ctrl: true, shift: true, description: 'Toggle theme', action: 'toggle_theme' },
-		{ key: 'e', ctrl: true, shift: true, description: 'Export conversation', action: 'export_conversation' },
-		{ key: '?', description: 'Show keyboard shortcuts', action: 'show_shortcuts' },
-		{ key: 'Escape', description: 'Close dialog / panel', action: 'close_dialog' }
-	];
-
-	// Active shortcuts (can be overridden by custom bindings)
-	let shortcuts: KeyboardShortcut[] = [...defaultShortcuts];
-
-	// Custom overrides loaded from backend (action -> partial binding)
-	let customOverrides: Record<string, Partial<KeyboardShortcut>> = {};
-
-	/**
-	 * Apply custom overrides to the default shortcuts.
-	 */
-	function applyOverrides() {
-		shortcuts = defaultShortcuts.map((s) => {
-			const override = customOverrides[s.action];
-			if (!override) return { ...s };
-			return {
-				...s,
-				key: override.key ?? s.key,
-				ctrl: override.ctrl ?? s.ctrl,
-				shift: override.shift ?? s.shift,
-				alt: override.alt ?? s.alt
-			};
-		});
-	}
-
-	/**
-	 * Load custom bindings from backend.
-	 */
-	async function loadCustomBindings() {
+	/** The reader's own keys, from the server; the registry's stand when it cannot answer. */
+	async function loadChosenKeys() {
 		try {
 			const { getKeyboardShortcuts } = await import('$lib/api/shortcuts');
 			const response = await getKeyboardShortcuts();
 			if (response?.custom_overrides && Object.keys(response.custom_overrides).length > 0) {
-				customOverrides = response.custom_overrides;
-				applyOverrides();
+				chosen = response.custom_overrides;
 			}
 		} catch {
-			// Silently fall back to defaults if backend unavailable
+			// The registry's keys stand.
 		}
 	}
 
-	/**
-	 * Listen for custom binding updates from ShortcutSettings.
-	 */
-	function handleBindingsUpdated(e: Event) {
+	/** The shortcut settings send the keys again when the reader changes them. */
+	function onKeysChanged(e: Event) {
 		const detail = (e as CustomEvent).detail;
-		if (detail?.custom_overrides) {
-			customOverrides = detail.custom_overrides;
-			applyOverrides();
-		}
+		if (detail?.custom_overrides) chosen = detail.custom_overrides;
 	}
 
-	// Action dispatcher map
-	const actionHandlers: Record<string, (() => void) | null> = {};
-	$: {
-		actionHandlers['new_chat'] = onNewConversation;
-		actionHandlers['export_conversation'] = onExportConversation;
-		actionHandlers['open_settings'] = onGoToSettings;
-		actionHandlers['search_conversations'] = onToggleSearch;
-		actionHandlers['toggle_theme'] = onToggleTheme;
-		actionHandlers['toggle_sidebar'] = onToggleSidebar;
-	}
-
-	function matchesShortcut(e: KeyboardEvent, s: KeyboardShortcut): boolean {
-		// KS-02: '?' is produced WITH Shift on most layouts, so match
-		// it shift-agnostically and before the modifier gate.
+	function matchesShortcut(e: KeyboardEvent, s: DefaultShortcut): boolean {
+		// A browser's autofill sends a keydown with no key.
+		if (typeof e.key !== 'string') return false;
+		// '?' is typed with Shift on most layouts: it matches whatever Shift says.
 		if (s.key === '?') {
 			return e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey;
 		}
-
-		const ctrl = s.ctrl || false;
-		const shift = s.shift || false;
-		const alt = s.alt || false;
-
-		if (ctrl !== (e.ctrlKey || e.metaKey)) return false;
-		if (shift !== e.shiftKey) return false;
-		if (alt !== e.altKey) return false;
-
-		// KS-03: custom overrides arrive lowercased (ShortcutSettings
-		// and the backend both canonicalize), so compare case-insensitively
-		// for every key length; this also covers Enter/Escape.
+		if (s.ctrl !== (e.ctrlKey || e.metaKey)) return false;
+		if (s.shift !== e.shiftKey) return false;
+		if (s.alt !== e.altKey) return false;
+		// The server and the shortcut settings keep keys in lower case.
 		return e.key.toLowerCase() === s.key.toLowerCase();
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		const target = e.target as HTMLElement;
-		const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-
-		// Find matching shortcut
+	function onKeydown(e: KeyboardEvent) {
+		const target = e.target as HTMLElement | null;
+		const typing =
+			!!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 		for (const s of shortcuts) {
 			if (!matchesShortcut(e, s)) continue;
-
-			// For non-modifier shortcuts (? and Escape), skip if in input field
-			if (!s.ctrl && !s.shift && !s.alt && isInput) continue;
-
-			// KS-01: preventDefault ONLY on paths that actually handle
-			// the key. An unhandled Escape must keep its default action --
-			// that default is what fires the native <dialog> cancel event the
-			// ds Modal relies on to close.
-
-			// Toggle the help overlay (Modal handles focus + restore)
-			if (s.action === 'show_shortcuts') {
-				e.preventDefault();
-				showHelp = !showHelp;
-				return;
-			}
-
-			// Escape: close the help overlay if open; otherwise leave the
-			// event untouched for the native dialog / focused consumer.
-			if (s.action === 'close_dialog') {
-				if (showHelp) {
-					e.preventDefault();
-					closeHelp();
-				}
-				return;
-			}
-
-			// Send message: dispatch global event
-			if (s.action === 'send_message') {
-				e.preventDefault();
-				window.dispatchEvent(new CustomEvent('opti-send-message'));
-				return;
-			}
-
-			// Dispatch to handler
-			const handler = actionHandlers[s.action];
-			if (handler) {
-				e.preventDefault();
-				handler();
-			}
+			if (!s.ctrl && !s.shift && !s.alt && typing) continue;
+			const refused = runCommand(s.action);
+			if (refused === null || s.ctrl || s.alt) e.preventDefault();
 			return;
 		}
 	}
 
-	function closeHelp() {
-		showHelp = false;
-	}
-
-	function formatShortcut(shortcut: KeyboardShortcut): string {
-		const parts: string[] = [];
-		if (shortcut.ctrl) parts.push('Ctrl');
-		if (shortcut.shift) parts.push('Shift');
-		if (shortcut.alt) parts.push('Alt');
-
-		const keyNames: Record<string, string> = {
-			',': ',',
-			'Escape': 'Esc',
-			'?': '?',
-			'Enter': 'Enter'
-		};
-		parts.push(keyNames[shortcut.key] || shortcut.key.toUpperCase());
-		return parts.join(' + ');
-	}
-
 	onMount(() => {
-		document.addEventListener('keydown', handleKeydown);
-		window.addEventListener('opti-shortcuts-updated', handleBindingsUpdated);
-		loadCustomBindings();
+		document.addEventListener('keydown', onKeydown);
+		window.addEventListener('opti-shortcuts-updated', onKeysChanged);
+		loadChosenKeys();
 	});
 
 	onDestroy(() => {
-		document.removeEventListener('keydown', handleKeydown);
-		window.removeEventListener('opti-shortcuts-updated', handleBindingsUpdated);
+		if (typeof document === 'undefined') return;
+		document.removeEventListener('keydown', onKeydown);
+		window.removeEventListener('opti-shortcuts-updated', onKeysChanged);
 	});
 </script>
 
-<Modal open={showHelp} variant="center" size="sm" title="Keyboard Shortcuts" onClose={closeHelp}>
-	<div class="help-list">
-		{#each shortcuts as shortcut}
-			<div class="help-row">
-				<span class="help-desc">{shortcut.description}</span>
-				<kbd class="help-kbd">{formatShortcut(shortcut)}</kbd>
-			</div>
+<Modal open={$shortcutsHelp} variant="center" size="sm" title="Keyboard shortcuts" onClose={closeShortcutsHelp}>
+	<svelte:fragment slot="actions">
+		{#if $shortcutsHelp}
+			<StopAllButton placement="dialog-head" large={$isPhone} />
+		{/if}
+	</svelte:fragment>
+	<ul class="oo-keys" role="list">
+		{#each shortcuts as shortcut (shortcut.action)}
+			<li class="oo-keys-row">
+				<span class="oo-keys-what">{shortcut.description}</span>
+				<kbd class="oo-kbd">{bindingLabel(shortcut)}</kbd>
+			</li>
 		{/each}
-	</div>
+	</ul>
 	<svelte:fragment slot="footer">
-		<span class="help-hint">
-			Press <kbd class="help-kbd-inline">?</kbd>
-			or <kbd class="help-kbd-inline">Esc</kbd>
-			to close
-		</span>
+		<p class="oo-keys-hint">
+			{#if paletteKeys}
+				Every command is in the palette too: <kbd class="oo-kbd">{bindingLabel(paletteKeys)}</kbd>.
+			{/if}
+			Press <kbd class="oo-kbd">?</kbd> or <kbd class="oo-kbd">Esc</kbd> to close.
+		</p>
 	</svelte:fragment>
 </Modal>
 
 <style>
-	.help-list {
+	.oo-keys {
 		display: flex;
 		flex-direction: column;
-		gap: var(--oo-space-2);
+		gap: var(--oo-space-1);
+		margin: 0;
+		padding: 0;
+		list-style: none;
 	}
 
-	.help-row {
+	.oo-keys-row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -230,37 +149,30 @@
 		padding: var(--oo-space-2) 0;
 	}
 
-	.help-desc {
+	.oo-keys-what {
 		font-size: var(--oo-text-sm);
 		color: var(--oo-fg-secondary);
 	}
 
-	.help-kbd {
+	/* A key: a small rounded cap on the sunken ground. */
+	.oo-kbd {
 		display: inline-flex;
 		align-items: center;
-		gap: var(--oo-space-1);
-		padding: 2px var(--oo-space-2);
+		flex-shrink: 0;
+		padding: 1px var(--oo-space-2);
+		border: 1px solid var(--oo-edge);
 		border-radius: var(--oo-radius-sm);
-		background-color: var(--oo-bg-overlay);
-		border: 1px solid var(--oo-bd-subtle);
-		font-size: var(--oo-text-2xs);
-		color: var(--oo-fg-muted);
+		background-color: var(--oo-bg-subtle);
+		color: var(--oo-fg-secondary);
 		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-xs);
+		white-space: nowrap;
 	}
 
-	.help-hint {
-		font-size: var(--oo-text-2xs);
+	.oo-keys-hint {
+		margin: 0;
+		font-size: var(--oo-text-xs);
+		line-height: var(--oo-leading-snug);
 		color: var(--oo-fg-muted);
-	}
-
-	.help-kbd-inline {
-		display: inline;
-		padding: 2px var(--oo-space-1);
-		border-radius: var(--oo-radius-sm);
-		background-color: var(--oo-bg-overlay);
-		border: 1px solid var(--oo-bd-subtle);
-		font-size: var(--oo-text-2xs);
-		color: var(--oo-fg-muted);
-		font-family: var(--oo-font-mono);
 	}
 </style>

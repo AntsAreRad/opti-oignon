@@ -7,6 +7,11 @@
   Note: the input uses an explicit value + on:input handler (rather than
   bind:value) so the `type` attribute can stay dynamic, which Svelte
   forbids together with two-way binding.
+
+  Given `combobox`, a text field is the field of a combobox: it controls
+  the list whose id it names, says whether that list is shown, and names
+  its active option by aria-activedescendant, while focus stays in the
+  field; the browser's own suggestions and spelling marks are off.
 -->
 <script lang="ts">
 	import Icon from './Icon.svelte';
@@ -28,6 +33,11 @@
 	export let rows = 3;
 	/** Marks the field for focus when a dialog holding it opens. */
 	export let autofocus = false;
+	/**
+	 * The field of a combobox: the id of the list it controls, whether that
+	 * list is shown, and the id of its active option (none when undefined).
+	 */
+	export let combobox: { controls: string; expanded: boolean; active?: string } | undefined = undefined;
 
 	const uid = `oo-input-${Math.random().toString(36).slice(2, 9)}`;
 	$: describedBy = error ? `${uid}-error` : hint ? `${uid}-hint` : undefined;
@@ -81,7 +91,13 @@
 				{placeholder}
 				{disabled}
 				{required}
-				autocomplete={autocomplete}
+				autocomplete={combobox ? 'off' : autocomplete}
+				spellcheck={combobox ? false : undefined}
+				role={combobox ? 'combobox' : undefined}
+				aria-autocomplete={combobox ? 'list' : undefined}
+				aria-expanded={combobox ? combobox.expanded : undefined}
+				aria-controls={combobox ? combobox.controls : undefined}
+				aria-activedescendant={combobox ? combobox.active : undefined}
 				aria-invalid={!!error}
 				aria-describedby={describedBy}
 				data-autofocus={autofocus || undefined}

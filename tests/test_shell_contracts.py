@@ -56,7 +56,10 @@ The names the contracts read, beside those of the navigation contracts
   * SH9 -- the Workshop layout marks its space and draws it compact, with
     its band; the Use layout marks nothing and follows the reader's density.
   * SH10 -- export is one dialog at the shell's level, opened through its
-    store from anywhere, never through a window event.
+    store from anywhere, never through a window event. Superseded by SH25
+    (deselected by name in ``pyproject.toml``): it read the export
+    shortcut in the root layout, where the shortcuts were handed their
+    callbacks; each is now a command of the registry, run by its runner.
   * SH11 -- the device sync panel keeps "Show text" and the skills panel
     keeps the sync state, each loaded by its group.
   * SH12 -- on a desktop the sidebar is never unmounted: collapsed, it is
@@ -97,6 +100,19 @@ The names the contracts read, beside those of the navigation contracts
   * SH24 -- the network page shows the server's reachability (the
     inference server online, its latency and queue, its last error), read
     when the page is shown and on request, never on a timer.
+  * SH25 -- SH10, with the export shortcut read where it now runs: export
+    is one dialog at the shell's level, opened through its store, never
+    through a window event; the export command of the registry opens it
+    through the store (``lib/palette/run.ts``), and the shortcut handler,
+    mounted on every page by the root layout, runs its commands through
+    that runner.
+  * SH26 -- a modal dialog makes the page under it inert, so it holds Stop
+    all itself: the list of shortcuts, the export dialog and the command
+    palette hold it in their head (the list only while open, so nothing
+    reads the stop for a list no one sees); the dialogs that do not yet
+    are a named debt that only shrinks (``STOPLESS_DIALOGS``). Escape
+    pressed in the stop's confirmation shuts it and goes no further, so
+    the dialog around it stays open.
 
 The server-rendering halves render components through
 ``tests/_frontend.ssr()``, with small wrappers planted in the renderer's
@@ -164,6 +180,10 @@ BUDGET_S = {
     "test_sh22_the_stop_label_reaches_four_and_a_half_to_one_on_every_ground": 2.0,
     "test_sh23_an_unknown_address_is_answered_inside_the_shell": 1.0,
     "test_sh24_the_network_page_shows_the_server_reachability": 1.0,
+    "test_sh25_export_is_one_shell_level_dialog_that_the_export_command_opens_through_its_store": 1.0,
+    "test_sh26_a_modal_dialog_holds_stop_all_and_escape_shuts_only_its_confirmation[census]": 3.0,
+    "test_sh26_a_modal_dialog_holds_stop_all_and_escape_shuts_only_its_confirmation[rendered]": 1.0,
+    "test_sh26_a_modal_dialog_holds_stop_all_and_escape_shuts_only_its_confirmation[escape]": 1.0,
 }
 
 _SRC = "frontend/src"
@@ -1436,6 +1456,213 @@ def test_sh24_the_network_page_shows_the_server_reachability():
     shown = _markup(_REACHABILITY)
     for word in ("Refresh", "latency", "queue"):
         assert re.search(rf"\b{word}\b", shown, re.I), f"it shows {word!r}"
+
+
+# ---------------------------------------------------------------------------
+# SH25 -- SH10, the export shortcut read in the registry's runner
+# ---------------------------------------------------------------------------
+_RUNNER = f"{_SRC}/lib/palette/run.ts"
+_SHORTCUT_HANDLER = f"{_SRC}/lib/components/ui/KeyboardShortcuts.svelte"
+_HANDLERS = re.compile(r"\bHANDLERS\b[^=;\n]*=\s*\{")
+
+
+def _handler_entry(script, key):
+    """The text of the ``key`` entry of the ``HANDLERS`` object literal (its
+    first level, read to the comma or the brace that ends it), or ''."""
+    match = _HANDLERS.search(script)
+    if not match:
+        return ""
+    parts, depth, at, start = [], 0, match.end(), match.end()
+    while at < len(script):
+        char = script[at]
+        if char in "'\"`":
+            quote, at = char, at + 1
+            while at < len(script) and script[at] != quote:
+                at += 2 if script[at] == "\\" else 1
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                parts.append(script[start:at])
+                break
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(script[start:at])
+            start = at + 1
+        at += 1
+    for part in parts:
+        found = re.match(r"\s*(?:async\s+)?(['\"]?)([\w$]+)\1\s*(?::|\()", part)
+        if found and found.group(2) == key:
+            return part[found.end():]
+    return ""
+
+
+def _runs(script, text, name):
+    """Whether ``text`` calls ``name``, itself or through a function of
+    ``script`` it calls."""
+    if _calls(text, name):
+        return True
+    return any(
+        _calls(_nav._function_body(script, called), name)
+        for called in re.findall(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(", text)
+    )
+
+
+def test_sh25_export_is_one_shell_level_dialog_that_the_export_command_opens_through_its_store():
+    mounted = _mounted_by("ExportDialog")
+    assert mounted == {_APP_LAYOUT: 1}, (
+        f"the export dialog is mounted once, by the layout of both spaces: {mounted}"
+    )
+    assert _EXPORT_STORE in _imports(_APP_LAYOUT), "the shell's dialog follows its store"
+    events = [path for path in files(_SCRIPTS) if "opti-export-conversation" in _code(path)]
+    assert not events, f"export still travels as a window event: {events}"
+
+    sample = (
+        "function exportChat(id) { openExportDialog(id, 't'); }\n"
+        "const HANDLERS: Record<string, H> = { new_chat: () => go('a,b'), "
+        "export_conversation: (c) => exportChat(c.chatId), other: () => openExportDialog('x', 'y') };"
+    )
+    assert "exportChat(c.chatId)" in _handler_entry(sample, "export_conversation"), (
+        "the census reads one entry of the handlers, to its own end"
+    )
+    assert _runs(sample, _handler_entry(sample, "export_conversation"), "openExportDialog"), (
+        "and follows it into a function of the runner"
+    )
+    assert not _runs(sample, _handler_entry(sample, "new_chat"), "openExportDialog"), (
+        "an entry that opens nothing reads as none"
+    )
+
+    script = _script(_RUNNER)
+    assert _imports_name(_RUNNER, "openExportDialog", _EXPORT_STORE), (
+        "the runner takes openExportDialog from the dialog's store"
+    )
+    assert _runs(script, _handler_entry(script, "export_conversation"), "openExportDialog"), (
+        "the export command opens the dialog through its store"
+    )
+    assert _imports_name(_SHORTCUT_HANDLER, "runCommand", _RUNNER) and _calls(
+        _script(_SHORTCUT_HANDLER), "runCommand"
+    ), "the export shortcut runs through the runner"
+    assert _mounts(_ROOT_LAYOUT, "KeyboardShortcuts") == 1, (
+        "on every page: the root layout mounts the shortcut handler"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SH26 -- a modal dialog holds Stop all; Escape shuts only the stop's confirmation
+# ---------------------------------------------------------------------------
+_EXPORT_DIALOG = f"{_SRC}/lib/components/chat/ExportDialog.svelte"
+_SHORTCUT_LIST = f"{_SRC}/lib/components/ui/KeyboardShortcuts.svelte"
+_HOSTS_MODAL = re.compile(r"<(?:Modal|ConfirmDialog)\b")
+_SHOWS_MODAL = re.compile(r"\.showModal\s*\(")
+
+# The modal dialogs that do not hold Stop all yet: each makes the page under
+# it inert, so while it is open the stop is two actions away. Named debt:
+# the list only shrinks, and a dialog that gains the stop leaves it.
+STOPLESS_DIALOGS = {
+    "frontend/src/lib/components/chat/ChatControlBar.svelte": 1,
+    "frontend/src/lib/components/panels/FileManager.svelte": 1,
+    "frontend/src/lib/components/panels/MemoriesPanel.svelte": 1,
+    "frontend/src/lib/components/panels/NotesPanel.svelte": 1,
+    "frontend/src/lib/components/panels/ProjectList.svelte": 1,
+    "frontend/src/lib/components/panels/SyncPanel.svelte": 1,
+    "frontend/src/lib/components/panels/benchmark/BenchmarkRunDrawer.svelte": 1,
+    "frontend/src/lib/components/rag/DocumentManager.svelte": 1,
+    "frontend/src/lib/components/settings/FineTunePanel.svelte": 1,
+    "frontend/src/lib/components/settings/HardeningPanel.svelte": 1,
+    "frontend/src/lib/components/settings/KnowledgeBasePanel.svelte": 1,
+    "frontend/src/lib/components/settings/PluginMarketplace.svelte": 1,
+    "frontend/src/lib/components/settings/RemoteAccessPanel.svelte": 1,
+    "frontend/src/lib/components/settings/sections/AppearanceSection.svelte": 1,
+    "frontend/src/lib/components/ui/OnboardingOverlay.svelte": 1,
+    "frontend/src/routes/(app)/(use)/chat/+page.svelte": 1,
+}
+
+
+def _stopless_dialog(path, text):
+    """1 when a component hosts a modal dialog (the ds Modal, the ds
+    ConfirmDialog, or a native dialog shown modal) and mounts no Stop all;
+    0 otherwise. The primitives themselves and their gallery are left out:
+    they are the dialogs, not the pages that open them."""
+    markup, script = _markup(path, text), _script(path, text)
+    hosts = _HOSTS_MODAL.search(markup) or _SHOWS_MODAL.search(script)
+    return 1 if hosts and not re.search(r"<StopAllButton\b", markup) else 0
+
+
+def _head_mount(path):
+    """Whether a component mounts Stop all in its dialog's head: in the
+    Modal's actions slot, placed for the head."""
+    markup = _markup(path)
+    match = re.search(r"""<svelte:fragment\s+slot\s*=\s*["']actions["']\s*>(.*?)</svelte:fragment>""", markup, re.S)
+    return bool(match and re.search(
+        r"""<StopAllButton\b(?=[^>]*\bplacement\s*=\s*["']dialog-head["'])""", match.group(1)
+    ))
+
+
+@pytest.mark.parametrize("half", ("census", "rendered", "escape"))
+def test_sh26_a_modal_dialog_holds_stop_all_and_escape_shuts_only_its_confirmation(half):
+    if half == "census":
+        from _frontend import check_ledger
+
+        assert _stopless_dialog(f"{_SRC}/lib/Sample.svelte", "<ConfirmDialog open={true} />") == 1
+        assert _stopless_dialog(
+            f"{_SRC}/lib/Sample.svelte", "<Modal open title=\"x\"><StopAllButton slot=\"actions\" /></Modal>"
+        ) == 0, "a dialog that holds the stop counts nothing"
+        census = check_ledger(
+            "STOPLESS_DIALOGS", STOPLESS_DIALOGS, _stopless_dialog,
+            ("frontend/src/lib/Sample.svelte", "<script>el.showModal();</script><div>x</div>"),
+            test_file=__file__, exclude=("frontend/src/lib/ds/", "frontend/src/routes/dev/"),
+        )
+        assert census.fixture == 1 and census.counts == STOPLESS_DIALOGS, census.counts
+        for path in (_SHORTCUT_LIST, _EXPORT_DIALOG, f"{_SRC}/lib/components/palette/CommandPalette.svelte"):
+            assert path not in STOPLESS_DIALOGS and _head_mount(path), (
+                f"{path}: a dialog the keys and the palette open holds Stop all in its head"
+            )
+        return
+
+    if half == "escape":
+        script = _script(_STOP_ALL)
+        body = _nav._function_body(script, "closeOnEscape")
+        sample = "if (!confirming || event.key !== 'Escape') return;\nconfirming = false;\nevent.stopPropagation();"
+        assert re.search(r"if\s*\(\s*!\s*confirming\b[^)]*\)\s*return\b", sample), "the census reads the guard"
+        guard = re.search(r"if\s*\(\s*!\s*confirming\b[^)]*\)\s*return\b", body)
+        stopped, kept = body.find("stopPropagation"), body.find("preventDefault")
+        assert guard and 0 <= guard.end() < stopped and guard.end() < kept, (
+            "Escape that shuts the stop's confirmation goes no further: the dialog around it, the palette "
+            f"and the phone's drawer stay open; any other Escape passes on: {body!r}"
+        )
+        assert re.search(r"on:keydown\|capture\s*=\s*\{\s*closeOnEscape\s*\}", _markup(_STOP_ALL)), (
+            "the stop hears Escape first, on the way down"
+        )
+        return
+
+    for shown in (True, False):
+        path = _plant(f"ShortcutList{'Open' if shown else 'Shut'}", (
+            "<script>\n"
+            "\timport { shortcutsHelp } from '$lib/stores/shortcutsHelp';\n"
+            "\timport { estop } from '$lib/stores/estop';\n"
+            "\timport KeyboardShortcuts from '$lib/components/ui/KeyboardShortcuts.svelte';\n"
+            "\testop.update((s) => ({ ...s, stopped: false }));\n"
+            f"\tshortcutsHelp.set({'true' if shown else 'false'});\n"
+            "</script>\n"
+            "<KeyboardShortcuts />\n"
+        ))
+        root = _render(path)
+        dialogs = list(root.iter("dialog"))
+        assert len(dialogs) == 1, f"the list of shortcuts is one dialog: {len(dialogs)}"
+        inside = [stop for stop in _stops(root) if _inside(stop, dialogs[0])]
+        if shown:
+            assert len(inside) == 1, "open, the list of shortcuts holds Stop all: the page under it is inert"
+            node = inside[0].parent
+            while node is not None and node.tag != "header":
+                node = node.parent
+            assert node is not None, "in its head"
+        else:
+            assert not inside, "shut, it holds none, so nothing reads the stop for a list no one sees"
+    reset = _plant("ShortcutListShutAgain", (
+        "<script>\n\timport { shortcutsHelp } from '$lib/stores/shortcutsHelp';\n"
+        "\tshortcutsHelp.set(false);\n</script>\n"
+    ))
+    _render(reset)
 
 
 if __name__ == "__main__":

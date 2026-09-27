@@ -13,18 +13,20 @@ import type {
 /**
  * The conversations, newest first. With `q`, the server searches titles and
  * messages and returns at most `limit` matches (it takes no offset then);
- * without, it lists them a page at a time from `offset`.
+ * without, it lists them a page at a time from `offset`. Aborting `signal`
+ * stops the request.
  */
 export async function listConversations(params?: {
 	q?: string;
 	limit?: number;
 	offset?: number;
+	signal?: AbortSignal;
 }): Promise<ConversationSummary[]> {
 	const queryParams: Record<string, string> = {};
 	if (params?.q) queryParams.q = params.q;
 	if (params?.limit) queryParams.limit = String(params.limit);
 	if (params?.offset !== undefined && !params?.q) queryParams.offset = String(params.offset);
-	return apiGet<ConversationSummary[]>('/api/conversations', queryParams);
+	return apiGet('/api/conversations', queryParams, params?.signal);
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {

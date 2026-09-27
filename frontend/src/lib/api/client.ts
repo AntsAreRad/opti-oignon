@@ -215,12 +215,14 @@ function handleNetworkError(err: unknown, path: string): never {
 	throw new ApiError(0, 'Connection failed', detail, true);
 }
 
-export async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+/** GET `path` with `params` in its query; aborting `signal` stops the request. */
+export async function apiGet<T>(path: string, params?: Record<string, string>, signal?: AbortSignal): Promise<T> {
 	try {
 		const response = await fetch(buildUrl(path, params), {
 			method: 'GET',
 			headers: { 'Accept': 'application/json', ...authHeaders() },
 			credentials: 'include',
+			signal,
 		});
 		return handleResponse<T>(response, path);
 	} catch (err) {

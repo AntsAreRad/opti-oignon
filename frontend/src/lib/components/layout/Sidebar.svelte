@@ -6,6 +6,11 @@
   most recent chats, then at the foot Preferences, the space switch and the
   status card with Stop all.
 
+  Search opens the command palette through its store
+  (lib/stores/palette.ts), expanded, on the rail and in the phone's drawer
+  alike: the palette finds the chats (the server searches their messages
+  too), the pages, the commands and the settings.
+
   Which entry is current is decided by lib/nav/active.ts and nothing else:
   the page itself is active, the destination a page sits under is its
   section (in a conversation, Chats is the section and the conversation's
@@ -18,13 +23,12 @@
   collapse control of its own, and every link is a 44 px target.
 -->
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import Button from '$lib/ds/Button.svelte';
 	import IconButton from '$lib/ds/IconButton.svelte';
 	import Icon from '$lib/ds/Icon.svelte';
-	import Input from '$lib/ds/Input.svelte';
 	import StatusCard from './StatusCard.svelte';
 	import SpaceSwitch from './SpaceSwitch.svelte';
 	import StopAllButton from './StopAllButton.svelte';
@@ -34,6 +38,9 @@
 	import { spaceOf } from '$lib/nav/space';
 	import { conversations, createNewConversation, loadConversations } from '$lib/stores/conversations';
 	import { sidebarOpen } from '$lib/stores/ui';
+	import { openPalette } from '$lib/stores/palette';
+	import { shortcutKeys } from '$lib/stores/shortcutKeys';
+	import { bindingLabel } from '$lib/palette/commands';
 	import { toastError } from '$lib/stores/notifications';
 
 	/** On a desktop: the 72 px rail. */
@@ -46,8 +53,6 @@
 	// is not ready, and the visible list never shows it.
 	const visibility = { componion: true };
 
-	let searchWords = '';
-
 	$: pathname = $page.url?.pathname ?? '/';
 	$: space = spaceOf(pathname) ?? 'use';
 	$: shown = visibleDestinations(DESTINATIONS, visibility);
@@ -58,6 +63,10 @@
 	$: home = spaceHome('use', DESTINATIONS);
 	$: homeLabel = DESTINATIONS.find((d) => d.href === home)?.label ?? 'Home';
 	$: preferencesState = preferences ? stateOf(preferences.href, pathname, hrefs) : 'none';
+
+	// The keys that open the palette for this reader: a hint beside Search.
+	$: paletteBinding = $shortcutKeys.search_conversations;
+	$: paletteKeys = paletteBinding ? bindingLabel(paletteBinding) : '';
 
 	function stateOf(href: string, path: string, all: string[]) {
 		return activeState(path, href, all);
@@ -75,19 +84,6 @@
 		} catch {
 			toastError('Failed to create a conversation');
 		}
-	}
-
-	function search() {
-		const words = searchWords.trim();
-		goto(words ? `/chat?q=${encodeURIComponent(words)}` : '/chat');
-		afterNavigate();
-	}
-
-	async function openSearch() {
-		sidebarOpen.set(true);
-		await tick();
-		const field = document.querySelector('[data-oo-search] input');
-		if (field instanceof HTMLInputElement) field.focus();
 	}
 
 	onMount(() => {
@@ -116,29 +112,27 @@
 			<div class="oo-rail-actions">
 				<IconButton icon="panel-right" label="Expand the sidebar" expanded={false} on:click={() => sidebarOpen.set(true)} />
 				<IconButton icon="plus" label="New chat" variant="primary" on:click={newChat} />
-				<IconButton icon="search" label="Search chats" on:click={openSearch} />
+				<IconButton icon="search" label="Search" haspopup="dialog" on:click={() => openPalette()} />
 			</div>
 		{:else}
 			<div class="oo-side-actions">
 				<Button variant="secondary" shape="pill" size="lg" block iconLeft="plus" on:click={newChat}>
 					New chat
 				</Button>
-				<form
-					class="oo-side-search"
-					role="search"
-					aria-label="Search chats from the sidebar"
-					data-oo-search
-					on:submit|preventDefault={search}
-				>
-					<Input
-						label="Search chats"
-						hideLabel
-						placeholder="Search chats"
+				<div class="oo-side-search">
+					<Button
+						variant="ghost"
+						shape="pill"
+						size="lg"
+						block
 						iconLeft="search"
-						size={phone ? 'lg' : 'md'}
-						bind:value={searchWords}
-					/>
-				</form>
+						ariaLabel="Search"
+						haspopup="dialog"
+						on:click={() => openPalette()}
+					>
+						Search{#if !phone && paletteKeys}<kbd class="oo-side-keys" aria-hidden="true">{paletteKeys}</kbd>{/if}
+					</Button>
+				</div>
 			</div>
 		{/if}
 
@@ -286,6 +280,36 @@
 	}
 	.oo-rail-actions {
 		align-items: center;
+	}
+
+	/* Search: a quiet row like the destinations below it, the palette's
+	   keys at its end. */
+	.oo-side-search :global(.oo-btn) {
+		justify-content: flex-start;
+		gap: var(--oo-space-3);
+		padding-left: var(--oo-space-3);
+		color: var(--oo-fg-primary);
+		font-size: var(--oo-text-md);
+		font-weight: 400;
+	}
+	.oo-side-search :global(.oo-btn > svg) {
+		color: var(--oo-fg-muted);
+	}
+	.oo-side-search :global(.oo-btn-label) {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		gap: var(--oo-space-2);
+	}
+	.oo-side-keys {
+		margin-left: auto;
+		padding: 0 var(--oo-space-2);
+		border: 1px solid var(--oo-edge);
+		border-radius: var(--oo-radius-sm);
+		background-color: var(--oo-bg-subtle);
+		color: var(--oo-fg-muted);
+		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-xs);
 	}
 
 	.oo-side-list {

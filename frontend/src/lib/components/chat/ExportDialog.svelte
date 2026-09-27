@@ -3,13 +3,17 @@
   Modal dialog for exporting a conversation (Markdown, JSON, HTML).
   Actions: preview, copy to clipboard, download.
   Migrated to the shared <Modal> primitive, which provides the
-  native <dialog> focus trap plus Escape and backdrop handling.
+  native <dialog> focus trap plus Escape and backdrop handling. It holds
+  Stop all in its head, like every modal dialog of the shell: the page
+  under it is inert.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { exportConversation, downloadExport, type ExportFormat } from '$lib/api/export';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { Modal, Button } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 
 	export let conversationId: string;
 	export let conversationTitle: string = 'conversation';
@@ -74,6 +78,9 @@
 </script>
 
 <Modal {open} variant="center" size="lg" title="Export Conversation" onClose={close}>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
 	<p class="oo-export-subtitle">{conversationTitle}</p>
 
 	<!-- Format selector -->

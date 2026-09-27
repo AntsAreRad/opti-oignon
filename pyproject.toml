@@ -536,6 +536,40 @@ fail_under = 0
 # through a stand-in for the fetcher, and a31 adds that the text chunked is
 # the page's readable text.
 #
+# nv1 (tests/test_navigation_contracts.py) held the one destination table
+# and asked, of every file under the command palette's two directories
+# (lib/palette and components/palette), that it import the table. The
+# palette's pure modules (its ranking, its registry of commands, its sources,
+# its conversation source) are handed what they rank and hold no list, so
+# that spelling asks a module that reads no destination to import them,
+# while the property -- the palette lists the destinations from the table --
+# holds in its component. nv25 in the same file keeps every other assertion
+# of nv1 word for word and reads the palette where it lists them: the
+# sidebar, the route announcer and the palette's component exist and import
+# the table. The existence is new: nv1 read the palette's directories only
+# when they were there.
+#
+# ux16 (tests/test_ui_repairs_contracts.py) held that every DOM selector a
+# global shortcut queries is rendered, and asserted that the shortcuts query
+# at least one. Ctrl+K now opens the command palette through its store, and
+# nothing a shortcut runs reads the page's markup, so the census finds no
+# selector and that assertion is false while the property holds, stronger.
+# nv11 in tests/test_command_palette_contracts.py is the successor: nothing
+# a shortcut runs (the handler, the layout that mounts it, the palette's
+# modules and store, every listener of an event they send) queries the DOM,
+# and Ctrl+K reaches the palette through the store.
+#
+# sh10 (tests/test_shell_contracts.py) held that export is one dialog at the
+# shell's level, opened through its store, and read the export shortcut in
+# the root layout, which handed the shortcut handler its callbacks. Every
+# shortcut is now a command of the registry, run by its runner
+# (lib/palette/run.ts), and the root layout hands the handler nothing, so
+# that last assertion is false while the property holds. sh25 in the same
+# file keeps every other assertion of sh10 word for word and reads the
+# export shortcut where it runs: the export command's handler opens the
+# dialog through its store, and the handler the root layout mounts on
+# every page runs its commands through the runner.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -620,4 +654,7 @@ addopts = """
     --deselect=tests/test_rag_store_contracts.py::test_a24_ingest_url_rejects_oversize_page
     --deselect=tests/test_rag_store_contracts.py::test_a25_ingest_url_short_text_records_zero_chunk_doc
     --deselect=tests/test_rag_store_contracts.py::test_a26_ingest_url_happy_path_chunks_and_tags_domain
+    --deselect=tests/test_navigation_contracts.py::test_nv1_one_destination_table_and_no_other_list
+    --deselect=tests/test_ui_repairs_contracts.py::test_ux16_every_selector_a_global_shortcut_queries_is_rendered
+    --deselect=tests/test_shell_contracts.py::test_sh10_export_is_one_shell_level_dialog_opened_through_its_store
 """

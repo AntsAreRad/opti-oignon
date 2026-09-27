@@ -56,6 +56,8 @@ export interface SettingsHit {
 	href: string;
 	/** Where that page is, in words: "Preferences, Account", "Workshop, Security". */
 	where: string;
+	/** The name of the old settings section that listed it, or '' when none did. */
+	former: string;
 	/** The group's words, lower-cased: title, description, synonyms, where it sits and sat. */
 	haystack: string;
 }
@@ -104,6 +106,7 @@ export function settingsIndex(
 			description: group.description,
 			href: `${page}?g=${encodeURIComponent(host.id)}`,
 			where,
+			former: former?.label ?? '',
 			haystack: [group.title, group.description, ...(group.synonyms ?? []), where, former?.label ?? '']
 				.join(' ')
 				.toLowerCase()

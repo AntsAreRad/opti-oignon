@@ -5,6 +5,10 @@
   Mark as read, mark all read, clear history actions.
   Uses --oo-* CSS variables exclusively.
 
+  Its panel is open while its store says so (lib/stores/notificationCenter.ts):
+  the bell opens and shuts it, and so does the "Show notifications" command,
+  from a key or from the command palette. Leaving the page shuts it.
+
   Drawn to the surface rules: the panel on the second surface with its
   edge and a shadow token, space rather than a line under its head, a wash
   under the pointer; an unread entry says so by its weight (and in words to
@@ -21,21 +25,15 @@
 		clearNotificationHistory,
 	} from '$lib/stores/notifications';
 	import type { ToastType } from '$lib/stores/notifications';
+	import { notificationCenter, closeNotifications, toggleNotifications } from '$lib/stores/notificationCenter';
 
-	let expanded = false;
-
-	function toggle() {
-		expanded = !expanded;
-		// Mark all as read when opening
-		if (expanded) {
-			markAllRead();
-		}
-	}
+	// Opened, from the bell or from the command, the history is read.
+	$: if ($notificationCenter) markAllRead();
 
 	function handleClickOutside(event: MouseEvent) {
 		const target = event.target as HTMLElement;
-		if (expanded && !target.closest('.notif-center-wrapper')) {
-			expanded = false;
+		if ($notificationCenter && !target.closest('.notif-center-wrapper')) {
+			closeNotifications();
 		}
 	}
 
@@ -63,6 +61,8 @@
 	});
 
 	onDestroy(() => {
+		closeNotifications();
+		if (typeof document === 'undefined') return;
 		document.removeEventListener('click', handleClickOutside, true);
 	});
 </script>
@@ -70,7 +70,8 @@
 <div class="notif-center-wrapper">
 	<button
 		class="notif-bell-btn"
-		on:click={toggle}
+		aria-expanded={$notificationCenter}
+		on:click={toggleNotifications}
 		title="Notifications{$unreadCount > 0 ? ` (${$unreadCount} unread)` : ''}"
 		aria-label="Notifications{$unreadCount > 0 ? `, ${$unreadCount} unread` : ''}"
 	>
@@ -87,7 +88,7 @@
 	</button>
 
 	<!-- Dropdown panel -->
-	{#if expanded}
+	{#if $notificationCenter}
 		<div class="notif-panel">
 			<div class="notif-panel-header">
 				<span class="notif-panel-title">Notifications</span>

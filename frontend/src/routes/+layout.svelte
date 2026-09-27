@@ -7,22 +7,22 @@
   The announcer names the destination a page belongs to, read from the
   destination table (lib/nav/destinations.ts) through lib/nav/active.ts; it
   holds no map of its own.
+
+  The shortcuts are handed nothing: each is a command of the registry, and
+  runs through its runner (lib/palette/run.ts); Ctrl+K opens the command
+  palette, which the layout of both spaces mounts, through its store.
 -->
 <script>
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { get } from 'svelte/store';
 	import '../app.css';
 	import KeyboardShortcuts from '$lib/components/ui/KeyboardShortcuts.svelte';
 	import OnboardingOverlay from '$lib/components/ui/OnboardingOverlay.svelte';
 	import Toast from '$lib/ds/Toast.svelte';
-	import { initReducedMotion, sidebarOpen, toggleSidebar } from '$lib/stores/ui';
-	import { initPreferences, toggleDayNight } from '$lib/stores/preferences';
-	import { activeConversationId, activeConversation, createNewConversation } from '$lib/stores/conversations';
-	import { toastError } from '$lib/stores/notifications';
+	import { initReducedMotion } from '$lib/stores/ui';
+	import { initPreferences } from '$lib/stores/preferences';
 	import { initAuth, authLoading, currentUser, isSingleUserMode } from '$lib/stores/auth';
-	import { openExportDialog } from '$lib/stores/exportDialog';
 	import { DESTINATIONS, spaceHome, visibleDestinations } from '$lib/nav/destinations';
 	import { destinationFor } from '$lib/nav/active';
 
@@ -63,38 +63,6 @@
 			goto(spaceHome('use', DESTINATIONS));
 		}
 	}
-
-	// -- Global shortcut callbacks --
-	async function handleNewConversation() {
-		try {
-			const id = await createNewConversation();
-			goto(`/chat/${id}`);
-		} catch {
-			toastError('Failed to create conversation');
-		}
-	}
-
-	// The export dialog is the shell's, opened through its store on every page.
-	function handleExportConversation() {
-		const id = get(activeConversationId);
-		if (id) openExportDialog(id, get(activeConversation)?.title || 'conversation');
-	}
-
-	function handleGoToPreferences() {
-		goto(DESTINATIONS.find((d) => d.id === 'preferences')?.href ?? '/');
-	}
-
-	// Focus the sidebar's search field, which sits in the form carrying
-	// data-oo-search; a collapsed sidebar or a shut drawer opens first.
-	async function handleToggleSearch() {
-		sidebarOpen.set(true);
-		await tick();
-		const box = document.querySelector('[data-oo-search]');
-		const field = box ? box.querySelector('input') : null;
-		if (field instanceof HTMLInputElement) {
-			field.focus();
-		}
-	}
 </script>
 
 <!-- The one skip link; every page renders one main-content landmark for it -->
@@ -105,14 +73,7 @@
 
 <OnboardingOverlay />
 
-<KeyboardShortcuts
-	onNewConversation={handleNewConversation}
-	onExportConversation={handleExportConversation}
-	onGoToSettings={handleGoToPreferences}
-	onToggleSearch={handleToggleSearch}
-	onToggleTheme={toggleDayNight}
-	onToggleSidebar={toggleSidebar}
-/>
+<KeyboardShortcuts />
 
 <slot />
 

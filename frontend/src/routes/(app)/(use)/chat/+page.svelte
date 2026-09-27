@@ -3,9 +3,10 @@
   last changed.
 
   The search is the server's: its words go in `q` (the address carries
-  them, so the sidebar's search lands here), the server reads titles and
-  messages and returns at most the search limit, and the page says when
-  that limit was reached rather than showing a partial list as the whole.
+  them, so the command palette's "Every chat matching" entry lands here),
+  the server reads titles and messages and returns at most the search
+  limit, and the page says when that limit was reached rather than showing
+  a partial list as the whole.
   Without words, the listing comes a page at a time, from an offset.
   lib/chat/chatsIndex.ts builds each request and sorts what comes back.
 

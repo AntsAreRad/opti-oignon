@@ -11,6 +11,104 @@ package costs.
 
 ### Added
 
+- A command palette. Ctrl+K opens it, and so does Search in the sidebar,
+  expanded, on the rail and in the phone's drawer: one dialog, mounted once
+  by the layout of both spaces, that reaches every place and every action
+  of the interface from one field. It lists the pages of both spaces (the
+  componion's once it has a page); every command, the nine default
+  shortcuts among them, "Stop this reply" and "Show notifications" (which
+  goes to Preferences and opens the notification history there), each
+  beside the keys that run it for this reader, the reader's own keys when
+  they changed them (the sidebar's hint beside Search shows them too); each
+  of the fifty settings groups that has a page, found by the words the
+  settings page's own search reads (its title, its other names, its
+  description, the page that holds it and the old section that listed it),
+  an embedded group opening its host's page and a retired one never listed;
+  and the chats: the recent ones while nothing is typed, then the server's
+  search over titles and messages, asked once the typing pauses, the
+  request before it aborted when new words are asked or the palette closes,
+  and an answer to words no longer asked dropped, in whatever order the
+  answers come back. When the server found more chats than the palette
+  shows, a last entry opens the chats index on the same words, where every
+  match is listed with its limit notice. The words meet a name whole, at
+  its start, at the start of a later word, then by a command's or a group's
+  other names, then by the name's letters in order, case and accents
+  aside; the chats the server found are kept after those; each group shows
+  six at most and the groups follow their best match. A command that
+  cannot run where the reader is stays in the list, in the muted ink, with
+  its reason beside it ("Open a chat to export it", "No reply is being
+  written", "Open a chat to send a message"); opening it says why in the
+  status line, and runs nothing. The field is a combobox over a listbox of
+  labelled groups: focus stays in the field, the active entry is named to
+  assistive technology and drawn with a ring in the focus ink. The active
+  entry is held by what it is, not by its place: the entry the reader moved
+  to stays active when the list is ranked again under it (a chat the server
+  found jumping to the top no longer takes the reader's Enter), and
+  otherwise the first entry that can run is, never a disabled one; each
+  entry's id in the page follows what it is, so a new best match is read
+  out. The arrows move and wrap, Home and End take the first and the last,
+  Enter opens, Escape closes. A polite status line says how many results
+  are listed once the list has stood still a moment, that nothing matches,
+  or that a slow search of the chats is still running; a burst of keys is
+  read once.
+
+  Stop all sits in the palette's head, beside its close button, in every
+  state and at every width, so the stop stays one tap or click away while
+  the palette covers the page: above the field, where a phone's keyboard,
+  raised by the field, never covers it. Typing "stop", "emergency" or
+  "halt" finds a Stop all entry too, which opens that control's
+  confirmation and puts focus on its first action; nothing stops until the
+  reader chooses, and the palette never stops anything itself. On a phone
+  every entry is a 44 px target, a disabled command's reason wraps under
+  its name instead of being cut, and the field's type is 16 px at least,
+  so the phone does not zoom into it. The ds Modal gains an actions slot in
+  its head for this, and on a touch screen its close button is a 44 px
+  target. The list of shortcuts and the export dialog, which the keys and
+  the palette open, hold Stop all in their head as well (the list only
+  while it is open); the modal dialogs that do not yet, sixteen of them,
+  are named in a ledger that only shrinks. Escape pressed in the stop's
+  confirmation shuts it and goes no further, so the palette, a dialog or
+  the phone's drawer around it stays open.
+
+  Every shortcut is a command of one registry, which says for each where it
+  cannot run and why; the shortcut handler starts from it, applies the
+  reader's own keys over it as before, and runs every command through one
+  runner that asks for that reason before any handler does, the same runner
+  the palette uses: the palette judges its commands from inside and runs
+  the one chosen in that same context once it has closed, so what it shows
+  disabled is what the runner refuses. A key pressed while the palette or
+  the list of shortcuts is open runs only what closes them: Ctrl+Enter
+  typed in the palette's field no longer sends the draft of the chat under
+  it, and Ctrl+N no longer opens a chat behind it. On the sign-in,
+  registration and component gallery pages, which have no shell and no
+  palette, only the theme and closing a dialog run: Ctrl+K no longer
+  leaves the palette open with nothing on screen, to pop up after sign-in,
+  and the palette shuts its store when it leaves the page. The root layout
+  hands the handler nothing, and nothing a shortcut runs reads the page's
+  markup: Ctrl+K no longer looks the sidebar's field up by a data
+  attribute, and that field is gone, its place taken by the Search entry
+  (the chats index keeps its own search). A key the application binds with
+  a modifier is the application's even where its command cannot run, so
+  Ctrl+K pressed in the open palette does not fall through to the browser;
+  a plain key (? or Escape) that runs nothing keeps its default. The list
+  of shortcuts (?) names each by its command and says the palette holds
+  them all. The form field can now be a combobox's field, and a
+  conversations request carries an abort signal down to fetch.
+
+  svelte-check still reports 34 errors, none in the new files. Border-token
+  reads fall by 2 (the shortcut list's key caps sit on the sunken ground
+  with the edge). The palette, its store, its modules and runner, the
+  shortcut handler, the store of its list, the store of the keys each
+  command runs by and the store of the notification history's panel join
+  the files held to the surface rules. What the contracts prove is what the
+  templates emit when compiled for the server and what the ranking, the
+  registry, the sources, the conversation source, the follower that keeps
+  it in step and the active entry and status line answer under Node; focus
+  returning to the opener, the arrows, Home and End in a browser, a screen
+  reader reading the active entry and the status line, Stop all above a
+  phone's keyboard, and the latency of a search on a real store are
+  checked on the machine.
+
 - One shell for the whole interface, and two spaces in it. Use holds the
   pages a person works in (chats, notes, projects, preferences) and the
   Workshop holds the operator pages, all under `/workshop`: system status,
@@ -19,9 +117,10 @@ package costs.
   once, by the layout both spaces sit under, so moving between pages no
   longer mounts it again; the page sits on a sheet beside the sidebar. The
   sidebar shows the onion mark and the name (drawn inline in the accent ink,
-  no longer an image that needed a filter at night), New chat, a search of
-  the chats, the destinations of the space on screen, the six most recent
-  chats, then Preferences, the switch between the two spaces (which goes
+  no longer an image that needed a filter at night), New chat, Search
+  (which opens the command palette), the destinations of the space on
+  screen, the six most recent chats, then Preferences, the switch between
+  the two spaces (which goes
   back to the page last open in that space) and a status card: the inference
   backend and its state, "Server unreachable" when the API itself does not
   answer and "Ollama unavailable" (by the backend's name) when the server
@@ -102,9 +201,9 @@ package costs.
   newest first, grouped by the day it last changed: today, yesterday, the
   previous seven days, earlier; it stands alone, the chat frame's model,
   preset and context bars drawn only around a conversation. Its search is
-  the server's, over titles and messages: the words travel in the address
-  (the sidebar's search lands there), up to 200 matches come back, and when
-  a search fills that limit the page says so instead of passing a partial
+  the server's, over titles and messages: the words travel in the address,
+  up to 200 matches come back, and when a search fills that limit the page
+  says so instead of passing a partial
   list off as the whole. Without words the listing comes fifty at a time,
   from an offset, and "Show more chats" reads the next page (a chat deleted
   meanwhile does not make it skip one). Each row keeps its actions in sight,
@@ -1495,10 +1594,9 @@ package costs.
 - One skip link, the root layout's (the HTML shell and the app shell each
   carried their own), leads to one `main-content` landmark per page: the chat
   page no longer doubles it, and the sign-in, registration and component
-  gallery pages gained theirs. Ctrl+K focuses the conversation search again:
-  the handler queried a placeholder the field no longer carries, and now
-  queries the field's `data-oo-search` attribute. Scrolling to a settings
-  group or to the end of a chat is smooth only when neither the motion
+  gallery pages gained theirs. Ctrl+K works again: it opens the command
+  palette. Scrolling to a settings group or to the end of a chat is smooth
+  only when neither the motion
   preference nor the system reduces motion (`lib/motion.ts`), and not when
   that cannot be read.
 - Deleting the open conversation navigates within the app instead of reloading

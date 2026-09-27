@@ -85,7 +85,8 @@ auto-escalates to stronger models on repeated failures.
 ## Conversation management
 
 - **New chat:** `Ctrl+N`
-- **Search conversations:** `Ctrl+K`
+- **Search chats, pages, commands and settings:** `Ctrl+K` (the command
+  palette; the sidebar's Search opens it too)
 - **Export conversation:** `Ctrl+Shift+E`
 - **Toggle sidebar:** `Ctrl+B`
 
