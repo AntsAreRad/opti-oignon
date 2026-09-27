@@ -440,7 +440,7 @@ pub fn is_hex(text: &str, length: usize) -> bool {
 }
 
 pub fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(text.len() / 2);

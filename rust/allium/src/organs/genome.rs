@@ -875,7 +875,7 @@ pub fn validate_law(law: &Value) -> Vec<String> {
             out.push(format!("loci: {} named twice", label));
         }
         names.push(label);
-        if ident <= previous || ident >= LOCUS_LIMIT || ident < 0 || (ident >> 8) >= pairs {
+        if ident <= previous || !(0..LOCUS_LIMIT).contains(&ident) || (ident >> 8) >= pairs {
             out.push(format!("loci: {} id out of order or out of range", label));
         }
         previous = previous.max(ident);

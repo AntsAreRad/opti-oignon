@@ -173,11 +173,14 @@ fn empty(spec: &[(&'static str, &'static str)]) -> BTreeMap<&'static str, Vec<i6
     spec.iter().map(|(name, _)| (*name, Vec::new())).collect()
 }
 
+/// Where each locus of one chromosome sits, and the promoter before each record.
+type Placement = (BTreeMap<i64, usize>, Vec<Vec<usize>>);
+
 /// `(tables, work)` for canonical genome bytes under a validated law.
 pub fn compile_genome(data: &[u8], lawview: &View, law_digest: &str) -> Result<(Value, u64), Refused> {
     let chromosomes: Vec<Vec<Record>> = g::decode(data, lawview)?;
     // Where each locus sits, per chromosome, and the promoter before each record.
-    let mut placed: Vec<(BTreeMap<i64, usize>, Vec<Vec<usize>>)> = Vec::with_capacity(chromosomes.len());
+    let mut placed: Vec<Placement> = Vec::with_capacity(chromosomes.len());
     for chrom in &chromosomes {
         let mut at: BTreeMap<i64, usize> = BTreeMap::new();
         let mut promoter: Vec<Vec<usize>> = Vec::with_capacity(chrom.len());
