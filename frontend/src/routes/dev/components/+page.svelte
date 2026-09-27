@@ -17,6 +17,7 @@
 		Input,
 		Menu,
 		Modal,
+		PanelHeader,
 		Select,
 		SidePanel,
 		Switch,
@@ -31,6 +32,7 @@
 	import { CHOICE_LABELS, DENSITIES, PALETTES, type Density, type Palette } from '$lib/theme/apply';
 
 	const isDev = import.meta.env.DEV;
+	let headerOpen = false;
 
 	const DENSITY_LABELS: Record<Density, string> = {
 		compact: 'Compact',
@@ -283,6 +285,21 @@
 					>
 						Toast with retry
 					</Button>
+				</div>
+			</Card>
+
+			<Card variant="raised" padding="md">
+				<h2>Panel header</h2>
+				<PanelHeader title="Cache" description="A plain heading, with its description." />
+				<PanelHeader
+					title="Model health"
+					description="A disclosure: the whole row opens it."
+					expanded={headerOpen}
+					controls="dev-header-body"
+					on:toggle={() => (headerOpen = !headerOpen)}
+				/>
+				<div id="dev-header-body" hidden={!headerOpen}>
+					<p>The region the header shows or hides.</p>
 				</div>
 			</Card>
 

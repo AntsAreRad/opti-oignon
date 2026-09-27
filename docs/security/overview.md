@@ -72,6 +72,12 @@ security checklist that verifies:
 - Red team resistance score (if red team data is available)
 - CSP middleware status
 
-Results are available at `GET /api/security/health` and displayed as
+Results are available at `GET /api/security/status` and displayed as
 the security grade in the sidebar's status card, which leads to
-**Workshop > Security**.
+**Workshop > Security**. That page opens on the grade: its letter, its
+score and how many checks passed, and, behind a disclosure, every check
+with its points and its detail, whether sessions use httpOnly cookies,
+and the ten most recent security events, gathered by
+`GET /api/security/audit`: sign-in activity (logins, failed logins,
+registrations, password changes), sandbox blocks, sign-in lockouts and
+detected search injections.

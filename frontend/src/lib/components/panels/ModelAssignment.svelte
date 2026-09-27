@@ -3,16 +3,27 @@
   Visual editor for model-to-role routing configuration.
   Displays roles (task types) with primary/fast/quality dropdowns
   populated from installed Ollama models.
+
+  It renders from the roles store (lib/stores/modelRoles.ts): a read under
+  way, a read that failed (with its reason and a retry), a read that found
+  no role, and a save the server refused, shown under its own role with the
+  editor left open on the reader's choices. A retry reads quietly: the
+  failure and its retry stay on screen until the answer comes, so the retry
+  keeps focus, and roles read at last take it.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import Button from '$lib/ds/Button.svelte';
+	import InlineError from '$lib/ds/InlineError.svelte';
 	import {
 		roles,
 		installedModels,
-		benchmarkError,
+		rolesRead,
+		saveErrors,
 		loadRoles,
 		saveRole,
-	} from '$lib/stores/benchmark';
+		forgetSaveError,
+	} from '$lib/stores/modelRoles';
 	import type { ModelRoleInfo } from '$lib/types';
 
 	let editingRole: string | null = null;
@@ -20,12 +31,11 @@
 	let editFast = '';
 	let editQuality = '';
 	let saving = false;
-	let rolesLoading = true;
+	let retrying = false;
+	let panel: HTMLElement | undefined;
 
-	onMount(async () => {
-		rolesLoading = true;
-		await loadRoles();
-		rolesLoading = false;
+	onMount(() => {
+		loadRoles();
 	});
 
 	function startEdit(role: ModelRoleInfo) {
@@ -36,19 +46,32 @@
 	}
 
 	function cancelEdit() {
+		if (editingRole) forgetSaveError(editingRole);
 		editingRole = null;
 	}
 
 	async function handleSave() {
 		if (!editingRole) return;
 		saving = true;
-		await saveRole(editingRole, {
+		const saved = await saveRole(editingRole, {
 			primary: editPrimary || undefined,
 			fast: editFast || undefined,
 			quality: editQuality || undefined,
 		});
 		saving = false;
-		editingRole = null;
+		if (saved) editingRole = null;
+	}
+
+	/** Reads the roles again, the failure kept until the answer; then focus goes to the roles. */
+	async function retryRead() {
+		if (retrying) return;
+		retrying = true;
+		await loadRoles(true);
+		retrying = false;
+		if ($rolesRead.state === 'ok') {
+			await tick();
+			panel?.focus();
+		}
 	}
 
 	function isInstalled(model: string): boolean {
@@ -56,20 +79,20 @@
 	}
 </script>
 
-<div class="assignment">
+<div class="assignment" tabindex="-1" bind:this={panel}>
 	<div class="assign-header">
-		<h3 class="section-title">Model Assignment</h3>
 		<p class="assign-desc">
 			Configure which models handle each task type. 
 			Each role has three priorities: primary (default), fast (low latency), and quality (best output).
 		</p>
 	</div>
 
-	{#if rolesLoading}
-		<div class="flex items-center gap-2 py-6 justify-center" style="color: var(--oo-fg-muted);">
-			<div class="w-5 h-5 border-2 rounded-full animate-spin"
-				style="border-color: var(--oo-bd-default); border-top-color: var(--oo-acc-400);" />
-			<span class="text-sm">Loading roles...</span>
+	{#if $rolesRead.state === 'idle' || $rolesRead.state === 'loading'}
+		<p class="assign-status">Loading roles</p>
+	{:else if $rolesRead.state === 'error'}
+		<div class="assign-failure" role="alert">
+			<p>Could not read the roles: {$rolesRead.reason ?? 'the server did not answer'}</p>
+			<Button variant="secondary" size="sm" iconLeft="retry" on:click={retryRead}>Retry</Button>
 		</div>
 	{:else if $roles.length === 0}
 		<div class="empty-state">
@@ -79,7 +102,7 @@
 	{:else}
 		<div class="roles-list">
 			{#each $roles as role}
-				<div class="role-card" class:editing={editingRole === role.role}>
+				<div class="role-card" class:editing={editingRole === role.role} data-role={role.role}>
 					<div class="role-header">
 						<span class="role-name">{role.role}</span>
 						{#if editingRole !== role.role}
@@ -147,6 +170,11 @@
 							</div>
 						</div>
 					{/if}
+					{#if $saveErrors[role.role]}
+						<div class="role-error">
+							<InlineError message={`The ${role.role} role was not saved: ${$saveErrors[role.role]}`} />
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -172,11 +200,27 @@
 		gap: 1rem;
 	}
 
-	.section-title {
-		font-size: 0.9rem;
-		font-weight: 600;
-		margin: 0 0 0.25rem 0;
-		color: var(--oo-fg-primary);
+	.assign-status {
+		margin: 0;
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-sm);
+	}
+
+	.assign-failure {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--oo-space-3);
+		color: var(--oo-fg-secondary);
+		font-size: var(--oo-text-sm);
+	}
+
+	.assign-failure p {
+		margin: 0;
+	}
+
+	.role-error {
+		margin-top: var(--oo-space-3);
 	}
 
 	.sub-title {

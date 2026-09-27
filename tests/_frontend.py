@@ -152,6 +152,19 @@ HELD: list[str] = [
     "frontend/src/lib/stores/shortcutsHelp.ts",
     "frontend/src/lib/stores/shortcutKeys.ts",
     "frontend/src/lib/stores/notificationCenter.ts",
+    "frontend/src/lib/components/settings/SettingsGroup.svelte",
+    "frontend/src/lib/settings/disclosure.ts",
+    "frontend/src/lib/components/panels/ObservabilityPanel.svelte",
+    "frontend/src/lib/observability/",
+    "frontend/src/lib/api/security.ts",
+    "frontend/src/lib/components/settings/SecurityChecks.svelte",
+    "frontend/src/lib/components/settings/SecurityGrade.svelte",
+    "frontend/src/lib/stores/modelRoles.ts",
+    "frontend/src/lib/components/ui/OnboardingOverlay.svelte",
+    "frontend/src/lib/stores/configRefresh.ts",
+    "frontend/src/lib/components/panels/BenchmarkPage.svelte",
+    "frontend/src/routes/(app)/(workshop)/workshop/benchmarks/+page.svelte",
+    "frontend/src/lib/benchmark/",
 ]
 """Files held to the surface rules: separation by tone and space rather than
 by lines, matte surfaces, sentence-case labels, selection never by colour
@@ -172,7 +185,13 @@ answers an address no page serves; and the command palette: its modules
 list says), its dialog and its store, with the shortcut handler that runs
 the same commands, the store of its list of shortcuts, the store of the
 keys each command runs by, and the store of the notification history's
-panel, which one of those commands opens."""
+panel, which one of those commands opens. Then the Workshop's pages: the
+settings group, titled once and folding one open at a time by its pure
+rules; the inference pipeline's host and the words its overview says; the
+security grade, its checks and the client that reads them; the store of
+the model roles; the first-run dialog and the refresh that replaces its
+reload; the benchmarks page, its route and the module that keeps its tab
+in the address."""
 
 
 def held_files(held=None, *, root=REPO):

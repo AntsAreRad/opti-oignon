@@ -6,6 +6,8 @@
 -->
 <script lang="ts">
 	import { Modal } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import type { BenchmarkV2HistoryEntry } from '$lib/types';
 	import { getHistory } from '$lib/api/benchmarkV2';
 	import { scoreColor, pct, formatDuration, formatDate } from './format';
@@ -44,6 +46,9 @@
 </script>
 
 <Modal {open} variant="drawer-right" size="lg" title="Run detail" {onClose}>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
 	{#if loading}
 		<p class="text-sm" style="color: var(--oo-fg-muted);">Loading run...</p>
 	{:else if notFound || !run}

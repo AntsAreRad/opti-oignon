@@ -95,10 +95,7 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h4 class="text-sm font-semibold" style="color: var(--oo-fg-primary);">
-			Recovery Codes
-		</h4>
+	<div class="flex items-center justify-end">
 		{#if !loading && remaining > 0}
 			<span
 				class="px-2 py-0.5 rounded text-xs font-mono"

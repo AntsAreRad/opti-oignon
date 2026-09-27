@@ -8,7 +8,8 @@
   3. Documents: search/filter/paginated manager with bulk delete
   4. Folder Scan: local directory ingestion
   5. Query: test interface with citation display
-  6. Dashboard: RAG stats
+
+  The retrieval dashboard is its own group on the Knowledge page.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -22,7 +23,8 @@
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
-	import RAGDashboardPanel from './RAGDashboardPanel.svelte';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import BatchUpload from '$lib/components/rag/BatchUpload.svelte';
 	import IngestProgress from '$lib/components/rag/IngestProgress.svelte';
 	import DocumentManager from '$lib/components/rag/DocumentManager.svelte';
@@ -33,8 +35,15 @@
 		RAGIngestJob,
 	} from '$lib/types';
 
-	type SubTab = 'collections' | 'batch-upload' | 'documents' | 'folder-scan' | 'query' | 'dashboard';
+	type SubTab = 'collections' | 'batch-upload' | 'documents' | 'folder-scan' | 'query';
 	let activeSubTab: SubTab = 'collections';
+	const SUB_TABS: { id: SubTab; label: string }[] = [
+		{ id: 'collections', label: 'Collections' },
+		{ id: 'batch-upload', label: 'Batch Upload' },
+		{ id: 'documents', label: 'Documents' },
+		{ id: 'folder-scan', label: 'Folder Scan' },
+		{ id: 'query', label: 'Query Test' },
+	];
 
 	// -- Collections state --
 	let collections: RAGCollection[] = [];
@@ -215,14 +224,7 @@
 
 <!-- Sub-tab navigation -->
 <div class="flex gap-2 mb-4" style="border-bottom: 1px solid var(--oo-bd-subtle);">
-	{#each [
-		{ id: 'collections', label: 'Collections' },
-		{ id: 'batch-upload', label: 'Batch Upload' },
-		{ id: 'documents', label: 'Documents' },
-		{ id: 'folder-scan', label: 'Folder Scan' },
-		{ id: 'query', label: 'Query Test' },
-		{ id: 'dashboard', label: 'Dashboard' },
-	] as tab}
+	{#each SUB_TABS as tab}
 		<button
 			on:click={() => { activeSubTab = tab.id; }}
 			class="px-3 py-2 text-sm font-medium transition-colors"
@@ -463,11 +465,6 @@
 	</div>
 {/if}
 
-<!-- ==================== DASHBOARD ==================== -->
-{#if activeSubTab === 'dashboard'}
-	<RAGDashboardPanel />
-{/if}
-
 <ConfirmDialog
 	open={pendingCollection !== null}
 	title="Delete this collection?"
@@ -481,4 +478,8 @@
 	error={deleteError}
 	onConfirm={runDelete}
 	onCancel={closeDelete}
-/>
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>

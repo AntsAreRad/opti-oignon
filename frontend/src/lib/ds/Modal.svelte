@@ -6,16 +6,20 @@
   `open` state and `onClose`. drawer-right becomes drawer-bottom on
   mobile (< 768px). Focus is restored to the opener on close. On open,
   focus goes to the element marked autofocus (or data-autofocus) when there
-  is one, else to the first focusable element. While `closable` is false
-  (an action is running), the close button is disabled.
+  is one, else to the first focusable element outside the head's actions.
+  While `closable` is false (an action is running), the close button is
+  disabled.
 
   The `actions` slot sits in the head, before the close button: a dialog
   of the shell puts Stop all there, at the top, where a phone's keyboard
-  never covers it. On a touch screen the close button is a 44 px target.
+  never covers it. It never takes the dialog's first focus: Enter would
+  then open the stop's confirmation instead of the dialog's own action. On
+  a touch screen the close button is a 44 px target.
 -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import Icon from './Icon.svelte';
+	import { firstFocus } from './firstFocus';
 	import type { ModalVariant } from './types';
 
 	export let open = false;
@@ -49,13 +53,18 @@
 		if (!dialogEl.open) dialogEl.showModal();
 		await tick();
 		// A marked element first, wherever it sits: a selector list alone
-		// would take the first match in document order, the header's close
-		// button.
-		const focusable =
-			dialogEl.querySelector<HTMLElement>('[autofocus], [data-autofocus]') ??
-			dialogEl.querySelector<HTMLElement>(
-				'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-			);
+		// would take the first match in document order. Else the first
+		// focusable element outside the head's actions, so the stop there is
+		// never where the dialog opens (lib/ds/firstFocus.ts decides).
+		const focusable = firstFocus(
+			Array.from(
+				dialogEl.querySelectorAll<HTMLElement>(
+					'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+				)
+			),
+			dialogEl.querySelector<HTMLElement>('[autofocus], [data-autofocus]'),
+			(element) => element.closest('.oo-modal-actions') !== null
+		);
 		focusable?.focus();
 	}
 
@@ -101,7 +110,7 @@
 			<h2 id={`${uid}-title`} class="oo-modal-title">{title}</h2>
 			<div class="oo-modal-head-end">
 				{#if $$slots.actions}
-					<slot name="actions" />
+					<span class="oo-modal-actions"><slot name="actions" /></span>
 				{/if}
 				<button
 					type="button"
@@ -218,6 +227,10 @@
 		flex-shrink: 0;
 		align-items: center;
 		gap: var(--oo-space-2);
+	}
+	/* The head's actions keep the head's own layout. */
+	.oo-modal-actions {
+		display: contents;
 	}
 	.oo-modal-close {
 		display: inline-flex;

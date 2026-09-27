@@ -193,9 +193,6 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h3 class="text-sm font-medium" style="color: var(--oo-fg-primary);">
-				Conversation Compressor
-			</h3>
 			<p class="text-xs mt-0.5" style="color: var(--oo-fg-tertiary);">
 				Compresses history to fit the token budget while keeping the full archive searchable.
 			</p>

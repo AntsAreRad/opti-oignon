@@ -1,404 +1,230 @@
 <!--
-  ObservabilityPanel.svelte -- Combined Observability View.
+  ObservabilityPanel.svelte
+  The inference pipeline, in one group of the Observability page: an
+  overview, then the dashboards the catalog embeds in this group
+  (lib/settings/catalog.ts, embeddedGroups('observability')): telemetry,
+  its history, the profiler and performance. Each is a tab of one row of
+  the design system's tabs, labelled with its group's title, drawn from a
+  map keyed by the catalog's panel names. A tab whose feature key is off in
+  the health feature map says the feature is unavailable
+  (lib/observability/state.ts decides, tab by tab).
 
-  Unified panel linking Telemetry, Profiler, and Performance dashboards.
-  Features:
-  1. Quick status overview widget showing all three subsystem statuses
-  2. Sub-tab navigation between the three dashboards
-  3. Cross-linking: click a model in profiler to filter telemetry history by model
+  The overview says, in words (lib/observability/state.ts), whether
+  telemetry is collecting, how much the profiler has seen and how much
+  history is kept, each with the way to its tab. A model picked in the
+  profiler opens the history filtered by it, with a way to clear the
+  filter: clearing it draws the history afresh, unfiltered.
+
+  A control here that changes the tab (an overview's "Open", a model
+  picked, the filter cleared) is gone once it has, so it hands focus to
+  the selected tab: focus never falls back to the page. The tab and the
+  feature map are props, set by the component itself once mounted, so each
+  tab can be drawn on the server.
+
+  The group's title is drawn by the group; this panel draws none. The
+  overview sits on the sunken ground, bounded by the edge, never on the
+  group's own tone.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, type ComponentType } from 'svelte';
+	import { Tabs, TextButton } from '$lib/ds';
+	import type { TabItem } from '$lib/ds';
+	import PanelHeader from '$lib/ds/PanelHeader.svelte';
+	import FeatureUnavailable from '$lib/components/ui/FeatureUnavailable.svelte';
 	import TelemetryDashboard from './TelemetryDashboard.svelte';
+	import TelemetryHistoryPanel from './TelemetryHistoryPanel.svelte';
 	import ProfilerDashboard from './ProfilerDashboard.svelte';
 	import PerformanceDashboard from './PerformanceDashboard.svelte';
-	import TelemetryHistoryPanel from './TelemetryHistoryPanel.svelte';
-	import { getTelemetryStats } from '$lib/api/telemetry';
-	import { getProfilerSummary } from '$lib/api/profiler';
-	import { getHistoryStats } from '$lib/api/telemetry';
-	import type { TelemetryStats, TelemetryHistoryStats } from '$lib/api/telemetry';
-	import type { ProfilerSummaryResponse } from '$lib/api/profiler';
+	import { embeddedGroups, type SettingsGroupEntry } from '$lib/settings/catalog';
+	import { getFeatureMap } from '$lib/api/featureCheck';
+	import { getHistoryStats, getTelemetryStats, type TelemetryHistoryStats, type TelemetryStats } from '$lib/api/telemetry';
+	import { getProfilerSummary, type ProfilerSummaryResponse } from '$lib/api/profiler';
+	import { historyState, profilerState, tabUnavailable, telemetryState } from '$lib/observability/state';
 
-	// -------------------------------------------------------------------------
-	// State
-	// -------------------------------------------------------------------------
+	/** The dashboards, by the catalog's panel names. */
+	const PANELS: Record<string, ComponentType> = {
+		TelemetryDashboard,
+		TelemetryHistoryPanel,
+		ProfilerDashboard,
+		PerformanceDashboard
+	};
 
-	type SubTab = 'overview' | 'telemetry' | 'profiler' | 'performance' | 'history';
-	let activeSubTab: SubTab = 'overview';
+	const OVERVIEW = 'overview';
+	const EMBEDDED: SettingsGroupEntry[] = embeddedGroups('observability');
+	const tabs: TabItem[] = [
+		{ id: OVERVIEW, label: 'Overview' },
+		...EMBEDDED.map((group) => ({ id: group.id, label: group.title }))
+	];
+	const byPanel = (panel: string) => EMBEDDED.find((group) => group.panel === panel);
+	const telemetryGroup = byPanel('TelemetryDashboard');
+	const historyGroup = byPanel('TelemetryHistoryPanel');
+	const profilerGroup = byPanel('ProfilerDashboard');
 
-	// Status overview
-	let statusLoading = true;
-	let telemetryStatus: TelemetryStats | null = null;
-	let profilerStatus: ProfilerSummaryResponse | null = null;
-	let historyStatus: TelemetryHistoryStats | null = null;
+	/** The tab shown. */
+	export let active = OVERVIEW;
+	/** The health feature map, read once mounted. */
+	export let featureMap: Record<string, boolean> = {};
 
-	// Cross-linking: model selected from profiler
+	$: group = EMBEDDED.find((entry) => entry.id === active);
+	$: shut = !!group && tabUnavailable(group.feature, featureMap);
+
+	let tabsEl: Tabs | undefined;
+
+	let loading = true;
+	let telemetry: TelemetryStats | null = null;
+	let profiler: ProfilerSummaryResponse | null = null;
+	let history: TelemetryHistoryStats | null = null;
+
+	/** The model picked in the profiler, which filters the history. */
 	let linkedModel = '';
 
-	// -------------------------------------------------------------------------
-	// Lifecycle
-	// -------------------------------------------------------------------------
-
-	onMount(loadOverview);
+	$: blocks = [
+		{ entry: telemetryGroup, state: telemetryState(telemetry) },
+		{ entry: profilerGroup, state: profilerState(profiler) },
+		{ entry: historyGroup, state: historyState(history) }
+	].filter((block): block is { entry: SettingsGroupEntry; state: string } => !!block.entry);
 
 	async function loadOverview() {
-		statusLoading = true;
-		try {
-			const [ts, ps, hs] = await Promise.all([
-				getTelemetryStats().catch(() => null),
-				getProfilerSummary().catch(() => null),
-				getHistoryStats().catch(() => null),
-			]);
-			telemetryStatus = ts;
-			profilerStatus = ps;
-			historyStatus = hs;
-		} catch {
-			// Silently degrade
-		} finally {
-			statusLoading = false;
-		}
+		loading = true;
+		const [stats, summary, kept] = await Promise.all([
+			getTelemetryStats().catch(() => null),
+			getProfilerSummary().catch(() => null),
+			getHistoryStats().catch(() => null)
+		]);
+		telemetry = stats;
+		profiler = summary;
+		history = kept;
+		loading = false;
 	}
 
-	// -------------------------------------------------------------------------
-	// Cross-linking
-	// -------------------------------------------------------------------------
+	function openTab(id: string) {
+		active = id;
+		tabsEl?.focusSelected();
+	}
 
-	function handleProfilerModelSelect(e: CustomEvent<string>) {
-		linkedModel = e.detail;
-		if (linkedModel) {
-			activeSubTab = 'history';
+	function pickModel(event: CustomEvent<string>) {
+		linkedModel = event.detail;
+		if (linkedModel && historyGroup) {
+			active = historyGroup.id;
+			tabsEl?.focusSelected();
 		}
 	}
 
 	function clearLinkedModel() {
 		linkedModel = '';
+		tabsEl?.focusSelected();
 	}
 
-	// -------------------------------------------------------------------------
-	// Helpers
-	// -------------------------------------------------------------------------
-
-	const subTabs: { id: SubTab; label: string }[] = [
-		{ id: 'overview', label: 'Overview' },
-		{ id: 'telemetry', label: 'Telemetry' },
-		{ id: 'profiler', label: 'Profiler' },
-		{ id: 'performance', label: 'Performance' },
-		{ id: 'history', label: 'History' },
-	];
+	onMount(async () => {
+		loadOverview();
+		try {
+			featureMap = await getFeatureMap();
+		} catch {
+			// The health module may be unavailable; the tabs still render.
+		}
+	});
 </script>
 
-<div class="observability-panel">
-	<!-- Sub-tab navigation -->
-	<div class="sub-tabs">
-		{#each subTabs as tab}
-			<button
-				class="sub-tab"
-				class:active={activeSubTab === tab.id}
-				on:click={() => activeSubTab = tab.id}
-			>
-				{tab.label}
-			</button>
-		{/each}
-	</div>
-
-	<!-- Overview tab -->
-	{#if activeSubTab === 'overview'}
-		<div class="overview-grid">
-			<!-- Telemetry status -->
-			<button class="status-card" on:click={() => activeSubTab = 'telemetry'}>
-				<div class="status-header">
-					<span class="status-dot" class:green={telemetryStatus?.enabled} class:gray={!telemetryStatus?.enabled}></span>
-					<h4>Telemetry Pipeline</h4>
-				</div>
-				{#if statusLoading}
-					<div class="status-loading">Loading...</div>
-				{:else if telemetryStatus}
-					<div class="status-metrics">
-						<div class="sm-row">
-							<span class="sm-label">Events</span>
-							<span class="sm-value">{telemetryStatus.total_events.toLocaleString()}</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Requests</span>
-							<span class="sm-value">{telemetryStatus.total_requests.toLocaleString()}</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Tokens</span>
-							<span class="sm-value">{telemetryStatus.total_tokens.toLocaleString()}</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Consumers</span>
-							<span class="sm-value">{telemetryStatus.consumer_count}</span>
+<div class="oo-obs">
+	<Tabs bind:this={tabsEl} bind:value={active} {tabs} variant="underline" size="sm">
+		{#if active === OVERVIEW}
+			<div class="oo-obs-overview">
+				{#each blocks as block (block.entry.id)}
+					<div class="oo-obs-block">
+						<PanelHeader title={block.entry.title} level={3} />
+						<div class="oo-obs-block-body">
+							<p class="oo-obs-state">{loading ? 'Reading' : block.state}</p>
+							{#if block.entry === telemetryGroup && telemetry}
+								<p class="oo-obs-figures">
+									{telemetry.total_requests.toLocaleString()} requests,
+									{telemetry.total_tokens.toLocaleString()} tokens
+								</p>
+							{:else if block.entry === profilerGroup && profiler && profiler.models.length > 0}
+								<p class="oo-obs-figures">
+									{profiler.models.length}
+									{profiler.models.length === 1 ? 'model' : 'models'} seen
+								</p>
+							{:else if block.entry === historyGroup && history && history.available}
+								<p class="oo-obs-figures">Kept for {history.retention_days} days</p>
+							{/if}
+							<TextButton on:click={() => openTab(block.entry.id)}>Open {block.entry.title}</TextButton>
 						</div>
 					</div>
-				{:else}
-					<div class="status-unavailable">Unavailable</div>
-				{/if}
-			</button>
-
-			<!-- Profiler status -->
-			<button class="status-card" on:click={() => activeSubTab = 'profiler'}>
-				<div class="status-header">
-					<span class="status-dot" class:green={profilerStatus && profilerStatus.total_profiled_requests > 0} class:gray={!profilerStatus || profilerStatus.total_profiled_requests === 0}></span>
-					<h4>Inference Profiler</h4>
-				</div>
-				{#if statusLoading}
-					<div class="status-loading">Loading...</div>
-				{:else if profilerStatus}
-					<div class="status-metrics">
-						<div class="sm-row">
-							<span class="sm-label">Profiled</span>
-							<span class="sm-value">{profilerStatus.total_profiled_requests.toLocaleString()}</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Models</span>
-							<span class="sm-value">{profilerStatus.models.length}</span>
-						</div>
-						{#if profilerStatus.models.length > 0}
-							{@const topModel = profilerStatus.models.reduce((a, b) => a.request_count > b.request_count ? a : b)}
-							<div class="sm-row">
-								<span class="sm-label">Top model</span>
-								<span class="sm-value sm-truncate" title={topModel.model}>{topModel.model}</span>
-							</div>
-							<div class="sm-row">
-								<span class="sm-label">Avg latency</span>
-								<span class="sm-value">{Math.round(topModel.avg_total_ms)}ms</span>
-							</div>
-						{/if}
-					</div>
-				{:else}
-					<div class="status-unavailable">Unavailable</div>
-				{/if}
-			</button>
-
-			<!-- History status -->
-			<button class="status-card" on:click={() => activeSubTab = 'history'}>
-				<div class="status-header">
-					<span class="status-dot" class:green={historyStatus?.available} class:gray={!historyStatus?.available}></span>
-					<h4>Event History</h4>
-				</div>
-				{#if statusLoading}
-					<div class="status-loading">Loading...</div>
-				{:else if historyStatus && historyStatus.available}
-					<div class="status-metrics">
-						<div class="sm-row">
-							<span class="sm-label">Stored</span>
-							<span class="sm-value">{historyStatus.total_stored.toLocaleString()}</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Retention</span>
-							<span class="sm-value">{historyStatus.retention_days}d</span>
-						</div>
-						<div class="sm-row">
-							<span class="sm-label">Max</span>
-							<span class="sm-value">{historyStatus.max_events.toLocaleString()}</span>
-						</div>
-					</div>
-				{:else}
-					<div class="status-unavailable">Unavailable</div>
-				{/if}
-			</button>
-		</div>
-
-		<div class="overview-hint">
-			Click a card to open the corresponding dashboard, or use the tabs above.
-		</div>
-	{/if}
-
-	<!-- Telemetry tab -->
-	{#if activeSubTab === 'telemetry'}
-		<TelemetryDashboard />
-	{/if}
-
-	<!-- Profiler tab -->
-	{#if activeSubTab === 'profiler'}
-		<ProfilerDashboard on:selectModel={handleProfilerModelSelect} />
-	{/if}
-
-	<!-- Performance tab -->
-	{#if activeSubTab === 'performance'}
-		<PerformanceDashboard />
-	{/if}
-
-	<!-- History tab -->
-	{#if activeSubTab === 'history'}
-		{#if linkedModel}
-			<div class="linked-model-banner">
-				Filtered by model: <strong>{linkedModel}</strong>
-				<button class="btn-clear-link" on:click={clearLinkedModel}>Clear filter</button>
+				{/each}
 			</div>
+		{:else if group && shut}
+			<FeatureUnavailable featureName={group.title} />
+		{:else if group && group === historyGroup}
+			{#if linkedModel}
+				<p class="oo-obs-filter">
+					<span>Filtered by model: <strong>{linkedModel}</strong></span>
+					<TextButton on:click={clearLinkedModel}>Clear filter</TextButton>
+				</p>
+			{/if}
+			{#key linkedModel}
+				<TelemetryHistoryPanel initialModelFilter={linkedModel} />
+			{/key}
+		{:else if group && group === profilerGroup}
+			<ProfilerDashboard on:selectModel={pickModel} />
+		{:else if group && PANELS[group.panel]}
+			<svelte:component this={PANELS[group.panel]} />
 		{/if}
-		<TelemetryHistoryPanel initialModelFilter={linkedModel} />
-	{/if}
+	</Tabs>
 </div>
 
 <style>
-	.observability-panel {
+	.oo-obs {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: var(--oo-space-3);
+		min-width: 0;
 	}
 
-	/* Sub-tab navigation */
-	.sub-tabs {
-		display: flex;
-		gap: 0.25rem;
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid var(--oo-bd-subtle);
-	}
-
-	.sub-tab {
-		padding: 0.4rem 0.85rem;
-		border-radius: 6px;
-		font-size: 0.82rem;
-		cursor: pointer;
-		border: 1px solid transparent;
-		background: transparent;
-		color: var(--oo-text-secondary);
-		transition: background 0.15s, color 0.15s;
-	}
-
-	.sub-tab:hover {
-		background: var(--oo-bg-elevated);
-		color: var(--oo-text-primary);
-	}
-
-	.sub-tab.active {
-		background: var(--oo-acc-fill);
-		color: var(--oo-fg-on-accent);
-		border-color: var(--oo-acc-fill);
-		font-weight: 600;
-	}
-
-	/* Overview grid */
-	.overview-grid {
+	.oo-obs-overview {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 0.75rem;
+		grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+		gap: var(--oo-space-3);
 	}
 
-	.status-card {
-		background: var(--oo-bg-surface);
-		border: 1px solid var(--oo-bd-subtle);
-		border-radius: 8px;
-		padding: 1rem;
-		cursor: pointer;
-		transition: border-color 0.15s, box-shadow 0.15s;
-		text-align: left;
-		width: 100%;
-		font-family: inherit;
-		color: inherit;
-	}
-
-	.status-card:hover {
-		border-color: var(--oo-accent-primary);
-		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-	}
-
-	.status-header {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.75rem;
-	}
-
-	.status-header h4 {
-		margin: 0;
-		font-size: 0.88rem;
-		font-weight: 600;
-		color: var(--oo-text-primary);
-	}
-
-	.status-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		flex-shrink: 0;
-	}
-
-	.status-dot.green {
-		background: var(--oo-success);
-	}
-
-	.status-dot.gray {
-		background: var(--oo-text-tertiary);
-		opacity: 0.5;
-	}
-
-	.status-metrics {
+	/* The overview sits on the sunken ground, bounded by the edge. */
+	.oo-obs-block {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		background-color: var(--oo-bg-subtle);
+		border: 1px solid var(--oo-edge);
+		border-radius: var(--oo-radius-md);
+		--oo-panel-header-radius: var(--oo-radius-md);
 	}
-
-	.sm-row {
+	.oo-obs-block-body {
 		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--oo-space-2);
+		padding: 0 var(--oo-space-5) var(--oo-space-4);
+	}
+	.oo-obs-block-body :global(.oo-text-btn) {
+		margin-left: calc(-1 * var(--oo-space-3));
 	}
 
-	.sm-label {
-		font-size: 0.75rem;
-		color: var(--oo-text-tertiary);
+	.oo-obs-state {
+		margin: 0;
+		color: var(--oo-fg-primary);
+		font-size: var(--oo-text-sm);
 	}
-
-	.sm-value {
-		font-size: 0.82rem;
-		font-weight: 600;
-		color: var(--oo-text-primary);
+	.oo-obs-figures {
+		margin: 0;
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-xs);
 		font-variant-numeric: tabular-nums;
 	}
 
-	.sm-truncate {
-		max-width: 120px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.status-loading {
-		font-size: 0.78rem;
-		color: var(--oo-text-tertiary);
-	}
-
-	.status-unavailable {
-		font-size: 0.78rem;
-		color: var(--oo-text-tertiary);
-		font-style: italic;
-	}
-
-	.overview-hint {
-		font-size: 0.75rem;
-		color: var(--oo-text-tertiary);
-		text-align: center;
-		padding: 0.5rem;
-	}
-
-	/* Cross-link banner */
-	.linked-model-banner {
+	.oo-obs-filter {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.5rem 0.85rem;
-		background: var(--oo-bg-surface);
-		border: 1px solid var(--oo-accent-primary);
-		border-radius: 6px;
-		font-size: 0.82rem;
-		color: var(--oo-text-primary);
-	}
-
-	.btn-clear-link {
-		padding: 0.2rem 0.5rem;
-		border-radius: 4px;
-		font-size: 0.72rem;
-		cursor: pointer;
-		border: 1px solid var(--oo-bd-subtle);
-		background: var(--oo-bg-elevated);
-		color: var(--oo-text-secondary);
-		margin-left: auto;
-	}
-
-	.btn-clear-link:hover {
-		background: var(--oo-bg-overlay);
+		gap: var(--oo-space-2) var(--oo-space-3);
+		margin: 0 0 var(--oo-space-3);
+		color: var(--oo-fg-secondary);
+		font-size: var(--oo-text-sm);
 	}
 </style>

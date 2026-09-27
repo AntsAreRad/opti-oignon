@@ -3,11 +3,11 @@
 
   Shows installed plugins with enable/disable toggles, plugin details
   (version, author, hooks, permissions), install from directory,
-  plugin config editor, uninstall, and marketplace sub-tab.
+  plugin config editor and uninstall. The marketplace is its own group on
+  the Extensions page.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import PluginMarketplace from './PluginMarketplace.svelte';
 	import {
 		listPlugins,
 		enablePlugin,
@@ -43,10 +43,6 @@
 
 	// Confirm uninstall
 	let confirmUninstall: string | null = null;
-
-	// Sub-tab: installed vs marketplace
-	type SubTab = 'installed' | 'marketplace';
-	let subTab: SubTab = 'installed';
 
 	// Known slash commands per plugin
 	const SLASH_COMMANDS: Record<string, string[]> = {
@@ -199,35 +195,9 @@
 </script>
 
 <div class="space-y-4">
-	<!-- Sub-tabs: Installed / Marketplace -->
-	<div class="flex gap-1 rounded-lg p-0.5" style="background-color: var(--oo-bg-overlay);">
-		<button
-			on:click={() => { subTab = 'installed'; }}
-			class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-			style="{subTab === 'installed'
-				? 'background-color: var(--oo-bg-elevated); color: var(--oo-fg-primary);'
-				: 'color: var(--oo-fg-muted);'}"
-		>
-			Installed
-		</button>
-		<button
-			on:click={() => { subTab = 'marketplace'; }}
-			class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-			style="{subTab === 'marketplace'
-				? 'background-color: var(--oo-bg-elevated); color: var(--oo-fg-primary);'
-				: 'color: var(--oo-fg-muted);'}"
-		>
-			Marketplace
-		</button>
-	</div>
-
-	{#if subTab === 'marketplace'}
-		<PluginMarketplace />
-	{:else}
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">Plugins</h2>
 			<p class="text-xs mt-0.5" style="color: var(--oo-fg-muted);">
 				Manage extensions for tools, pipeline steps, and inference hooks.
 				{#if !loading}
@@ -538,6 +508,5 @@
 				</div>
 			{/each}
 		</div>
-	{/if}
 	{/if}
 </div>

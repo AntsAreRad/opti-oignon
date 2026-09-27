@@ -3,7 +3,8 @@
   System Status content: an overview row, the six module groups (Backend,
   Inference & models, RAG & memory, Plugins & tools, Network, Security) built
   from the /api/health/dashboard module map, a live network line from
-  /api/network/status, the model warmup state, the benchmark runner, and a
+  /api/network/status, the model warmup state, the latency of the server's
+  own components (micro-measures, not a benchmark of the models), and a
   derived "Recent alerts" list. All presentation is on the ds primitives and
   --oo-* tokens; the health and network APIs are unchanged.
 -->
@@ -272,12 +273,12 @@
 			</div>
 		{/if}
 
-		<!-- Benchmarks -->
+		<!-- Component latency: micro-measures of the server's own parts, not of the models -->
 		<div>
 			<div class="flex items-center gap-3 mb-2">
-				<h3 class="text-sm font-medium" style="color: var(--oo-fg-secondary);">Benchmarks</h3>
+				<h3 class="text-sm font-medium" style="color: var(--oo-fg-secondary);">Component latency</h3>
 				<Button variant="secondary" size="sm" loading={benchmarkRunning} on:click={handleRunBenchmarks}>
-					Run all
+					Measure
 				</Button>
 			</div>
 
@@ -329,7 +330,7 @@
 					{/each}
 				</div>
 			{:else}
-				<p class="text-xs" style="color: var(--oo-fg-faint);">Run benchmarks to see latency metrics.</p>
+				<p class="text-xs" style="color: var(--oo-fg-faint);">Measure to see each component's latency.</p>
 			{/if}
 		</div>
 

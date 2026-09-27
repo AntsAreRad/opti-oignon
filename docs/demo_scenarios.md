@@ -36,51 +36,40 @@ This scenario demonstrates a simple chat interaction with smart model routing.
 
 ## Scenario 2: Running a Benchmark and Viewing Results
 
-This scenario walks through benchmarking your models and comparing their performance.
+This scenario walks through evaluating your models and comparing their performance.
 
 ### Steps
 
-1. **Navigate to Benchmark** — Switch to the Workshop (the switch at the foot of the sidebar) and choose "Benchmarks" (bar-chart icon). The page loads with its tabs, Run and History among them; each run in History opens its detail.
+1. **Navigate to Benchmarks** — Switch to the Workshop (the switch at the foot of the sidebar) and choose "Benchmarks" (bar-chart icon). The page is one row of tabs over the quality evaluation: Run, Leaderboard, Head-to-head, Trends, Compare, History, Profiles. The tab you are on stays in the address (`?tab=`), so a reload or a shared link lands on it.
 
 2. **Configure a run** — On the Run tab:
-   - Select one or more models using the model chips (e.g., `qwen3-coder:30b` and `qwen3:32b`)
-   - Select one or more benchmark suites (e.g., "General Knowledge", "Code Generation")
-   - Optionally expand "Advanced Options" to adjust temperature and timeout
+   - Choose an evaluation profile (a built-in one, or one you made on the Profiles tab)
+   - Select one or more models
+   - Optionally turn on the LLM judge
 
-3. **Start the benchmark** — Click "Run Benchmark". A progress bar appears with:
-   - Current task name and model being tested
-   - Completion percentage and ETA
-   - Individual results appearing in a table as they complete
+3. **Start the run** — Start it from the Run tab. Its progress shows while each model answers the profile's tasks, and the results appear once the run completes: accuracy, code, structure and speed per model, the judge's scores when it ran, and a radar chart comparing the models.
 
-4. **Review results** — Once complete, the results table shows each model/task combination with:
-   - Auto-score (keyword-based scoring, 0–10)
-   - Time taken per task
-   - Status badges (success, refusal, error, timeout)
-   - Color-coded scores (green > 7, yellow 4–7, red < 4)
+4. **Rank the models** — The Leaderboard tab ranks every model the evaluation has seen, and suggests which model suits each role.
 
-5. **Submit user scores** — Click on any result row to provide your own score (1–10). The final score is computed as a weighted average of auto and user scores.
+5. **Compare** — Head-to-head puts two models side by side; Compare aggregates several; Trends follows one model's scores over its runs.
 
-6. **View history** — Switch to the History tab. Previous runs appear as cards with summary stats. Click any card to see:
-   - Full results table
-   - Best-by-category breakdown
-   - Model ranking
+6. **View history** — The History tab lists the fifty latest runs. Open one to see its detail in a drawer (every model's accuracy, code, structure and speed); closing the drawer brings you back to History.
 
-7. **Compare runs** — Select two or more runs using checkboxes, then click "Compare". The comparison view shows:
-   - A model × task score matrix
-   - Score deltas between runs
-   - Regression warnings (highlighted in red if a model dropped > 1.5 points)
+7. **Export** — A completed run's results export as JSON or CSV from the Run tab.
 
-8. **Configure model roles** — Switch to the Model Assignment tab. Assign models to roles:
+8. **Configure model roles** — Roles are assigned in **Workshop > Models and inference > Model assignment**. Assign models to roles:
    - **Primary** — Default model for general use
    - **Fast** — Quick model for simple queries
    - **Quality** — Best model for complex tasks
 
+   A save the server refuses is shown under its role, with the editor still open on your choices.
+
 ### What to verify
 
-- WebSocket progress updates in real time
-- Scoring and result display work correctly
-- History persists across page reloads
-- Comparison detects regressions
+- The run completes and its results appear on the Run tab
+- The leaderboard ranks the models that ran
+- History persists across page reloads, and a run opened from it closes back onto History
+- The tab survives a reload and Back
 
 
 ## Scenario 3: Creating a Project with File Context
@@ -130,22 +119,19 @@ This scenario demonstrates using benchmarks to make an informed model selection 
 
 ### Steps
 
-1. **Run baseline benchmark** — Go to Benchmark > Run tab. Select all installed models, choose the "General Knowledge" and "Code Generation" suites. Run the benchmark and wait for completion.
+1. **Run a baseline** — Go to **Workshop > Benchmarks**, Run tab. Select every installed model and an evaluation profile. Run it and wait for completion.
 
-2. **Record the run** — Note the run ID. The run is automatically saved to history.
+2. **Record the run** — The run is saved to history automatically; note its id on the History tab.
 
 3. **Change model parameters** — Open **Workshop > Models and inference** and adjust the temperature of one model's profile (e.g., lower temperature for code tasks). Alternatively, pull a new model variant: `ollama pull qwen3-coder:30b-q4_0`.
 
-4. **Run second benchmark** — Run the same suites again with the updated configuration.
+4. **Run it again** — Run the same profile with the updated configuration.
 
-5. **Compare both runs** — Go to History tab, select both runs, click "Compare". The comparison matrix shows:
-   - Per-task score changes for each model
-   - Overall average score delta
-   - Regressions highlighted (any drop > 1.5 points)
+5. **Compare the models** — The Compare tab aggregates the models' scores over their runs, and Head-to-head sets two of them side by side.
 
-6. **Check model trends** — For any model that appeared in multiple runs, the trends view (via API at `GET /api/benchmark/trends/{model}`) shows score and speed progression over time.
+6. **Check model trends** — The Trends tab shows a model's composite score over its runs.
 
-7. **Update model roles** — Based on the comparison, go to Model Assignment tab and update:
+7. **Update model roles** — Based on the comparison, go to **Workshop > Models and inference > Model assignment** and update:
    - Assign the highest-scoring model to the "Quality" role
    - Assign the fastest model to the "Fast" role
    - Choose the best all-rounder for "Primary"
@@ -154,8 +140,8 @@ This scenario demonstrates using benchmarks to make an informed model selection 
 
 ### What to verify
 
-- Multiple benchmark runs produce consistent, comparable results
-- Comparison correctly identifies improvements and regressions
+- Multiple runs of the same profile produce consistent, comparable results
+- The trends and the comparison show the change between the two configurations
 - Model role changes propagate to the smart router
 - Routing indicator reflects the updated model assignments
 
@@ -273,17 +259,17 @@ This scenario walks through the first-run experience with system presets.
 
 1. **Fresh start** — If you have used the app before, go to Workshop > Backup > Configuration and click "Reset onboarding" to simulate a first run. Reload the page.
 
-2. **Onboarding overlay** — A full-screen overlay appears with:
-   - Opti-Oignon logo with copper glow
-   - "Scanning models..." loading state
-   - After scan: list of detected Ollama models as chips (with size badges)
-   - Three preset cards: Minimal, Balanced, Power
-   - A "Recommended" badge on the preset matching your hardware
+2. **Onboarding dialog** — The "Welcome to Opti-Oignon" dialog appears with:
+   - The Opti-Oignon logo, on a flat tone, and Stop all in the dialog's head
+   - "Scanning installed models" while the models are read
+   - After the scan: the number of models detected, and their list, each with its size
+   - Three presets, one choice: Minimal, Balanced, Power, the dialog opening on the recommended one
+   - The word "Recommended" on the preset matching your hardware
 
-3. **Apply a preset** — Click the recommended preset card. The overlay shows:
-   - Spinner while configs are being updated
-   - Confirmation with any warnings (e.g., "Some models referenced by Power preset are not installed")
-   - "Get Started" button
+3. **Apply a preset** — Choose a preset (the recommended one is chosen already), then click "Apply <name> preset". The dialog shows:
+   - "Applying configuration" while the configs are being updated (the dialog cannot be closed meanwhile)
+   - "<name> preset applied", the default model it chose, and any warnings under the word "Warnings" (e.g., "Some models referenced by Power preset are not installed")
+   - "Get started" button: it closes the dialog, and the application takes the preset without a reload (the chat's models and default model, the feature list and the chat's switches are read again); closing the dialog by Escape or its close button does the same
 
 4. **Verify configuration** — After applying:
    - Go to Workshop > Models and inference > System preset: the active preset reads "Applied"

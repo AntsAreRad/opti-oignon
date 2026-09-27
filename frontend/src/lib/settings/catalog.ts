@@ -10,7 +10,7 @@
  * (lib/nav/legacy.ts).
  *
  * Each section lists the groups its panels render, each panel loaded when
- * the page holding it is first shown (the settings hub,
+ * its group is opened on the page holding it (the settings hub,
  * components/settings/SettingsHub.svelte, holds the loaders, keyed by the
  * panel names here). The groups a section's introduction renders inline are
  * listed apart, under the section whose introduction renders them, so the
@@ -45,7 +45,13 @@ export interface SettingsGroupEntry extends GroupPlacement {
 	synonyms?: string[];
 	/** The lazy panel's key in the settings page's loaders. */
 	panel: string;
-	/** A feature-map key; the panel is gated when that feature is off. */
+	/**
+	 * A key of the health endpoint's feature map, given only where the
+	 * server serves it and the panel's own routes check that same gate; the
+	 * panel is shown as unavailable when that feature is off. A panel whose
+	 * routes check a gate the server does not serve carries none, and says
+	 * its failure through its own route.
+	 */
 	feature?: string;
 }
 
@@ -124,8 +130,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 		label: 'Knowledge (RAG)',
 		description: 'Knowledge base, collections, ingestion and retrieval dashboards.',
 		groups: [
-			{ id: 'knowledge-base', title: 'Knowledge base', description: 'Documents, collections and ingestion configuration.', synonyms: ['rag', 'documents', 'collections', 'chunk size', 'retrieval'], panel: 'KnowledgeBasePanel', feature: 'rag', space: 'workshop', section: 'knowledge' },
-			{ id: 'rag-dashboard', title: 'RAG dashboard', description: 'Retrieval metrics and index health.', synonyms: ['rag', 'retrieval', 'index', 'metrics'], panel: 'RAGDashboardPanel', feature: 'rag', space: 'workshop', section: 'knowledge' }
+			{ id: 'knowledge-base', title: 'Knowledge base', description: 'Documents, collections and ingestion configuration.', synonyms: ['rag', 'documents', 'collections', 'chunk size', 'retrieval'], panel: 'KnowledgeBasePanel', feature: 'rag_store', space: 'workshop', section: 'knowledge' },
+			{ id: 'rag-dashboard', title: 'RAG dashboard', description: 'Retrieval metrics and index health.', synonyms: ['rag', 'retrieval', 'index', 'metrics'], panel: 'RAGDashboardPanel', feature: 'rag_dashboard', space: 'workshop', section: 'knowledge' }
 		]
 	},
 	{
@@ -133,9 +139,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 		label: 'Plugins & Extensions',
 		description: 'Installed plugins, the marketplace and the permission allowlist.',
 		groups: [
-			{ id: 'installed-plugins', title: 'Installed plugins', description: 'Manage installed plugins and pipeline hooks.', synonyms: ['extensions', 'tools', 'hooks'], panel: 'PluginsPanel', feature: 'plugins', space: 'workshop', section: 'extensions' },
-			{ id: 'plugin-marketplace', title: 'Marketplace', description: 'Discover and install new plugins.', synonyms: ['install', 'catalog', 'discover'], panel: 'PluginMarketplace', feature: 'plugins', space: 'workshop', section: 'extensions' },
-			{ id: 'plugin-allowlist', title: 'Permission allowlist', description: 'Per-plugin permission allowlist.', synonyms: ['permissions', 'allowlist', 'security'], panel: 'PluginAllowlistPanel', feature: 'plugins', space: 'workshop', section: 'extensions' },
+			{ id: 'installed-plugins', title: 'Installed plugins', description: 'Manage installed plugins and pipeline hooks.', synonyms: ['extensions', 'tools', 'hooks'], panel: 'PluginsPanel', feature: 'plugin_registry', space: 'workshop', section: 'extensions' },
+			{ id: 'plugin-marketplace', title: 'Marketplace', description: 'Discover and install new plugins.', synonyms: ['install', 'catalog', 'discover'], panel: 'PluginMarketplace', feature: 'plugin_index', space: 'workshop', section: 'extensions' },
+			{ id: 'plugin-allowlist', title: 'Permission allowlist', description: 'Per-plugin permission allowlist.', synonyms: ['permissions', 'allowlist', 'security'], panel: 'PluginAllowlistPanel', space: 'workshop', section: 'extensions' },
 			{ id: 'skills', title: 'Agent skills', description: 'Browse the SKILL.md registry: published skills and agent-proposed drafts, approval-gated publishing.', synonyms: ['skill', 'teacher', 'draft', 'odysseus'], panel: 'SkillsPanel', space: 'workshop', section: 'extensions' }
 		]
 	},
@@ -146,12 +152,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 		groups: [
 			{ id: 'cache', title: 'Cache', description: 'Response cache statistics and controls.', synonyms: ['cache stats', 'hit rate'], panel: 'CacheStatsPanel', space: 'workshop', section: 'observability' },
 			{ id: 'resource-governor', title: 'Resource governor', description: 'VRAM capacity, in-use, pressure and recent admission decisions.', synonyms: ['governor', 'vram', 'capacity', 'pressure', 'admission', 'eviction'], panel: 'GovernorPanel', space: 'workshop', section: 'models' },
-			{ id: 'observability', title: 'Observability (Observe)', description: 'Live observability of the inference pipeline.', synonyms: ['observe', 'tracing', 'spans'], panel: 'ObservabilityPanel', feature: 'observability', space: 'workshop', section: 'observability' },
-			{ id: 'telemetry', title: 'Telemetry', description: 'Aggregated telemetry dashboard.', synonyms: ['metrics', 'usage'], panel: 'TelemetryDashboard', feature: 'telemetry', space: 'workshop', section: 'observability' },
-			{ id: 'telemetry-history', title: 'Telemetry history', description: 'Historical telemetry detail over time.', synonyms: ['history', 'trend', 'metrics'], panel: 'TelemetryHistoryPanel', feature: 'telemetry', space: 'workshop', section: 'observability' },
-			{ id: 'profiler', title: 'Profiler', description: 'Per-request inference profiler.', synonyms: ['profile', 'latency', 'timing'], panel: 'ProfilerDashboard', space: 'workshop', section: 'observability' },
+			{ id: 'observability', title: 'Inference pipeline', description: 'Telemetry, its history, the profiler and performance, with an overview.', synonyms: ['observe', 'tracing', 'spans'], panel: 'ObservabilityPanel', space: 'workshop', section: 'observability' },
+			{ id: 'telemetry', title: 'Telemetry', description: 'Aggregated telemetry dashboard.', synonyms: ['metrics', 'usage'], panel: 'TelemetryDashboard', feature: 'telemetry', embeddedIn: 'observability' },
+			{ id: 'telemetry-history', title: 'Telemetry history', description: 'Historical telemetry detail over time.', synonyms: ['history', 'trend', 'metrics'], panel: 'TelemetryHistoryPanel', embeddedIn: 'observability' },
+			{ id: 'profiler', title: 'Profiler', description: 'Per-request inference profiler.', synonyms: ['profile', 'latency', 'timing'], panel: 'ProfilerDashboard', feature: 'inference_profiler', embeddedIn: 'observability' },
 			{ id: 'performance-tuner', title: 'Performance tuner', description: 'Throughput and concurrency tuning.', synonyms: ['tuning', 'concurrency', 'throughput'], panel: 'PerformanceTunerPanel', space: 'workshop', section: 'models' },
-			{ id: 'performance-dashboard', title: 'Performance dashboard', description: 'High-level performance overview.', synonyms: ['overview', 'metrics'], panel: 'PerformanceDashboard', space: 'workshop', section: 'observability' },
+			{ id: 'performance-dashboard', title: 'Performance dashboard', description: 'High-level performance overview.', synonyms: ['overview', 'metrics'], panel: 'PerformanceDashboard', feature: 'performance_monitor', embeddedIn: 'observability' },
 			{ id: 'analytics', title: 'Analytics', description: 'Feedback and performance analytics.', synonyms: ['feedback', 'analytics', 'ratings'], panel: 'AnalyticsDashboard', feature: 'analytics', space: 'workshop', section: 'observability' }
 		]
 	},
@@ -172,10 +178,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 		description: 'Backup and restore, fine-tune export and data management.',
 		groups: [
 			{ id: 'backup-restore', title: 'Backup & restore', description: 'Export and import configuration and data.', synonyms: ['backup', 'restore', 'export', 'import'], panel: 'BackupRestorePanel', space: 'workshop', section: 'backup' },
-			{ id: 'fine-tune', title: 'Fine-Tune export', description: 'Export training data, track variants and A/B compare.', synonyms: ['fine-tune', 'export data', 'variants', 'a/b'], panel: 'FineTunePanel', space: 'workshop', section: 'backup' }
+			{ id: 'fine-tune', title: 'Fine-tune export', description: 'Export training data, track variants and A/B compare.', synonyms: ['fine-tune', 'export data', 'variants', 'a/b'], panel: 'FineTunePanel', space: 'workshop', section: 'backup' }
 		]
 	}
 ];
+
+/** The groups embedded in the group `hostId`, whose panel renders them, in catalog order. */
+export function embeddedGroups(hostId: string): SettingsGroupEntry[] {
+	return SETTINGS_SECTIONS.flatMap((section) => section.groups).filter((group) => group.embeddedIn === hostId);
+}
 
 /** The sections of Preferences, in the order the page shows them. */
 export const PREFERENCES_SECTIONS: { id: string; label: string }[] = [

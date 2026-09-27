@@ -199,11 +199,7 @@
 <!-- ============================================================ -->
 <div class="space-y-6">
 
-	<div class="flex items-center justify-between">
-		<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
-			Learned Router
-			<span class="ml-2 text-xs font-normal" style="color: var(--oo-fg-tertiary);">ML-based routing</span>
-		</h2>
+	<div class="flex items-center justify-end">
 		<button
 			on:click={load}
 			disabled={loading}

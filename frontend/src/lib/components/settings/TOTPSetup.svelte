@@ -146,10 +146,7 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h4 class="text-sm font-semibold" style="color: var(--oo-fg-primary);">
-			Authenticator App (TOTP)
-		</h4>
+	<div class="flex items-center justify-end">
 		{#if status?.totp_verified}
 			<span class="px-2 py-0.5 rounded text-xs font-medium" style="background-color: var(--oo-bg-success, rgba(34,197,94,0.1)); color: var(--oo-sage);">
 				Active

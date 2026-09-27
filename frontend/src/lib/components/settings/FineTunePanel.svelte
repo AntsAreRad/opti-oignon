@@ -20,6 +20,8 @@
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import type {
 		FineTuneExportResponse,
 		FineTunePreviewResponse,
@@ -588,4 +590,8 @@
 	error={unregisterError}
 	onConfirm={runUnregister}
 	onCancel={closeUnregister}
-/>
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>

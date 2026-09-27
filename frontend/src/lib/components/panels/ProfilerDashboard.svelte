@@ -139,7 +139,6 @@
 
 <div class="profiler-dashboard">
 	<div class="dashboard-header">
-		<h2>Inference Profiler</h2>
 		<div class="header-actions">
 			<button
 				class="btn-secondary"
@@ -302,16 +301,10 @@
 
 	.dashboard-header {
 		display: flex;
-		justify-content: space-between;
+		justify-content: flex-end;
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 0.75rem;
-	}
-
-	.dashboard-header h2 {
-		margin: 0;
-		font-size: 1.3rem;
-		color: var(--oo-text-primary);
 	}
 
 	.header-actions {

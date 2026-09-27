@@ -15,6 +15,8 @@
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import type { RAGCollection, RAGDocument } from '$lib/types';
 
 	/** Externally trigger a refresh (e.g. after batch ingest completes). */
@@ -451,7 +453,11 @@
 	error={deleteError}
 	onConfirm={runDelete}
 	onCancel={closeDelete}
-/>
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>
 
 <ConfirmDialog
 	open={confirmBulk}
@@ -462,4 +468,8 @@
 	danger
 	onConfirm={runBulkDelete}
 	onCancel={() => (confirmBulk = false)}
-/>
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>

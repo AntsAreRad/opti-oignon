@@ -3,9 +3,17 @@
   tablist / tab / tabpanel semantics with roving tabindex and arrow-key
   navigation (Home/End supported). The active panel content is provided
   via the default slot; the consumer switches content on `value`.
+  A horizontal row that is wider than its place scrolls within itself,
+  never the page. When it first shows, the row alone is scrolled to the
+  selected tab (a link that names a far tab lands on it); when the value
+  changes, the selected tab is kept in view. The row keeps room for the
+  focus ring on every side, since a scrolling box clips at its padding.
+  `focusSelected()` hands focus to the selected tab, for a control that
+  changed the tab from elsewhere and is gone once it has.
 -->
 <script lang="ts">
 	import { createEventDispatcher, tick } from 'svelte';
+	import { scrollBehavior } from '$lib/motion';
 	import Icon from './Icon.svelte';
 	import type { Size, TabItem } from './types';
 
@@ -18,6 +26,7 @@
 	const dispatch = createEventDispatcher<{ change: string }>();
 	const uid = `oo-tabs-${Math.random().toString(36).slice(2, 9)}`;
 	let tabEls: HTMLButtonElement[] = [];
+	let listEl: HTMLElement | undefined;
 
 	function select(id: string) {
 		if (id === value) return;
@@ -32,6 +41,39 @@
 		select(tabs[wrapped].id);
 		await tick();
 		tabEls[wrapped]?.focus();
+	}
+
+	/** Scrolls the row alone, sideways, until the tab at `index` shows in it. */
+	function revealInRow(index: number) {
+		const tab = tabEls[index];
+		if (!listEl || !tab) return;
+		const box = listEl.getBoundingClientRect();
+		const at = tab.getBoundingClientRect();
+		if (at.left < box.left) listEl.scrollLeft -= box.left - at.left;
+		else if (at.right > box.right) listEl.scrollLeft += at.right - box.right;
+	}
+
+	/** Brings the selected tab into the row's view: when the row first shows,
+	    by scrolling the row alone (opening a page never scrolls the page);
+	    when the value changes, as the nearest scroll that shows it. */
+	let shown = false;
+	async function keepSelectedInView(current: string) {
+		if (typeof window === 'undefined') return;
+		await tick();
+		const index = tabs.findIndex((tab) => tab.id === current);
+		if (!shown) {
+			shown = true;
+			revealInRow(index);
+			return;
+		}
+		tabEls[index]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: scrollBehavior() });
+	}
+	$: keepSelectedInView(value);
+
+	/** Focuses the selected tab. */
+	export async function focusSelected() {
+		await tick();
+		tabEls[tabs.findIndex((tab) => tab.id === value)]?.focus();
 	}
 
 	function onKeydown(event: KeyboardEvent, index: number) {
@@ -60,6 +102,7 @@
 		class="oo-tablist"
 		data-variant={variant}
 		data-size={size}
+		bind:this={listEl}
 	>
 		{#each tabs as tab, i (tab.id)}
 			<button
@@ -100,6 +143,17 @@
 	.oo-tablist {
 		display: flex;
 		gap: var(--oo-space-1);
+	}
+	/* A row wider than its place scrolls within itself. A scrolling box
+	   clips at its padding edge, so the row keeps the focus ring's width and
+	   offset as room on every side, and more below for the underline. */
+	.oo-tabs[data-orientation='horizontal'] .oo-tablist {
+		--oo-tablist-room: calc(var(--oo-focus-ring-width) + var(--oo-focus-ring-offset));
+		overflow-x: auto;
+		padding: var(--oo-tablist-room) var(--oo-tablist-room)
+			max(var(--oo-tablist-room), var(--oo-space-3));
+		scrollbar-width: thin;
+		scrollbar-color: var(--oo-fg-faint) transparent;
 	}
 	.oo-tabs[data-orientation='vertical'] .oo-tablist {
 		flex-direction: column;

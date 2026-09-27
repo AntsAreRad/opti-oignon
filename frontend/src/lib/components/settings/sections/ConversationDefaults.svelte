@@ -10,7 +10,10 @@
   default that the per-conversation ChatControlBar toggles start from.
 
   Controls apply immediately with a toast (spec 5.9). Built on the ds
-  primitives (Switch, Input, Button) inside SettingsGroup wrappers.
+  primitives (Switch, Input, Button) inside SettingsGroup wrappers. A preset
+  applied, or the configuration reloaded from disk, is followed by a read
+  of what it changed (lib/stores/configRefresh.ts): the chat's models and
+  default model, the feature map, the backends, the control bar's switches.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -27,6 +30,7 @@
 		resetOnboarding
 	} from '$lib/api/systemPresets';
 	import { handleApiError } from '$lib/api/errorHandler';
+	import { refreshAfterConfigChange } from '$lib/stores/configRefresh';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import type { SystemPresetInfo, SystemPresetDetectResponse } from '$lib/types';
 
@@ -104,7 +108,7 @@
 				currentAppliedPreset = result.preset_id;
 				toastSuccess(`Applied "${result.preset_name}" preset. Model: ${result.selected_model || 'none'}`);
 				if (result.warnings.length > 0) toastError(result.warnings.join('; '));
-				await load();
+				await Promise.all([load(), refreshAfterConfigChange()]);
 			} else {
 				toastError(result.error || 'Failed to apply preset');
 			}
@@ -120,7 +124,7 @@
 		try {
 			await reloadSettings();
 			toastSuccess('Configuration reloaded from disk');
-			await load();
+			await Promise.all([load(), refreshAfterConfigChange()]);
 		} catch (e) {
 			handleApiError(e, 'reloading configuration');
 		} finally {

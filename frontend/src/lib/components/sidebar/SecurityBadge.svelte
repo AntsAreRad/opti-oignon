@@ -2,13 +2,16 @@
   SecurityBadge.svelte
   Compact security status badge in the status card. Shows the letter
   grade (A+ to F) with color coding; a tooltip surfaces the numeric score.
-  Clicking opens the Workshop's security page. Uses the ds Tooltip and
-  Icon primitives and --oo-* tokens.
+  Clicking opens the Workshop's security page, which explains the grade.
+  It reads the grade through the API client (lib/api/security.ts), so an
+  expired session leads to the sign-in page, as every request does. Uses
+  the ds Tooltip and Icon primitives and --oo-* tokens.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Tooltip from '$lib/ds/Tooltip.svelte';
 	import Icon from '$lib/ds/Icon.svelte';
+	import { getSecurityStatus } from '$lib/api/security';
 
 	let grade = '';
 	let score = 0;
@@ -17,13 +20,10 @@
 
 	onMount(async () => {
 		try {
-			const resp = await fetch('/api/security/status', { credentials: 'include' });
-			if (resp.ok) {
-				const data = await resp.json();
-				grade = data.grade || '?';
-				score = data.score || 0;
-				maxScore = data.max_score || 100;
-			}
+			const data = await getSecurityStatus();
+			grade = data.grade || '?';
+			score = data.score || 0;
+			maxScore = data.max_score || 100;
 		} catch {
 			// Silently fail -- the badge just won't show.
 		} finally {

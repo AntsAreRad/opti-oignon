@@ -161,10 +161,7 @@
 <!-- ===================================================================== -->
 
 <div class="panel" style="background: var(--oo-bg-surface); border: 1px solid var(--oo-bd-default); border-radius: var(--oo-radius-lg); padding: 1.25rem;">
-	<div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 1rem 0;">
-		<h3 style="margin: 0; color: var(--oo-fg-primary); font-size: 1rem; font-weight: 600;">
-			Web Search &amp; Privacy
-		</h3>
+	<div style="display: flex; align-items: center; justify-content: flex-end; margin: 0 0 1rem 0;">
 		<!-- Compact proxy status badge -->
 		{#if !loading && !error}
 			<span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.5rem;

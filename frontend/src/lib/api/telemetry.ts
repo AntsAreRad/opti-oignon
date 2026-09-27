@@ -4,7 +4,7 @@
  * Client functions for the telemetry dashboard endpoints.
  */
 
-import { apiGet, apiPost, apiDelete } from './client';
+import { apiGet, apiPost, apiPut, apiDelete } from './client';
 
 export interface TelemetryConsumerInfo {
 	name: string;

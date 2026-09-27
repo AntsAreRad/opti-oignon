@@ -77,10 +77,6 @@
 
 <section class="governor-panel">
 	<header class="governor-header">
-		<div class="governor-title">
-			<Icon name="gauge" />
-			<h2>Resource governor</h2>
-		</div>
 		<Button variant="ghost" on:click={load} disabled={loading}>
 			<Icon name="refresh-cw" />
 			Refresh
@@ -186,17 +182,7 @@
 	.governor-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-	}
-	.governor-title {
-		display: flex;
-		align-items: center;
-		gap: var(--oo-space-2);
-	}
-	.governor-title h2 {
-		margin: 0;
-		font-size: var(--oo-text-lg);
-		color: var(--oo-fg-primary);
+		justify-content: flex-end;
 	}
 	.governor-aria {
 		margin: 0;

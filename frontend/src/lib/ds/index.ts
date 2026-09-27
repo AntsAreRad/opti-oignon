@@ -20,6 +20,7 @@ export { default as Tooltip } from './Tooltip.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
 export { default as InlineError } from './InlineError.svelte';
+export { default as PanelHeader } from './PanelHeader.svelte';
 
 export { ICONS, iconKey, inlineIcon } from './icons';
 

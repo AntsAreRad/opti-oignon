@@ -214,7 +214,6 @@ def test_ux14_svelte_check_errors_per_file_never_exceed_the_ledger():
 # ===========================================================================
 UX14_LEDGER = {
     'frontend/src/lib/api/chat.ts': 2,
-    'frontend/src/lib/api/telemetry.ts': 1,
     'frontend/src/lib/components/chat/ChatMessage.svelte': 3,
     'frontend/src/lib/components/chat/ToolCallDisplay.svelte': 2,
     'frontend/src/lib/components/health/CacheManager.svelte': 1,
@@ -223,9 +222,7 @@ UX14_LEDGER = {
     'frontend/src/lib/components/panels/SandboxSettingsStrip.svelte': 5,
     'frontend/src/lib/components/panels/SyncPanel.svelte': 6,
     'frontend/src/lib/components/settings/FineTunePanel.svelte': 1,
-    'frontend/src/lib/components/settings/KnowledgeBasePanel.svelte': 1,
     'frontend/src/lib/components/settings/PluginsPanel.svelte': 5,
-    'frontend/src/lib/components/settings/SecurityPanel.svelte': 1,
     'frontend/src/lib/stores/chat.ts': 4,
 }
 

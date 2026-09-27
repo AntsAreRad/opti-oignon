@@ -124,7 +124,6 @@
 
 <div class="health-widget">
 	<div class="health-header">
-		<h3 class="health-title">Model Health</h3>
 		<button
 			class="check-btn"
 			on:click={handleCheckAll}
@@ -194,15 +193,8 @@
 	.health-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-end;
 		margin-bottom: 8px;
-	}
-
-	.health-title {
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: var(--oo-fg-primary);
-		margin: 0;
 	}
 
 	.check-btn {

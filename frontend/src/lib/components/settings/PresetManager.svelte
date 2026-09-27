@@ -221,9 +221,9 @@
 	<!-- Create/Edit form -->
 	{#if creating || editing}
 		<div class="p-4 rounded-lg bg-surface-800 border border-surface-700 space-y-3">
-			<h3 class="text-sm font-medium text-surface-200">
+			<h4 class="text-sm font-medium text-surface-200">
 				{creating ? 'New Preset' : `Edit: ${editing?.name}`}
-			</h3>
+			</h4>
 
 			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 				{#if creating}

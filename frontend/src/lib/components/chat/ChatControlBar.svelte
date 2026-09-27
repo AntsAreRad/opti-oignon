@@ -38,6 +38,7 @@
 	import { getHardeningStatus, wipeConversation } from '$lib/api/hardening';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import { createServerSwitch, pressed } from '$lib/switches/serverSwitch';
+	import { configEpoch } from '$lib/stores/configRefresh';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import InlineError from '$lib/ds/InlineError.svelte';
 
@@ -176,6 +177,15 @@
 		} catch {
 			wipeAvailable = false;
 		}
+	}
+
+	// A preset applied or the configuration reloaded after this bar was
+	// built: the server's switches are read again. The epoch the bar was
+	// built at is no change (onMount reads the switches once already).
+	let epochSeen = $configEpoch;
+	$: if ($configEpoch !== epochSeen) {
+		epochSeen = $configEpoch;
+		Promise.all([cache.load(), cascade.load(), humanizer.load(), sandbox.load(), coding.load(), readSearchAvailability()]);
 	}
 
 	onMount(async () => {

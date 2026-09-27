@@ -321,7 +321,6 @@
 <div class="history-panel">
 	<!-- Header -->
 	<div class="panel-header">
-		<h2>Telemetry History</h2>
 		<div class="header-actions">
 			<button class="btn-sm" on:click={loadAll} disabled={loading}>
 				{loading ? 'Loading...' : 'Refresh'}
@@ -638,16 +637,10 @@
 	/* Header */
 	.panel-header {
 		display: flex;
-		justify-content: space-between;
+		justify-content: flex-end;
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 0.75rem;
-	}
-
-	.panel-header h2 {
-		margin: 0;
-		font-size: 1.3rem;
-		color: var(--oo-text-primary);
 	}
 
 	.header-actions {

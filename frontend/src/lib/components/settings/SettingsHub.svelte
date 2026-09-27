@@ -18,18 +18,32 @@
   leaves the page), and after every navigation they are read back from it,
   so another page's results never stay on screen.
 
-  The network page also shows the server's reachability.
+  The network page also shows the server's reachability, and the security
+  page opens on the grade: its checks, the session mode and the recent
+  security events.
 
-  A group's panel loads when its page is first shown: the loaders below are
-  keyed by the catalog's panel names. The groups a section's introduction
-  renders inline are rendered by that introduction, each on its own page.
-  Feature availability gates a panel through the health feature map.
+  On a Workshop page the groups fold (lib/settings/disclosure.ts decides):
+  one group is open at a time, and only the open group loads its panel,
+  or a group whose panel was used on this visit, kept mounted and hidden
+  until the page is left. The address names the open group (`?g=`): on
+  arrival the group it names opens, focused and scrolled into view (an
+  embedded group opens its host); with none named, a page's only group
+  opens. A toggle writes the address in place, and an address the hub
+  wrote itself is never read as an arrival: the hub remembers the address
+  it asked for, and a navigation to any other is one. Preferences' groups
+  do not fold. While the search shows its results, the page's groups stay
+  where they are, hidden, so a draft in a group outlives a search. The loaders
+  below are keyed by the catalog's panel names; an embedded group's panel
+  is loaded by its host's. The groups a section's introduction renders
+  inline are rendered by that introduction, each on its own page. Feature
+  availability gates a panel through the health feature map.
 
   Preferences also holds what the old header held: the palette switcher
   (Appearance), the account menu (Account) and the notification history.
 -->
 <script lang="ts">
-	import { onMount, type ComponentType } from 'svelte';
+	import { onMount, setContext, tick, type ComponentType } from 'svelte';
+	import { writable } from 'svelte/store';
 	import { page } from '$app/stores';
 	import { goto, afterNavigate } from '$app/navigation';
 	import IconButton from '$lib/ds/IconButton.svelte';
@@ -45,10 +59,19 @@
 	import ConversationDefaults from '$lib/components/settings/sections/ConversationDefaults.svelte';
 	import AccountAuthMode from '$lib/components/settings/sections/AccountAuthMode.svelte';
 	import NetworkReachability from '$lib/components/settings/NetworkReachability.svelte';
+	import SecurityGrade from '$lib/components/settings/SecurityGrade.svelte';
 	import { getFeatureMap } from '$lib/api/featureCheck';
 	import { scrollBehavior } from '$lib/motion';
 	import { DESTINATIONS } from '$lib/nav/destinations';
 	import { searchSettings, settingsIndex } from '$lib/settings/search';
+	import {
+		GROUPS_CONTEXT,
+		addressFor,
+		openOnArrival,
+		toggled,
+		withEdited,
+		type GroupsContext
+	} from '$lib/settings/disclosure';
 	import {
 		SETTINGS_SECTIONS,
 		INLINE_GROUPS,
@@ -88,11 +111,7 @@
 		CacheStatsPanel: () => import('$lib/components/panels/CacheStatsPanel.svelte'),
 		GovernorPanel: () => import('$lib/components/panels/GovernorPanel.svelte'),
 		ObservabilityPanel: () => import('$lib/components/panels/ObservabilityPanel.svelte'),
-		TelemetryDashboard: () => import('$lib/components/panels/TelemetryDashboard.svelte'),
-		TelemetryHistoryPanel: () => import('$lib/components/panels/TelemetryHistoryPanel.svelte'),
-		ProfilerDashboard: () => import('$lib/components/panels/ProfilerDashboard.svelte'),
 		PerformanceTunerPanel: () => import('$lib/components/settings/PerformanceTunerPanel.svelte'),
-		PerformanceDashboard: () => import('$lib/components/panels/PerformanceDashboard.svelte'),
 		AnalyticsDashboard: () => import('$lib/components/panels/AnalyticsDashboard.svelte'),
 		ProxySettingsPanel: () => import('$lib/components/panels/ProxySettingsPanel.svelte'),
 		SyncPanel: () => import('$lib/components/panels/SyncPanel.svelte'),
@@ -144,6 +163,12 @@
 	];
 
 	const WORKSHOP_PREFIX = '/workshop/';
+	const TITLE_ID = 'oo-hub-title';
+
+	/** Each embedded group's host, so a link to it opens the group that shows it. */
+	const HOST_OF: Record<string, string> = Object.fromEntries(
+		GROUPS.filter((g) => g.embeddedIn).map((g) => [g.id, g.embeddedIn as string])
+	);
 
 	function groupsOf(inSpace: 'use' | 'workshop', inSection: string | null): Group[] {
 		return GROUPS.filter((g) => !g.retired && !g.embeddedIn && g.space === inSpace && g.section === inSection);
@@ -172,6 +197,51 @@
 					}
 				];
 	$: title = space === 'use' ? 'Preferences' : pageSections[0].label;
+	$: pageGroupIds = pageSections.flatMap((s) => s.groups.map((g) => g.id));
+
+	// -- The groups' context: their level, whether they fold, which is open. --
+	const open = writable<string | null>(null);
+	const edited = writable<ReadonlySet<string>>(new Set());
+	/** The address the hub last asked for itself: reaching it is no arrival. */
+	let wrote: string | null = null;
+	let hubEl: HTMLElement | undefined;
+
+	function markEdited(id: string) {
+		edited.update((set) => withEdited(set, id));
+	}
+
+	/** Opens a group, or closes the open one, and writes the address in place. */
+	async function toggle(id: string) {
+		const next = toggled($open, id);
+		open.set(next);
+		const target = addressFor($page.url, next);
+		if (target !== `${$page.url.pathname}${$page.url.search}`) {
+			wrote = target;
+			goto(target, { replaceState: true, keepFocus: true, noScroll: true });
+		}
+		await tick();
+		keepRowInView(id);
+	}
+
+	/** A group above the toggled one closed: its row comes back into view, at once. */
+	function keepRowInView(id: string) {
+		if (typeof document === 'undefined') return;
+		const row = document.getElementById(`oo-set-${id}`);
+		if (!row || !hubEl) return;
+		const box = hubEl.getBoundingClientRect();
+		const at = row.getBoundingClientRect();
+		// No behaviour given: the row comes back at once, never smoothly.
+		if (at.top < box.top || at.top > box.bottom) row.scrollIntoView({ block: 'nearest' });
+	}
+
+	setContext(GROUPS_CONTEXT, {
+		level: space === 'workshop' ? 2 : 3,
+		collapsible: space === 'workshop',
+		open,
+		edited,
+		toggle,
+		markEdited
+	} as GroupsContext);
 
 	// -- Search over the whole catalog, both spaces. ----------------------------
 	const INDEX = settingsIndex(GROUPS, DESTINATIONS, PREFERENCES_SECTIONS, SETTINGS_SECTIONS);
@@ -192,7 +262,9 @@
 		if ((url.searchParams.get('q') ?? '') === q) return;
 		if (q) url.searchParams.set('q', q);
 		else url.searchParams.delete('q');
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		const target = `${url.pathname}${url.search}`;
+		wrote = target;
+		goto(target, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	/** Once the reader pauses, the words go to the address. */
@@ -229,12 +301,24 @@
 		return !group.feature || featureMap[group.feature] !== false;
 	}
 
-	function scrollToGroup(id: string | null) {
-		if (!id || typeof document === 'undefined') return;
+	/** The opened group comes into view, its title focused without a scroll of its own. */
+	async function revealGroup(id: string) {
+		if (typeof document === 'undefined') return;
+		await tick();
 		requestAnimationFrame(() => {
 			const element = document.getElementById(`oo-set-${id}`);
-			if (element) element.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+			if (!element) return;
+			const button = element.querySelector<HTMLElement>('button[aria-expanded][aria-controls]');
+			button?.focus({ preventScroll: true });
+			element.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
 		});
+	}
+
+	/** A page reached: the group the address names opens, and comes into view. */
+	function arrive(url: URL | null) {
+		const target = openOnArrival(url?.searchParams.get('g') ?? null, pageGroupIds, HOST_OF);
+		if (space === 'workshop') open.set(target);
+		if (target && url?.searchParams.has('g')) revealGroup(target);
 	}
 
 	afterNavigate(({ from, to }) => {
@@ -243,7 +327,11 @@
 		const q = to?.url.searchParams.get('q') ?? '';
 		leaving = false;
 		if (!from || from.url.pathname !== to?.url.pathname || q !== words.trim()) words = q;
-		scrollToGroup(to?.url.searchParams.get('g') ?? null);
+		const own = wrote !== null && !!to && `${to.url.pathname}${to.url.search}` === wrote;
+		wrote = null;
+		if (own) return;
+		if (!from || from.url.pathname !== to?.url.pathname) edited.set(new Set());
+		arrive(to?.url ?? null);
 	});
 
 	onMount(async () => {
@@ -252,13 +340,12 @@
 		} catch {
 			// The health module may be unavailable; the panels still render.
 		}
-		scrollToGroup($page.url.searchParams.get('g'));
 	});
 </script>
 
-<div class="oo-hub">
+<div class="oo-hub" data-space={space} bind:this={hubEl}>
 	<header class="oo-hub-head">
-		<h1 class="oo-hub-title">{title}</h1>
+		<h1 class="oo-hub-title" id={TITLE_ID}>{title}</h1>
 		<div class="oo-hub-search">
 			<Input
 				label="Search every setting"
@@ -279,6 +366,8 @@
 
 	{#if space === 'workshop' && section === 'network'}
 		<NetworkReachability />
+	{:else if space === 'workshop' && section === 'security'}
+		<SecurityGrade />
 	{/if}
 
 	{#if query}
@@ -313,17 +402,26 @@
 				</ul>
 			{/if}
 		</section>
-	{:else}
+	{/if}
+
+	<!-- The page's groups, hidden while the search shows its results: an
+	     open or used group keeps its panel, and its draft, through a search. -->
+	<div class="oo-hub-pages" hidden={!!query}>
 		{#each pageSections as s (s.id)}
-			<section class="oo-hub-section" aria-labelledby={`oo-hub-${s.id}`}>
-				<div class="oo-hub-section-head">
-					<h2 class="oo-hub-section-title" id={`oo-hub-${s.id}`}>{s.label}</h2>
-					{#if space === 'use' && s.id === 'appearance'}
-						<ThemeSwitcher />
-					{:else if space === 'use' && s.id === 'account'}
-						<UserMenu />
-					{/if}
-				</div>
+			<section
+				class="oo-hub-section"
+				aria-labelledby={space === 'workshop' ? TITLE_ID : `oo-hub-${s.id}`}
+			>
+				{#if space === 'use'}
+					<div class="oo-hub-section-head">
+						<h2 class="oo-hub-section-title" id={`oo-hub-${s.id}`}>{s.label}</h2>
+						{#if s.id === 'appearance'}
+							<ThemeSwitcher />
+						{:else if s.id === 'account'}
+							<UserMenu />
+						{/if}
+					</div>
+				{/if}
 				{#each introsOf(s.groups) as block (block.intro)}
 					{#if block.intro === 'appearance'}
 						<AppearanceSection groups={block.ids} />
@@ -352,7 +450,7 @@
 				</div>
 			</section>
 		{/each}
-	{/if}
+	</div>
 </div>
 
 <style>
@@ -424,6 +522,11 @@
 		flex-direction: column;
 		gap: var(--oo-space-4);
 		margin-top: var(--oo-space-4);
+	}
+	/* A Workshop page's groups are quiet rows, set apart by space alone. */
+	.oo-hub[data-space='workshop'] .oo-hub-groups {
+		gap: var(--oo-space-3);
+		margin-top: var(--oo-space-3);
 	}
 
 	.oo-hub-error {

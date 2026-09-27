@@ -199,9 +199,6 @@
 <div class="space-y-6">
 	<!-- Header -->
 	<div>
-		<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
-			Backup & Restore
-		</h2>
 		<p class="text-xs mt-0.5" style="color: var(--oo-fg-muted);">
 			Export your configuration to a file or restore from a previous backup.
 		</p>

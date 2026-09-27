@@ -39,6 +39,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Button, Card, Icon, EmptyState, InlineError, ConfirmDialog, Input } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import {
 		getSyncStatus,
 		listSyncPeers,
@@ -384,10 +386,6 @@
 
 <section class="sync-panel">
 	<header class="sync-header">
-		<div class="sync-title">
-			<Icon name="share-2" />
-			<h2>Sync (Veilid)</h2>
-		</div>
 		<Button variant="ghost" on:click={load} disabled={loading}>
 			<Icon name="refresh-cw" />
 			Refresh
@@ -755,6 +753,9 @@
 	onConfirm={runRename}
 	onCancel={closeRename}
 >
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
 	<Input label="Device label" bind:value={renameLabel} autofocus />
 </ConfirmDialog>
 
@@ -768,17 +769,7 @@
 	.sync-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-	}
-	.sync-title {
-		display: flex;
-		align-items: center;
-		gap: var(--oo-space-2);
-	}
-	.sync-title h2 {
-		margin: 0;
-		font-size: var(--oo-text-lg);
-		color: var(--oo-fg-primary);
+		justify-content: flex-end;
 	}
 	.sync-bulbe-note {
 		display: flex;

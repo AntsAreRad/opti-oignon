@@ -996,6 +996,97 @@ package costs.
 
 ### Changed
 
+- The Workshop's settings pages are quiet lists: each group is a row,
+  titled once, and one group is open at a time. Only the open group loads
+  its panel, so entering Models and inference no longer starts thirteen
+  panels' reads, and the model health poll, at once; a closed group's panel
+  never asks the server anything (its code may still come with the page's).
+  A group whose panel was used on this visit (a field typed in, a choice
+  clicked, a switch pressed, a file dropped) stays mounted, hidden, once
+  closed, so what it held is there when it reopens: a draft, a queue of
+  files, an ingest's progress. A search on the page hides the groups
+  instead of dropping them, so a draft outlives it too; leaving the page
+  still drops what was not saved. The address names the open group (`?g=`): the command
+  palette, the settings search and a shared link open it, focused and
+  scrolled into view, and a link to one of the inference pipeline's
+  dashboards opens the group that shows them. With no group named, a page's
+  only group opens, and a page of several opens none. Preferences' groups
+  do not fold. Each group's title is drawn once, by a new header of the
+  design system (`PanelHeader`): the whole row is its target, and its
+  description is read as the button's description, not as part of the
+  heading. Twenty-nine panels repeated their group's title above their own
+  content; none does now, nor writes a heading at or above its group's
+  level, and a Workshop page no longer repeats its own title as a section
+  heading. The design system's row of tabs scrolls within itself when it is
+  wider than its place, with room for the focus ring on every side, and
+  keeps the selected tab in view, a link to a far tab included; a dialog no
+  longer opens with its focus on the controls in its head.
+
+  Observability lists the inference pipeline once. Its group, now called
+  "Inference pipeline", holds an overview and one row of tabs (Telemetry,
+  Telemetry history, Profiler, Performance dashboard) drawn from the
+  catalog, which marks the four dashboards as embedded in it; they used to
+  be both tabs of that group and groups of their own on the same page. The
+  overview says each state in words ("Collecting", "12 requests profiled",
+  "History off") where a coloured dot stood. A control that changes the
+  tab (an overview's "Open", a model picked in the profiler, the history's
+  filter cleared) hands focus to the selected tab, and clearing the filter
+  draws the history again unfiltered, where it used to stay filtered. The knowledge base no longer
+  holds the retrieval dashboard in a sub-tab, nor the installed plugins the
+  marketplace: each is mounted once, as its own group. Model assignment
+  lives only in Models and inference, where it now says the roles could not
+  be read (with a retry) instead of "No role assignments found.", shows a
+  refused save under its role, and keeps the editor open on the reader's
+  choices when a save fails. A group's feature gate names a key the server
+  serves and the panel's own routes check: the knowledge base, the
+  retrieval dashboard, the installed plugins and the marketplace were gated
+  by keys the health map never served, so they could never show as
+  unavailable; the telemetry history and the plugin allowlist carry none,
+  their routes checking a flag the health map does not serve. The history's
+  retention could not be saved (its client called a helper it never
+  imported); it can. "Fine-Tune export" reads "Fine-tune export".
+
+  The Security page opens on the grade the status card's badge shows: its
+  letter, its score and how many checks passed, and, behind a disclosure,
+  each check with its points and its detail, whether sessions use httpOnly
+  cookies, and the ten most recent security events (sign-in activity:
+  logins, failed logins, registrations and password changes; sandbox
+  blocks, sign-in lockouts and detected search injections). Only a panel no page
+  reached showed them; it is deleted, with the unreachable claim verifier
+  (the Verify page's pairs mode does its work), that verifier's client and
+  an unused focus trap. The badge reads the grade through the API client,
+  so an expired session now takes the reader to the sign-in page, as every
+  request does, where the badge used to hide itself.
+
+  Stop all sits in the head of every dialog of the Workshop's pages (a
+  run's detail, fine-tune's and the knowledge base's deletes, the
+  documents' two deletes, hardening's confirmation, the marketplace's
+  reviews, remote access's two confirmations, device sync's rename) and of
+  the first-run dialog. That dialog no longer reloads the page after a
+  preset: once a preset is applied, closing it ("Get started", Escape or
+  its close button) reads again what the preset changed (the chat's models
+  and default model, the feature map, the backends, the chat control bar's
+  switches), and so do applying a preset and "Reload from disk" at Models
+  and inference, which refreshed none of it before. It cannot be closed
+  while the preset is being applied. Its presets are one radio group; the
+  recommended one says so in a word, and the dialog opens on the chosen
+  one. The grade's, the roles' and the first-run dialog's retries keep
+  focus while they read again, and what replaces a pressed control takes
+  it.
+
+  The benchmarks page is one row of tabs over the quality evaluation (Run,
+  Leaderboard, Head-to-head, Trends, Compare, History, Profiles), where two
+  rows used to nest, with a second "Run" and a second "History" for the
+  older suite engine. The tab lives in the address, and a run opened from
+  History closes back onto History. What left the interface with the older
+  engine's pages: its keyword-scored suites, the temperature and timeout of
+  a run, its live table of results, and the list of its past runs with
+  their deletion, for which the evaluation has no equivalent. Those runs
+  stay on the server (`GET` and `DELETE /api/benchmark/runs`), and none of
+  its routes changed; an old `/benchmark?tab=models` link lands on Run.
+  System status's section that times the server's own components is now
+  "Component latency", with a "Measure" button: it was titled "Benchmarks",
+  and it benchmarks no model.
 - Run `npm ci` in `frontend/` after pulling this change: the reply renderer
   adds `marked`, the frontend's third runtime dependency, and an install
   made before it does not hold it, so the app fails to load. The launcher

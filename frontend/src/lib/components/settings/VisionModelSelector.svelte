@@ -109,7 +109,6 @@
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
 		<div>
-			<h3 class="text-sm font-medium" style="color: var(--oo-fg-primary);">Vision Model</h3>
 			<p class="text-xs mt-0.5" style="color: var(--oo-fg-muted);">
 				Select which model handles image analysis. Auto mode detects vision-capable models
 				via Ollama capabilities and name patterns.

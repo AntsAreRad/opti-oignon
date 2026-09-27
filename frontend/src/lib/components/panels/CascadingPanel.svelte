@@ -145,10 +145,7 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h3 class="text-sm font-medium" style="color: var(--oo-fg-primary);">
-			Cascading Inference
-		</h3>
+	<div class="flex items-center justify-end">
 		{#if !loading}
 			<span class="text-xs px-2 py-0.5 rounded-full"
 				style="background-color: {status?.available ? 'var(--oo-success-bg)' : 'var(--oo-error-bg)'};

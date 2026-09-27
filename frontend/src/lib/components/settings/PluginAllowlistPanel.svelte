@@ -188,10 +188,7 @@
 
   <!-- Allowlist Status Card -->
   <div class="rounded-lg p-5 mb-4" style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-base font-semibold" style="color: var(--oo-fg-primary);">
-        Plugin Allowlist
-      </h3>
+    <div class="flex items-center justify-end mb-4">
       <span
         class="text-xs px-2 py-1 rounded font-medium"
         style="background-color: {bulbeMode ? 'var(--oo-fg-error)' : 'var(--oo-success)'}; color: var(--oo-fg-on-semantic);"

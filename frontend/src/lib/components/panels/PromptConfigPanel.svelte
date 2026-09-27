@@ -173,10 +173,7 @@
 
 <div class="space-y-6">
 	<!-- Header -->
-	<div class="flex items-center justify-between">
-		<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
-			Prompt Intelligence
-		</h2>
+	<div class="flex items-center justify-end">
 		<button
 			on:click={handleReload}
 			class="px-3 py-1.5 rounded text-xs font-medium transition-colors"

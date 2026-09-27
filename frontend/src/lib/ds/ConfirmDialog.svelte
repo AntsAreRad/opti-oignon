@@ -11,7 +11,8 @@
   the cancelling button and the close button wait, and Escape and the
   backdrop do not close it. The body is a form that confirms on submit, so
   a dialog that holds one field (given `autofocus`, where focus lands on
-  open) confirms with Enter.
+  open) confirms with Enter. Its `actions` slot goes to the dialog's head:
+  a page puts Stop all there, which the dialog never opens on.
 -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
@@ -69,6 +70,9 @@
 			</div>
 		{/if}
 	</form>
+	<svelte:fragment slot="actions">
+		<slot name="actions" />
+	</svelte:fragment>
 	<svelte:fragment slot="footer">
 		<Button variant="secondary" disabled={busy} on:click={dismiss}>{cancelLabel}</Button>
 		<Button variant={danger ? 'danger' : 'primary'} loading={busy} on:click={accept}>{confirmLabel}</Button>

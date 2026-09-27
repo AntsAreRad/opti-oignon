@@ -1,8 +1,9 @@
 <!--
   BenchmarkHistorySection.svelte
-  The "History" section extracted from BenchmarkV2Panel: the fifty latest
+  The "History" section of the benchmarks page: the fifty latest
   runs, filtered by a run's id, profile or models. Each run's profile links
-  to the same page with ?run=<id>, which opens the run's detail drawer
+  to the same page with ?tab=history&run=<id>, which opens the run's detail
+  drawer over History, and closes onto it
   (every model's accuracy, code, structure and speed): the history is how
   the interface reaches it.
 -->
@@ -25,7 +26,7 @@
 		: historyEntries;
 
 	function runHref(entry: BenchmarkV2HistoryEntry): string {
-		return `/workshop/benchmarks?run=${encodeURIComponent(entry.run_id)}`;
+		return `/workshop/benchmarks?tab=history&run=${encodeURIComponent(entry.run_id)}`;
 	}
 
 	onMount(loadHistory);

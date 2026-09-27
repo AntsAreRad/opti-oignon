@@ -7,6 +7,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Modal } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import {
 		browseMarketplace,
 		searchMarketplace,
@@ -267,7 +269,6 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between flex-wrap gap-2">
 		<div>
-			<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">Marketplace</h2>
 			<p class="text-xs mt-0.5" style="color: var(--oo-fg-muted);">
 				Browse, search, and install community plugins.
 				{#if !loading}
@@ -552,6 +553,9 @@
 		title={selectedEntry?.name ?? 'Plugin details'}
 		onClose={closeReviews}
 	>
+		<svelte:fragment slot="actions">
+			<StopAllButton placement="dialog-head" large={$isPhone} />
+		</svelte:fragment>
 		{#if selectedEntry}
 			<p class="text-xs" style="color: var(--oo-fg-muted); margin: 0 0 8px;">
 				v{selectedEntry.version} by {selectedEntry.author}

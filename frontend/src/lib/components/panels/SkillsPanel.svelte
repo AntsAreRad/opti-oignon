@@ -112,10 +112,6 @@
 
 <section class="skills-panel">
 	<header class="skills-header">
-		<div class="skills-title">
-			<Icon name="book-marked" />
-			<h2>Skills</h2>
-		</div>
 		<Button variant="ghost" on:click={load} disabled={loading}>
 			<Icon name="refresh-cw" />
 			Refresh
@@ -226,17 +222,7 @@
 	.skills-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-	}
-	.skills-title {
-		display: flex;
-		align-items: center;
-		gap: var(--oo-space-2);
-	}
-	.skills-title h2 {
-		margin: 0;
-		font-size: var(--oo-text-lg);
-		color: var(--oo-fg-primary);
+		justify-content: flex-end;
 	}
 	.skills-filters {
 		display: flex;

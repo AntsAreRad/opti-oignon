@@ -96,10 +96,7 @@
 
 <div class="space-y-5">
 	<!-- Header -->
-	<div class="flex items-center justify-between">
-		<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
-			Analytics & Feedback
-		</h2>
+	<div class="flex items-center justify-end">
 		<button
 			on:click={loadData}
 			class="px-2.5 py-1 text-xs rounded transition-colors"

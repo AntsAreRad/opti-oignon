@@ -570,6 +570,18 @@ fail_under = 0
 # dialog through its store, and the handler the root layout mounts on
 # every page runs its commands through the runner.
 #
+# ux17's node half (tests/test_ui_repairs_contracts.py) held that the hub's
+# lazy loaders are exactly the panels of the catalog's groups, with at least
+# forty of them. The four dashboards of the inference pipeline are now
+# embedded in the Observability group: its panel imports them and the hub no
+# longer loads them, so the loaders are the placed groups' panels (38) and
+# both statements are false while the property holds. pf27's hub half in
+# tests/test_workshop_pages_contracts.py keeps every other assertion of that
+# half word for word; its two changed statements are that the loaders are
+# exactly the placed groups' panels, every embedded group's panel imported by
+# its host's, and that the capacity floor reads the loaders together with the
+# panels the hosts import (38 + 4, at least 40). ux17's wiring half stays.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -657,4 +669,5 @@ addopts = """
     --deselect=tests/test_navigation_contracts.py::test_nv1_one_destination_table_and_no_other_list
     --deselect=tests/test_ui_repairs_contracts.py::test_ux16_every_selector_a_global_shortcut_queries_is_rendered
     --deselect=tests/test_shell_contracts.py::test_sh10_export_is_one_shell_level_dialog_opened_through_its_store
+    --deselect=tests/test_ui_repairs_contracts.py::test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[node]
 """

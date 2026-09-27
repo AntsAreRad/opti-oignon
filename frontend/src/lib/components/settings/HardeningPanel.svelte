@@ -18,6 +18,8 @@
 	} from '$lib/api/hardening';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 
 	let status: HardeningStatus | null = null;
 	let loading = true;
@@ -350,4 +352,8 @@
 	error={wipeError || null}
 	onConfirm={runWipeAll}
 	onCancel={closeWipeAll}
-/>
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>

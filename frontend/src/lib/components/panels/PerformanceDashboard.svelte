@@ -174,9 +174,6 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between flex-wrap gap-3">
 		<div>
-			<h2 class="text-base font-medium" style="color: var(--oo-fg-primary);">
-				Performance Dashboard
-			</h2>
 			<p class="text-xs mt-0.5" style="color: var(--oo-fg-tertiary);">
 				Real-time metrics, drift detection, and optimization recommendations
 			</p>

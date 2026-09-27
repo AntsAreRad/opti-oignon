@@ -195,10 +195,7 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h4 class="text-sm font-semibold" style="color: var(--oo-fg-primary);">
-			Security Keys (WebAuthn/FIDO2)
-		</h4>
+	<div class="flex items-center justify-end">
 		{#if webauthnAvailable && !showRegisterForm}
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"

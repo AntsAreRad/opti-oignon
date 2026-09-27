@@ -154,10 +154,6 @@
 
 <section class="memories-panel">
 	<header class="memories-header">
-		<div class="memories-title">
-			<Icon name="brain" size="md" />
-			<h2>Memories</h2>
-		</div>
 		<Button
 			variant="ghost"
 			size="sm"
@@ -267,20 +263,7 @@
 	.memories-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-	}
-
-	.memories-title {
-		display: flex;
-		align-items: center;
-		gap: var(--oo-space-2);
-		color: var(--oo-fg-primary);
-	}
-
-	.memories-title h2 {
-		margin: 0;
-		font-size: var(--oo-text-lg);
-		font-weight: 600;
+		justify-content: flex-end;
 	}
 
 	.memories-status {

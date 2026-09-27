@@ -1564,16 +1564,7 @@ STOPLESS_DIALOGS = {
     "frontend/src/lib/components/panels/MemoriesPanel.svelte": 1,
     "frontend/src/lib/components/panels/NotesPanel.svelte": 1,
     "frontend/src/lib/components/panels/ProjectList.svelte": 1,
-    "frontend/src/lib/components/panels/SyncPanel.svelte": 1,
-    "frontend/src/lib/components/panels/benchmark/BenchmarkRunDrawer.svelte": 1,
-    "frontend/src/lib/components/rag/DocumentManager.svelte": 1,
-    "frontend/src/lib/components/settings/FineTunePanel.svelte": 1,
-    "frontend/src/lib/components/settings/HardeningPanel.svelte": 1,
-    "frontend/src/lib/components/settings/KnowledgeBasePanel.svelte": 1,
-    "frontend/src/lib/components/settings/PluginMarketplace.svelte": 1,
-    "frontend/src/lib/components/settings/RemoteAccessPanel.svelte": 1,
     "frontend/src/lib/components/settings/sections/AppearanceSection.svelte": 1,
-    "frontend/src/lib/components/ui/OnboardingOverlay.svelte": 1,
     "frontend/src/routes/(app)/(use)/chat/+page.svelte": 1,
 }
 

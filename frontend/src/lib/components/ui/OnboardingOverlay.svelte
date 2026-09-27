@@ -1,14 +1,34 @@
 <!--
   OnboardingOverlay.svelte
-  Full-screen overlay shown on first run (user_initialized === false).
-  Detects installed Ollama models, recommends a system preset,
-  and allows one-click apply. Dismissible after apply or skip.
-  Migrated to the shared <Modal> primitive (native dialog focus
-  trap + Escape). Backdrop click is disabled; Escape maps to Skip.
+  The first-run dialog, shown while the install is not set up
+  (user_initialized false). It lists the models it finds installed,
+  recommends a system preset, and applies the one the reader chooses.
+
+  The presets are one choice, a radio group named "System preset": each
+  card says its name, the memory it wants and what it does; the chosen one
+  carries a check, the recommended one says "Recommended" in a word, and
+  the dialog opens on the chosen card. Once a preset is applied, the dialog
+  closes on "Get started", Escape or its close button alike, and reads
+  again what the preset changed (the chat's models and default model, the
+  feature map, the backends, the control bar's switches:
+  lib/stores/configRefresh.ts) instead of reloading the page. While the
+  preset is being applied, the dialog cannot be closed.
+
+  Built on the ds Modal (a native modal dialog): Escape and the close
+  button mean Skip, a click on the backdrop does nothing. Stop all sits in
+  its head, since the page under it is inert, and never takes its first
+  focus. Each step that replaces the control just pressed hands focus to
+  its own: the note while the models are scanned or the preset applied,
+  "Get started" once applied, the retry after a failure. Its props are its
+  state, set by the component itself once mounted, so each step can be
+  drawn on the server.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { Modal } from '$lib/ds';
+	import { onMount, tick } from 'svelte';
+	import { Button, Icon, InlineError, Modal } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
+	import { refreshAfterConfigChange } from '$lib/stores/configRefresh';
 	import type {
 		SystemPresetInfo,
 		SystemPresetDetectResponse,
@@ -20,17 +40,27 @@
 		applySystemPreset,
 	} from '$lib/api/systemPresets';
 
-	let visible = false;
-	let step: 'loading' | 'ready' | 'applying' | 'done' | 'error' = 'loading';
+	/** Whether the dialog is shown. */
+	export let visible = false;
+	/** Where the dialog is. */
+	export let step: 'loading' | 'ready' | 'applying' | 'done' | 'error' = 'loading';
+	/** The presets offered. */
+	export let presets: SystemPresetInfo[] = [];
+	/** The models found and the preset they recommend. */
+	export let detection: SystemPresetDetectResponse | null = null;
+	/** The preset chosen. */
+	export let selectedPresetId = '';
 
-	let presets: SystemPresetInfo[] = [];
-	let detection: SystemPresetDetectResponse | null = null;
-	let selectedPresetId = '';
 	let applyResult: { preset_name: string; selected_model: string | null; warnings: string[] } | null = null;
 	let errorMsg = '';
+	let choices: HTMLElement | undefined;
+	let body: HTMLElement | undefined;
+	let actions: HTMLElement | undefined;
 
 	const MAX_RETRIES = 3;
 	const RETRY_DELAY_MS = 2000;
+
+	$: chosen = presets.find((preset) => preset.id === selectedPresetId);
 
 	onMount(async () => {
 		try {
@@ -57,12 +87,12 @@
 				await loadData();
 				return;
 			} catch {
-			// BUG-10: Backend may not be ready yet (404 / connection error).
-				// Retry with delay before giving up.
+				// The backend may not be ready yet (404 or no connection):
+				// wait, then ask again before giving up.
 				if (attempt < MAX_RETRIES - 1) {
 					await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
 				} else {
-					// All retries exhausted -- backend not available
+					// Every attempt failed: the backend is not there.
 					visible = false;
 				}
 			}
@@ -80,16 +110,40 @@
 			detection = detectResp;
 			selectedPresetId = detectResp.recommended_preset;
 			step = 'ready';
+			await tick();
+			choices?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
 		} catch (e) {
 			errorMsg = e instanceof Error ? e.message : 'Failed to load system data';
 			step = 'error';
+			focusStep();
 		}
+	}
+
+	/** A retry after a failure: the note says the models are being scanned. */
+	function retryLoad() {
+		loadData();
+		focusStep();
+	}
+
+	/** The control just pressed is gone: focus goes to what the step shows instead. */
+	async function focusStep() {
+		await tick();
+		const target =
+			step === 'done'
+				? actions?.querySelector<HTMLElement>('button')
+				: step === 'error'
+					? body?.querySelector<HTMLElement>('.oo-inline-error button')
+					: step === 'loading' || step === 'applying'
+						? body?.querySelector<HTMLElement>('.ob-step-note')
+						: null;
+		target?.focus();
 	}
 
 	async function handleApply() {
 		if (!selectedPresetId) return;
 		step = 'applying';
 		errorMsg = '';
+		focusStep();
 		try {
 			const result = await applySystemPreset(selectedPresetId);
 			if (result.applied) {
@@ -107,25 +161,32 @@
 			errorMsg = e instanceof Error ? e.message : 'Failed to apply preset';
 			step = 'error';
 		}
+		focusStep();
 	}
 
+	/** Skip, Escape and the close button: once a preset was applied, what it changed is read again. */
 	function handleSkip() {
 		visible = false;
+		if (applyResult) refreshAfterConfigChange();
 	}
 
-	function handleClose() {
+	/** Closes the dialog, then reads again what the preset changed. */
+	function handleGetStarted() {
 		visible = false;
-		// Reload page to pick up new configs
-		window.location.reload();
+		refreshAfterConfigChange();
 	}
 
-	function presetIconSvg(icon: string): string {
-		switch (icon) {
-			case 'leaf': return 'M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66L7 18.5C9 15 12 12 17 8z M20.5 3.5C17 7 13 9 10 10l1 2c3-1 6.5-3.5 9.5-6.5';
-			case 'scale': return 'M12 3v18m-7-4l7-10 7 10M5 17h14';
-			case 'zap': return 'M13 2L3 14h9l-1 10 10-12h-9l1-10z';
-			default: return 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5';
-		}
+	/** The arrows move the choice through the presets, as a radio group does. */
+	async function onChoiceKey(event: KeyboardEvent, index: number) {
+		const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+		const back = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+		if (!forward && !back) return;
+		event.preventDefault();
+		const count = presets.length;
+		const next = (index + (forward ? 1 : -1) + count) % count;
+		selectedPresetId = presets[next].id;
+		await tick();
+		choices?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
 	}
 </script>
 
@@ -135,168 +196,103 @@
 	size="lg"
 	title="Welcome to Opti-Oignon"
 	closeOnBackdrop={false}
+	closable={step !== 'applying'}
+	closeOnEsc={step !== 'applying'}
 	onClose={handleSkip}
 >
-	<!-- Branded intro -->
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+
 	<div class="ob-intro">
-		<div class="ob-logo-ring">
-			<img src="/bousier-oignon.png" alt="Opti-Oignon" class="ob-logo oo-logo-adaptive" />
-		</div>
+		<img src="/bousier-oignon.png" alt="Opti-Oignon" class="ob-logo oo-logo-adaptive" />
 		<p class="ob-tagline">Let's configure your setup in one click.</p>
 	</div>
 
-	<div class="ob-body">
+	<div class="ob-body" bind:this={body}>
 		{#if step === 'loading'}
-			<div class="flex flex-col items-center gap-3 py-6">
-				<div class="w-6 h-6 border-2 rounded-full animate-spin"
-					style="border-color: var(--oo-bd-default); border-top-color: var(--oo-acc-400);"></div>
-				<span class="text-sm" style="color: var(--oo-fg-tertiary);">
-					Scanning installed models...
-				</span>
-			</div>
+			<p class="ob-note ob-step-note" tabindex="-1">Scanning installed models</p>
 		{:else if step === 'error'}
-			<div class="px-4 py-3 rounded-lg text-sm"
-				style="background-color: var(--oo-error-bg); border: 1px solid var(--oo-error-bd); color: var(--oo-error);">
-				{errorMsg}
-			</div>
-			<div class="flex justify-center gap-3">
-				<button on:click={loadData}
-					class="px-4 py-2 rounded-lg text-sm font-medium"
-					style="background-color: var(--oo-bg-elevated); color: var(--oo-fg-secondary);
-						border: 1px solid var(--oo-bd-default);">
-					Retry
-				</button>
-				<button on:click={handleSkip}
-					class="px-4 py-2 rounded-lg text-sm"
-					style="color: var(--oo-fg-muted);">
-					Skip for now
-				</button>
-			</div>
+			<InlineError message={errorMsg} onRetry={retryLoad} />
 		{:else if step === 'ready'}
-			<!-- Detected models summary -->
 			{#if detection}
-				<div class="rounded-lg px-4 py-3"
-					style="background-color: var(--oo-bg-elevated); border: 1px solid var(--oo-bd-subtle);">
-					<div class="flex items-center gap-2 mb-2">
-						<svg class="w-4 h-4" style="color: var(--oo-acc-400);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
-						</svg>
-						<span class="text-sm font-medium" style="color: var(--oo-fg-primary);">
-							{detection.models.length} model{detection.models.length !== 1 ? 's' : ''} detected
-						</span>
-					</div>
+				<div class="ob-found">
+					<p class="ob-found-count">
+						{detection.models.length}
+						{detection.models.length === 1 ? 'model' : 'models'} detected
+					</p>
 					{#if detection.models.length > 0}
-						<div class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+						<ul class="ob-models">
 							{#each detection.models as m}
-								<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs"
-									style="background-color: var(--oo-bg-overlay); color: var(--oo-fg-secondary);
-										border: 1px solid var(--oo-bd-subtle);">
-									<span class="font-mono">{m.name}</span>
+								<li>
+									<span class="ob-model-name">{m.name}</span>
 									{#if m.parameter_count_b > 0}
-										<span style="color: var(--oo-fg-muted);">{m.parameter_count_b}B</span>
+										<span class="ob-model-size">{m.parameter_count_b}B</span>
 									{/if}
-								</span>
+								</li>
 							{/each}
-						</div>
+						</ul>
 					{:else}
-						<p class="text-xs" style="color: var(--oo-fg-muted);">
-							No models found. Install models with <code class="font-mono px-1 py-0.5 rounded"
-								style="background-color: var(--oo-bg-overlay);">ollama pull</code> first, or pick Minimal.
+						<p class="ob-note">
+							No models found. Install models with <code>ollama pull</code> first, or pick Minimal.
 						</p>
 					{/if}
 				</div>
 			{/if}
 
-			<!-- Preset selector -->
-			<div class="space-y-2">
-				<p class="text-xs font-medium uppercase tracking-wide"
-					style="color: var(--oo-fg-muted);">
-					Choose a configuration preset
-				</p>
-				{#each presets as preset (preset.id)}
+			<div class="ob-choices" role="radiogroup" aria-label="System preset" bind:this={choices}>
+				{#each presets as preset, index (preset.id)}
+					{@const picked = preset.id === selectedPresetId}
 					<button
-						on:click={() => { selectedPresetId = preset.id; }}
-						class="w-full text-left px-4 py-3 rounded-lg transition-all"
-						style="background-color: {selectedPresetId === preset.id ? 'var(--oo-acc-900)' : 'var(--oo-bg-elevated)'};
-							border: 1.5px solid {selectedPresetId === preset.id ? 'var(--oo-acc-ink)' : 'var(--oo-bd-subtle)'};
-							{selectedPresetId === preset.id ? 'box-shadow: 0 0 12px var(--oo-msg-user-bg);' : ''}"
+						type="button"
+						class="ob-choice"
+						role="radio"
+						aria-checked={picked}
+						tabindex={picked ? 0 : -1}
+						data-autofocus={picked || undefined}
+						on:click={() => (selectedPresetId = preset.id)}
+						on:keydown={(event) => onChoiceKey(event, index)}
 					>
-						<div class="flex items-center gap-3">
-							<!-- Icon -->
-							<div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-								style="background-color: {selectedPresetId === preset.id ? 'var(--oo-acc-600)' : 'var(--oo-bg-overlay)'}; color: {selectedPresetId === preset.id ? 'var(--oo-fg-on-accent)' : 'var(--oo-fg-tertiary)'};">
-								<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke-width="1.8"
-									stroke="currentColor">
-									<path d="{presetIconSvg(preset.icon)}" />
-								</svg>
-							</div>
-							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-2">
-									<span class="text-sm font-medium"
-										style="color: var(--oo-fg-primary);">
-										{preset.name}
-									</span>
-									{#if detection?.recommended_preset === preset.id}
-										<span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-											style="background-color: var(--oo-success-bg); color: var(--oo-success);
-												border: 1px solid var(--oo-success-bd);">
-											Recommended
-										</span>
-									{/if}
-									<span class="text-[10px] ml-auto"
-										style="color: var(--oo-fg-muted);">
-										{preset.recommended_ram_gb}+ GB RAM
-									</span>
-								</div>
-								<p class="text-xs mt-0.5 line-clamp-2"
-									style="color: var(--oo-fg-tertiary);">
-									{preset.description}
-								</p>
-							</div>
-						</div>
+						<span class="ob-choice-head">
+							<span class="ob-choice-name">{preset.name}</span>
+							{#if detection?.recommended_preset === preset.id}
+								<span class="ob-choice-word">Recommended</span>
+							{/if}
+							<span class="ob-choice-ram">{preset.recommended_ram_gb}+ GB RAM</span>
+							{#if picked}
+								<span class="ob-choice-check"><Icon name="check" size="sm" /></span>
+							{/if}
+						</span>
+						<span class="ob-choice-desc">{preset.description}</span>
 					</button>
 				{/each}
 			</div>
 
 			{#if detection?.reason}
-				<p class="text-xs italic" style="color: var(--oo-fg-muted);">
-					{detection.reason}
-				</p>
+				<p class="ob-note">{detection.reason}</p>
 			{/if}
-
 		{:else if step === 'applying'}
-			<div class="flex flex-col items-center gap-3 py-6">
-				<div class="w-6 h-6 border-2 rounded-full animate-spin"
-					style="border-color: var(--oo-bd-default); border-top-color: var(--oo-acc-400);"></div>
-				<span class="text-sm" style="color: var(--oo-fg-tertiary);">
-					Applying configuration...
-				</span>
-			</div>
-
+			<p class="ob-note ob-step-note" tabindex="-1">Applying configuration</p>
 		{:else if step === 'done'}
-			<div class="text-center py-4 space-y-3">
-				<div class="mx-auto w-12 h-12 rounded-full flex items-center justify-center"
-					style="background-color: var(--oo-success-bg); border: 1px solid var(--oo-success-bd);">
-					<svg class="w-6 h-6" style="color: var(--oo-success);" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-						<path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
-				</div>
-				<div>
-					<p class="text-sm font-medium" style="color: var(--oo-fg-primary);">
-						{applyResult?.preset_name} preset applied
-					</p>
-					{#if applyResult?.selected_model}
-						<p class="text-xs mt-1" style="color: var(--oo-fg-tertiary);">
-							Default model: <span class="font-mono">{applyResult.selected_model}</span>
-						</p>
-					{/if}
-				</div>
+			<div class="ob-done">
+				<p class="ob-done-title">
+					<span class="ob-choice-check"><Icon name="check" size="sm" /></span>
+					{applyResult?.preset_name} preset applied
+				</p>
+				{#if applyResult?.selected_model}
+					<p class="ob-note">Default model: <code>{applyResult.selected_model}</code></p>
+				{/if}
 				{#if applyResult?.warnings && applyResult.warnings.length > 0}
-					<div class="text-left px-4 py-2 rounded-lg text-xs"
-						style="background-color: var(--oo-warning-bg); border: 1px solid var(--oo-warning-bd); color: var(--oo-warning);">
-						{#each applyResult.warnings as w}
-							<p>{w}</p>
-						{/each}
+					<div class="ob-warnings">
+						<p class="ob-warnings-title">
+							<Icon name="alert-triangle" size="sm" />
+							Warnings
+						</p>
+						<ul>
+							{#each applyResult.warnings as w}
+								<li>{w}</li>
+							{/each}
+						</ul>
 					</div>
 				{/if}
 			</div>
@@ -304,49 +300,33 @@
 	</div>
 
 	<svelte:fragment slot="footer">
-		{#if step === 'ready'}
-			<button on:click={handleSkip}
-				class="text-sm px-3 py-1.5 rounded-lg transition-colors"
-				style="color: var(--oo-fg-muted); margin-right: auto;"
-				title="Skip and configure manually later, in Preferences and the Workshop">
-				Skip
-			</button>
-			<button on:click={handleApply}
-				disabled={!selectedPresetId}
-				class="px-5 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-40"
-				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);
-					{selectedPresetId ? 'box-shadow: 0 2px 12px var(--oo-msg-user-bd);' : ''}">
-				Apply {presets.find(p => p.id === selectedPresetId)?.name ?? ''} Preset
-			</button>
-		{:else if step === 'done'}
-			<button on:click={handleClose}
-				class="px-5 py-2 rounded-lg text-sm font-medium"
-				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);
-					box-shadow: 0 2px 12px var(--oo-msg-user-bd);">
-				Get Started
-			</button>
-		{:else if step === 'applying'}
-			<span class="text-xs" style="color: var(--oo-fg-muted);">Please wait...</span>
-		{/if}
+		<span class="ob-actions" bind:this={actions}>
+			{#if step === 'ready'}
+				<span class="ob-skip">
+					<Button variant="ghost" on:click={handleSkip}>Skip</Button>
+				</span>
+				<Button variant="primary" disabled={!selectedPresetId} on:click={handleApply}>
+					Apply {chosen?.name ?? ''} preset
+				</Button>
+			{:else if step === 'error'}
+				<Button variant="ghost" on:click={handleSkip}>Skip for now</Button>
+			{:else if step === 'done'}
+				<Button variant="primary" on:click={handleGetStarted}>Get started</Button>
+			{:else if step === 'applying'}
+				<span class="ob-note">Please wait</span>
+			{/if}
+		</span>
 	</svelte:fragment>
 </Modal>
 
 <style>
 	.ob-intro {
-		text-align: center;
-		margin-bottom: var(--oo-space-5);
-	}
-	.ob-logo-ring {
-		margin: 0 auto var(--oo-space-3);
-		width: 6rem;
-		height: 6rem;
-		border-radius: var(--oo-radius-full);
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		justify-content: center;
-		background: radial-gradient(circle, var(--oo-acc-fill-hover) 0%, var(--oo-acc-fill) 100%);
-		color: var(--oo-fg-on-accent);
-		box-shadow: 0 0 24px var(--oo-acc-fill);
+		gap: var(--oo-space-3);
+		margin-bottom: var(--oo-space-5);
+		text-align: center;
 	}
 	.ob-logo {
 		width: 4rem;
@@ -355,12 +335,152 @@
 	}
 	.ob-tagline {
 		margin: 0;
-		font-size: var(--oo-text-sm);
-		color: var(--oo-fg-tertiary);
+		color: var(--oo-fg-secondary);
+		font-family: var(--oo-font-serif);
+		font-size: var(--oo-text-base);
 	}
+
 	.ob-body {
 		display: flex;
 		flex-direction: column;
 		gap: var(--oo-space-4);
+	}
+	.ob-note {
+		margin: 0;
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-sm);
+	}
+
+	.ob-found {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-2);
+	}
+	.ob-found-count {
+		margin: 0;
+		color: var(--oo-fg-primary);
+		font-size: var(--oo-text-sm);
+	}
+	.ob-models {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--oo-space-1) var(--oo-space-3);
+		max-height: 7rem;
+		margin: 0;
+		padding: 0;
+		overflow-y: auto;
+		list-style: none;
+		font-size: var(--oo-text-xs);
+	}
+	.ob-model-name {
+		color: var(--oo-fg-secondary);
+		font-family: var(--oo-font-mono);
+	}
+	.ob-model-size {
+		margin-left: var(--oo-space-1);
+		color: var(--oo-fg-muted);
+	}
+
+	.ob-choices {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-2);
+	}
+	/* Each preset is a quiet card on the sunken ground; the chosen one
+	   carries a check and its name at weight 600. */
+	.ob-choice {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-1);
+		width: 100%;
+		padding: var(--oo-space-3) var(--oo-space-4);
+		border: 1px solid var(--oo-edge);
+		border-radius: var(--oo-radius-md);
+		background-color: var(--oo-bg-subtle);
+		color: var(--oo-fg-primary);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: background-color var(--oo-motion-fast) var(--oo-ease-default);
+	}
+	.ob-choice:hover {
+		background-color: color-mix(in srgb, var(--oo-fg-primary) 4%, var(--oo-bg-subtle));
+	}
+	.ob-choice-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--oo-space-1) var(--oo-space-3);
+	}
+	.ob-choice-name {
+		font-size: var(--oo-text-sm);
+	}
+	.ob-choice[aria-checked='true'] .ob-choice-name {
+		font-weight: 600;
+	}
+	.ob-choice-word {
+		color: var(--oo-fg-secondary);
+		font-size: var(--oo-text-xs);
+	}
+	.ob-choice-ram {
+		margin-left: auto;
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-xs);
+	}
+	.ob-choice-check {
+		display: inline-flex;
+		align-self: center;
+		color: var(--oo-fg-primary);
+	}
+	.ob-choice-desc {
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-xs);
+		line-height: var(--oo-leading-snug);
+	}
+
+	.ob-done {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--oo-space-2);
+		text-align: center;
+	}
+	.ob-done-title {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--oo-space-2);
+		margin: 0;
+		color: var(--oo-fg-primary);
+		font-size: var(--oo-text-sm);
+	}
+	.ob-warnings {
+		align-self: stretch;
+		color: var(--oo-fg-secondary);
+		font-size: var(--oo-text-xs);
+		text-align: left;
+	}
+	.ob-warnings-title {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--oo-space-1);
+		margin: 0 0 var(--oo-space-1);
+	}
+	.ob-warnings ul {
+		margin: 0;
+		padding-left: var(--oo-space-5);
+	}
+
+	/* The footer's buttons lay out as the footer's own; the span only finds them. */
+	.ob-actions {
+		display: contents;
+	}
+	.ob-skip {
+		margin-right: auto;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ob-choice {
+			transition: none;
+		}
 	}
 </style>
