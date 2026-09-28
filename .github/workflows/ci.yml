@@ -297,7 +297,7 @@ jobs:
           npx svelte-kit sync
           # Pre-existing type debt is tracked as a baseline; the build fails
           # only if NEW errors appear above it. Lower BASELINE as debt is paid down.
-          BASELINE=78
+          BASELINE=31
           set +e
           OUT=$(npm run check 2>&1)
           set -e
