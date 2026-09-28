@@ -49,6 +49,25 @@ def _resolve_backend(model: str):
     except Exception:  # noqa: BLE001 - a broken registry is absence
         return None
 
+
+def _report(on_progress: Callable | None, event: str, **fields) -> None:
+    """One progress event to the caller's hook; its errors never propagate.
+
+    The events of a consensus: ``query`` (``total``, the resolved model
+    count) before the models are asked, ``model_end`` each time a model
+    finishes, answered or failed, ``compare`` when the comparison starts
+    after the last model, and ``compared`` when the selection is made. A
+    stopped consensus reports no comparison; its open step is closed by
+    the caller.
+    """
+    if on_progress is None:
+        return
+    try:
+        on_progress(event, **fields)
+    except Exception as e:
+        logger.debug(f"on_progress {event} failed: {e}")
+
+
 # How often a parallel query looks at its turn's stop while it waits.
 _STOP_POLL_S = 0.1
 
@@ -352,6 +371,7 @@ class ConsensusEngine:
         temperature: float | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> list[ModelResponse]:
         """Query several models in parallel via threading.
 
@@ -359,11 +379,15 @@ class ConsensusEngine:
             messages: Conversation messages
             models: Liste de models (default: config.default_models)
             temperature: Temperature (default: config.temperature)
-            on_model_done: Callback called when a model finishes
+            on_model_done: Callback called when a model finishes, answered
+                or failed; once per model, from the waiting thread
             should_stop: The turn's stop. Checked while the query waits: a
                 stopped query stops waiting and returns the responses it
                 has. The model calls still in flight finish on their own
                 threads and their answers are discarded.
+            on_progress: Optional progress hook (see ``_report``): ``query``
+                with the resolved model count, then ``model_end`` after
+                each ``on_model_done``.
 
         Returns:
             List of each model's responses
@@ -375,6 +399,7 @@ class ConsensusEngine:
             return []
 
         responses: list[ModelResponse] = []
+        _report(on_progress, "query", total=len(_models))
 
         pool = ThreadPoolExecutor(max_workers=len(_models))
         shut = False
@@ -406,28 +431,31 @@ class ConsensusEngine:
                     model_name = futures[future]
                     try:
                         resp = future.result(timeout=self._config.timeout_per_model)
-                        responses.append(resp)
-                        if on_model_done:
-                            try:
-                                on_model_done(resp)
-                            except Exception:
-                                pass
                     except TimeoutError:
                         logger.warning(f"Timeout for model {model_name}")
-                        responses.append(ModelResponse(
+                        resp = ModelResponse(
                             model=model_name,
                             content="",
                             success=False,
                             error="timeout",
-                        ))
+                        )
                     except Exception as e:
                         logger.warning(f"Future error {model_name}: {e}")
-                        responses.append(ModelResponse(
+                        resp = ModelResponse(
                             model=model_name,
                             content="",
                             success=False,
                             error=str(e),
-                        ))
+                        )
+                    # Every model that finished, answered or failed, is
+                    # reported once, as it finishes.
+                    responses.append(resp)
+                    if on_model_done:
+                        try:
+                            on_model_done(resp)
+                        except Exception:
+                            pass
+                    _report(on_progress, "model_end")
 
             pool.shutdown(wait=True)
             shut = True
@@ -714,6 +742,7 @@ class ConsensusEngine:
         temperature: float | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> ConsensusResult:
         """Execute the full multi-model consensus.
 
@@ -732,6 +761,7 @@ class ConsensusEngine:
                 query runs no strategy and no merge: the result carries the
                 responses it has, their comparison, an empty selection and
                 ``metadata["stopped"]``.
+            on_progress: Optional progress hook (see ``_report``).
 
         Returns:
             ConsensusResult complet
@@ -754,9 +784,12 @@ class ConsensusEngine:
             temperature=temperature,
             on_model_done=on_model_done,
             should_stop=should_stop,
+            on_progress=on_progress,
         )
 
-        # 2) Compare the responses
+        # 2) Compare the responses; a stopped query starts no comparison step
+        if should_stop is None or not should_stop():
+            _report(on_progress, "compare")
         comparison = self.compare_responses(responses)
 
         if should_stop is not None and should_stop():
@@ -808,6 +841,7 @@ class ConsensusEngine:
             },
         )
 
+        _report(on_progress, "compared")
         self._last_result = result
         return result
 
@@ -823,11 +857,13 @@ class ConsensusEngine:
         system_prompt: str | None = None,
         on_model_done: Callable[[ModelResponse], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> Generator:
         """Execute consensus and yield results for streaming.
 
         Yields tuples for streaming:
-        - ("consensus_model_done", ModelResponse) for each model
+        - ("consensus_model_done", ModelResponse) for each model, a replay
+          of what ``on_model_done`` already heard live
         - ("consensus_done", ConsensusResult) a la fin
         - str for the final response tokens
 
@@ -839,6 +875,7 @@ class ConsensusEngine:
             on_model_done: Callback additionnel
             should_stop: The turn's stop; a stopped consensus yields its
                 responses and ``consensus_done`` but no text.
+            on_progress: Optional progress hook (see ``_report``).
 
         Yields:
             Chunks de streaming
@@ -857,6 +894,7 @@ class ConsensusEngine:
             system_prompt=system_prompt,
             on_model_done=_model_callback,
             should_stop=should_stop,
+            on_progress=on_progress,
         )
 
         # Yield each model response

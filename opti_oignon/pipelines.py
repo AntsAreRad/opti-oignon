@@ -568,6 +568,38 @@ class PipelineRunner:
             yield "[ERR] Pipeline has no steps"
             return
 
+        # Step frames go to the turn's recorder when it brings one. What a
+        # step's call reports (the pipeline that ran, an admission refused
+        # inside it, a fixed server error) is read from the turn's results,
+        # never from the reply text.
+        # Without a recorder nothing is imported and nothing is emitted.
+        recorder = getattr(run, "steps", None)
+        results = getattr(run, "results", None)
+        if not isinstance(results, dict):
+            results = None
+        total = len(pipeline.steps)
+        step_run = None
+        if recorder is not None:
+            from . import pipeline_step
+
+            step_run = pipeline_step.emit(
+                recorder, "start_run", "exec_pipeline", pipeline.name,
+                total=total, pipeline_id=pipeline.id,
+            )
+        if step_run is None:
+            recorder = None
+
+        def emit(event, *args, **kwargs):
+            if recorder is not None:
+                pipeline_step.emit(recorder, event, step_run, *args, **kwargs)
+
+        def not_run_from(first, reason):
+            for index in range(first, total):
+                emit("end", index, "not_run", reason=reason)
+
+        for index, planned in enumerate(pipeline.steps):
+            emit("pending", index, planned.label, step_type=planned.step_type)
+
         # Contexte passe entre les etapes
         current_input = message
         accumulated_output = ""
@@ -582,6 +614,7 @@ class PipelineRunner:
                     "PipelineRunner: emergency stop engaged, aborting at "
                     f"step {step_idx + 1}/{len(pipeline.steps)}"
                 )
+                not_run_from(step_idx, "Stop all engaged")
                 yield "\n[ERR] Pipeline aborted: emergency stop engaged"
                 return
 
@@ -598,6 +631,7 @@ class PipelineRunner:
                     f"PipelineRunner: etape {step_idx + 1} ignoree "
                     f"(condition '{step.condition}' non remplie)"
                 )
+                emit("end", step_idx, "skipped")
                 continue
 
             # Signaler le debut de l'etape
@@ -630,6 +664,7 @@ class PipelineRunner:
             # Executer l'etape via l'agentic executor
             step_output = ""
             step_failed = False
+            started = False
             try:
                 # Configurer les overrides pour this etape
                 think_override = None
@@ -690,12 +725,23 @@ class PipelineRunner:
                             f"{step_idx + 1}/{len(pipeline.steps)}: "
                             f"{_gov_decision.reason}"
                         )
+                        not_run_from(
+                            step_idx, f"Resources refused for {step_routing.model}"
+                        )
                         yield (
                             "\n[ERR] Pipeline aborted: resource admission "
                             f"refused for {step_routing.model} "
                             f"({_gov_decision.reason})"
                         )
                         return
+
+                # The step runs only once admitted; what its call reports
+                # is its own, so the previous step's reports are cleared.
+                if results is not None:
+                    for key in ("pipeline", "admission_refused", "step_error"):
+                        results.pop(key, None)
+                started = True
+                emit("running", step_idx)
 
                 for chunk in executor.execute(
                     message=step_prompt,
@@ -729,11 +775,43 @@ class PipelineRunner:
                 yield error_msg
                 step_output = error_msg
                 step_failed = True
+                if not started:
+                    emit("running", step_idx)
+                emit("end", step_idx, "failed", reason=str(e))
+
+            # How the step ended, when it did not raise. A stop is never a
+            # failure; a refusal inside the step ends the run, and its text
+            # never reaches a later step.
+            refused = None
+            if not step_failed:
+                _estop = _resolve_emergency_stop()
+                if _estop is not None and _estop.is_stopped():
+                    emit("end", step_idx, "cancelled", reason="Stop all engaged")
+                elif run is not None and run.stop.is_set():
+                    emit("end", step_idx, "cancelled")
+                elif results is not None and results.get("step_error"):
+                    step_failed = True
+                    emit("end", step_idx, "failed", reason=str(results["step_error"]))
+                elif results is not None and results.get("admission_refused"):
+                    refused = str(results["admission_refused"])
+                    step_failed = True
+                    emit("end", step_idx, "cancelled", reason=refused)
+                else:
+                    emit("end", step_idx, "done",
+                         ran_as=results.get("pipeline") if results is not None else None)
 
             # Signaler la fin de l'etape
             yield ("pipeline_step_end", step_idx, step_output)
             if on_step_end:
                 on_step_end(step_idx, step, step_output)
+
+            if refused is not None:
+                logger.warning(
+                    "PipelineRunner: admission refused inside step "
+                    f"{step_idx + 1}/{len(pipeline.steps)}; the run ends"
+                )
+                not_run_from(step_idx + 1, refused)
+                return
 
             # Mettre a jour le contexte
             # A failed step must not poison the chain context;

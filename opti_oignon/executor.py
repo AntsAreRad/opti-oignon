@@ -1907,6 +1907,10 @@ class Executor:
 
             if context_check:
                 if context_check.exceeds_limit and not auto_truncate:
+                    # A fixed server error: the step it ends is failed.
+                    _run_results["step_error"] = (
+                        f"[ERR] Context exceeds model limit: {context_warning}"
+                    )
                     yield f"[ERR] Context exceeds model limit: {context_warning}"
                     yield f"\n\nEstimated tokens: ~{context_check.total_tokens:,}"
                     yield f"\nAvailable: {context_check.available_for_input:,}"
@@ -1979,6 +1983,8 @@ class Executor:
                 yield _vmsg
                 self._current_task = None
                 _emit_ledger("vision_refused", gov_action="refuse", gov_admitted=False)
+                # A safety refusal, never a failure of the step.
+                _run_results["admission_refused"] = _vision_refusal_msg
                 return question, _vmsg
             try:
                 question, images, _vision_meta = _vision_pipeline.process(
@@ -2715,6 +2721,8 @@ class Executor:
                 "message", "resource admission refused"
             )
             status("[!] Resource admission refused")
+            # A safety refusal, never a failure of the step.
+            _run_results["admission_refused"] = _gov_msg
             refusal_msg = f"[ERR] {_gov_msg}"
             yield refusal_msg
             self._current_task = None

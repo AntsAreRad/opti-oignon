@@ -53,6 +53,12 @@ try:
 except Exception:
     _emergency_stop = None
 
+# The step frames of a reply: one recorder per turn, its frames queued here
+try:
+    from opti_oignon import pipeline_step as _pipeline_step
+except Exception:
+    _pipeline_step = None
+
 # PIP-06: conditional import of the execution-pipeline system.
 # The PipelineRunner rides the agentic executor; CRUD lives in
 # routes_exec_pipelines; this is the execution seam (finished here).
@@ -169,6 +175,36 @@ _BP_SLOW_THRESHOLD = 0.8
 # off mid-thought. This measures the gap since the last consumed event, not the
 # total duration, so it still catches a genuinely dead client.
 _BP_IDLE_TIMEOUT = float(os.environ.get("OPTI_IDLE_TIMEOUT_S", "600"))
+# Critical event types that must never be dropped by backpressure
+_BP_CRITICAL_EVENTS = frozenset({
+    "error", "cancel", "tool_call_pending", "tool_call_resolved",
+    "pipeline_step",
+})
+
+
+def _trim_backlog(chunks: list, sent_index: int, max_size: int = _BP_MAX_SIZE) -> int:
+    """Drop the oldest non-critical pending events beyond ``max_size``.
+
+    The pending window starts at ``sent_index``; critical events and the
+    most recent ones are kept. The generation thread appends while this
+    runs, so only the slice that was read is reassigned, in one statement:
+    an event appended meanwhile lands after it and is kept. Returns how
+    many events were dropped.
+    """
+    end = len(chunks)
+    pending = end - sent_index
+    if pending <= max_size:
+        return 0
+    drop_target = pending - max_size
+    dropped = 0
+    kept = []
+    for event in chunks[sent_index:end]:
+        if dropped < drop_target and event[0] not in _BP_CRITICAL_EVENTS:
+            dropped += 1
+        else:
+            kept.append(event)
+    chunks[sent_index:end] = kept
+    return dropped
 
 # RFC 6455 WebSocket close codes for graceful server-side shutdown.
 # 1011 = internal error (server hit an unexpected condition); 1003 = the
@@ -212,14 +248,38 @@ _THREAD_POLL_S = 0.1
 
 
 class ChatTurn:
-    """One chat turn's stop and results. Made per turn, never reused."""
+    """One chat turn's stop, results and step recorder. Made per turn,
+    never reused. ``steps`` is set when the turn streams."""
 
-    __slots__ = ("conversation_id", "stop", "results")
+    __slots__ = ("conversation_id", "stop", "results", "steps")
 
     def __init__(self, conversation_id: str) -> None:
         self.conversation_id = conversation_id
         self.stop = threading.Event()
         self.results: dict = {}
+        self.steps = None
+
+
+def _close_turn_steps(turn: ChatTurn, cause: str, reason: str | None = None) -> bool:
+    """Close every step the turn's runs left open; True when one was.
+
+    On a stop the reason is the emergency stop's when it is engaged at
+    closure time, since Stop all also sets every turn's stop.
+    """
+    steps = turn.steps
+    if steps is None or _pipeline_step is None:
+        return False
+    summary = _pipeline_step.emit(steps, "summary") or []
+    if all(step["state"] in _pipeline_step.TERMINAL for step in summary):
+        return False
+    if cause == "stop":
+        try:
+            if _emergency_stop is not None and _emergency_stop.is_stopped():
+                reason = "Stop all engaged"
+        except Exception as exc:
+            logger.debug("emergency stop state unreadable: %s", exc)
+    _pipeline_step.emit(steps, "close", cause, reason)
+    return True
 
 
 # The live turns, by conversation. A turn with no conversation id is kept
@@ -611,6 +671,11 @@ async def _stream_turn(
     error_occurred = False
     generation_done = threading.Event()
     chunks = []
+    # The turn's step recorder queues its frames with the other events.
+    if _pipeline_step is not None:
+        turn.steps = _pipeline_step.StepRecorder(
+            lambda md: chunks.append(("pipeline_step", md))
+        )
     # Backpressure tracking for slow client detection
     _bp_dropped = 0
     _bp_slow_logged = 0
@@ -704,7 +769,10 @@ async def _stream_turn(
                 # Always emit as generic status for StreamingIndicator
                 chunks.append(("status", {"message": msg}))
                 # Additionally tag vision-specific statuses
-                if "Analyzing image" in msg or "vision" in msg.lower():
+                # Only a status that starts an image analysis: one that
+                # merely names vision (no model found, admission refused)
+                # starts none.
+                if isinstance(msg, str) and msg.startswith("Analyzing image"):
                     chunks.append(("vision_delegation", {
                         "status": "analyzing",
                         "message": msg,
@@ -771,22 +839,19 @@ async def _stream_turn(
             _stopped_seen = False
             for chunk in gen:
                 if turn.stop.is_set():
-                    # The executors hold this turn's stop themselves.
+                    # The executors hold this turn's stop themselves. The
+                    # runner is left at this chunk, so its open steps are
+                    # closed here, before the cancellation.
                     _stopped_seen = True
+                    _close_turn_steps(turn, "stop")
                     chunks.append(("cancel", None))
                     break
                 if chunk:
                     # PIP-06: pipeline step-boundary tuples from the
-                    # PipelineRunner; relayed as light status, never
-                    # concatenated into the response text.
+                    # PipelineRunner. The steps travel as pipeline_step
+                    # frames; the tuples are never relayed nor concatenated
+                    # into the response text.
                     if isinstance(chunk, tuple) and len(chunk) == 3:
-                        if chunk[0] == "pipeline_step_end":
-                            chunks.append((
-                                "status",
-                                {"message": f"Step {chunk[1] + 1} done"},
-                            ))
-                        # pipeline_step_start: on_status already emitted
-                        # "Step i/N: label" from the runner.
                         continue
                     # Distinguish thinking chunks from regular chunks
                     if isinstance(chunk, tuple) and len(chunk) == 2:
@@ -794,14 +859,16 @@ async def _stream_turn(
                         if chunk_type == "thinking":
                             chunks.append(("thinking", chunk_content))
                         elif chunk_type == "reasoning_step":
-                            # Etape de raisonnement
-                            chunks.append(("reasoning_step", chunk_content))
+                            # A replay after the run: the live hook already
+                            # queued this step, so it is dropped.
+                            pass
                         elif chunk_type == "reasoning_done":
                             # Fin du raisonnement
                             chunks.append(("reasoning_done", chunk_content))
                         elif chunk_type == "consensus_model_done":
-                            # Reponse individuelle de consensus
-                            chunks.append(("consensus_model_done", chunk_content))
+                            # A replay after the run: the live hook already
+                            # queued this model, so it is dropped.
+                            pass
                         elif chunk_type == "consensus_done":
                             # Fin du consensus
                             chunks.append(("consensus_done", chunk_content))
@@ -812,14 +879,18 @@ async def _stream_turn(
                             # Fin de l'auto-correction
                             chunks.append(("correction_done", chunk_content))
                         else:
-                            full_response += chunk_content
-                            chunks.append(("chunk", chunk_content))
+                            # An unknown kind is not reply text.
+                            logger.warning(
+                                "Dropped a stream tuple of unknown kind %r",
+                                chunk_type,
+                            )
                     else:
                         full_response += chunk
                         chunks.append(("chunk", chunk))
 
             # A stage that yields nothing returns on a stop: say so.
             if turn.stop.is_set() and not _stopped_seen:
+                _close_turn_steps(turn, "stop")
                 chunks.append(("cancel", None))
 
             # Emit vision delegation completion if it occurred
@@ -834,11 +905,16 @@ async def _stream_turn(
 
         except Exception as e:
             logger.error(f"Generation error: {e}")
+            # The consumer returns at the error frame: close first.
+            _close_turn_steps(turn, "error", str(e))
             chunks.append(("error", str(e)))
             error_occurred = True
         finally:
             if _qs_active and _qs_session is not None:
                 _qs_session.end_turn()
+            # No done leaves while a step is open.
+            if _close_turn_steps(turn, "error", "No end was reported"):
+                logger.warning("A step of this reply reported no end; closed as failed")
             generation_done.set()
 
     # Fire pre_inference hooks before starting generation
@@ -894,31 +970,12 @@ async def _stream_turn(
     gen_thread.start()
 
     # Streaming loop: sends chunks progressively
-    # Critical event types that must never be dropped by backpressure
-    _BP_CRITICAL_EVENTS = frozenset({
-        "error", "cancel", "tool_call_pending", "tool_call_resolved",
-    })
     sent_index = 0
     while not generation_done.is_set() or sent_index < len(chunks):
         # Backpressure -- detect slow client and drop oldest
         # non-critical events when the pending queue exceeds the limit.
-        pending = len(chunks) - sent_index
-        if pending > _BP_MAX_SIZE:
-            # Find non-critical events to drop from the front of the
-            # pending window, preserving critical events and the most
-            # recent events.
-            drop_target = pending - _BP_MAX_SIZE
-            dropped_now = 0
-            new_chunks = chunks[:sent_index]  # already consumed
-            skipped = 0
-            for i in range(sent_index, len(chunks)):
-                ev_type = chunks[i][0]
-                if skipped < drop_target and ev_type not in _BP_CRITICAL_EVENTS:
-                    skipped += 1
-                    dropped_now += 1
-                else:
-                    new_chunks.append(chunks[i])
-            chunks[:] = new_chunks
+        if len(chunks) - sent_index > _BP_MAX_SIZE:
+            dropped_now = _trim_backlog(chunks, sent_index)
             _bp_dropped += dropped_now
             if dropped_now > 0:
                 _bp_slow_logged += 1
@@ -1069,6 +1126,10 @@ async def _stream_turn(
                 # Tool call approval resolved (approved/denied/timeout)
                 if isinstance(content, dict):
                     await _send_token(websocket, "tool_call_resolved", "", metadata=content)
+            elif event_type == "pipeline_step":
+                # One step's state, from the turn's recorder
+                if isinstance(content, dict):
+                    await _send_token(websocket, "pipeline_step", "", metadata=content)
             elif event_type == "error":
                 await _send_token(websocket, "error", content)
                 if _qs_active and _tool_registry is not None:
@@ -1194,6 +1255,11 @@ async def _stream_turn(
     # PIP-06: record which execution pipeline ran, if any
     if _exec_pipeline_obj is not None:
         done_metadata["exec_pipeline"] = _exec_pipeline_obj.id
+    # The last state of every step the reply emitted, when it emitted one
+    if _pipeline_step is not None:
+        _steps_summary = _pipeline_step.emit(turn.steps, "summary")
+        if _steps_summary:
+            done_metadata["steps"] = _steps_summary
     # Add the agentic information: this turn's own results
     if use_agentic and _agentic_executor is not None:
         done_metadata["pipeline"] = turn.results.get("pipeline") or PIPELINE_DIRECT

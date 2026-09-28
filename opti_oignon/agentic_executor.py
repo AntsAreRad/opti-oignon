@@ -573,21 +573,118 @@ def _ensure_tool_capable_model(model, routing):
     )
 
 
+def _step_recorder(steps) -> Callable | None:
+    """The turn's step recorder behind its one guard; None without one.
+
+    The recorder's module is imported only on the path that emits, and a
+    recorder error is a logged warning, never a broken reply.
+    """
+    if steps is None:
+        return None
+    try:
+        from . import pipeline_step
+    except Exception as e:
+        logger.warning(f"pipeline_step unavailable: {e}")
+        return None
+
+    def emit(event, *args, **kwargs):
+        return pipeline_step.emit(steps, event, *args, **kwargs)
+
+    return emit
+
+
+def _reasoning_progress(steps) -> Callable | None:
+    """The reasoning engine's progress events as the turn's step frames.
+
+    ``run`` names the run; the first ``plan`` starts it with its total and
+    every plan announces its labels as the next pending steps, setting the
+    total when it arrives later; ``begin`` and ``end`` are a step's running
+    and terminal frames. None without a recorder: the engine then reports
+    to no one.
+    """
+    emit = _step_recorder(steps)
+    if emit is None:
+        return None
+    state = {"name": None, "run": None, "next": 0}
+
+    def on_progress(event, **fields):
+        run = state["run"]
+        if event == "run":
+            state["name"] = fields["name"]
+        elif event == "plan":
+            if run is None:
+                run = state["run"] = emit("start_run", "reasoning", state["name"],
+                                          total=fields["total"])
+                if run is None:
+                    return
+            elif fields["total"] is not None:
+                emit("set_total", run, fields["total"])
+            for label in fields["labels"]:
+                emit("pending", run, state["next"], label)
+                state["next"] += 1
+        elif run is not None and event == "begin":
+            emit("running", run, fields["index"])
+        elif run is not None and event == "end":
+            emit("end", run, fields["index"], fields["state"], reason=fields.get("reason"))
+
+    return on_progress
+
+
+def _consensus_progress(steps) -> Callable | None:
+    """The consensus engine's progress events as the turn's two steps.
+
+    ``query`` starts the run, announces both steps and runs the query with
+    its progress at 0 of the resolved model count; each ``model_end``, a
+    model that answered or failed, adds one; ``compare`` ends the query and
+    runs the comparison, ``compared`` ends it. A step left open by a stop
+    is closed by the relay. None without a recorder.
+    """
+    emit = _step_recorder(steps)
+    if emit is None:
+        return None
+    state = {"run": None, "total": 0, "done": 0}
+
+    def on_progress(event, **fields):
+        run = state["run"]
+        if event == "query":
+            run = state["run"] = emit("start_run", "consensus", "consensus", total=2)
+            if run is None:
+                return
+            emit("pending", run, 0, "Query the models")
+            emit("pending", run, 1, "Compare the answers")
+            emit("running", run, 0)
+            state["total"] = fields["total"]
+            emit("progress", run, 0, 0, state["total"], "model")
+        elif run is None:
+            return
+        elif event == "model_end":
+            state["done"] += 1
+            emit("progress", run, 0, state["done"], state["total"], "model")
+        elif event == "compare":
+            emit("end", run, 0, "done")
+            emit("running", run, 1)
+        elif event == "compared":
+            emit("end", run, 1, "done")
+
+    return on_progress
+
+
 # =============================================================================
 # AGENTIC EXECUTOR
 # =============================================================================
 
 class _Turn:
-    """One execute() call: its stop, its results and its hooks.
+    """One execute() call: its stop, its results, its steps and its hooks.
 
     Built from the caller's run when it brings one (its ``stop`` when that
-    is a ``threading.Event``, its ``results`` when that is a dict), fresh
-    otherwise. It satisfies the executor's run protocol, so the executor's
-    stop is the turn's and its per-call results land in the turn's dict.
-    Nothing of a turn is ever stored on the shared instance.
+    is a ``threading.Event``, its ``results`` when that is a dict, its
+    ``steps`` recorder when it has one), fresh otherwise. It satisfies the
+    executor's run protocol, so the executor's stop is the turn's and its
+    per-call results land in the turn's dict. Nothing of a turn is ever
+    stored on the shared instance.
     """
 
-    __slots__ = ("stop", "results", "on_tool_call", "on_reasoning_step",
+    __slots__ = ("stop", "results", "steps", "on_tool_call", "on_reasoning_step",
                  "on_consensus_model", "on_correction_step")
 
     def __init__(
@@ -603,6 +700,7 @@ class _Turn:
         results = getattr(run, "results", None)
         self.stop = stop if isinstance(stop, threading.Event) else threading.Event()
         self.results = results if isinstance(results, dict) else {}
+        self.steps = getattr(run, "steps", None)
         self.on_tool_call = on_tool_call
         self.on_reasoning_step = on_reasoning_step
         self.on_consensus_model = on_consensus_model
@@ -1237,6 +1335,8 @@ class AgenticExecutor:
 
         # Check the base executor is available
         if self._executor is None:
+            # A fixed server error: the step it ends is failed.
+            turn.results["step_error"] = "[ERR] Executor not available"
             yield "[ERR] Executor not available"
             return
 
@@ -1842,6 +1942,7 @@ class AgenticExecutor:
         model = getattr(routing, 'model', self._default_model)
 
         try:
+            progress = _reasoning_progress(turn.steps)
             gen = self._reasoning_engine.execute_reasoning(
                 question=message,
                 # None lets the engine resolve the strategy
@@ -1851,6 +1952,8 @@ class AgenticExecutor:
                 model=model,
                 on_step=turn.emit_reasoning_step,
                 should_stop=turn.stopped,
+                # The engine's steps become the turn's frames when it records them.
+                **({"on_progress": progress} if progress is not None else {}),
             )
 
             full_response = ""
@@ -1916,12 +2019,15 @@ class AgenticExecutor:
         model = getattr(routing, 'model', self._default_model)
 
         try:
+            progress = _consensus_progress(turn.steps)
             gen = self._consensus_engine.execute_consensus(
                 query=message,
                 models=models,
                 strategy=strategy,
                 on_model_done=turn.emit_consensus_model,
                 should_stop=turn.stopped,
+                # The query and the comparison become the turn's frames.
+                **({"on_progress": progress} if progress is not None else {}),
             )
 
             full_response = ""
@@ -1990,9 +2096,24 @@ class AgenticExecutor:
 
         model = getattr(routing, 'model', self._default_model)
 
+        # Two steps on the turn's recorder, with no progress: the passes
+        # stop early, so the pass number stays in words (correction_step).
+        # A step left open by a stop is closed by the relay.
+        emit = _step_recorder(turn.steps)
+        step_run = None if emit is None else emit(
+            "start_run", "self_correct", "self_correct", total=2)
+
+        def step(event, *args, **kwargs):
+            if step_run is not None:
+                emit(event, step_run, *args, **kwargs)
+
+        step("pending", 0, "Write a first answer")
+        step("pending", 1, "Check and correct")
+
         # Phase 1: generate the initial response (no streaming)
         if on_status:
             on_status("Generating initial response...")
+        step("running", 0)
 
         initial_response = ""
         try:
@@ -2016,6 +2137,8 @@ class AgenticExecutor:
                         initial_response += chunk
         except Exception as e:
             logger.error(f"Initial generation error: {e}")
+            step("end", 0, "failed", reason=str(e))
+            step("end", 1, "not_run", reason="No first answer to check")
             yield f"\n\n[Error: {e}]"
             return
 
@@ -2023,12 +2146,18 @@ class AgenticExecutor:
             return
 
         if not initial_response:
+            # A fixed server error: the step it ends is failed.
+            turn.results["step_error"] = "[ERR] No initial response generated"
+            step("end", 0, "failed", reason="[ERR] No initial response generated")
+            step("end", 1, "not_run", reason="No first answer to check")
             yield "[ERR] No initial response generated"
             return
+        step("end", 0, "done")
 
         # Phase 2: self-correction
         if on_status:
             on_status("Running self-correction...")
+        step("running", 1)
 
         try:
             gen = self._self_correction_engine.execute_self_correction(
@@ -2056,6 +2185,7 @@ class AgenticExecutor:
             # Save the corrected reply (skipped on a stopped turn)
             if turn.stopped():
                 return
+            step("end", 1, "done")
             self._save_to_conversation(
                 conversation_id, message, full_response, model,
             )
@@ -2065,6 +2195,7 @@ class AgenticExecutor:
             # A stopped turn gets no fallback reply and saves nothing.
             if turn.stopped():
                 return
+            step("end", 1, "failed", reason=str(e))
             # Fallback: stream the initial response
             yield initial_response
             self._save_to_conversation(

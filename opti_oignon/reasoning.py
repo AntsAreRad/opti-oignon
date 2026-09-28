@@ -260,6 +260,23 @@ def _stop_requested(should_stop: Callable[[], bool] | None) -> bool:
     return should_stop is not None and bool(should_stop())
 
 
+def _report(on_progress: Callable | None, event: str, **fields) -> None:
+    """One progress event to the caller's hook; its errors never propagate.
+
+    The events of a strategy: ``plan`` (``labels``, the steps it announces,
+    indexed in order across plans, and ``total`` when it becomes known),
+    ``begin`` (``index``) before a step's model call, and ``end``
+    (``index``, ``state``, ``reason``). A step left open by a stop is
+    closed by the caller.
+    """
+    if on_progress is None:
+        return
+    try:
+        on_progress(event, **fields)
+    except Exception as e:
+        logger.debug(f"on_progress {event} failed: {e}")
+
+
 class ReasoningEngine:
     """Moteur de raisonnement multi-strategies.
 
@@ -410,6 +427,7 @@ class ReasoningEngine:
         max_steps: int | None = None,
         on_step: Callable | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> ReasoningResult:
         """Decompose a request into sub-steps and solve them sequentially.
 
@@ -419,6 +437,9 @@ class ReasoningEngine:
             max_steps: Nombre max de sous-etapes (default: config.max_sub_steps)
             on_step: Callback appele apres each etape resolue
                 Signature: on_step(step: ReasoningStep)
+            on_progress: Optional progress hook (see ``_report``): step 0
+                breaks the question down with no total; the plan announces
+                one step per sub-question and the combine step, total n + 2.
 
         Returns:
             ReasoningResult avec les etapes et la reponse finale
@@ -430,6 +451,10 @@ class ReasoningEngine:
         result = ReasoningResult(strategy="decompose")
         if _stop_requested(should_stop):
             return self._finish_stopped(result, start_time, _model)
+
+        _report(on_progress, "plan", labels=["Break the question down"], total=None)
+        _report(on_progress, "begin", index=0)
+        plan_error = None
 
         # Phase 1: Decomposition de la question
         decompose_prompt = _DECOMPOSE_PROMPT.format(max_steps=_max_steps)
@@ -455,12 +480,26 @@ class ReasoningEngine:
             logger.error(f"Decomposition echouee: {e}")
             # Fallback: reponse directe
             sub_steps = [{"title": "Direct answer", "question": question}]
+            plan_error = str(e)
+
+        if plan_error is None:
+            _report(on_progress, "end", index=0, state="done")
+        else:
+            _report(on_progress, "end", index=0, state="failed", reason=plan_error)
+        _report(
+            on_progress, "plan",
+            labels=[str(s.get("title", f"Step {i + 1}")) for i, s in enumerate(sub_steps)]
+            + ["Combine the sub-answers"],
+            total=len(sub_steps) + 2,
+        )
 
         # Phase 2: Resoudre each sous-etape
         previous_context = ""
         for i, step_data in enumerate(sub_steps):
             if _stop_requested(should_stop):
                 return self._finish_stopped(result, start_time, _model)
+            _report(on_progress, "begin", index=i + 1)
+            step_error = None
             step_start = time.time()
             step_title = step_data.get("title", f"Step {i + 1}")
             step_question = step_data.get("question", question)
@@ -483,7 +522,12 @@ class ReasoningEngine:
                 )
             except Exception as e:
                 step_answer = f"[Error solving step: {e}]"
+                step_error = str(e)
 
+            if step_error is None:
+                _report(on_progress, "end", index=i + 1, state="done")
+            else:
+                _report(on_progress, "end", index=i + 1, state="failed", reason=step_error)
             step_duration = int((time.time() - step_start) * 1000)
 
             step = ReasoningStep(
@@ -516,6 +560,8 @@ class ReasoningEngine:
         if _stop_requested(should_stop):
             return self._finish_stopped(result, start_time, _model)
 
+        combine = len(sub_steps) + 1
+        _report(on_progress, "begin", index=combine)
         try:
             final_answer = self._call_llm(
                 messages=[
@@ -526,11 +572,13 @@ class ReasoningEngine:
                 temperature=self._config.base_temperature,
             )
             result.final_answer = final_answer
-        except Exception:
+            _report(on_progress, "end", index=combine, state="done")
+        except Exception as e:
             # Fallback: concatener les reponses des etapes
             result.final_answer = "\n\n".join(
                 f"**{s.title}**: {s.content}" for s in result.steps
             )
+            _report(on_progress, "end", index=combine, state="failed", reason=str(e))
 
         result.confidence = min(1.0, len(result.steps) / max(1, _max_steps))
         result.total_duration_ms = int((time.time() - start_time) * 1000)
@@ -554,8 +602,12 @@ class ReasoningEngine:
         n_branches: int | None = None,
         on_step: Callable | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> ReasoningResult:
         """Explore N candidate approaches and select the best.
+
+        ``on_progress`` (see ``_report``) hears three steps, total 3 from
+        the start; the third ends ``not_run`` when no approach is valid.
 
         ``should_stop`` is checked before every model call; a stopped run
         returns the steps it has, marked ``metadata["stopped"]``.
@@ -576,6 +628,10 @@ class ReasoningEngine:
         result = ReasoningResult(strategy="tree_of_thought")
         if _stop_requested(should_stop):
             return self._finish_stopped(result, start_time, _model)
+
+        _report(on_progress, "plan", total=3, labels=[
+            "Draft approaches", "Score the approaches", "Develop the best approach"])
+        _report(on_progress, "begin", index=0)
 
         # Phase 1: Generer les approches
         gen_prompt = _TREE_GENERATE_PROMPT.format(
@@ -599,9 +655,11 @@ class ReasoningEngine:
 
             branches_data = branches_data[:_n_branches]
 
+            _report(on_progress, "end", index=0, state="done")
         except Exception as e:
             logger.error(f"Generation de branches echouee: {e}")
             branches_data = [{"approach": f"Direct analysis of: {question}"}]
+            _report(on_progress, "end", index=0, state="failed", reason=str(e))
 
         # Enregistrer l'etape de generation
         gen_step = ReasoningStep(
@@ -618,6 +676,7 @@ class ReasoningEngine:
                 pass
 
         # Phase 2: Evaluer each branche
+        _report(on_progress, "begin", index=1)
         branches: list[TreeBranch] = []
         for i, bd in enumerate(branches_data):
             if _stop_requested(should_stop):
@@ -655,6 +714,7 @@ class ReasoningEngine:
                 score=score,
             )
             branches.append(branch)
+        _report(on_progress, "end", index=1, state="done")
 
         # Enregistrer l'etape d'evaluation
         eval_step = ReasoningStep(
@@ -679,6 +739,7 @@ class ReasoningEngine:
         if best_branch is not None and _stop_requested(should_stop):
             return self._finish_stopped(result, start_time, _model)
         if best_branch is not None:
+            _report(on_progress, "begin", index=2)
             elab_prompt = _TREE_ELABORATE_PROMPT.format(
                 question=question,
                 approach=best_branch.approach,
@@ -697,9 +758,11 @@ class ReasoningEngine:
                 )
                 best_branch.elaboration = elaboration
                 result.final_answer = elaboration
+                _report(on_progress, "end", index=2, state="done")
             except Exception as e:
                 logger.error(f"Elaboration echouee: {e}")
                 result.final_answer = best_branch.approach
+                _report(on_progress, "end", index=2, state="failed", reason=str(e))
 
             elab_step = ReasoningStep(
                 step_number=3,
@@ -715,6 +778,8 @@ class ReasoningEngine:
                     pass
         else:
             result.final_answer = "[No valid approaches generated]"
+            _report(on_progress, "end", index=2, state="not_run",
+                    reason="No valid approaches generated")
 
         result.confidence = best_branch.score if best_branch else 0.0
         result.total_duration_ms = int((time.time() - start_time) * 1000)
@@ -746,8 +811,12 @@ class ReasoningEngine:
         n_runs: int | None = None,
         on_step: Callable | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> ReasoningResult:
         """Execute the same request N times and measure coherence.
+
+        ``on_progress`` (see ``_report``) hears one ``Sample {k}`` step per
+        run, the total being the number of runs from the start.
 
         Args:
             question: Question a poser plusieurs fois
@@ -769,9 +838,12 @@ class ReasoningEngine:
         base_temp = self._config.base_temperature
         variance = self._config.temperature_variance
 
+        _report(on_progress, "plan", total=_n_runs,
+                labels=[f"Sample {k}" for k in range(1, _n_runs + 1)])
         for i in range(_n_runs):
             if _stop_requested(should_stop):
                 return self._finish_stopped(result, start_time, _model)
+            _report(on_progress, "begin", index=i)
             run_start = time.time()
             # Temperature variee autour de la base
             temp = base_temp + (i - _n_runs // 2) * variance
@@ -787,9 +859,11 @@ class ReasoningEngine:
                     temperature=temp,
                 )
                 answers.append(answer)
+                _report(on_progress, "end", index=i, state="done")
             except Exception as e:
                 logger.warning(f"Run {i} echouee: {e}")
                 answers.append("")
+                _report(on_progress, "end", index=i, state="failed", reason=str(e))
 
             run_duration = int((time.time() - run_start) * 1000)
             step = ReasoningStep(
@@ -893,6 +967,7 @@ class ReasoningEngine:
         model: str | None = None,
         on_step: Callable | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_progress: Callable | None = None,
     ) -> Generator:
         """Execute reasoning and yield results for streaming.
 
@@ -910,6 +985,8 @@ class ReasoningEngine:
             should_stop: The turn's stop, checked before every model call.
                 A stopped run yields its steps and ``reasoning_done`` but no
                 final text.
+            on_progress: Optional progress hook (see ``_report``); it first
+                hears ``run`` with ``name``, the strategy that runs.
         """
         # Resolve the strategy from config when the caller
         # does not force one, so tree_of_thought / self_consistency are
@@ -925,12 +1002,16 @@ class ReasoningEngine:
                 on_step(step)
 
         # Dispatcher vers la strategie
+        if _strategy not in ("tree_of_thought", "self_consistency"):
+            _strategy = "decompose"
+        _report(on_progress, "run", name=_strategy)
         if _strategy == "tree_of_thought":
             reasoning_result = self.tree_of_thought(
                 question=question,
                 model=model,
                 on_step=_step_callback,
                 should_stop=should_stop,
+                on_progress=on_progress,
             )
         elif _strategy == "self_consistency":
             reasoning_result = self.self_consistency(
@@ -938,6 +1019,7 @@ class ReasoningEngine:
                 model=model,
                 on_step=_step_callback,
                 should_stop=should_stop,
+                on_progress=on_progress,
             )
         else:
             # Default: decompose_and_solve
@@ -946,6 +1028,7 @@ class ReasoningEngine:
                 model=model,
                 on_step=_step_callback,
                 should_stop=should_stop,
+                on_progress=on_progress,
             )
 
         # Yield les etapes individuelles

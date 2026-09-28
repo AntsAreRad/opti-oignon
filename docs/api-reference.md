@@ -66,6 +66,54 @@ WebSocket endpoints are used for real-time chat streaming. The RAG
 query stream endpoint (`/api/rag/query/stream`) uses chunked transfer
 encoding with UTF-8 safe chunk boundaries.
 
+#### Chat stream frames
+
+The chat WebSockets (`/api/chat/stream`, and `/api/chat/retry`, which
+streams a regenerated reply the same way) send JSON frames of the form
+`{"type": ..., "content": ..., "metadata": {...}}`, the metadata only when
+there is some. The types are `metadata`, `token`, `thinking`, `status`,
+`tool_call`, `tool_call_pending`, `tool_call_resolved`, `reasoning_step`,
+`reasoning_done`, `consensus_model_done`, `consensus_done`,
+`correction_step`, `correction_done`, `vision_delegation`, `verification`,
+`pipeline_step`, `ping`, `error` and `done`; the coding path relays its
+agent's own `coding_*` frames. A reply normally ends with `done`; an error
+ends it with `error` and no `done`.
+
+`pipeline_step` reports one step of a run the server executes: an execution
+pipeline, a reasoning strategy, a consensus or a forced self-correction. Its
+`content` is empty and its `metadata` always carries every field below,
+`null` where it does not apply.
+
+| Field | Meaning |
+|---|---|
+| `v` | Schema version, `1` |
+| `seq` | Counter per reply, from 1, strictly increasing: it orders the frames and removes duplicates |
+| `run` | Opaque id of the run within the reply |
+| `kind` | `exec_pipeline`, `reasoning`, `consensus` or `self_correct` |
+| `name` | The pipeline's name; `decompose`, `tree_of_thought` or `self_consistency` for reasoning; the kind otherwise |
+| `pipeline_id`, `step_type` | The pipeline's id and the step's declared type (pipeline steps only) |
+| `parent` | `{run, index}` of the step that started this run, when runs nest |
+| `index`, `total` | The step's position from 0, and the run's step count once known (a decomposition knows it only when its plan arrives; after that it never changes) |
+| `label` | The step's name, at most 120 characters; a decomposition's sub-question titles come from the model and are data |
+| `state` | `pending`, `running`, `done`, `failed`, `skipped`, `cancelled` or `not_run` |
+| `progress` | `{done, total, unit}` on `running` only, and only when those units are the step's whole work: `model` for a consensus query, `sample` or `sub_step` for the step that started a nested run |
+| `reason` | At most 300 characters: the error of a `failed` step, or why a step was `cancelled` or `not_run` |
+| `ran_as` | The agentic pipeline an execution step really ran as, which can differ from its declared type |
+| `duration_ms` | Measured by the server on a monotonic clock, for a step that ran |
+
+A run announces the steps it knows as `pending` before running them (a
+decomposition announces its sub-questions when its plan arrives). Each step
+then goes from `pending` to `running` to `done`, `failed` or `cancelled`, or
+straight from `pending` to `skipped` (its condition was false) or `not_run`,
+and reaches exactly one final state. `done` means finished with no error the
+server could see; `failed` is an error of the step's own work (an exception,
+or one of the server's own fixed error messages). A safety mechanism never
+ends a step `failed`: Stop, Stop all and a resource refusal end it
+`cancelled` or `not_run`, with the reason. On Stop and on an error the
+server closes every open step before the stream says so, and the `done`
+frame carries `steps`, the last `pipeline_step` of every step, whenever the
+reply had one. `pipeline_step` is never dropped by backpressure.
+
 ### Pagination
 
 List endpoints support `offset` and `limit` query parameters for

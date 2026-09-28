@@ -11,6 +11,34 @@ package costs.
 
 ### Added
 
+- A `pipeline_step` frame on the chat stream, so the interface can draw each
+  step of a run from what the server did rather than from status text. An
+  execution pipeline, the three reasoning strategies, a consensus and a
+  forced self-correction announce their steps before running them, then
+  report every change of state (pending, running, done, failed, skipped,
+  cancelled, not run) with a sequence number per reply, a duration measured
+  on a monotonic clock, the agentic pipeline an execution step really ran
+  as, and a fraction only where its units are the step's whole work: the
+  models of a consensus query, the samples or sub-steps of a nested run. A
+  step whose work raised, or which returned one of the server's own fixed
+  error messages, ends failed, read from a signal and never from the reply
+  text; Stop, Stop all and a resource refusal never end a step failed, but
+  cancelled or not run, with the reason. The frame is never dropped by
+  backpressure; on Stop and on an error every open step is closed before
+  the stream says so, and `done` carries the last state of every step. The
+  "Step k done" status is no longer sent (it was sent after a failed step
+  too); the "Step i/N" status stays for the terminal and the logs. With it:
+  a resource refusal inside a pipeline step now ends the run, where the
+  next step used to receive the refusal text as its previous analysis; the
+  backpressure trim could lose an event appended while it ran, a critical
+  one included, and now replaces only what it read; reasoning steps and
+  consensus answers reach the socket once instead of twice; a status that
+  only names vision is no longer tagged as an image analysis; and a
+  structured chunk of an unknown kind is dropped with a log line instead of
+  being appended to the reply text. Unchanged, and said: a self-correction
+  stopped after its first draft has already saved that draft. The frame is
+  documented in the API reference.
+
 - A command palette. Ctrl+K opens it, and so does Search in the sidebar,
   expanded, on the rail and in the phone's drawer: one dialog, mounted once
   by the layout of both spaces, that reaches every place and every action
