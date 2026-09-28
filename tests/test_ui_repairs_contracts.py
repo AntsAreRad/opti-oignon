@@ -866,8 +866,8 @@ _PRIMITIVES = f"{_SRC}/lib/ds/"
 # above the deaf mounts it covers is stale.
 _DEAF_EXEMPT = {
     (f"{_SRC}/lib/components/chat/ChatMessage.svelte", "retry"): {
-        # The replies still being written: Retry shows only on a finished one.
-        f"{_SRC}/routes/(app)/(use)/chat/[id]/+page.svelte": 2,
+        # The reply still being written: Retry shows only on a finished one.
+        f"{_SRC}/routes/(app)/(use)/chat/[id]/+page.svelte": 1,
     },
     (f"{_SRC}/lib/components/panels/PipelineEditor.svelte", "change"): {
         # The read-only view of a pipeline, whose steps cannot change.

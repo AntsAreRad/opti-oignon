@@ -15,6 +15,10 @@
   reply's last character); any other message, a user's or one of another
   role, stays plain text (markdown/PlainText.svelte), a long one collapsed by
   whole lines.
+  The content is not a live region: the stream's one status region
+  (StreamingStatus) speaks for a reply being written. After done, the
+  reply's footer holds the run's summary line (RunSummary), read from the
+  steps' record the reply carries, never from its text.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
@@ -30,6 +34,7 @@
 	import Icon from '$lib/ds/Icon.svelte';
 	import Markdown from './markdown/Markdown.svelte';
 	import PlainText from './markdown/PlainText.svelte';
+	import RunSummary from './RunSummary.svelte';
 
 	export let message: MessageItem;
 	export let isStreaming: boolean = false;
@@ -73,6 +78,9 @@
 	// collapses: a reply to its first whole blocks, plain text to its first
 	// lines.
 	export let collapseThreshold: number = 500;
+	// Another moving thing stands beside the reply (the loader's): the
+	// thinking summary draws no caret of its own.
+	export let quietThinking: boolean = false;
 
 	const dispatch = createEventDispatcher<{
 		retry: void;
@@ -189,7 +197,7 @@
 						fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path d="M9 5l7 7-7 7" />
 					</svg>
-					Thinking{#if isStreaming}<span class="inline-block w-1 h-3 ml-1 animate-cursor-blink" style="background-color: var(--oo-acc-mark);" />{/if}
+					Thinking{#if isStreaming && !quietThinking}<span class="inline-block w-1 h-3 ml-1 animate-cursor-blink" style="background-color: var(--oo-acc-mark);" />{/if}
 				</summary>
 				<div class="px-2.5 pb-2 text-xs leading-relaxed whitespace-pre-wrap pt-1.5 max-h-60 overflow-y-auto"
 					style="color: var(--oo-fg-tertiary); border-top: 1px solid var(--oo-bd-subtle);">
@@ -217,11 +225,7 @@
 		{/if}
 
 		<!-- Content: a reply's markdown, rendered; any other message as written -->
-		<div
-			class="break-words msg-content"
-			aria-live={isStreaming ? 'polite' : 'off'}
-			aria-atomic="false"
-		>
+		<div class="break-words msg-content">
 			{#if isReply}
 				<Markdown
 					source={displayContent}
@@ -264,6 +268,11 @@
 					</span>
 				{/each}
 			</div>
+		{/if}
+
+		<!-- The run's summary line, after done, from the steps' record -->
+		{#if !isUser && !isStreaming}
+			<RunSummary steps={message.steps} durationMs={message.duration_ms} stopped={message.stopped === true} />
 		{/if}
 
 		<!-- Feedback widget (always visible on assistant messages, not streaming) -- BUG-05 -->

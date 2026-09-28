@@ -58,6 +58,9 @@ export interface MessageItem {
 	correction?: CorrectionInfo;  // Info d'auto-correction
 	vision_delegation?: VisionDelegationInfo;  // Vision delegation info
 	sandbox_meta?: SandboxMeta;  // Quick sandbox metadata
+	stopped?: boolean;  // A Stop ended the reply: its text is what was written
+	steps?: PipelineStepFrame[];  // The steps' record the reply's done carried
+	duration_ms?: number;  // The reply's duration, as the server measured it
 }
 
 // Quick sandbox metadata attached to assistant messages
@@ -210,9 +213,29 @@ export interface ChatRequest {
 }
 
 export interface ChatToken {
-	type: 'token' | 'thinking' | 'done' | 'error' | 'metadata' | 'verification' | 'tool_call' | 'reasoning_step' | 'reasoning_done' | 'consensus_model_done' | 'consensus_done' | 'correction_step' | 'correction_done' | 'vision_delegation' | 'status' | 'coding_plan' | 'coding_step' | 'coding_test' | 'coding_fix' | 'coding_done' | 'coding_status' | 'coding_error';
+	type: 'token' | 'thinking' | 'done' | 'error' | 'metadata' | 'verification' | 'tool_call' | 'tool_call_pending' | 'tool_call_resolved' | 'reasoning_step' | 'reasoning_done' | 'consensus_model_done' | 'consensus_done' | 'correction_step' | 'correction_done' | 'vision_delegation' | 'status' | 'pipeline_step' | 'ping' | 'coding_plan' | 'coding_step' | 'coding_test' | 'coding_fix' | 'coding_done' | 'coding_status' | 'coding_error';
 	content: string;
 	metadata?: Record<string, unknown>;
+}
+
+/** One step of a run the server executes: the metadata of a `pipeline_step` frame. */
+export interface PipelineStepFrame {
+	v: number;
+	seq: number;
+	run: string;
+	kind: string;
+	name: string;
+	pipeline_id: string | null;
+	parent: { run: string; index: number } | null;
+	index: number;
+	total: number | null;
+	label: string;
+	step_type: string | null;
+	state: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled' | 'not_run';
+	progress: { done: number; total: number; unit: string } | null;
+	reason: string | null;
+	ran_as: string | null;
+	duration_ms: number | null;
 }
 
 export interface ChatResponse {
@@ -222,6 +245,9 @@ export interface ChatResponse {
 	model: string;
 	tokens: number;
 	duration_ms: number;
+	// Whether a Stop ended the reply, and the last state of every step it ran
+	cancelled?: boolean;
+	steps?: PipelineStepFrame[];
 	// Quick sandbox metadata (present when sandbox was used)
 	sandbox_active?: boolean;
 	sandbox_session_id?: string;
@@ -254,6 +280,9 @@ export interface ChatStreamCallbacks {
 	onDone: (response: ChatResponse) => void;
 	onError: (error: string) => void;
 	onMetadata?: (metadata: Record<string, unknown>) => void;
+	onFrame?: (frame: ChatToken) => void;  // Every frame, in order, before its own callback
+	onReconnecting?: (attempt: number, max: number) => void;  // A retry before the first frame
+	onLost?: () => void;  // The stream ended without done or error
 }
 
 // -- Presets --

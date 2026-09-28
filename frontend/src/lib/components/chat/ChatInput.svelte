@@ -5,6 +5,8 @@
   Image upload button with thumbnails.
   Ctrl+Enter global send shortcut support.
   Mobile responsive -- full-width, 44px touch targets, enterkeyhint, safe-area.
+  The textarea stays usable while a reply streams: the next message can be
+  written meanwhile, and sending it waits for the reply's end (canSend).
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
@@ -329,7 +331,7 @@
 				on:paste={handlePaste}
 				enterkeyhint="send"
 				placeholder={isStreaming ? 'Generating...' : attachedImages.length > 0 ? 'Describe the image...' : 'Type a message...'}
-				disabled={disabled || isStreaming}
+				disabled={disabled}
 				rows={MIN_ROWS}
 				class="w-full text-sm rounded-xl outline-none resize-none
 					disabled:opacity-50 disabled:cursor-not-allowed"

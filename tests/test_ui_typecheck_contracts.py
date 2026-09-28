@@ -213,7 +213,6 @@ def test_ux14_svelte_check_errors_per_file_never_exceed_the_ledger():
 # The ledger: svelte-check errors per file, born equal to today's count.
 # ===========================================================================
 UX14_LEDGER = {
-    'frontend/src/lib/api/chat.ts': 2,
     'frontend/src/lib/components/chat/ChatMessage.svelte': 3,
     'frontend/src/lib/components/chat/ToolCallDisplay.svelte': 2,
     'frontend/src/lib/components/health/CacheManager.svelte': 1,

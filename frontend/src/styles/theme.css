@@ -80,6 +80,12 @@
 	--oo-acc-ink-2: var(--oo-role-secondary-ink);
 	--oo-acc-mark: var(--oo-role-primary-ink);
 	--oo-acc-mark-2: var(--oo-role-secondary-ink);
+	/* The ground a mark is cut into (the loader's onion): the thread's page,
+	   the sheet on the surface. */
+	--oo-mark-ground: var(--oo-bg-surface);
+	/* The tin tag of a failed step's plant, and the straw that plant is drawn in. */
+	--oo-machine: var(--oo-role-machine);
+	--oo-dried: var(--oo-role-dried);
 	--oo-acc-50: var(--oo-role-on-primary);
 	--oo-acc-100: var(--oo-role-tint-1);
 	--oo-acc-200: var(--oo-role-tint-1);

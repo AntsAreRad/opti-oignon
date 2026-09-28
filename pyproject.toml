@@ -597,6 +597,31 @@ fail_under = 0
 # property held. It stays in the tree word for word; the replacement is ks6 in
 # the same file, which names web_gate.py in its place.
 #
+# ds1 of the design-token suite held that each palette file declares
+# exactly the roles, spelled as a closed list of twenty-six with their
+# values, and ds3's derivation half read a role outside that list as no
+# role. The chat loader adds two roles, the machine's tin (the tag a failed
+# step's plant carries) and the pale straw that plant is drawn in, each
+# derived into one app token, so both spellings are false while both
+# properties hold. They stay in the tree word for word. ds29 in the same file
+# keeps every assertion of ds1 word for word over the twenty-eight roles and
+# their chosen values, the count read twenty-nine with the colour scheme;
+# ds30 keeps every assertion of ds3's derivation half word for word over the
+# same twenty-eight, adds a witness that the table it reads takes the two
+# and still refuses a third name, and adds that each of the two roles is
+# read by its own token. ds3's hex half stays selected.
+#
+# ld9 of the chat loader suite held, in three of its halves, that a failed
+# step's plant was mounted on a sheet of the second surface: its census of
+# tokens named the sheet's ground, its marks half read the brand marks on
+# that ground, and its row half read the kept plant's straw on it. The plant
+# now stands on the row's own ground, with no sheet behind it and no strap
+# across it, so no table names that ground and those statements are false
+# while the properties hold. They stay in the tree word for word. ld22 in the
+# same file keeps every other assertion of the three halves word for word
+# over the row's grounds, and adds that no ground is named for a mount behind
+# the failed step's plant. ld9's straw half stays selected.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -687,4 +712,9 @@ addopts = """
     --deselect=tests/test_ui_repairs_contracts.py::test_ux17_every_settings_group_is_in_the_catalog_and_the_hub_renders_it[node]
     --deselect=tests/test_executor_ledger_emission_contracts.py::test_e6_mid_stream_cancellation_is_one_cancelled_record
     --deselect=tests/test_search_gates_contracts.py::test_ks1_an_engaged_switch_is_read_engaged_by_every_reader
+    --deselect=tests/test_design_tokens_contracts.py::test_ds1_three_palette_files_each_declaring_exactly_the_roles
+    --deselect=tests/test_design_tokens_contracts.py::test_ds3_every_colour_comes_from_a_role[derivation]
+    --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[tokens]
+    --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[marks]
+    --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[row]
 """

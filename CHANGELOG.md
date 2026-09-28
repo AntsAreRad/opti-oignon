@@ -11,6 +11,49 @@ package costs.
 
 ### Added
 
+- The chat's loader, drawn from what the server did. While a reply is
+  written, one status line stands where it will appear: its words come from
+  one closed table that has passed the garden's two ethics nets, the onion
+  stands beside them until the first token, the seconds show from the
+  fifth, and after 30 seconds without any frame, pings included, the motion
+  stops and the line says how long the server has been silent; the next
+  frame resumes it.
+  A run the server executes (an execution pipeline, a reasoning strategy, a
+  consensus, a self-correction) shows a card instead, held at the top of
+  the thread while the run is open: the run's name and the step it is at,
+  one plant per step on one soil line, and one line per step with its
+  state, its sub-progress and its duration in words. A plant grows only on
+  a fraction the server sent and never shrinks, and each of its looks is
+  held at least 400 ms. Every end has its own drawing and its own words: a
+  failed step keeps its plant as it stood, in straw, with the machine's tin
+  tag on its stem; a stopped one keeps it too, in the stop's own ink; a
+  step skipped or not run grows nothing; and a step still open when the
+  stream closes is drawn in dots, never as failed. After `done`, the
+  reply's footer carries one summary line, a disclosure, read only from the
+  steps' record `done` carries: a reply without that record, a reloaded one
+  included, has none. No step text is parsed, and a status the word table
+  does not map changes nothing visible. One status region speaks for the
+  whole stream, the last of a burst after 400 ms of calm and at most one a
+  second, never the seconds; the reply loses its `aria-live`, and the
+  thread is a named region rather than a log. A Stop now reads the end: the
+  cancel is sent first and the socket is read on until `done` or `error`,
+  or 10 seconds, so the server's closing frames arrive and the run says
+  where it stopped; a stopped reply keeps its text, marked `stopped`, and an
+  error keeps the partial reply beside it. A connection lost before the
+  first frame is retried up to three times, and the line says so. The
+  composer's input stays usable while a reply streams; sending still waits.
+  Sending and retrying read the stream through one reader, which knows
+  `pipeline_step`, `ping` and the tool-call approval frames, and one reset
+  clears every streaming store on send, retry, done, an error and a Stop.
+  Two palette roles, `dried` and `machine`, join the three palettes.
+  `StreamingIndicator`, `VisionDelegationIndicator` and `OnionLoader` are
+  removed. Not yet drawn: the sub-lines of a nested run, the words of the
+  pipeline a step really ran as in the unfolded summary line, and a drawing
+  held still while a tool call waits on an approval, a request waits in the
+  queue or the stream reconnects. Owed to the machine: a real run on
+  Ollama, a Stop and a refusal mid-step, a server cut, the palettes at
+  several widths and pixel ratios, forced colours, reduced motion and a
+  screen reader's order.
 - A `pipeline_step` frame on the chat stream, so the interface can draw each
   step of a run from what the server did rather than from status text. An
   execution pipeline, the three reasoning strategies, a consensus and a

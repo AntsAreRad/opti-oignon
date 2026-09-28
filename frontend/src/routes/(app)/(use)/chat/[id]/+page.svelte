@@ -4,6 +4,9 @@
   Passes chat options (model, preset, temperature) via chatOptions.
   Mobile responsive -- scroll FAB, tighter padding; the shell keeps the page
   clear of the safe areas.
+  The thread is not a live region: StreamingStatus, mounted where the reply
+  is written, holds the stream's one status region, its waiting line and a
+  run's card.
 -->
 <script lang="ts">
 	import { page } from '$app/stores';
@@ -21,7 +24,8 @@
 		streamingThinking,
 		streamingModel,
 		streamingError,
-		streamingVisionDelegation,
+		streamingLoader,
+		streamingConversation,
 		lastSearchMetadata,
 		searchMetadataMap,
 		sendMessage,
@@ -35,9 +39,8 @@
 	import ChatMessage from '$lib/components/chat/ChatMessage.svelte';
 	import ChatInput from '$lib/components/chat/ChatInput.svelte';
 	import FileUpload from '$lib/components/chat/FileUpload.svelte';
-	import StreamingIndicator from '$lib/components/chat/StreamingIndicator.svelte';
+	import StreamingStatus from '$lib/components/chat/StreamingStatus.svelte';
 	import LiveMetricsOverlay from '$lib/components/chat/LiveMetricsOverlay.svelte';
-	import VisionDelegationIndicator from '$lib/components/chat/VisionDelegationIndicator.svelte';
 	import ModelSelector from '$lib/components/chat/ModelSelector.svelte';
 	import MessageSkeleton from '$lib/components/chat/MessageSkeleton.svelte';
 	import ScrollToBottomFab from '$lib/components/chat/ScrollToBottomFab.svelte';
@@ -78,15 +81,8 @@
 		token_estimate: 0,
 	};
 
-	// Extract vision model name from delegation data (avoids TS 'as' cast in template)
-	$: delegatedVisionModel = (() => {
-		const d = $streamingVisionDelegation;
-		if (!d) return '';
-		if (d.vision_model) return String(d.vision_model);
-		const msg = d.message ? String(d.message) : '';
-		const m = msg.match(/with (.+)\.\.\./);
-		return m?.[1] ?? '';
-	})();
+	// The loader of the stream this conversation started, and no other's.
+	$: loader = convId !== null && $streamingConversation === convId ? $streamingLoader : null;
 
 	function scrollToBottom() {
 		if (bottomSentinel && shouldAutoScroll) {
@@ -195,7 +191,7 @@
 		bind:this={messagesContainer}
 		on:scroll={handleScroll}
 		class="flex-1 overflow-y-auto px-2 sm:px-4 py-6 touch-scroll"
-		role="log"
+		role="region"
 		aria-label="Chat messages"
 	>
 		<ErrorBoundary fallbackMessage="Failed to render messages">
@@ -231,34 +227,22 @@
 						</div>
 					{/each}
 
+					<!-- The stream: its waiting line or its run, where the reply is written -->
+					<StreamingStatus {loader} quiet={$isStreaming && $isCodingStream} />
+
 					<!-- Currently streaming: show partial message -->
-					{#if $isStreaming && $streamingContent}
+					{#if $isStreaming && ($streamingContent || $streamingThinking)}
 						<ChatMessage
 							message={streamingPlaceholder}
 							conversationId={convId ?? ''}
 							isStreaming={true}
 							streamContent={$streamingContent}
 							streamThinking={$streamingThinking}
+							quietThinking={true}
 						/>
-						{#if $isCodingStream}
-							<CodingAgentProgress />
-						{/if}
-					{:else if $isStreaming && $streamingThinking}
-						<ChatMessage
-							message={streamingPlaceholder}
-							conversationId={convId ?? ''}
-							isStreaming={true}
-							streamContent={''}
-							streamThinking={$streamingThinking}
-						/>
-					{:else if $isStreaming && $streamingVisionDelegation?.status === 'analyzing'}
-						<VisionDelegationIndicator
-							visionModel={delegatedVisionModel}
-						/>
-					{:else if $isStreaming && $isCodingStream}
+					{/if}
+					{#if $isStreaming && $isCodingStream}
 						<CodingAgentProgress />
-					{:else if $isStreaming}
-						<StreamingIndicator />
 					{/if}
 				</div>
 			{/if}

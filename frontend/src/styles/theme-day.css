@@ -36,4 +36,6 @@
 	--oo-role-warn-tone: #B08A3E;               /* the warning wash (washes only, never text) */
 	--oo-role-success-ink: #4F5E42;             /* success text */
 	--oo-role-edge: transparent;                /* the border of tone-only containers */
+	--oo-role-machine: #6B7278;                 /* the machine's tin (a failed step's tag) */
+	--oo-role-dried: #908153;                   /* the straw of a failed step's plant, a drawing only */
 }

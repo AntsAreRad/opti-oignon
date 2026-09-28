@@ -165,6 +165,11 @@ HELD: list[str] = [
     "frontend/src/lib/components/panels/BenchmarkPage.svelte",
     "frontend/src/routes/(app)/(workshop)/workshop/benchmarks/+page.svelte",
     "frontend/src/lib/benchmark/",
+    "frontend/src/lib/components/pixel/",
+    "frontend/src/lib/components/chat/StreamingStatus.svelte",
+    "frontend/src/lib/components/chat/StepRow.svelte",
+    "frontend/src/lib/components/chat/StepList.svelte",
+    "frontend/src/lib/components/chat/RunSummary.svelte",
 ]
 """Files held to the surface rules: separation by tone and space rather than
 by lines, matte surfaces, sentence-case labels, selection never by colour
@@ -191,7 +196,8 @@ rules; the inference pipeline's host and the words its overview says; the
 security grade, its checks and the client that reads them; the store of
 the model roles; the first-run dialog and the refresh that replaces its
 reload; the benchmarks page, its route and the module that keeps its tab
-in the address."""
+in the address. Then the chat loader: the pixel strip, and the stream's
+status, a run's plants and its step lines, and the reply's summary line."""
 
 
 def held_files(held=None, *, root=REPO):

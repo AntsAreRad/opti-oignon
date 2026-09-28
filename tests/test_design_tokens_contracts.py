@@ -25,14 +25,18 @@ known values; what a browser computes is recorded on the machine, never here.
   * DS1 -- exactly three palette files, each one rule under its own
     ``[data-oo-theme="<id>"]`` declaring exactly the roles and
     ``color-scheme``; no other file declares a role; the values are the
-    chosen ones.
+    chosen ones. Superseded by DS29 (deselected by name in
+    ``pyproject.toml``): its closed list of twenty-six roles is false once
+    the chat loader adds its two.
   * DS2 -- every pair of the design's pair list reaches its ratio in every
     palette, the pairs named by app token and evaluated through the
     derivation layer; a planted low pair is caught.
   * DS3 -- every app token that carries a colour is declared once, in the
     derivation layer, as an expression of roles; no hex colour stands
     outside the palette files, except the QR code's white ground and the
-    pre-render's theme-color map.
+    pre-render's theme-color map. Its derivation half is superseded by DS30
+    (deselected by name in ``pyproject.toml``): it read a role outside the
+    twenty-six as no role, and the loader's two are roles.
   * DS4 -- only ``apply.ts`` and the pre-render write the palette
     attribute, the dark class, the density class, the root font size, the
     motion classes or the componion attribute.
@@ -98,6 +102,11 @@ known values; what a browser computes is recorded on the machine, never here.
     border, the ring and its offset, and a field's placeholder.
   * DS28 -- the colours a browser computes are recorded on the machine; until
     then the comparison is owed, and says so.
+  * DS29 -- DS1, over the twenty-eight roles: the twenty-six and the two
+    the chat loader added (the machine's tin, the straw of a failed step's
+    plant), with their chosen values.
+  * DS30 -- DS3's derivation half, over the twenty-eight roles; and each
+    role the loader added is read, by its own token.
 
 Local-only (the public distribution ships no tests). Runs under pytest or
 the __main__ runner.
@@ -149,6 +158,8 @@ BUDGET_S = {
     "test_ds26_no_colour_literal_but_the_ledgered_rgb_debt_and_no_named_colour": 1.0,
     "test_ds27_the_base_layer_tailwind_generates_draws_in_tokens": 2.0,
     "test_ds28_the_browser_computed_colours_are_recorded_or_owed": 1.0,
+    "test_ds29_three_palette_files_each_declaring_exactly_the_roles_the_loaders_two_included": 1.0,
+    "test_ds30_every_colour_comes_from_a_role_the_loaders_two_included": 1.0,
 }
 
 _SRC = "frontend/src"
@@ -216,6 +227,17 @@ _ROLE_TABLE = {
 }
 _ROLES = tuple(_ROLE_TABLE)
 _ROLE_PREFIX = "--oo-role-"
+
+# The two roles the chat loader added: the machine's tin (the tag a failed
+# step's plant carries) and the pale straw that plant is drawn in, a drawing
+# only, never a text. DS1 and DS3's derivation half read the table above;
+# DS29 and DS30, their successors, read this one.
+_LOADER_ROLES = {
+    "machine": ("#6B7278", "#9AA3AB", "#B8C0C7"),
+    "dried": ("#908153", "#CCBA8C", "#DBCC9B"),
+}
+_ROLE_TABLE_WITH_THE_LOADER = {**_ROLE_TABLE, **_LOADER_ROLES}
+_ROLES_WITH_THE_LOADER = tuple(_ROLE_TABLE_WITH_THE_LOADER)
 
 
 # ---------------------------------------------------------------------------
@@ -1231,8 +1253,9 @@ _MIX = re.compile(
 )
 
 
-def _derivation_findings(sources):
-    """Every way the sources break the derivation rule, as sentences."""
+def _derivation_findings(sources, roles=_ROLES):
+    """Every way the sources break the derivation rule, as sentences; a role
+    is a name of ``roles``."""
     findings = []
     theme = sources.get(_THEME, "")
     blocks = _derivation_blocks(theme)
@@ -1308,7 +1331,7 @@ def _derivation_findings(sources):
             )
         for ref in _VAR.findall(value):
             if ref.startswith(_ROLE_PREFIX):
-                if ref[len(_ROLE_PREFIX):] not in _ROLES:
+                if ref[len(_ROLE_PREFIX):] not in roles:
                     findings.append(f"{name} reads {ref}, which is no role")
             elif ref not in in_block and ref not in given and ref not in known_other:
                 findings.append(f"{name} reads {ref}, declared nowhere")
@@ -3849,6 +3872,124 @@ def test_ds28_the_browser_computed_colours_are_recorded_or_owed():
     recorded = json.loads(computed.read_text(encoding="utf-8"))
     covered = {entry.get("palette") for entry in recorded}
     assert covered == set(_PALETTE_IDS), f"the recorded browser values cover each palette: {sorted(covered)}"
+
+
+# ===========================================================================
+# DS29 -- DS1 over the roles the loader added
+# ===========================================================================
+def test_ds29_three_palette_files_each_declaring_exactly_the_roles_the_loaders_two_included():
+    listed = [path for path in files((".css",), within=_STYLES) if re.search(r"/theme-[^/]+\.css$", path)]
+    assert sorted(listed) == sorted(_PALETTE_FILES.values()), (
+        f"the palette files are exactly day, night and high contrast: {sorted(listed)}"
+    )
+
+    expected = {f"{_ROLE_PREFIX}{role}" for role in _ROLES_WITH_THE_LOADER} | {"color-scheme"}
+    assert len(expected) == 29, "twenty-eight roles and the colour scheme"
+    for pid, path in _PALETTE_FILES.items():
+        selector, declared = _palette_declarations(path)
+        match = _PALETTE_SELECTOR.fullmatch(selector.strip())
+        assert match and match.group(2) == pid, (
+            f"{path} declares under [data-oo-theme=\"{pid}\"], so it applies to the "
+            f"root and to any subtree: {selector!r}"
+        )
+        names = [name for name, _ in declared]
+        doubled = sorted({name for name in names if names.count(name) > 1})
+        assert not doubled, f"{path} declares each property once: {doubled}"
+        assert set(names) == expected, (
+            f"{path} declares exactly the roles and color-scheme: "
+            f"missing {sorted(expected - set(names))}, extra {sorted(set(names) - expected)}"
+        )
+
+    assert _roles_declared(
+        "frontend/src/x.svelte", "<style>.x { --oo-role-bg: #000; }</style><script>el.style.setProperty('--oo-role-text', v)</script>"
+    ) == ["--oo-role-bg", "--oo-role-text"], "the census reads a role declared in a rule and one set by a script"
+    elsewhere = {}
+    for path, text in _sources(_STYLED).items():
+        if path in _PALETTE_FILES.values():
+            continue
+        found = _roles_declared(path, text)
+        if found:
+            elsewhere[path] = sorted(set(found))
+    assert not elsewhere, f"only the palette files declare a role: {elsewhere}"
+
+    for column, pid in enumerate(_PALETTE_IDS):
+        _, declared = _palette_declarations(_PALETTE_FILES[pid])
+        values = dict(declared)
+        wrong = {
+            role: values.get(f"{_ROLE_PREFIX}{role}")
+            for role, row in _ROLE_TABLE_WITH_THE_LOADER.items()
+            if _colour_key(values.get(f"{_ROLE_PREFIX}{role}", "")) != _colour_key(row[column])
+        }
+        assert not wrong, f"the {pid} palette holds the chosen values: differs at {wrong}"
+
+
+# ===========================================================================
+# DS30 -- DS3's derivation half over the roles the loader added
+# ===========================================================================
+def test_ds30_every_colour_comes_from_a_role_the_loaders_two_included():
+    sample = {
+        _THEME: (
+            "[data-oo-theme] { --oo-a: var(--oo-role-text); --oo-b: #123456; --oo-a: var(--oo-role-bg);\n"
+            "  --oo-c: color-mix(in oklch, var(--oo-role-text) 4%, transparent); --oo-d: var(--oo-nowhere);\n"
+            "  --oo-e: var(--oo-role-ground); --oo-qr-bg: #FFFFFF; --oo-f: 0 1px 2px var(--oo-a); }\n"
+            ":root { --oo-motion-x: 1ms; }\n"
+        ),
+        f"{_SRC}/lib/x.css": ".panel { --oo-g: oklch(0.7 0.06 70); --oo-h: var(--oo-a); --oo-w: 24rem; }",
+    }
+    caught = _derivation_findings(sample, _ROLES_WITH_THE_LOADER)
+    expected_bits = (
+        "--oo-a is declared 2 times", "--oo-b spells a colour literal", "--oo-c mixes",
+        "--oo-d reads --oo-nowhere", "--oo-e reads --oo-role-ground", "--oo-g carries a colour",
+        "--oo-h carries a colour",
+    )
+    missing = [bit for bit in expected_bits if not any(bit in f for f in caught)]
+    assert not missing and len(caught) == len(expected_bits), (
+        f"the census names every planted break, and nothing else: missing {missing}, found {caught}"
+    )
+    # A value that differs with the palette is given by the rule naming
+    # it, once for each palette; light-dark() is refused, because an
+    # engine that cannot compute it drops every property reading it.
+    split = {
+        _THEME: (
+            "[data-oo-theme] { --oo-a: var(--oo-role-text); --oo-b: var(--oo-role-bg);"
+            " --oo-l: light-dark(var(--oo-role-text), var(--oo-role-bg)); --oo-m: var(--oo-h); }\n"
+            "[data-oo-theme=\"day\"] { --oo-h: var(--oo-role-surface); --oo-b: var(--oo-role-text); }\n"
+            "[data-oo-theme=\"night\"], [data-oo-theme='high-contrast'] { --oo-h: var(--oo-role-text); }\n"
+            "[data-oo-theme=\"night\"] { --oo-k: var(--oo-role-text); }\n"
+        ),
+    }
+    caught = _derivation_findings(split, _ROLES_WITH_THE_LOADER)
+    wanted = ("--oo-l uses light-dark()", "--oo-b is declared in the block and in a palette's rule",
+              "--oo-b is given per palette for ['day']", "--oo-k is given per palette for ['night']")
+    missing = [bit for bit in wanted if not any(bit in f for f in caught)]
+    assert not missing and len(caught) == len(wanted) and not any("--oo-h" in f or "--oo-m" in f for f in caught), (
+        "a per-palette value given once for each palette stands, a block token read from it resolves, "
+        f"and light-dark(), a double or a palette left out is named: missing {missing}, found {caught}"
+    )
+    # The table read is the one with the loader's two roles: a token that
+    # reads one of them stands, and a name outside the table is still refused.
+    witness = {_THEME: (
+        "[data-oo-theme] { --oo-t: var(--oo-role-machine); --oo-u: var(--oo-role-dried);"
+        " --oo-v: var(--oo-role-straw); }\n"
+    )}
+    assert len(_derivation_findings(witness)) == 3, "the twenty-six roles refuse all three names"
+    found = _derivation_findings(witness, _ROLES_WITH_THE_LOADER)
+    assert found == ["--oo-v reads --oo-role-straw, which is no role"], (
+        f"the twenty-eight take the loader's two and refuse a third name: {found}"
+    )
+
+    sources = _sources((".css", ".scss", ".svelte"))
+    tokens = _derivation()
+    assert len(tokens) >= 100, f"the derivation layer declares the app's tokens: {len(tokens)}"
+    findings = _derivation_findings(sources, _ROLES_WITH_THE_LOADER)
+    assert not findings, "the derivation rule is broken:\n  " + "\n  ".join(findings)
+    read = {
+        role: sorted(name for name, value in tokens.items() if f"var({_ROLE_PREFIX}{role})" in value.replace(" ", ""))
+        for role in _LOADER_ROLES
+    }
+    assert "--oo-machine" in read["machine"] and "--oo-dried" in read["dried"], (
+        f"each role the loader added is read, by its own token: {read}"
+    )
 
 
 if __name__ == "__main__":

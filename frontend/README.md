@@ -72,6 +72,13 @@ src/
     chat/
       requestFields.ts  # The ChatRequest fields a message sends, and their two builders
       chatsIndex.ts     # The chats index's requests (the search limit, the pages) and day groups
+      stream.ts         # One chat WebSocket read to its end; a Stop keeps reading until `done`
+      progress.ts       # The loader's reducer: status line, runs, steps, announcements (pure)
+      pacing.ts         # When a step's plant changes its drawing (each look held 400 ms)
+      loaderWords.ts    # Every word the loader shows or announces: one closed table
+    pixel/
+      onionFrames.ts    # The waiting line's onion, as pixel data
+      plantFrames.ts    # The step plants, as pixel data on one shared baseline
     nav/
       destinations.ts   # The destination table: every link the sidebar and the announcer draw
       active.ts         # Which entry is the current page, which holds it as its section
@@ -127,12 +134,18 @@ src/
         ChatInput         # Textarea with send/cancel, file attach, keyboard submit
         FileUpload        # Drag-and-drop + click file upload
         ContextBar        # Active model/preset/temperature display
-        StreamingIndicator  # Animated dots during generation
+        StreamingStatus   # The reply being written: a waiting line with the onion, or a run's card
+        StepRow           # A run's plants on one soil line, numbered (decorative)
+        StepList          # A run's steps as lines of words: number, name, state, duration
+        RunSummary        # The footer line after a run, read only from the record `done` carries
         ModelSelector     # Model dropdown (from Ollama)
         PresetSelector    # Preset dropdown with icons
         SearchResults     # Web search result cards
         ExportDialog      # Modal: format selector, preview, download/copy
         MessageSkeleton   # Pulsing loading placeholder for messages
+
+      pixel/
+        PixelStrip        # Draws a strip of pixel frames and plays it, a whole frame at a time
 
       sidebar/
         SecurityBadge     # The security grade, in the status card

@@ -1426,7 +1426,6 @@ UR2_LEDGER = {
     'frontend/src/lib/components/settings/WebAuthnSetup.svelte': 1,
 }
 UR3_LEDGER = {
-    'frontend/src/lib/components/OnionLoader.svelte': 2,
     'frontend/src/lib/components/chat/BranchExplorer.svelte': 10,
     'frontend/src/lib/components/chat/BranchTreeNodeItem.svelte': 3,
     'frontend/src/lib/components/chat/ChatControlBar.svelte': 14,
@@ -1445,9 +1444,7 @@ UR3_LEDGER = {
     'frontend/src/lib/components/chat/ProjectLinker.svelte': 9,
     'frontend/src/lib/components/chat/ReasoningDisplay.svelte': 1,
     'frontend/src/lib/components/chat/SandboxIsolationBadge.svelte': 1,
-    'frontend/src/lib/components/chat/StreamingIndicator.svelte': 2,
     'frontend/src/lib/components/chat/ToolCallApprovalDrawer.svelte': 8,
-    'frontend/src/lib/components/chat/VisionDelegationIndicator.svelte': 2,
     'frontend/src/lib/components/health/CacheManager.svelte': 33,
     'frontend/src/lib/components/health/HealthDashboard.svelte': 52,
     'frontend/src/lib/components/panels/AnalyticsDashboard.svelte': 61,
@@ -1516,7 +1513,6 @@ UR3_LEDGER = {
     'frontend/src/routes/(app)/(workshop)/workshop/+page.svelte': 4,
 }
 UR4_LEDGER = {
-    'frontend/src/lib/components/OnionLoader.svelte': 1,
     'frontend/src/lib/components/chat/BranchExplorer.svelte': 8,
     'frontend/src/lib/components/chat/BranchTreeNodeItem.svelte': 3,
     'frontend/src/lib/components/chat/ChatInput.svelte': 1,
@@ -1591,7 +1587,7 @@ UR7_LEDGER = {
 UR8_LEDGER = {
     'frontend/src/lib/api/artifacts.ts': 2,
     'frontend/src/lib/api/cache.ts': 1,
-    'frontend/src/lib/api/chat.ts': 6,
+    'frontend/src/lib/api/chat.ts': 1,
     'frontend/src/lib/api/code.ts': 2,
     'frontend/src/lib/api/context.ts': 1,
     'frontend/src/lib/api/export.ts': 1,
@@ -1607,7 +1603,7 @@ UR8_LEDGER = {
     'frontend/src/lib/components/panels/PanelToggle.svelte': 2,
     'frontend/src/lib/components/panels/PipelineEditor.svelte': 2,
     'frontend/src/lib/components/settings/PresetManager.svelte': 1,
-    'frontend/src/lib/stores/chat.ts': 21,
+    'frontend/src/lib/stores/chat.ts': 18,
     'frontend/src/lib/stores/conversations.ts': 3,
     'frontend/src/lib/stores/panels.ts': 4,
     'frontend/src/lib/types.ts': 1,

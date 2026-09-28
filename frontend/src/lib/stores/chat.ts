@@ -3,6 +3,15 @@
  *
  * Gere l'etat de streaming, le contenu en cours, et les actions
  * d'envoi, retry et annulation.
+ *
+ * One reset puts every live store of a reply back at rest; sending,
+ * retrying, done, an error and a Stop all call it. The loader's state is
+ * not emptied there: the reducer ends it itself (done, an error, a lost
+ * stream), so the status region can still say how the reply ended and a run
+ * cut short stays drawn; the next reply's start replaces it. A reply that
+ * ends keeps what was written: a Stop marks it `stopped`, adding nothing to
+ * its text, and an error keeps the partial reply beside the error. A reply
+ * whose `done` carries the steps' record keeps it, for its summary line.
  */
 
 import { writable, get } from 'svelte/store';
@@ -10,8 +19,26 @@ import { streamChat, retryChat, cancelGeneration } from '$lib/api/chat';
 import type { ChatConnection } from '$lib/api/chat';
 import { messages, loadConversations } from '$lib/stores/conversations';
 import { getMessages } from '$lib/api/conversations';
-import type { ChatStreamCallbacks } from '$lib/types';
+import type {
+	ChatResponse,
+	ChatStreamCallbacks,
+	ChatToken,
+	MessageItem,
+	ReasoningMetaInfo,
+	ReasoningStepInfo,
+	ToolCallInfo,
+	VerificationInfo,
+} from '$lib/types';
 import { chatRequest, type ChatOptions } from '$lib/chat/requestFields';
+import {
+	lose,
+	observe,
+	reconnecting,
+	start,
+	stop as stopLoader,
+	type LoaderState,
+} from '$lib/chat/progress';
+import { statusLine } from '$lib/chat/loaderWords';
 
 // -- Stores de streaming --
 
@@ -72,9 +99,136 @@ export const streamingCodingEvents = writable<CodingEventEntry[]>([]);
 /** Whether the current streaming is a coding agent turn. */
 export const isCodingStream = writable<boolean>(false);
 
+/** The loader's state for the reply being streamed (lib/chat/progress.ts). */
+export const streamingLoader = writable<LoaderState | null>(null);
+
+/** The conversation the reply being streamed (or the last one) belongs to. */
+export const streamingConversation = writable<string | null>(null);
+
+/** What the stream reported about the reply, attached to it when it is done. */
+export const streamingVerifications = writable<VerificationInfo[]>([]);
+export const streamingToolCalls = writable<ToolCallInfo[]>([]);
+export const streamingReasoningSteps = writable<ReasoningStepInfo[]>([]);
+export const streamingReasoningMeta = writable<ReasoningMetaInfo | null>(null);
+
 // -- Etat interne --
 
 let activeConnection: ChatConnection | null = null;
+
+/** Every live store of a reply back at rest: the one reset every path calls. */
+function resetStreaming(): void {
+	isStreaming.set(false);
+	streamingContent.set('');
+	streamingThinking.set('');
+	streamingModel.set(null);
+	streamingVisionDelegation.set(null);
+	streamingStatus.set(null);
+	streamingCodingEvents.set([]);
+	isCodingStream.set(false);
+	streamingVerifications.set([]);
+	streamingToolCalls.set([]);
+	streamingReasoningSteps.set([]);
+	streamingReasoningMeta.set(null);
+	activeConnection = null;
+}
+
+/** A new reply: every live store at rest, the last reply's error gone, the loader started. */
+function beginStream(conversationId: string): void {
+	resetStreaming();
+	streamingError.set(null);
+	lastSearchMetadata.set(null);
+	streamingConversation.set(conversationId);
+	streamingLoader.set(start(Date.now()));
+	isStreaming.set(true);
+}
+
+/** Whether the reader asked for a Stop of the reply being streamed. */
+function stopAsked(): boolean {
+	return get(streamingLoader)?.stopRequested === true;
+}
+
+/** How the reply ended, as its own fields: stopped, and the steps' record `done` carried. */
+function endOf(response: ChatResponse): Partial<MessageItem> {
+	const end: Partial<MessageItem> = {};
+	if (response.cancelled === true || stopAsked()) end.stopped = true;
+	if (Array.isArray(response.steps) && response.steps.length > 0) {
+		end.steps = response.steps;
+		end.duration_ms = response.duration_ms;
+	}
+	return end;
+}
+
+/** An error ended the reply: what was written stays, beside the error. */
+function keepPartialReply(): void {
+	const partial = get(streamingContent);
+	if (!partial) return;
+	const kept: MessageItem = {
+		id: null,
+		role: 'assistant',
+		content: partial,
+		timestamp: new Date().toISOString(),
+		model: get(streamingModel),
+		token_estimate: 0,
+		thinking: get(streamingThinking) || undefined,
+		...streamReports(),
+	};
+	if (stopAsked()) kept.stopped = true;
+	messages.update((msgs) => [...msgs, kept]);
+}
+
+function feedLoader(frame: ChatToken): void {
+	streamingLoader.update((state) => state && observe(state, frame, Date.now(), statusLine));
+}
+
+function reconnectLoader(attempt: number, max: number): void {
+	streamingLoader.update((state) => state && reconnecting(state, attempt, max, Date.now()));
+}
+
+function loseLoader(): void {
+	streamingLoader.update((state) => state && lose(state, Date.now()));
+}
+
+function keepVerification(info: VerificationInfo): void {
+	streamingVerifications.update((list) => [...list, info]);
+}
+
+function keepToolCall(info: ToolCallInfo): void {
+	streamingToolCalls.update((list) => [...list, info]);
+}
+
+function keepReasoningStep(info: ReasoningStepInfo): void {
+	streamingReasoningSteps.update((list) => [...list, info]);
+}
+
+function keepReasoningMeta(info: ReasoningMetaInfo): void {
+	streamingReasoningMeta.set(info);
+}
+
+function keepCodingEvent(eventType: string, data: Record<string, unknown>): void {
+	streamingCodingEvents.update((events) => [
+		...events,
+		{
+			eventType,
+			content: (data.event_content as string) || '',
+			data,
+			timestamp: Date.now(),
+		},
+	]);
+}
+
+/** What the stream reported, as the finished reply's own fields. */
+function streamReports(): Partial<MessageItem> {
+	const reports: Partial<MessageItem> = {};
+	const verifications = get(streamingVerifications);
+	const toolCalls = get(streamingToolCalls);
+	const reasoningSteps = get(streamingReasoningSteps);
+	const reasoningMeta = get(streamingReasoningMeta);
+	if (verifications.length > 0) reports.verification = verifications;
+	if (toolCalls.length > 0) reports.tool_calls = toolCalls;
+	if (reasoningSteps.length > 0) reports.reasoning_steps = reasoningSteps;
+	if (reasoningMeta) reports.reasoning_meta = reasoningMeta;
+	return reports;
+}
 
 /**
  * Envoie un message et streame la reponse.
@@ -89,19 +243,10 @@ export async function sendMessage(
 ): Promise<void> {
 	if (get(isStreaming)) return;
 
-	// Reset etat
-	isStreaming.set(true);
-	streamingContent.set('');
-	streamingThinking.set('');
-	streamingModel.set(null);
-	streamingError.set(null);
-	lastSearchMetadata.set(null);
-	streamingVisionDelegation.set(null);
-	streamingStatus.set(null);
+	// A new reply, and a new session: the last one's sandbox and coding records go.
 	lastSandboxMeta.set(null);
 	lastCodingMeta.set(null);
-	streamingCodingEvents.set([]);
-	isCodingStream.set(false);
+	beginStream(conversationId);
 
 	// Ajouter le message user localement
 	const userMsg = {
@@ -140,6 +285,8 @@ export async function sendMessage(
 				model: response.model,
 				token_estimate: response.tokens,
 				thinking: thinkingText || (response as Record<string, unknown>).thinking as string || undefined,
+				...streamReports(),
+				...endOf(response),
 			};
 			if (visionDel?.vision_model) {
 				assistantMsg.vision_delegation = visionDel;
@@ -190,31 +337,15 @@ export async function sendMessage(
 				});
 			}
 
-			// Reset streaming
-			isStreaming.set(false);
-			streamingContent.set('');
-			streamingThinking.set('');
-			streamingModel.set(null);
-			streamingVisionDelegation.set(null);
-			streamingStatus.set(null);
-			streamingCodingEvents.set([]);
-			isCodingStream.set(false);
-			activeConnection = null;
+			resetStreaming();
 
 			// Rafraichir la liste (pour mettre a jour le titre et message_count)
 			loadConversations();
 		},
 		onError: (error: string) => {
+			keepPartialReply();
 			streamingError.set(error);
-			isStreaming.set(false);
-			streamingContent.set('');
-			streamingThinking.set('');
-			streamingModel.set(null);
-			streamingVisionDelegation.set(null);
-			streamingStatus.set(null);
-			streamingCodingEvents.set([]);
-			isCodingStream.set(false);
-			activeConnection = null;
+			resetStreaming();
 		},
 		onMetadata: (metadata) => {
 			if (metadata.model) {
@@ -237,22 +368,19 @@ export async function sendMessage(
 		onVisionDelegation: (info) => {
 			streamingVisionDelegation.set(info);
 		},
-		// Intermediate status for StreamingIndicator
+		// A server status as sent; the loader says it in the table's words, through onFrame
 		onStatus: (message) => {
 			streamingStatus.set(message || null);
 		},
 		// Live coding agent events during streaming
-		onCodingEvent: (eventType, data) => {
-			streamingCodingEvents.update((events) => [
-				...events,
-				{
-					eventType,
-					content: (data.event_content as string) || '',
-					data,
-					timestamp: Date.now(),
-				},
-			]);
-		},
+		onCodingEvent: keepCodingEvent,
+		onVerification: keepVerification,
+		onToolCall: keepToolCall,
+		onReasoningStep: keepReasoningStep,
+		onReasoningDone: keepReasoningMeta,
+		onFrame: feedLoader,
+		onReconnecting: reconnectLoader,
+		onLost: loseLoader,
 	};
 
 	activeConnection = streamChat(request, callbacks);
@@ -267,12 +395,8 @@ export async function sendMessage(
 export async function retryLastMessage(conversationId: string): Promise<void> {
 	if (get(isStreaming)) return;
 
-	isStreaming.set(true);
-	streamingContent.set('');
-	streamingThinking.set('');
-	streamingModel.set(null);
-	streamingError.set(null);
-	streamingStatus.set(null);
+	// The sandbox and coding records stay: a retry answers in the same session.
+	beginStream(conversationId);
 
 	// Supprimer les derniers messages localement (assistant puis user)
 	// Le backend s'occupe de la suppression en DB
@@ -296,13 +420,23 @@ export async function retryLastMessage(conversationId: string): Promise<void> {
 			streamingThinking.update((prev) => prev + content);
 		},
 		onDone: async (response) => {
+			// How it ended, kept before the reset; the saved message does not carry it.
+			const end = endOf(response);
+			const reports = streamReports();
+			const thinkingText = get(streamingThinking);
+			resetStreaming();
 			// Recharger les messages depuis l'API (le backend gere l'etat)
 			try {
 				const freshMessages = await getMessages(conversationId);
-				messages.set(freshMessages);
+				let last = -1;
+				freshMessages.forEach((msg, i) => {
+					if (msg.role === 'assistant') last = i;
+				});
+				messages.set(
+					last < 0 ? freshMessages : freshMessages.map((msg, i) => (i === last ? { ...msg, ...end } : msg))
+				);
 			} catch {
 				// Fallback: ajouter le message assistant localement
-				const thinkingText = get(streamingThinking);
 				const assistantMsg = {
 					id: response.message_id,
 					role: 'assistant',
@@ -311,79 +445,84 @@ export async function retryLastMessage(conversationId: string): Promise<void> {
 					model: response.model,
 					token_estimate: response.tokens,
 					thinking: thinkingText || undefined,
+					...reports,
+					...end,
 				};
 				messages.update((msgs) => [...msgs, assistantMsg]);
 			}
-
-			isStreaming.set(false);
-			streamingContent.set('');
-			streamingThinking.set('');
-			streamingModel.set(null);
-			streamingStatus.set(null);
-			activeConnection = null;
 		},
 		onError: (error: string) => {
+			keepPartialReply();
 			streamingError.set(error);
-			isStreaming.set(false);
-			streamingContent.set('');
-			streamingThinking.set('');
-			streamingModel.set(null);
-			streamingStatus.set(null);
-			activeConnection = null;
+			resetStreaming();
 		},
 		onMetadata: (metadata) => {
 			if (metadata.model) {
 				streamingModel.set(metadata.model as string);
 			}
 		},
-		// Intermediate status for StreamingIndicator
+		onVisionDelegation: (info) => {
+			streamingVisionDelegation.set(info);
+		},
+		// A server status as sent; the loader says it in the table's words, through onFrame
 		onStatus: (message) => {
 			streamingStatus.set(message || null);
 		},
+		onCodingEvent: keepCodingEvent,
+		onVerification: keepVerification,
+		onToolCall: keepToolCall,
+		onReasoningStep: keepReasoningStep,
+		onReasoningDone: keepReasoningMeta,
+		onFrame: feedLoader,
+		onReconnecting: reconnectLoader,
+		onLost: loseLoader,
 	};
 
 	activeConnection = retryChat(conversationId, callbacks);
 }
 
 /**
- * Annule la generation en cours.
- * Envoie un POST /api/chat/cancel et ferme le WebSocket.
+ * Stops the reply being streamed.
+ *
+ * The cancel goes first (POST /api/chat/cancel) and the socket keeps being
+ * read: the server closes its open steps and sends done, which finishes the
+ * reply through the stream's own callbacks. Only a stream that ends without
+ * an answer leaves the partial reply to be kept here.
  */
 export async function cancelCurrentGeneration(conversationId: string): Promise<void> {
 	if (!get(isStreaming)) return;
 
-	// Fermer le WebSocket cote client
-	if (activeConnection) {
-		activeConnection.cancel();
-		activeConnection = null;
+	streamingLoader.update((state) => state && stopLoader(state, Date.now()));
+	const connection = activeConnection;
+	const request = () => cancelGeneration(conversationId);
+	if (connection) {
+		const ended = await connection.stop(request);
+		if (ended === 'done' || ended === 'error') return;
+	} else {
+		try {
+			await request();
+		} catch {
+			/* the reply may be over already */
+		}
 	}
+	// A second Stop waited on the same end: the first one kept the reply.
+	if (!get(isStreaming)) return;
 
-	// Demander l'annulation cote serveur
-	try {
-		await cancelGeneration(conversationId);
-	} catch {
-		// L'annulation peut echouer si la generation est deja terminee
-	}
-
-	// Finaliser le contenu partiel comme message
+	// Nobody answered the Stop: the text written so far is the reply, marked stopped.
 	const partial = get(streamingContent);
 	if (partial) {
-		const model = get(streamingModel);
-		const thinkingText = get(streamingThinking);
 		const partialMsg = {
 			id: null,
 			role: 'assistant',
-			content: partial + '\n\n[Generation cancelled]',
+			content: partial,
 			timestamp: new Date().toISOString(),
-			model: model,
+			model: get(streamingModel),
 			token_estimate: 0,
-			thinking: thinkingText || undefined,
+			thinking: get(streamingThinking) || undefined,
+			...streamReports(),
+			stopped: true,
 		};
 		messages.update((msgs) => [...msgs, partialMsg]);
 	}
-
-	isStreaming.set(false);
-	streamingContent.set('');
-	streamingThinking.set('');
-	streamingModel.set(null);
+	resetStreaming();
 }
