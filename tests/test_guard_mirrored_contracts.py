@@ -135,7 +135,7 @@ def test_gm3_the_ladder_guard_tier_leaves_the_fake_trees_data_places_as_they_wer
     tree = _tree(tmp_path, {"touch_guard.py": _TOUCH, "quiet_guard.py": "raise SystemExit(0)\n"})
     (tree / "scripts").mkdir()
     shutil.copy2(_REPO / "scripts" / "ladder.sh", tree / "scripts" / "ladder.sh")
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", CLAUDE_PROJECT_DIR=str(tree))
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     run = subprocess.run(["bash", str(tree / "scripts" / "ladder.sh"), "t2"], cwd=tree, env=env,
                          capture_output=True, text=True, timeout=300)
     assert "PASS  touch_guard.py" in run.stdout and "PASS  quiet_guard.py" in run.stdout, run.stdout

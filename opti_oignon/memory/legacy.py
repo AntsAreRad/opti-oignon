@@ -6,7 +6,7 @@ MEMORY -- OPTI-OIGNON 1.4.0
 Cross-conversation memory: extracts, stores, and retrieves persistent
 facts about the user across conversations.
 
-This is the biggest gap vs. Claude/ChatGPT -- every local conversation
+This is the biggest gap vs. hosted assistants -- every local conversation
 starts from zero. This module bridges that gap by:
 
 1. Extracting facts from conversations via a lightweight LLM call

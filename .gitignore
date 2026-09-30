@@ -131,16 +131,8 @@ opti_oignon/data/notes_blobs/
 data/.security_mode_lock
 data/.audit_chain_anchor
 data/sandbox_exports/
-CLAUDE.local.md
-.claude/settings.local.json
-!CLAUDE.md
-.claude/state/*
-!.claude/state/blades.md
 
 # Maintainer tooling and personal files: never part of the public tree.
-.claude/
-CLAUDE.md
-CLAUDE.local.md
 .bash_profile
 .bashrc
 .profile

@@ -21,7 +21,15 @@ linter rather than anything internal.
 
 Diff-only by design: it guards against NEW nomenclature on added lines
 without failing on pre-existing debt, so it can be adopted before that debt
-is paid down. The forbidden patterns are assembled from fragments at import
+is paid down.
+
+A second pass reads the whole tracked tree, root and hidden files included,
+where that debt is already zero: no tracked file may carry a session code or
+the name of the tool used to write the tree in its path, and no tracked line
+may name that tool. A name ships as surely as a line does, and a file at the
+root sits outside every scan tree of the diff pass.
+
+The forbidden patterns are assembled from fragments at import
 time, so this published script carries no clear instance of the
 nomenclature it rejects and does not trip on a scan of itself.
 
@@ -95,6 +103,10 @@ _SCAN_PATHS = (
 
 _DEFAULT_BASE_REF = "origin/main"
 
+# The tool used to write the tree (case-insensitive, from fragments). It is
+# not part of the work: no tracked path or line may name it.
+_TOOL_NAME = re.compile("cla" + "ude", re.IGNORECASE)
+
 
 def _strip_allowed(line):
     """Remove exempt terms and pragmas so they cannot account for a match."""
@@ -126,6 +138,52 @@ def find_violations(lines):
                 violations.append((index, "process_word", raw.strip()))
                 break
     return violations
+
+
+def find_name_violations(paths):
+    """Return ``[(path, kind), ...]`` for tracked paths that must not ship.
+
+    A path is charged when any of its components carries a session code
+    (``session_code_in_name``) or names the tool (``tool_in_name``).
+    """
+    violations = []
+    for path in paths:
+        if _TOOL_NAME.search(path):
+            violations.append((path, "tool_in_name"))
+        elif _SESSION_CODE.search(path):
+            violations.append((path, "session_code_in_name"))
+    return violations
+
+
+def find_tool_mentions(lines):
+    """Return ``[(index, snippet), ...]`` for lines that name the tool."""
+    return [
+        (index, raw.strip())
+        for index, raw in enumerate(lines)
+        if _TOOL_NAME.search(raw)
+    ]
+
+
+def _tracked_tree():
+    """Return ``(paths, [(path, line), ...])`` for the whole tracked tree.
+
+    Binary files are skipped by content; their names are still read.
+    """
+    # Fixed argv, no shell: safe.
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], capture_output=True, check=False,
+    )
+    paths = [p for p in listed.stdout.decode("utf-8").split("\0") if p]
+    grep = subprocess.run(
+        ["git", "grep", "-I", "-i", "-z", "--no-color", "-e", "cla" + "ude"],
+        capture_output=True, check=False,
+    )
+    pairs = []
+    for line in grep.stdout.decode("utf-8", "replace").split("\n"):
+        path, sep, text = line.partition("\0")
+        if sep:
+            pairs.append((path, text))
+    return paths, pairs
 
 
 def _added_lines_with_paths(base_ref):
@@ -178,19 +236,26 @@ def main(argv=None):
     lines = [added for _path, added in pairs]
     violations = find_violations(lines)
 
-    if not violations:
+    paths, tree_lines = _tracked_tree()
+    names = find_name_violations(paths)
+    mentions = find_tool_mentions([text for _path, text in tree_lines])
+
+    if not violations and not names and not mentions:
         print(
             "public-clean guard: no session nomenclature in added lines "
-            f"(base {base_ref})"
+            f"(base {base_ref}), none in {len(paths)} tracked names, "
+            "no tool mention"
         )
         return 0
 
-    print(
-        "public-clean guard: FAILED -- session nomenclature in added lines:"
-    )
+    print("public-clean guard: FAILED")
     for index, kind, snippet in violations:
         path = pairs[index][0] or "?"
         print(f"  {path} [{kind}]: {snippet}")
+    for path, kind in names:
+        print(f"  {path} [{kind}]")
+    for index, snippet in mentions:
+        print(f"  {tree_lines[index][0]} [tool_mention]: {snippet[:120]}")
     return 1
 
 

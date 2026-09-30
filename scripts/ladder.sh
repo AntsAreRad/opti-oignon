@@ -6,7 +6,7 @@
 # "life" is not part of "all": it runs alone, and exits 3 when it is owed.
 # "frontend" runs t1's frontend step alone.
 set -uo pipefail
-cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}" || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 TIER="${1:-all}"
 JUNIT="${JUNIT_OUT:-${TMPDIR:-/tmp}/oo_junit.xml}"
@@ -238,12 +238,15 @@ t3() {
   head_ "t3  directed mutation"
   say "  Manual tier, driven by the blade skill: for each new contract, apply its"
   say "  blade, observe red, restore byte-exact, confirm the checksum."
-  if [ -f .claude/state/blades.md ]; then
-    pending=$(grep -cE '^[[:space:]]*- \[ \]' .claude/state/blades.md 2>/dev/null | head -1)
+  # The blade register is local maintainer state, never tracked: its path
+  # comes from the local git config key oo.bladeRegister.
+  blades=$(git config --get oo.bladeRegister 2>/dev/null)
+  if [ -n "$blades" ] && [ -f "$blades" ]; then
+    pending=$(grep -cE '^[[:space:]]*- \[ \]' "$blades" 2>/dev/null | head -1)
     pending=${pending:-0}
     if [ "$pending" -eq 0 ]; then pass "no blade left unproven"
-    else fail "$pending blade(s) still unproven in .claude/state/blades.md"; fi
-  else skip "no blade register yet (created by the open-block skill)"; fi
+    else fail "$pending blade(s) still unproven in $blades"; fi
+  else skip "no blade register (set git config oo.bladeRegister <path>)"; fi
 }
 
 t4() {

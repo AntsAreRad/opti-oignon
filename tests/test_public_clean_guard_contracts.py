@@ -24,6 +24,15 @@ independently of git:
   * G9 -- scope control: a hardware architecture triple, whose digits run
     straight into a lowercase letter, is NOT flagged. The widened pattern
     must catch disguises without charging ordinary platform names.
+  * G10 -- a tracked file whose name carries a session code is flagged, and
+    an ordinary name is not: a name ships as surely as a line does.
+  * G11 -- a tracked path naming the tool used to write the tree is flagged,
+    in any case and in any component.
+  * G12 -- a content line naming that tool is flagged, in any case, while a
+    line naming a model vendor's call format is not.
+  * G13 -- the tree-wide pass charges a tracked file at the root, outside
+    the diff's scan trees, for its name or for its content; a clean tree
+    passes.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -34,7 +43,10 @@ lives under .github/, outside the importable package, and is loaded through
 the shared isolation window.
 """
 
+import os
+import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -49,6 +61,7 @@ _GUARD_PATH = REPO / ".github" / "scripts" / "public_clean_guard.py"
 _S = "S"
 _DIGITS = "312"
 _UNDERSCORE = "_"
+_TOOL = "Cla" + "ude"
 
 
 def _load():
@@ -228,6 +241,88 @@ def test_g9_architecture_triple_is_not_flagged():
 
 
 # ---------------------------------------------------------------------------
+# G10 -- a session code in a tracked file's name is flagged
+# ---------------------------------------------------------------------------
+def test_g10_session_code_in_a_file_name_is_flagged():
+    guard, restore = _load()
+    try:
+        name = "manifest" + _UNDERSCORE + _S + _DIGITS + "_full.md5"
+        violations = guard.find_name_violations([name, "notes/" + name])
+        assert [path for path, _kind in violations] == [name, "notes/" + name]
+        assert {kind for _path, kind in violations} == {"session_code_in_name"}
+        clean = ["scripts/ladder.sh", "frontend/node_modules/linux-s390x/a.js"]
+        assert guard.find_name_violations(clean) == [], "an ordinary name is clean"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G11 -- the tool's name in a tracked path is flagged, in any case
+# ---------------------------------------------------------------------------
+def test_g11_tool_name_in_a_path_is_flagged():
+    guard, restore = _load()
+    try:
+        paths = [
+            _TOOL.upper() + ".md",
+            "." + _TOOL.lower() + "/rules/python.md",
+            "docs/notes_" + _TOOL + "_setup.txt",
+        ]
+        violations = guard.find_name_violations(paths)
+        assert [path for path, _kind in violations] == paths
+        assert {kind for _path, kind in violations} == {"tool_in_name"}
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G12 -- the tool's name on a content line is flagged, in any case
+# ---------------------------------------------------------------------------
+def test_g12_tool_name_on_a_content_line_is_flagged():
+    guard, restore = _load()
+    try:
+        lines = [
+            "The local " + _TOOL + " milestone.",
+            'cd "${' + _TOOL.upper() + '_PROJECT_DIR:-.}"',
+            "." + _TOOL.lower() + "/",
+            "- XML-style blocks -- a vendor-style call with parameters",
+        ]
+        assert [index for index, _snippet in guard.find_tool_mentions(lines)] == [0, 1, 2]
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G13 -- the tree-wide pass charges a root-level file, by name or content
+# ---------------------------------------------------------------------------
+def _tree_rc(guard, files):
+    """Run the guard's main in a fresh git tree holding ``files``."""
+    here = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init", "-q", tmp], check=True)
+        for rel, text in files.items():
+            (Path(tmp) / rel).write_text(text)
+        subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+        os.chdir(tmp)
+        try:
+            return guard.main(["HEAD"])
+        finally:
+            os.chdir(here)
+
+
+def test_g13_tree_wide_pass_charges_a_root_level_file():
+    guard, restore = _load()
+    try:
+        clean = {"README.md": "a clean tree\n"}
+        assert _tree_rc(guard, clean) == 0, "a clean tree passes"
+        named = dict(clean, **{"manifest_" + _S + _DIGITS + ".md5": "x\n"})
+        assert _tree_rc(guard, named) == 1, "a root-level name is charged"
+        mentioned = dict(clean, **{".gitignore": "." + _TOOL.lower() + "/\n"})
+        assert _tree_rc(guard, mentioned) == 1, "a root-level mention is charged"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -246,6 +341,13 @@ def _run_all():
          test_g8_session_code_in_camel_case_identifier_is_flagged),
         ("G9 architecture triple not flagged",
          test_g9_architecture_triple_is_not_flagged),
+        ("G10 session code in a file name flagged",
+         test_g10_session_code_in_a_file_name_is_flagged),
+        ("G11 tool name in a path flagged", test_g11_tool_name_in_a_path_is_flagged),
+        ("G12 tool name on a content line flagged",
+         test_g12_tool_name_on_a_content_line_is_flagged),
+        ("G13 tree-wide pass charges a root-level file",
+         test_g13_tree_wide_pass_charges_a_root_level_file),
     ]
     passed = 0
     for label, fn in tests:

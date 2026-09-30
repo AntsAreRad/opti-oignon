@@ -1133,6 +1133,16 @@ package costs.
 
 ### Changed
 
+- The public-clean guard reads the whole tracked tree as well as the diff:
+  no tracked path may carry a session code or the name of the tool used to
+  write the tree, and no tracked line may name that tool. A file at the root
+  sat outside every scan tree of the diff pass; a stale checksum manifest
+  named after a work block had shipped there, and is removed. The ignore
+  entries for that tool's local files leave the tracked ignore file for each
+  clone's own exclude file, the ladder finds its root from its own location,
+  and its directed-mutation tier reads the blade register's path from the
+  local git config key `oo.bladeRegister` (a named skip when unset).
+
 - The Workshop's settings pages are quiet lists: each group is a row,
   titled once, and one group is open at a time. Only the open group loads
   its panel, so entering Models and inference no longer starts thirteen

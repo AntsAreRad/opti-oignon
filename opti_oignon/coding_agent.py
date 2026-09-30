@@ -4,7 +4,7 @@ CODING AGENT - OPTI-OIGNON v1.8.3
 =========================================
 
 Multi-step autonomous coding agent: plan -> implement -> test -> fix -> review -> apply.
-The "local Claude Code" milestone.
+The local coding-agent milestone.
 
 Uses SandboxToolSession for all filesystem operations (fully isolated).
 Uses token budget for context window management.

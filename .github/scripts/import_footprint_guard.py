@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import footprint guard: a capability costs nothing until it is called.
 
-`.claude/rules/python-modules.md` already states the rule -- "importing the
+The maintainer's module rules already state it -- "importing the
 package creates no database, starts no thread, and touches no network". The
 thread clause holds. The database clause does not: importing the package
 opens twenty databases through singletons built at module scope, with
