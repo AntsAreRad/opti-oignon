@@ -18,6 +18,7 @@ except ImportError:
     # a stale copy of a real version is drift, a zero is a flag.
     __version__ = "0.0.0"
 
+
 # -- Conversations --
 
 class ConversationSummary(BaseModel):
@@ -1751,7 +1752,7 @@ class CodingTaskRequest(BaseModel):
         None, description="Model override for this task"
     )
     allow_degraded: bool = Field(
-        False, description="Allow tempdir sandbox without confirmation"
+        False, description="Refused when true: degraded mode is the server's decision"
     )
 
 

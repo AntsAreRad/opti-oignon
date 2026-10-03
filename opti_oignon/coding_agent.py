@@ -969,7 +969,6 @@ class CodingAgent:
         self,
         task: str,
         project_path: str | None = None,
-        allow_degraded: bool = False,
     ) -> str:
         """Start a new coding task.
 
@@ -979,7 +978,6 @@ class CodingAgent:
         Args:
             task: Natural language description of the coding task.
             project_path: Optional path to inject into sandbox.
-            allow_degraded: Allow tempdir sandbox without confirmation.
 
         Returns:
             Task ID string.
@@ -1025,10 +1023,7 @@ class CodingAgent:
 
             # Start sandbox session
             if not self._session.active:
-                self._session.start(
-                    session_id=self._task_id,
-                    allow_degraded=allow_degraded,
-                )
+                self._session.start(session_id=self._task_id)
 
             self._log("init", "task_started", f"Task: {task[:200]}")
 

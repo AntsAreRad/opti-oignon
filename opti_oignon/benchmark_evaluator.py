@@ -529,7 +529,7 @@ def evaluate_code(
     result = CodeResult(question_id=question.id)
 
     try:
-        session = mgr.create_sandbox(session_id, allow_degraded=True)
+        session = mgr.create_sandbox(session_id)
     except Exception as e:
         result.details = f"Sandbox creation failed: {e}"
         return result

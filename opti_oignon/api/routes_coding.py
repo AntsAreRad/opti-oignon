@@ -77,6 +77,12 @@ except Exception:  # pragma: no cover - constrained environments only
 
 logger = logging.getLogger(__name__)
 
+_DEGRADED_REQUEST_REFUSED = (
+    "allow_degraded is refused: a degraded (tempdir) sandbox is decided by "
+    "the server configuration and confirmed by the user through "
+    "POST /api/sandbox/confirm-degraded, never by a request"
+)
+
 router = APIRouter(prefix="/api/coding", tags=["coding"])
 
 
@@ -279,13 +285,14 @@ def start_coding_task(request: CodingTaskRequest) -> dict:
     """
     if _emergency_stop is not None:
         _emergency_stop.guard_http()  # Refused, not hung
+    if request.allow_degraded:
+        raise HTTPException(status_code=400, detail=_DEGRADED_REQUEST_REFUSED)
     agent = _ensure_agent_with_callback()
 
     try:
         task_id = agent.start_task(  # noqa: F841
             task=request.task,
             project_path=request.project_path,
-            allow_degraded=request.allow_degraded,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

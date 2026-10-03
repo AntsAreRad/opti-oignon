@@ -1600,7 +1600,6 @@ class SandboxManager:
     def create_sandbox(
         self,
         session_id: str | None,
-        allow_degraded: bool = False,
         label: str = "",
         owner_user_id: str = "local",
         timeout_override: int | None = None,
@@ -1611,9 +1610,6 @@ class SandboxManager:
             session_id: Unique identifier for this sandbox session, or None
                 to auto-generate one (previously a None leaked into
                 the key and the directory prefix).
-            allow_degraded: If True, allow tempdir mode without prior
-                confirmation. If False (default), degraded mode requires
-                confirm_degraded_mode() to have been called first.
             label: Optional human label for the workspace manager.
             owner_user_id: Owning user per the effective_user_id isolation
                 pattern; defaults to the single-user "local".
@@ -1631,10 +1627,11 @@ class SandboxManager:
         if not self._config.enabled:
             raise RuntimeError("Sandbox is disabled in configuration")
 
-        # Enforce degraded mode confirmation
+        # Enforce degraded mode confirmation. Only the configuration and the
+        # user's own confirmation decide it; no caller can ask past it.
         if self.degraded_mode:
             if self._config.require_degraded_confirmation:
-                if not allow_degraded and not self._degraded_confirmed:
+                if not self._degraded_confirmed:
                     raise RuntimeError(
                         "Sandbox is in DEGRADED mode (no bwrap). "
                         "True filesystem isolation is NOT available. "

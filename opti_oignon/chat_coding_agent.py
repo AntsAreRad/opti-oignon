@@ -539,9 +539,7 @@ class ChatCodingSession:
             return
         if self._mgr is None:
             raise RuntimeError("Sandbox manager not available")
-        self._sandbox_session = self._mgr.create_sandbox(
-            self._session_id, allow_degraded=True
-        )
+        self._sandbox_session = self._mgr.create_sandbox(self._session_id)
         logger.info(
             "Chat coding sandbox created: %s (conv=%s)",
             self._session_id, self._conversation_id[:8],

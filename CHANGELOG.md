@@ -2427,6 +2427,16 @@ package costs.
   the sandbox. Each now asks the manager whether bwrap is in use, and strict
   mode blocks a configured tempdir backend with a reason that names the
   setting. Nine contracts: one per check, one for the manager's answer.
+- A degraded sandbox is the server's decision, never a caller's. A sandbox
+  on the tempdir backend gives no real isolation, and the manager asks the
+  user to confirm one before creating it; yet the quick sandbox, the chat's
+  coding agent, the evaluation runner and the benchmark evaluator passed
+  `allow_degraded=True` past that confirmation, and the two REST routes that
+  start a sandbox took the flag from the request body. The flag is gone
+  from every function. `POST /api/sandbox/create` and `POST
+  /api/coding/start` refuse `allow_degraded: true` with a 400 that names
+  `POST /api/sandbox/confirm-degraded`, where the user confirms. Four
+  contracts.
 
 ## 2.2.0 -- 2026-07-28
 

@@ -333,13 +333,11 @@ class SandboxToolSession:
     def start(
         self,
         session_id: str | None = None,
-        allow_degraded: bool = False,
     ) -> str:
         """Start a new sandbox session.
 
         Args:
             session_id: Custom ID, or auto-generated UUID if None.
-            allow_degraded: Allow tempdir mode without confirmation.
 
         Returns:
             The session ID.
@@ -357,9 +355,7 @@ class SandboxToolSession:
             )
 
         sid = session_id or f"tool-session-{uuid.uuid4().hex[:12]}"
-        self._session = self._mgr.create_sandbox(
-            sid, allow_degraded=allow_degraded
-        )
+        self._session = self._mgr.create_sandbox(sid)
         self._session_id = sid
         self._reset_diag_cache()
 

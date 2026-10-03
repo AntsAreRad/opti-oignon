@@ -151,6 +151,12 @@ def _current_uid(user: dict) -> str:
     """The effective owner id of the calling user."""
     return _effective_user_id((user or {}).get("sub"))
 
+_DEGRADED_REQUEST_REFUSED = (
+    "allow_degraded is refused: a degraded (tempdir) sandbox is decided by "
+    "the server configuration and confirmed by the user through "
+    "POST /api/sandbox/confirm-degraded, never by a request"
+)
+
 router = APIRouter(prefix="/api/sandbox", tags=["sandbox"], dependencies=_auth_dep)
 
 # Default export directory for copy-out
@@ -258,11 +264,12 @@ def create_sandbox(
     if _emergency_stop is not None:
         _emergency_stop.guard_http()  # Refused, not hung
     _require_sandbox()
+    if request.allow_degraded:
+        raise HTTPException(status_code=400, detail=_DEGRADED_REQUEST_REFUSED)
 
     try:
         session = sandbox_manager.create_sandbox(
             session_id=request.session_id or None,
-            allow_degraded=request.allow_degraded,
             label=request.label,
             owner_user_id=_current_uid(current_user),
             timeout_override=request.timeout,

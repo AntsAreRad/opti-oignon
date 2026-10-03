@@ -303,9 +303,7 @@ class QuickSandboxSession:
                 "Bound workspace %s unavailable; creating a fresh sandbox "
                 "for %s", self._existing_sandbox_id, self._session_id,
             )
-        self._sandbox_session = self._mgr.create_sandbox(
-            self._session_id, allow_degraded=True
-        )
+        self._sandbox_session = self._mgr.create_sandbox(self._session_id)
         logger.info(
             "Quick sandbox session created: %s", self._session_id
         )

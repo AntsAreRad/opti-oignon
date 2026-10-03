@@ -650,7 +650,7 @@ class EvalRunner:
             sandbox_mgr=self._sandbox_manager, tool_registry=None
         )
         try:
-            session.start(allow_degraded=True)
+            session.start()
         except Exception as exc:
             logger.error("eval sandbox start failed: %s", exc)
             return self._error_row(started, f"sandbox start failed: {exc}")
