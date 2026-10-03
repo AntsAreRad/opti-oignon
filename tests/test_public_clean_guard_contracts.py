@@ -49,6 +49,14 @@ independently of git:
   * G19 -- a read of the tracked tree that git fails, the names or the tool
     mentions, fails the guard: half a read is not a pass.
   * G20 -- the green line says how many added lines the diff pass read.
+  * G21 -- a markdown name in capitals that is not on the guard's closed
+    list of public document names is flagged on a line; a public one, and a
+    name not in capitals, is not.
+  * G22 -- every name on that list is one the tree writes: a document it
+    carries, or a name written elsewhere in it. The list cannot become a
+    place to name private documents.
+  * G23 -- a tracked file whose name is a document name in capitals off the
+    list is flagged by name.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -80,6 +88,7 @@ _S = "S"
 _DIGITS = "312"
 _UNDERSCORE = "_"
 _TOOL = "Cla" + "ude"
+_MD = "." + "md"
 
 
 def _load():
@@ -506,6 +515,74 @@ def test_g20_the_green_says_how_many_added_lines_it_read():
 
 
 # ---------------------------------------------------------------------------
+# G21 -- a document name in capitals off the public list is flagged
+# ---------------------------------------------------------------------------
+def test_g21_a_capitalized_document_name_off_the_public_list_is_flagged():
+    guard, restore = _load()
+    try:
+        charged = [
+            "see " + "NOTES" + "_SYNC" + "_SPEC" + _MD + " for the record",
+            "# taken from " + "PLAN" + _MD,
+            "docs/" + "DESIGN" + "-" + "NOTES" + _MD,
+        ]
+        public = [
+            "see README" + _MD + " and CHANGELOG" + _MD,
+            "the skill lives in its SKILL" + _MD,
+            "a lowercase notes" + _MD + " is not a name in capitals",
+            # Three letters are an acronym's length, and the length of the
+            # fragments these contracts build their references from.
+            "an acronym such as FAQ" + _MD + " is not read as a document name",
+        ]
+        found = guard.find_violations(charged)
+        assert [index for index, _kind, _snippet in found] == [0, 1, 2]
+        assert _kinds(found) == {"doc_name"}
+        assert guard.find_violations(public) == []
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G22 -- every name on the public list is one the tree writes
+# ---------------------------------------------------------------------------
+def test_g22_every_public_document_name_is_one_the_tree_writes():
+    guard, restore = _load()
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, check=True,
+        )
+        carried = {Path(p).name for p in listed.stdout.decode("utf-8").split("\0") if p}
+        assert "README" + _MD in carried, "control: the listing reads the tree"
+        assert len(guard._PUBLIC_DOCS) >= 10
+        for name in sorted(guard._PUBLIC_DOCS):
+            if name in carried:
+                continue
+            found = subprocess.run(
+                ["git", "-C", str(REPO), "grep", "-l", "-F", name, "--", ".",
+                 ":(exclude).github/scripts/public_clean_guard.py",
+                 ":(exclude)tests/test_public_clean_guard_contracts.py"],
+                capture_output=True, text=True,
+            )
+            assert found.returncode == 0 and found.stdout.strip(), (
+                f"{name} is on the public list and the tree never writes it"
+            )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G23 -- a tracked file named in capitals off the public list is flagged
+# ---------------------------------------------------------------------------
+def test_g23_a_tracked_document_named_off_the_public_list_is_flagged():
+    guard, restore = _load()
+    try:
+        internal = "docs/" + "ROAD" + "_NOTES" + _MD
+        paths = [internal, "README" + _MD, "docs/guide" + _MD]
+        assert guard.find_name_violations(paths) == [(internal, "doc_name_in_name")]
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -545,6 +622,12 @@ def _run_all():
          test_g19_a_tracked_tree_read_git_fails_fails_the_guard),
         ("G20 green carries the added-line count",
          test_g20_the_green_says_how_many_added_lines_it_read),
+        ("G21 unlisted document name flagged",
+         test_g21_a_capitalized_document_name_off_the_public_list_is_flagged),
+        ("G22 public names are written by the tree",
+         test_g22_every_public_document_name_is_one_the_tree_writes),
+        ("G23 unlisted document file name flagged",
+         test_g23_a_tracked_document_named_off_the_public_list_is_flagged),
     ]
     passed = 0
     for label, fn in tests:

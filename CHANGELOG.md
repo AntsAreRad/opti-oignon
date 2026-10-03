@@ -1133,6 +1133,14 @@ package costs.
 
 ### Changed
 
+- The public-clean guard holds markdown names in capitals to a closed list
+  of the public document names the tree writes: the documents it carries,
+  the release notes it generates, the skill format's file and two fixture
+  names its contracts write. Any other such name of four characters or more
+  is charged on the lines the guard reads and as a tracked file's name:
+  internal documents live outside the repository and are never named from
+  inside it. A settings hint no longer points to an installation document
+  the tree does not carry.
 - The public-clean guard holds every line outside its scan trees to its
   whole rule, standing lines as well as added ones: at the root, under
   `docs/`, under `.github/` or in any other directory, a session code, an

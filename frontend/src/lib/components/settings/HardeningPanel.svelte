@@ -255,7 +255,7 @@
 				{#if !status.swap.safe && status.swap.swap_enabled}
 					<p class="mt-2 text-xs" style="color: var(--oo-fg-error);">
 						Unencrypted swap detected. Sensitive data may be written to disk.
-						Use encrypted swap, zram, or disable swap. See INSTALL.md.
+						Use encrypted swap, zram, or disable swap.
 					</p>
 				{/if}
 			{/if}

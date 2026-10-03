@@ -92,6 +92,36 @@ _PROCESS_WORDS = tuple(
     )
 )
 
+# Document names in capitals. A markdown file named in capitals is either a
+# public document of the tree or an internal one, and the internal ones live
+# outside the repository and are never named from inside it. Listing those
+# would publish them, so the guard holds the opposite, closed list: the
+# public names the tree itself writes -- the documents it carries, a name it
+# generates or reads by format, and the fixture names its contracts write.
+# Any other such name is charged, on a line and as a tracked file's name. A
+# name is four characters or more: three are an acronym's length, and the
+# length of the fragments the guard's own contracts assemble references from.
+_DOC_NAME = re.compile(
+    r"(?<![A-Za-z0-9_])(?=[A-Z0-9_-]{4,}\.md\b)[A-Z][A-Z0-9]+(?:[_-][A-Z0-9]+)*\.md\b"
+)
+_PUBLIC_DOCS = frozenset({
+    # The documents the tree carries.
+    "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md",
+    "CODE_OF_CONDUCT.md", "API_REFERENCE.md", "BRANCH_PROTECTION.md",
+    "PLUGIN_DEVELOPMENT_GUIDE.md", "BUILD_RUNBOOK.md",
+    "MOBILE_SYNC_CONTRACT.md", "DESIGN_NOTE_EX01_FAIL_SECURE_TOOL_GATE.md",
+    # The file of the skill format, and the notes the release workflow writes.
+    "SKILL.md", "RELEASE_CHANGELOG.md",
+    # Names the release-document contracts write as fixtures.
+    "PRIVATE.md", "MOBILE_NOTES.md",
+})
+
+
+def _unlisted_doc_names(text):
+    """The document names in capitals in ``text`` that are not public ones."""
+    return [name for name in _DOC_NAME.findall(text) if name not in _PUBLIC_DOCS]
+
+
 # Trees the diff pass scans. Outside these, the tree-wide pass reads every
 # line instead.
 #
@@ -139,6 +169,9 @@ def find_violations(lines):
         if _SESSION_CODE.search(line):
             violations.append((index, "session_code", raw.strip()))
             continue
+        if _unlisted_doc_names(line):
+            violations.append((index, "doc_name", raw.strip()))
+            continue
         for pattern in _PROCESS_WORDS:
             if pattern.search(line):
                 violations.append((index, "process_word", raw.strip()))
@@ -150,7 +183,8 @@ def find_name_violations(paths):
     """Return ``[(path, kind), ...]`` for tracked paths that must not ship.
 
     A path is charged when any of its components carries a session code
-    (``session_code_in_name``) or names the tool (``tool_in_name``).
+    (``session_code_in_name``), names the tool (``tool_in_name``), or is a
+    document name in capitals off the public list (``doc_name_in_name``).
     """
     violations = []
     for path in paths:
@@ -158,6 +192,8 @@ def find_name_violations(paths):
             violations.append((path, "tool_in_name"))
         elif _SESSION_CODE.search(path):
             violations.append((path, "session_code_in_name"))
+        elif _unlisted_doc_names(path):
+            violations.append((path, "doc_name_in_name"))
     return violations
 
 
