@@ -1,4 +1,4 @@
-# Resource Governor configuration (RESOURCE_GOVERNOR_SPEC.md Section 10).
+# Resource Governor configuration.
 #
 # Bloc 0 consumes the measurement subset: enabled, total_vram_gb,
 # safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
@@ -53,8 +53,8 @@ kv_overrides:
 # > longest matching family substring > the estimator chain unchanged,
 # which stays the fail-secure answer for any model neither table names
 # (an unknown model prices exactly as today). Matching is
-# case-insensitive. Calibrate against a live observation (the walk is
-# in DEBT_LOT_S261.md); example:
+# case-insensitive. Calibrate against a live observation on the host;
+# example:
 #   models:
 #     "qwen3.6-35b-a3b:latest": 4.5
 #   families:

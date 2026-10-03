@@ -286,7 +286,7 @@ def build_live_captioner(
     produces the OCR leg; the optional model-driven "describe" caption leg (via
     the existing local vision pipeline) is a host-assured refinement and is not
     the sandboxed file-touching step. The exact tool invocation is settled on the
-    host (NOTES_CAPTION_E2E_S251.md); it is never simulated in the container.
+    host; it is never simulated in the container.
     """
     if not VISION_AVAILABLE:
         return None

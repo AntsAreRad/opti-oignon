@@ -19,7 +19,7 @@ Security posture (inherited, not invented; the notes_store house rules):
   once-emitted warning, the documented db_encryption posture; the code path
   is identical. The blobs are DB-layer rows like the note body itself: the
   two-layer AES-256-GCM treatment remains an attachment property and does
-  not apply here (NOTES_CRDT_SPEC.md section 2).
+  not apply here.
 - Per-user isolation via a ``user_id`` column and scoped queries, resolved
   through ``effective_user_id`` -- the memory canonical_store pattern, NOT
   the user_data_manager prefix bug (UD-01). Every read and write is scoped;
@@ -234,7 +234,7 @@ class NoteUpdateRefused(Exception):
     """A section-5 refusal at the append seam (or a guarded prune).
 
     Refused means not appended, not served, not rendered, and loggable --
-    never silently dropped (NOTES_CRDT_SPEC.md section 5). The store logs a
+    never silently dropped. The store logs a
     warning before raising, so a refusal is observable even when the caller
     swallows the exception.
     """
@@ -398,7 +398,7 @@ class NoteUpdatesStore:
         ``(user_id, note_id, seq)`` REFUSES -- a duplicate never replaces an
         appended row. An unknown or dead parent refuses; an indeterminable
         parent liveness refuses; a missing blob cannot be persisted and
-        refuses (NOTES_CRDT_SPEC.md section 5).
+        refuses.
 
         ``sync_publish``: a successful append journals itself for
         Veilid sync through the best-effort glue, the idiom covering

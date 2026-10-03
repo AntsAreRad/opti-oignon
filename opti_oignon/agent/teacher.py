@@ -2,8 +2,8 @@
 """Teacher escalation for the agent loop.
 
 A small local student model drives the agent; when a step is hard or fails, it
-escalates to a stronger teacher model (ODYSSEUS_SPEC.md Section 5.6, Section
-2.7). The teacher rescues the step with corrected guidance and may write an
+escalates to a stronger teacher model. The teacher rescues the step with
+corrected guidance and may write an
 authoritative SKILL.md draft. Two rules shape this module:
 
 - Guidance, not authority. A teacher-produced SKILL.md draft is tagged with a

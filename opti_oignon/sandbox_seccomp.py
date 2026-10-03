@@ -10,8 +10,7 @@ Honesty about assurance and scope:
 - The bytes this module produces are deterministic and fully testable in any
   environment -- they are just packed ``struct sock_filter`` records. Whether
   the kernel actually loads the program and kills the listed syscalls assures
-  only on the host, under a real bwrap launch. See the Bloc 0 host-assurance
-  list in SHAKEDOWN_S198_HANDOFF.md.
+  only on the host, under a real bwrap launch.
 - A denylist reduces kernel attack surface; it is NOT the sandbox boundary. The
   boundary is the namespace isolation that bwrap sets up. Kerckhoffs: the
   filter is open by design; its strength is the mechanism, not its secrecy.

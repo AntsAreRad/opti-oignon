@@ -416,7 +416,7 @@ class PluginReviewStore:
 
         The per-user cascade-delete hook. Legacy rows with
         a NULL user_id never match the equality predicate, so they stay
-        untouched by construction (documented in ATREST_INVENTORY.md).
+        untouched by construction.
         """
         conn = self._get_conn()
         try:

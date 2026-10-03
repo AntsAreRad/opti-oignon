@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastAPI notes-update legs (N.8 editor seam): bind the update store.
 
-The Notes body collaboration model (NOTES_CRDT_SPEC.md) keeps
+The Notes body collaboration model keeps
 the CRDT in the client and moves opaque Yjs update blobs through the platform.
 The at-rest append-only ``note_update`` store landed first,
 and the transport (the ``note_update`` record kind on the seam, the
@@ -11,7 +11,7 @@ rides for the update log, alongside the five whole-note routes in
 
 - append: ``POST /api/notes/{note_id}/updates`` over ``append_update`` -- the
   local editor's incremental update. A store refusal (a dead or unknown
-  parent, a duplicate seq, a missing blob -- NOTES_CRDT_SPEC.md section 5)
+  parent, a duplicate seq, a missing blob)
   maps to a 409, never a silent success; an undecodable blob is a 422.
 - tail read: ``GET /api/notes/{note_id}/updates?after_seq=N`` over
   ``list_updates`` -- the section-4 replay tail a fresh or behind device
@@ -139,7 +139,7 @@ def append_note_update(
     """Append one opaque update to ``note_id``; refuse fail-secure.
 
     The store mints the per-(user, note) ``seq`` and refuses an
-    indeterminable, unknown, or dead parent (NOTES_CRDT_SPEC.md section 5);
+    indeterminable, unknown, or dead parent;
     a refusal maps to a 409, never a silent 200. No device identity rides the
     payload (decision N9-D3): the engine attaches the local author's signature
     at publish through the store's best-effort sync glue.

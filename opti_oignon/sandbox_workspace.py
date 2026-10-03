@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Conversation <-> workspace binding for the Sandbox Workspace cycle.
 
-Bloc 1 of SANDBOX_WORKSPACE_SPEC.md (section 4.1): a workspace is a named,
+A workspace is a named,
 user-owned sandbox with a stable id that outlives a single run. This module
 owns the ``conversation_id -> sandbox_id`` binding so a whole conversation can
 run against one workspace: the chat agent, when a workspace is bound, injects

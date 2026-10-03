@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Resource Governor -- Blocs 0-3: measurement, admission, backpressure, limits.
 
-RESOURCE_GOVERNOR_SPEC.md Section 3 implemented verbatim: a cached
+Measurement: a cached
 ResourceSnapshot assembled from ranked, individually-optional sources with
-honest provenance; the measure-and-adapt store (Section 3.2); the YAML
-config loader (Section 10 keys). The admission layer adds the gate on
+honest provenance; the measure-and-adapt store; the YAML
+config loader. The admission layer adds the gate on
 top: admit() and the AdmissionDecision ticket (Section 4.4), the 4.2 fit
 math on the cached snapshot (get_snapshot_fast), the per-caller ctx ladder
 and floors (4.3, benchmark/AGT never downsized), the R-04 emergency-stop
@@ -52,7 +52,7 @@ Ranked sources (Section 3, decision D2):
 - S3: static estimation for not-yet-loaded models --
   speculative_decoding._VRAM_PER_BILLION_PARAMS through
   VRAMBudgetCalculator.estimate_model_vram(), reused BY IMPORT (the table
-  is not moved and not duplicated; the s110 pins on its home module keep
+  is not moved and not duplicated; the contracts on its home module keep
   holding), plus the KV-cache increment implemented HERE as a function of
   the requested num_ctx (the config-tunable ``kv_coefficient``).
 - S4: capacity and host memory -- total VRAM capacity is a CONFIGURED
@@ -516,7 +516,7 @@ def _as_opt_int(value: Any, default: int | None) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Configuration (RESOURCE_GOVERNOR_SPEC.md Section 10)
+# Configuration
 # ---------------------------------------------------------------------------
 
 

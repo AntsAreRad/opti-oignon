@@ -14,7 +14,7 @@ single note into phone-class sync -- unpinned. This suite covers it:
     flipping the flag cannot resurrect a deleted note into the phone-sync
     surface, and the call returns ``False``;
   * the outbound payload NEVER carries ``mobile_allowed``: the flag is local
-    desktop trust state (MOBILE_THREAT_MODEL.md section 3); were it to ride
+    desktop trust state; were it to ride
     the wire, a receiving device's apply path could become a writer of it.
 
 ``notes_store.py`` is loaded through the shared isolation window with

@@ -1,6 +1,5 @@
 # Opti-Oignon .gitignore
 # Runtime state, user data, and key material must never be committed.
-# See SHAKEDOWN_S183_FINDINGS.md (P-01, K-01).
 
 # --- Python ---
 __pycache__/
@@ -87,24 +86,6 @@ fingerprint.db
 .DS_Store
 *.swp
 
-# --- Development bookkeeping (local only) ---
-/PROMPT_S*.md
-/SESSION_TRACKING_*.md
-/BASELINE_S*
-/ROADMAP_*.md
-/*_E2E_S*.md
-/SHAKEDOWN_*.md
-/HOST_SHAKEDOWN_*.md
-/AUDIT_FINDINGS_*.md
-/AUDIT_FUNCTIONAL_FINDINGS.md
-/FIX_REPORT_*.md
-/DEBT_LOT_*.md
-/BLOC*_LIVE_WALK.md
-/SANDBOX_CYCLE_LIVE_WALK.md
-docs/ROADMAP_SIDE_QUESTS.md
-/SANDBOX_CYCLE_LIVE_WALK.md
-docs/ROADMAP_SIDE_QUESTS.md
-
 # Keep the repo root limited to standard docs: ignore any other root-level .md
 # (internal specs, inventories, session/roadmap/audit notes remain local only)
 /*.md
@@ -118,7 +99,7 @@ docs/ROADMAP_SIDE_QUESTS.md
 docs/COLOR_INSPIRATION_*.md
 docs/SECURITY_AUDIT_*.md
 docs/*_audit_report.json
-docs/s93-palette-preview-*.html
+docs/*palette-preview-*.html
 
 # Runtime data and personal content (never ship in the public repo)
 opti_oignon/data/rag/

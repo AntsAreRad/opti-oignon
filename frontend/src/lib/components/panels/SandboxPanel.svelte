@@ -12,7 +12,7 @@
   (ATL-02). The network field is live since Bloc 4: the settings
   strip owns the Daily-only, user-activated toggle. Updates
   announce through an aria-live region. Design-system tokens only (--oo-*);
-  lucide icons through Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  lucide icons through Icon.
   (Bloc 3): hosts the diff review + apply card (SandboxDiffReview) on
   the same explicit target Select; review and apply are user actions only.
   (Bloc 4): hosts the per-workspace settings strip

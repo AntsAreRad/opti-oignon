@@ -17,8 +17,7 @@
   All controls go through /api/sync (routes_sync), which carries router-level
   authentication (SYN-06). The grant and the revocation are audit-chained on the
   server. Design-system tokens only (--oo-*); lucide icons through Icon. The peer
-  list is supplied by the parent SyncPanel. Registered in
-  FRONTEND_REDESIGN_SPEC.md.
+  list is supplied by the parent SyncPanel.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';

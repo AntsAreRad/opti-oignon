@@ -17,7 +17,6 @@
   On-demand fetch (onMount plus a manual Refresh), the SyncPanel idiom; live
   polling is a host concern. Updates announce through an aria-live region.
   Design-system tokens only (--oo-*); lucide icons through Icon.
-  Registered in FRONTEND_REDESIGN_SPEC.md.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';

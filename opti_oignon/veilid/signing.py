@@ -111,7 +111,7 @@ _KEY_WRAP_LABEL = b"oo-veilid-signing-v1"
 # below. Tests that exercise the historical open-window behaviour monkeypatch
 # the module attribute (the read is at call time in the engine's verify seam).
 #
-# Fleet upgrade order (also in VEILID_SPEC.md section 8 and the CHANGELOG):
+# Fleet upgrade order (also in the CHANGELOG):
 # upgrade every device to 3.7.0, re-pair each peer pair (ONE confirmation per
 # peer by the key-change demotion design), run the one-time
 # ``SyncEngine.republish_signed`` on each device (the sync panel exposes it),

@@ -9,7 +9,7 @@
   collisions come back as per-file refusals and are listed, never
   overwritten. Successful uploads record the section 6.1 baseline manifest
   server-side. Design-system tokens only (--oo-*); lucide icons through
-  Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  Icon.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Untrusted-context wrapping for the agent loop.
 
-The anti-injection core, adopting the Odysseus ``prompt_security`` pattern
-(ODYSSEUS_SPEC.md Section 2.4 and Section 5.5). All external content -- web
+The anti-injection core, adopting the Odysseus ``prompt_security`` pattern.
+All external content -- web
 results, file contents, tool output, retrieved memories, and skill text -- is
 wrapped as untrusted data, fenced inside explicit untrusted-data markers and
 tagged ``trusted="false"``; this module's own message helpers carry it in a

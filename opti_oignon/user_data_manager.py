@@ -121,8 +121,8 @@ _RAG_USER_PREFIX = "user_"
 # column) or because its data is not user-scoped. Surfaced in results so
 # a wipe never silently implies completeness. Shrinks as the scoping
 # cycle (FBK-01 and family) lands.
-# Completed against the full at-rest inventory
-# (ATREST_INVENTORY.md): projects, conversation branches, learned
+# Completed against the full at-rest inventory:
+# projects, conversation branches, learned
 # routing, and the plugin-owned data stores were missing from this
 # surface; plugin reviews left it the same session (REV-2:
 # identity-bound and covered by the cascade below).
@@ -146,8 +146,8 @@ WIPE_NOT_COVERED = (
 # Stores deliberately RETAINED on a per-user wipe. Audit
 # trails are tamper-evident accountability records; erasing them on
 # request would defeat their purpose. Surfaced alongside not_covered so
-# the wipe result is honest about what survives by design (the GDPR
-# tension is documented in ATREST_INVENTORY.md).
+# the wipe result is honest about what survives by design (a known GDPR
+# tension).
 WIPE_RETAINED_BY_DESIGN = (
     "admin audit log (accountability trail)",
     "audit chain (tamper-evident security trail)",

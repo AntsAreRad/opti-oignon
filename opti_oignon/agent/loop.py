@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The agent loop.
 
-A multi-turn streaming loop (ODYSSEUS_SPEC.md Section 5.1) with a configurable
+A multi-turn streaming loop with a configurable
 round cap whose default is the Odysseus reference value of 20. Each round
 streams a model response, resolves any tool calls (``dispatch``), executes them
 through the disposable bwrap sandbox seam (never the host), observes the

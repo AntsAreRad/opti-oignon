@@ -8,7 +8,7 @@
   approval that turns an agent proposal into a published skill) and deleting one.
   Drafts are clearly marked as awaiting approval. Updates announce through an
   aria-live region. Design-system tokens only (--oo-*); lucide icons through
-  Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  Icon.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';

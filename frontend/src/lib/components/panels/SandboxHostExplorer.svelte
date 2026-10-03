@@ -13,7 +13,6 @@
   clone. Hidden entries are shown dimmed rather than hidden --
   a clone copies them, so hiding them would lie about what is shared.
   Design-system tokens only (--oo-*); lucide icons through Icon.
-  Registered in FRONTEND_REDESIGN_SPEC.md.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';

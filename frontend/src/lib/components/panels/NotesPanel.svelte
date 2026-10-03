@@ -185,8 +185,8 @@
 		}
 	}
 
-	// N.8: the collaborative-edit confirmed-posture seam
-	// (NOTES_CRDT_SPEC.md section 5). An incremental Yjs update renders in the
+	// N.8: the collaborative-edit confirmed-posture seam.
+	// An incremental Yjs update renders in the
 	// editor ONLY after the local backend acknowledges its append -- there is
 	// no optimistic ghost state the store has not seen. When the append cannot
 	// reach the backend the update is held in an explicit offline queue,

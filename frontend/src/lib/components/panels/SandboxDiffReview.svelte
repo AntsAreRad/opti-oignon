@@ -11,8 +11,7 @@
   the host share-root allowlist. Cap and refusal errors are surfaced
   honestly, per file. An EXPLICIT user action: the model can trigger
   neither the review nor the apply. Design-system tokens only
-  (--oo-*); lucide icons through Icon. Registered in
-  FRONTEND_REDESIGN_SPEC.md.
+  (--oo-*); lucide icons through Icon.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';

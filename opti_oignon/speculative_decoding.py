@@ -28,7 +28,7 @@ Addition:
     build_llama_server_command -- the pure argv materialisation that
     finally wires this module's config to the external llama-server
     (consumed through inference_backend.LlamaServerBackend; the process
-    is launched host-side per INFERENCE_PERF_S259.md, never spawned
+    is launched host-side, never spawned
     here).
 """
 
@@ -992,7 +992,7 @@ def build_llama_server_command(
 
     PURE by contract: no filesystem reads, no process spawning, no
     state -- the same inputs always answer the same argv. Launching the
-    server is host-side (INFERENCE_PERF_S259.md); the running process is
+    server is host-side; the running process is
     consumed through inference_backend.LlamaServerBackend.
 
     Draft posture: an enabled config with a draft model emits the same

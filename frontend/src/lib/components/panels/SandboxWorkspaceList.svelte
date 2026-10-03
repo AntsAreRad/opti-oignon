@@ -7,7 +7,7 @@
   stop / delete / select actions. Stop SIGKILLs the running command and keeps
   the workspace (files persist for inspection); delete destroys it; select
   binds it to the active conversation. Design-system tokens only (--oo-*);
-  lucide icons through Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  lucide icons through Icon.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';

@@ -3,7 +3,7 @@
 
 This is the receiving half of collaborative note sync: it lands a received
 ``note_update`` record into the append-only store. It is fail-secure at the
-landing seam (NOTES_CRDT_SPEC.md section 5) -- a record that cannot be
+landing seam -- a record that cannot be
 attributed refuses (returns False, nothing appended), and any store refusal
 propagates as False too.
 

@@ -18,7 +18,7 @@ established domain-separated construction:
 This is the same idiom signing.py's ``_wrap_subkey`` uses for the device signing
 key, what db_encryption calls its "HKDF-like construction (HMAC-SHA256)", and what
 auth_2fa derives "on its own HKDF domain". It honours the domain-separation string
-NOTES_FEATURE_ROADMAP.md specifies (``info = "oo-notes-attachment-" +
+(``info = "oo-notes-attachment-" +
 attachment_id``) while staying consistent with the audited crypto surface rather
 than introducing a formal HKDF primitive used nowhere else. The master key is the
 only secret; the derivation is open (Kerckhoffs-clean). The AES-256-GCM sealing

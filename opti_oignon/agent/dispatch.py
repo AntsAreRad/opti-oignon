@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tool-call dispatch for the agent loop.
 
-Two responsibilities (ODYSSEUS_SPEC.md Section 5.2 and Section 5.3):
+Two responsibilities:
 
 1. Dual dispatch. A round either emits native function-calling tool calls or
    text the model wrote in one of the local-model conventions. ``resolve_tool_

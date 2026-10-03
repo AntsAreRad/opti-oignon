@@ -45,7 +45,7 @@ done
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "Opti-Oignon Dependency Audit (S155)"
+echo "Opti-Oignon Dependency Audit"
 echo "Output: $OUTPUT_DIR"
 echo "Fail threshold: $FAIL_ON"
 echo ""

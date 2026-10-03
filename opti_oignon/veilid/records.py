@@ -62,7 +62,7 @@ class RecordKind(str, Enum):
     user's own content (N.8), the conversation kind's sibling: it applies without
     the human gate (only the executable ``skill`` kind is gated), and its body is
     carried as an opaque, E2E-encrypted CRDT blob the engine never interprets.
-    A note update (``note_update``, NOTES_CRDT_SPEC.md section 3) is the note
+    A note update (``note_update``) is the note
     kind's sibling: one opaque Yjs increment of a note body, identified as
     ``note_id:seq``, applied without the human gate like the note itself, and
     never a tombstone -- an update leaves the world only by the local pruning

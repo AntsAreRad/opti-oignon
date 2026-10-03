@@ -341,8 +341,8 @@ class NoteSchema(BaseModel):
     created_at: str = ""
     updated_at: str = ""
     deleted: bool = False
-    # N.9: the per-item phone-sync opt-in (MOBILE_THREAT_MODEL.md
-    # section 3). False is the secure default; the PATCH leg flips it
+    # N.9: the per-item phone-sync opt-in.
+    # False is the secure default; the PATCH leg flips it
     # through the store's dedicated setter only.
     mobile_allowed: bool = False
 
@@ -390,8 +390,8 @@ class NoteUpdateRecordSchema(BaseModel):
     """One appended update as served by the append / tail-read legs.
 
     The opaque blob is carried base64-encoded; ``seq`` is the per-(user, note)
-    append order (the platform's only ordering duty, NOTES_CRDT_SPEC.md
-    section 4). ``author_device`` is informational local metadata and may be
+    append order (the platform's only ordering duty).
+    ``author_device`` is informational local metadata and may be
     absent on a locally appended row.
     """
 

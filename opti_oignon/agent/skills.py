@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The on-disk SKILL.md registry.
 
-The evolving-skills half of the agent (ODYSSEUS_SPEC.md Section 6). Skills are
+The evolving-skills half of the agent. Skills are
 plain SKILL.md files on disk, each with YAML-style frontmatter and a structured
 body (When to Use / Procedure / Pitfalls / Verification), so a procedure the
 agent learns once can be consulted before later domain work. Two layers live

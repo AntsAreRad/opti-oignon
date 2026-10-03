@@ -14,8 +14,7 @@
   network is on) runs the one scoped egress: a hash-pinned requirements
   set installed with --require-hashes --only-binary=:all: into a
   workspace venv; refusals are surfaced per line, honestly. Design-system
-  tokens only (--oo-*); lucide icons through Icon. Registered in
-  FRONTEND_REDESIGN_SPEC.md.
+  tokens only (--oo-*); lucide icons through Icon.
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';

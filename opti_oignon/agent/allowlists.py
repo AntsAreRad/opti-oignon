@@ -2,7 +2,7 @@
 """Per-mode tool gating for the agent loop.
 
 Tool availability is gated per security context by Daily and Bulbe through
-``frozenset`` allowlists (ODYSSEUS_SPEC.md Section 5.4). Two rules:
+``frozenset`` allowlists. Two rules:
 
 - The dispatch consults the allowlist for the active mode (from
   ``security_mode``) before any tool runs. A tool that is not in the active

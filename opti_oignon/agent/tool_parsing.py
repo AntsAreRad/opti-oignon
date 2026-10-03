@@ -3,8 +3,8 @@
 
 Local Ollama models do not reliably emit native function calls, so the agent
 must recognise the textual tool-call conventions they actually produce. This
-module mirrors the Odysseus ``parse_tool_blocks`` surface (ODYSSEUS_SPEC.md
-Section 2.3, Section 5.2): three coexisting call formats, each with its own
+module mirrors the Odysseus ``parse_tool_blocks`` surface: three coexisting
+call formats, each with its own
 compiled regex, plus a normalisation pass into a single parsed representation.
 
 The three formats:

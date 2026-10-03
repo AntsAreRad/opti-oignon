@@ -3,8 +3,8 @@
 
 NoteUpdatesStore is the append-only log of opaque Yjs update blobs that backs
 collaborative note sync. Its append seam is security-sensitive: an update that
-cannot be attributed, gated against a live parent, or persisted is REFUSED
-(NOTES_CRDT_SPEC.md section 5), never silently appended. The parent-liveness
+cannot be attributed, gated against a live parent, or persisted is REFUSED,
+never silently appended. The parent-liveness
 gate is injectable, so these tests drive it with a small mutable Gate -- which
 also lets one store append while the note is live and then prune once it dies.
 

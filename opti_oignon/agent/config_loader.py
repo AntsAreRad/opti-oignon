@@ -2,7 +2,7 @@
 """Guarded loader for the agent configuration.
 
 Reads ``opti_oignon/agent/config.yaml`` and exposes the agent's configurable
-parameters (ODYSSEUS_SPEC.md Section 5): the loop round cap, the verifier cap,
+parameters: the loop round cap, the verifier cap,
 the teacher thresholds and model, and the per-mode tool exposure. The laptop-
 lite preset is represented and selectable.
 

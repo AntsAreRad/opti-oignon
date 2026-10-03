@@ -1133,6 +1133,10 @@ package costs.
 
 ### Changed
 
+- Comments, docstrings and ignore rules no longer name internal planning
+  documents or work-block codes: 70 lines in 52 files. Two of them were
+  published, an endpoint description and a schema description, and the
+  prose digest records the change.
 - The public-clean guard reads the whole tracked tree as well as the diff:
   no tracked path may carry a session code or the name of the tool used to
   write the tree, and no tracked line may name that tool. A file at the root

@@ -100,6 +100,5 @@ bwrap is required: without it, strict mode refuses execution -- there is no
 host fallback to misbehave. The running enforcement (the seccomp kills,
 the cap limits, the live provision run with real DNS, the rendered UI
 walks) assures only on a real host; the container proves the argv, the
-gates, the refusals, and the audit. The host-side checklist is
-consolidated in SANDBOX_CYCLE_LIVE_WALK.md, with the bwrap argv baseline
-capture ordered first.
+gates, the refusals, and the audit. On the host, the
+checks start with a capture of the bwrap argv baseline.

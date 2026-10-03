@@ -34,7 +34,7 @@
   (accepting a payload, confirming or rejecting a pending pairing, relabelling,
   unpairing) is local-disk and stays available in
   any mode. Updates announce through an aria-live region. Design-system tokens only
-  (--oo-*); lucide icons through Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  (--oo-*); lucide icons through Icon.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';

@@ -6,7 +6,7 @@
   round / step display, a cancel control, and the Bulbe approval prompts
   (approve / deny) wired to the existing tool-call approval API. Streaming
   updates use aria-live regions. Design-system tokens only (--oo-*); lucide
-  icons through Icon. Registered in FRONTEND_REDESIGN_SPEC.md.
+  icons through Icon.
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';

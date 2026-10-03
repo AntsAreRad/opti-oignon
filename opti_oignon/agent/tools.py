@@ -2,7 +2,7 @@
 """The concrete agent tool set.
 
 This module fills the agent's hands. It defines the tools the agent may call
-(ODYSSEUS_SPEC.md Section 5.3 and Section 6 surfaces that are not skills) and
+(the agent surfaces that are not skills) and
 wires them into the dispatch seam without inventing a second execution
 path:
 

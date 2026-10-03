@@ -240,7 +240,7 @@ def build_live_transcriber(
     the live transcriber runs the binary INSIDE the disposable sandbox (zero host
     filesystem, zero network) over the injected audio, then reads the transcript
     out under the approve / copy-out discipline. The exact whisper.cpp
-    invocation is settled on the host (NOTES_TRANSCRIPTION_E2E_S250.md); it is
+    invocation is settled on the host; it is
     never simulated in the container.
     """
     if not TRANSCRIBE_AVAILABLE:

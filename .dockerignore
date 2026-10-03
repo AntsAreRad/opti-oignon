@@ -1,4 +1,4 @@
-# Opti-Oignon -- Docker build context exclusions (S163, restored S197)
+# Opti-Oignon -- Docker build context exclusions
 #
 # The backend image (Dockerfile.backend) copies only opti_oignon/, scripts/
 # and assets/. Everything below is excluded from the build context to keep the
@@ -37,9 +37,9 @@ fingerprint.db
 *.key
 *.pem
 
-# Session-tracking and prompt continuity files (development artefacts)
-SESSION_TRACKING_*.md
-PROMPT_S*.md
+# Root-level Markdown: documentation and local notes, none of which the
+# image copies
+*.md
 
 # Archives and build outputs
 *.zip

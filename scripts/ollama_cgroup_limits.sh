@@ -10,7 +10,7 @@
 # never applies anything itself.
 #
 # WARNINGS -- read before using either recipe:
-#   - HOST-BOUND, reference only (RESOURCE_GOVERNOR_SPEC.md Section 6).
+#   - HOST-BOUND, reference only.
 #     This script is never executed by the application and is
 #     never simulated in tests; only its existence and these warnings are
 #     container-checkable facts.

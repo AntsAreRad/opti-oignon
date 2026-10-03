@@ -142,7 +142,7 @@ def note_update_record(
 ) -> SyncRecord:
     """One opaque CRDT update as a sync record (``RecordKind.NOTE_UPDATE``).
 
-    The note kind's sibling (NOTES_CRDT_SPEC.md section 3): one Yjs increment
+    The note kind's sibling: one Yjs increment
     of a note body, riding the existing sync envelope. The identity is
     ``note_id:seq`` -- ``seq`` is the author's per-``(user, note)`` append
     order, the platform's only ordering duty (section 4), so each update is

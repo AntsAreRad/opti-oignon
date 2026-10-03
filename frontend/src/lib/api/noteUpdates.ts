@@ -32,7 +32,7 @@ export interface NoteUpdateRecord {
  *
  * Resolves with the appended record (carrying the store-minted seq) ONLY after
  * the local backend acknowledges the append -- the confirmed posture the editor
- * renders behind (NOTES_CRDT_SPEC.md section 5): nothing renders that the
+ * renders behind: nothing renders that the
  * backend has not recorded. A refusal rejects (the caller surfaces it and
  * leaves the display at server truth); the eventual remote echo is a no-op by
  * Yjs idempotence.

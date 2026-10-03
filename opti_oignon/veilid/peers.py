@@ -153,8 +153,7 @@ _CREATE_TABLE = (
 # The device-class allowlist -- the only values the setter ever
 # accepts (NULL clears back to the grandfathered desktop class). The sync
 # responder filters NOTE records toward a phone-class peer behind the
-# per-item mobile-allowed flag (MOBILE_THREAT_MODEL.md section 3,
-# filter-at-serve, decision N9-D1).
+# per-item mobile-allowed flag (filter-at-serve).
 DEVICE_CLASS_PHONE = "phone"
 DEVICE_CLASS_DESKTOP = "desktop"
 DEVICE_CLASSES: frozenset[str] = frozenset(

@@ -26,7 +26,7 @@ Security posture (inherited, not invented):
   placeholder.
 - The body CRDT and the OR-Set tags are stored OPAQUE (a BLOB and a JSON-ish TEXT
   the store never interprets), so the backend stays CRDT-agnostic and note
-  structure stays end-to-end private (NOTES_FEATURE_ROADMAP.md, the CRDT model).
+  structure stays end-to-end private (the CRDT model).
 - Deletions are tombstones (``deleted = 1``), so a delete on one device syncs
   safely once N.8 makes notes a Veilid record type.
 
@@ -211,7 +211,7 @@ def _sync_publish_note(
     Called by the store's mutation seams AFTER the domain commit --
     ``add_note``, ``update_note`` (when a column was actually applied),
     ``delete_note`` (the tombstone), and ``set_mobile_allowed`` (the
-    republish-on-opt-in delivery contract of NOTES_MOBILE_SYNC_N9_S256.md:
+    republish-on-opt-in delivery contract:
     a flag flipped to allowed journals a fresh record, or a phone whose
     watermark has advanced past the filtered entries never sees the newly
     allowed note; the flip journals in BOTH directions -- republish is
@@ -286,8 +286,8 @@ def _sync_publish_note(
 class NoteRecord:
     """A single note's metadata and opaque CRDT body.
 
-    ``mobile_allowed`` is the per-item phone-sync opt-in
-    (MOBILE_THREAT_MODEL.md section 3): ``False`` is the secure default and
+    ``mobile_allowed`` is the per-item phone-sync opt-in:
+    ``False`` is the secure default and
     the only creation-time value; flipping it is a deliberate second gesture
     through the dedicated setter, never the generic update path.
     """
@@ -454,8 +454,8 @@ class NotesStore:
             # sync. SQLite has no ADD COLUMN IF NOT EXISTS, so guard with
             # table_info (the AU-06 idiom, the peers-registry shape). NOT
             # NULL DEFAULT 0 is the secure default: nothing crosses to a
-            # phone until the user opts the item in (MOBILE_THREAT_MODEL.md
-            # section 3); every pre-N.9 row reads 0 = not allowed after the
+            # phone until the user opts the item in;
+            # every pre-N.9 row reads 0 = not allowed after the
             # migration, by construction.
             cols = {
                 row[1]
@@ -878,7 +878,7 @@ class NotesStore:
     def set_mobile_allowed(
         self, note_id: str, allowed: bool, *, user_id: str | None = None
     ) -> bool:
-        """Set the per-item phone-sync opt-in (MOBILE_THREAT_MODEL.md s.3).
+        """Set the per-item phone-sync opt-in.
 
         A human trust decision made at the desktop: the route is the only
         caller, and the flag is deliberately NOT in ``_UPDATABLE_COLUMNS``,

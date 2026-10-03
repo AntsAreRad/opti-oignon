@@ -101,7 +101,7 @@ def _notes_store_dep():
 def _note_updates_store_dep() -> Any:
     """Resolve the ``NoteUpdatesStore`` singleton for the compaction watermark.
 
-    A dependency seam (the s256 idiom) so the PATCH leg records the section-4
+    A dependency seam so the PATCH leg records the section-4
     checkpoint watermark through the same store the update legs use, while
     tests inject through the singleton. Returns ``None`` when the update store
     is unavailable, so the watermark recording is best-effort and never breaks
