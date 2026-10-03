@@ -68,6 +68,7 @@ import ast
 import bisect
 import importlib.util
 import io
+import os
 import re
 import subprocess
 import sys
@@ -397,18 +398,35 @@ def _in_cargo_build(tree, path):
     return False
 
 
-def _tree_files(root, scan_path):
+# Directories the walk never lists: the maintainer's data, which holds no
+# source, and the interpreter's caches.
+_PRUNED = frozenset({"data", "__pycache__"})
+
+
+def _tree_files(root, scan_path, unlisted=None):
     """The files of one perimeter entry this guard reads, as the walk finds them.
 
     Lazy on purpose: asking whether a tree holds any readable file stops at
-    the first one, as it always has, instead of walking the whole tree.
+    the first one, as it always has, instead of walking the whole tree. A
+    directory the walk cannot list is appended to ``unlisted`` as
+    ``(path, reason)`` when a list is given.
     """
     suffix = _suffix_for(scan_path)
     tree = Path(root) / scan_path.rstrip("/")
-    for path in tree.rglob("*" + suffix):
-        if suffix == _RUST_SUFFIX and _in_cargo_build(tree, path):
-            continue
-        yield path
+
+    def failed(error):
+        if unlisted is not None:
+            unlisted.append((error.filename, error.strerror))
+
+    for current, dirs, names in os.walk(tree, onerror=failed):
+        dirs[:] = sorted(d for d in dirs if d not in _PRUNED)
+        for name in sorted(names):
+            path = Path(current) / name
+            if not name.endswith(suffix):
+                continue
+            if suffix == _RUST_SUFFIX and _in_cargo_build(tree, path):
+                continue
+            yield path
 
 
 def _source_of(path, suffix):
@@ -463,25 +481,35 @@ def unreadable_scan_paths(repo, scan_paths=None):
     return tuple(missing)
 
 
-def census_tree(repo, scan_paths=None):
+def census_tree(repo, scan_paths=None, unread=None):
     """Map every scanned file that carries debt to how much it carries.
 
     Files at zero are omitted: a file paid down to nothing comes off the
     ledger rather than sitting on it at zero. Each tree is read for its own
-    file kind only; see ``unreadable_scan_paths``.
+    file kind only; see ``unreadable_scan_paths``. A file that cannot be
+    read and a directory that cannot be listed are appended to ``unread`` as
+    ``(path, reason)`` when a list is given: neither carries no debt, they
+    were not read.
     """
     counts = {}
     root = Path(repo)
+    unlisted = []
     for scan_path in (_SCAN_PATHS if scan_paths is None else scan_paths):
         suffix = _suffix_for(scan_path)
-        for path in sorted(_tree_files(root, scan_path)):
+        for path in sorted(_tree_files(root, scan_path, unlisted)):
             try:
                 source = _source_of(path, suffix)
-            except (OSError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError) as exc:
+                if unread is not None:
+                    unread.append((path.relative_to(root).as_posix(),
+                                   f"cannot be read ({type(exc).__name__})"))
                 continue
             found = census(source, suffix)
             if found:
                 counts[path.relative_to(root).as_posix()] = found
+    if unread is not None:
+        unread.extend((Path(os.path.relpath(path, root)).as_posix(), f"cannot be listed ({reason})")
+                      for path, reason in unlisted)
     return counts
 
 
@@ -585,6 +613,21 @@ def _opened(repo, added):
     }
 
 
+def unreadable_added(repo, added):
+    """``[(path, reason), ...]`` for the files of ``added`` this guard opens and cannot read.
+
+    Their added lines were not read, so they are not lines without prose.
+    """
+    root = Path(repo)
+    out = []
+    for path in _opened(repo, added):
+        try:
+            _source_of(root / path, _read_as(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            out.append((path, f"cannot be read ({type(exc).__name__})"))
+    return out
+
+
 def added_violations(repo, added):
     """``[(path, line, kind, text), ...]`` for prose on the added lines.
 
@@ -637,6 +680,12 @@ def main(argv=None):
         print(f"public-language guard: FAILED -- git could not diff against base {base_ref}")
         failed = True
         added = {}
+    unread_added = unreadable_added(repo, added)
+    if unread_added:
+        print("public-language guard: FAILED -- added lines in files this guard cannot read:")
+        for path, reason in unread_added:
+            print(f"  {path}: {reason}")
+        failed = True
     for path, line, kind, text in added_violations(repo, added):
         if not failed:
             print(
@@ -646,7 +695,13 @@ def main(argv=None):
             failed = True
         print(f"  {path}:{line} [{kind}]: {text}")
 
-    regressions = find_ledger_regressions(census_tree(repo))
+    unread = []
+    regressions = find_ledger_regressions(census_tree(repo, unread=unread))
+    if unread:
+        print("public-language guard: FAILED -- the perimeter holds what this guard cannot read:")
+        for path, reason in unread:
+            print(f"  {path}: {reason}")
+        failed = True
     if regressions:
         print("public-language guard: FAILED -- the standing debt grew:")
         for path, sealed, actual in regressions:

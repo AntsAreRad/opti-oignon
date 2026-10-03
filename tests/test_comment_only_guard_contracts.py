@@ -1084,7 +1084,10 @@ def _git_run(guard, base_files, changed=None, base="HEAD"):
             for rel, text in files.items():
                 target = Path(tmp) / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(text)
+                if isinstance(text, bytes):
+                    target.write_bytes(text)
+                else:
+                    target.write_text(text)
             subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
             if files is base_files:
                 subprocess.run(
@@ -1161,6 +1164,17 @@ def test_c36_the_green_says_how_many_changed_files_it_compared():
         restore()
 
 
+def test_c37_a_changed_file_the_guard_cannot_read_fails_it():
+    guard, restore = _load()
+    try:
+        files = {"opti_oignon/mod.py": "VALUE = 1\n"}
+        rc, out = _git_run(guard, files, {"opti_oignon/mod.py": b"VALUE = 2\n# caf\xe9\n"})
+        assert rc == 1, "a working-tree file the guard cannot read is not a file without nomenclature"
+        assert "opti_oignon/mod.py" in out, f"the failure names the file: {out!r}"
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -1233,6 +1247,8 @@ def _run_all():
          test_c35_a_base_version_git_cannot_read_is_not_a_new_file),
         ("C36 green carries the compared-file count",
          test_c36_the_green_says_how_many_changed_files_it_compared),
+        ("C37 unreadable changed file fails the guard",
+         test_c37_a_changed_file_the_guard_cannot_read_fails_it),
     ]
     passed = 0
     for label, fn in tests:

@@ -1712,6 +1712,16 @@ package costs.
 
 ### Fixed
 
+- Five merge guards no longer pass over what they cannot read. A file that
+  is not UTF-8 text was read with its bad bytes dropped or skipped, a module
+  that does not parse counted no network sink or inference call, and a
+  directory the walk could not list was left out, each without a word. The
+  egress census, the registry funnel and the public-language, comment-only
+  and isolation-seal guards now fail and name each such file or directory.
+  The walks that read the package never list a directory named `data`,
+  which holds the maintainer's content and no source. The isolation seal
+  reads the repository's own `tests/` wherever it is run from, and refuses
+  a directory with no suite instead of reporting every owed suite as stale.
 - The merge guards no longer take a failed git call for an empty answer. A
   base ref git cannot resolve, such as the commit before a force push,
   emptied the diff passes of the public-clean, public-language and

@@ -1369,7 +1369,8 @@ def main(argv=None):
             continue
         try:
             after = _worktree_text(path)
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            unread.append((path, f"cannot be read in the working tree ({type(exc).__name__})"))
             continue
         compared += 1
         if debt_count(after, clean_guard) >= debt_count(before, clean_guard):
@@ -1386,8 +1387,8 @@ def main(argv=None):
                 renamed.append((path, format_rename_map(mapping)))
 
     if unread:
-        print("comment-only guard: FAILED -- git could not read these files "
-              "at the base:")
+        print("comment-only guard: FAILED -- these changed files could not be "
+              "read, so nothing was proven about them:")
         for path, why in unread:
             print(f"  {path}: {why}")
         return 1

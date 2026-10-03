@@ -178,7 +178,7 @@ _PRUNED = frozenset({"data", "__pycache__"})
 
 Home = namedtuple("Home", "classes gates factories callers_in ungated sinks contracts reason")
 Site = namedtuple("Site", "kind line function")
-Estate = namedtuple("Estate", "root modules manifests rust cache")
+Estate = namedtuple("Estate", "root modules manifests rust cache unread", defaults=((),))
 Result = namedtuple("Result", "code lines estate census")
 
 
@@ -654,10 +654,13 @@ class _Census:
         """
         self.sites, self.nodes, self.imports, self.assigned = [], [], set(), {}
         self.tree = None
+        self.unparsed = None
         try:
             tree = ast.parse(text)
-        except (SyntaxError, ValueError):
-            # The syntax tier owns a module that does not parse and names it.
+        except (SyntaxError, ValueError) as exc:
+            # Recorded, and the census fails by name: a module that does not
+            # parse counts no sink, which is not the same as having none.
+            self.unparsed = f"{type(exc).__name__}: {exc}"
             return
         self.import_nodes = list(_statement_imports(tree))
         imported = []
@@ -690,7 +693,7 @@ class _Census:
         if not keep:
             kept = {"sites": self.sites, "imports": self.imports}
             self.__dict__.clear()
-            self.__dict__.update(kept, nodes=[], assigned={}, tree=None)
+            self.__dict__.update(kept, nodes=[], assigned={}, tree=None, unparsed=None)
 
     # -- collection -------------------------------------------------------
     def _collect(self):
@@ -1083,44 +1086,81 @@ def count_sinks(text):
 # The estate.
 # ---------------------------------------------------------------------------
 def _read_text(path):
-    """Every file this guard reads goes through here."""
-    return Path(path).read_text(encoding="utf-8", errors="ignore")
+    """Every file this guard reads goes through here, strictly.
+
+    A file that is not UTF-8 text raises instead of coming back with its
+    bytes dropped: read that way it would not be the file on disk.
+    """
+    return Path(path).read_text(encoding="utf-8")
 
 
-def _walk(top, prune):
-    """Files under ``top``, sorted, with every pruned directory left unlisted."""
+def _walk(top, prune, unlisted=None):
+    """Files under ``top``, sorted, with every pruned directory left unlisted.
+
+    A directory the walk cannot list is appended to ``unlisted`` as
+    ``(path, reason)``; without a list, it raises.
+    """
+    def failed(error):
+        if unlisted is None:
+            raise error
+        unlisted.append((error.filename, error.strerror))
+
     out = []
-    for current, dirs, files in os.walk(top):
+    for current, dirs, files in os.walk(top, onerror=failed):
         dirs[:] = sorted(d for d in dirs if d not in prune and not d.startswith("."))
         out.extend(Path(current) / name for name in sorted(files))
     return out
 
 
 def read_estate(root):
-    """The package's modules, the bundled plugins' manifests and the Rust crates under ``root``."""
+    """The package's modules, the bundled plugins' manifests and the Rust crates under ``root``.
+
+    What could not be read -- a file that is not UTF-8 text, a directory the
+    walk cannot list -- is named in ``unread``, never read as empty.
+    """
     root = Path(root)
     package = root / _PACKAGE_DIR
-    modules, manifests, rust = {}, {}, {}
+    modules, manifests, rust, unread, unlisted = {}, {}, {}, [], []
+
+    def read(path):
+        try:
+            return _read_text(path)
+        except (OSError, UnicodeDecodeError) as exc:
+            rel = path.relative_to(root).as_posix()
+            unread.append(f"{rel}: cannot be read as UTF-8 text ({type(exc).__name__})")
+            return None
+
     if package.is_dir():
-        for path in _walk(package, _PRUNED):
+        for path in _walk(package, _PRUNED, unlisted):
             rel = path.relative_to(root).as_posix()
             if path.suffix == ".py":
-                modules[rel] = _read_text(path)
+                text = read(path)
+                if text is not None:
+                    modules[rel] = text
         plugins = package / "plugins"
         if plugins.is_dir():
-            for entry in sorted(plugins.iterdir()):
+            try:
+                entries = sorted(plugins.iterdir())
+            except OSError:
+                entries = []  # the walk above has named the directory
+            for entry in entries:
                 if entry.is_dir() and entry.name not in _PRUNED:
                     manifest = entry / "manifest.yaml"
                     rel = entry.relative_to(root).as_posix()
-                    manifests[rel] = _read_text(manifest) if manifest.is_file() else None
+                    manifests[rel] = read(manifest) if manifest.is_file() else None
     crates = root / "rust"
     if crates.is_dir():
-        for path in _walk(crates, _PRUNED | {"target"}):
+        for path in _walk(crates, _PRUNED | {"target"}, unlisted):
             rel = path.relative_to(root).as_posix()
             if path.name in ("Cargo.toml", "Cargo.lock") or (
                     path.suffix == ".rs" and "src" in path.relative_to(crates).parts):
-                rust[rel] = _read_text(path)
-    return Estate(root, modules, manifests, rust, {})
+                text = read(path)
+                if text is not None:
+                    rust[rel] = text
+    for path, reason in unlisted:
+        rel = Path(os.path.relpath(path, root)).as_posix()
+        unread.append(f"{rel}: cannot be listed ({reason})")
+    return Estate(root, modules, manifests, rust, {}, tuple(unread))
 
 
 def _censuses(estate):
@@ -1377,12 +1417,26 @@ def find_stale_homes(estate, census=None):
             for rel in sorted(HOMES) if not census.get(rel)]
 
 
+class SuitesUnreadable(Exception):
+    """A test suite the census reads for its home proofs could not be read."""
+
+
 def _suites(root):
     tests = Path(root) / "tests"
     if not tests.is_dir():
         return {}
-    return {path.relative_to(root).as_posix(): _read_text(path)
-            for path in sorted(tests.glob("test_*.py")) if path.is_file()}
+    suites, unread = {}, []
+    for path in sorted(tests.glob("test_*.py")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            suites[rel] = _read_text(path)
+        except (OSError, UnicodeDecodeError) as exc:
+            unread.append(f"{rel}: cannot be read as UTF-8 text ({type(exc).__name__})")
+    if unread:
+        raise SuitesUnreadable("; ".join(unread))
+    return suites
 
 
 _TEST_FUNCTION = re.compile(r"^\s*(?:async\s+)?def\s+test_(\w+)", re.M)
@@ -1566,12 +1620,24 @@ def green_line(estate, census):
 def run(root):
     """The census of the repository at ``root``: its exit code, its lines, and what it read."""
     estate = read_estate(root)
+    if estate.unread:
+        return Result(1, [f"Egress census: FAILED -- {len(estate.unread)} part(s) of the estate could "
+                          f"not be read, and what was not read was not counted:"]
+                      + [f"  {reason}" for reason in estate.unread], estate, {})
     if not estate.modules:
         return Result(1, [f"Egress census: nothing was scanned under {root}: no Python module "
                           f"in {_PACKAGE_DIR}/."], estate, {})
     census = take_census(estate)
+    unparsed = sorted((rel, c.unparsed) for rel, c in _censuses(estate).items() if c.unparsed)
+    if unparsed:
+        return Result(1, ["Egress census: FAILED -- these modules do not parse, so their sinks "
+                          "cannot be counted:"]
+                      + [f"  {rel}: {reason}" for rel, reason in unparsed], estate, census)
     try:
         found = find_all(estate, census)
+    except SuitesUnreadable as exc:
+        return Result(1, [f"Egress census: FAILED -- a suite that proves a gate home could not be "
+                          f"read: {exc}"], estate, census)
     except ManifestParserMissing as exc:
         manifests = sum(1 for text in estate.manifests.values() if text is not None)
         return Result(1, [f"Egress census: FAILED -- {exc}, so the {manifests} bundled plugin "

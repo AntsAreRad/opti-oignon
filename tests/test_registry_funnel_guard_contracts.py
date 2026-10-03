@@ -1117,5 +1117,85 @@ def test_rf30_the_cloud_paths_and_host_are_raw_sites_and_the_entry_point_refuses
         restore()
 
 
+# ---------------------------------------------------------------------------
+# RF31-RF34 -- what the guard could not read fails it by name
+# ---------------------------------------------------------------------------
+def _fixture_estate(guard, tmp_path):
+    """A one-module estate under ``tmp_path`` and ledgers that owe nothing."""
+    _with_ledger(guard, {})
+    _with_raw_ledger(guard, {})
+    guard.RAW_EXEMPT = {}
+    tree = tmp_path / "opti_oignon"
+    tree.mkdir()
+    (tree / "routed.py").write_text(_ROUTED, encoding="utf-8")
+    return tree
+
+
+def test_rf31_a_module_that_does_not_parse_fails_the_guard_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        tree = _fixture_estate(guard, tmp_path)
+        assert guard.main(["guard", str(tmp_path)]) == 0, "control: the estate parses and passes"
+        capsys.readouterr()
+        (tree / "broken.py").write_text("def ask(:\n" + _DIRECT, encoding="utf-8")
+        assert guard.main(["guard", str(tmp_path)]) == 1, (
+            "a module whose sites cannot be counted is not a module without sites"
+        )
+        assert "opti_oignon/broken.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+def test_rf32_a_module_that_is_not_utf8_fails_the_guard_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        tree = _fixture_estate(guard, tmp_path)
+        (tree / "latin.py").write_bytes(b"# caf\xe9\nVALUE = 1\n")
+        assert guard.main(["guard", str(tmp_path)]) == 1, (
+            "a module read with its bytes dropped is not the module on disk"
+        )
+        assert "opti_oignon/latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+def test_rf33_a_directory_the_walk_cannot_list_fails_the_guard_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    locked = None
+    try:
+        tree = _fixture_estate(guard, tmp_path)
+        locked = tree / "sub"
+        locked.mkdir()
+        (locked / "hidden.py").write_text(_DIRECT, encoding="utf-8")
+        os.chmod(locked, 0)
+        assert guard.main(["guard", str(tmp_path)]) == 1, (
+            "a directory the walk cannot list is not a directory without modules"
+        )
+        assert "opti_oignon/sub" in capsys.readouterr().out
+    finally:
+        if locked is not None:
+            os.chmod(locked, 0o755)
+        restore()
+
+
+def test_rf34_the_package_data_directory_is_never_listed(tmp_path, capsys):
+    guard, restore = _load()
+    data = None
+    try:
+        tree = _fixture_estate(guard, tmp_path)
+        data = tree / "data"
+        data.mkdir()
+        (data / "stray.py").write_text(_DIRECT, encoding="utf-8")
+        os.chmod(data, 0)
+        assert guard.main(["guard", str(tmp_path)]) == 0, (
+            "the maintainer's data directory holds no module and is pruned before listing"
+        )
+        assert "1 module(s) scanned" in capsys.readouterr().out
+    finally:
+        if data is not None:
+            os.chmod(data, 0o755)
+        restore()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

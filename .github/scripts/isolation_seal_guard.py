@@ -244,12 +244,36 @@ def find_stale_ledger_entries(files):
     return sorted(stale)
 
 
+def _suites(root):
+    """``([(name, text), ...], [reason, ...])``: the suites under ``root``.
+
+    Each is read strictly. A suite that is not UTF-8 text, or cannot be
+    opened, is a reason rather than a text: read with its bytes dropped, it
+    would no longer be the suite on disk, nor the one its seal was taken on.
+    """
+    files, unread = [], []
+    for path in sorted(root.glob("test_*.py")):
+        try:
+            files.append((path.name, path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError) as exc:
+            unread.append(f"{path.name}: cannot be read as UTF-8 text ({type(exc).__name__})")
+    return files, unread
+
+
 def main(argv):
-    root = Path(argv[1]) if len(argv) > 1 else Path("tests")
-    files = [
-        (p.name, p.read_text(encoding="utf-8", errors="ignore"))
-        for p in sorted(root.glob("test_*.py"))
-    ]
+    # The repository's own tests/, wherever the guard is run from.
+    root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parents[2] / "tests"
+    files, unread = _suites(root)
+    if unread:
+        print("Isolation seal: FAILED -- these suites could not be read, and a suite")
+        print("not read is not a suite that obeys:")
+        for reason in unread:
+            print(f"  {reason}")
+        return 1
+    if not files:
+        print(f"Isolation seal: no test suite found under {root}; nothing was read,")
+        print("and nothing read is not a pass.")
+        return 1
     violations = find_violations(files)
     broken = find_broken_seals(files)
     stale = find_stale_ledger_entries(files)

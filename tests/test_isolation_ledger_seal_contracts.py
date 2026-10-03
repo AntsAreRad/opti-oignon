@@ -285,5 +285,59 @@ def test_l10_this_suite_obeys_the_rule_it_enforces():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# What the guard could not read fails it by name
+# ---------------------------------------------------------------------------
+
+
+def test_l13_a_suite_that_is_not_utf8_fails_the_guard_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        for name, text in _real_files():
+            (tmp_path / name).write_text(text, encoding="utf-8")
+        assert guard.main(["isolation_seal_guard.py", str(tmp_path)]) == 0, (
+            "control: the estate as it stands"
+        )
+        capsys.readouterr()
+        (tmp_path / "test_zz_latin.py").write_bytes(
+            b"# caf\xe9\n\ndef test_x():\n    assert True\n"
+        )
+        assert guard.main(["isolation_seal_guard.py", str(tmp_path)]) == 1, (
+            "a suite read with its bytes dropped is not the suite on disk"
+        )
+        assert "test_zz_latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+def test_l14_the_default_root_is_the_repository_wherever_the_guard_runs(
+    tmp_path, capsys, monkeypatch,
+):
+    guard, restore = _load()
+    try:
+        # A working directory with no tests/ under it at all.
+        monkeypatch.chdir(tmp_path)
+        assert guard.main(["isolation_seal_guard.py"]) == 0, (
+            "run from anywhere, the guard reads its own repository's suites"
+        )
+        assert "suites on the shared window" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+def test_l15_a_root_with_no_suite_is_refused(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert guard.main(["isolation_seal_guard.py", str(empty)]) == 1
+        assert "nothing was read" in capsys.readouterr().out, (
+            "an empty root is refused for what it is, not for the ledger "
+            "entries it cannot find"
+        )
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

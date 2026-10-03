@@ -96,6 +96,7 @@ non-zero on any finding. Usage: ``registry_funnel_guard.py [REPO_ROOT]``.
 
 import ast
 import hashlib
+import os
 import posixpath
 import re
 import sys
@@ -754,22 +755,85 @@ def find_stale_ledger_entries(files):
     )
 
 
+# Directories the walk never lists: the maintainer's data, which holds no
+# module, and the interpreter's caches.
+_PRUNED = frozenset({"data", "__pycache__"})
+
+
+class EstateUnreadable(Exception):
+    """Part of the package could not be read; ``reasons`` names each part."""
+
+    def __init__(self, reasons):
+        super().__init__("; ".join(reasons))
+        self.reasons = reasons
+
+
 def _estate(root):
+    """``[(path, text), ...]`` for every module of the package, read strictly.
+
+    A directory the walk cannot list, or a module that is not UTF-8 text,
+    raises ``EstateUnreadable`` naming each: a module not read is not a
+    module without a site, and one read with its bytes dropped is not the
+    module on disk.
+    """
     package = Path(root) / _PACKAGE_DIR
-    return [
-        (p.relative_to(root).as_posix(), p.read_text(encoding="utf-8", errors="ignore"))
-        for p in sorted(package.rglob("*.py"))
-    ]
+    if not package.is_dir():
+        return []
+    reasons, found = [], []
+
+    def unlisted(error):
+        rel = Path(os.path.relpath(error.filename, root)).as_posix()
+        reasons.append(f"{rel}: cannot be listed ({error.strerror})")
+
+    for current, dirs, names in os.walk(package, onerror=unlisted):
+        dirs[:] = sorted(d for d in dirs if d not in _PRUNED)
+        found.extend(Path(current) / name for name in names if name.endswith(".py"))
+    files = []
+    for path in sorted(found):
+        rel = path.relative_to(root).as_posix()
+        try:
+            files.append((rel, path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError) as exc:
+            reasons.append(f"{rel}: cannot be read as UTF-8 text ({type(exc).__name__})")
+    if reasons:
+        raise EstateUnreadable(reasons)
+    return files
+
+
+def _unparsed(files):
+    """``[(path, reason), ...]`` for the modules ``ast`` cannot parse."""
+    out = []
+    for name, text in files:
+        try:
+            ast.parse(text)
+        except (SyntaxError, ValueError) as exc:
+            out.append((name, f"{type(exc).__name__}: {exc}"))
+    return out
 
 
 def main(argv):
     root = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parents[2]
-    files = _estate(root)
+    try:
+        files = _estate(root)
+    except EstateUnreadable as exc:
+        print(f"Registry funnel: FAILED -- part of {root / _PACKAGE_DIR} could not be read, "
+              "and what was not read was not scanned:")
+        for reason in exc.reasons:
+            print(f"  {reason}")
+        return 1
     if not files:
         # A guard that scanned nothing has proven nothing. The zero it would
         # otherwise print is the silent kind this repository treats as a
         # defect, so an empty estate is a refusal, not a pass.
         print(f"Registry funnel: no Python module found under {root / _PACKAGE_DIR}; nothing was scanned.")
+        return 1
+    unparsed = _unparsed(files)
+    if unparsed:
+        # A module that does not parse counts no site, which is not the same
+        # as having none.
+        print("Registry funnel: FAILED -- these modules do not parse, so their sites cannot be counted:")
+        for name, reason in unparsed:
+            print(f"  {name}: {reason}")
         return 1
     violations = find_violations(files)
     broken = find_broken_seals(files)

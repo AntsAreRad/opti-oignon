@@ -32,6 +32,7 @@ Local-only, stdlib-only. The guard script lives under .github/, outside the
 importable package, and is loaded through the shared isolation window.
 """
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -415,7 +416,7 @@ def test_l18_a_base_git_cannot_resolve_fails_the_guard(capsys):
         assert guard._added_lines_by_path(base) is None, (
             "a diff git could not produce is not an empty diff"
         )
-        guard.census_tree = lambda _repo, scan_paths=None: {}
+        guard.census_tree = lambda _repo, scan_paths=None, unread=None: {}
         assert guard.main([base]) == 1, "a base git cannot resolve fails the run"
         assert "no-such-base" in capsys.readouterr().out, "the failure names the base"
     finally:
@@ -435,10 +436,104 @@ def test_l19_the_green_says_how_many_added_lines_it_read(capsys):
             own: {1, 2, 3},
             "docs/notes.md": {1},
         }
-        guard.census_tree = lambda _repo, scan_paths=None: {}
+        guard.census_tree = lambda _repo, scan_paths=None, unread=None: {}
         assert guard.main(["HEAD"]) == 0
         out = capsys.readouterr().out
         assert "3 added line(s) in 1 file(s)" in out, out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# l20 -- an added file the guard cannot read fails the run
+# ---------------------------------------------------------------------------
+def test_l20_an_added_file_the_guard_cannot_read_fails_the_run(capsys):
+    guard, restore = _load()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            (root / "tests" / "latin.py").write_bytes(b"# caf\xe9\nVALUE = 1\n")
+            (root / "tests" / "plain.py").write_text("VALUE = 1\n", encoding="utf-8")
+            found = guard.unreadable_added(root, {"tests/latin.py": {1}, "tests/plain.py": {1}})
+            assert [path for path, _reason in found] == ["tests/latin.py"]
+        guard.unreadable_added = lambda _repo, _added: [("tests/latin.py", "planted")]
+        guard._added_lines_by_path = lambda _base_ref: {}
+        guard.census_tree = lambda _repo, scan_paths=None, unread=None: {}
+        assert guard.main(["HEAD"]) == 1, "an added file the guard cannot read fails the run"
+        assert "tests/latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# l21 -- a file of the perimeter the census cannot read fails the run
+# ---------------------------------------------------------------------------
+def test_l21_a_file_the_census_cannot_read_fails_the_run(capsys):
+    guard, restore = _load()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tree").mkdir()
+            (root / "tree" / "latin.py").write_bytes(b"# caf\xe9\nVALUE = 1\n")
+            unread = []
+            guard.census_tree(root, scan_paths=("tree/",), unread=unread)
+            assert [path for path, _reason in unread] == ["tree/latin.py"]
+
+        def planted(_repo, scan_paths=None, unread=None):
+            unread.append(("tests/latin.py", "planted"))
+            return {}
+
+        guard.census_tree = planted
+        guard._added_lines_by_path = lambda _base_ref: {}
+        assert guard.main(["HEAD"]) == 1, "a file the census cannot read fails the run"
+        assert "tests/latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# l22 -- a directory of the perimeter the walk cannot list is named
+# ---------------------------------------------------------------------------
+def test_l22_a_directory_the_walk_cannot_list_is_named():
+    guard, restore = _load()
+    locked = None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            locked = root / "tree" / "sub"
+            locked.mkdir(parents=True)
+            (locked / "mod.py").write_text("VALUE = 1\n", encoding="utf-8")
+            os.chmod(locked, 0)
+            try:
+                unread = []
+                guard.census_tree(root, scan_paths=("tree/",), unread=unread)
+            finally:
+                os.chmod(locked, 0o755)
+            assert [path for path, _reason in unread] == ["tree/sub"], unread
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# l23 -- a directory named data is never listed
+# ---------------------------------------------------------------------------
+def test_l23_a_directory_named_data_is_never_listed():
+    guard, restore = _load()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "tree" / "data"
+            data.mkdir(parents=True)
+            (data / "notes.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (root / "tree" / "mod.py").write_text("VALUE = 1\n", encoding="utf-8")
+            os.chmod(data, 0)
+            try:
+                unread = []
+                guard.census_tree(root, scan_paths=("tree/",), unread=unread)
+            finally:
+                os.chmod(data, 0o755)
+            assert unread == [], "the maintainer's data is pruned before it is listed"
     finally:
         restore()
 

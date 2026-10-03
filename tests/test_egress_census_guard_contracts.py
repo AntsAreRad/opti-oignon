@@ -25,6 +25,13 @@ name with a reason, or is owed in a ledger of counts that may only shrink.
   * EC7 -- each manifest that does not permit a plugin's sinks names its own
     cause: absent, unparseable, not a mapping, or parsed without the
     permission.
+  * EC8 -- a file that is not UTF-8 text fails the census by name: read with
+    its bytes dropped, it would not be the file on disk.
+  * EC9 -- a module that does not parse fails the census by name: it counts
+    no sink, which is not the same as having none.
+  * EC10 -- a directory the walk cannot list fails the census by name.
+  * EC11 -- so does a test suite it reads to prove a gate home, when that
+    suite is not UTF-8 text.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
@@ -49,6 +56,10 @@ BUDGET_S = {
     "test_ec5_the_limits_are_written_and_the_green_carries_its_denominator": 2.0,
     "test_ec6_a_missing_yaml_parser_fails_the_census_by_name": 2.0,
     "test_ec7_each_unread_manifest_names_its_own_cause": 2.0,
+    "test_ec8_a_file_that_is_not_utf8_fails_the_census_by_name": 2.0,
+    "test_ec9_a_module_that_does_not_parse_fails_the_census_by_name": 2.0,
+    "test_ec10_a_directory_the_census_cannot_list_fails_it_by_name": 2.0,
+    "test_ec11_a_proving_suite_that_is_not_utf8_fails_the_census_by_name": 2.0,
 }
 
 
@@ -639,5 +650,82 @@ def test_ec7_each_unread_manifest_names_its_own_cause(tmp_path):
             assert len(found) == 1 and cause in found[0], f"{label}: {found}"
             other = [c for name, (_m, c) in causes.items() if name != label and c in found[0]]
             assert other == [], f"{label}: named another cause too: {found[0]}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC8 -- a file the census cannot read as UTF-8 fails it by name
+# ---------------------------------------------------------------------------
+def test_ec8_a_file_that_is_not_utf8_fails_the_census_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        root = _write(tmp_path / "estate", _clean_files())
+        (root / "opti_oignon" / "latin.py").write_bytes(b"# caf\xe9\nVALUE = 1\n")
+        assert guard.main(["egress_census_guard.py", str(root)]) == 1, (
+            "a module read with its bytes dropped is not the module on disk"
+        )
+        assert "opti_oignon/latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC9 -- a module the census cannot parse fails it by name
+# ---------------------------------------------------------------------------
+def test_ec9_a_module_that_does_not_parse_fails_the_census_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        root = _write(tmp_path / "estate", _clean_files())
+        (root / "opti_oignon" / "broken.py").write_text(
+            "def f(:\n" + "import requests\n\ndef g(u):\n    return requests.get(u)\n", encoding="utf-8",
+        )
+        assert guard.main(["egress_census_guard.py", str(root)]) == 1, (
+            "a module whose sinks cannot be counted is not a module without sinks"
+        )
+        assert "opti_oignon/broken.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC10 -- a directory the census cannot list fails it by name
+# ---------------------------------------------------------------------------
+def test_ec10_a_directory_the_census_cannot_list_fails_it_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    locked = None
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        root = _write(tmp_path / "estate", _clean_files())
+        locked = root / "opti_oignon" / "sub"
+        locked.mkdir()
+        (locked / "hidden.py").write_text("import requests\n\ndef g(u):\n    return requests.get(u)\n",
+                                          encoding="utf-8")
+        os.chmod(locked, 0)
+        assert guard.main(["egress_census_guard.py", str(root)]) == 1, (
+            "a directory the walk cannot list is not a directory without modules"
+        )
+        assert "opti_oignon/sub" in capsys.readouterr().out
+    finally:
+        if locked is not None:
+            os.chmod(locked, 0o755)
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC11 -- a suite the census reads for its proofs and cannot read fails it by name
+# ---------------------------------------------------------------------------
+def test_ec11_a_proving_suite_that_is_not_utf8_fails_the_census_by_name(tmp_path, capsys):
+    guard, restore = _load()
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        root = _write(tmp_path / "estate", _clean_files())
+        (root / "tests" / "test_zz_latin.py").write_bytes(b"# caf\xe9\ndef test_x():\n    assert True\n")
+        assert guard.main(["egress_census_guard.py", str(root)]) == 1, (
+            "a suite read with its bytes dropped is not the suite on disk"
+        )
+        assert "tests/test_zz_latin.py" in capsys.readouterr().out
     finally:
         restore()
