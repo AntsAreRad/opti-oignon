@@ -1153,16 +1153,38 @@ def _plugin_of(rel):
     return None
 
 
-def _permits_network(manifest):
+class ManifestParserMissing(Exception):
+    """The YAML parser the plugin manifests are read with is not installed."""
+
+
+def _manifest_refusal(manifest):
+    """Why ``manifest`` does not permit network egress; ``None`` when it does.
+
+    Each cause is named apart: no manifest, a manifest that does not parse,
+    one that is not a mapping, one parsed without the permission. A parser
+    that is not installed says nothing about the plugin: it raises
+    ``ManifestParserMissing``, and the census fails by name.
+    """
     if manifest is None:
-        return False
+        return "no manifest.yaml"
     try:
         import yaml
+    except ImportError as exc:
+        raise ManifestParserMissing("the YAML parser (PyYAML) is not installed") from exc
+    try:
         data = yaml.safe_load(manifest)
-    except Exception:
-        return False
-    permissions = data.get("permissions") if isinstance(data, dict) else None
-    return isinstance(permissions, list) and "network_outbound" in permissions
+    except Exception as exc:
+        return f"a manifest.yaml that does not parse ({type(exc).__name__})"
+    if not isinstance(data, dict):
+        return "a manifest.yaml that is not a mapping"
+    permissions = data.get("permissions")
+    if isinstance(permissions, list) and "network_outbound" in permissions:
+        return None
+    return "no network_outbound permission in a parsed manifest"
+
+
+def _permits_network(manifest):
+    return _manifest_refusal(manifest) is None
 
 
 def _kinds(sites):
@@ -1407,15 +1429,19 @@ def find_home_proofs_missing(estate, census=None):
 
 
 def find_unpermitted_plugins(estate, census=None):
-    """A bundled plugin with a sink and no parsed network_outbound permission."""
+    """A bundled plugin with a sink and no parsed network_outbound permission, by cause."""
     census = take_census(estate) if census is None else census
     counted = {}
     for rel, sites in census.items():
         plugin = _plugin_of(rel)
         if plugin is not None and sites:
             counted[plugin] = counted.get(plugin, 0) + len(sites)
-    return [f"{plugin}: {n} sink site(s) and no network_outbound permission in a parsed manifest"
-            for plugin, n in sorted(counted.items()) if not _permits_network(estate.manifests.get(plugin))]
+    out = []
+    for plugin, n in sorted(counted.items()):
+        refusal = _manifest_refusal(estate.manifests.get(plugin))
+        if refusal is not None:
+            out.append(f"{plugin}: {n} sink site(s) and {refusal}")
+    return out
 
 
 def find_unclassified_imports(estate, census=None):
@@ -1544,8 +1570,15 @@ def run(root):
         return Result(1, [f"Egress census: nothing was scanned under {root}: no Python module "
                           f"in {_PACKAGE_DIR}/."], estate, {})
     census = take_census(estate)
+    try:
+        found = find_all(estate, census)
+    except ManifestParserMissing as exc:
+        manifests = sum(1 for text in estate.manifests.values() if text is not None)
+        return Result(1, [f"Egress census: FAILED -- {exc}, so the {manifests} bundled plugin "
+                          f"manifest(s) were left unread: an unread manifest is neither a "
+                          f"permission missing nor one granted."], estate, census)
     lines = []
-    for name, findings in find_all(estate, census).items():
+    for name, findings in found.items():
         if findings:
             lines.append(f"Egress census: {name.replace('_', ' ')} ({len(findings)}):")
             lines.extend(f"  {finding}" for finding in findings)

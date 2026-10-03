@@ -1712,6 +1712,18 @@ package costs.
 
 ### Fixed
 
+- The merge guards no longer take a failed git call for an empty answer. A
+  base ref git cannot resolve, such as the commit before a force push,
+  emptied the diff passes of the public-clean, public-language and
+  comment-only guards without a word, and each printed a clean verdict; it
+  now fails the guard and names the base. The comment-only guard no longer
+  takes a file git could not read at the base for one the base never had,
+  and the public-clean guard fails when git cannot list the tracked names
+  or search them. Each of these green lines now says how much it read. The
+  egress census names why a plugin's manifest does not permit its sinks
+  (absent, unparseable, not a mapping, or parsed without the permission),
+  and fails by name when the YAML parser is not installed instead of
+  reporting the plugin's permission as missing.
 - [SECURITY] The security documentation no longer claims signatures that do
   not exist. The audit chain is a SHA-512 hash chain whose anchor is keyed
   with HMAC-SHA256, not signed with ML-DSA-65; releases are signed with GPG

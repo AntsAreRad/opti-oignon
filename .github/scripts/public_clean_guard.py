@@ -184,16 +184,23 @@ def _tracked_tree():
     """Return ``(paths, [(path, line), ...])`` for the whole tracked tree.
 
     Binary files are skipped by content; their names are still read.
+    Returns ``None`` when git fails either read: half a tree read is not a
+    tree read.
     """
     # Fixed argv, no shell: safe.
     listed = subprocess.run(
         ["git", "ls-files", "-z"], capture_output=True, check=False,
     )
+    if listed.returncode != 0:
+        return None
     paths = [p for p in listed.stdout.decode("utf-8").split("\0") if p]
     grep = subprocess.run(
         ["git", "grep", "-I", "-i", "-z", "--no-color", "-e", "cla" + "ude"],
         capture_output=True, check=False,
     )
+    # git grep exits 1 when no line matches; anything else is an error.
+    if grep.returncode not in (0, 1):
+        return None
     return paths, _grep_pairs(grep.stdout)
 
 
@@ -229,6 +236,10 @@ def _added_lines_with_paths(base_ref):
     file header only between a ``diff --git`` line and the first hunk: inside
     a hunk, an added line whose own text opens with ``++ `` reads ``+++ ``
     and was taken for a header, its code never read.
+
+    Returns ``None`` when git cannot produce the diff, a base it cannot
+    resolve first of all: an empty diff and a failed one are not the same
+    answer, and only the first is a pass.
     """
     cmd = [
         "git", "diff", "--unified=0", "--no-color", base_ref,
@@ -236,6 +247,8 @@ def _added_lines_with_paths(base_ref):
     ]
     # Fixed argv, no shell: safe.
     result = subprocess.run(cmd, capture_output=True, check=False)
+    if result.returncode != 0:
+        return None
     pairs = []
     current_path = None
     in_hunk = False
@@ -263,24 +276,28 @@ def main(argv=None):
     base_ref = argv[0] if argv else _DEFAULT_BASE_REF
 
     pairs = _added_lines_with_paths(base_ref)
+    if pairs is None:
+        print(f"public-clean guard: FAILED -- git could not diff against base {base_ref}")
+        return 1
     lines = [added for _path, added in pairs]
     violations = find_violations(lines)
 
-    paths, tree_lines = _tracked_tree()
-    names = find_name_violations(paths)
-    mentions = find_tool_mentions([text for _path, text in tree_lines])
-
+    tracked = _tracked_tree()
     outside = _lines_outside_scan_trees()
-    if outside is None:
+    if tracked is None or outside is None:
         print("public-clean guard: FAILED -- git could not read the tracked tree")
         return 1
+    paths, tree_lines = tracked
+    names = find_name_violations(paths)
+    mentions = find_tool_mentions([text for _path, text in tree_lines])
     standing = find_violations([text for _path, text in outside])
 
     if not violations and not standing and not names and not mentions:
         print(
-            "public-clean guard: no session nomenclature in added lines "
-            f"(base {base_ref}) nor in {len(outside)} lines outside the scan "
-            f"trees, none in {len(paths)} tracked names, no tool mention"
+            f"public-clean guard: no session nomenclature in {len(pairs)} "
+            f"added line(s) (base {base_ref}) nor in {len(outside)} lines "
+            f"outside the scan trees, none in {len(paths)} tracked names, "
+            "no tool mention"
         )
         return 0
 

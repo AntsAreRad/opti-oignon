@@ -44,6 +44,11 @@ independently of git:
     until it is paid.
   * G17 -- a tree git cannot read fails the guard: nothing read is never a
     pass.
+  * G18 -- a base git cannot resolve fails the guard: a diff git could not
+    produce is not an empty diff.
+  * G19 -- a read of the tracked tree that git fails, the names or the tool
+    mentions, fails the guard: half a read is not a pass.
+  * G20 -- the green line says how many added lines the diff pass read.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -54,6 +59,8 @@ lives under .github/, outside the importable package, and is loaded through
 the shared isolation window.
 """
 
+import contextlib
+import io
 import os
 import subprocess
 import sys
@@ -305,21 +312,62 @@ def test_g12_tool_name_on_a_content_line_is_flagged():
 # ---------------------------------------------------------------------------
 # G13 -- the tree-wide pass charges a root-level file, by name or content
 # ---------------------------------------------------------------------------
-def _tree_rc(guard, files):
-    """Run the guard's main in a fresh git tree holding ``files``."""
+def _place(root, files):
+    for rel, text in files.items():
+        target = Path(root) / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+
+
+def _tree_rc(guard, files, base="HEAD", added=None):
+    """Run the guard's main in a fresh git tree holding ``files``.
+
+    ``files`` are committed, so that ``HEAD`` names a base the diff pass can
+    read; ``added`` are staged on top of that commit, the lines a change
+    adds. A tree with no commit has no base at all, and a diff against it
+    fails rather than coming back empty.
+    """
     here = os.getcwd()
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q", tmp], check=True)
-        for rel, text in files.items():
-            target = Path(tmp) / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text)
+        _place(tmp, files)
         subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", tmp, "-c", "user.name=contract",
+             "-c", "user.email=contract@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+             "commit", "-q", "--no-verify", "-m", "base"],
+            check=True,
+        )
+        if added:
+            _place(tmp, added)
+            subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
         os.chdir(tmp)
         try:
-            return guard.main(["HEAD"])
+            return guard.main([base])
         finally:
             os.chdir(here)
+
+
+def _tree_run(guard, files, base="HEAD", added=None):
+    """``_tree_rc`` with what the guard printed: ``(rc, output)``."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = _tree_rc(guard, files, base=base, added=added)
+    return rc, buffer.getvalue()
+
+
+class _FailingGit:
+    """Stands in for ``subprocess`` inside the guard: one git read fails."""
+
+    def __init__(self, fails):
+        self._fails = fails
+
+    def run(self, cmd, **kwargs):
+        if self._fails(cmd):
+            empty = "" if kwargs.get("text") else b""
+            return subprocess.CompletedProcess(cmd, 128, stdout=empty, stderr=empty)
+        return subprocess.run(cmd, **kwargs)
 
 
 def test_g13_tree_wide_pass_charges_a_root_level_file():
@@ -407,6 +455,57 @@ def test_g17_a_tree_git_cannot_read_fails_the_guard():
 
 
 # ---------------------------------------------------------------------------
+# G18 -- a base git cannot resolve fails the guard
+# ---------------------------------------------------------------------------
+def test_g18_a_base_git_cannot_resolve_fails_the_guard():
+    guard, restore = _load()
+    try:
+        clean = {"README.md": "a clean tree\n"}
+        rc, out = _tree_run(guard, clean)
+        assert rc == 0, f"the clean tree passes against a base git resolves: {out!r}"
+        rc, out = _tree_run(guard, clean, base="refs/heads/no-such-base")
+        assert rc == 1, "a diff git could not produce is not an empty diff"
+        assert "no-such-base" in out, f"the failure names the base: {out!r}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G19 -- a tracked-tree read git fails fails the guard
+# ---------------------------------------------------------------------------
+def test_g19_a_tracked_tree_read_git_fails_fails_the_guard():
+    guard, restore = _load()
+    try:
+        clean = {"README.md": "a clean tree\n"}
+        reads = {
+            "the tracked names": lambda cmd: cmd[1:2] == ["ls-files"],
+            "the tool mentions": lambda cmd: cmd[1:2] == ["grep"] and "-i" in cmd,
+        }
+        for label, fails in reads.items():
+            guard.subprocess = _FailingGit(fails)
+            assert _tree_rc(guard, clean) == 1, f"a failed read of {label} fails the guard"
+        guard.subprocess = subprocess
+        assert _tree_rc(guard, clean) == 0, "the same tree, every read answered, passes"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G20 -- the green says how many added lines the diff pass read
+# ---------------------------------------------------------------------------
+def test_g20_the_green_says_how_many_added_lines_it_read():
+    guard, restore = _load()
+    try:
+        tree = guard._SCAN_PATHS[0]
+        rc, out = _tree_run(guard, {"README.md": "a clean tree\n"},
+                            added={tree + "notes.txt": "one\ntwo\nthree\n"})
+        assert rc == 0, out
+        assert "in 3 added line(s)" in out, f"the green carries its count: {out!r}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -440,6 +539,12 @@ def _run_all():
          test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass),
         ("G17 unreadable tree fails the guard",
          test_g17_a_tree_git_cannot_read_fails_the_guard),
+        ("G18 unresolvable base fails the guard",
+         test_g18_a_base_git_cannot_resolve_fails_the_guard),
+        ("G19 failed tracked-tree read fails the guard",
+         test_g19_a_tracked_tree_read_git_fails_fails_the_guard),
+        ("G20 green carries the added-line count",
+         test_g20_the_green_says_how_many_added_lines_it_read),
     ]
     passed = 0
     for label, fn in tests:

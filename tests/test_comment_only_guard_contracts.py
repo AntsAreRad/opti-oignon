@@ -84,7 +84,12 @@ lives under .github/, outside the importable package, and is loaded through
 the shared isolation window.
 """
 
+import contextlib
+import io
+import os
+import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -1061,6 +1066,101 @@ def test_c33_a_name_declared_global_is_part_of_the_map():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# C34-C36 -- what git could not read fails the guard, and the green says
+# how much it read
+# ---------------------------------------------------------------------------
+def _git_run(guard, base_files, changed=None, base="HEAD"):
+    """Run the guard's main in a fresh git tree: ``(rc, output)``.
+
+    ``base_files`` are committed, so that ``HEAD`` names a base; ``changed``
+    are written over them and staged, the change under review.
+    """
+    here = os.getcwd()
+    buffer = io.StringIO()
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init", "-q", tmp], check=True)
+        for files in (base_files, changed or {}):
+            for rel, text in files.items():
+                target = Path(tmp) / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text)
+            subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
+            if files is base_files:
+                subprocess.run(
+                    ["git", "-C", tmp, "-c", "user.name=contract",
+                     "-c", "user.email=contract@example.invalid",
+                     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                     "commit", "-q", "--no-verify", "-m", "base"],
+                    check=True,
+                )
+        os.chdir(tmp)
+        try:
+            with contextlib.redirect_stdout(buffer):
+                rc = guard.main([base])
+        finally:
+            os.chdir(here)
+    return rc, buffer.getvalue()
+
+
+class _FailingGit:
+    """Stands in for ``subprocess`` inside the guard: one git read fails."""
+
+    def __init__(self, fails):
+        self._fails = fails
+
+    def run(self, cmd, **kwargs):
+        if self._fails(cmd):
+            empty = "" if kwargs.get("text") else b""
+            return subprocess.CompletedProcess(cmd, 128, stdout=empty, stderr=empty)
+        return subprocess.run(cmd, **kwargs)
+
+
+def test_c34_a_base_git_cannot_resolve_fails_the_guard():
+    guard, restore = _load()
+    try:
+        files = {"opti_oignon/mod.py": "VALUE = 1\n"}
+        rc, out = _git_run(guard, files)
+        assert rc == 0, f"the tree passes against a base git resolves: {out!r}"
+        rc, out = _git_run(guard, files, base="refs/heads/no-such-base")
+        assert rc == 1, "a diff git could not produce is not an empty diff"
+        assert "no-such-base" in out, f"the failure names the base: {out!r}"
+    finally:
+        restore()
+
+
+def test_c35_a_base_version_git_cannot_read_is_not_a_new_file():
+    guard, restore = _load()
+    try:
+        files = {"opti_oignon/mod.py": "VALUE = 1\n"}
+        changed = {"opti_oignon/mod.py": "VALUE = 2\n"}
+        rc, out = _git_run(guard, files, changed)
+        assert rc == 0, f"the base version is read and compared: {out!r}"
+        guard.subprocess = _FailingGit(lambda cmd: cmd[1:2] == ["show"])
+        rc, out = _git_run(guard, files, changed)
+        assert rc == 1, "a base version git could not read is not a file the base never had"
+        assert "opti_oignon/mod.py" in out, f"the failure names the file: {out!r}"
+        guard.subprocess = subprocess
+        rc, out = _git_run(guard, files, {"opti_oignon/new.py": "VALUE = 3\n"})
+        assert rc == 0, f"a file the base never had is new, and passes as before: {out!r}"
+    finally:
+        restore()
+
+
+def test_c36_the_green_says_how_many_changed_files_it_compared():
+    guard, restore = _load()
+    try:
+        files = {"opti_oignon/a.py": "A = 1\n", "opti_oignon/b.py": "B = 1\n"}
+        changed = {"opti_oignon/a.py": "A = 2\n", "opti_oignon/b.py": "B = 2\n",
+                   "opti_oignon/c.py": "C = 1\n"}
+        rc, out = _git_run(guard, files, changed)
+        assert rc == 0, out
+        assert "2 changed file(s) compared" in out, f"the green carries its count: {out!r}"
+        assert "1 new" in out, f"and the new file is counted apart: {out!r}"
+    finally:
+        restore()
+
+
 def _run_all():
     tests = [
         ("C1 comment-only removal accepted",
@@ -1127,6 +1227,12 @@ def _run_all():
          test_c32_an_accepted_rename_names_its_map),
         ("C33 global declaration is part of the map",
          test_c33_a_name_declared_global_is_part_of_the_map),
+        ("C34 unresolvable base fails the guard",
+         test_c34_a_base_git_cannot_resolve_fails_the_guard),
+        ("C35 unread base version is not a new file",
+         test_c35_a_base_version_git_cannot_read_is_not_a_new_file),
+        ("C36 green carries the compared-file count",
+         test_c36_the_green_says_how_many_changed_files_it_compared),
     ]
     passed = 0
     for label, fn in tests:

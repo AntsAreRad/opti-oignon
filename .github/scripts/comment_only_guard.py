@@ -1286,13 +1286,23 @@ def verdict(path, before, after, clean_guard=None):
 
 # ------------------------------------------------------------------ main ---
 
+class BaseUnreadable(Exception):
+    """git could not read a file at the base it was asked for."""
+
+
 def _changed_paths(base_ref):
-    """Paths changed in the diff over the scan trees, post-image names."""
+    """Paths changed in the diff over the scan trees, post-image names.
+
+    ``None`` when git cannot produce the diff: an empty diff and a failed
+    one are not the same answer, and only the first is a pass.
+    """
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=d", "--no-color",
          base_ref, "--", *_SCAN_PATHS],
         capture_output=True, text=True, check=False,
     )
+    if result.returncode != 0:
+        return None
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -1301,14 +1311,27 @@ def _blob_at(base_ref, path):
 
     A Rust file is read as the compiler reads it (``rust_text``); every
     other file keeps the universal newlines it has always been read with.
+
+    Whether the path existed is asked of the base's tree first, so that a
+    read git fails is never taken for a file the base never had: that
+    raises ``BaseUnreadable``.
     """
     rust = Path(path).suffix in _RUST_LIKE
+    listed = subprocess.run(
+        ["git", "ls-tree", "--full-tree", "--name-only", "-z", base_ref,
+         "--", path],
+        capture_output=True, check=False,
+    )
+    if listed.returncode != 0:
+        raise BaseUnreadable(f"git could not list it at {base_ref}")
+    if not listed.stdout:
+        return None
     result = subprocess.run(
         ["git", "show", f"{base_ref}:{path}"],
         capture_output=True, text=not rust, check=False,
     )
     if result.returncode != 0:
-        return None
+        raise BaseUnreadable(f"git could not read it at {base_ref}")
     return rust_text(result.stdout) if rust else result.stdout
 
 
@@ -1325,18 +1348,30 @@ def main(argv=None):
     base_ref = argv[0] if argv else _DEFAULT_BASE_REF
     clean_guard = _load_clean_guard()
 
+    paths = _changed_paths(base_ref)
+    if paths is None:
+        print(f"comment-only guard: FAILED -- git could not diff against base {base_ref}")
+        return 1
+
     refusals = []
     unjudged = []
     renamed = []
-    examined = 0
-    for path in _changed_paths(base_ref):
-        before = _blob_at(base_ref, path)
+    unread = []
+    examined = compared = new = 0
+    for path in paths:
+        try:
+            before = _blob_at(base_ref, path)
+        except BaseUnreadable as exc:
+            unread.append((path, str(exc)))
+            continue
         if before is None:
+            new += 1
             continue
         try:
             after = _worktree_text(path)
         except (OSError, UnicodeDecodeError):
             continue
+        compared += 1
         if debt_count(after, clean_guard) >= debt_count(before, clean_guard):
             continue
         examined += 1
@@ -1349,6 +1384,13 @@ def main(argv=None):
             mapping = proven_rename_map(before, after, clean_guard=clean_guard)
             if mapping:
                 renamed.append((path, format_rename_map(mapping)))
+
+    if unread:
+        print("comment-only guard: FAILED -- git could not read these files "
+              "at the base:")
+        for path, why in unread:
+            print(f"  {path}: {why}")
+        return 1
 
     # Printed before any verdict, so an absence of checking is never folded
     # into a line that reads as a check that passed.
@@ -1369,6 +1411,7 @@ def main(argv=None):
     if not refusals:
         print(
             "comment-only guard: "
+            f"{compared} changed file(s) compared, {new} new; "
             f"{examined - len(unjudged)} of {examined} file(s) shed "
             "nomenclature within an unchanged executable shape, a proven "
             "string purge, a proven rename or a proven line purge "

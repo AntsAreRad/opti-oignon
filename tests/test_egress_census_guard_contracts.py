@@ -20,6 +20,11 @@ name with a reason, or is owed in a ledger of counts that may only shrink.
     third-party library the package imports is classified.
   * EC5 -- the limits of the census are written in its docstring, and its
     green line carries every figure it stands on.
+  * EC6 -- a YAML parser that is not installed fails the census by name: the
+    manifests it could not read are never reported as permissions missing.
+  * EC7 -- each manifest that does not permit a plugin's sinks names its own
+    cause: absent, unparseable, not a mapping, or parsed without the
+    permission.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
@@ -42,6 +47,8 @@ BUDGET_S = {
     "test_ec3_each_question_answers_its_own_finding": 2.0,
     "test_ec4_the_real_tree_is_green_and_its_ledger_never_grows": 2.0,
     "test_ec5_the_limits_are_written_and_the_green_carries_its_denominator": 2.0,
+    "test_ec6_a_missing_yaml_parser_fails_the_census_by_name": 2.0,
+    "test_ec7_each_unread_manifest_names_its_own_cause": 2.0,
 }
 
 
@@ -586,5 +593,51 @@ def test_ec5_the_limits_are_written_and_the_green_carries_its_denominator(tmp_pa
             "2 third-party import(s) classified, 1 crate manifest(s) read; the ledger may only shrink."
         ), line
         assert len(re.findall(r"\d+", line)) == 9, "nine figures, each a number"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC6 -- a missing YAML parser fails the census by name
+# ---------------------------------------------------------------------------
+def test_ec6_a_missing_yaml_parser_fails_the_census_by_name(tmp_path, capsys, monkeypatch):
+    guard, restore = _load()
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        root = _write(tmp_path / "clean", _clean_files())
+        # The clean estate's plugin has a sink, so its manifest must be read.
+        monkeypatch.setitem(sys.modules, "yaml", None)
+        assert guard.main(["egress_census_guard.py", str(root)]) == 1, "an unread manifest is never a pass"
+        out = capsys.readouterr().out
+        assert "YAML parser" in out, f"the failure names the parser: {out}"
+        assert "network_outbound" not in out, f"an unread manifest is not a missing permission: {out}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC7 -- each unread manifest names its own cause
+# ---------------------------------------------------------------------------
+def test_ec7_each_unread_manifest_names_its_own_cause(tmp_path):
+    guard, restore = _load()
+    try:
+        _set_tables(guard, _clean_tables(guard))
+        causes = {
+            "absent": (None, "no manifest.yaml"),
+            "unparseable": ("name: p\npermissions: [network_outbound\n", "does not parse"),
+            "a list": ("- network_outbound\n", "not a mapping"),
+            "unpermitted": (_MANIFEST_WITHOUT, "no network_outbound permission in a parsed manifest"),
+        }
+        for label, (manifest, cause) in causes.items():
+            files = _clean_files()
+            if manifest is None:
+                del files["opti_oignon/plugins/p/manifest.yaml"]
+            else:
+                files["opti_oignon/plugins/p/manifest.yaml"] = manifest
+            estate = guard.read_estate(_write(tmp_path / label.replace(" ", "_"), files))
+            found = guard.find_unpermitted_plugins(estate)
+            assert len(found) == 1 and cause in found[0], f"{label}: {found}"
+            other = [c for name, (_m, c) in causes.items() if name != label and c in found[0]]
+            assert other == [], f"{label}: named another cause too: {found[0]}"
     finally:
         restore()

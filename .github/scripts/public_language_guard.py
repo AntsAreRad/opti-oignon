@@ -531,6 +531,10 @@ def _added_lines_by_path(base_ref):
     alone, and with a file header only before a file's first hunk. Split
     anywhere else, or with an added line opening with ``++ `` taken for a
     header, the rest of the diff could be handed to another path.
+
+    Returns ``None`` when git cannot produce the diff, a base it cannot
+    resolve first of all: an empty diff and a failed one are not the same
+    answer, and only the first is a pass.
     """
     cmd = [
         "git", "diff", "--unified=0", "--no-color", base_ref,
@@ -538,6 +542,8 @@ def _added_lines_by_path(base_ref):
     ]
     # Fixed argv, no shell: safe.
     result = subprocess.run(cmd, capture_output=True, check=False)
+    if result.returncode != 0:
+        return None
 
     hunk = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
     by_path = {}
@@ -565,6 +571,20 @@ def _added_lines_by_path(base_ref):
     return by_path
 
 
+def _opened(repo, added):
+    """The part of ``added`` this guard opens, as ``{path: lines}``.
+
+    A path outside the perimeter, a file of another kind than its tree's,
+    or a file that is gone is not opened, and its lines are not counted as
+    read.
+    """
+    root = Path(repo)
+    return {
+        path: lines for path, lines in sorted(added.items())
+        if _read_as(path) is not None and (root / path).is_file()
+    }
+
+
 def added_violations(repo, added):
     """``[(path, line, kind, text), ...]`` for prose on the added lines.
 
@@ -575,11 +595,9 @@ def added_violations(repo, added):
     """
     root = Path(repo)
     found = []
-    for path, lines in sorted(added.items()):
+    for path, lines in _opened(repo, added).items():
         suffix = _read_as(path)
         full = root / path
-        if suffix is None or not full.is_file():
-            continue
         try:
             source = _source_of(full, suffix)
         except (OSError, UnicodeDecodeError):
@@ -615,6 +633,10 @@ def main(argv=None):
         failed = True
 
     added = _added_lines_by_path(base_ref)
+    if added is None:
+        print(f"public-language guard: FAILED -- git could not diff against base {base_ref}")
+        failed = True
+        added = {}
     for path, line, kind, text in added_violations(repo, added):
         if not failed:
             print(
@@ -635,6 +657,8 @@ def main(argv=None):
         return 1
 
     total = sum(LEDGER.values())
+    opened = _opened(repo, added)
+    read = sum(len(lines) for lines in opened.values())
     trees = {}
     for scan_path in _SCAN_PATHS:
         trees.setdefault(_suffix_for(scan_path), []).append(scan_path)
@@ -643,7 +667,8 @@ def main(argv=None):
         for suffix, paths in trees.items()
     )
     print(
-        f"public-language guard: added lines are English (base {base_ref}); "
+        f"public-language guard: {read} added line(s) in {len(opened)} "
+        f"file(s) are English (base {base_ref}); "
         f"standing debt {total} span(s) across {len(LEDGER)} file(s), sealed "
         f"and falling only; read {scanned}, Cargo build output skipped -- "
         "no other tree or file kind, no TOML comment, no string literal, no "

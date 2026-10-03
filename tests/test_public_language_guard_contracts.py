@@ -405,6 +405,44 @@ def test_l17_the_entry_point_fails_on_an_unreadable_perimeter():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# l18 -- a diff git cannot produce fails the run; it is not an empty diff
+# ---------------------------------------------------------------------------
+def test_l18_a_base_git_cannot_resolve_fails_the_guard(capsys):
+    guard, restore = _load()
+    try:
+        base = "refs/heads/no-such-base"
+        assert guard._added_lines_by_path(base) is None, (
+            "a diff git could not produce is not an empty diff"
+        )
+        guard.census_tree = lambda _repo, scan_paths=None: {}
+        assert guard.main([base]) == 1, "a base git cannot resolve fails the run"
+        assert "no-such-base" in capsys.readouterr().out, "the failure names the base"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# l19 -- the green says how many added lines it read, in how many files
+# ---------------------------------------------------------------------------
+def test_l19_the_green_says_how_many_added_lines_it_read(capsys):
+    guard, restore = _load()
+    try:
+        # This suite's own first lines are English and inside the perimeter;
+        # the second path is outside it and is not opened, so not counted.
+        own = Path(__file__).resolve().relative_to(REPO).as_posix()
+        guard._added_lines_by_path = lambda _base_ref: {
+            own: {1, 2, 3},
+            "docs/notes.md": {1},
+        }
+        guard.census_tree = lambda _repo, scan_paths=None: {}
+        assert guard.main(["HEAD"]) == 0
+        out = capsys.readouterr().out
+        assert "3 added line(s) in 1 file(s)" in out, out
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     import pytest
 
