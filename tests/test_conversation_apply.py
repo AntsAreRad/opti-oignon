@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for the conversation materialization apply method (SYN-01 receive half).
+"""Tests for the conversation materialization apply method (the sync receive half).
 
 ``ConversationManager.apply_synced_conversation`` is the receiving half of a
 sync round: a winning CONVERSATION record is written into the local store so it
 surfaces on this device. This suite loads ``conversation.py`` in isolation --
 ``safe_connect`` stubbed to a plain sqlite3 connection, ``DATA_DIR`` to a tmp
-dir, and the S125 field key swapped for a reversible marker -- and proves:
+dir, and the at-rest field key swapped for a reversible marker -- and proves:
 
   * a record materialises the conversation row and its messages;
   * message content is RE-ENCRYPTED at rest (the marker form is stored, never
@@ -35,7 +35,7 @@ from _isolation import isolate, source  # noqa: E402
 def _load(tmpdir: str):
     """Load conversation.py in isolation with a plain-sqlite safe_connect.
 
-    sys.modules is saved/restored so sibling suites stay clean. The S125
+    sys.modules is saved/restored so sibling suites stay clean. The field key's
     ``_encrypt``/``_decrypt`` module globals are swapped for a reversible marker
     AFTER load, so the at-rest encryption path is observable.
     """

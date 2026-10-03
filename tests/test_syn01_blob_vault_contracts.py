@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""SYN-01 backfill: blob framing / transfer / vault-manifest contract gaps.
+"""Blob framing / transfer / vault-manifest contract gaps.
 
 Companion suite (additive; the original blob/vault suites are never edited).
-Each test pins a security contract on the SYN-01 receive surface that the
+Each test pins a security contract on the sync receive surface that the
 existing suites left unpinned, and each is red-before-green (it fails when the
 guarding source line is neutralised, passes on the untouched source):
 

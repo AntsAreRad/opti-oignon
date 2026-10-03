@@ -430,7 +430,7 @@ class AttachmentSchema(BaseModel):
     One row per media blob; the encrypted bytes live in the two-layer
     ``NotesBlobStore``, never in this row. ``transcript_text`` (audio),
     ``caption_text`` / ``ocr_text`` (image) are populated by the later opt-in,
-    sandboxed post-processing blocs and are None until then.
+    sandboxed post-processing and are None until then.
     """
     id: str
     note_id: str

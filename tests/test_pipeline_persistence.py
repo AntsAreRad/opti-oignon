@@ -12,8 +12,8 @@ The fix corrected the keyword, but the *class* of bug remained: every pipeline
 that does not run through the Executor must call ``_save_to_conversation``
 itself, and nothing enforced it. The persistence audit found three further
 gaps:
-  * cascading (S69) never persisted -> whole turn dropped.
-  * speculative (S70) never persisted -> whole turn dropped.
+  * cascading never persisted -> whole turn dropped.
+  * speculative never persisted -> whole turn dropped.
   * think+tools persisted only the reasoning (via the Executor); the Phase 2
     tool-output block was dropped on reload.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SYN-01 backfill: the CRDT NOTE_UPDATE store at the mutation-proven bar.
+"""The CRDT NOTE_UPDATE store, each contract proven by directed mutation.
 
 Companion suite (additive; the original suites are never edited). The existing
 ``test_note_updates_store.py`` pins the store contracts but is full-stack DEP
@@ -7,7 +7,7 @@ Companion suite (additive; the original suites are never edited). The existing
 container. ``note_updates_store.py`` is import-isolable, so this companion
 re-pins the load-bearing store contracts under the same stubbed
 ``db_utils`` / ``user_isolation`` idiom the notes suites use -- making them both
-runnable here AND mutation-proven -- and fills two gaps the DEP suite leaves:
+runnable here AND proven by directed mutation -- and fills two gaps the DEP suite leaves:
 
   * the ``sync_publish`` gate at the STORE layer: a remote-apply landing
     (``sync_publish=False``) must NOT re-publish the received update (the DEP
@@ -19,7 +19,7 @@ runnable here AND mutation-proven -- and fills two gaps the DEP suite leaves:
     real sibling probe is never exercised).
 
 The append seam, the watermark, and the destructive tombstone prune are the
-section-5 / section-4 posture of NOTES_CRDT_SPEC. The engine sink
+section-5 / section-4 posture of the notes CRDT specification. The engine sink
 (``veilid/sync_engine._update_sink_for``) is host-side and out of scope here.
 
 Local-only. Runs under pytest or the __main__ runner.
@@ -61,7 +61,7 @@ def _live_store(mod, td):
 
 
 # --------------------------------------------------------------------------- #
-# Ported store contracts (DEP suite -> isolated, mutation-proven)             #
+# Ported store contracts (DEP suite -> isolated, proven by mutation)          #
 # --------------------------------------------------------------------------- #
 def test_duplicate_seq_never_replaces():
     """A duplicate (user, note, seq) is refused; the original row is intact.

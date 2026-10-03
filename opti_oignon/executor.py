@@ -2373,7 +2373,7 @@ class Executor:
                     # Build window_stats compatible with existing UI
                     rpt = opt_result.report
                     window_stats = {
-                        "strategy": "s123_optimizer",
+                        "strategy": "optimizer",
                         "kept": len(messages) - 2,  # minus system + user
                         "dropped": rpt.total_trimmed,
                         "total_tokens": context_tokens,

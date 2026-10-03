@@ -1133,6 +1133,11 @@ package costs.
 
 ### Changed
 
+- The context optimizer's window statistics name their strategy
+  `optimizer`; the value used to carry a work code. The last eight lines of
+  work codes and process words under the source trees, in four test
+  suites' docstrings, are gone, and so is a work-block word left in a
+  published schema description.
 - Four test suites load their modules through the shared isolation window
   instead of windows of their own, with every test and assertion as it
   was; the isolation seal owes for 87 suites, down from 91.
