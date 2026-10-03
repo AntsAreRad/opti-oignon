@@ -12,16 +12,11 @@ registration time.
 """
 
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-# -- Safety limits for file operations --
-MAX_FILE_READ_SIZE = 1024 * 1024  # 1 Mo
-ALLOWED_FILE_DIR = os.path.expanduser("~/.opti-oignon/workspace")
 
 
 @dataclass
@@ -86,10 +81,10 @@ class ToolRegistry:
     for the tools callable by the LLM.
     """
 
-    # Tools that are UNSAFE outside a sandbox. When sandbox mode is
-    # active, these are disabled and replaced by their sandboxed
-    # equivalents. This prevents the LLM from bypassing the sandbox
-    # by calling an unsandboxed tool instead.
+    # Tools that are UNSAFE outside a sandbox. They have no host-side
+    # handler: with no sandbox session they refuse. When sandbox mode is
+    # active they are disabled in favour of the sandbox's own tools; the
+    # quick sandbox routes them to its session for the turn.
     UNSAFE_TOOLS = frozenset({
         "execute_code",
         "read_file",
@@ -476,94 +471,24 @@ def _handle_web_search(query: str, max_results: int = 5) -> str:
         return f"Web search error: {e}"
 
 
-def _handle_execute_code(
-    code: str, language: str = "python", timeout: int = 30
-) -> str:
-    """Handler for the execute_code tool."""
-    try:
-        from opti_oignon.code_executor import code_executor
-        result = code_executor.execute(code, language=language, timeout=timeout)
-        parts = []
-        if result.stdout:
-            parts.append(f"STDOUT:\n{result.stdout}")
-        if result.stderr:
-            parts.append(f"STDERR:\n{result.stderr}")
-        if result.error_message:
-            parts.append(f"ERROR: {result.error_message}")
-        if not parts:
-            status = "Success" if result.success else "Failed"
-            parts.append(f"Execution {status} (return code: {result.return_code})")
-        return "\n".join(parts)
-    except Exception as e:
-        return f"Code execution error: {e}"
+def _needs_sandbox(tool_name: str) -> Callable[..., str]:
+    """The handler of an unsafe tool while no sandbox session is attached.
 
+    The four UNSAFE_TOOLS have no host-side handler: outside a sandbox
+    session each one refuses and names the remedy, and nothing is read,
+    written, listed or run on this machine. The quick sandbox swaps in its
+    session's handlers for the turn and puts these back when it ends.
+    """
+    def refuse(**_args: Any) -> str:
+        return (
+            f"Refused: {tool_name} runs only inside a sandbox session, and none "
+            "is attached to this conversation (the sandbox is off, unavailable, "
+            "or failed to start). Nothing was read, written or run on this "
+            "machine. Turn the sandbox on to work with files or run code."
+        )
 
-def _handle_read_file(path: str) -> str:
-    """Handler for the read_file tool."""
-    try:
-        # Safety: resolve the path and check the size
-        resolved = os.path.abspath(path)
-        if not os.path.isfile(resolved):
-            return f"File not found: {path}"
-
-        size = os.path.getsize(resolved)
-        if size > MAX_FILE_READ_SIZE:
-            return (
-                f"File too large: {size} bytes "
-                f"(max {MAX_FILE_READ_SIZE} bytes)"
-            )
-
-        with open(resolved, encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        return content
-    except Exception as e:
-        return f"Read file error: {e}"
-
-
-def _handle_write_file(path: str, content: str) -> str:
-    """Handler for the write_file tool."""
-    try:
-        # Create the working directory if required
-        os.makedirs(ALLOWED_FILE_DIR, exist_ok=True)
-
-        # Safety: write only inside the allowed directory
-        if not os.path.isabs(path):
-            resolved = os.path.join(ALLOWED_FILE_DIR, path)
-        else:
-            resolved = os.path.abspath(path)
-
-        # Create subdirectories if required
-        os.makedirs(os.path.dirname(resolved), exist_ok=True)
-
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(content)
-        return f"File written: {resolved} ({len(content)} bytes)"
-    except Exception as e:
-        return f"Write file error: {e}"
-
-
-def _handle_list_files(path: str = ".") -> str:
-    """Handler for the list_files tool."""
-    try:
-        resolved = os.path.abspath(path)
-        if not os.path.isdir(resolved):
-            return f"Directory not found: {path}"
-
-        entries = sorted(os.listdir(resolved))
-        if not entries:
-            return f"Empty directory: {path}"
-
-        lines = []
-        for entry in entries[:100]:  # Limiter a 100 entrees
-            full_path = os.path.join(resolved, entry)
-            if os.path.isdir(full_path):
-                lines.append(f"  [DIR]  {entry}/")
-            else:
-                size = os.path.getsize(full_path)
-                lines.append(f"  [FILE] {entry} ({size} bytes)")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"List files error: {e}"
+    refuse.__name__ = f"refuse_{tool_name}"
+    return refuse
 
 
 # =============================================================================
@@ -626,14 +551,14 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
                 default=30,
             ),
         },
-        handler=_handle_execute_code,
+        handler=_needs_sandbox("execute_code"),
         requires=["code_executor"],
     ))
 
     # 3. read_file
     registry.register(ToolDefinition(
         name="read_file",
-        description="Read the contents of a file from disk.",
+        description="Read the contents of a file in the sandbox workspace.",
         parameters={
             "path": ToolParam(
                 name="path",
@@ -642,14 +567,14 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
                 required=True,
             ),
         },
-        handler=_handle_read_file,
+        handler=_needs_sandbox("read_file"),
         requires=["filesystem"],
     ))
 
     # 4. write_file
     registry.register(ToolDefinition(
         name="write_file",
-        description="Write content to a file on disk.",
+        description="Write content to a file in the sandbox workspace.",
         parameters={
             "path": ToolParam(
                 name="path",
@@ -664,14 +589,14 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
                 required=True,
             ),
         },
-        handler=_handle_write_file,
+        handler=_needs_sandbox("write_file"),
         requires=["filesystem"],
     ))
 
     # 5. list_files
     registry.register(ToolDefinition(
         name="list_files",
-        description="List files and directories at a given path.",
+        description="List files and directories in the sandbox workspace.",
         parameters={
             "path": ToolParam(
                 name="path",
@@ -681,7 +606,7 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
                 default=".",
             ),
         },
-        handler=_handle_list_files,
+        handler=_needs_sandbox("list_files"),
         requires=["filesystem"],
     ))
 

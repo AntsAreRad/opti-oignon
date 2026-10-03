@@ -2437,6 +2437,16 @@ package costs.
   /api/coding/start` refuse `allow_degraded: true` with a 400 that names
   `POST /api/sandbox/confirm-degraded`, where the user confirms. Four
   contracts.
+- The chat's file and code tools have no handler outside the sandbox. On
+  a chat turn without a sandbox session (the quick sandbox switched off
+  in the request, unavailable, or failing to start), `read_file` returned
+  any file the server could open, `list_files` listed any directory, and
+  `write_file`, said to write inside a working directory, wrote any
+  absolute path it was given; the shipped tool configuration enables all
+  four tools, web search beside them. Outside a sandbox session each now
+  refuses, says that nothing was read, written or run, and names the
+  remedy. With the quick sandbox on, the shipped default, a turn is
+  unchanged. Five contracts.
 
 ## 2.2.0 -- 2026-07-28
 
