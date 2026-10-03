@@ -283,18 +283,24 @@ def resolve_tool_calls(response: Any) -> tuple[list[ToolCall], str]:
 
 
 def sandbox_ready(session: Any) -> bool:
-    """Whether the injected sandbox session is backed by an available bwrap.
+    """Whether the injected sandbox session runs its commands under bwrap.
 
     This is the physical invariant: the agent acts only when true isolation is
-    available. A missing session, a missing manager, or an unavailable bwrap
-    all return False, so the dispatch refuses rather than touching the host.
-    There is deliberately no tempdir or degraded path here.
+    in use. A missing session, a missing manager, or a manager that does not
+    run bwrap (absent, or installed while the resolved backend is tempdir) all
+    return False, so the dispatch refuses rather than touching the host.
+    There is deliberately no tempdir or degraded path here. A seam that does
+    not report ``bwrap_in_use`` is judged on availability alone; the
+    SandboxManager always reports it.
     """
     if session is None:
         return False
     mgr = getattr(session, "sandbox_manager", None)
     if mgr is None:
         return False
+    in_use = getattr(mgr, "bwrap_in_use", None)
+    if in_use is not None:
+        return bool(in_use)
     return bool(getattr(mgr, "bwrap_available", False))
 
 

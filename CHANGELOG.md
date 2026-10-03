@@ -2417,6 +2417,16 @@ package costs.
   Garbage the contracts make is still collected; no budget was loosened.
   One contract, which also shows the probe failing when the freeze is
   taken out.
+- The sandbox's isolation checks read the backend in use, not whether
+  bubblewrap is installed. With `isolation_backend: tempdir`, commands run
+  in a plain temporary directory even where bwrap is present, yet eight
+  checks keyed on its presence alone: strict mode let those commands run,
+  `execution_blocked` and the health level reported bwrap, the agent
+  dispatch and the skills tool took the session for isolated, note
+  transcription and captioning went ahead, and the security score credited
+  the sandbox. Each now asks the manager whether bwrap is in use, and strict
+  mode blocks a configured tempdir backend with a reason that names the
+  setting. Nine contracts: one per check, one for the manager's answer.
 
 ## 2.2.0 -- 2026-07-28
 

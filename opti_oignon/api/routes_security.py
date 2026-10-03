@@ -203,7 +203,7 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
     try:
         from opti_oignon.sandbox_manager import sandbox_manager
         if sandbox_manager is not None:
-            passed = sandbox_manager.bwrap_available
+            passed = sandbox_manager.bwrap_in_use
         else:
             passed = False
         checks.append({
@@ -212,7 +212,7 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
             "max_points": 15,
             "passed": passed,
             "detail": "Bubblewrap sandbox active" if passed
-                      else "Bubblewrap not available -- degraded isolation",
+                      else "Bubblewrap not in use -- degraded isolation",
         })
         total += 15 if passed else 0
     except Exception:

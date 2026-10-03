@@ -1475,10 +1475,11 @@ class SandboxManager:
 
         if preference == "tempdir":
             if self._config.strict_mode:
-                logger.warning(
+                logger.error(
                     "Sandbox strict_mode is ON but isolation_backend is "
-                    "'tempdir'. Allowing tempdir as explicitly requested, "
-                    "but this provides NO real isolation."
+                    "'tempdir', which gives no real isolation: code "
+                    "execution will be BLOCKED. Set isolation_backend to "
+                    "'auto' or 'bwrap', or strict_mode: false."
                 )
             return IsolationBackend.TEMPDIR
 
@@ -1521,6 +1522,16 @@ class SandboxManager:
         return self._bwrap_available
 
     @property
+    def bwrap_in_use(self) -> bool:
+        """Whether commands run under bubblewrap: bwrap is the resolved
+        backend and it is present. Installed is not in use: a configured
+        tempdir backend runs without it."""
+        return (
+            self._isolation_backend == IsolationBackend.BWRAP
+            and self._bwrap_available
+        )
+
+    @property
     def degraded_mode(self) -> bool:
         """Whether running in degraded (tempdir-only) mode."""
         return self._isolation_backend == IsolationBackend.TEMPDIR
@@ -1532,19 +1543,15 @@ class SandboxManager:
 
     @property
     def execution_blocked(self) -> bool:
-        """Whether code execution is blocked (strict_mode + no bwrap)."""
-        return (
-            self._config.strict_mode
-            and not self._bwrap_available
-            and self._isolation_backend != IsolationBackend.BWRAP
-        )
+        """Whether code execution is blocked (strict_mode, bwrap not in use)."""
+        return self._config.strict_mode and not self.bwrap_in_use
 
     def get_isolation_status(self) -> dict[str, Any]:
         """Return comprehensive isolation status for health checks.
 
         Returns a dict suitable for inclusion in /api/health responses.
         """
-        if self._bwrap_available:
+        if self.bwrap_in_use:
             level = "bwrap"
         elif self._config.strict_mode:
             level = "blocked"
@@ -3150,24 +3157,29 @@ class SandboxManager:
             effective_timeout = _override or self._config.command_timeout
         backend = self._isolation_backend
 
-        # Strict mode -- refuse execution if bwrap is not available
-        if (
-            self._config.strict_mode
-            and not self._bwrap_available
-            and backend != IsolationBackend.BWRAP
-        ):
-            result = CommandResult(
-                blocked=True,
-                block_reason=(
+        # Strict mode -- refuse execution unless bwrap is the backend in use
+        if self._config.strict_mode and not self.bwrap_in_use:
+            if self._bwrap_available:
+                reason = (
+                    "Sandbox strict_mode is ON but the configured isolation "
+                    "backend is 'tempdir', which gives no real isolation. "
+                    "Code execution is BLOCKED. Set isolation_backend to "
+                    "'auto' or 'bwrap'."
+                )
+            else:
+                reason = (
                     "Sandbox strict_mode is ON but bubblewrap (bwrap) is "
                     "not available. Code execution is BLOCKED for security. "
                     "Install bubblewrap: apt install bubblewrap"
-                ),
+                )
+            result = CommandResult(
+                blocked=True,
+                block_reason=reason,
                 isolation_backend="blocked",
             )
             self._audit.log_command(session_id, command, result)
             logger.warning(
-                "Execution blocked in session %s: strict_mode + no bwrap",
+                "Execution blocked in session %s: strict_mode, bwrap not in use",
                 session_id,
             )
             return result

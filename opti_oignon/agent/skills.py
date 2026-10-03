@@ -1068,17 +1068,21 @@ _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 
 def _sandbox_ready(session: Any) -> bool:
-    """Whether an injected sandbox session is backed by an available bwrap.
+    """Whether an injected sandbox session runs its commands under bwrap.
 
     Mirrors ``dispatch.sandbox_ready`` without importing ``dispatch``, so this
     module stays decoupled and isolatable. A missing session, a missing
-    manager, or an unavailable bwrap all return False.
+    manager, or a manager that does not run bwrap (absent, or installed while
+    the resolved backend is tempdir) all return False.
     """
     if session is None:
         return False
     mgr = getattr(session, "sandbox_manager", None)
     if mgr is None:
         return False
+    in_use = getattr(mgr, "bwrap_in_use", None)
+    if in_use is not None:
+        return bool(in_use)
     return bool(getattr(mgr, "bwrap_available", False))
 
 

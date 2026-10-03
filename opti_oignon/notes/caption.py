@@ -20,8 +20,9 @@ router, keeping each media concern independent.
 The disposable-bubblewrap floor is non-negotiable here, because
 caption / OCR is file-touching post-processing of user content:
 
-- FAIL-SECURE. If a real bubblewrap is not available (``sandbox.bwrap_available``
-  is false), the orchestration REFUSES; it never falls back to a degraded
+- FAIL-SECURE. If bubblewrap is not in use (``sandbox.bwrap_in_use`` is false:
+  absent, or installed while the resolved backend is tempdir), the
+  orchestration REFUSES; it never falls back to a degraded
   tempdir-only mode for this work. An undeterminable isolation posture is a
   refusal, never a host-side run.
 - DECRYPT IN MEMORY. The blob is decrypted via ``NotesBlobStore.open`` into a
@@ -145,6 +146,16 @@ def _refused(attachment_id: str, reason: str) -> CaptionResult:
     )
 
 
+def _bwrap_in_use(sandbox: Any) -> bool:
+    """Whether the sandbox runs commands under bwrap. Installed is not in use:
+    a seam that reports ``bwrap_in_use`` is taken at its word; one that does
+    not is judged on ``bwrap_available`` alone."""
+    in_use = getattr(sandbox, "bwrap_in_use", None)
+    if in_use is not None:
+        return bool(in_use)
+    return bool(getattr(sandbox, "bwrap_available", False))
+
+
 def _coerce(raw: Any) -> tuple[str | None, str | None]:
     """Coerce the captioner's return into a ``(caption, ocr)`` pair of str|None.
 
@@ -181,7 +192,7 @@ def caption_attachment(
             a structured ``not_found``, never a served result).
         store: A ``NotesStore`` (``get_attachment`` / ``update_attachment``).
         blobs: A ``NotesBlobStore`` (``open`` decrypts in memory).
-        sandbox: A ``SandboxManager``-like seam (``bwrap_available``,
+        sandbox: A ``SandboxManager``-like seam (``bwrap_in_use``,
             ``create_sandbox`` / ``get_active_workspace_path`` /
             ``destroy_sandbox``). The live one is the real disposable sandbox.
         captioner: The injected tool seam; ``None`` is a structured refusal (the
@@ -193,8 +204,8 @@ def caption_attachment(
     Returns:
         A :class:`CaptionResult`; the function never raises.
     """
-    # Fail-secure on the disposable-bubblewrap floor: with no real bwrap, refuse.
-    if sandbox is None or not getattr(sandbox, "bwrap_available", False):
+    # Fail-secure on the disposable-bubblewrap floor: unless bwrap is in use, refuse.
+    if sandbox is None or not _bwrap_in_use(sandbox):
         return _refused(attachment_id, REASON_SANDBOX_UNAVAILABLE)
     if captioner is None:
         return _refused(attachment_id, REASON_CAPTIONER_UNAVAILABLE)
