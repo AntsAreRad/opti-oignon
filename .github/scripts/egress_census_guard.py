@@ -252,7 +252,6 @@ HOMES = {
 # finding, and so is a count the census no longer finds.
 LEDGER = {
     "opti_oignon/async_plugin_subprocess.py": {"process": 1},
-    "opti_oignon/code_executor.py": {"process": 1},
     "opti_oignon/context_manager.py": {"process": 2},
     "opti_oignon/core_client.py": {"urllib": 1},
     "opti_oignon/dep_monitor.py": {"process": 1},

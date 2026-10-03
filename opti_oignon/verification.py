@@ -66,6 +66,21 @@ _LANGUAGE_ALIASES = {
     "rlang": "r",
 }
 
+# The user setting that lets the code blocks of an answer run on their own,
+# and its value when it is unset or cannot be read. Off: the check runs model
+# code without a click and spends model calls on fixes.
+AUTO_VERIFY_SETTING = "code_auto_verify"
+AUTO_VERIFY_DEFAULT = False
+
+
+def _user_setting(key: str, default):
+    """A user setting, or ``default`` when it is unset or cannot be read."""
+    try:
+        from .config import config
+        return config.get_user_preference(key, default)
+    except Exception:
+        return default
+
 
 class VerificationIteration(BaseModel):
     """Detail of a verification iteration."""
@@ -155,8 +170,18 @@ class VerificationEngine:
 
     @property
     def available(self) -> bool:
-        """Check that dependencies are available."""
-        return self.code_exec is not None
+        """Whether the code of an answer may run now.
+
+        An executor must be there with execution turned on, and the user must
+        have turned automatic checking on as well: it runs model code without
+        a click and spends model calls on fixes.
+        """
+        code_exec = self.code_exec
+        return (
+            code_exec is not None
+            and getattr(code_exec, "enabled", False) is True
+            and _user_setting(AUTO_VERIFY_SETTING, AUTO_VERIFY_DEFAULT) is True
+        )
 
     def verify_and_fix(
         self,
@@ -238,6 +263,18 @@ class VerificationEngine:
                     iteration=iteration,
                     success=False,
                     error=error_msg,
+                    execution_time=time.time() - iter_start,
+                ))
+                break
+
+            # Code that never ran has no error of its own to fix: stop, and
+            # spend no model call on it.
+            if not getattr(result, "ran", True):
+                errors_encountered.append(result.error_message or "The code did not run")
+                iteration_details.append(VerificationIteration(
+                    iteration=iteration,
+                    success=False,
+                    error=result.error_message,
                     execution_time=time.time() - iter_start,
                 ))
                 break
@@ -539,7 +576,7 @@ class VerificationEngine:
         Returns:
             Liste de VerificationResult (un par bloc verifie)
         """
-        if self.code_exec is None:
+        if not self.available:
             return []
 
         results = []

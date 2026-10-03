@@ -44,7 +44,8 @@
 
 	let defaultModel = '';
 	let defaultTemperature = 0.7;
-	let codeExecutionEnabled = true;
+	let codeExecutionEnabled = false;
+	let codeAutoVerifyEnabled = false;
 	let memoryInjectionEnabled = true;
 	let persistentDir = '';
 
@@ -63,7 +64,8 @@
 			const data = await getSettings();
 			defaultModel = (data.user?.default_model as string) ?? (data.models?.default as string) ?? '';
 			defaultTemperature = (data.user?.temperature as number) ?? 0.7;
-			codeExecutionEnabled = (data.user?.code_execution as boolean) ?? true;
+			codeExecutionEnabled = (data.user?.code_execution as boolean) ?? false;
+			codeAutoVerifyEnabled = (data.user?.code_auto_verify as boolean) ?? false;
 			memoryInjectionEnabled = (data.user?.memory_injection as boolean) ?? true;
 			persistentDir = (data.user?.persistent_dir as string) ?? '';
 		} catch (e) {
@@ -147,13 +149,15 @@
 
 	async function resetDefaults() {
 		defaultTemperature = 0.7;
-		codeExecutionEnabled = true;
+		codeExecutionEnabled = false;
+		codeAutoVerifyEnabled = false;
 		memoryInjectionEnabled = true;
 		persistentDir = '';
 		try {
 			await Promise.all([
 				updateSetting('temperature', 0.7),
-				updateSetting('code_execution', true),
+				updateSetting('code_execution', false),
+				updateSetting('code_auto_verify', false),
 				updateSetting('memory_injection', true),
 				updateSetting('persistent_dir', '')
 			]);
@@ -280,9 +284,16 @@
 				/>
 				<Switch
 					label="Code execution"
-					description="Allow the assistant to run code in the sandbox by default."
+					description="Let code blocks run in the sandbox when you run them. Off, no code runs."
 					bind:checked={codeExecutionEnabled}
 					on:change={() => saveSetting('code_execution', codeExecutionEnabled, 'Code execution')}
+				/>
+				<Switch
+					label="Check code in answers"
+					description="Also run the Python and R blocks of each answer in the sandbox, and ask the model to fix the ones that fail. This spends model calls."
+					bind:checked={codeAutoVerifyEnabled}
+					disabled={!codeExecutionEnabled}
+					on:change={() => saveSetting('code_auto_verify', codeAutoVerifyEnabled, 'Check code in answers')}
 				/>
 				<Switch
 					label="Memory injection"

@@ -2457,6 +2457,22 @@ package costs.
   loader is built instead of falling through to that fallback, and Bulbe
   refuses an explicit in-process loader, which it let through before.
   Three contracts.
+- Code execution runs in the sandbox, and only when the user turned it on.
+  `POST /api/code/execute` and the automatic check of the code in an answer
+  shared a runner of their own: a process on this machine with the
+  server's environment, its secrets included, and a memory limit as its
+  only bound. It stayed off because a flag nothing set stayed false, while
+  the settings screen showed it on and saved a setting nothing read. Each
+  run now goes through the sandbox manager, like the agent's tools, in a
+  sandbox made for that run and destroyed after it, or the conversation's
+  own in persistent mode; without a usable sandbox it is refused and says
+  the code never ran, and an image leaves the sandbox only as a regular
+  file, never through a link. `code_execution` turns execution on; the
+  automatic check has its own setting, `code_auto_verify`, and needs both.
+  Both are off by default, on the server and on the screen. With execution
+  off, the check used to ask the model to fix the refusal, twice per code
+  block; code that never ran is no longer offered for a fix. Eleven
+  contracts, and the egress census owes one sink fewer.
 
 ## 2.2.0 -- 2026-07-28
 

@@ -637,6 +637,15 @@ fail_under = 0
 # everywhere. It stays in the tree word for word; g25 in the same file
 # plants a standing line under each source tree and reads it charged.
 #
+# ec4 of the egress census suite held, among its other properties, that the
+# census finds at least the eighty-six sink sites it found when its floor was
+# pinned. Code execution no longer starts a process of its own, so the package
+# holds one sink fewer, and that count is false while the property it served
+# -- the census keeps its capacity -- holds. It stays in the tree word for
+# word; ec12 in the same file keeps each of its other assertions word for word
+# and lowers the floor only by the sinks it names as retired, each proven gone
+# from the census and from the ledger.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -734,4 +743,5 @@ addopts = """
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[row]
     --deselect=tests/test_facade_lazy_contracts.py::test_lf2_every_export_resolves_when_asked_and_only_then
     --deselect=tests/test_public_clean_guard_contracts.py::test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass
+    --deselect=tests/test_egress_census_guard_contracts.py::test_ec4_the_real_tree_is_green_and_its_ledger_never_grows
 """

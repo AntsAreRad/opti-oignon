@@ -32,6 +32,9 @@ name with a reason, or is owed in a ledger of counts that may only shrink.
   * EC10 -- a directory the walk cannot list fails the census by name.
   * EC11 -- so does a test suite it reads to prove a gate home, when that
     suite is not UTF-8 text.
+  * EC12 -- the real tree as EC4 reads it, with the capacity floor lowered
+    only by sinks retired by name, each proven gone from the census and from
+    the ledger. It supersedes EC4, deselected by name.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window.
@@ -60,6 +63,7 @@ BUDGET_S = {
     "test_ec9_a_module_that_does_not_parse_fails_the_census_by_name": 2.0,
     "test_ec10_a_directory_the_census_cannot_list_fails_it_by_name": 2.0,
     "test_ec11_a_proving_suite_that_is_not_utf8_fails_the_census_by_name": 2.0,
+    "test_ec12_the_real_tree_is_green_and_only_a_named_retirement_lowers_its_floor": 2.0,
 }
 
 
@@ -727,5 +731,53 @@ def test_ec11_a_proving_suite_that_is_not_utf8_fails_the_census_by_name(tmp_path
             "a suite read with its bytes dropped is not the suite on disk"
         )
         assert "tests/test_zz_latin.py" in capsys.readouterr().out
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EC12 -- the real tree, its retirements named (supersedes EC4)
+# ---------------------------------------------------------------------------
+# Sinks taken out of the package by name: module -> {kind: count}. Each one
+# lowers the floor EC4 pinned, though the census loses no capacity.
+RETIRED = {
+    # Code execution is a client of the sandbox manager, which owns the process.
+    "opti_oignon/code_executor.py": {"process": 1},
+}
+
+
+def test_ec12_the_real_tree_is_green_and_only_a_named_retirement_lowers_its_floor():
+    guard, restore = _load()
+    try:
+        result = guard.run(REPO)
+        # c1: the census on the repository is green, with its green line.
+        assert result.code == 0, "\n".join(result.lines)
+        assert result.lines[-1].startswith("Egress census OK: "), result.lines[-1]
+        # c2: the ratchet, as properties.
+        assert guard.find_home_proofs_missing(result.estate, result.census) == []
+        assert set(guard.LEDGER) <= set(BIRTH), f"owed modules beyond the birth: {sorted(set(guard.LEDGER) - set(BIRTH))}"
+        for rel, kinds in guard.LEDGER.items():
+            for kind, count in kinds.items():
+                assert count <= BIRTH[rel].get(kind, 0), f"{rel}: {kind} {count} is above its birth"
+        assert guard.EXEMPT and all(isinstance(r, str) and r.strip() for r in guard.EXEMPT.values())
+        # c3: the capacity anchor, less the sinks retired by name, each gone.
+        retired = 0
+        for rel, kinds in RETIRED.items():
+            for kind, count in kinds.items():
+                assert 0 < count <= BIRTH[rel].get(kind, 0), f"{rel}: {kind} was never owed {count}"
+                assert guard.LEDGER.get(rel, {}).get(kind, 0) == 0, f"{rel}: {kind} is retired and still owed"
+                left = [site.line for site in result.census.get(rel, ()) if site.kind == kind]
+                assert left == [], f"{rel}: {kind} is retired and still sinks at {left}"
+                retired += count
+        total = sum(len(sites) for sites in result.census.values())
+        assert FLOOR - retired > 0 and total >= FLOOR - retired, f"{total} sink site(s), floor {FLOOR} less {retired}"
+        for rel in guard.LEDGER:
+            assert len(result.census.get(rel, ())) >= 1, f"{rel} is owed and has no sink"
+        # c4: every third-party name is classified.
+        assert len(_THIRD_PARTY) == 38
+        assert [n for n in _THIRD_PARTY if n not in guard.LIBRARIES] == []
+        imported = guard.third_party_imports(result.estate)
+        classified = [n for n in imported if n in guard.LIBRARIES]
+        assert len(classified) >= 30, f"only {len(classified)} classified import(s) seen"
     finally:
         restore()

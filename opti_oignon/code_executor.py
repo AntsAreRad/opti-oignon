@@ -4,12 +4,17 @@ CODE EXECUTOR -- OPTI-OIGNON 1.4.0 (F3)
 
 Sandboxed code execution for Python, R, and Bash.
 
-Runs code in isolated subprocesses with:
-- Timeout enforcement (default 30s)
-- Output size limits (default 50k chars)
-- Memory limits via ulimit (Linux only)
-- Temporary working directories (cleaned up after)
-- No eval/exec -- always subprocess
+Every run is a client of the server's sandbox manager, the runner the agent's
+tools use: the script is written into a sandbox workspace by the shared file
+handler, so the command validator reads it, and runs through
+``SandboxManager.execute_command``. There is no other runner. Without a usable
+sandbox a run is refused, never moved to this machine:
+- Off unless the user turns on the ``code_execution`` setting
+- Timeout enforcement (default 30s, at most 120s)
+- Output, memory and file size limits: the sandbox's own
+- One sandbox per run, destroyed after it; one per conversation in
+  persistent mode, destroyed by a reset
+- Output images copied out only as regular files, never through a link
 
 Architecture:
     - CodeBlock: dataclass for a parsed code block from LLM output
@@ -24,8 +29,9 @@ import logging
 import os
 import re
 import shutil
-import subprocess
+import stat
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -54,6 +60,9 @@ class ExecutionResult:
     error_message: str = ""
     output_files: list[str] = field(default_factory=list)
     working_dir: str = ""
+    # False when the code never ran: execution is off, the language or its
+    # runtime is missing, or the sandbox is unavailable or refused the run.
+    ran: bool = True
 
 
 # Regex to match fenced code blocks.
@@ -84,6 +93,43 @@ def _get_output_dir() -> str:
             _OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "opti_exec_outputs")
         os.makedirs(_OUTPUT_DIR, exist_ok=True)
     return _OUTPUT_DIR
+
+# The user setting that turns code execution on, and its value when it is
+# unset or cannot be read. The settings screen writes it.
+CODE_EXECUTION_SETTING = "code_execution"
+CODE_EXECUTION_DEFAULT = False
+
+_NO_SANDBOX = "Code execution needs the sandbox, which is off or unavailable."
+
+
+def _user_setting(key: str, default):
+    """A user setting, or ``default`` when it is unset or cannot be read."""
+    try:
+        from .config import config
+        return config.get_user_preference(key, default)
+    except Exception:
+        return default
+
+
+def _server_sandbox():
+    """The server's sandbox manager, or None when the sandbox is off or missing."""
+    try:
+        from .sandbox_manager import sandbox_manager
+    except Exception:
+        return None
+    return sandbox_manager
+
+
+def _write_script(manager, session_id: str, name: str, code: str) -> str:
+    """Write a script into a sandbox workspace through the shared file handler.
+
+    The handler validates the path, holds its size limit and registers the
+    content with the command validator, as it does for every sandbox client.
+    Returns "" once the script is written, or the handler's error.
+    """
+    from .file_tools import _handle_sandbox_create_file
+    reply = _handle_sandbox_create_file(session_id, name, code, _sandbox_manager=manager)
+    return "" if reply.startswith("File created:") else reply
 
 # Language aliases for normalization
 _LANGUAGE_ALIASES = {
@@ -143,20 +189,19 @@ _BASH_INDICATORS = [
 
 
 class CodeExecutor:
-    """Execute Python, R, and Bash code in sandboxed subprocesses."""
+    """Execute Python, R, and Bash code inside the server's sandbox."""
 
     SUPPORTED_LANGUAGES = {"python", "r", "bash"}
 
-    # Safety limits
+    # Safety limits (output, memory and file size are the sandbox's own)
     DEFAULT_TIMEOUT = 30       # seconds
     MAX_TIMEOUT = 120          # absolute maximum
-    MAX_OUTPUT_SIZE = 50_000   # chars
-    MAX_MEMORY_MB = 512        # MB
 
-    def __init__(self):
-        self._enabled = False  # off by default for safety
-        self._persistent_mode = False  # reuse tmpdir per conversation
-        self._persistent_dirs = {}  # conv_id -> tmpdir path
+    def __init__(self, sandbox_mgr=None):
+        self._sandbox_mgr = sandbox_mgr  # None: the server's own, looked up per run
+        self._persistent_mode = False  # one sandbox per conversation
+        self._persistent_sessions = {}  # conv_id -> sandbox session id
+        self._sessions_lock = threading.Lock()
         self._detect_available_languages()
 
     def _detect_available_languages(self):
@@ -181,15 +226,12 @@ class CodeExecutor:
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
-
-    @enabled.setter
-    def enabled(self, value: bool):
-        self._enabled = bool(value)
+        """Whether the user turned code execution on; only a real True does."""
+        return _user_setting(CODE_EXECUTION_SETTING, CODE_EXECUTION_DEFAULT) is True
 
     @property
     def persistent_mode(self) -> bool:
-        """Whether to reuse working directories per conversation."""
+        """Whether each conversation keeps one sandbox across runs."""
         return self._persistent_mode
 
     @persistent_mode.setter
@@ -198,67 +240,91 @@ class CodeExecutor:
         if not value:
             self.cleanup_all_persistent_dirs()
 
-    def get_persistent_dir(self, conv_id: str) -> str:
-        """Get or create a persistent working directory for a conversation.
+    def _manager(self):
+        """The sandbox manager runs go to, or None when there is none."""
+        return self._sandbox_mgr if self._sandbox_mgr is not None else _server_sandbox()
 
-        Args:
-            conv_id: conversation identifier
+    @staticmethod
+    def _destroy(manager, session_id: str):
+        try:
+            manager.destroy_sandbox(session_id)
+        except Exception as e:
+            logger.warning(f"Could not destroy sandbox {session_id}: {e}")
 
-        Returns:
-            Path to the persistent tmpdir
-        """
-        if conv_id not in self._persistent_dirs:
-            d = tempfile.mkdtemp(prefix=f"opti_persist_{conv_id[:8]}_")
-            self._persistent_dirs[conv_id] = d
-            logger.info(f"Created persistent dir for {conv_id[:8]}: {d}")
-        return self._persistent_dirs[conv_id]
+    def _conversation_session(self, manager, conv_id: str) -> str:
+        """The live sandbox of a conversation, made on its first run."""
+        with self._sessions_lock:
+            session_id = self._persistent_sessions.get(conv_id)
+            if session_id is not None and manager.get_workspace_path(session_id):
+                return session_id
+            session = manager.create_sandbox(None, label="code execution")
+            self._persistent_sessions[conv_id] = session.session_id
+            logger.info(f"Created persistent sandbox for {conv_id[:8]}")
+            return session.session_id
 
     def reset_persistent_dir(self, conv_id: str) -> bool:
-        """Remove and recreate the persistent dir for a conversation.
+        """Destroy the sandbox of a conversation.
 
         Returns:
-            True if a dir was cleaned up, False if none existed.
+            True if a sandbox was destroyed, False if none existed.
         """
-        if conv_id in self._persistent_dirs:
-            old = self._persistent_dirs.pop(conv_id)
-            try:
-                shutil.rmtree(old, ignore_errors=True)
-            except Exception:
-                pass
-            logger.info(f"Reset persistent dir for {conv_id[:8]}")
-            return True
-        return False
+        with self._sessions_lock:
+            session_id = self._persistent_sessions.pop(conv_id, None)
+        manager = self._manager()
+        if session_id is None or manager is None:
+            return False
+        self._destroy(manager, session_id)
+        logger.info(f"Reset persistent sandbox for {conv_id[:8]}")
+        return True
 
     def cleanup_all_persistent_dirs(self):
-        """Remove all persistent working directories."""
-        for cid, d in list(self._persistent_dirs.items()):
-            try:
-                shutil.rmtree(d, ignore_errors=True)
-            except Exception:
-                pass
-        count = len(self._persistent_dirs)
-        self._persistent_dirs.clear()
-        if count:
-            logger.info(f"Cleaned up {count} persistent dirs")
+        """Destroy the sandbox of every conversation."""
+        with self._sessions_lock:
+            session_ids = list(self._persistent_sessions.values())
+            self._persistent_sessions.clear()
+        manager = self._manager()
+        if manager is None:
+            return
+        for session_id in session_ids:
+            self._destroy(manager, session_id)
+        if session_ids:
+            logger.info(f"Cleaned up {len(session_ids)} persistent sandboxes")
 
     def list_persistent_files(self, conv_id: str) -> list[str]:
-        """List files in the persistent working directory for a conversation.
+        """List the regular files in the sandbox of a conversation.
 
         Returns:
             List of filenames (not full paths), or empty list.
         """
-        if conv_id not in self._persistent_dirs:
+        with self._sessions_lock:
+            session_id = self._persistent_sessions.get(conv_id)
+        manager = self._manager()
+        if session_id is None or manager is None:
             return []
-        d = self._persistent_dirs[conv_id]
-        if not os.path.isdir(d):
+        workspace = manager.get_workspace_path(session_id)
+        if not workspace:
             return []
+        return sorted(
+            name for name in self._regular_files(workspace)
+            if not name.startswith("script.")
+        )
+
+    @staticmethod
+    def _regular_files(directory: str) -> list[str]:
+        """Names of the regular files directly in ``directory``; a link is never followed."""
         try:
-            return [
-                f for f in os.listdir(d)
-                if not f.startswith("script.") and os.path.isfile(os.path.join(d, f))
-            ]
-        except Exception:
+            names = os.listdir(directory)
+        except OSError:
             return []
+        found = []
+        for name in names:
+            try:
+                mode = os.lstat(os.path.join(directory, name)).st_mode
+            except OSError:
+                continue
+            if stat.S_ISREG(mode):
+                found.append(name)
+        return found
 
     def get_available_languages(self) -> list[str]:
         """Return list of languages with available runtimes."""
@@ -274,151 +340,130 @@ class CodeExecutor:
         code: str,
         language: str = "python",
         timeout: int | None = None,
-        allow_network: bool = False,
         conv_id: str | None = None,
     ) -> ExecutionResult:
-        """Execute code in a subprocess and return the result.
+        """Execute code inside a sandbox session and return the result.
 
         Args:
             code: source code to execute
             language: one of python/r/bash (or alias)
-            timeout: max seconds (None = DEFAULT_TIMEOUT)
-            allow_network: if False, attempts to restrict network (best-effort)
-            conv_id: if provided and persistent_mode is on, reuse working dir
+            timeout: max seconds (None = DEFAULT_TIMEOUT, capped at MAX_TIMEOUT)
+            conv_id: if provided and persistent_mode is on, reuse its sandbox
 
         Returns:
-            ExecutionResult with stdout, stderr, timing, etc.
+            ExecutionResult with stdout, stderr, timing, etc.; ``ran`` is
+            False when the code never ran.
         """
         start_time = time.monotonic()
         language = self._normalize_language(language)
 
-        if not self._enabled:
-            return ExecutionResult(
-                success=False, stdout="", stderr="",
-                return_code=-1, execution_time=0.0,
-                language=language,
-                error_message="Code execution is disabled. Enable it in Settings.",
-            )
+        if not self.enabled:
+            return self._refusal(language, "Code execution is disabled. Enable it in Settings.")
 
         if language not in self.SUPPORTED_LANGUAGES:
-            return ExecutionResult(
-                success=False, stdout="", stderr="",
-                return_code=-1, execution_time=0.0,
-                language=language,
-                error_message=f"Unsupported language: {language}",
-            )
+            return self._refusal(language, f"Unsupported language: {language}")
 
         if language not in self._available:
-            return ExecutionResult(
-                success=False, stdout="", stderr="",
-                return_code=-1, execution_time=0.0,
-                language=language,
-                error_message=(
-                    f"Runtime not found for {language}. "
-                    f"Available: {', '.join(self._available.keys()) or 'none'}"
-                ),
+            return self._refusal(
+                language,
+                f"Runtime not found for {language}. "
+                f"Available: {', '.join(self._available.keys()) or 'none'}",
             )
+
+        manager = self._manager()
+        if manager is None:
+            return self._refusal(language, _NO_SANDBOX)
 
         if timeout is None:
             timeout = self.DEFAULT_TIMEOUT
         timeout = min(timeout, self.MAX_TIMEOUT)
 
-        # Decide whether to use a persistent or ephemeral directory
-        use_persistent = (
-            self._persistent_mode
-            and conv_id is not None
-            and len(conv_id) > 0
-        )
-
-        if use_persistent:
-            tmpdir = self.get_persistent_dir(conv_id)
-            cleanup = False
-        else:
-            tmpdir = tempfile.mkdtemp(prefix="opti_exec_")
-            cleanup = True
-
-        # Snapshot files before execution for output detection
-        files_before = set()
+        # The conversation's own sandbox, or one made for this run only
+        use_persistent = self._persistent_mode and bool(conv_id)
         try:
-            files_before = {
-                f for f in os.listdir(tmpdir)
-                if f not in _SCRIPT_FILES
-            }
-        except OSError:
-            pass
+            if use_persistent:
+                session_id = self._conversation_session(manager, conv_id)
+            else:
+                session_id = manager.create_sandbox(None, label="code execution").session_id
+        except Exception as e:
+            return self._refusal(language, f"The sandbox could not open a session for this run: {e}")
 
         try:
-            result = self._run_in_subprocess(
-                code, language, tmpdir, timeout, allow_network,
+            result = self._run_in_sandbox(
+                manager, session_id, code, language, timeout, copy_out=not use_persistent,
             )
-            result.execution_time = time.monotonic() - start_time
-            result.working_dir = tmpdir
-
-            # Detect new output files (images, data)
-            new_files = self._detect_output_files(tmpdir, files_before)
-
-            if new_files and cleanup:
-                # Ephemeral mode: copy images to stable output dir
-                output_dir = _get_output_dir()
-                stable_paths = []
-                for fpath in new_files:
-                    fname = os.path.basename(fpath)
-                    # Add timestamp prefix to avoid collisions
-                    stable_name = f"{int(time.time())}_{fname}"
-                    stable_path = os.path.join(output_dir, stable_name)
-                    try:
-                        shutil.copy2(fpath, stable_path)
-                        stable_paths.append(stable_path)
-                    except Exception as e:
-                        logger.debug(f"Could not copy output file: {e}")
-                result.output_files = stable_paths
-            elif new_files:
-                # Persistent mode: files stay in place
-                result.output_files = new_files
-
-            return result
         except Exception as e:
             logger.exception(f"Code execution failed: {e}")
-            return ExecutionResult(
-                success=False, stdout="", stderr=str(e),
-                return_code=-1,
-                execution_time=time.monotonic() - start_time,
-                language=language,
-                error_message=f"Internal error: {e}",
-            )
+            result = self._refusal(language, f"Internal error: {e}")
         finally:
-            if cleanup:
-                try:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                except Exception:
-                    pass
+            if not use_persistent:
+                self._destroy(manager, session_id)
+        result.execution_time = time.monotonic() - start_time
+        return result
+
+    @staticmethod
+    def _refusal(language: str, reason: str) -> ExecutionResult:
+        """The result of a run that never happened."""
+        return ExecutionResult(
+            success=False, stdout="", stderr="",
+            return_code=-1, execution_time=0.0,
+            language=language,
+            error_message=reason,
+            ran=False,
+        )
 
     def _detect_output_files(
-        self, tmpdir: str, files_before: set,
+        self, workspace: str, files_before: set,
     ) -> list[str]:
-        """Find new image/data files created during execution.
+        """Find new image files created during execution.
+
+        Only regular files count: a link is never followed out of the
+        workspace, whatever it points at.
 
         Args:
-            tmpdir: working directory
+            workspace: the sandbox workspace
             files_before: set of filenames present before execution
 
         Returns:
             List of absolute paths to new output files (images only).
         """
-        try:
-            files_after = set(os.listdir(tmpdir))
-        except OSError:
-            return []
-
-        new_names = files_after - files_before - _SCRIPT_FILES
+        new_names = set(self._regular_files(workspace)) - files_before - _SCRIPT_FILES
         output_paths = []
         for name in sorted(new_names):
             ext = os.path.splitext(name)[1].lower()
             if ext in _IMAGE_EXTENSIONS:
-                full_path = os.path.join(tmpdir, name)
-                if os.path.isfile(full_path):
-                    output_paths.append(full_path)
+                output_paths.append(os.path.join(workspace, name))
         return output_paths
+
+    @staticmethod
+    def _copy_out(paths: list[str]) -> list[str]:
+        """Copy images out of a sandbox that is about to go.
+
+        Each file is opened without following a link, and copied only while
+        it is a regular file with a single name; anything else stays behind.
+        """
+        output_dir = _get_output_dir()
+        stable_paths = []
+        for fpath in paths:
+            fname = os.path.basename(fpath)
+            # Add timestamp prefix to avoid collisions
+            stable_path = os.path.join(output_dir, f"{int(time.time())}_{fname}")
+            try:
+                fd = os.open(fpath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            except OSError as e:
+                logger.debug(f"Could not open output file: {e}")
+                continue
+            with os.fdopen(fd, "rb") as src:
+                try:
+                    st = os.fstat(src.fileno())
+                    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                        continue
+                    with open(stable_path, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    stable_paths.append(stable_path)
+                except OSError as e:
+                    logger.debug(f"Could not copy output file: {e}")
+        return stable_paths
 
     @staticmethod
     def _detect_table_output(stdout: str) -> str | None:
@@ -497,110 +542,74 @@ class CodeExecutor:
 
         return "\n".join(md_parts)
 
-    def _run_in_subprocess(
+    def _run_in_sandbox(
         self,
+        manager,
+        session_id: str,
         code: str,
         language: str,
-        tmpdir: str,
         timeout: int,
-        allow_network: bool,
+        copy_out: bool,
     ) -> ExecutionResult:
-        """Actually run the code via subprocess."""
-        cmd, script_path = self._prepare_command(code, language, tmpdir)
+        """Write the script into the session's workspace and run it there."""
+        workspace = manager.get_workspace_path(session_id) or ""
+        files_before = set(os.listdir(workspace)) if os.path.isdir(workspace) else set()
 
-        env = os.environ.copy()
-        # Restrict some environment variables for safety
-        env["HOME"] = tmpdir
-        env["TMPDIR"] = tmpdir
-        # Keep PATH so runtimes can find their dependencies
-        # Keep LANG/LC_ALL for proper encoding
+        script, command = self._command(language)
+        error = _write_script(manager, session_id, script, code)
+        if error:
+            return self._refusal(language, error)
 
-        # Build ulimit prefix for memory limit (Linux only)
-        preexec = None
-        if os.name == "posix":
-            mem_bytes = self.MAX_MEMORY_MB * 1024 * 1024
-            def _set_limits():
-                try:
-                    import resource
-                    resource.setrlimit(
-                        resource.RLIMIT_AS,
-                        (mem_bytes, mem_bytes),
-                    )
-                except Exception:
-                    pass  # best-effort
-            preexec = _set_limits
+        outcome = manager.execute_command(session_id, command, timeout=timeout)
+        if outcome.blocked:
+            return self._refusal(language, outcome.block_reason or "The sandbox refused the command.")
 
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=tmpdir,
-                env=env,
-                preexec_fn=preexec,
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
+        if outcome.timed_out:
+            result = ExecutionResult(
                 success=False,
-                stdout="",
+                stdout=outcome.stdout,
                 stderr=f"Execution timed out after {timeout}s",
                 return_code=-1,
                 execution_time=float(timeout),
                 language=language,
+                truncated=outcome.truncated_stdout,
                 error_message=f"Timeout: code exceeded {timeout}s limit",
             )
+        else:
+            result = ExecutionResult(
+                success=(outcome.return_code == 0),
+                stdout=outcome.stdout,
+                stderr=outcome.stderr,
+                return_code=outcome.return_code,
+                execution_time=0.0,  # filled by caller
+                language=language,
+                truncated=outcome.truncated_stdout or outcome.truncated_stderr,
+            )
+        result.working_dir = workspace
 
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        truncated = False
+        # Detect new output files (images)
+        new_files = self._detect_output_files(workspace, files_before)
+        if new_files and copy_out:
+            # The sandbox goes with this run: copy images to the stable output dir
+            result.output_files = self._copy_out(new_files)
+        elif new_files:
+            # Persistent mode: files stay in the conversation's sandbox
+            result.output_files = new_files
+        return result
 
-        if len(stdout) > self.MAX_OUTPUT_SIZE:
-            stdout = stdout[: self.MAX_OUTPUT_SIZE] + f"\n\n... [truncated at {self.MAX_OUTPUT_SIZE} chars]"
-            truncated = True
+    def _command(self, language: str) -> tuple[str, str]:
+        """The script name and the command that runs it in the workspace.
 
-        if len(stderr) > self.MAX_OUTPUT_SIZE:
-            stderr = stderr[: self.MAX_OUTPUT_SIZE] + f"\n\n... [truncated at {self.MAX_OUTPUT_SIZE} chars]"
-            truncated = True
-
-        return ExecutionResult(
-            success=(proc.returncode == 0),
-            stdout=stdout,
-            stderr=stderr,
-            return_code=proc.returncode,
-            execution_time=0.0,  # filled by caller
-            language=language,
-            truncated=truncated,
-        )
-
-    def _prepare_command(
-        self, code: str, language: str, tmpdir: str,
-    ) -> tuple[list[str], str]:
-        """Write code to a temp file and build the command to run it.
-
-        Returns:
-            (command_list, script_path)
+        Python and Bash take the script as their first argument: the command
+        validator reads a script it was told about only when the command
+        names it right after the interpreter.
         """
         if language == "python":
-            script = os.path.join(tmpdir, "script.py")
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(code)
-            cmd_name = self._available["python"]
-            return [cmd_name, "-u", script], script
-
+            return "script.py", f"{self._available['python']} script.py"
         elif language == "r":
-            script = os.path.join(tmpdir, "script.R")
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(code)
-            return [self._available["r"], "--vanilla", script], script
-
+            return "script.R", "Rscript --vanilla script.R"
         elif language == "bash":
-            script = os.path.join(tmpdir, "script.sh")
-            with open(script, "w", encoding="utf-8") as f:
-                f.write(code)
-            os.chmod(script, 0o700)
-            return [self._available["bash"], "-e", script], script
-
+            return "script.sh", "bash script.sh"
         else:
             raise ValueError(f"No command builder for language: {language}")
 
