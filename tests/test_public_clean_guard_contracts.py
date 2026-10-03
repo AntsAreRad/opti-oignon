@@ -33,6 +33,17 @@ independently of git:
   * G13 -- the tree-wide pass charges a tracked file at the root, outside
     the diff's scan trees, for its name or for its content; a clean tree
     passes.
+  * G14 -- outside the scan trees every tracked line is read, not the added
+    ones alone: a code on a standing line of a file at the root, under the
+    documentation, under the CI tree or under any other directory is
+    charged.
+  * G15 -- there the whole rule applies: a document reference and a process
+    word are charged as well as a code.
+  * G16 -- scope control: a standing line under a scan tree is NOT charged
+    by the tree-wide pass; the standing debt there is left to the diff pass
+    until it is paid.
+  * G17 -- a tree git cannot read fails the guard: nothing read is never a
+    pass.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -300,7 +311,9 @@ def _tree_rc(guard, files):
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q", tmp], check=True)
         for rel, text in files.items():
-            (Path(tmp) / rel).write_text(text)
+            target = Path(tmp) / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
         subprocess.run(["git", "-C", tmp, "add", "-A"], check=True)
         os.chdir(tmp)
         try:
@@ -319,6 +332,77 @@ def test_g13_tree_wide_pass_charges_a_root_level_file():
         mentioned = dict(clean, **{".gitignore": "." + _TOOL.lower() + "/\n"})
         assert _tree_rc(guard, mentioned) == 1, "a root-level mention is charged"
     finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G14 -- outside the scan trees, a code on a standing line is charged
+# ---------------------------------------------------------------------------
+def test_g14_tree_wide_pass_reads_every_line_outside_the_scan_trees():
+    guard, restore = _load()
+    try:
+        clean = {"README.md": "a clean tree\n"}
+        text = "a first line\nsee " + _S + _DIGITS + " for the history\n"
+        for rel in ("CHANGELOG.md", "docs/notes.md", ".github/workflows/ci.yml",
+                    "assets/credits.txt"):
+            planted = dict(clean, **{rel: text})
+            assert _tree_rc(guard, planted) == 1, f"a code in {rel} is charged"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G15 -- outside the scan trees, the whole rule applies, not the code alone
+# ---------------------------------------------------------------------------
+def test_g15_tree_wide_pass_applies_the_whole_rule_outside_the_scan_trees():
+    guard, restore = _load()
+    try:
+        clean = {"README.md": "a clean tree\n"}
+        reference = "PROMP" + "T" + _UNDERSCORE + "TRACK" + "ING.md\n"
+        word = "a " + "back" + "fill" + " of the rows\n"
+        for text in (reference, word):
+            planted = dict(clean, **{"CONTRIBUTING.md": text})
+            assert _tree_rc(guard, planted) == 1, f"charged at the root: {text!r}"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G16 -- the scan trees' standing lines are left to the diff pass
+# ---------------------------------------------------------------------------
+def test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass():
+    guard, restore = _load()
+    try:
+        text = "# see " + _S + _DIGITS + "\n"
+        for tree in guard._SCAN_PATHS:
+            standing = {"README.md": "a clean tree\n", tree + "a.txt": text}
+            assert _tree_rc(guard, standing) == 0, (
+                f"a standing line under {tree} is the diff pass's business"
+            )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# G17 -- a tree git cannot read fails the guard instead of passing it
+# ---------------------------------------------------------------------------
+def test_g17_a_tree_git_cannot_read_fails_the_guard():
+    guard, restore = _load()
+    here, saved = os.getcwd(), os.environ.get("GIT_DIR")
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["GIT_DIR"] = os.path.join(tmp, "absent")
+            os.chdir(tmp)
+            try:
+                rc = guard.main(["HEAD"])
+            finally:
+                os.chdir(here)
+        assert rc == 1, "nothing read must fail the guard, never pass it"
+    finally:
+        if saved is None:
+            os.environ.pop("GIT_DIR", None)
+        else:
+            os.environ["GIT_DIR"] = saved
         restore()
 
 
@@ -348,6 +432,14 @@ def _run_all():
          test_g12_tool_name_on_a_content_line_is_flagged),
         ("G13 tree-wide pass charges a root-level file",
          test_g13_tree_wide_pass_charges_a_root_level_file),
+        ("G14 every line read outside the scan trees",
+         test_g14_tree_wide_pass_reads_every_line_outside_the_scan_trees),
+        ("G15 whole rule applies outside the scan trees",
+         test_g15_tree_wide_pass_applies_the_whole_rule_outside_the_scan_trees),
+        ("G16 scan trees left to the diff pass",
+         test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass),
+        ("G17 unreadable tree fails the guard",
+         test_g17_a_tree_git_cannot_read_fails_the_guard),
     ]
     passed = 0
     for label, fn in tests:

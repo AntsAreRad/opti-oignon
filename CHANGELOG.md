@@ -1133,6 +1133,13 @@ package costs.
 
 ### Changed
 
+- The public-clean guard holds every line outside its scan trees to its
+  whole rule, standing lines as well as added ones: at the root, under
+  `docs/`, under `.github/` or in any other directory, a session code, an
+  internal document reference or a process word fails it, since the debt
+  there is zero. Inside the scan trees the standing debt is still left to
+  the diff pass until it is paid. A tree git cannot read now fails the
+  guard instead of passing it on nothing read.
 - Comments, docstrings and ignore rules no longer name internal planning
   documents or work-block codes: 70 lines in 52 files. Two of them were
   published, an endpoint description and a schema description, and the

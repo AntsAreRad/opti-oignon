@@ -19,22 +19,27 @@ A short list of public product terms is exempt and can never account for a
 violation; so are the rule codes of a lint pragma, which name rules of the
 linter rather than anything internal.
 
-Diff-only by design: it guards against NEW nomenclature on added lines
-without failing on pre-existing debt, so it can be adopted before that debt
-is paid down.
+Diff-only by design over those trees: it guards against NEW nomenclature on
+added lines without failing on pre-existing debt, so it can be adopted
+before that debt is paid down.
 
 A second pass reads the whole tracked tree, root and hidden files included,
 where that debt is already zero: no tracked file may carry a session code or
 the name of the tool used to write the tree in its path, and no tracked line
 may name that tool. A name ships as surely as a line does, and a file at the
-root sits outside every scan tree of the diff pass.
+root sits outside every scan tree of the diff pass. Outside the scan trees
+-- the root, the documentation, the CI tree, any other directory -- the
+debt is zero under the whole rule as well, so every line of every tracked
+text file there is held to it, standing lines included; inside them the
+standing debt is left to the diff pass until it is paid. A tree git cannot
+read fails the guard: nothing read is never a pass.
 
 The forbidden patterns are assembled from fragments at import
 time, so this published script carries no clear instance of the
 nomenclature it rejects and does not trip on a scan of itself.
 
 The pure helper ``find_violations`` is import-safe and unit-tested;
-``main`` performs the git diff scan and exits non-zero on any violation.
+``main`` runs both passes and exits non-zero on any violation.
 Usage: ``public_clean_guard.py [BASE_REF]`` (default base ref: origin/main).
 """
 
@@ -87,7 +92,8 @@ _PROCESS_WORDS = tuple(
     )
 )
 
-# Trees the guard scans. Nothing outside these is considered.
+# Trees the diff pass scans. Outside these, the tree-wide pass reads every
+# line instead.
 #
 # Every tree that ships is here, not the Python ones alone. The detector is a
 # regex over added lines and knows nothing about syntax, so a tree of
@@ -164,6 +170,16 @@ def find_tool_mentions(lines):
     ]
 
 
+def _grep_pairs(stdout):
+    """Split the output of ``git grep -z`` into ``[(path, line), ...]``."""
+    pairs = []
+    for line in stdout.decode("utf-8", "replace").split("\n"):
+        path, sep, text = line.partition("\0")
+        if sep:
+            pairs.append((path, text))
+    return pairs
+
+
 def _tracked_tree():
     """Return ``(paths, [(path, line), ...])`` for the whole tracked tree.
 
@@ -178,12 +194,26 @@ def _tracked_tree():
         ["git", "grep", "-I", "-i", "-z", "--no-color", "-e", "cla" + "ude"],
         capture_output=True, check=False,
     )
-    pairs = []
-    for line in grep.stdout.decode("utf-8", "replace").split("\n"):
-        path, sep, text = line.partition("\0")
-        if sep:
-            pairs.append((path, text))
-    return paths, pairs
+    return paths, _grep_pairs(grep.stdout)
+
+
+def _lines_outside_scan_trees():
+    """Return ``[(path, line), ...]`` for every tracked line outside the scan trees.
+
+    Every line of every tracked text file, binary files skipped by content.
+    Returns ``None`` when git cannot read the tree, so that a failed read
+    fails the guard instead of passing it on nothing read.
+    """
+    excluded = [":(exclude)" + path for path in _SCAN_PATHS]
+    # Fixed argv, no shell: safe. The empty pattern matches every line.
+    grep = subprocess.run(
+        ["git", "grep", "-I", "-z", "--no-color", "-e", "", "--", ".", *excluded],
+        capture_output=True, check=False,
+    )
+    # git grep exits 1 when it read no line at all; anything else is an error.
+    if grep.returncode not in (0, 1):
+        return None
+    return _grep_pairs(grep.stdout)
 
 
 def _added_lines_with_paths(base_ref):
@@ -228,7 +258,7 @@ def _added_lines_with_paths(base_ref):
 
 
 def main(argv=None):
-    """Scan the diff's added lines and exit non-zero on any violation."""
+    """Run the diff pass and the tree-wide pass; exit non-zero on any violation."""
     argv = list(sys.argv[1:] if argv is None else argv)
     base_ref = argv[0] if argv else _DEFAULT_BASE_REF
 
@@ -240,11 +270,17 @@ def main(argv=None):
     names = find_name_violations(paths)
     mentions = find_tool_mentions([text for _path, text in tree_lines])
 
-    if not violations and not names and not mentions:
+    outside = _lines_outside_scan_trees()
+    if outside is None:
+        print("public-clean guard: FAILED -- git could not read the tracked tree")
+        return 1
+    standing = find_violations([text for _path, text in outside])
+
+    if not violations and not standing and not names and not mentions:
         print(
             "public-clean guard: no session nomenclature in added lines "
-            f"(base {base_ref}), none in {len(paths)} tracked names, "
-            "no tool mention"
+            f"(base {base_ref}) nor in {len(outside)} lines outside the scan "
+            f"trees, none in {len(paths)} tracked names, no tool mention"
         )
         return 0
 
@@ -252,6 +288,8 @@ def main(argv=None):
     for index, kind, snippet in violations:
         path = pairs[index][0] or "?"
         print(f"  {path} [{kind}]: {snippet}")
+    for index, kind, snippet in standing:
+        print(f"  {outside[index][0]} [{kind}]: {snippet}")
     for path, kind in names:
         print(f"  {path} [{kind}]")
     for index, snippet in mentions:
