@@ -58,9 +58,10 @@ jobs:
         run: ruff check opti_oignon/ --output-format=github
 
   # -------------------------------------------------------------------
-  # Public-clean -- reject internal session nomenclature on ADDED lines
-  # of a diff over the public source and test trees (diff-only, so it
-  # guards against regressions without failing on pre-existing debt).
+  # Public-clean -- reject internal session nomenclature. Over the public
+  # source and test trees it reads the ADDED lines of a diff, so the debt
+  # standing there does not fail the job; every tracked name, and every
+  # line outside those trees, is read in full, where that debt is zero.
   # -------------------------------------------------------------------
   public-clean:
     name: Public-clean Guard
@@ -90,7 +91,7 @@ jobs:
             echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run public-clean guard (added lines only)
+      - name: Run public-clean guard (added lines in the source trees, every line elsewhere)
         run: python .github/scripts/public_clean_guard.py "${{ steps.base.outputs.ref }}"
 
       - name: Run public-language guard (added lines, plus the standing debt)
@@ -114,9 +115,16 @@ jobs:
         run: python scripts/native_bridge_concordance.py
 
       # A gate protects only the calls that ask it. This census reads the
-      # package's source, installs nothing and takes no base: every network
-      # sink must be behind a gate, exempt by name, or counted in the
-      # guard's own ledger, which may only shrink.
+      # package's source without installing it and takes no base: every
+      # network sink must be behind a gate, exempt by name, or counted in
+      # the guard's own ledger, which may only shrink. A bundled plugin's
+      # sinks pass only on the network permission its manifest grants, and
+      # the census parses that manifest with the YAML parser the host's
+      # plugin loader uses. The bare interpreter has none: without this
+      # step, every such plugin reads as unpermitted.
+      - name: Install the manifest parser
+        run: pip install pyyaml==6.0.3
+
       - name: Run egress census guard (every network sink gated, owed or exempt)
         run: python .github/scripts/egress_census_guard.py
 
