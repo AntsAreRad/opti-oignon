@@ -2447,6 +2447,16 @@ package costs.
   refuses, says that nothing was read, written or run, and names the
   remedy. With the quick sandbox on, the shipped default, a turn is
   unchanged. Five contracts.
+- A plugin whose subprocess fails is no longer run inside the server. The
+  loader's default mode tried the plugin's own subprocess and, on any
+  failure there, the plugin failing its own start handshake included,
+  loaded the same code into the server process, where the import rules
+  are no boundary against a hostile plugin. A failed start now raises a
+  load error that names the cause and leaves the plugin unloaded. The
+  subprocess is the default mode, an unknown mode is refused when the
+  loader is built instead of falling through to that fallback, and Bulbe
+  refuses an explicit in-process loader, which it let through before.
+  Three contracts.
 
 ## 2.2.0 -- 2026-07-28
 

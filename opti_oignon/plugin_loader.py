@@ -87,7 +87,7 @@ _NETWORK_MODULES = frozenset({
 # importlib's own entries once they are. Every rule acts only while a plugin
 # frame is on the stack, so a platform thread that serves the garden while a
 # plugin loads is never refused, and nothing is hidden from ``sys.modules``.
-# This is a rule of the load, in the in-process fallback: hooks run after it
+# This is a rule of the load, in in-process mode: hooks run after it
 # with no import restriction, and it is no boundary against a hostile plugin
 # (a loader of the plugin's own can execute a file by its path).
 _BLOCKED_PACKAGES = ("opti_oignon.allium", "opti_oignon.api.routes_allium", "opti_oignon.cli.garden")
@@ -845,6 +845,16 @@ def _make_rpc_hook_proxy(
     return _rpc_proxy
 
 
+def _bulbe_active() -> bool:
+    """Whether Bulbe is on. Fail-closed: a mode that cannot be read counts
+    as Bulbe, so in-process loading is refused when in doubt."""
+    try:
+        from opti_oignon.security_mode import is_bulbe
+        return bool(is_bulbe())
+    except Exception:
+        return True
+
+
 class PluginLoader:
     """Load and manage plugin lifecycles with sandboxed execution.
 
@@ -856,22 +866,31 @@ class PluginLoader:
         Base directory where plugin directories are stored.
     subprocess_mode : str
         Plugin execution mode:
-        - ``"auto"`` -- try subprocess, fall back to in-process (default)
-        - ``"subprocess"`` -- force subprocess only (no fallback)
-        - ``"inprocess"`` -- force in-process only (legacy behavior)
+        - ``"subprocess"`` -- the plugin runs in its own process (default);
+          a load that fails there leaves the plugin unloaded
+        - ``"inprocess"`` -- the plugin runs inside the server: an explicit
+          choice only, never a fallback, and refused under Bulbe
+        Any other value is refused when the loader is built.
     subprocess_manager : PluginSubprocessManager or None
         External subprocess manager instance.  If None and subprocess_mode
         is not ``"inprocess"``, a default manager will be created lazily.
     """
+
+    EXECUTION_MODES = ("subprocess", "inprocess")
 
     def __init__(
         self,
         registry: Any = None,
         plugins_base_dir: Path | str | None = None,
         *,
-        subprocess_mode: str = "auto",
+        subprocess_mode: str = "subprocess",
         subprocess_manager: Any = None,
     ) -> None:
+        if subprocess_mode not in self.EXECUTION_MODES:
+            raise ValueError(
+                f"Unknown plugin execution mode {subprocess_mode!r}: "
+                f"expected one of {', '.join(self.EXECUTION_MODES)}"
+            )
         self._registry = registry
         self._base_dir = Path(plugins_base_dir) if plugins_base_dir else None
         self._loaded: dict[str, LoadedPlugin] = {}
@@ -891,10 +910,10 @@ class PluginLoader:
     ) -> LoadedPlugin:
         """Load a plugin from a directory containing manifest.yaml + entry point.
 
-        Depending on ``subprocess_mode``, this will attempt to run the
-        plugin in an isolated subprocess.  If subprocess loading fails
-        and mode is ``"auto"``, falls back to in-process loading with
-        a warning.
+        The plugin runs in its own subprocess. A load that fails there
+        raises PluginLoadError naming the cause and leaves the plugin
+        unloaded: nothing re-executes it inside the server. The explicit
+        ``inprocess`` mode is refused under Bulbe.
 
         Parameters
         ----------
@@ -902,7 +921,7 @@ class PluginLoader:
             Directory containing the plugin files.
         sandbox : bool
             Whether to apply import and filesystem restrictions
-            (only relevant for in-process fallback).
+            (only relevant in ``inprocess`` mode).
 
         Returns
         -------
@@ -913,36 +932,14 @@ class PluginLoader:
         PluginLoadError
             If the plugin cannot be loaded.
         """
-        mode = self._subprocess_mode
-
-        # In Bulbe mode, force subprocess-only unless explicitly inprocess
-        if mode == "auto":
-            try:
-                from opti_oignon.security_mode import is_bulbe
-                if is_bulbe():
-                    mode = "subprocess"
-                    logger.info(
-                        "Bulbe mode active: forcing subprocess isolation"
-                    )
-            except ImportError:
-                pass
-
-        if mode == "subprocess":
-            return self._load_plugin_subprocess(plugin_dir)
-
-        if mode == "inprocess":
+        if self._subprocess_mode == "inprocess":
+            if _bulbe_active():
+                raise PluginLoadError(
+                    "Bulbe mode: plugins run only in their own subprocess; "
+                    "in-process loading is refused"
+                )
             return self._load_plugin_inprocess(plugin_dir, sandbox=sandbox)
-
-        # mode == "auto": try subprocess, fall back to inprocess
-        try:
-            return self._load_plugin_subprocess(plugin_dir)
-        except Exception as exc:
-            logger.warning(
-                "Subprocess loading failed for '%s', falling back to "
-                "in-process: %s",
-                plugin_dir, exc,
-            )
-            return self._load_plugin_inprocess(plugin_dir, sandbox=sandbox)
+        return self._load_plugin_subprocess(plugin_dir)
 
     def _get_subprocess_manager(self) -> Any:
         """Lazily obtain a PluginSubprocessManager instance."""
