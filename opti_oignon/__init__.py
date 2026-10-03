@@ -31,7 +31,7 @@ same: the names in ``__all__``, the availability flags, ``main()``.
 
 Author: Léon
 Version: see __version__.py
-License: MIT
+License: AGPL-3.0-only
 """
 
 import importlib
@@ -42,7 +42,7 @@ from pathlib import Path as _Path
 from .__version__ import __version__
 
 __author__ = "Léon"
-__license__ = "MIT"
+__license__ = "AGPL-3.0-only"
 
 # Exported name -> (module, attribute it is imported from). Read by
 # __getattr__ below on first access; nothing here imports anything.

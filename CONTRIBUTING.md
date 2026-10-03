@@ -117,4 +117,5 @@ it is a private working convention.
 ## License
 
 By contributing, you agree that your contributions will be licensed under
-the MIT License (see [LICENSE](LICENSE)).
+the GNU Affero General Public License, version 3 only (AGPL-3.0-only; see
+[LICENSE](LICENSE)).

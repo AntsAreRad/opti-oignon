@@ -119,5 +119,32 @@ def test_lf3_the_static_census_sees_a_facade_that_pulls_only_the_version():
         assert len(report["modules"][name]["closure_eager"]) < 232, f"{name} no longer inherits the whole tree through the facade"
 
 
+# ---------------------------------------------------------------------------
+# LF4 -- LF2 under the licence the project now carries
+# ---------------------------------------------------------------------------
+def test_lf4_every_export_resolves_when_asked_and_only_then_under_the_agpl():
+    import opti_oignon as oo
+
+    assert list(oo.__all__) == _EXPORTS, "the same seventy-one names, in the same order"
+    assert len(oo.__all__) == 71
+    for name in oo.__all__:
+        assert name in dir(oo), f"{name} is listed by dir()"
+    with pytest.raises(AttributeError):
+        oo.this_name_was_never_exported
+    for key in ("opti_oignon.api.app", "opti_oignon.performance_benchmark"):
+        sys.modules.pop(key, None)
+    import importlib
+    router_module = importlib.import_module("opti_oignon.router")
+    assert oo.RoutingResult is router_module.RoutingResult
+    backend_module = importlib.import_module("opti_oignon.inference_backend")
+    assert oo.get_backend_registry is backend_module.get_backend_registry
+    assert oo.INFERENCE_BACKEND_AVAILABLE is True and oo.MEMORY_AVAILABLE is True
+    assert oo.config is sys.modules["opti_oignon.config"].config
+    assert "opti_oignon.api.app" not in sys.modules, "asking for the router did not import the API application"
+    assert "opti_oignon.performance_benchmark" not in sys.modules, "nor the benchmark runner"
+    assert oo.__author__ and oo.__license__ == "AGPL-3.0-only"
+    assert callable(oo.main)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

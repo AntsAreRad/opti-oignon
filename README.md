@@ -184,7 +184,18 @@ The near-term focus is finishing the Veilid sync layer so device-to-device sync 
 
 ## License
 
-MIT License -- see [LICENSE](LICENSE).
+Copyright (C) 2026 Leon Brouille
+
+Opti-Oignon is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, version 3 of the License only
+(AGPL-3.0-only). It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full
+text.
+
+What was published before this licence, releases 2.1.0 and earlier
+included, was published under the MIT License, which still applies to it.
 
 ## Acknowledgments
 

@@ -3,7 +3,7 @@ name = "oo_core"
 version = "0.9.0"
 edition = "2021"
 description = "Integrity primitives and window assembly of the onion memory, behind the Python surface"
-license = "MIT"
+license = "AGPL-3.0-only"
 publish = false
 
 [lib]

@@ -1133,6 +1133,12 @@ package costs.
 
 ### Changed
 
+- Opti-Oignon is licensed under the GNU Affero General Public License,
+  version 3 only (AGPL-3.0-only), from this change on. What was published
+  before it, releases 2.1.0 and earlier included, stays under the MIT
+  License. The licence text, the README notice, the contribution terms, the
+  package metadata (`pyproject.toml` and both crates) and the package's own
+  `__license__` change together.
 - The public-clean guard holds markdown names in capitals to a closed list
   of the public document names the tree writes: the documents it carries,
   the release notes it generates, the skill format's file and two fixture

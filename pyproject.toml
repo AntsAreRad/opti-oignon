@@ -7,7 +7,7 @@ name = "opti-oignon"
 version = "2.2.0"
 description = "Local-first AI inference platform with defense-in-depth security"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 requires-python = ">=3.10"
 authors = [
     { name = "Leon" },
@@ -622,6 +622,13 @@ fail_under = 0
 # over the row's grounds, and adds that no ground is named for a mount behind
 # the failed step's plant. ld9's straw half stays selected.
 #
+# lf2 of the facade suite held, among the facade's other properties, that
+# the package declares the MIT License. The project is now licensed under
+# the GNU Affero General Public License, version 3 only, so that spelling
+# is false while every other property holds. It stays in the tree word for
+# word; lf4 in the same file keeps each of its assertions word for word and
+# reads the licence the package now declares.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -717,4 +724,5 @@ addopts = """
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[tokens]
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[marks]
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[row]
+    --deselect=tests/test_facade_lazy_contracts.py::test_lf2_every_export_resolves_when_asked_and_only_then
 """
