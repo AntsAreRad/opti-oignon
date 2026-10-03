@@ -1133,6 +1133,9 @@ package costs.
 
 ### Changed
 
+- Four test suites load their modules through the shared isolation window
+  instead of windows of their own, with every test and assertion as it
+  was; the isolation seal owes for 87 suites, down from 91.
 - Comments, docstrings, a tooltip and five published API descriptions no
   longer number the work in French "blocks": 155 lines in 34 files. A French
   comment in the chat view is now English. The public-clean guard charges

@@ -33,12 +33,13 @@ fake engines are injected, so each pipeline reaches its persistence path.
 sys.modules entries are saved and restored around every load.
 """
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
-_AE_PATH = Path(__file__).resolve().parent.parent / "opti_oignon" / "agentic_executor.py"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 CONV = "conv-regression"
 
@@ -126,30 +127,14 @@ class FakeToolExec:
 # Isolated module loading (with save/restore of sys.modules)
 # ---------------------------------------------------------------------------
 def _install_stubs(fake_cm):
-    keys = ("opti_oignon", "opti_oignon.conversation", "opti_oignon.agentic_executor")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []  # guarded relative imports -> AVAILABLE=False
-    sys.modules["opti_oignon"] = pkg
-
     conv = types.ModuleType("opti_oignon.conversation")
     conv.conversation_manager = fake_cm
-    sys.modules["opti_oignon.conversation"] = conv
 
-    spec = importlib.util.spec_from_file_location("opti_oignon.agentic_executor", _AE_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.agentic_executor"] = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-    return mod, restore
+    loaded, restore = isolate(
+        targets={"opti_oignon.agentic_executor": source("agentic_executor.py")},
+        seeded={"opti_oignon.conversation": conv},
+    )
+    return loaded["opti_oignon.agentic_executor"], restore
 
 
 def _routing():

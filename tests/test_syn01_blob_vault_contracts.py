@@ -24,7 +24,6 @@ Local-only. Runs under pytest or the __main__ runner.
 """
 
 import base64
-import importlib.util
 import os
 import sqlite3
 import sys
@@ -32,8 +31,10 @@ import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
+
 _KEY = bytes(range(32))
 _KEY_A = bytes(range(32))
 
@@ -50,17 +51,6 @@ def _raises(fn) -> bool:
 # blob_store loader (stub encryption backed by real AES-256-GCM)               #
 # --------------------------------------------------------------------------- #
 def _load_blob_store():
-    keys = ("opti_oignon", "opti_oignon.notes", "opti_oignon.encryption",
-            "opti_oignon.notes.blob_store")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    npkg = types.ModuleType("opti_oignon.notes")
-    npkg.__path__ = []
-    sys.modules["opti_oignon.notes"] = npkg
-
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     enc = types.ModuleType("opti_oignon.encryption")
     enc.encrypt_bytes = lambda key, pt: bytes([1]) + (
@@ -70,70 +60,43 @@ def _load_blob_store():
         blob[1:13], blob[13:], None
     )
     enc.get_encryption_key = lambda: None
-    sys.modules["opti_oignon.encryption"] = enc
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.notes.blob_store", _OO / "notes" / "blob_store.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.notes.blob_store"] = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-    return mod, restore
+    loaded, restore = isolate(
+        targets={"opti_oignon.notes.blob_store": source("notes", "blob_store.py")},
+        seeded={"opti_oignon.encryption": enc},
+        packages=("opti_oignon.notes",),
+    )
+    return loaded["opti_oignon.notes.blob_store"], restore
 
 
 def _load_transfer():
-    spec = importlib.util.spec_from_file_location(
-        "blob_transfer_under_test_v", _OO / "veilid" / "blob_transfer.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    loaded, restore = isolate(
+        targets={"opti_oignon.veilid.blob_transfer": source("veilid", "blob_transfer.py")},
+    )
+    restore()
+    return loaded["opti_oignon.veilid.blob_transfer"]
 
 
 # --------------------------------------------------------------------------- #
 # notes_store loader (stub db_utils / user_isolation; sqlite on a temp file)   #
 # --------------------------------------------------------------------------- #
 def _load_notes_store():
-    keys = ("opti_oignon", "opti_oignon.notes", "opti_oignon.db_utils",
-            "opti_oignon.user_isolation", "opti_oignon.notes.notes_store")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    notes_pkg = types.ModuleType("opti_oignon.notes")
-    notes_pkg.__path__ = []
-    sys.modules["opti_oignon.notes"] = notes_pkg
-
     db = types.ModuleType("opti_oignon.db_utils")
     db.safe_connect = lambda path, **kw: sqlite3.connect(
         path, check_same_thread=kw.get("check_same_thread", False))
-    sys.modules["opti_oignon.db_utils"] = db
 
     ui = types.ModuleType("opti_oignon.user_isolation")
     ui.DEFAULT_LOCAL_USER = "local"
     ui.effective_user_id = lambda user_id, single_user_mode=True: (
         "local" if (single_user_mode or user_id is None) else user_id)
-    sys.modules["opti_oignon.user_isolation"] = ui
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.notes.notes_store", _OO / "notes" / "notes_store.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.notes.notes_store"] = mod
-    spec.loader.exec_module(mod)
+    loaded, restore = isolate(
+        targets={"opti_oignon.notes.notes_store": source("notes", "notes_store.py")},
+        seeded={"opti_oignon.db_utils": db, "opti_oignon.user_isolation": ui},
+        packages=("opti_oignon.notes",),
+    )
+    mod = loaded["opti_oignon.notes.notes_store"]
     mod._sync_publish_note = lambda *a, **k: None
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
     return mod, restore
 
 

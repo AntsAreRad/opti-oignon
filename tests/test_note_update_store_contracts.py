@@ -25,54 +25,34 @@ section-5 / section-4 posture of NOTES_CRDT_SPEC. The engine sink
 Local-only. Runs under pytest or the __main__ runner.
 """
 
-import importlib.util
 import sqlite3
 import sys
 import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 def _load_store():
-    keys = ("opti_oignon", "opti_oignon.notes", "opti_oignon.db_utils",
-            "opti_oignon.user_isolation", "opti_oignon.notes.note_updates_store")
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-    notes_pkg = types.ModuleType("opti_oignon.notes")
-    notes_pkg.__path__ = []
-    sys.modules["opti_oignon.notes"] = notes_pkg
-
     db = types.ModuleType("opti_oignon.db_utils")
     db.safe_connect = lambda path, **kw: sqlite3.connect(
         path, check_same_thread=kw.get("check_same_thread", False))
-    sys.modules["opti_oignon.db_utils"] = db
 
     ui = types.ModuleType("opti_oignon.user_isolation")
     ui.DEFAULT_LOCAL_USER = "local"
     ui.effective_user_id = lambda user_id, single_user_mode=True: (
         "local" if (single_user_mode or user_id is None) else user_id)
-    sys.modules["opti_oignon.user_isolation"] = ui
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.notes.note_updates_store",
-        _OO / "notes" / "note_updates_store.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.notes.note_updates_store"] = mod
-    spec.loader.exec_module(mod)
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-    return mod, restore
+    loaded, restore = isolate(
+        targets={"opti_oignon.notes.note_updates_store":
+                 source("notes", "note_updates_store.py")},
+        seeded={"opti_oignon.db_utils": db, "opti_oignon.user_isolation": ui},
+        packages=("opti_oignon.notes",),
+    )
+    return loaded["opti_oignon.notes.note_updates_store"], restore
 
 
 def _live_store(mod, td):

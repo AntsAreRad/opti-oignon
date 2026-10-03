@@ -21,15 +21,15 @@ maintainer's engine harness, not here. Local-only. Runs under pytest or the
 __main__ runner.
 """
 
-import importlib.util
 import sqlite3
 import sys
 import tempfile
 import types
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_OO = _REPO / "opti_oignon"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _isolation import isolate, source  # noqa: E402
 
 
 def _load(tmpdir: str):
@@ -39,46 +39,26 @@ def _load(tmpdir: str):
     ``_encrypt``/``_decrypt`` module globals are swapped for a reversible marker
     AFTER load, so the at-rest encryption path is observable.
     """
-    keys = (
-        "opti_oignon", "opti_oignon.db_utils", "opti_oignon.config",
-        "opti_oignon.conversation",
-    )
-    saved = {k: sys.modules.get(k) for k in keys}
-
-    pkg = types.ModuleType("opti_oignon")
-    pkg.__path__ = []
-    sys.modules["opti_oignon"] = pkg
-
     db = types.ModuleType("opti_oignon.db_utils")
 
     def _safe_connect(path, **kw):
         return sqlite3.connect(path, check_same_thread=kw.get("check_same_thread", False))
 
     db.safe_connect = _safe_connect
-    sys.modules["opti_oignon.db_utils"] = db
 
     cfg = types.ModuleType("opti_oignon.config")
     cfg.DATA_DIR = Path(tmpdir)
-    sys.modules["opti_oignon.config"] = cfg
 
-    spec = importlib.util.spec_from_file_location(
-        "opti_oignon.conversation", _OO / "conversation.py",
+    loaded, restore = isolate(
+        targets={"opti_oignon.conversation": source("conversation.py")},
+        seeded={"opti_oignon.db_utils": db, "opti_oignon.config": cfg},
     )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["opti_oignon.conversation"] = mod
-    spec.loader.exec_module(mod)
+    mod = loaded["opti_oignon.conversation"]
 
     # Reversible marker for the at-rest field key, so re-encryption is visible.
     mod._encrypt = lambda v: "E:" + v
     if hasattr(mod, "_decrypt"):
         mod._decrypt = lambda v: v[2:] if isinstance(v, str) and v.startswith("E:") else v
-
-    def restore():
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
 
     return mod, restore
 
