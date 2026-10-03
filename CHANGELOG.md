@@ -1133,6 +1133,9 @@ package costs.
 
 ### Changed
 
+- The public-clean guard reads every tracked line, the source trees
+  included: their standing debt is paid, so its rule now holds everywhere.
+  The contract that pinned the old boundary is superseded by name.
 - The context optimizer's window statistics name their strategy
   `optimizer`; the value used to carry a work code. The last eight lines of
   work codes and process words under the source trees, in four test

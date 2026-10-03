@@ -61,6 +61,9 @@ independently of git:
     capitalised as that numbering spelled it, is flagged; the same word in
     lower case, ordinary French for a block of code, and the English word
     are not.
+  * G25 -- the tree-wide pass reads the scan trees as well: their standing
+    debt is paid, and a standing line there is charged. It supersedes G16,
+    which pinned the boundary while that debt was owed.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -613,6 +616,23 @@ def test_g24_the_capitalised_french_work_block_word_is_flagged():
 
 
 # ---------------------------------------------------------------------------
+# G25 -- the tree-wide pass reads the scan trees as well
+# ---------------------------------------------------------------------------
+def test_g25_tree_wide_pass_reads_the_scan_trees_too():
+    guard, restore = _load()
+    try:
+        assert _tree_rc(guard, {"README.md": "a clean tree\n"}) == 0, "a clean tree passes"
+        text = "# see " + _S + _DIGITS + "\n"
+        for tree in guard._SCAN_PATHS:
+            standing = {"README.md": "a clean tree\n", tree + "a.txt": text}
+            assert _tree_rc(guard, standing) == 1, (
+                f"a standing line under {tree} is charged: the debt there is paid"
+            )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -660,6 +680,8 @@ def _run_all():
          test_g23_a_tracked_document_named_off_the_public_list_is_flagged),
         ("G24 capitalised work-block word flagged",
          test_g24_the_capitalised_french_work_block_word_is_flagged),
+        ("G25 tree-wide pass reads the scan trees",
+         test_g25_tree_wide_pass_reads_the_scan_trees_too),
     ]
     passed = 0
     for label, fn in tests:

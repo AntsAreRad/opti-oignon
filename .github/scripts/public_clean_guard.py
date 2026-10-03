@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Public-clean guard: reject internal session nomenclature in added lines.
+"""Public-clean guard: reject internal session nomenclature in the tracked tree.
 
 No published tree may carry internal session nomenclature -- not the Python
 ones alone, but the frontend, the operator scripts, the mobile tree and the
-native crates as well, so that each of them is born clean rather than cleaned
-later. This guard scans the ADDED lines of a diff over those trees and fails
-when a line introduces:
+native crates as well. A line is charged when it carries:
 
   * a session code -- the letter S followed by two-to-four digits as a
     standalone token; or
@@ -13,26 +11,25 @@ when a line introduces:
     prefixes immediately followed by a session code or the tracking marker
     (the bare prefixes are legitimate elsewhere, e.g. an uppercase constant,
     so only the document-reference form is a violation); or
+  * a markdown name in capitals, four characters or more, that is not on
+    the closed list of public document names the tree writes; or
+  * the French word the internal numbering used for a block of work,
+    capitalised as that numbering spelled it; or
   * an internal process word.
 
 A short list of public product terms is exempt and can never account for a
 violation; so are the rule codes of a lint pragma, which name rules of the
 linter rather than anything internal.
 
-Diff-only by design over those trees: it guards against NEW nomenclature on
-added lines without failing on pre-existing debt, so it can be adopted
-before that debt is paid down.
-
-A second pass reads the whole tracked tree, root and hidden files included,
-where that debt is already zero: no tracked file may carry a session code or
-the name of the tool used to write the tree in its path, and no tracked line
-may name that tool. A name ships as surely as a line does, and a file at the
-root sits outside every scan tree of the diff pass. Outside the scan trees
--- the root, the documentation, the CI tree, any other directory -- the
-debt is zero under the whole rule as well, so every line of every tracked
-text file there is held to it, standing lines included; inside them the
-standing debt is left to the diff pass until it is paid. A tree git cannot
-read fails the guard: nothing read is never a pass.
+Two passes. The diff pass reads the lines a change adds under the source
+trees and reports each with its path; it was the whole guard while the
+standing debt there was being paid. The tree-wide pass reads every tracked
+line, root, hidden files and source trees alike, now that the debt is zero
+everywhere; no tracked path may carry a session code, the name of the tool
+used to write the tree, or a document name off the public list, and no
+tracked line may name that tool. A git read that fails -- a base it cannot
+resolve, a tree it cannot list -- fails the guard: nothing read is never a
+pass.
 
 The forbidden patterns are assembled from fragments at import
 time, so this published script carries no clear instance of the
@@ -128,17 +125,16 @@ def _unlisted_doc_names(text):
     return [name for name in _DOC_NAME.findall(text) if name not in _PUBLIC_DOCS]
 
 
-# Trees the diff pass scans. Outside these, the tree-wide pass reads every
-# line instead.
+# Trees the diff pass scans, reporting each added line with its path. The
+# tree-wide pass reads every tracked line, these trees included: their
+# standing debt is paid, so the rule holds everywhere.
 #
 # Every tree that ships is here, not the Python ones alone. The detector is a
-# regex over added lines and knows nothing about syntax, so a tree of
-# TypeScript, shell, Kotlin or Rust is guarded on exactly the same terms as a
-# tree of Python: leaving a shipped tree out would be a choice, never a
-# technical limit. Diff-only, so the standing debt in these trees is not
-# charged -- what is charged is any new instance arriving on an added line.
-# The comment-only guard covers these same trees, and the release recipes
-# read their perimeter from this list.
+# regex over lines and knows nothing about syntax, so a tree of TypeScript,
+# shell, Kotlin or Rust is guarded on exactly the same terms as a tree of
+# Python: leaving a shipped tree out would be a choice, never a technical
+# limit. The comment-only guard covers these same trees, and the release
+# recipes read their perimeter from this list.
 _SCAN_PATHS = (
     "opti_oignon/", "tests/", "frontend/", "scripts/", "android/", "rust/",
 )
@@ -249,17 +245,16 @@ def _tracked_tree():
     return paths, _grep_pairs(grep.stdout)
 
 
-def _lines_outside_scan_trees():
-    """Return ``[(path, line), ...]`` for every tracked line outside the scan trees.
+def _tracked_lines():
+    """Return ``[(path, line), ...]`` for every tracked line.
 
     Every line of every tracked text file, binary files skipped by content.
     Returns ``None`` when git cannot read the tree, so that a failed read
     fails the guard instead of passing it on nothing read.
     """
-    excluded = [":(exclude)" + path for path in _SCAN_PATHS]
     # Fixed argv, no shell: safe. The empty pattern matches every line.
     grep = subprocess.run(
-        ["git", "grep", "-I", "-z", "--no-color", "-e", "", "--", ".", *excluded],
+        ["git", "grep", "-I", "-z", "--no-color", "-e", ""],
         capture_output=True, check=False,
     )
     # git grep exits 1 when it read no line at all; anything else is an error.
@@ -328,21 +323,20 @@ def main(argv=None):
     violations = find_violations(lines)
 
     tracked = _tracked_tree()
-    outside = _lines_outside_scan_trees()
-    if tracked is None or outside is None:
+    every_line = _tracked_lines()
+    if tracked is None or every_line is None:
         print("public-clean guard: FAILED -- git could not read the tracked tree")
         return 1
     paths, tree_lines = tracked
     names = find_name_violations(paths)
     mentions = find_tool_mentions([text for _path, text in tree_lines])
-    standing = find_violations([text for _path, text in outside])
+    standing = find_violations([text for _path, text in every_line])
 
     if not violations and not standing and not names and not mentions:
         print(
             f"public-clean guard: no session nomenclature in {len(pairs)} "
-            f"added line(s) (base {base_ref}) nor in {len(outside)} lines "
-            f"outside the scan trees, none in {len(paths)} tracked names, "
-            "no tool mention"
+            f"added line(s) (base {base_ref}) nor in {len(every_line)} tracked "
+            f"lines, none in {len(paths)} tracked names, no tool mention"
         )
         return 0
 
@@ -351,7 +345,7 @@ def main(argv=None):
         path = pairs[index][0] or "?"
         print(f"  {path} [{kind}]: {snippet}")
     for index, kind, snippet in standing:
-        print(f"  {outside[index][0]} [{kind}]: {snippet}")
+        print(f"  {every_line[index][0]} [{kind}]: {snippet}")
     for path, kind in names:
         print(f"  {path} [{kind}]")
     for index, snippet in mentions:

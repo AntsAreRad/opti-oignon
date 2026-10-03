@@ -629,6 +629,14 @@ fail_under = 0
 # word; lf4 in the same file keeps each of its assertions word for word and
 # reads the licence the package now declares.
 #
+# g16 of the public-clean suite held that the tree-wide pass leaves a
+# standing line under the source trees to the diff pass. That was the
+# boundary while the standing debt there was owed. It is paid, the pass now
+# reads every tracked line, and the statement is false while the property
+# it served -- the rule holds wherever the debt is zero -- now holds
+# everywhere. It stays in the tree word for word; g25 in the same file
+# plants a standing line under each source tree and reads it charged.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -725,4 +733,5 @@ addopts = """
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[marks]
     --deselect=tests/test_chat_loader_contracts.py::test_ld9_every_loader_colour_is_an_app_token_that_reads_on_its_ground[row]
     --deselect=tests/test_facade_lazy_contracts.py::test_lf2_every_export_resolves_when_asked_and_only_then
+    --deselect=tests/test_public_clean_guard_contracts.py::test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass
 """
