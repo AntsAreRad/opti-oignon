@@ -490,7 +490,7 @@ class RAGVectorStore:
         # encryption (LUKS) is a deployment requirement for a sensitive RAG
         # corpus (see SECURITY.md). Application-layer encryption of the chunk
         # text before upsert (decrypt on retrieval) is a planned cycle
-        # (ROADMAP_POST_S183, RAG-at-rest cycle).
+        # (the RAG-at-rest cycle).
         if CHROMADB_AVAILABLE:
             self._chroma = chromadb.PersistentClient(
                 path=str(self.chroma_dir),

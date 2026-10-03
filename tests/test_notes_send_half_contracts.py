@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""SYN-01 backfill: the notes SEND half (the _sync_publish_note save hooks).
+"""The notes SEND half (the _sync_publish_note save hooks).
 
 Companion suite (additive; originals never edited). The notes suites STUB
 ``_sync_publish_note`` to a no-op so they can exercise the receive half, which
 means the producer's TRIGGERING on a write is never pinned. This companion
-pins it at the store layer with a spy, the mirror of S278's NOTE_UPDATE G1:
+pins it at the store layer with a spy, the mirror of the NOTE_UPDATE store's G1:
 
   * a create journals AFTER the commit (commit-then-publish), as a non-deleted
     record (``add_note``);

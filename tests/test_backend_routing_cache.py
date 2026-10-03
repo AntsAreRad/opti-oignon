@@ -4,7 +4,7 @@
 ``BackendRegistry.resolve_backend`` caches ``model -> backend name`` so the
 per-call ``model_info`` probe (Ollama network / llama.cpp filesystem /
 llama-server HTTP) is paid once per model on the hot path. Additive companion
-(the S283 ``test_backend_routing.py`` is left byte-untouched; BR1-BR5 still hold
+(``test_backend_routing.py`` is left byte-untouched; BR1-BR5 still hold
 unchanged because the cache is transparent to first-call routing). Contracts:
 
   * CACHE1 a second resolve of the same model is a cache hit -- ``model_info`` is
@@ -16,7 +16,7 @@ unchanged because the cache is transparent to first-call routing). Contracts:
     falls through to a healthy backend.
   * CACHE4 ``unregister`` clears the cache -- same topology-change invariant.
 
-Isolation reuses the S283 idiom: ``inference_backend.py`` imports with
+Isolation reuses that suite's idiom: ``inference_backend.py`` imports with
 stdlib-only top-level imports, so the registry is exercised with a fake
 ``InferenceBackend`` whose ``health_check`` is flippable and whose ``model_info``
 counts its calls (the cache observable). No network, no filesystem, no real

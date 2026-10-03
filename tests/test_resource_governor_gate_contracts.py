@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Resource Governor backfill, suite: the enforcement seam, the ctx ladder,
+"""Resource Governor, second suite: the enforcement seam, the ctx ladder,
 and the learned-ceiling store.
 
-Second companion (additive; the S280 companion and every original test file are
+Second companion (additive; the first companion and every original test file are
 left byte-untouched). Where ``test_resource_governor_contracts.py`` pinned the
 admission math, the backpressure signal, and the runtime-limits applier, this
-file pins the three highest-value surfaces named at the S280 close:
+file pins the three highest-value surfaces named when the first one closed:
 
   The enforcement seam (``backend_admission_gate``) -- the point the four
   generate/stream heads call, where a refusal actually RAISES and blocks:
@@ -34,7 +34,7 @@ file pins the three highest-value surfaces named at the S280 close:
       above-ceiling successes (slow-up; one fluke success does not race it back).
     * E3 the ceiling never drops below the configured floor.
 
-Isolation follows the S280 idiom and is re-declared here so this file is fully
+Isolation follows the first suite's idiom and is re-declared here so this file is fully
 self-contained (no cross-test import; each contract opens the shared isolation
 window of ``tests/_isolation.py`` on the on-disk source and closes it after).
 The module's top-level imports are stdlib + ``yaml`` only, so it loads with a

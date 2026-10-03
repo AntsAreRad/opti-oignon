@@ -2133,7 +2133,7 @@ class Executor:
             system_prompt = self._inject_memory(system_prompt, refined_question, conversation_id)
 
         # Check if context optimizer handles project injection
-        _s123_optimizer_active = (
+        _optimizer_active = (
             CONTEXT_OPTIMIZER_AVAILABLE
             and _get_context_optimizer is not None
             and _get_context_optimizer() is not None
@@ -2142,7 +2142,7 @@ class Executor:
 
         # Step 2c-bis: Inject project context
         # Skipped when optimizer is active (it handles RAG with budget passthrough)
-        if not _s123_optimizer_active:
+        if not _optimizer_active:
             if _stable_prefix_active:
                 _proj_text = self._compose_project_context(
                     question, conversation_id, on_status=status,
@@ -2335,7 +2335,7 @@ class Executor:
 
         if use_conversation:
             # Use context optimizer when active (replaces manual pipeline)
-            if _s123_optimizer_active:
+            if _optimizer_active:
                 self._last_optimization_report = None
                 optimizer = _get_context_optimizer()
 
@@ -2424,7 +2424,7 @@ class Executor:
                 _turn_window_stats = window_stats
 
             # Multi-turn status with trimming info (A3)
-            if not _s123_optimizer_active:
+            if not _optimizer_active:
                 strategy = window_stats.get("strategy", "keep_all")
                 dropped = window_stats.get("dropped", 0)
                 if dropped > 0:

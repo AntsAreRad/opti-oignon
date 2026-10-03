@@ -1133,6 +1133,10 @@ package costs.
 
 ### Changed
 
+- Comments, docstrings, one log message and one local name in ten files no
+  longer carry work codes, internal document names or process words. Each
+  file is proven by the comment-only guard: its executable shape is
+  unchanged, or the change is a string purge or a proven rename.
 - Opti-Oignon is licensed under the GNU Affero General Public License,
   version 3 only (AGPL-3.0-only), from this change on. What was published
   before it, releases 2.1.0 and earlier included, stays under the MIT

@@ -1388,7 +1388,7 @@ class LlamaCppBackend(InferenceBackend):
     lives in opti_oignon.speculative. The external path is wired here: the argv
     is materialised by speculative_decoding.build_llama_server_command and the
     running server is consumed through LlamaServerBackend below (launching the
-    process stays host-side, per INFERENCE_PERF_S259.md -- this codebase never
+    process stays host-side -- this codebase never
     spawns the server itself).
 
     Thread safety (IB-02): a per-model load lock serializes concurrent
@@ -1835,7 +1835,7 @@ class LlamaServerBackend(InferenceBackend):
 
     Launching the server is deliberately NOT this class's job: the argv
     is built by speculative_decoding.build_llama_server_command and the
-    process lifecycle is host-side (INFERENCE_PERF_S259.md), the same
+    process lifecycle is host-side, the same
     external_advisory posture as the governor's ollama_limits. Every
     method degrades honestly when the server is unreachable: health is
     False, listings are empty, lookups are None, and generation raises
@@ -2392,7 +2392,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
     # Register the external llama-server seam when configured.
     # Registration is config presence, not reachability -- availability
     # is the backend's health_check, asked at use time; the process
-    # itself is launched host-side (INFERENCE_PERF_S259.md), never here.
+    # itself is launched host-side, never here.
     server_cfg = cfg.get("llama_server", {})
     if isinstance(server_cfg, dict) and server_cfg:
         registry.register(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claim-vs-source verification role (the gated verification surface).
 
-A first implementation lot for the logged DEBT_LOT_S261 roadmap item: a role
+A first implementation of a logged roadmap item: a role
 that checks a model-generated claim against its cited source and returns a
 fail-secure verdict. It is local, deterministic in its plumbing, and routes its
 single inference call through an injected one-shot seam, so it is 100% local /

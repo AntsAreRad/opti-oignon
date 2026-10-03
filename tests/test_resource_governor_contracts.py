@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Resource Governor backfill: the DoS-bound security contracts.
+"""Resource Governor: the DoS-bound security contracts.
 
 Companion suite (additive; no original test file is edited). ``resource_governor.py``
 (2915 lines) is the system's DoS bound -- admission gate, runtime backpressure,
 and the optional runtime limits applier -- and ships with no test today. This
 companion pins the highest-value security contracts across the three families,
-each mutation-proven red-before-green.
+each proven red-before-green by directed mutation.
 
 The module's top-level imports are stdlib + ``yaml`` only, so it loads in the
 shared isolation window (``tests/_isolation.py``) with a seeded ``db_utils``:
@@ -16,7 +16,7 @@ emergency-stop flag, the ModelLimits clamp) takes its fail-open fallback unless
 the contract seeds it, and a hand-built snapshot plus an injected clock drive
 ``admit`` fully deterministically -- no warmup or registry read happens.
 
-Contracts pinned (spec RESOURCE_GOVERNOR_SPEC.md Sections 4-6):
+Contracts pinned (the governor specification, sections 4-6):
 
   Admission (``admit``):
     * C1 fail-secure: an engaged emergency stop refuses BEFORE the

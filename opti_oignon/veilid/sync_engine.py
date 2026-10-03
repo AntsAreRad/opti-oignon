@@ -1244,7 +1244,7 @@ class SyncEngine:
         deliberately untouched: a filtered record is invisible to the phone,
         not pending for it, so the asker's watermark advances past it; a
         later opt-in reaches the phone through a fresh journal entry (the
-        republish contract, NOTES_MOBILE_SYNC_N9_S256.md).
+        republish contract).
         """
         records = batch.get("records")
         if not isinstance(records, list) or not records:
@@ -1836,7 +1836,7 @@ class SyncEngine:
             logger.warning(
                 "sync: refused a note_update at the landing seam "
                 "(id=%s origin=%s): not appended, not served, not "
-                "rendered (NOTES_CRDT_SPEC.md section 5)",
+                "rendered",
                 r.record_id,
                 r.device,
             )

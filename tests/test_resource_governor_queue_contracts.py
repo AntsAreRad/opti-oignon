@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Resource Governor backfill, suite: the bounded queue, the conditional-grant
+"""Resource Governor, third suite: the bounded queue, the conditional-grant
 decision, and the learned-cost store.
 
-Third companion (additive; the S280 and S281 companions and every original test
+Third companion (additive; the first two companions and every original test
 file are left byte-untouched). It pins the governor surfaces that remained
-container-isolable after S281, each mutation-proven red-before-green:
+container-isolable after the second, each proven red-before-green by mutation:
 
   The bounded admission queue (``admit_or_wait``, Section 5) -- only the
   NON-BLOCKING exits (queue_wait_s=0 throughout, so no wait slice is ever
@@ -28,7 +28,7 @@ container-isolable after S281, each mutation-proven red-before-green:
     * P2 the exact-digest lookup is preferred over a newer digest-less row.
     * P3 (control) an absent model returns None -- never "too large" (3.1).
 
-Isolation follows the S280/S281 idiom, re-declared here so this file is fully
+Isolation follows the idiom of the first two, re-declared here so this file is fully
 self-contained: each contract opens the shared isolation window of
 ``tests/_isolation.py`` on the on-disk source, with a seeded ``db_utils`` and
 every other project module unreachable, and closes it after. The
