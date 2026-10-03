@@ -44,7 +44,7 @@ max_concurrent_sessions: 5
 # Audit log (separate SQLite DB per feature domain)
 audit_db_path: sandbox_audit.db
 
-# ---- Resource caps (Bloc 0) ----
+# ---- Resource caps ----
 # Per-sandbox limits applied to the bwrap process tree. Out-of-range values
 # are clamped into the documented ranges, never disabled.
 #   limits_enabled    gate the caps on/off (off = no caps applied)
@@ -64,7 +64,7 @@ limit_fsize_bytes: 1073741824
 limit_cpu_seconds: 300
 tmpfs_size_bytes: 268435456
 
-# ---- Seccomp denylist (Bloc 0) ----
+# ---- Seccomp denylist ----
 # A moderate seccomp BPF denylist (x86_64) is built and passed on every bwrap
 # launch. It reduces kernel syscall surface but is NOT the boundary -- the
 # namespaces are. seccomp_required makes a build or fd failure REFUSE the
@@ -72,7 +72,7 @@ tmpfs_size_bytes: 268435456
 seccomp_enabled: true
 seccomp_required: true
 
-# ---- Workspace lifecycle (Bloc 1) ----
+# ---- Workspace lifecycle ----
 # Workspaces default ephemeral under workspace_base (volatile under /tmp:
 # they do NOT survive a reboot). reconcile_on_start reaps orphaned
 # sandbox-* directories left by a previous process at startup (directories
@@ -80,19 +80,19 @@ seccomp_required: true
 # workspace_persistent=true skips that reap so files under a configured
 # persistent workspace_base survive restarts -- the trade-off is a WIDENED
 # DISPOSABLE WINDOW (data persists on disk between runs); write-back to the
-# host stays approval-gated regardless (Bloc 3). idle_ttl_seconds lazily
+# host stays approval-gated regardless. idle_ttl_seconds lazily
 # destroys idle workspaces that are not bound to a conversation (a binding
 # is explicit user intent and exempts it); 0 disables; clamped 0..2592000.
 # disk_soft_limit_bytes is the per-workspace copy-in soft quota: a copy-in
 # that would exceed it is refused (HTTP 413); the workspace is never killed;
-# clamped 1 MiB..16 GiB. The tmpfs --size from Bloc 0 caps /tmp inside the
+# clamped 1 MiB..16 GiB. The tmpfs_size_bytes cap above caps /tmp inside the
 # sandbox; this quota covers the workspace bind on the host side.
 workspace_persistent: false
 reconcile_on_start: true
 idle_ttl_seconds: 3600
 disk_soft_limit_bytes: 536870912
 
-# ---- Copy-in (Bloc 2) ----
+# ---- Copy-in ----
 # All copy-in is EXPLICIT and user-initiated through the manager UI; the
 # model can trigger neither an upload nor a browse nor a clone.
 # host_share_roots confines the host explorer and the clone source: each
@@ -110,7 +110,7 @@ disk_soft_limit_bytes: 536870912
 # a whole -- both apply, neither subsumes the other. The clone never
 # follows symlinks (skipped and counted; targets never exposed) and skips
 # device/special files; it records the section 6.1 baseline manifest
-# (in-memory, outside the sandboxed code's reach) that Bloc 3's diff and
+# (in-memory, outside the sandboxed code's reach) that the diff review and
 # write-back consume.
 host_share_roots: []
 upload_max_files: 64
@@ -118,7 +118,7 @@ upload_max_file_bytes: 134217728
 clone_max_bytes: 536870912
 clone_max_files: 20000
 
-# ---- Diff-gated write-back (Bloc 3) ----
+# ---- Diff-gated write-back ----
 # The review and the apply are EXPLICIT and user-initiated through the
 # manager UI; the model can trigger neither. The diff classifies
 # the live workspace against the in-memory 6.1 baseline (hash-driven:
@@ -134,7 +134,7 @@ clone_max_files: 20000
 # hardcoded, not configuration.
 diff_max_entries: 50000
 
-# ---- Optional Daily network: provision phase (Bloc 4) ----
+# ---- Optional Daily network: provision phase ----
 # There is deliberately NO key here that turns the sandbox network on:
 # the network flag is per workspace, default off, and set only by an
 # explicit user action through the manager (spec 8.3 -- never a config

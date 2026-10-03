@@ -143,7 +143,7 @@
 		</svg>
 	</button>
 
-	<!-- Sandbox workspace panel toggle (Sandbox Workspace cycle Bloc 1) -->
+	<!-- Sandbox workspace panel toggle -->
 	<button
 		on:click={() => togglePanel('sandbox')}
 		class="p-1.5 rounded-md transition-colors"

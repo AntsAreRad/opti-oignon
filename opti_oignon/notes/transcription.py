@@ -2,10 +2,10 @@
 """Notes media post-processing (N.5 voice): the opt-in, sandboxed whisper.cpp
 transcription orchestration.
 
-An earlier bloc built the media data layer for all three kinds and landed the
+The media data layer for all three kinds already exists, and so does the
 shared notes-attachment route over it; the ``attachment`` manifest carries a
-``transcript_text`` column that stays NULL until a post-processing bloc fills it.
-This module is that bloc for audio: it turns an encrypted audio attachment into a
+``transcript_text`` column that stays NULL until a post-processing step fills it.
+This module is that step for audio: it turns an encrypted audio attachment into a
 transcript and writes it back through ``NotesStore.update_attachment``, but only
 after the human approves, and only ever inside a fully isolated, disposable
 bubblewrap sandbox.

@@ -367,7 +367,7 @@ def _governor_account_load(model: str, num_ctx: int | None) -> None:
     """invalidate_on_load wiring for funnels whose transport is a direct
     ollama call out of the mechanical seam's reach (speculative, cascade,
     vision): the funnel accounts right after a positive admission so the
-    Bloc 0 attribution learns real costs."""
+    measurement path's attribution learns real costs."""
     if not RESOURCE_GOVERNOR_AVAILABLE or _get_resource_governor is None:
         return
     try:
@@ -3268,8 +3268,8 @@ class Executor:
         # Governor admission of the FIRST tier model -- the one the
         # cascade is guaranteed to load. A refusal answers None (the
         # documented unavailability contract); later tiers are direct
-        # callers inside cascading and ride the Section 8 residual this
-        # bloc records. Defensive reads only: cascading is not edited.
+        # callers inside cascading and ride the Section 8 residual
+        # recorded here. Defensive reads only: cascading is not edited.
         try:
             _tiers = getattr(_cascading_inference, "tiers", None) or []
             _first_tier_model = (

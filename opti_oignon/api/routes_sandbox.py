@@ -57,7 +57,6 @@ from .schemas import (
     SandboxCreateRequest,
     SandboxCreateResponse,
     SandboxDestroyResponse,
-    # Bloc 3
     SandboxDiffEntry,
     SandboxDiffResponse,
     SandboxExecuteRequest,
@@ -66,7 +65,6 @@ from .schemas import (
     SandboxFilesResponse,
     SandboxInjectRequest,
     SandboxInjectResponse,
-    # Bloc 4
     SandboxNetworkToggleRequest,
     SandboxNetworkToggleResponse,
     SandboxPreviewResponse,
@@ -76,14 +74,12 @@ from .schemas import (
     SandboxRejectResponse,
     SandboxSessionInfo,
     SandboxStatusResponse,
-    # Bloc 1
     SandboxStopResponse,
-    # Bloc 2
     SandboxUploadRefused,
     SandboxUploadResponse,
 )
 
-# Bloc 1: the conversation <-> workspace binding store; guarded so the
+# The conversation <-> workspace binding store; guarded so the
 # router still loads if the module is absent in a partial build.
 try:
     from opti_oignon import sandbox_workspace as _ws
@@ -92,7 +88,7 @@ except ImportError:
     _ws = None
     WORKSPACE_BINDING_AVAILABLE = False
 
-# Bloc 4: the binding-layer egress gate; guarded the same way. The
+# The binding-layer egress gate; guarded the same way. The
 # fail-secure direction is REFUSAL: with the module absent, network_allowed
 # surfaces False on /status and the network/provision routes answer 503 --
 # an unavailable gate never permits.
@@ -866,7 +862,7 @@ def stop_sandbox_command(
 
 
 # ---------------------------------------------------------------------------
-# Conversation binding (Bloc 1)
+# Conversation binding
 # ---------------------------------------------------------------------------
 
 def _require_bindings():
@@ -955,10 +951,10 @@ def get_conversation_binding(conversation_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Copy-in (Bloc 2): drag-and-drop upload, allowlisted host browse,
+# Copy-in: drag-and-drop upload, allowlisted host browse,
 # symlink-safe host clone. All three are EXPLICIT user actions through the
 # manager UI -- the model can trigger none of them. The baseline
-# manifest (spec section 6.1, the seam Bloc 3's diff consumes) is recorded
+# manifest (spec section 6.1, the seam the diff review consumes) is recorded
 # here after a successful manager operation; the manager computes the hashes
 # on the fly and never imports the manifest store (no cycle).
 # ---------------------------------------------------------------------------
@@ -986,7 +982,7 @@ def _record_manifest(
     cloned_mount: str | None = None,
 ) -> int:
     """Record baseline-manifest entries; honest no-op when the store is
-    absent (a partial build): copy-in still works, Bloc 3 then simply has
+    absent (a partial build): copy-in still works, the diff review then simply has
     no baseline -- the conservative failure mode."""
     if not entries:
         return 0
@@ -1109,7 +1105,7 @@ def clone_host_directory(
     pre-walk BEFORE any copy (413), destination collisions refused (409),
     sources outside the allowlisted roots refused (403). The baseline
     manifest (6.1) is recorded from the hashes computed during the copy;
-    the cloned root is write-once -- Bloc 3's only implicit write-back
+    the cloned root is write-once -- the diff review's only implicit write-back
     target. Refusals are audited as host_clone_refused.
     """
     _require_sandbox()
@@ -1167,7 +1163,7 @@ def clone_host_directory(
 
 
 # ---------------------------------------------------------------------------
-# Bloc 3: diff-gated write-back -- diff, deletion confirmation, apply
+# Diff-gated write-back -- diff, deletion confirmation, apply
 # ---------------------------------------------------------------------------
 
 def _require_workspace_module() -> None:
@@ -1344,7 +1340,7 @@ def apply_workspace_changes(
     )
 
 
-# -- (Bloc 4): the per-workspace network gate and the provision run --
+# -- the per-workspace network gate and the provision run --
 
 
 def _require_egress() -> None:

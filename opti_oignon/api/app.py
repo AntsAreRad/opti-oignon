@@ -422,9 +422,9 @@ if agent_router is not None:
 # and a sensitive apply reuses /api/security/tool-approval/* through the engine.
 if sync_router is not None:
     app.include_router(sync_router)
-# Resource governor: status / admissions / evict / config (Resource
-# Governor cycle Bloc 4). Guarded so a constrained build cannot block app
-# startup; mode-free (it behaves identically in Daily and Bulbe).
+# Resource governor: status / admissions / evict / config. Guarded so a
+# constrained build cannot block app startup; mode-free (it behaves
+# identically in Daily and Bulbe).
 if governor_router is not None:
     app.include_router(governor_router)
 # Agent eval harness: run / status / results / history / cancel (AGT

@@ -386,7 +386,7 @@ def _sync_publish_skill(
     full-state payload; it runs INSIDE this hook's protection, and only after
     the availability probe passes, so when sync is absent the write pays
     nothing (no payload build, no journal append). The contract
-    (ROADMAP_SYNC_CYCLE, Bloc 0, the lot-1/2 precedents):
+    (ROADMAP_SYNC_CYCLE, the lot-1/2 precedents):
 
     - A payload or journalling failure must never break the write: any error
       is logged and swallowed (at-least-once on the next write).

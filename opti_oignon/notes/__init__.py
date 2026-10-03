@@ -6,7 +6,7 @@ and a two-layer per-attachment AES-256-GCM blob store
 (:class:`~opti_oignon.notes.blob_store.NotesBlobStore`). This package is the data
 layer ONLY -- the notes UI (N.2+), the LLM-from-note / LLM-from-chat surfaces
 (N.3 / N.4, the gated ``manage_notes`` STATE_MUTATION tool), and the Veilid
-record type (N.8) are later blocs.
+record type (N.8) live outside this package.
 """
 
 from __future__ import annotations

@@ -2,12 +2,12 @@
 """Notes media post-processing (N.6 picture caption / OCR): the opt-in, sandboxed
 vision caption / OCR orchestration.
 
-An earlier bloc built the media data layer for all three kinds and landed the
+The media data layer for all three kinds already exists, and so does the
 shared notes-attachment route over it; the ``attachment`` manifest carries
 ``caption_text`` and ``ocr_text`` columns that stay NULL until a post-processing
-bloc fills them. Later work landed the audio sibling (``transcription.py``) and the
+step fills them. The audio sibling (``transcription.py``) already exists, as does the
 additive ``NotesStore.update_attachment`` write-back, whose caption / ocr legs
-this module reuses unchanged. This module is the post-processing bloc for images:
+this module reuses unchanged. This module is the post-processing step for images:
 it turns an encrypted image attachment into a caption and/or OCR text and writes
 the produced legs back through ``NotesStore.update_attachment``, but only after
 the human approves, and only ever inside a fully isolated, disposable bubblewrap

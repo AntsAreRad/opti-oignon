@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resource Governor -- Blocs 0-3: measurement, admission, backpressure, limits.
+"""Resource Governor: measurement, admission, backpressure, limits.
 
 Measurement: a cached
 ResourceSnapshot assembled from ranked, individually-optional sources with
@@ -32,7 +32,7 @@ advisory-only precedent: never blocking startup in any mode), and the
 optional, off-by-default process-wide rlimits applier
 (apply_llamacpp_rlimits, consumed by the llama.cpp load seam BEFORE the
 first in-process load). The API/frontend
-surfaces remain Bloc 4 territory.
+surfaces are implemented separately (routes_governor.py, GovernorPanel.svelte).
 
 Ranked sources (Section 3, decision D2):
 
@@ -63,7 +63,7 @@ Ranked sources (Section 3, decision D2):
   decision): the pre-flight is NOT moved out of smart_router
   and its private helper is not imported across modules; the few lines
   are replicated by decision so this module stays standalone-loadable
-  and zero existing files are edited this bloc.
+  and zero existing files are edited here.
 
 Design decisions (arbitrated):
 
@@ -75,8 +75,8 @@ Design decisions (arbitrated):
 - DI-5: the TTL cache exposes refresh() (synchronous build),
   get_snapshot() (stale -> synchronous refresh) and get_snapshot_fast()
   (returns the cached snapshot even when stale and triggers a single
-  background refresh -- the primitive the Bloc 1 admission fast path will
-  consume; the current decision uses the cached values conservatively).
+  background refresh -- the primitive the admission fast path
+  consumes; the current decision uses the cached values conservatively).
 - DI-8: ceiling learning is fast-down / slow-up. Fast-down immediately on
   a reported load failure to max(floor, observed_in_use - safety_margin);
   slow-up by _CEILING_RELAX_STEP_GB toward the configured capacity after
@@ -87,8 +87,8 @@ Design decisions (arbitrated):
   refresh that sees the model in the S1 view with a positive size_vram
   writes the learned per-model cost (keyed name+digest when the digest is
   present). The other hooks (evict / estop-drain / resume) only
-  invalidate. None of the four is wired to a caller this bloc: Bloc 1
-  wires the callers.
+  invalidate. All four are now wired to callers: admission (load),
+  eviction, and estop observation (drain and resume).
 
 Conservative defaults and fail-open (Section 3.1): capacity unknown
 (configured null AND no learned ceiling) -> the VRAM half reports
@@ -97,8 +97,8 @@ half still applies; an unknown model is never treated as too large; a
 source erroring is the same as a source absent (log at debug, degrade to
 the next source, never raise into the request path). No audit-chain append
 happens anywhere in this module (the chain is reserved for evictions,
-config changes and ceiling-learning surfacing, all Bloc 1+ and off the hot
-path).
+config changes and ceiling-learning surfacing, all outside the
+measurement layer and off the hot path).
 
 Kerckhoffs: nothing here is secret; the measurement chain, the learning
 rules and the config surface are fully described. The store holds derived,
@@ -524,11 +524,11 @@ def _as_opt_int(value: Any, default: int | None) -> int | None:
 class GovernorConfig:
     """Section 10 keys with spec defaults.
 
-    Bloc 0 consumes the measurement subset (enabled, total_vram_gb,
+    The measurement path consumes the measurement subset (enabled, total_vram_gb,
     safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
     decisions_ring_size); the remaining keys are carried so the file and
-    the loader are written once and the later blocs only consume.
-    ``enabled`` gates the FUTURE admission behaviour (Bloc 1); measurement
+    the loader are written once and consumed later.
+    ``enabled`` gates the FUTURE admission behaviour; measurement
     itself stays available regardless.
     """
 
@@ -564,7 +564,7 @@ class GovernorConfig:
     ceiling_floor_gb: float = 4.0
     # Bounded recent-decisions ring, pruned by count (Section 3.2).
     decisions_ring_size: int = 200
-    # Later-bloc keys (carried, not consumed in Bloc 0):
+    # Keys carried for later use (not consumed by the measurement path):
     ctx_ladder: list[int] = field(
         default_factory=lambda: [32768, 16384, 8192, 4096]
     )
@@ -747,7 +747,7 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
 
 
 # ---------------------------------------------------------------------------
-# R-03 limit management (Bloc 3, Section 6)
+# R-03 limit management (Section 6)
 # ---------------------------------------------------------------------------
 
 # The three Ollama limit knobs: payload key, GovernorConfig attribute,
@@ -803,7 +803,7 @@ def compute_ollama_limits_advisory(
     enforced externally -- never a guess. ``env`` is injectable for
     tests and defaults to ``os.environ``.
 
-    Returns the status-API shape the Bloc 4 surface will reuse. status
+    Returns the status-API shape the governor status route reuses. status
     is one of "not_configured" | "match" | "mismatch" | "unknown";
     mixed observations resolve mismatch > unknown > match; a visible
     value that does not parse as an integer counts as a mismatch.
@@ -1047,7 +1047,7 @@ class ResourceSnapshot:
     """The assembled measurement view (Section 3).
 
     ``vram_available_gb`` is RAW capacity minus in-use: the safety margin
-    is deliberately NOT subtracted here; applying it belongs to the Bloc 1
+    is deliberately NOT subtracted here; applying it belongs to the admission
     fit computation (spec Section 4.2). ``sources`` is the honest
     provenance list naming exactly which read paths contributed.
     ``taken_at`` is on the governor's clock (monotonic by default).
@@ -1092,7 +1092,7 @@ class ResourceSnapshot:
 
 
 # ---------------------------------------------------------------------------
-# Bloc 1: the admission ticket (Section 4.4) and the typed refusal
+# The admission ticket (Section 4.4) and the typed refusal
 # ---------------------------------------------------------------------------
 
 
@@ -1107,7 +1107,7 @@ class AdmissionDecision:
     testability, payload capture) and not part of the minimum surface.
     num_gpu stays None (conservative: full offload when the fit
     holds means no option is sent; computed partial offload stays
-    deferred behind a flag); keep_alive carries the Bloc 2 soft-pressure
+    deferred behind a flag); keep_alive carries the soft-pressure
     override when the pressure signal fills it.
     """
 
@@ -1245,8 +1245,8 @@ class AdaptStore:
     Holds derived, regenerable state: learned per-model VRAM cost (keyed
     name+digest when the digest is present), the learned capacity ceiling
     (fast down, slow up, config floor) and the bounded recent-decisions
-    ring (schema and prune-by-count land in this bloc; Bloc 1 writes the
-    rows on the admission path).
+    ring (schema and prune-by-count land here; the admission path writes
+    the rows).
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -1483,7 +1483,7 @@ class AdaptStore:
     ) -> None:
         """Append one admission decision and prune the ring by count.
 
-        Bloc 1 is the writer on the admission path; this bloc lands the
+        The admission path is the writer; this method implements the
         table and the prune so the ring is bounded from day one.
         """
         with self._lock:
@@ -1551,12 +1551,12 @@ class AdaptStore:
 
 
 # ---------------------------------------------------------------------------
-# The governor (measurement only this bloc)
+# The governor
 # ---------------------------------------------------------------------------
 
 
 class ResourceGovernor:
-    """Governor core: measures, caches, learns (Bloc 0); admits (Bloc 1).
+    """Governor core: measures, caches, learns; admits.
 
     Every collaborator is injectable for container-provable tests: the
     warmup (S1), the backend registry (S2), the clock (TTL), the meminfo
@@ -1658,7 +1658,7 @@ class ResourceGovernor:
         return self.refresh(force=False)
 
     def get_snapshot_fast(self) -> ResourceSnapshot:
-        """The Bloc 1 admission fast-path primitive (Section 3).
+        """The admission fast-path primitive (Section 3).
 
         Returns the cached snapshot immediately -- even when stale, the
         current decision uses the cached values conservatively -- and
@@ -1695,7 +1695,7 @@ class ResourceGovernor:
             with self._cache_lock:
                 self._refresh_in_flight = False
 
-    # -- eager invalidation hooks (callable; Bloc 1 wires the callers) --------
+    # -- eager invalidation hooks (callable; now wired to their callers) -----
 
     def invalidate_on_load(
         self, model: str, requested_num_ctx: int | None = None
@@ -2114,7 +2114,7 @@ class ResourceGovernor:
             sources=sources,
         )
 
-    # -- learning passthroughs (rules land now; Bloc 1 calls them) -------------
+    # -- learning passthroughs (rules land now; the admission path calls them) --
 
     def record_load_failure(self, observed_in_use_gb: float) -> float:
         """Fast-down the learned ceiling after a failed load (Section 3.2)."""
@@ -2145,7 +2145,7 @@ class ResourceGovernor:
         decision: str,
         reason: str = "",
     ) -> None:
-        """Append to the bounded recent-decisions ring (Bloc 1's writer)."""
+        """Append to the bounded recent-decisions ring (the admission path's writer)."""
         self._store.record_decision(
             caller,
             model,
@@ -2156,11 +2156,11 @@ class ResourceGovernor:
             ring_size=self._config.decisions_ring_size,
         )
 
-    # -- Bloc 2: runtime backpressure -- the pressure signal (Section 5) ------
+    # -- Runtime backpressure -- the pressure signal (Section 5) --------------
 
     def pressure_state(self) -> dict[str, Any]:
-        """The R-02 pressure signal, the shape the Bloc 4 status API
-        will surface.
+        """The R-02 pressure signal, the shape the status API
+        surfaces.
 
         Level is the max of two contributions: in_use over EFFECTIVE
         capacity (the snapshot's capacity_gb already folds the learned
@@ -2173,13 +2173,13 @@ class ResourceGovernor:
         """
         return self._pressure_from_snapshot(self.get_snapshot_fast())
 
-    # -- Bloc 3: R-03 limit management -- the advisory seat (Section 6) -------
+    # -- R-03 limit management -- the advisory seat (Section 6) ---------------
 
     def ollama_limits_advisory(self) -> dict[str, Any]:
         """The R-03 external-Ollama advisory in the status-API shape.
 
         Thin delegation to :func:`compute_ollama_limits_advisory` with
-        this governor's config; the seat the Bloc 4 status surface
+        this governor's config; the seat the status surface
         reads. The startup security checklist consumes the pure
         function directly (advisory-only in all modes, never blocking
         startup -- the standing precedent).
@@ -2326,7 +2326,7 @@ class ResourceGovernor:
                     "Pressure keep_alive restore failed open: %s", exc
                 )
 
-    # -- Bloc 1: the admission gate (Section 4) -------------------------------
+    # -- The admission gate (Section 4) ---------------------------------------
 
     def admit(
         self,
@@ -2355,8 +2355,8 @@ class ResourceGovernor:
           where evictable_now sums loaded models idle past the config
           threshold (derived from the snapshot's expirations); a fit
           reached only through evictable_now is granted CONDITIONAL on
-          eviction (the eviction act itself is Bloc 2; Ollama's own LRU
-          carries it meanwhile, the Section 12 posture).
+          eviction (the eviction act itself is handled by evict_model;
+          Ollama's own LRU carries it meanwhile, the Section 12 posture).
         - The requested ctx is clamped to the model's context window
           (ModelLimits stays the authority), then stepped down the config
           ladder to the per-caller floor; callers without a floor
@@ -2745,7 +2745,7 @@ class ResourceGovernor:
         candidates.sort(key=lambda c: c[1], reverse=True)
         return candidates
 
-    # -- Bloc 2: targeted eviction (Section 5, honouring conditional grants) --
+    # -- Targeted eviction (Section 5, honouring conditional grants) ---------
 
     def evict_model(
         self,
@@ -2762,8 +2762,8 @@ class ResourceGovernor:
         snapshot (invalidate_on_evict) and appends to the signed audit
         chain OFF the hot path. Every failure path is fail-open: a
         False return means Ollama's own LRU carries the pressure (the
-        Section 12 posture). This is also the surface the Bloc 4
-        POST /api/governor/evict will call.
+        Section 12 posture). This is also the surface the
+        POST /api/governor/evict route calls.
         """
         registry = self._resolve_registry()
         if registry is None:
@@ -2883,7 +2883,7 @@ class ResourceGovernor:
         except Exception as exc:
             logger.debug("Eviction audit thread failed: %s", exc)
 
-    # -- Bloc 2: the bounded opt-in queue (Section 5) -------------------------
+    # -- The bounded opt-in queue (Section 5) ---------------------------------
 
     def admit_or_wait(
         self,
@@ -2963,7 +2963,7 @@ class ResourceGovernor:
 
     @property
     def queue_depth(self) -> int:
-        """Current number of queued admissions (the Bloc 4 status field)."""
+        """Current number of queued admissions (the status-API field)."""
         with self._queue_cond:
             return self._queue_depth
 
@@ -3025,7 +3025,7 @@ def reset_resource_governor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bloc 1: the mechanical-seam gate (4.1/4.4, consumed by inference_backend)
+# The mechanical-seam gate (4.1/4.4, consumed by inference_backend)
 # ---------------------------------------------------------------------------
 
 

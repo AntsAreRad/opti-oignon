@@ -303,7 +303,7 @@ def manifest_hash_file(path: str, chunk_size: int = 65536) -> str:
 
     A streamed SHA-256 (the ``_compute_diffs_hash`` family in the coding
     agent), bounded chunks so a large file never lands in memory at once.
-    Bloc 3's diff recomputes this over the live workspace and compares it
+    The diff review recomputes this over the live workspace and compares it
     against the recorded baseline.
     """
     import hashlib
@@ -324,7 +324,7 @@ class WorkspaceManifests:
     Per workspace: ``relative_path -> sha256`` for every file recorded at
     copy-in (upload AND clone, per the spec's 6.1 text), plus the
     ``cloned_root`` -- the realpath of the originally-cloned host directory,
-    the only implicit write-back target Bloc 3 may use (6.2). The root is
+    the only implicit write-back target the diff review may use (6.2). The root is
     WRITE-ONCE: the first clone fixes it; later clones never move it
     ("writes only under the ORIGINALLY-cloned root"). Upload-only
     workspaces keep it None -- no implicit target.
@@ -333,13 +333,13 @@ class WorkspaceManifests:
 
     - IN-MEMORY, like the bindings: a manifest inside ``/workspace`` would
       be writable by the sandboxed code, which could then hide its own
-      modifications from the Bloc 3 review -- unacceptable for a review-gate
+      modifications from the diff review -- unacceptable for a review-gate
       input. A host-side file would persist user-tree paths and hashes in
       plaintext (a privacy surface) and add a cleanup lifecycle. In-memory
       is tamper-proof from the sandbox and dies with the process.
     - Documented limitation: under ``workspace_persistent``, a restart
-      loses the baseline. The failure mode is CONSERVATIVE: Bloc 3 without
-      a baseline has no implicit write-back target and must treat the
+      loses the baseline. The failure mode is CONSERVATIVE: the diff review
+      without a baseline has no implicit write-back target and must treat the
       whole tree as unreviewed -- never less review, never a silent write.
     - Entries are recorded by the ROUTES after a successful manager
       operation on an active session (the manager computes the hashes on
@@ -388,7 +388,7 @@ class WorkspaceManifests:
             return dict(manifest) if manifest is not None else None
 
     def get_cloned_root(self, session_id: str) -> str | None:
-        """The originally-cloned host root (Bloc 3's implicit target)."""
+        """The originally-cloned host root (the diff review's implicit target)."""
         with self._lock:
             return self._cloned_roots.get(session_id)
 

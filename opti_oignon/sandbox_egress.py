@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scoped sandbox network egress: gate, provision phase, audit shapes.
 
-Bloc 4 of the Sandbox Workspace cycle (SANDBOX_WORKSPACE_SPEC section 8).
+The sandbox network capability (SANDBOX_WORKSPACE_SPEC section 8).
 The sandbox network is the cycle's one new capability and its most
 sensitive: off by default, per workspace, Daily-only, switched on only by
 an explicit user action, never a config default, never model-triggerable,
@@ -14,7 +14,7 @@ guard's bulbe-equality test -- egress is allowed only when the mode is
 exactly ``daily``; an unset, unknown, or undeterminable mode is refused.
 There is no parameter to bypass it and no configuration that relaxes it.
 
-The egress mechanism shipped this bloc is the PROVISION PHASE (spec 8.4,
+The egress mechanism here is the PROVISION PHASE (spec 8.4,
 the preferred mode): a dedicated, network-on bwrap run that executes ONLY
 dependency installation -- a hash-pinned requirements set installed with
 ``--require-hashes --only-binary=:all:`` into a workspace venv -- after
@@ -308,7 +308,7 @@ def proxy_mode_available() -> bool:
 
     Detection only: reports whether ``pasta`` or ``slirp4netns`` exists on
     PATH. Shipping the mode (the namespace wiring and the filtering proxy)
-    is host territory and stays out of this bloc's deliverable.
+    is host territory and stays out of scope here.
     """
     try:
         return any(shutil.which(helper) for helper in _PROXY_HELPERS)

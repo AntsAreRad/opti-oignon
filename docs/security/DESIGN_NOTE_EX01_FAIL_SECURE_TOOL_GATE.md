@@ -135,14 +135,14 @@ continues to take precedence where present.
   execution path. Keep it a lazy import with a cached policy read to avoid a
   per-call cost.
 - **Interactions.** Pairs naturally with the auth-hardening lot (A4) and
-  the red-team bloc (Bloc 6), both of which touch policy and adversarial tool
+  the red-team review, both of which touch policy and adversarial tool
   use. The taxonomy is also useful input to red-team scoring (which tools are
   "dangerous").
 
 ## Recommendation
 
 Defer implementation to a dedicated hardening pass (the auth-hardening lot, or the
-red-team bloc), because it is a security-policy change to the tool-execution hot
+red-team review), because it is a security-policy change to the tool-execution hot
 path and requires (1) a reviewed tool side-effect taxonomy and (2) a settled
 answer on the no-policy default. The decision is recorded here so it is not lost;
 the smallest correct first step is the taxonomy plus flipping the `hook is None`

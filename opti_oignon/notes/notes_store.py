@@ -1065,7 +1065,7 @@ class NotesStore:
     ) -> bool:
         """Write derived post-processing text back onto an existing manifest row.
 
-        The opt-in, sandboxed post-processing blocs fill the derived-text columns
+        The opt-in, sandboxed post-processing fills the derived-text columns
         AFTER the human approves the result: transcript_text (audio, N.5),
         caption_text / ocr_text (image, N.6). Only the fields explicitly passed
         are written, so a call that omits a field never blanks an existing value,

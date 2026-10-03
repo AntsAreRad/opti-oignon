@@ -1,5 +1,5 @@
 <!--
-  SandboxUploadZone.svelte (Sandbox Workspace cycle, Bloc 2)
+  SandboxUploadZone.svelte
   Drag-and-drop / file-picker upload zone (spec 5.1): an EXPLICIT user
   action targeting the selected workspace -- the model can trigger no
   upload, and no host path is ever read by the server on this

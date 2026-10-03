@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resource Governor API surface (Resource Governor cycle Bloc 4).
+"""Resource Governor API surface.
 
 Wraps the governor's already-assembled status seat behind a thin, guarded
 FastAPI surface, the same shape as routes_sync: web-free payload helpers at
@@ -27,7 +27,7 @@ Reading the pressure state also evaluates and applies the sustained-pressure
 keep_alive policy (the design property), so a status read is not entirely
 free of effect; that is intentional and documented at the engine.
 
-POST /config write semantics (the one new design question this bloc answered).
+POST /config write semantics (the one new design question answered here).
 The config file is the single source of truth: a write edits the YAML in place
 (targeted line replacement, comments and layout preserved -- a full safe_dump
 rewrite would strip the spec caveat comments), then drops the module-level
@@ -36,7 +36,7 @@ finish on the config they were constructed with; the response says so. Only
 scalar runtime-tunable keys are writable: the rlimits backstop is a
 process-wide, once-per-process latch (an API write could not honestly take
 effect) and the structured keys (ladder, floors, per-caller queue) stay
-YAML-edit-only this bloc. The change rides the existing signed audit chain
+YAML-edit-only. The change rides the existing signed audit chain
 (the chain_log idiom, action "config_change"), best-effort and off no hot path.
 """
 

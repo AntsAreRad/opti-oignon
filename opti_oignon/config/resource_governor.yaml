@@ -1,12 +1,12 @@
 # Resource Governor configuration.
 #
-# Bloc 0 consumes the measurement subset: enabled, total_vram_gb,
+# The measurement path consumes the measurement subset: enabled, total_vram_gb,
 # safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
 # decisions_ring_size. The remaining keys are carried here so the file is
-# written once; the later blocs (admission, backpressure, limits) only
-# consume them.
+# written once; admission, backpressure, and limits consume them
+# later.
 
-# Gates the FUTURE admission behaviour (Bloc 1); measurement itself stays
+# Gates the FUTURE admission behaviour; measurement itself stays
 # available regardless of this flag.
 enabled: true
 
@@ -20,7 +20,7 @@ enabled: true
 # explicitly to override the reading or to work on a host without nvidia-smi.
 total_vram_gb: null
 
-# Subtracted by the Bloc 1 fit math (spec Section 4.2); also the
+# Subtracted by the admission fit math (spec Section 4.2); also the
 # fast-down margin of the ceiling learning (spec Section 3.2). The
 # speculative_decoding precedent value.
 safety_margin_gb: 1.5
@@ -68,19 +68,19 @@ weights_overrides:
 ceiling_floor_gb: 4.0
 
 # Bounded ring of recent admission decisions, pruned by count
-# (spec Section 3.2; written by the Bloc 1 admission path).
+# (spec Section 3.2; written by the admission path).
 decisions_ring_size: 200
 
-# --- Later-bloc keys (carried; not consumed by Bloc 0) ---
+# --- Keys carried for later use (not consumed by the measurement path) ---
 
-# Bloc 1: the downsize ladder and the per-caller context floors
+# The downsize ladder and the per-caller context floors
 # (benchmark/AGT have no floor entry: they never downsize, D3).
 ctx_ladder: [32768, 16384, 8192, 4096]
 ctx_floor:
   chat: 4096
   pipeline: 4096
 
-# Bloc 2: backpressure.
+# Backpressure.
 idle_evict_threshold_s: 600
 pressure:
   soft_threshold: 0.85
@@ -96,7 +96,7 @@ queue:
   depth: 2
   wait_s: 30
 
-# Bloc 3: optional in-process rlimits (off by default) and Ollama limit
+# Optional in-process rlimits (off by default) and Ollama limit
 # management (spawn-path env application; advisory for external servers).
 # Caveat (why rlimits ships off): setrlimit is process-wide -- it caps the
 # ENTIRE Opti-Oignon process, not the llama.cpp backend alone. Admission

@@ -1,5 +1,5 @@
 /**
- * API client for the Resource Governor (Resource Governor cycle Bloc 4).
+ * API client for the Resource Governor.
  *
  * Defines the contract the status card (GovernorPanel.svelte) consumes from the
  * backend route (opti_oignon/api/routes_governor.py): the status surface

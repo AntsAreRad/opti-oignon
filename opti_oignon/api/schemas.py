@@ -1252,7 +1252,7 @@ class SandboxCreateRequest(BaseModel):
     """Request to create a new sandbox session."""
     session_id: str | None = None
     allow_degraded: bool = False
-    # Bloc 1: optional human label and per-sandbox command timeout.
+    # Optional human label and per-sandbox command timeout.
     label: str = ""
     timeout: int | None = None
 
@@ -1323,7 +1323,7 @@ class SandboxStatusResponse(BaseModel):
     degraded_confirmed: bool = False
     active_sessions: int = 0
     max_sessions: int = 5
-    # Bloc 4: the live egress-gate answer (True only in Daily;
+    # The live egress-gate answer (True only in Daily;
     # fail-secure False when the gate is unavailable) -- the SyncPanel
     # bulbe_disabled precedent -- plus the configured caps, read-only, for
     # the per-workspace settings strip. All additive with safe defaults.
@@ -1347,8 +1347,8 @@ class SandboxSessionInfo(BaseModel):
     approval_state: str = "pending"
     approved_paths: list[str] = Field(default_factory=list)
     approved_at: float | None = None
-    # Bloc 1: the workspace-manager view. network_enabled is the
-    # per-workspace flag (Bloc 4: user-set only, Daily-only, default
+    # The workspace-manager view. network_enabled is the
+    # per-workspace flag (user-set only, Daily-only, default
     # False); disk_use_bytes is approximate (bounded walk); running reflects
     # the per-session process registry. has_cloned_baseline is True
     # when a host clone recorded a baseline root -- the settings strip
@@ -1422,7 +1422,7 @@ class SandboxUploadRefused(BaseModel):
 
 
 class SandboxUploadResponse(BaseModel):
-    """Result of a multipart drag-and-drop upload (Bloc 2)."""
+    """Result of a multipart drag-and-drop upload."""
     session_id: str
     uploaded_paths: list[str] = Field(default_factory=list)
     refused: list[SandboxUploadRefused] = Field(default_factory=list)
@@ -1439,20 +1439,20 @@ class HostBrowseEntry(BaseModel):
 
 
 class HostBrowseResponse(BaseModel):
-    """Allowlisted host directory listing (Bloc 2)."""
+    """Allowlisted host directory listing."""
     path: str
     roots: list[str] = Field(default_factory=list)
     entries: list[HostBrowseEntry] = Field(default_factory=list)
 
 
 class SandboxCloneRequest(BaseModel):
-    """Request to clone an allowlisted host directory (Bloc 2)."""
+    """Request to clone an allowlisted host directory."""
     src_path: str
     dest_subdir: str = ""
 
 
 class SandboxCloneResponse(BaseModel):
-    """Result of a symlink-safe host clone (Bloc 2)."""
+    """Result of a symlink-safe host clone."""
     session_id: str
     dest: str
     cloned_root: str
@@ -1463,7 +1463,7 @@ class SandboxCloneResponse(BaseModel):
     manifest_files: int = 0
 
 
-# -- Sandbox diff-gated write-back (Bloc 3) --
+# -- Sandbox diff-gated write-back --
 
 class SandboxDiffEntry(BaseModel):
     """One classified change against the baseline manifest."""
@@ -1553,7 +1553,7 @@ class SandboxApplyResponse(BaseModel):
     diff_hash: str = ""
 
 
-# -- Sandbox network gate + provision phase (Bloc 4) --
+# -- Sandbox network gate + provision phase --
 
 class SandboxNetworkToggleRequest(BaseModel):
     """Flip the per-workspace network flag (user action only)."""

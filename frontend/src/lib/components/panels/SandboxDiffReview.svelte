@@ -1,5 +1,5 @@
 <!--
-  SandboxDiffReview.svelte (Sandbox Workspace cycle, Bloc 3)
+  SandboxDiffReview.svelte
   The diff review + apply flow (spec sections 6 and 10): load the live
   workspace diff against the recorded baseline (added/modified/deleted,
   hash-driven), preview files, approve changes per file, confirm deletions

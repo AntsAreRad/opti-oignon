@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FastAPI notes-attachment route (the media blocs' shared backend prerequisite):
+"""FastAPI notes-attachment route (the media features' shared backend prerequisite):
 expose the N.1 ``attachment`` manifest and the two-layer ``NotesBlobStore`` over
 HTTP.
 
@@ -11,7 +11,7 @@ the full media data layer for all three kinds: the ``attachment`` manifest table
 metadata store). The piece missing to open the N.5 voice / N.6 picture vault /
 N.7 drawing front is the shared HTTP surface that moves the encrypted blobs and
 the manifest rows; this module is that surface, the client the capture / gallery
-/ canvas UIs (later blocs) ride.
+/ canvas UIs ride.
 
 Design notes:
 
@@ -42,7 +42,7 @@ Design notes:
   ``routes_notes``; it defines no ``ToolSchema`` and registers nothing in the
   agent tool registry. The opt-in, sandboxed whisper.cpp transcription (N.5) and
   vision caption / OCR (N.6) that fill ``transcript_text`` / ``caption_text`` /
-  ``ocr_text`` are later blocs and run in the disposable bubblewrap; this route
+  ``ocr_text`` come later and run in the disposable bubblewrap; this route
   does no post-processing.
 - The one HTTP error code beyond 404 / 422 is the availability guard (503),
   mirroring ``routes_notes._check_store``.

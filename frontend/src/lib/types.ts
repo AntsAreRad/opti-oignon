@@ -1393,7 +1393,7 @@ export interface SandboxStatusResponse {
 	degraded_confirmed: boolean;
 	active_sessions: number;
 	max_sessions: number;
-	/** (Bloc 4): live egress-gate answer (true only in Daily; the
+	/** Live egress-gate answer (true only in Daily; the
 	 * SyncPanel bulbe_disabled precedent, fail-secure false) plus the
 	 * configured caps, read-only, for the settings strip. */
 	network_allowed?: boolean;
@@ -1428,7 +1428,7 @@ export interface ChatCodingStatusResponse {
 export interface SandboxCreateRequest {
 	session_id?: string;
 	allow_degraded?: boolean;
-	/** (Bloc 1): optional human label and per-sandbox command timeout. */
+	/** Optional human label and per-sandbox command timeout. */
 	label?: string;
 	timeout?: number | null;
 }
@@ -1497,8 +1497,8 @@ export interface SandboxSessionInfo {
 	approval_state: string;
 	approved_paths: string[];
 	approved_at: number | null;
-	/** (Bloc 1): the workspace-manager view. network_enabled is the
-	 * per-workspace flag (Bloc 4: user-set only, Daily-only, default
+	/** The workspace-manager view. network_enabled is the
+	 * per-workspace flag (user-set only, Daily-only, default
 	 * false); disk_use_bytes is approximate. has_cloned_baseline is
 	 * true when a host clone recorded a baseline root -- the settings strip
 	 * sharpens the exfiltration warning with it. */
@@ -1514,20 +1514,20 @@ export interface SandboxSessionInfo {
 	has_cloned_baseline?: boolean;
 }
 
-/** (Bloc 1): stop-path response. stopped=false means nothing was
+/** Stop-path response. stopped=false means nothing was
  * running (honest no-op); the workspace persists either way. */
 export interface SandboxStopResponse {
 	session_id: string;
 	stopped: boolean;
 }
 
-/** (Bloc 1): bind a conversation to a workspace. */
+/** Bind a conversation to a workspace. */
 export interface SandboxBindRequest {
 	conversation_id: string;
 	session_id: string;
 }
 
-/** (Bloc 1): the current binding of a conversation. */
+/** The current binding of a conversation. */
 export interface SandboxBindingResponse {
 	conversation_id: string;
 	session_id: string | null;
@@ -1540,7 +1540,7 @@ export interface SandboxUploadRefused {
 	reason: string;
 }
 
-/** Result of a multipart drag-and-drop upload (Bloc 2). */
+/** Result of a multipart drag-and-drop upload. */
 export interface SandboxUploadResponse {
 	session_id: string;
 	uploaded_paths: string[];
@@ -1557,20 +1557,20 @@ export interface HostBrowseEntry {
 	hidden: boolean;
 }
 
-/** Allowlisted host directory listing (Bloc 2). */
+/** Allowlisted host directory listing. */
 export interface HostBrowseResponse {
 	path: string;
 	roots: string[];
 	entries: HostBrowseEntry[];
 }
 
-/** Request to clone an allowlisted host directory (Bloc 2). */
+/** Request to clone an allowlisted host directory. */
 export interface SandboxCloneRequest {
 	src_path: string;
 	dest_subdir?: string;
 }
 
-/** Result of a symlink-safe host clone (Bloc 2). */
+/** Result of a symlink-safe host clone. */
 export interface SandboxCloneResponse {
 	session_id: string;
 	dest: string;
@@ -1582,7 +1582,7 @@ export interface SandboxCloneResponse {
 	manifest_files: number;
 }
 
-/** One classified change against the baseline manifest (Bloc 3). */
+/** One classified change against the baseline manifest. */
 export interface SandboxDiffEntry {
 	path: string;
 	kind: 'added' | 'modified' | 'deleted';
@@ -1591,7 +1591,7 @@ export interface SandboxDiffEntry {
 	current_hash: string;
 }
 
-/** The workspace diff against the recorded baseline (Bloc 3).
+/** The workspace diff against the recorded baseline.
  * diff_hash is the review-integrity digest the apply request must echo;
  * baseline_present false means no baseline (everything "added", no
  * implicit write-back target). */
@@ -1628,7 +1628,7 @@ export interface SandboxConfirmDeletionsResponse {
 	refused: SandboxConfirmDeletionsRefused[];
 }
 
-/** Apply approved changes back to the host (Bloc 3). */
+/** Apply approved changes back to the host. */
 export interface SandboxApplyRequest {
 	diff_hash: string;
 	target_dir?: string;
@@ -1647,7 +1647,7 @@ export interface SandboxApplyRefusedEntry {
 	error: string;
 }
 
-/** Result of an apply-to-host run (Bloc 3). */
+/** Result of an apply-to-host run. */
 export interface SandboxApplyResponse {
 	session_id: string;
 	target: string;
@@ -1659,7 +1659,7 @@ export interface SandboxApplyResponse {
 	diff_hash: string;
 }
 
-/** (Bloc 4): the per-workspace network toggle. Enabling is Daily-only
+/** The per-workspace network toggle. Enabling is Daily-only
  * (403 under Bulbe at the binding-layer gate; an unset or unknown mode is
  * treated as Bulbe); disabling works in any mode. User action only. */
 export interface SandboxNetworkToggleRequest {
@@ -1671,7 +1671,7 @@ export interface SandboxNetworkToggleResponse {
 	network_enabled: boolean;
 }
 
-/** (Bloc 4): the provision run -- the one scoped egress. The
+/** The provision run -- the one scoped egress. The
  * requirements set must be exact name==version pins carrying
  * --hash=sha256: hashes; option lines are refused per line and nothing
  * installs on a partial validation. */

@@ -398,7 +398,7 @@ class SandboxConfig:
     # reboot). workspace_persistent=True skips the startup reconcile so files
     # under a configured persistent base survive restarts -- the documented
     # trade-off is a widened disposable window (data persists on disk between
-    # runs; write-back to the host stays approval-gated regardless, Bloc 3).
+    # runs; write-back to the host stays approval-gated regardless).
     # idle_ttl_seconds destroys idle, unbound workspaces lazily (0 disables).
     # disk_soft_limit_bytes is the per-workspace copy-in soft quota: a copy-in
     # that would exceed it is refused; the workspace itself is never killed.
@@ -897,7 +897,7 @@ class CommandValidator:
     # defense-in-depth ONLY. It is bypassable -- base64/eval, here-docs,
     # write-then-execute, obscure interpreters -- and must never be relied on
     # as the security boundary. The boundary is the namespace isolation that
-    # bwrap provides (hardened in Bloc 0: clean env, full namespace
+    # bwrap provides (hardened with a clean env, full namespace
     # cloistering, seccomp denylist, resource caps); these patterns only add
     # friction against the obvious and accidental cases.
 
@@ -1278,8 +1278,8 @@ def _build_bwrap_command(
     # Isolated /tmp (tmpfs, separate from host) with a size cap. The
     # --size option applies to the immediately following filesystem mount, so
     # it must precede --tmpfs. The read-write workspace is a real bind, not a
-    # tmpfs: its disk is bounded by RLIMIT_FSIZE (per file) plus the Bloc 1
-    # workspace quota, not by --size.
+    # tmpfs: its disk is bounded by RLIMIT_FSIZE (per file) plus the
+    # workspace disk quota, not by --size.
     cmd.extend([
         "--size", str(int(config.tmpfs_size_bytes)),
         "--tmpfs", "/tmp",
@@ -2093,9 +2093,9 @@ class SandboxManager:
         """Refuse a copy-in that would exceed the workspace soft quota.
 
         Soft semantics: raises WorkspaceQuotaExceeded; the caller's
-        copy-in is refused and the workspace is left untouched. The tmpfs
-        --size from Bloc 0 caps /tmp inside the sandbox; this quota covers
-        the workspace bind on the host side.
+        copy-in is refused and the workspace is left untouched. The
+        tmpfs_size_bytes setting bounds /tmp inside the sandbox; this quota
+        covers the workspace bind on the host side.
         """
         limit = self._config.disk_soft_limit_bytes
         current = self._workspace_disk_use(workspace)
@@ -2395,7 +2395,7 @@ class SandboxManager:
         files. Regular files are copied in bounded chunks with an
         on-the-fly sha256 per file -- the returned ``manifest`` maps each
         relative path (under the clone destination) to its content hash,
-        the seam Bloc 3's diff consumes. The destination
+        the seam the diff review consumes. The destination
         ``<workspace>/[dest_subdir/]<basename(src)>`` must not already
         exist (FileExistsError -> the route's 409): explicit, never merged.
 
@@ -3218,8 +3218,8 @@ class SandboxManager:
         Runs the lazy idle-TTL sweep first, then returns the
         manager view: the stored lifecycle fields plus the derived figures
         (age, running/idle from the process registry, approximate disk use
-        from the bounded walk). network_enabled is surfaced and stays False
-        this cycle (Bloc 4 flips it).
+        from the bounded walk). network_enabled is surfaced and reflects the
+        per-workspace flag (default False, flipped only by set_network_enabled).
         """
         self._sweep_idle_sessions()
         now = time.time()

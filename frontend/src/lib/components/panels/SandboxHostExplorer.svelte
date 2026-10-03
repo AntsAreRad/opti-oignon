@@ -1,5 +1,5 @@
 <!--
-  SandboxHostExplorer.svelte (Sandbox Workspace cycle, Bloc 2)
+  SandboxHostExplorer.svelte
   The host explorer + clone flow (spec 5.2): browse the allowlisted share
   roots (the server confines every request -- outside the roots it answers
   403 before any existence check), pick a directory, and clone it into the
@@ -8,7 +8,7 @@
   and file count, plus the per-workspace quota) by an exact pre-walk that
   refuses with 413 before any copy; a destination collision answers 409.
   Cap errors and skip counts are surfaced honestly. Cloning records the
-  section 6.1 baseline manifest server-side (Bloc 3's diff consumes it).
+  section 6.1 baseline manifest server-side (the diff review consumes it).
   An EXPLICIT user action: the model can trigger neither a browse nor a
   clone. Hidden entries are shown dimmed rather than hidden --
   a clone copies them, so hiding them would lie about what is shared.

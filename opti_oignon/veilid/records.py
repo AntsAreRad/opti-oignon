@@ -7,7 +7,7 @@ the skills registry. A record is the unit the sync protocol moves between a user
 own devices; this module turns a record into a stable, self-describing wire object
 and back, and computes the content hash the reconciler uses.
 
-Every record carries five things the rest of the bloc depends on: a stable
+Every record carries five things the rest of the sync layer depends on: a stable
 identity within its kind, a logical clock (a scalar version that the reconciler
 orders by, last-writer-wins), a content hash over the record's content, the source
 device that produced the version, and a kind tag that namespaces the identity so

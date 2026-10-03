@@ -184,7 +184,7 @@
 			</div>
 		{/if}
 
-		<!-- Bloc de reflexion retractable (assistant uniquement) -->
+		<!-- Collapsible reasoning block (assistant only) -->
 		{#if !isUser && hasThinking}
 			<details
 				class="mb-2 rounded-lg"

@@ -214,7 +214,7 @@ def _sync_publish_conversation(
     the full-state snapshot; it runs INSIDE this hook's protection, and only
     after the availability probe passes, so when sync is absent the save pays
     nothing at all (no snapshot reads, no journal append). The contract
-    (ROADMAP_SYNC_CYCLE, Bloc 0):
+    (ROADMAP_SYNC_CYCLE):
 
     - A snapshot or journalling failure must never break the save: any error
       is logged and swallowed (at-least-once on the next save).
@@ -1201,7 +1201,7 @@ class ConversationManager:
         lines.append(f"# {conv.title}")
         lines.append("")
 
-        # Bloc metadata
+        # Metadata block
         lines.append("---")
         lines.append(f"- **Created:** {conv.created_at}")
         lines.append(f"- **Updated:** {conv.updated_at}")

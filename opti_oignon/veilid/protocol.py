@@ -81,7 +81,7 @@ MSG_REMOTE_INFER_CONT = "remote_infer_cont"
 # caps an incoming envelope defensively and REJECTS past the cap (never truncates).
 #
 # The receiver caps are set well above the sender bound (>= with margin) so a
-# compliant sender -- including Bloc 2's per-record ML-DSA-65 signatures (~3.3 KB
+# compliant sender -- including per-record ML-DSA-65 signatures (~3.3 KB
 # each), sequenced after this lot precisely so signed batches stay bounded -- is
 # never rejected, while an unbounded or hostile envelope still cannot exhaust
 # memory on parse. Bytes are measured on the serialised wire records, the same

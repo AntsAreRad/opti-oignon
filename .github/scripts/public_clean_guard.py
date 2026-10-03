@@ -92,6 +92,12 @@ _PROCESS_WORDS = tuple(
     )
 )
 
+# The French word the internal numbering of work used for a block of work,
+# capitalised as that numbering spelled it, alone or before a number. Lower
+# case is left to the language guard: there it is ordinary French for a
+# block of code, and it is charged as French prose, not as nomenclature.
+_WORK_BLOCK = re.compile("(?<![A-Za-z])" + "Bl" + "ocs?" + "(?![A-Za-z])")
+
 # Document names in capitals. A markdown file named in capitals is either a
 # public document of the tree or an internal one, and the internal ones live
 # outside the repository and are never named from inside it. Listing those
@@ -171,6 +177,9 @@ def find_violations(lines):
             continue
         if _unlisted_doc_names(line):
             violations.append((index, "doc_name", raw.strip()))
+            continue
+        if _WORK_BLOCK.search(line):
+            violations.append((index, "work_block", raw.strip()))
             continue
         for pattern in _PROCESS_WORDS:
             if pattern.search(line):

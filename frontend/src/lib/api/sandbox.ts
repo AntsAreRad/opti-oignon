@@ -154,7 +154,7 @@ export async function getApprovalAudit(
 	return apiGet(`/api/sandbox/${sessionId}/approval-audit`);
 }
 
-// -- (Bloc 1): workspace lifecycle + conversation binding --
+// -- workspace lifecycle + conversation binding --
 
 /** SIGKILL the workspace's running command; the workspace persists.
  * stopped=false means nothing was running (honest no-op). */
@@ -184,7 +184,7 @@ export async function getConversationBinding(
 	return apiGet(`/api/sandbox/bind/${conversationId}`);
 }
 
-// -- (Bloc 2): copy-in (drag-and-drop, host browse, host clone) --
+// -- copy-in (drag-and-drop, host browse, host clone) --
 // All three are EXPLICIT user actions through the manager UI; the model can
 // trigger none of them. The agent only ever sees /workspace.
 
@@ -222,7 +222,7 @@ export async function cloneDirectory(
 	return apiPost(`/api/sandbox/${sessionId}/clone`, request);
 }
 
-// ---- (Bloc 3): diff-gated write-back ------------------------------------
+// ---- diff-gated write-back ------------------------------------
 // Review and apply are EXPLICIT user actions through the manager UI; the
 // model can trigger neither the diff-approve chain nor the apply.
 
@@ -258,7 +258,7 @@ export async function applyChanges(
 	return apiPost(`/api/sandbox/${sessionId}/apply`, request);
 }
 
-/** (Bloc 4): flip the per-workspace network flag -- an explicit user
+/** Flip the per-workspace network flag -- an explicit user
  * action. Enabling answers 403 under Bulbe (the binding-layer gate; an
  * unset or unknown mode is treated as Bulbe); disabling works in any mode.
  * Both directions are audited. */
@@ -269,7 +269,7 @@ export async function setNetwork(
 	return apiPost(`/api/sandbox/${sessionId}/network`, { enabled });
 }
 
-/** (Bloc 4): run the provision phase -- the one scoped egress: a
+/** Run the provision phase -- the one scoped egress: a
  * hash-pinned requirements set installed with --require-hashes
  * --only-binary=:all: into a workspace venv. 403 under Bulbe, 409 when the
  * workspace network flag is off, 400 on a set that is not exact-and-pinned

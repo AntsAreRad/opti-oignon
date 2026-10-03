@@ -57,6 +57,10 @@ independently of git:
     place to name private documents.
   * G23 -- a tracked file whose name is a document name in capitals off the
     list is flagged by name.
+  * G24 -- the French word the internal numbering used for a block of work,
+    capitalised as that numbering spelled it, is flagged; the same word in
+    lower case, ordinary French for a block of code, and the English word
+    are not.
 
 Every input that must be flagged is assembled from fragments at runtime, so
 the literal nomenclature never appears in this file's source and the guard
@@ -583,6 +587,32 @@ def test_g23_a_tracked_document_named_off_the_public_list_is_flagged():
 
 
 # ---------------------------------------------------------------------------
+# G24 -- the capitalised French work-block word is flagged
+# ---------------------------------------------------------------------------
+def test_g24_the_capitalised_french_work_block_word_is_flagged():
+    guard, restore = _load()
+    try:
+        word = "Bl" + "oc"
+        charged = [
+            "# " + word + " 3: the diff review",
+            "SandboxPanel.svelte (Sandbox Workspace cycle, " + word + " 1)",
+            '"""Resource Governor -- ' + word + "s 0-3: measurement.",
+        ]
+        free = [
+            # Lower case is ordinary French for a block of code: the
+            # language guard's business, not nomenclature.
+            "# Extrait les " + word.lower() + "s de code d'un texte",
+            "an English Block of text and a blocking call",
+        ]
+        found = guard.find_violations(charged)
+        assert [index for index, _kind, _snippet in found] == [0, 1, 2]
+        assert _kinds(found) == {"work_block"}
+        assert guard.find_violations(free) == []
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -628,6 +658,8 @@ def _run_all():
          test_g22_every_public_document_name_is_one_the_tree_writes),
         ("G23 unlisted document file name flagged",
          test_g23_a_tracked_document_named_off_the_public_list_is_flagged),
+        ("G24 capitalised work-block word flagged",
+         test_g24_the_capitalised_french_work_block_word_is_flagged),
     ]
     passed = 0
     for label, fn in tests:

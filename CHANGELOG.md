@@ -1133,6 +1133,11 @@ package costs.
 
 ### Changed
 
+- Comments, docstrings, a tooltip and five published API descriptions no
+  longer number the work in French "blocks": 155 lines in 34 files. A French
+  comment in the chat view is now English. The public-clean guard charges
+  that word, capitalised as the numbering spelled it; in lower case it is
+  ordinary French for a block of code, and the language guard's business.
 - Comments, docstrings, one log message and one local name in ten files no
   longer carry work codes, internal document names or process words. Each
   file is proven by the comment-only guard: its executable shape is

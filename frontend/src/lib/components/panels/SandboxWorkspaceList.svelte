@@ -1,9 +1,9 @@
 <!--
-  SandboxWorkspaceList.svelte (Sandbox Workspace cycle, Bloc 1)
+  SandboxWorkspaceList.svelte
   The decomposed workspace list of the sandbox manager (spec section 4.2),
   built on the lib/ds primitives. Each row surfaces the manager fields: id,
   optional label, bound conversation, age, approximate disk use, running/idle,
-  network on/off (off this cycle; Bloc 4 flips it) and last activity, with the
+  network on/off (per-workspace flag, default off, Daily-only) and last activity, with the
   stop / delete / select actions. Stop SIGKILLs the running command and keeps
   the workspace (files persist for inspection); delete destroys it; select
   binds it to the active conversation. Design-system tokens only (--oo-*);
@@ -94,7 +94,7 @@
 					<span title="Approximate disk use (bounded walk)">
 						disk {formatBytes(session.disk_use_bytes)}
 					</span>
-					<span title="Network stays off this cycle (Bloc 4 flips it)">
+					<span title="Network flag: per workspace, default off, Daily-only">
 						network {session.network_enabled ? 'on' : 'off'}
 					</span>
 					<span title="Last activity">active {formatLastActivity(session.last_activity)}</span>
