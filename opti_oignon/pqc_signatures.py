@@ -9,7 +9,8 @@ Features:
   - ML-DSA-65 keypair generation, signing, and verification
   - Feature-flagged: graceful degradation if liboqs is not installed
   - Key persistence in data/.pqc_keypair (chmod 600)
-  - Classical HMAC-SHA512 fallback is handled by the caller (backup_manager)
+  - No classical fallback: a caller that requires a signature refuses
+    without one (backup_manager exports nothing unsigned when it is required)
 
 Configuration: config/security.yaml > pqc > backup_signatures
 

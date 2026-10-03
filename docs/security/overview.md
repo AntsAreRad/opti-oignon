@@ -30,9 +30,10 @@ assumptions.
    binding, network bind guard monitors Ollama configuration, CSP
    headers in report-only mode. See [Bulbe Mode](bulbe-mode.md).
 
-5. **Audit chain** -- hash-chain audit log with tamper detection,
-   ML-DSA-65 post-quantum signatures, QR code and signed JSON export
-   for external verification. See [Audit Chain](audit-chain.md).
+5. **Audit chain** -- SHA-512 hash-chain audit log with tamper
+   detection, an anchor keyed with HMAC-SHA256 (not signed), and QR
+   code, JSON and clipboard anchor exports for later checks. See
+   [Audit Chain](audit-chain.md).
 
 6. **Automated security testing** -- LLM-powered red team engine that
    tests Opti-Oignon's own defense layers, dependency vulnerability

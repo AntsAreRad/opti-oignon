@@ -23,8 +23,9 @@ When Bulbe mode is active, the following constraints apply:
   externally
 - **Mandatory authentication** -- all API endpoints require a valid
   JWT session cookie; no anonymous access
-- **Full audit chain** -- every security-relevant action is logged
-  to the hash-chain audit log with post-quantum signatures
+- **Full audit chain** -- security-relevant actions are logged to the
+  SHA-512 hash-chain audit log, whose anchor is keyed with HMAC-SHA256
+  (tamper-evident, not signed; see `audit-chain.md`)
 - **Startup checklist** -- the full security checklist runs at startup
   and must pass all critical checks
 - **LUKS advisory** -- disk encryption status is checked and reported

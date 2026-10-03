@@ -134,7 +134,7 @@ auto-escalates to larger models on repeated failures.
 | User accounts | SQLite | bcrypt passwords, SQLCipher DB |
 | RAG vectors | ChromaDB | Collection-level isolation |
 | RAG metadata | SQLite | SQLCipher when available |
-| Audit chain | SQLite | SQLCipher + ML-DSA-65 signatures |
+| Audit chain | SQLite | SQLCipher; SHA-512 hash chain, HMAC-SHA256 anchor |
 | Plugin config | SQLite | Per-user, SQLCipher |
 | Benchmarks | SQLite | SQLCipher when available |
 | Configuration | YAML files | Filesystem permissions |

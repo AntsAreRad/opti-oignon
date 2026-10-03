@@ -1701,6 +1701,16 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The security documentation no longer claims signatures that do
+  not exist. The audit chain is a SHA-512 hash chain whose anchor is keyed
+  with HMAC-SHA256, not signed with ML-DSA-65; releases are signed with GPG
+  alone, when the workflow holds a key; nothing falls back to Ed25519, which
+  serves only as a TLS key type. The pages also said that the startup
+  checklist reports a plaintext database, that API keys are encrypted field
+  by field, that anchors can be verified without trusting the application,
+  and that the chain hashes with SHA-256: none of it is true, and each page
+  now says what the code does, including that the RAG vector store is not
+  encrypted at rest.
 - [SECURITY] Every outbound request of the plugin marketplace and of the
   model downloader asks the web gate, and every gate reads the security mode
   from disk. Until now:

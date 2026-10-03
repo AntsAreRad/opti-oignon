@@ -2,74 +2,83 @@
 
 ## How it works
 
-The audit chain is a tamper-evident log of security-relevant events.
-Each entry contains a SHA-256 hash of the previous entry, forming a
-hash chain similar to a blockchain. Any modification to a past entry
-breaks the chain and is detected automatically.
+The audit chain is a tamper-evident log of security-relevant events,
+stored in `data/audit_chain.db` (SQLCipher when available). Each entry
+carries the SHA-512 hash of its own fields and of the previous entry's
+hash, so a modification to a past entry breaks the chain at that entry.
+
+A separate anchor file records the number of entries and the hash of the
+last one, so that truncating the chain, or replacing it with a fresh
+one, is detected too. The anchor is authenticated with HMAC-SHA256 under
+a key derived from the master encryption key. Without a master key the
+anchor is a plain SHA-256 checksum, which only detects accidental
+corruption.
 
 
 ## What is logged
 
-The audit chain records:
+Among the events the chain records:
 
-- Authentication events (login, logout, failed attempts)
-- Configuration changes (security settings, plugin toggles)
-- Admin actions (user creation, role changes)
-- Sandbox events (tool execution, apply/reject decisions)
-- Encryption key operations (creation, rotation)
-- Red team audit results
-- Security checklist outcomes
+- Account events (registration, login, password change, user deletion,
+  project sharing)
+- Security mode changes and rejected non-local requests
+- Tool call approvals and sandbox events (provisioning, network toggle)
+- Emergency stops and conversation wipes
+- Resource governor decisions
+- Veilid synchronization, remote inference and lifecycle events
+- TLS setup and skill changes
 
 
-## Signatures
+## Keyed, not signed
 
-Each audit chain entry is signed using ML-DSA-65 post-quantum
-signatures (or Ed25519 as fallback). This ensures that entries cannot
-be forged even by an attacker who gains database write access.
-
-The signing key is stored in SecureBytes (mlock'd memory) and derived
-from the admin password via Argon2id.
+The chain is keyed with HMAC-SHA256, not signed: no ML-DSA-65 or
+Ed25519 signature is involved. An HMAC is symmetric, so whoever verifies
+holds the same secret as whoever wrote. The chain is therefore
+tamper-evident against an attacker who does not hold the master key, and
+not tamper-proof against one who does: such an attacker can recompute
+every hash and the anchor, and produce a chain that verifies clean. See
+`SECURITY.md`, layer 5.
 
 
 ## Verification
 
-### Automatic verification
+### On startup
 
-The startup security checklist verifies the entire audit chain on
-every boot. Any broken links or invalid signatures are reported in
-the health endpoint.
+When the backend starts, the audit log walks the chain and compares its
+tip with the anchor file. A broken link, a truncation or an altered
+anchor is logged as a warning or a critical error.
 
-### Manual verification
+### On demand
 
-```bash
-# Via the API
-curl http://localhost:8001/api/security/audit/verify
+These routes are under `/api/security` and require a valid session:
 
-# Via the CLI (if backend is running)
-oo redteam status  # includes chain integrity in output
-```
+- `POST /audit-chain/verify` walks the chain and reports the first
+  broken entry, if any
+- `GET /audit-chain/status` reports the chain's state
+- `GET /audit-chain/export` downloads the full chain as CSV
 
-### External verification
+### External anchors
 
-The audit chain supports export to external formats for independent
-verification:
+The current anchor can be exported in three forms:
 
-- **QR code export** -- individual entries encoded as QR codes for
-  offline verification or physical archival
-- **Signed JSON export** -- full chain exported as signed JSON with
-  embedded ML-DSA-65 signature for verification by external tools
-- **Clipboard anchor** -- copy a chain anchor (hash + signature) to
-  clipboard for pasting into external records
+- **JSON file** -- the anchor with its HMAC tag
+- **QR code** -- a PNG of the same anchor as compact JSON
+- **Clipboard text** -- the same fields in readable form
 
-These exports allow you to verify the integrity of the audit chain
-without trusting the Opti-Oignon software itself.
+`POST /audit/verify-anchor` checks a re-presented anchor: its tag under
+the same key, the chain's integrity, and that the chain at the anchored
+height still ends at the anchored hash. Growth after the anchor is fine;
+truncation and rewrites are not.
+
+An anchor kept off the machine shows later whether the chain was
+rewritten behind your back. Checking it needs the same master key, so a
+third party cannot verify it, and neither can a machine without that
+key.
 
 
 ## Retention
 
-Audit chain entries are retained indefinitely by default. The chain
-cannot be truncated without breaking verification -- this is by design.
-Storage impact is minimal (each entry is a few hundred bytes).
-
-Old entries can be exported and archived, but the chain in the database
-must remain complete for verification to work.
+Entries are kept indefinitely: nothing in the code deletes them, and
+each takes a few hundred bytes. The chain cannot be truncated without
+the anchor detecting it. Old entries can be exported as CSV, but the
+chain in the database must stay complete for verification to work.

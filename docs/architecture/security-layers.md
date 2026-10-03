@@ -38,7 +38,7 @@ flowchart TD
 
     subgraph L5["Layer 5: Audit"]
         E1[Hash-chain audit log]
-        E2[ML-DSA-65 post-quantum signatures]
+        E2[HMAC-SHA256 keyed anchor]
         E3[External anchor export]
         E4[Tamper detection]
     end
@@ -116,17 +116,19 @@ external access to local services.
 
 ## Layer 5: Audit chain
 
-An immutable log of security-relevant events enables forensic
-analysis and compliance.
+A tamper-evident log of security-relevant events supports forensic
+analysis.
 
-- **Hash chain** links each entry to the previous via SHA-256
-- **ML-DSA-65 signatures** provide post-quantum tamper resistance
-- **External anchors** allow verification without trusting the
-  application (QR code, signed JSON, clipboard)
+- **Hash chain** links each entry to the previous via SHA-512
+- **Keyed anchor** authenticates the chain's tip with HMAC-SHA256 under
+  a key derived from the master encryption key; it is not a signature,
+  so a holder of that key can rewrite the chain
+- **External anchors** (QR code, JSON file, clipboard text) show later
+  whether the chain was rewritten; checking one needs the same key
 - **Startup verification** checks chain integrity on every boot
 
-Threat model: post-compromise evidence tampering, insider threats,
-compliance requirements.
+Threat model: evidence tampering by anyone who does not hold the
+master encryption key.
 
 
 ## Layer 6: Automated security testing
