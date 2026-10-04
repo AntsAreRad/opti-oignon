@@ -30,6 +30,14 @@ When Bulbe mode is active, the following constraints apply:
   and must pass all critical checks
 - **LUKS advisory** -- disk encryption status is checked and reported
   (advisory only, does not block startup even in Bulbe mode)
+- **Strict sandbox** -- every sandbox switch that lowers the bubblewrap
+  path reads at its strict value, whatever `sandbox.yaml` or
+  `security.yaml` say: strict mode on (without bubblewrap, nothing
+  executes and no plugin starts), a `tempdir` backend given way to
+  bubblewrap where it runs, the seccomp filter on and required, the
+  resource limits on, and a degraded sandbox confirmed by the user. The
+  mode is read at each use, so a switch to Bulbe takes effect without a
+  restart; Daily mode keeps the configured values
 
 
 ## Web search
@@ -80,10 +88,10 @@ refusal is named in the tool result.
 
 What this does not cover, each named with the work that owns it:
 
-- **Code run by the code executor** -- its network is not confined; that
-  belongs to the sandbox work.
-- **Plugins** -- they are not confined; that belongs to plugin
-  confinement.
+- **Plugins that declare `network_outbound`** -- their worker keeps the
+  network, outside the web gate; every other plugin's worker runs without
+  one. Plugin loading itself is gated by the allowlist, and without
+  bubblewrap no plugin starts in Bulbe mode (see below).
 - **Ollama's cloud search and fetch** -- no module calls them, and the
   registry-funnel guard refuses a module that would. If `OLLAMA_API_KEY`
   is in the application's environment, nothing at run time would stop
@@ -153,11 +161,11 @@ import is a refusal. What asks the web gate today:
   from GitHub.
 
 Not yet: the egress census guard counts every network sink in the package,
-and 48 of them, in 15 modules its ledger names, still leave without asking
+and 46 of them, in 13 modules its ledger names, still leave without asking
 the web gate. They are the model lifecycle (the pull in Daily mode, its
 callers other than the route, and the update check), the external vector
-stores (Pinecone, Qdrant, Weaviate) and the local one, code that runs with
-the network (the code executor, the sandbox, plugin workers, the dependency
+stores (Pinecone, Qdrant, Weaviate) and the local one, processes that can
+reach the network (the sandbox's launches, plugin workers, the dependency
 monitor), the Ollama command line the context manager runs, the core
 client, the token counter, the terminal interface and the Veilid client.
 The local rule does not yet look at an environment proxy: a proxy named in

@@ -2512,6 +2512,20 @@ package costs.
   path's six are re-asserted on real workers, three more are superseded by
   name, and the in-process sandbox suite, which imports what is gone, is
   ignored and kept as the record.
+- [SECURITY] Bulbe pins the sandbox's strict settings. Every switch that
+  lowers the bubblewrap path was configuration in both modes:
+  `strict_mode: false` (in sandbox.yaml, or security.yaml over it),
+  `isolation_backend: tempdir`, `seccomp_enabled` or `seccomp_required`
+  off, `limits_enabled` off, `require_degraded_confirmation` off. Under
+  Bulbe each now reads at its strict value: without bubblewrap nothing
+  executes and no plugin starts, a tempdir backend gives way to bubblewrap
+  where it runs, a seccomp filter that cannot be built refuses the launch,
+  the limits are installed, and a degraded sandbox waits for the user's
+  confirmation. Daily keeps the configured values. The mode is read at
+  each use, so a switch to Bulbe pins them without a restart; a mode that
+  cannot be read pins them too. The Bulbe page drops two gaps the entries
+  above closed, code execution and plugins outside any confinement, and
+  counts the census as it stands. Seven contracts.
 
 ## 2.2.0 -- 2026-07-28
 

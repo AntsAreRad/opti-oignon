@@ -60,7 +60,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from opti_oignon.db_utils import safe_connect
@@ -1424,7 +1424,7 @@ class SandboxManager:
 
         # Detect isolation backend
         self._bwrap_available, self._bwrap_info = _detect_bwrap()
-        self._isolation_backend = self._resolve_backend()
+        self._configured_backend = self._resolve_backend()
 
         # Ensure workspace base exists
         os.makedirs(self._config.workspace_base, mode=0o700, exist_ok=True)
@@ -1501,10 +1501,61 @@ class SandboxManager:
 
         return IsolationBackend.TEMPDIR
 
+    def _bulbe_pins(self) -> bool:
+        """Whether Bulbe pins the strict settings at this moment.
+
+        The security mode is read at each use, so a switch to Bulbe pins
+        them without a restart. A mode that cannot be read pins them; without
+        the security-mode module there is no Bulbe to pin for.
+        """
+        try:
+            from opti_oignon.security_mode import is_bulbe
+        except ImportError:
+            return False
+        try:
+            return bool(is_bulbe())
+        except Exception:  # noqa: BLE001 - an unreadable mode pins the strict settings
+            return True
+
+    @property
+    def effective_config(self) -> SandboxConfig:
+        """The configuration in force.
+
+        Daily keeps every setting as configured. Under Bulbe each switch that
+        lowers the bubblewrap path reads at its strict value, whatever
+        sandbox.yaml or security.yaml say: strict mode on, a tempdir backend
+        given way to auto, the seccomp filter on and required, the resource
+        limits on, and a degraded sandbox confirmed by the user.
+        """
+        if not self._bulbe_pins():
+            return self._config
+        backend = self._config.isolation_backend
+        return replace(
+            self._config,
+            strict_mode=True,
+            isolation_backend="auto" if backend.lower() == "tempdir" else backend,
+            seccomp_enabled=True,
+            seccomp_required=True,
+            limits_enabled=True,
+            require_degraded_confirmation=True,
+        )
+
     @property
     def config(self) -> SandboxConfig:
-        """Access the sandbox configuration."""
-        return self._config
+        """Access the sandbox configuration in force (see effective_config)."""
+        return self.effective_config
+
+    @property
+    def _isolation_backend(self) -> IsolationBackend:
+        """The backend in force: under Bulbe a configured tempdir gives way to
+        bubblewrap wherever bubblewrap runs."""
+        if (
+            self._configured_backend == IsolationBackend.TEMPDIR
+            and self._bwrap_available
+            and self.effective_config.isolation_backend.lower() != "tempdir"
+        ):
+            return IsolationBackend.BWRAP
+        return self._configured_backend
 
     @property
     def audit(self) -> AuditLog:
@@ -1538,22 +1589,23 @@ class SandboxManager:
 
     @property
     def strict_mode(self) -> bool:
-        """Whether strict mode is enabled."""
-        return self._config.strict_mode
+        """Whether strict mode is in force (always under Bulbe)."""
+        return self.effective_config.strict_mode
 
     @property
     def execution_blocked(self) -> bool:
         """Whether code execution is blocked (strict_mode, bwrap not in use)."""
-        return self._config.strict_mode and not self.bwrap_in_use
+        return self.strict_mode and not self.bwrap_in_use
 
     def get_isolation_status(self) -> dict[str, Any]:
         """Return comprehensive isolation status for health checks.
 
         Returns a dict suitable for inclusion in /api/health responses.
         """
+        strict = self.strict_mode
         if self.bwrap_in_use:
             level = "bwrap"
-        elif self._config.strict_mode:
+        elif strict:
             level = "blocked"
         else:
             level = "tempdir"
@@ -1562,7 +1614,7 @@ class SandboxManager:
             "isolation_level": level,
             "bwrap_available": self._bwrap_available,
             "bwrap_info": self._bwrap_info,
-            "strict_mode": self._config.strict_mode,
+            "strict_mode": strict,
             "execution_blocked": self.execution_blocked,
             "backend": self._isolation_backend.value,
         }
@@ -1630,7 +1682,7 @@ class SandboxManager:
         # Enforce degraded mode confirmation. Only the configuration and the
         # user's own confirmation decide it; no caller can ask past it.
         if self.degraded_mode:
-            if self._config.require_degraded_confirmation:
+            if self.effective_config.require_degraded_confirmation:
                 if not self._degraded_confirmed:
                     raise RuntimeError(
                         "Sandbox is in DEGRADED mode (no bwrap). "
@@ -3155,7 +3207,7 @@ class SandboxManager:
         backend = self._isolation_backend
 
         # Strict mode -- refuse execution unless bwrap is the backend in use
-        if self._config.strict_mode and not self.bwrap_in_use:
+        if self.execution_blocked:
             if self._bwrap_available:
                 reason = (
                     "Sandbox strict_mode is ON but the configured isolation "
@@ -3380,7 +3432,7 @@ class SandboxManager:
         single, gated provision seam. Seccomp and the resource caps apply to
         the network-on run unchanged.
         """
-        config = self._config
+        config = self.effective_config
         seccomp_file = None
         seccomp_fd: int | None = None
 
