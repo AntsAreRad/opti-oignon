@@ -1,0 +1,35 @@
+# Hardware profile: which cards the inference engines use, and how often
+# their used memory is read again. The resource governor and speculative
+# decoding size their VRAM budgets from the cards selected here.
+#
+#   devices              -- auto: the discrete cards, with a known total, of
+#                           the first vendor that has any (NVIDIA, then AMD).
+#                           For NVIDIA, auto honours CUDA_VISIBLE_DEVICES in
+#                           the server's environment: a UUID, or a prefix
+#                           that names one card, is always read; a number is
+#                           an nvidia-smi index only with
+#                           CUDA_DEVICE_ORDER=PCI_BUS_ID or cards of one
+#                           model. An engine in another process (Ollama as a
+#                           service) reads its own environment instead; on
+#                           such a host, list the cards it uses. A list
+#                           selects exactly the cards it names, by id
+#                           (nvidia:0, pci:0000:03:00.0), UUID or bus id in
+#                           any written form, among those that report a total.
+#   integrated_below_gb  -- an AMD card reporting less of its own memory than
+#                           this, in GB, is taken as integrated (its memory is
+#                           a carve-out of the system RAM) and left out of auto.
+#   kind_overrides       -- a card's kind by id, UUID or bus id: discrete or
+#                           integrated.
+#   vram_used_ttl_s      -- how long a reading of the cards' used memory is
+#                           served before a background refresh reads it again.
+#   nvidia_smi_timeout_s -- how long one nvidia-smi query may take, in seconds.
+#   vram_used_max_age_s  -- a reading of the used memory older than this is
+#                           unknown, so a refresh that never returns does not
+#                           leave a frozen figure behind.
+# A value out of its range is ignored for its default, with a warning.
+devices: auto
+integrated_below_gb: 1.0
+kind_overrides: {}
+vram_used_ttl_s: 5.0
+nvidia_smi_timeout_s: 5.0
+vram_used_max_age_s: 600.0

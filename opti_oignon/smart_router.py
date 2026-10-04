@@ -146,21 +146,17 @@ _RAM_SAFETY_MARGIN_MB = 1024.0
 def _get_available_ram_mb() -> float:
     """Return available system RAM in MB, or 0.0 when it cannot be determined.
 
-    Reads /proc/meminfo (MemAvailable) on Linux, falls back to psutil, and
-    returns 0.0 if neither is usable. A 0.0 result disables the pre-flight
-    (fail-open: no model is excluded when memory state is unknown).
+    Reads MemAvailable through the hardware profile's /proc/meminfo reader.
+    A 0.0 result disables the pre-flight (fail-open: no model is excluded
+    when memory state is unknown), and a profile that cannot be loaded is
+    such a result.
     """
-    meminfo = Path("/proc/meminfo")
-    if meminfo.is_file():
-        try:
-            for line in meminfo.read_text(encoding="utf-8").splitlines():
-                if line.startswith("MemAvailable:"):
-                    return float(line.split()[1]) / 1024.0  # kB -> MB
-        except Exception:
-            pass
     try:
-        import psutil
-        return float(psutil.virtual_memory().available) / (1024.0 * 1024.0)
+        from opti_oignon.hardware_profile import read_meminfo
+    except Exception:
+        return 0.0
+    try:
+        return float(read_meminfo().available_mib)
     except Exception:
         return 0.0
 

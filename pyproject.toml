@@ -684,6 +684,13 @@ fail_under = 0
 # longer record. The split itself is pinned in
 # tests/test_governor_offload_contracts.py.
 #
+# The RAM a split leaves to the rest of the machine is now sized from the
+# machine: the shipped resource_governor.yaml leaves offload.ram_reserve_gb
+# null, and a number there stays the fixed reserve it was. go17 pinned the
+# shipped value 4.0. It stays in the tree word for word; go25, in the same
+# file, keeps its other assertions and pins the shipped null. The sizing
+# itself is pinned in tests/test_hardware_profile_contracts.py.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -796,4 +803,5 @@ addopts = """
     --deselect=tests/test_resource_governor_queue_contracts.py::test_w3_enrolled_refusal_at_depth_bound_does_not_enqueue
     --deselect=tests/test_dynamic_ctx_ceiling_contracts.py::test_dc8_a_starved_budget_answers_the_lowest_step_and_lets_fit_refuse
     --deselect=tests/test_backend_heads_contracts.py::test_bh2_ollama_reads_the_loaded_set_through_ps_in_both_forms_and_unknown_is_none
+    --deselect=tests/test_governor_offload_contracts.py::test_go17_the_offload_block_parses_and_the_shipped_file_carries_the_decided_defaults
 """

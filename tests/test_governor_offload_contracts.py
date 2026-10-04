@@ -59,6 +59,11 @@ was the arithmetic, and a KV cost that knew the model it priced.
     * GO24 -- a split resident is resident, and only its VRAM part counts as
       VRAM in use.
 
+  The reserve sized from the machine:
+    * GO25 -- what GO17 pins, now that the shipped file leaves ram_reserve_gb
+      null and the reserve is sized from the machine; GO17 stays in the tree
+      word for word and is deselected by name.
+
 Everything here is proven in the container, on scripted snapshots and fakes
 loaded through the shared isolation window: no card, no socket, no model.
 What an engine does with a split on the machine is owed there.
@@ -925,3 +930,20 @@ def test_go24_a_split_resident_is_resident_and_only_its_vram_part_is_vram_in_use
     in_ram = gov.admit("c", requested_ctx=2048, caller="chat")
     assert in_ram.admitted is True
     assert in_ram.load_expected is False
+
+
+def test_go25_the_offload_block_parses_and_the_shipped_file_sizes_the_reserve_from_the_machine():
+    rg = _open()[_RG]
+    tmp = Path(tempfile.mkdtemp(prefix="go-cfg-"))
+    path = tmp / "resource_governor.yaml"
+    path.write_text(
+        "offload:\n  enabled: false\n  prefer: speed\n  min_gpu_share: 0.25\n  ram_reserve_gb: 8.0\n",
+        encoding="utf-8",
+    )
+    assert _offload(rg.load_config(path)) == (False, "speed", 0.25, 8.0)
+    assert _offload(rg.load_config(tmp / "missing.yaml")) == (True, "context", 0.0, 4.0)
+    shipped = Path(source("config", "resource_governor.yaml"))
+    # null: the reserve is sized from the machine (the ram_reserve block).
+    assert _offload(rg.load_config(shipped)) == (True, "context", 0.0, None)
+    raw = yaml.safe_load(shipped.read_text(encoding="utf-8"))
+    assert raw["offload"] == {"enabled": True, "prefer": "context", "min_gpu_share": 0.0, "ram_reserve_gb": None}

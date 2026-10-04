@@ -136,8 +136,42 @@ def _nvidia_smi_available() -> bool:
     return shutil.which("nvidia-smi") is not None
 
 
+def nvidia_smi_rows(query: str, timeout: float = 5.0) -> list[list[str]] | None:
+    """Every row nvidia-smi prints for ``query``, one per card, or None.
+
+    The one place the package runs nvidia-smi. The fields of each row are
+    stripped and kept as text; a host without the tool answers None without
+    spawning anything, and so does a failed or timed-out query. A row per
+    card is the point: callers that need one card take the first row, and
+    the hardware profile reads them all.
+    """
+    if not _nvidia_smi_available():
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=" + query,
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        logger.debug("nvidia-smi query failed: %s", exc)
+        return None
+    if proc.returncode != 0:
+        return None
+    return [
+        [part.strip() for part in line.split(",")]
+        for line in proc.stdout.strip().splitlines()
+        if line.strip()
+    ]
+
+
 def _query_gpu_metrics() -> dict:
-    """Query GPU metrics via nvidia-smi.
+    """Query GPU metrics via nvidia-smi, for the first card it lists.
 
     Returns a dict with keys: gpu_utilization_pct, gpu_memory_used_mb,
     gpu_memory_total_mb, gpu_temperature_c. All values are -1.0 on
@@ -149,45 +183,14 @@ def _query_gpu_metrics() -> dict:
         "gpu_memory_total_mb": -1.0,
         "gpu_temperature_c": -1.0,
     }
-
-    try:
-        proc = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=" + _NVIDIA_SMI_QUERY,
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if proc.returncode != 0:
-            return result
-
-        line = proc.stdout.strip().split("\n")[0]
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) >= 4:
-            result["gpu_utilization_pct"] = _safe_float(parts[0])
-            result["gpu_memory_used_mb"] = _safe_float(parts[1])
-            result["gpu_memory_total_mb"] = _safe_float(parts[2])
-            result["gpu_temperature_c"] = _safe_float(parts[3])
-
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        logger.debug("nvidia-smi query failed: %s", exc)
-
+    rows = nvidia_smi_rows(_NVIDIA_SMI_QUERY)
+    if rows and len(rows[0]) >= 4:
+        parts = rows[0]
+        result["gpu_utilization_pct"] = _safe_float(parts[0])
+        result["gpu_memory_used_mb"] = _safe_float(parts[1])
+        result["gpu_memory_total_mb"] = _safe_float(parts[2])
+        result["gpu_temperature_c"] = _safe_float(parts[3])
     return result
-
-
-def read_total_vram_mb() -> float:
-    """Total VRAM in MiB, or ``-1.0`` when it cannot be read.
-
-    The public name for the one real VRAM reading in this package. The
-    negative sentinel is deliberate and is part of the contract: a host with
-    no NVIDIA card, no nvidia-smi, or a failed query is UNKNOWN, and a zero
-    would be a reading of a card with no memory. Callers must test for a
-    positive value rather than for truthiness.
-    """
-    return _query_gpu_metrics().get("gpu_memory_total_mb", -1.0)
 
 
 def _safe_float(val: str) -> float:
@@ -201,34 +204,21 @@ def _safe_float(val: str) -> float:
 def _get_system_memory() -> tuple[float, float]:
     """Get system memory usage (used_mb, total_mb).
 
-    Reads from /proc/meminfo on Linux, falls back to psutil if
-    available, or returns (0, 0).
+    Read through the hardware profile's /proc/meminfo reader; (0, 0) when
+    the total cannot be read or the profile cannot be loaded.
     """
-    meminfo_path = Path("/proc/meminfo")
-    if meminfo_path.is_file():
-        try:
-            text = meminfo_path.read_text(encoding="utf-8")
-            mem_total = 0.0
-            mem_available = 0.0
-            for line in text.splitlines():
-                if line.startswith("MemTotal:"):
-                    mem_total = float(line.split()[1]) / 1024.0  # kB to MB
-                elif line.startswith("MemAvailable:"):
-                    mem_available = float(line.split()[1]) / 1024.0
-            used = mem_total - mem_available
-            return (round(used, 1), round(mem_total, 1))
-        except Exception:
-            pass
-
-    # Fallback: try psutil.
     try:
-        import psutil
-        vm = psutil.virtual_memory()
-        return (vm.used / (1024 * 1024), vm.total / (1024 * 1024))
-    except ImportError:
-        pass
-
-    return (0.0, 0.0)
+        from opti_oignon.hardware_profile import read_meminfo
+    except Exception:
+        return (0.0, 0.0)
+    try:
+        info = read_meminfo()
+    except Exception:
+        return (0.0, 0.0)
+    if info.total_mib <= 0.0:
+        return (0.0, 0.0)
+    used = info.total_mib - info.available_mib
+    return (round(used, 1), round(info.total_mib, 1))
 
 
 # ---------------------------------------------------------------------------

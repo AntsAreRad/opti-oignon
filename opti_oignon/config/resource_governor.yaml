@@ -9,19 +9,21 @@
 # flag.
 enabled: true
 
-# Total VRAM capacity in GB. A value here is authoritative and the host is
-# never probed for it. null means ASK THE HOST: the governor reads the total
-# from nvidia-smi through the live-metrics collector, and the snapshot reports
-# capacity_source as "probe" rather than "config". If that reading is also
-# unavailable -- no card, no nvidia-smi, a failed query -- the capacity stays
-# UNKNOWN, measurement reports disabled_capacity_unknown, and any future
-# admission stays fail-open with a logged warning (spec Section 3.1). Set this
-# explicitly to override the reading or to work on a host without nvidia-smi.
+# Total VRAM capacity in GB. A value here is authoritative and no card is
+# read for it. null means ASK THE HOST: the capacity is the sum of the cards
+# the hardware profile selects (hardware_profile.yaml: every NVIDIA card
+# nvidia-smi lists, AMD cards from DRM sysfs), the memory other programs hold
+# on those cards is left to them, and the snapshot reports capacity_source as
+# "probe" rather than "config". If no card can be read -- no card, no
+# nvidia-smi, a failed query -- the capacity stays UNKNOWN, measurement
+# reports disabled_capacity_unknown, and any future admission stays fail-open
+# with a logged warning (spec Section 3.1). Set this explicitly to override
+# the reading or to work on a host whose cards cannot be read.
 total_vram_gb: null
 
-# Subtracted by the admission fit math (spec Section 4.2); also the
-# fast-down margin of the ceiling learning (spec Section 3.2). The
-# speculative_decoding precedent value.
+# Subtracted by the admission fit math (spec Section 4.2), once per card the
+# capacity was summed from; also the fast-down margin of the ceiling
+# learning (spec Section 3.2). The speculative_decoding precedent value.
 safety_margin_gb: 1.5
 
 # Snapshot cache TTL in seconds (spec Section 3). The ps view is a socket
@@ -136,12 +138,42 @@ dynamic_ctx:
 #   min_gpu_share   -- the smallest share of the cost a split may leave on the
 #                      GPU, from 0.0 to 1.0 (0.0: refuse only when VRAM and
 #                      RAM together are too small).
-#   ram_reserve_gb  -- the RAM a split leaves to the rest of the machine,
-#                      in GB, 0.0 or more.
+#   ram_reserve_gb  -- the RAM a split leaves to the rest of the machine: a
+#                      fixed figure in GB, 0.0 or more, or null to size it
+#                      from the machine (ram_reserve below). A file that does
+#                      not name it keeps a fixed 4.0.
 # A value out of its range is ignored for its default, with a warning.
 # Rollback: enabled false gives back the decisions made before offload.
 offload:
   enabled: true
   prefer: context
   min_gpu_share: 0.0
-  ram_reserve_gb: 4.0
+  ram_reserve_gb: null
+
+# The RAM reserve sized from the machine, when offload.ram_reserve_gb is null:
+# a fraction of the total RAM, held between a floor and a ceiling (the
+# ceiling when the total cannot be read), multiplied by pressure_factor while
+# the kernel reports memory pressure (host_pressure below), and never more
+# than the machine holds. 1/16 keeps 4.0 GB on a 64 GB machine.
+#   fraction         -- 0.0 to 1.0 of the total RAM.
+#   floor_gb         -- the smallest reserve, in GB, at most ceiling_gb.
+#   ceiling_gb       -- the largest reserve before pressure, in GB.
+#   pressure_factor  -- 1.0 or more.
+ram_reserve:
+  fraction: 0.0625
+  floor_gb: 2.0
+  ceiling_gb: 8.0
+  pressure_factor: 2.0
+
+# The kernel's pressure stall information (/proc/pressure), read with every
+# snapshot: the share of time, over the last ten seconds, that some task
+# waited on memory. At or above the enter mark the machine is under memory
+# pressure, and it stays so until the share falls below the exit mark; the
+# two marks keep a wavering reading from flipping the reserve. A kernel that
+# exposes no pressure files, or enabled false, is no pressure.
+#   memory_enter_some_avg10 -- 0 to 100 (percent).
+#   memory_exit_some_avg10  -- 0 to 100, at most the enter mark.
+host_pressure:
+  enabled: true
+  memory_enter_some_avg10: 10.0
+  memory_exit_some_avg10: 5.0

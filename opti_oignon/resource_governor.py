@@ -55,15 +55,20 @@ Ranked sources (Section 3, decision D2):
   is not moved and not duplicated; the contracts on its home module keep
   holding), plus the KV-cache increment implemented HERE as a function of
   the requested num_ctx (the config-tunable ``kv_coefficient``).
-- S4: capacity and host memory -- total VRAM capacity is a CONFIGURED
-  value (``total_vram_gb``, null by default meaning unknown), refined
-  downward by the learned ceiling (Section 3.2); host RAM comes from
-  /proc/meminfo MemAvailable with the psutil fallback. The RAM read is a
-  deliberate LOCAL EQUIVALENT of the smart_router idiom (a design
-  decision): the pre-flight is NOT moved out of smart_router
-  and its private helper is not imported across modules; the few lines
-  are replicated by decision so this module stays standalone-loadable
-  and zero existing files are edited here.
+- S4: capacity and host memory -- the VRAM capacity is the CONFIGURED
+  value (``total_vram_gb``) when one is written down; null asks the
+  machine: the capacity is then the sum of the cards the hardware profile
+  selects (hardware_profile.py: every NVIDIA card nvidia-smi lists, AMD
+  and Intel cards from DRM sysfs). On those cards the memory other
+  programs hold -- the cards' used memory less what the engines declare --
+  is deducted, and the safety margin is kept on each card. A learned
+  ceiling, when one is recorded, lowers the capacity (Section 3.2). Host
+  RAM comes from /proc/meminfo (MemTotal and MemAvailable; 0.0 is
+  unknown, never a guess). That reader is a deliberate LOCAL EQUIVALENT of
+  the profile's: this module stays loadable on its own, in a window
+  without the profile, and a contract holds the two readers to the same
+  answers. The kernel's pressure stall information, read through the
+  profile, sizes the RAM a split leaves to the rest of the machine.
 
 Design decisions (arbitrated):
 
@@ -91,7 +96,8 @@ Design decisions (arbitrated):
   eviction, and estop observation (drain and resume).
 
 Conservative defaults and fail-open (Section 3.1): capacity unknown
-(configured null AND no learned ceiling) -> the VRAM half reports
+(configured null, no card the profile can read, AND no learned ceiling)
+-> the VRAM half reports
 vram_status="disabled_capacity_unknown" with a logged warning and the RAM
 half still applies; an unknown model is never treated as too large; a
 source erroring is the same as a source absent (log at debug, degrade to
@@ -109,6 +115,7 @@ backup excluded).
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import threading
@@ -229,45 +236,30 @@ _SIZE_STR_RE = re.compile(r"^([\d.]+)\s*(GB|MB|B)$", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 
 
-def _default_vram_probe() -> float:
-    """Total VRAM in MiB from the host collector, or ``-1.0`` when unknown.
+def _read_meminfo_mb(meminfo_path: str | Path = "/proc/meminfo") -> tuple[float, float]:
+    """(MemAvailable, MemTotal) in MiB; a field that cannot be read is 0.0.
 
-    Imported lazily and on demand: the collector spawns nvidia-smi, and
-    neither importing this module nor running on a host without a card may
-    pay for that. The negative sentinel is the collector's own, and it is
-    what distinguishes "no reading" from "a card with no memory".
+    The local equivalent of hardware_profile.read_meminfo, kept here so the
+    governor loads on its own (a contract holds the two to the same answers
+    on the same files). A 0.0 MemAvailable means the RAM half of the
+    snapshot is unknown and must never exclude anything; a 0.0 MemTotal
+    leaves the adaptive reserve at its ceiling.
     """
+    fields = {"MemTotal:": 0.0, "MemAvailable:": 0.0}
     try:
-        from opti_oignon.live_metrics import read_total_vram_mb
-    except Exception as exc:  # pragma: no cover - import shape, not logic
-        logger.debug("VRAM probe unavailable: %s", exc)
-        return -1.0
-    return read_total_vram_mb()
-
-
-def _read_available_ram_mb(meminfo_path: str | Path = "/proc/meminfo") -> float:
-    """Return available system RAM in MB, or 0.0 when undeterminable.
-
-    Deliberate local equivalent of the smart_router idiom (a design
-    decision DI-1): /proc/meminfo MemAvailable first, the psutil fallback
-    second, 0.0 fail-open last (a 0.0 result means the RAM half of the
-    snapshot is unknown and must never exclude anything). The smart_router
-    pre-flight and its helper stay where they are.
-    """
-    p = Path(meminfo_path)
-    if p.is_file():
-        try:
-            for line in p.read_text(encoding="utf-8").splitlines():
-                if line.startswith("MemAvailable:"):
-                    return float(line.split()[1]) / 1024.0  # kB -> MB
-        except Exception:
-            pass
-    try:
-        import psutil
-
-        return float(psutil.virtual_memory().available) / (1024.0 * 1024.0)
-    except Exception:
-        return 0.0
+        text = Path(meminfo_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return 0.0, 0.0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in fields:
+            try:
+                value = float(parts[1])
+            except ValueError:
+                continue
+            if math.isfinite(value) and value >= 0.0:
+                fields[parts[0]] = value / 1024.0  # kB -> MiB
+    return fields["MemAvailable:"], fields["MemTotal:"]
 
 
 def _parse_parameter_size_b(value: Any) -> float:
@@ -585,7 +577,12 @@ def _as_weights_override_map(value: Any) -> dict[str, float]:
 
 
 def _bounded_float(
-    section: Mapping, key: str, default: float, low: float, high: float | None
+    section: Mapping,
+    key: str,
+    default: float,
+    low: float,
+    high: float | None,
+    section_name: str = "offload",
 ) -> float:
     """``section[key]`` as a number within [low, high], else ``default``.
 
@@ -605,7 +602,8 @@ def _bounded_float(
     ):
         return value
     logger.warning(
-        "offload.%s %r is not a number in [%s, %s]; keeping %s",
+        "%s.%s %r is not a number in [%s, %s]; keeping %s",
+        section_name,
         key,
         raw,
         low,
@@ -681,12 +679,25 @@ class GovernorConfig:
     # splits at the requested context before stepping down the ladder,
     # "speed" steps down on the GPU alone first and splits last. A split
     # must leave at least ``offload_min_gpu_share`` of the cost on the GPU
-    # (0.0 to 1.0) and never uses the last ``offload_ram_reserve_gb`` of
-    # available RAM (0.0 or more).
+    # (0.0 to 1.0) and never uses the reserve: the last
+    # ``offload_ram_reserve_gb`` of available RAM when that is a number (0.0
+    # or more), or, when it is None, a reserve sized from the machine --
+    # ``ram_reserve_fraction`` of the total RAM, within the floor and the
+    # ceiling, multiplied by ``ram_reserve_pressure_factor`` while the
+    # kernel reports memory pressure (``host_pressure_*``: entered at or
+    # above the enter mark, left below the exit mark). The shipped file
+    # leaves it None; a file that does not name it keeps the fixed 4.0.
     offload_enabled: bool = True
     offload_prefer: str = "context"
     offload_min_gpu_share: float = 0.0
-    offload_ram_reserve_gb: float = 4.0
+    offload_ram_reserve_gb: float | None = 4.0
+    ram_reserve_fraction: float = 0.0625
+    ram_reserve_floor_gb: float = 2.0
+    ram_reserve_ceiling_gb: float = 8.0
+    ram_reserve_pressure_factor: float = 2.0
+    host_pressure_enabled: bool = True
+    host_pressure_memory_enter: float = 10.0
+    host_pressure_memory_exit: float = 5.0
     # Admission's context shaping and the backpressure, queue and limits keys:
     ctx_ladder: list[int] = field(
         default_factory=lambda: [32768, 16384, 8192, 4096]
@@ -882,11 +893,86 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
         cfg.offload_min_gpu_share = _bounded_float(
             offload, "min_gpu_share", cfg.offload_min_gpu_share, 0.0, 1.0
         )
-        cfg.offload_ram_reserve_gb = _bounded_float(
-            offload, "ram_reserve_gb", cfg.offload_ram_reserve_gb, 0.0, None
-        )
+        if "ram_reserve_gb" in offload and offload.get("ram_reserve_gb") is None:
+            # null: the reserve is sized from the machine (ram_reserve).
+            cfg.offload_ram_reserve_gb = None
+        else:
+            cfg.offload_ram_reserve_gb = _bounded_float(
+                offload, "ram_reserve_gb", cfg.offload_ram_reserve_gb, 0.0, None
+            )
     elif offload is not None:
         logger.warning("offload is not a mapping; the offload defaults stand")
+
+    reserve = raw.get("ram_reserve")
+    if isinstance(reserve, dict):
+        fraction = _bounded_float(
+            reserve, "fraction", cfg.ram_reserve_fraction, 0.0, 1.0, "ram_reserve"
+        )
+        floor = _bounded_float(
+            reserve, "floor_gb", cfg.ram_reserve_floor_gb, 0.0, None, "ram_reserve"
+        )
+        ceiling = _bounded_float(
+            reserve, "ceiling_gb", cfg.ram_reserve_ceiling_gb, 0.0, None, "ram_reserve"
+        )
+        factor = _bounded_float(
+            reserve,
+            "pressure_factor",
+            cfg.ram_reserve_pressure_factor,
+            1.0,
+            None,
+            "ram_reserve",
+        )
+        if floor > ceiling:
+            logger.warning(
+                "ram_reserve.floor_gb %s is above ceiling_gb %s; keeping %s and %s",
+                floor,
+                ceiling,
+                cfg.ram_reserve_floor_gb,
+                cfg.ram_reserve_ceiling_gb,
+            )
+            floor, ceiling = cfg.ram_reserve_floor_gb, cfg.ram_reserve_ceiling_gb
+        cfg.ram_reserve_fraction = fraction
+        cfg.ram_reserve_floor_gb = floor
+        cfg.ram_reserve_ceiling_gb = ceiling
+        cfg.ram_reserve_pressure_factor = factor
+    elif reserve is not None:
+        logger.warning("ram_reserve is not a mapping; the reserve defaults stand")
+
+    host = raw.get("host_pressure")
+    if isinstance(host, dict):
+        cfg.host_pressure_enabled = _as_bool(
+            host.get("enabled"), cfg.host_pressure_enabled
+        )
+        enter = _bounded_float(
+            host,
+            "memory_enter_some_avg10",
+            cfg.host_pressure_memory_enter,
+            0.0,
+            100.0,
+            "host_pressure",
+        )
+        leave = _bounded_float(
+            host,
+            "memory_exit_some_avg10",
+            cfg.host_pressure_memory_exit,
+            0.0,
+            100.0,
+            "host_pressure",
+        )
+        if leave > enter:
+            logger.warning(
+                "host_pressure.memory_exit_some_avg10 %s is above"
+                " memory_enter_some_avg10 %s; keeping %s and %s",
+                leave,
+                enter,
+                cfg.host_pressure_memory_exit,
+                cfg.host_pressure_memory_enter,
+            )
+            enter, leave = cfg.host_pressure_memory_enter, cfg.host_pressure_memory_exit
+        cfg.host_pressure_memory_enter = enter
+        cfg.host_pressure_memory_exit = leave
+    elif host is not None:
+        logger.warning("host_pressure is not a mapping; its defaults stand")
 
     return cfg
 
@@ -1210,11 +1296,17 @@ class BackendResidentView:
 class ResourceSnapshot:
     """The assembled measurement view (Section 3).
 
-    ``vram_available_gb`` is RAW capacity minus in-use: the safety margin
-    is deliberately NOT subtracted here; applying it belongs to the admission
-    fit computation (spec Section 4.2). ``sources`` is the honest
-    provenance list naming exactly which read paths contributed.
-    ``taken_at`` is on the governor's clock (monotonic by default).
+    ``vram_available_gb`` is RAW capacity minus in-use minus what other
+    programs hold: the safety margin is deliberately NOT subtracted here;
+    applying it belongs to the admission fit computation (spec Section
+    4.2), once per selected card. ``sources`` is the honest provenance list
+    naming exactly which read paths contributed. ``taken_at`` is on the
+    governor's clock (monotonic by default). ``devices`` are the cards the
+    capacity was summed from (none when it was configured or injected),
+    ``vram_others_gb`` the memory other programs hold on them (the cards'
+    used memory less what the engines declare, never below zero; its
+    reading is ``vram_used_age_s`` old), and ``host_pressure`` the kernel's
+    pressure stall information, None where it could not be read.
     """
 
     taken_at: float
@@ -1228,6 +1320,14 @@ class ResourceSnapshot:
     vram_status: str = "ok"
     ram_available_mb: float = 0.0
     sources: list[str] = field(default_factory=list)
+    ram_total_mb: float = 0.0
+    devices: list[dict[str, Any]] = field(default_factory=list)
+    device_count: int = 0
+    vram_others_gb: float = 0.0
+    vram_used_age_s: float | None = None
+    vram_others_carried: bool = False
+    host_pressure: dict[str, Any] | None = None
+    memory_pressure_active: bool = False
 
     def age_s(self, now: float) -> float:
         return max(0.0, now - self.taken_at)
@@ -1252,6 +1352,25 @@ class ResourceSnapshot:
             "vram_status": self.vram_status,
             "ram_available_mb": round(self.ram_available_mb, 1),
             "sources": list(self.sources),
+            "ram_total_mb": round(self.ram_total_mb, 1),
+            "devices": [dict(d) for d in self.devices],
+            "device_count": self.device_count,
+            "vram_others_gb": round(self.vram_others_gb, 3),
+            "vram_used_age_s": (
+                round(self.vram_used_age_s, 3)
+                if self.vram_used_age_s is not None
+                else None
+            ),
+            "vram_others_carried": self.vram_others_carried,
+            "host_pressure": (
+                {
+                    resource: {kind: dict(values) for kind, values in lines.items()}
+                    for resource, lines in self.host_pressure.items()
+                }
+                if self.host_pressure is not None
+                else None
+            ),
+            "memory_pressure_active": self.memory_pressure_active,
         }
 
 
@@ -1853,6 +1972,7 @@ class ResourceGovernor:
         clock: Callable[[], float] = time.monotonic,
         meminfo_path: str | Path = "/proc/meminfo",
         vram_probe: Any = _UNSET,
+        hardware: Any = _UNSET,
     ):
         self._config = load_config(config_path)
         self._store = AdaptStore(db_path)
@@ -1863,12 +1983,22 @@ class ResourceGovernor:
         self._registry_override = registry
         self._clock = clock
         self._meminfo_path = meminfo_path
-        # Injected in tests; the default reads the host collector lazily, so
-        # importing the governor still spawns no subprocess and touches no
-        # device. Consulted only when no capacity is configured.
-        self._vram_probe = (
-            _default_vram_probe if vram_probe is _UNSET else vram_probe
-        )
+        # Consulted only when no capacity is configured. An injected probe
+        # (a callable answering the total in MiB, or None for none) is the
+        # whole of the capacity reading, and no card is read beside it;
+        # left unset, the capacity is the hardware profile's placement.
+        self._probe_injected = vram_probe is not _UNSET
+        self._vram_probe = None if vram_probe is _UNSET else vram_probe
+        # The hardware profile: injected (an object, or None for none), or
+        # resolved lazily at the first snapshot, so importing the governor
+        # still spawns no subprocess and touches no device.
+        self._hardware_arg = hardware
+        self._hardware_resolved: Any = _UNSET
+        self._memory_pressure_active = False
+        # What other programs held on the cards at the last reading that
+        # paired with the engines' holdings: carried across a load or an
+        # eviction until the cards are read again.
+        self._others_carry: float | None = None
         self._estimator = _load_vram_estimator()
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
@@ -1989,22 +2119,47 @@ class ResourceGovernor:
             self._pending_attribution[model] = requested_num_ctx
             self._geometry.pop(model, None)
             self._snapshot = None
+        self._invalidate_card_reading()
         self._notify_queue()
 
     def invalidate_on_evict(self, model: str | None = None) -> None:
         with self._cache_lock:
             self._snapshot = None
+        self._invalidate_card_reading()
         self._notify_queue()
 
     def invalidate_on_estop_drain(self) -> None:
         with self._cache_lock:
             self._snapshot = None
+        self._invalidate_card_reading()
         self._notify_queue()
 
     def invalidate_on_resume(self) -> None:
         with self._cache_lock:
             self._snapshot = None
+        self._invalidate_card_reading()
         self._notify_queue()
+
+    def _invalidate_card_reading(self) -> None:
+        """The engines' holdings changed: ask the profile for a fresh reading.
+
+        Called after the cache lock is released. Only a profile already in
+        use is told; none is resolved for it.
+        """
+        hardware = (
+            self._hardware_arg
+            if self._hardware_arg is not _UNSET
+            else self._hardware_resolved
+        )
+        if hardware is None or hardware is _UNSET:
+            return
+        invalidate = getattr(hardware, "invalidate_used", None)
+        if invalidate is None:
+            return
+        try:
+            invalidate()
+        except Exception as exc:
+            logger.debug("Card reading invalidation failed: %s", exc)
 
     def _notify_queue(self) -> None:
         """Wake queued admissions: the world may have moved.
@@ -2385,10 +2540,19 @@ class ResourceGovernor:
             sources.append(f"S2-unread:{backend_name}")
 
         configured = self._config.total_vram_gb
+        hardware = self._hardware()
         # The probe is a fallback, not an override: an operator who wrote a
         # figure down is not overruled by a sensor, and on a configured host
-        # nvidia-smi is never spawned at all.
-        probed = None if configured is not None else self._probe_capacity_gb()
+        # no card is read at all.
+        placement = None
+        probed = None
+        if configured is None:
+            if self._probe_injected:
+                probed = self._probe_capacity_gb()
+            elif hardware is not None:
+                placement = self._read_placement(hardware)
+                if placement is not None and (placement.capacity_mib or 0.0) > 0.0:
+                    probed = placement.capacity_mib / 1024.0
         declared = configured if configured is not None else probed
         declared_source = "config" if configured is not None else "probe"
 
@@ -2417,9 +2581,9 @@ class ResourceGovernor:
             capacity = None
             capacity_source = "unknown"
 
-        ram_mb = 0.0
+        ram_mb = ram_total_mb = 0.0
         try:
-            ram_mb = _read_available_ram_mb(self._meminfo_path)
+            ram_mb, ram_total_mb = _read_meminfo_mb(self._meminfo_path)
         except Exception as exc:  # pragma: no cover - the reader never raises
             logger.debug("S4 RAM read failed: %s", exc)
         if ram_mb > 0:
@@ -2429,22 +2593,58 @@ class ResourceGovernor:
             (v.estimated_gb or 0.0) for v in resident
         )
 
+        # The cards the capacity was summed from, and the memory other
+        # programs hold on them: what the cards report used, less what the
+        # engines declare -- only when the reading was taken since the
+        # engines last loaded or released a model. An older reading set
+        # against today's holdings would count a model just loaded as
+        # someone else's absence, or one just evicted as someone else's
+        # memory: what others held at the last paired reading is carried
+        # instead, until the cards are read again. An engine that declares
+        # more than the card shows leaves nobody else's memory, never less;
+        # a reading too old to describe the cards leaves it unknown.
+        devices: list[dict[str, Any]] = []
+        others = 0.0
+        used_age: float | None = None
+        carried = False
+        if placement is not None and probed is not None:
+            devices = [d.to_dict() for d in placement.devices]
+            if placement.used_mib is not None:
+                if getattr(placement, "used_current", True):
+                    others = max(0.0, placement.used_mib / 1024.0 - in_use)
+                    self._others_carry = others
+                elif self._others_carry is not None:
+                    others = self._others_carry
+                    carried = True
+                used_age = placement.used_age_s
+            else:
+                self._others_carry = None
+
+        host_pressure = None
+        if hardware is not None:
+            try:
+                host_pressure = hardware.pressure()
+            except Exception as exc:
+                logger.debug("Host pressure read failed: %s", exc)
+        memory_pressure = self._update_memory_pressure(host_pressure)
+
         if capacity is None:
             vram_status = "disabled_capacity_unknown"
             available: float | None = None
             if not self._capacity_warning_emitted:
                 logger.warning(
                     "Resource governor: total VRAM capacity unknown "
-                    "(total_vram_gb is null and no ceiling is learned); the "
-                    "VRAM half of measurement reports disabled and any "
-                    "future admission stays fail-open (spec Section 3.1). "
-                    "Set total_vram_gb in resource_governor.yaml on the "
-                    "host."
+                    "(total_vram_gb is null, the hardware profile reads no "
+                    "card and no ceiling is learned); the VRAM half of "
+                    "measurement reports disabled and any future admission "
+                    "stays fail-open (spec Section 3.1). Set total_vram_gb "
+                    "in resource_governor.yaml, or name the cards in "
+                    "hardware_profile.yaml, on the host."
                 )
                 self._capacity_warning_emitted = True
         else:
             vram_status = "ok"
-            available = max(0.0, capacity - in_use)
+            available = max(0.0, capacity - in_use - others)
 
         return ResourceSnapshot(
             taken_at=now,
@@ -2458,9 +2658,135 @@ class ResourceGovernor:
             vram_status=vram_status,
             ram_available_mb=ram_mb,
             sources=sources,
+            ram_total_mb=ram_total_mb,
+            devices=devices,
+            device_count=len(devices),
+            vram_others_gb=others,
+            vram_used_age_s=used_age,
+            vram_others_carried=carried,
+            host_pressure=host_pressure,
+            memory_pressure_active=memory_pressure,
         )
 
-    # -- learning passthroughs (rules land now; the admission path calls them) --
+    # -- the machine: cards, pressure, the RAM reserve ------------------------
+
+    def _hardware(self) -> Any:
+        """The hardware profile, or None when there is none to ask.
+
+        An injected one (or an injected None) answers. An injected VRAM
+        probe stands alone: no card is read beside it. Otherwise the
+        process-wide profile is resolved once, lazily; a window without the
+        profile module is a governor without one.
+        """
+        if self._hardware_arg is not _UNSET:
+            return self._hardware_arg
+        if self._probe_injected:
+            return None
+        if self._hardware_resolved is _UNSET:
+            try:
+                from opti_oignon.hardware_profile import get_hardware_profile
+
+                self._hardware_resolved = get_hardware_profile()
+            except Exception as exc:
+                logger.debug("Hardware profile unavailable: %s", exc)
+                self._hardware_resolved = None
+        return self._hardware_resolved
+
+    def _read_placement(self, hardware: Any) -> Any:
+        try:
+            return hardware.placement()
+        except Exception as exc:
+            logger.debug("Hardware placement read failed: %s", exc)
+            return None
+
+    def _update_memory_pressure(self, host_pressure: Any) -> bool:
+        """Whether the kernel reports memory pressure, with hysteresis.
+
+        Entered when the share of time some task stalled on memory over the
+        last ten seconds reaches the enter mark, left only once it falls
+        below the exit mark, so a reading that wavers between the two does
+        not flip the reserve from one admission to the next. Unknown, or
+        the signal disabled, is no pressure.
+        """
+        cfg = self._config
+        some = None
+        if cfg.host_pressure_enabled and isinstance(host_pressure, dict):
+            memory = host_pressure.get("memory") or {}
+            some = (memory.get("some") or {}).get("avg10")
+        if not isinstance(some, (int, float)) or isinstance(some, bool):
+            self._memory_pressure_active = False
+        elif some >= cfg.host_pressure_memory_enter:
+            self._memory_pressure_active = True
+        elif some < cfg.host_pressure_memory_exit:
+            self._memory_pressure_active = False
+        return self._memory_pressure_active
+
+    def _vram_margin_gb(self, snapshot: Any) -> float:
+        """The safety margin, kept on every card the capacity was summed from."""
+        count = getattr(snapshot, "device_count", 0) or 0
+        return self._config.safety_margin_gb * max(1, int(count))
+
+    def ram_reserve_state(self, snapshot: Any) -> dict[str, Any]:
+        """The RAM a split leaves to the rest of the machine, and why.
+
+        A number in ``offload.ram_reserve_gb`` is that number, whatever the
+        machine and its pressure. None sizes it: ``ram_reserve_fraction`` of
+        the total RAM, held between the floor and the ceiling (the ceiling
+        when the total cannot be read), multiplied by the pressure factor
+        while the kernel reports memory pressure, and never more than the
+        machine holds.
+        """
+        cfg = self._config
+        known = getattr(snapshot, "host_pressure", None) is not None
+        fixed = cfg.offload_ram_reserve_gb
+        if fixed is not None:
+            return {
+                "mode": "fixed",
+                "gb": fixed,
+                "base_gb": fixed,
+                "pressure_applied": False,
+                "pressure_known": known,
+            }
+        total_gb = (getattr(snapshot, "ram_total_mb", 0.0) or 0.0) / 1024.0
+        if total_gb > 0.0:
+            base = min(
+                cfg.ram_reserve_ceiling_gb,
+                max(cfg.ram_reserve_floor_gb, cfg.ram_reserve_fraction * total_gb),
+            )
+        else:
+            base = cfg.ram_reserve_ceiling_gb
+        applied = cfg.host_pressure_enabled and bool(
+            getattr(snapshot, "memory_pressure_active", False)
+        )
+        reserve = base * cfg.ram_reserve_pressure_factor if applied else base
+        if total_gb > 0.0:
+            reserve = min(reserve, total_gb)
+        return {
+            "mode": "adaptive",
+            "gb": round(reserve, 3),
+            "base_gb": round(base, 3),
+            "pressure_applied": applied,
+            "pressure_known": known,
+        }
+
+    def effective_ram_reserve_gb(self, snapshot: Any) -> float:
+        """The RAM reserve a split priced on ``snapshot`` leaves untouched."""
+        return float(self.ram_reserve_state(snapshot)["gb"])
+
+    def hardware_state(self) -> dict[str, Any]:
+        """The hardware profile's view for the status surface."""
+        hardware = self._hardware()
+        if hardware is None:
+            return {"available": False}
+        try:
+            state = dict(hardware.to_dict())
+        except Exception as exc:
+            logger.debug("Hardware profile view failed: %s", exc)
+            return {"available": False}
+        state["available"] = True
+        return state
+
+    # -- learning passthroughs (the rules hold; no production path calls them yet) --
 
     def record_load_failure(self, observed_in_use_gb: float) -> float:
         """Fast-down the learned ceiling after a failed load (Section 3.2)."""
@@ -2536,7 +2862,12 @@ class ResourceGovernor:
         self, snapshot: ResourceSnapshot
     ) -> dict[str, Any]:
         cfg = self._config
+        # What other programs hold on the cards is not the governor's to
+        # use: the effective capacity is what is left of it.
+        others = getattr(snapshot, "vram_others_gb", 0.0) or 0.0
         effective = snapshot.capacity_gb
+        if effective is not None:
+            effective = max(0.0, effective - others)
         ratio: float | None = None
         ratio_level = "none"
         if effective is not None and effective > 0:
@@ -2576,6 +2907,7 @@ class ResourceGovernor:
             "ratio": round(ratio, 4) if ratio is not None else None,
             "effective_capacity_gb": effective,
             "in_use_gb": round(snapshot.vram_in_use_gb, 3),
+            "others_gb": round(others, 3),
             "soft_threshold": cfg.pressure_soft_threshold,
             "hard_threshold": cfg.pressure_hard_threshold,
             "refusal_rate": round(refusal_rate, 4),
@@ -2889,9 +3221,10 @@ class ResourceGovernor:
             return decision
 
         in_use = snapshot.vram_in_use_gb
-        margin = self._config.safety_margin_gb
+        others = getattr(snapshot, "vram_others_gb", 0.0) or 0.0
+        margin = self._vram_margin_gb(snapshot)
         evictable = self._evictable_now_gb(snapshot)
-        budget_unconditional = snapshot.capacity_gb - in_use - margin
+        budget_unconditional = snapshot.capacity_gb - in_use - others - margin
         budget_with_eviction = budget_unconditional + evictable
         # The RAM a split may use; None when no split is priced at all.
         ram_budget = self._offload_ram_budget_gb(snapshot)
@@ -3043,17 +3376,17 @@ class ResourceGovernor:
     def _offload_ram_budget_gb(self, snapshot: Any) -> float | None:
         """The system RAM a split may use, or None when none is priced.
 
-        MemAvailable less the configured reserve. Offload off, or the RAM
-        unreadable (the snapshot then reads 0), means no split: a split
-        priced against RAM nobody measured would be a guess, so the
-        refusal stands instead.
+        MemAvailable less the effective reserve (ram_reserve_state). Offload
+        off, or the RAM unreadable (the snapshot then reads 0), means no
+        split: a split priced against RAM nobody measured would be a guess,
+        so the refusal stands instead.
         """
         if not self._config.offload_enabled:
             return None
         ram_mb = getattr(snapshot, "ram_available_mb", 0.0) or 0.0
         if ram_mb <= 0.0:
             return None
-        return ram_mb / 1024.0 - self._config.offload_ram_reserve_gb
+        return ram_mb / 1024.0 - self.effective_ram_reserve_gb(snapshot)
 
     def _observe_estop_transition(self, stopped: bool) -> None:
         """R-04 invalidation wiring without editing emergency_stop:
@@ -3138,7 +3471,8 @@ class ResourceGovernor:
             kv_budget_gb = (
                 snapshot.capacity_gb
                 - snapshot.vram_in_use_gb
-                - self._config.safety_margin_gb
+                - (getattr(snapshot, "vram_others_gb", 0.0) or 0.0)
+                - self._vram_margin_gb(snapshot)
                 - known_weights_gb
             )
             coeff = (
@@ -3279,7 +3613,8 @@ class ResourceGovernor:
             budget = (
                 snapshot.capacity_gb
                 - snapshot.vram_in_use_gb
-                - self._config.safety_margin_gb
+                - (getattr(snapshot, "vram_others_gb", 0.0) or 0.0)
+                - self._vram_margin_gb(snapshot)
             )
             needed = cost - budget
             if needed <= 0.0:

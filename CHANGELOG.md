@@ -2555,6 +2555,50 @@ package costs.
   its VRAM part, the cost the governor learns is that total, and a model
   split or held in RAM counts as loaded. Twenty-four contracts; eight
   earlier ones are superseded by name, each replaced in its own file.
+- The governor sees every card the engines use, and what the rest of the
+  machine needs. Its capacity was the total of the first card nvidia-smi
+  printed, read by a new process at every snapshot rebuild, sometimes on
+  the request path; a second card, an AMD card and the memory other
+  programs held on a card did not exist for it. A hardware profile
+  (`opti_oignon/hardware_profile.py`, `hardware_profile.yaml`) now reads
+  every NVIDIA card nvidia-smi lists and every card DRM sysfs describes,
+  each with an id, a kind and its memory. With `total_vram_gb` null, the
+  capacity is the sum of the cards it selects: `devices: auto` takes the
+  discrete cards of the first vendor that has any, NVIDIA then AMD,
+  honouring CUDA_VISIBLE_DEVICES in the server's environment (a number
+  there counts only under CUDA_DEVICE_ORDER=PCI_BUS_ID or with cards of one
+  model, since CUDA otherwise counts the fastest first), and leaves out an
+  AMD card whose own memory is under `integrated_below_gb` (1.0); a list
+  names the cards instead, by id, UUID or bus id in any written form. The
+  safety margin is kept on each selected card, and the memory other
+  programs hold on them, the cards' used memory less what the engines
+  declare, is not counted as free: not by admission, the dynamic context,
+  the eviction it plans or the pressure signal. That deduction is taken
+  only from a reading made since the engines last loaded or released a
+  model; in between, the last paired figure is carried and the cards are
+  read again at once, and a reading older than `vram_used_max_age_s`
+  (600 s) is unknown. The cards are read at the first question, and their
+  used memory is read again in the background every `vram_used_ttl_s` (5
+  s), so no admission waits on nvidia-smi after the first reading. The RAM a
+  split leaves to
+  the rest of the machine is sized from the machine: the shipped
+  `offload.ram_reserve_gb` is null, which keeps 1/16 of the total RAM,
+  between 2 and 8 GB (`ram_reserve`), and doubles it while the kernel's
+  pressure stall information reports memory pressure (`host_pressure`:
+  entered when tasks waited on memory 10 per cent of the last ten seconds,
+  left under 5); a number there is still a fixed reserve, and a file that
+  names none keeps 4.0. The status route shows the cards, what other
+  programs hold, the pressure and the reserve; the config routes write the
+  new keys in range and refuse a write that crosses the floor and the
+  ceiling or the two pressure marks, read from the file being written.
+  smart_router and the live metrics read the RAM through the profile, the
+  governor keeps its own reader so it still loads alone, held to the same
+  answers, and no module imports psutil any more: no manifest declared it.
+  A host without /proc/meminfo now reads its RAM as unknown, so no split is
+  priced there. Speculative decoding sizes its draft budget from the
+  detected cards, and from its configured 24 GB only when none is
+  detected. Thirty-six contracts; go17, which pinned the shipped 4.0, is
+  superseded by name by go25 in its own file.
 
 ## 2.2.0 -- 2026-07-28
 

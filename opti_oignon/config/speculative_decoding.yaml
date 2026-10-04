@@ -43,5 +43,5 @@ family_compatibility:
 
 # VRAM budget estimation defaults (in GB).
 vram_budget:
-  default_total_gb: 24   # Assumed total VRAM if detection fails
+  default_total_gb: 24   # Assumed total VRAM when the hardware profile detects no card
   safety_margin_gb: 1.5  # Reserve for OS/other processes

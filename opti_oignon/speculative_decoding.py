@@ -219,6 +219,25 @@ def _default_availability_probe() -> bool | None:
         return None
 
 
+def _detected_total_vram_gb() -> float | None:
+    """The cards' placement capacity in GiB, from the hardware profile, or None.
+
+    Imported lazily, like the availability probe: importing this module reads
+    no device. None -- no card the profile can read, or no profile at all --
+    leaves the configured default in charge.
+    """
+    try:
+        from opti_oignon.hardware_profile import get_hardware_profile
+
+        capacity = get_hardware_profile().placement().capacity_mib
+    except Exception as exc:
+        logger.debug("No VRAM capacity detected: %s", exc)
+        return None
+    if capacity is None or capacity <= 0.0:
+        return None
+    return float(capacity) / 1024.0
+
+
 def round_or_none(value: float | None, digits: int) -> float | None:
     """Round a number, or keep an unknown unknown.
 
@@ -807,9 +826,16 @@ class SpeculativeDecodingManager:
             ]
             return flags
 
+    def _vram_total_gb(self) -> float:
+        """The detected placement capacity, or the configured default."""
+        detected = _detected_total_vram_gb()
+        if detected is not None:
+            return detected
+        return self._vram_budget_cfg.get("default_total_gb", 24.0)
+
     def get_draft_selector(self) -> DraftModelSelector:
         """Create a DraftModelSelector with current config."""
-        vram_total = self._vram_budget_cfg.get("default_total_gb", 24.0)
+        vram_total = self._vram_total_gb()
         vram_margin = self._vram_budget_cfg.get("safety_margin_gb", 1.5)
         calc = VRAMBudgetCalculator(
             total_vram_gb=vram_total,
@@ -822,7 +848,7 @@ class SpeculativeDecodingManager:
 
     def get_vram_calculator(self) -> VRAMBudgetCalculator:
         """Create a VRAMBudgetCalculator with current config."""
-        vram_total = self._vram_budget_cfg.get("default_total_gb", 24.0)
+        vram_total = self._vram_total_gb()
         vram_margin = self._vram_budget_cfg.get("safety_margin_gb", 1.5)
         return VRAMBudgetCalculator(
             total_vram_gb=vram_total,

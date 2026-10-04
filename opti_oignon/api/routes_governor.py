@@ -8,7 +8,9 @@ FastAPI wrapper that maps faults to HTTP codes. The contract (spec Section 9):
 
 - ``GET  /api/governor/status``       -> snapshot, provenance, capacity,
                                           learned ceiling, pressure, queue depth,
-                                          the external-Ollama advisory
+                                          the external-Ollama advisory, the
+                                          cards the hardware profile reads and
+                                          the RAM reserve a split leaves
 - ``GET  /api/governor/admissions``   -> the bounded recent-decisions ring
 - ``POST /api/governor/evict``        -> per-model eviction (honest boolean,
                                           fail-open semantics surfaced)
@@ -173,14 +175,73 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
         "min": 0.0,
         "max": 1.0,
     },
+    # null sizes the reserve from the machine (the ram_reserve keys below).
     "offload.ram_reserve_gb": {
         "attr": "offload_ram_reserve_gb",
-        "type": "float",
+        "type": "opt_float",
         "section": "offload",
         "leaf": "ram_reserve_gb",
         "min": 0.0,
     },
+    "ram_reserve.fraction": {
+        "attr": "ram_reserve_fraction",
+        "type": "float",
+        "section": "ram_reserve",
+        "leaf": "fraction",
+        "min": 0.0,
+        "max": 1.0,
+    },
+    "ram_reserve.floor_gb": {
+        "attr": "ram_reserve_floor_gb",
+        "type": "float",
+        "section": "ram_reserve",
+        "leaf": "floor_gb",
+        "min": 0.0,
+    },
+    "ram_reserve.ceiling_gb": {
+        "attr": "ram_reserve_ceiling_gb",
+        "type": "float",
+        "section": "ram_reserve",
+        "leaf": "ceiling_gb",
+        "min": 0.0,
+    },
+    "ram_reserve.pressure_factor": {
+        "attr": "ram_reserve_pressure_factor",
+        "type": "float",
+        "section": "ram_reserve",
+        "leaf": "pressure_factor",
+        "min": 1.0,
+    },
+    "host_pressure.enabled": {
+        "attr": "host_pressure_enabled",
+        "type": "bool",
+        "section": "host_pressure",
+        "leaf": "enabled",
+    },
+    "host_pressure.memory_enter_some_avg10": {
+        "attr": "host_pressure_memory_enter",
+        "type": "float",
+        "section": "host_pressure",
+        "leaf": "memory_enter_some_avg10",
+        "min": 0.0,
+        "max": 100.0,
+    },
+    "host_pressure.memory_exit_some_avg10": {
+        "attr": "host_pressure_memory_exit",
+        "type": "float",
+        "section": "host_pressure",
+        "leaf": "memory_exit_some_avg10",
+        "min": 0.0,
+        "max": 100.0,
+    },
 }
+
+# Pairs load_config holds in order, (low, high): a write that crosses one
+# would be set aside at the next load, so it is refused here.
+ORDERED_PAIRS: tuple[tuple[str, str], ...] = (
+    ("ram_reserve.floor_gb", "ram_reserve.ceiling_gb"),
+    ("host_pressure.memory_exit_some_avg10", "host_pressure.memory_enter_some_avg10"),
+)
 
 # Keys deliberately not writable over the API, with the honest reason.
 READ_ONLY_KEYS: dict[str, str] = {
@@ -222,6 +283,8 @@ def status_payload(governor: Any) -> dict[str, Any]:
         "snapshot": snapshot.to_dict(),
         "learned_ceiling_gb": learned_ceiling,
         "pressure": governor.pressure_state(),
+        "hardware": governor.hardware_state(),
+        "ram_reserve": governor.ram_reserve_state(snapshot),
         "queue_depth": governor.queue_depth,
         "ollama_limits": governor.ollama_limits_advisory(),
     }
@@ -306,6 +369,17 @@ def _config_to_nested(cfg: Any) -> dict[str, Any]:
             "min_gpu_share": cfg.offload_min_gpu_share,
             "ram_reserve_gb": cfg.offload_ram_reserve_gb,
         },
+        "ram_reserve": {
+            "fraction": cfg.ram_reserve_fraction,
+            "floor_gb": cfg.ram_reserve_floor_gb,
+            "ceiling_gb": cfg.ram_reserve_ceiling_gb,
+            "pressure_factor": cfg.ram_reserve_pressure_factor,
+        },
+        "host_pressure": {
+            "enabled": cfg.host_pressure_enabled,
+            "memory_enter_some_avg10": cfg.host_pressure_memory_enter,
+            "memory_exit_some_avg10": cfg.host_pressure_memory_exit,
+        },
     }
 
 
@@ -355,8 +429,11 @@ def _check_range(spec: dict[str, Any], value: Any, key: str) -> None:
     """Refuse a value outside the key's declared choices or range (400).
 
     A key without an upper bound still refuses infinity, and a NaN is in no
-    range. Keys that declare neither pass untouched.
+    range. Keys that declare neither pass untouched, and so does the null of
+    a nullable key.
     """
+    if value is None:
+        return
     choices = spec.get("choices")
     if choices is not None and value not in choices:
         raise ConfigWriteError(400, f"{key} expects one of {', '.join(choices)}")
@@ -368,6 +445,38 @@ def _check_range(spec: dict[str, Any], value: Any, key: str) -> None:
     if not (above and below):
         bounds = f"[{low}, {high}]" if high is not None else f"[{low}, inf)"
         raise ConfigWriteError(400, f"{key} expects a number in {bounds}")
+
+
+def _check_pairs(current_config: Any, typed: dict[str, Any], text: str) -> None:
+    """Refuse a write that leaves an ordered pair crossed in the file (400).
+
+    Each side is read from ``text``, the YAML about to be written: the
+    written value, or what the file already holds there -- so a pair a hand
+    edit left crossed is caught too, not only one this write crosses. A
+    side the file does not hold is the current configuration's.
+    """
+    import yaml
+
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except Exception:
+        parsed = {}
+    for low_key, high_key in ORDERED_PAIRS:
+        if low_key not in typed and high_key not in typed:
+            continue
+        sides = []
+        for key in (low_key, high_key):
+            spec = WRITABLE_KEYS[key]
+            section = parsed.get(spec["section"]) if isinstance(parsed, dict) else None
+            value = section.get(spec["leaf"]) if isinstance(section, dict) else None
+            if key in typed:
+                value = typed[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                value = getattr(current_config, spec["attr"])
+            sides.append(value)
+        low, high = sides
+        if low > high:
+            raise ConfigWriteError(400, f"{low_key} ({low}) may not exceed {high_key} ({high})")
 
 
 def _yaml_scalar(value: Any) -> str:
@@ -493,6 +602,7 @@ def config_write_payload(
         old = getattr(current_config, WRITABLE_KEYS[key]["attr"])
         new_text = _set_yaml_scalar(new_text, key, value)  # may raise 409
         applied[key] = {"old": old, "new": value}
+    _check_pairs(current_config, typed, new_text)
 
     try:
         p.write_text(new_text, encoding="utf-8")
