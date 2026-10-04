@@ -88,7 +88,9 @@ def _resolve_resource_governor() -> Any:
         return None
 
 
-def _governor_admission(model: str, options: dict | None) -> None:
+def _governor_admission(
+    model: str, options: dict | None, unsplittable: str | None = None
+) -> None:
     """The internal hook at the six generate/stream heads and the embedding head.
 
     Six, not four: the external llama-server backend was the one that talks
@@ -101,12 +103,19 @@ def _governor_admission(model: str, options: dict | None) -> None:
     down; a ticketless call gets the fast cached admit-or-refuse backstop.
     Module absent, disabled by config, or any governor error: proceed
     unguarded. Only the governor's own typed GovernorRefusal propagates.
+
+    ``unsplittable`` is how a head that cannot run a model split between
+    the GPU and system RAM names itself to the gate, which then refuses a
+    split admission by that name. Heads that can split pass nothing.
     """
     rg = _resolve_resource_governor()
     if rg is None:
         return
     try:
-        rg.backend_admission_gate(model, options)
+        if unsplittable:
+            rg.backend_admission_gate(model, options, unsplittable=unsplittable)
+        else:
+            rg.backend_admission_gate(model, options)
     except Exception as exc:
         refusal = getattr(rg, "GovernorRefusal", None)
         if refusal is not None and isinstance(exc, refusal):
@@ -355,10 +364,12 @@ class BackendLoadedModel:
 
     The five fields are the ones the warmup used to read from the client's
     ``ps()``; ``None`` in any of them means the backend did not say, never
-    zero. ``size_vram`` is bytes.
+    zero. ``size_vram`` is bytes. ``size`` is the total the backend reports
+    for the model, VRAM and system RAM together, in bytes: a model split
+    between the two shows a size above its ``size_vram``.
     """
 
-    __slots__ = ("name", "backend", "size_vram", "expires_at", "context_length", "digest")
+    __slots__ = ("name", "backend", "size_vram", "expires_at", "context_length", "digest", "size")
 
     def __init__(
         self,
@@ -368,6 +379,7 @@ class BackendLoadedModel:
         expires_at: float | None = None,
         context_length: int | None = None,
         digest: str | None = None,
+        size: int | None = None,
     ):
         self.name = name
         self.backend = backend
@@ -375,6 +387,7 @@ class BackendLoadedModel:
         self.expires_at = expires_at
         self.context_length = context_length
         self.digest = digest
+        self.size = size
 
     def to_dict(self) -> dict:
         """Serialize to dictionary."""
@@ -385,6 +398,7 @@ class BackendLoadedModel:
             "expires_at": self.expires_at,
             "context_length": self.context_length,
             "digest": self.digest,
+            "size": self.size,
         }
 
 
@@ -413,7 +427,8 @@ def _loaded_model_from_ps(entry: Any, backend: str) -> BackendLoadedModel | None
 
     A name is taken from ``name`` then ``model``; an entry naming nothing is
     skipped. ``size_vram`` is coerced through ``__int__`` (the client's
-    ``ByteSize``), ``expires_at`` from a datetime to a timestamp.
+    ``ByteSize``), ``expires_at`` from a datetime to a timestamp. ``size``,
+    the total, is coerced the same way and is ``None`` unless it is a number.
     """
     name = _field(entry, "name") or _field(entry, "model")
     if not name:
@@ -421,6 +436,8 @@ def _loaded_model_from_ps(entry: Any, backend: str) -> BackendLoadedModel | None
     size_vram = _field(entry, "size_vram")
     if size_vram is not None and hasattr(size_vram, "__int__"):
         size_vram = int(size_vram)
+    size = _field(entry, "size")
+    size = int(size) if size is not None and hasattr(size, "__int__") else None
     expires_at = _field(entry, "expires_at")
     if expires_at is not None:
         if hasattr(expires_at, "timestamp"):
@@ -437,6 +454,7 @@ def _loaded_model_from_ps(entry: Any, backend: str) -> BackendLoadedModel | None
         expires_at=expires_at,
         context_length=_field(entry, "context_length"),
         digest=str(digest) if digest else None,
+        size=size,
     )
 
 
@@ -1494,7 +1512,7 @@ class LlamaCppBackend(InferenceBackend):
     ) -> ChatResponse:
         """Non-streaming inference via llama-cpp-python."""
         # Governor admission hook (additive, signature untouched).
-        _governor_admission(model, options)
+        _governor_admission(model, options, self._unsplittable(model))
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1557,7 +1575,7 @@ class LlamaCppBackend(InferenceBackend):
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference via llama-cpp-python."""
         # Governor admission hook (additive, signature untouched).
-        _governor_admission(model, options)
+        _governor_admission(model, options, self._unsplittable(model))
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1617,6 +1635,22 @@ class LlamaCppBackend(InferenceBackend):
             )
 
     # -- internal helpers --
+
+    def _unsplittable(self, model_name: str) -> str | None:
+        """How this engine names itself to the gate when a split would fail.
+
+        A negative n_gpu_layers puts every layer on the GPU: a model the
+        governor admits only split between the GPU and system RAM would then
+        fail for memory at its load, so the gate refuses it by this name. A
+        model already held loads nothing, and an explicit layer count is
+        the operator's own placement; neither is named.
+        """
+        if self._n_gpu_layers >= 0 or model_name in self._loaded_models:
+            return None
+        return (
+            f"{self.display_name} in process (n_gpu_layers"
+            f" {self._n_gpu_layers} puts every layer on the GPU)"
+        )
 
     def _lock_for(
         self, registry: dict[str, threading.Lock], model_name: str

@@ -84,6 +84,8 @@ class LoadedModel:
         expires_at: Timestamp d'expiration du keepalive
         context_length: Supported context length
         digest: Model hash
+        size: Total size in bytes, VRAM and system RAM together (0 when
+            the backend reports none); above size_vram for a split model
     """
 
     name: str
@@ -91,6 +93,7 @@ class LoadedModel:
     expires_at: float | None = None
     context_length: int | None = None
     digest: str | None = None
+    size: int = 0
 
 
 @dataclass
@@ -252,6 +255,7 @@ class ModelWarmup:
                 expires_at=r.expires_at,
                 context_length=r.context_length,
                 digest=r.digest or None,
+                size=int(getattr(r, "size", None) or 0),
             )
             for r in records
         ]

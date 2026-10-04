@@ -220,6 +220,26 @@ def test_dc8_a_starved_budget_answers_the_lowest_step_and_lets_fit_refuse():
 
 
 # ---------------------------------------------------------------------------
+# dc13 -- supersedes dc8 now that the fit math splits a model between VRAM
+# and RAM: with no RAM left to split into, the fit still refuses
+# ---------------------------------------------------------------------------
+
+def test_dc13_a_starved_budget_answers_the_lowest_step_and_lets_fit_refuse_with_no_room_to_split():
+    # kv budget = 8 - 2 - 1.5 - 4 = 0.5 GiB -> 1024 tokens < lowest step.
+    # The stage still answers 4096; cost(4096) = 4 + 2 = 6 > 4.5 budget, and
+    # a split would need 1.5 GiB of RAM where 4096 MB, all of it the 4 GiB
+    # reserve, leaves none: the FIT math refuses -- the stage never does.
+    rg, gov, restore = _load_governor(dynamic=True, capacity=8.0)
+    try:
+        gov.get_snapshot_fast().ram_available_mb = 4096.0
+        decision = gov.admit("m", requested_ctx=5200, caller="chat")
+        assert decision.admitted is False
+        assert decision.reason == "vram_insufficient+ram_insufficient"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # dc9 -- control: the model window still clamps first, both modes agree
 # ---------------------------------------------------------------------------
 

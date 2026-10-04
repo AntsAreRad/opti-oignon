@@ -2,12 +2,11 @@
 #
 # The measurement path consumes the measurement subset: enabled, total_vram_gb,
 # safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
-# decisions_ring_size. The remaining keys are carried here so the file is
-# written once; admission, backpressure, and limits consume them
-# later.
+# decisions_ring_size. Admission, backpressure, the queue, the limits and
+# the offload policy consume the rest.
 
-# Gates the FUTURE admission behaviour; measurement itself stays
-# available regardless of this flag.
+# Gates admission; measurement itself stays available regardless of this
+# flag.
 enabled: true
 
 # Total VRAM capacity in GB. A value here is authoritative and the host is
@@ -71,7 +70,7 @@ ceiling_floor_gb: 4.0
 # (spec Section 3.2; written by the admission path).
 decisions_ring_size: 200
 
-# --- Keys carried for later use (not consumed by the measurement path) ---
+# --- Admission's context shaping, backpressure, queue and limits ---
 
 # The downsize ladder and the per-caller context floors
 # (benchmark/AGT have no floor entry: they never downsize, D3).
@@ -122,3 +121,27 @@ ollama_limits:
 dynamic_ctx:
   enabled: false
   unknown_ctx_ceiling: 8192
+
+# Partial offload. A model the GPU cannot hold, even after evicting idle
+# models, is admitted split between VRAM and system RAM when the VRAM free
+# now and the RAM above the reserve hold it together. Ollama places the
+# layers itself (no num_gpu is sent); llama.cpp in process, which puts every
+# layer on the GPU unless n_gpu_layers says otherwise, refuses such a split
+# by name instead of failing for memory at the load. A split never waits on
+# an eviction, and RAM that cannot be read means no split: the refusal
+# stands, naming what the GPU alone lacks.
+#   prefer          -- context: keep the requested context and split before
+#                      stepping down the ladder; speed: step down the ladder
+#                      on the GPU alone first, and split only at the last step.
+#   min_gpu_share   -- the smallest share of the cost a split may leave on the
+#                      GPU, from 0.0 to 1.0 (0.0: refuse only when VRAM and
+#                      RAM together are too small).
+#   ram_reserve_gb  -- the RAM a split leaves to the rest of the machine,
+#                      in GB, 0.0 or more.
+# A value out of its range is ignored for its default, with a warning.
+# Rollback: enabled false gives back the decisions made before offload.
+offload:
+  enabled: true
+  prefer: context
+  min_gpu_share: 0.0
+  ram_reserve_gb: 4.0

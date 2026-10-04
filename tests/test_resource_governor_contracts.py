@@ -23,6 +23,9 @@ Contracts pinned (the governor specification, sections 4-6):
       governor-disabled passthrough and BEFORE the fit math (is_estop).
     * C2 refuse-beyond-capacity: a cost that exceeds the budget even with
       eviction is refused (vram_insufficient), never admitted.
+    * C10 refuse-beyond-vram-and-ram: supersedes C2 now that a model the GPU
+      cannot hold is admitted split when VRAM and RAM together hold it -- a
+      cost beyond both is refused, and the refusal names both shortfalls.
     * C3 bounded fail-open: with capacity unknown the VRAM half fails open,
       but the RAM half STILL guards (a known weight cost above MemAvailable
       refuses, ram_insufficient).
@@ -32,6 +35,9 @@ Contracts pinned (the governor specification, sections 4-6):
       (capacity otherwise fine) still escalates the level to soft.
     * C7 an estop refusal NEVER enters the refusal-rate window (otherwise the
       estop would self-amplify the DoS pressure signal).
+    * C11 supersedes C7, whose resource control now splits the model between
+      VRAM and RAM: the same exclusion, its control refused with no RAM left
+      to split into.
 
   Runtime limits (``apply_llamacpp_rlimits``, child-process idiom):
     * C8 off-by-default: rlimits_enabled=False applies nothing ("disabled").
@@ -209,6 +215,27 @@ def test_c2_refuse_beyond_capacity():
     assert decision.shortfall_gb == 43.5
 
 
+def test_c10_refuse_beyond_vram_and_ram():
+    """C10 -- supersedes C2: a weight cost far above the GPU budget (even
+    counting eviction) AND above the RAM a split could use is refused, naming
+    both shortfalls; flipping the no-fit verdict to a fit would admit an
+    over-capacity load -> RED."""
+    rg = _load_rg()
+    _clear_estop()
+    cfg = rg.GovernorConfig(total_vram_gb=8.0, safety_margin_gb=1.5)
+    cfg.weights_override_models = {"bigmodel": 50.0}  # 50 GiB on an 8 GiB box
+    gov, clk = _governor(rg, config=cfg)
+    # 4096 MB of RAM available, all of it the 4 GiB reserve: no room to split.
+    gov._snapshot = _fresh_snapshot(rg, clk, capacity=8.0, in_use=0.0, ram_mb=4096.0)
+    decision = gov.admit("bigmodel", requested_ctx=None, caller="chat")
+    assert decision.admitted is False
+    assert decision.reason == "vram_insufficient+ram_insufficient"
+    # budget_unconditional = 8.0 - 0.0 - 1.5 = 6.5; shortfall = 50.0 - 6.5.
+    assert decision.shortfall_gb == 43.5
+    # Split, 43.5 GiB would go to RAM, where nothing is usable.
+    assert decision.ram_shortfall_gb == 43.5
+
+
 def test_c3_capacity_unknown_fails_open_but_ram_still_guards():
     """C3 -- bounded fail-open: with capacity unknown the VRAM half admits,
     but a known weight cost above MemAvailable still refuses (ram_insufficient).
@@ -301,6 +328,35 @@ def test_c7_estop_refusal_never_enters_refusal_window():
     cfg2.weights_override_models = {"bigmodel": 50.0}
     gov2, clk2 = _governor(rg, config=cfg2)
     gov2._snapshot = _fresh_snapshot(rg, clk2, capacity=8.0, in_use=0.0)
+    d = gov2.admit("bigmodel", requested_ctx=None, caller="chat")
+    assert d.admitted is False
+    assert len(gov2._refusal_events) == 1  # resource refusal counted
+
+
+def test_c11_estop_refusal_never_enters_refusal_window_with_no_room_to_split():
+    """C11 -- supersedes C7, whose resource control now splits the 50 GiB
+    model between VRAM and RAM: an estop refusal must NOT feed the
+    refusal-rate window; counting it would make it length 1 -> RED. A
+    resource refusal on the same governor, with no RAM left to split into,
+    DOES enter, proving the seam is live and the estop exclusion is
+    specific."""
+    rg = _load_rg()
+    _seed_estop(True)
+    try:
+        cfg = rg.GovernorConfig(total_vram_gb=8.0)
+        gov, clk = _governor(rg, config=cfg)
+        gov._snapshot = _fresh_snapshot(rg, clk, capacity=8.0, in_use=0.0)
+        gov.admit("m", requested_ctx=4096, caller="chat")
+        assert len(gov._refusal_events) == 0  # estop refusal excluded
+    finally:
+        _clear_estop()
+
+    # Same kind of refusal, but a RESOURCE one, must be counted. 4096 MB of
+    # RAM available, all of it the 4 GiB reserve: no room to split.
+    cfg2 = rg.GovernorConfig(total_vram_gb=8.0, safety_margin_gb=1.5)
+    cfg2.weights_override_models = {"bigmodel": 50.0}
+    gov2, clk2 = _governor(rg, config=cfg2)
+    gov2._snapshot = _fresh_snapshot(rg, clk2, capacity=8.0, in_use=0.0, ram_mb=4096.0)
     d = gov2.admit("bigmodel", requested_ctx=None, caller="chat")
     assert d.admitted is False
     assert len(gov2._refusal_events) == 1  # resource refusal counted

@@ -16,6 +16,9 @@ is "nobody looked".
     forms, carries the five fields the warmup read, answers ``None`` when
     the client is absent or ``ps()`` fails, and evicts through the same
     read.
+  * BH11 -- supersedes BH2 now that a record carries the total size Ollama
+    reports beside ``size_vram``: the same reads, and the record's dictionary
+    pinned with the size it names, ``None`` when the entry names none.
   * BH3 -- Ollama asks the client's ``embed`` and returns the first vector
     in both forms; ``None`` without the client; a client failure
     propagates; the governor is asked before the client.
@@ -238,6 +241,54 @@ def test_bh2_ollama_reads_the_loaded_set_through_ps_in_both_forms_and_unknown_is
         assert first.to_dict() == {
             "name": "a", "backend": "ollama", "size_vram": 1024,
             "expires_at": _WHEN.timestamp(), "context_length": 8192, "digest": "sha256:a",
+        }
+
+        obj = _FakeOllama(ps=_PsObject([_Entry("c")]))
+        loaded = _ollama(mod, obj).loaded_models()
+        assert [m.name for m in loaded] == ["c"]
+        assert loaded[0].size_vram == 2048 and isinstance(loaded[0].size_vram, int)
+        assert loaded[0].expires_at == 1700000000.0 and loaded[0].context_length == 4096
+
+        empty = _FakeOllama(ps={"models": []})
+        assert _ollama(mod, empty).loaded_models() == []
+
+        assert _ollama(mod, _FakeOllama(), available=False).loaded_models() is None
+        down = _FakeOllama(fail=True)
+        assert _ollama(mod, down).loaded_models() is None
+        assert down.calls == [("ps",)]
+
+        # Eviction reads the loaded set through the same head.
+        fake = _FakeOllama(ps={"models": [_entry_dict("a"), _entry_dict("b")]})
+        assert _ollama(mod, fake).unload_all() == 2
+        evicted = [kw for kind, kw in fake.calls[1:] if kind == "generate"]
+        assert [kw["model"] for kw in evicted] == ["a", "b"]
+        assert all(kw["keep_alive"] == 0 for kw in evicted)
+        assert _ollama(mod, _FakeOllama(fail=True)).unload_all() == 0
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# BH11 -- supersedes BH2: the same reads, with the total size beside size_vram
+# ---------------------------------------------------------------------------
+def test_bh11_ollama_reads_the_loaded_set_through_ps_in_both_forms_with_the_total_size():
+    mod, restore = _open()
+    try:
+        fake = _FakeOllama(ps={"models": [_entry_dict("a"), _entry_dict("b")]})
+        loaded = _ollama(mod, fake).loaded_models()
+        assert fake.calls == [("ps",)]
+        assert [m.name for m in loaded] == ["a", "b"]
+        first = loaded[0]
+        assert first.backend == "ollama"
+        assert first.size_vram == 1024 and isinstance(first.size_vram, int)
+        assert first.expires_at == _WHEN.timestamp()
+        assert first.context_length == 8192
+        assert first.digest == "sha256:a"
+        # The entry names no total size: the record says so with None.
+        assert first.to_dict() == {
+            "name": "a", "backend": "ollama", "size_vram": 1024,
+            "expires_at": _WHEN.timestamp(), "context_length": 8192, "digest": "sha256:a",
+            "size": None,
         }
 
         obj = _FakeOllama(ps=_PsObject([_Entry("c")]))

@@ -26,6 +26,11 @@ file pins the three highest-value surfaces named when the first one closed:
       being silently downsized -- the admission guarantee those callers rely on.
     * D3 the requested ctx is clamped to the model's context window before the
       fit check (ModelLimits stays the authority).
+    * D4 supersedes D1 now that a model is split before its context is
+      stepped down: with no RAM to split into, the floored caller is still
+      stepped down the ladder to a ctx that fits.
+    * D5 supersedes D2: with no RAM to split into, the floorless caller is
+      still REFUSED, never downsized, and the refusal names both shortfalls.
 
   Learned ceiling (``AdaptStore`` fast-down / slow-up, DI-8):
     * E1 a load failure lowers the working ceiling to (observed in-use minus
@@ -339,6 +344,42 @@ def test_d2_floorless_caller_refused_not_downsized():
     assert decision.reason == "vram_insufficient"
     # shortfall = cost(8192) - budget_with_eviction = 9.0 - 8.5 = 0.5
     assert decision.shortfall_gb == 0.5
+
+
+# D4/D5 run the D1/D2 frame with 4096 MB of RAM available, all of it the
+# 4 GiB reserve: a split at 8192 would need 0.5 GiB of RAM and finds none.
+
+
+def test_d4_floored_caller_laddered_to_downsize_when_no_split_fits():
+    """D4 -- supersedes D1: a floored caller (chat, floor 2048) that cannot fit
+    at 8192, on the GPU or split, is stepped down the ladder to 4096, which
+    fits: action "downsize". Dropping the ladder extension leaves [8192] only,
+    which fits nowhere, and the caller is refused instead -> RED."""
+    rg = _load_rg()
+    gov, clk = _governor(rg, config=_ladder_config(rg))
+    gov._snapshot = _fresh_snapshot(rg, clk, capacity=10.0, in_use=0.0, ram_mb=4096.0)
+    decision = gov.admit("m", requested_ctx=8192, caller="chat")
+    assert decision.admitted is True
+    assert decision.action == "downsize"
+    assert decision.num_ctx == 4096  # first ladder step that fits
+    assert "ctx_laddered_to_fit" in decision.reason
+
+
+def test_d5_floorless_caller_refused_not_downsized_when_no_split_fits():
+    """D5 -- supersedes D2: a floorless caller (direct) under the SAME cost and
+    no RAM to split into is REFUSED, never silently downsized. Giving floorless
+    callers a default floor would ladder them down to a fit and admit -> RED."""
+    rg = _load_rg()
+    gov, clk = _governor(rg, config=_ladder_config(rg))
+    gov._snapshot = _fresh_snapshot(rg, clk, capacity=10.0, in_use=0.0, ram_mb=4096.0)
+    decision = gov.admit("m", requested_ctx=8192, caller="direct")
+    assert decision.admitted is False
+    assert decision.action == "refuse"
+    assert decision.reason == "vram_insufficient+ram_insufficient"
+    # shortfall = cost(8192) - budget_with_eviction = 9.0 - 8.5 = 0.5
+    assert decision.shortfall_gb == 0.5
+    # Split, 0.5 GiB would go to RAM, where nothing is usable.
+    assert decision.ram_shortfall_gb == 0.5
 
 
 def test_d3_requested_ctx_clamped_to_model_window():

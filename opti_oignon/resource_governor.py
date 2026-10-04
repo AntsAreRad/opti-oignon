@@ -210,6 +210,14 @@ _REFUSAL_RATE_MIN_DECISIONS = 3
 
 _BYTES_PER_GIB = 1024.0 ** 3
 
+# The two orders a split admission can follow (the offload.prefer key).
+_OFFLOAD_PREFER = ("context", "speed")
+
+# Bytes per cached key or value element: f16, the KV cache type the engines
+# use unless told otherwise. A quantized cache holds less, so pricing every
+# model at f16 errs on the side of the larger cost.
+_KV_BYTES_PER_ELEMENT = 2
+
 # Sentinel distinguishing "not passed" from an explicit None injection.
 _UNSET: Any = object()
 
@@ -302,6 +310,78 @@ def _gb_from_size_string(size: Any) -> float | None:
     if unit == "MB":
         return number / 1024.0
     return number / _BYTES_PER_GIB
+
+
+def _positive_int(value: Any) -> int | None:
+    """A strictly positive integer, or None; a boolean is not a count."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _kv_geometry_from_metadata(meta: Any) -> dict[str, int] | None:
+    """The KV cache geometry a model's metadata names, or None.
+
+    ``meta`` is the key/value mapping Ollama's model information reports or a
+    GGUF header holds; both use the GGUF key names. Bytes per token = the KV
+    heads summed over the layers x (key length + value length) x the element
+    size. An unreported key or value length is the embedding width over the
+    attention heads, a model that names no KV head count keeps one per
+    attention head, and a per-layer KV head list is summed. Anything else
+    missing or malformed answers None, and the flat coefficient stands.
+    """
+    if not isinstance(meta, Mapping):
+        return None
+    arch = meta.get("general.architecture")
+    if not isinstance(arch, str) or not arch:
+        return None
+    layers = _positive_int(meta.get(f"{arch}.block_count"))
+    if layers is None:
+        return None
+    heads = meta.get(f"{arch}.attention.head_count")
+    kv_heads = meta.get(f"{arch}.attention.head_count_kv", heads)
+    if isinstance(kv_heads, (list, tuple)):
+        if len(kv_heads) != layers or any(
+            isinstance(h, bool) or not isinstance(h, int) or h < 0 for h in kv_heads
+        ):
+            return None
+        total_kv_heads = sum(kv_heads)
+    else:
+        per_layer = _positive_int(kv_heads)
+        if per_layer is None:
+            return None
+        total_kv_heads = per_layer * layers
+    key_len = _positive_int(meta.get(f"{arch}.attention.key_length"))
+    value_len = _positive_int(meta.get(f"{arch}.attention.value_length"))
+    if key_len is None or value_len is None:
+        width = _positive_int(meta.get(f"{arch}.embedding_length"))
+        n_heads = _positive_int(heads)
+        if width is None or n_heads is None or width % n_heads:
+            return None
+        key_len = key_len or width // n_heads
+        value_len = value_len or width // n_heads
+    per_token = total_kv_heads * (key_len + value_len) * _KV_BYTES_PER_ELEMENT
+    if per_token <= 0:
+        return None
+    return {"layers": layers, "kv_bytes_per_token": per_token}
+
+
+def _kv_geometry_from_gguf(path: Any) -> dict[str, int] | None:
+    """The KV geometry a GGUF file's header names, or None.
+
+    The header reader is the model manager's, imported only when a file is
+    named, so importing the governor costs nothing; a file it cannot read
+    holds no geometry.
+    """
+    if not path:
+        return None
+    try:
+        from opti_oignon.model_manager import parse_gguf_header
+
+        return _kv_geometry_from_metadata(parse_gguf_header(path).metadata)
+    except Exception as exc:  # noqa: BLE001 - an unreadable header is no geometry
+        logger.debug("GGUF header of %s unreadable: %s", path, exc)
+        return None
 
 
 def _s1_backend_reachable(warmup: Any) -> bool:
@@ -504,6 +584,37 @@ def _as_weights_override_map(value: Any) -> dict[str, float]:
     return out
 
 
+def _bounded_float(
+    section: Mapping, key: str, default: float, low: float, high: float | None
+) -> float:
+    """``section[key]`` as a number within [low, high], else ``default``.
+
+    No upper bound when ``high`` is None, but never infinite. An absent key
+    is the default, silently; a present one that is not a number, NaN, or
+    out of range is the default with a warning naming it.
+    """
+    if key not in section:
+        return default
+    raw = section.get(key)
+    try:
+        value = None if isinstance(raw, bool) else float(raw)
+    except (TypeError, ValueError):
+        value = None
+    if value is not None and low <= value and (
+        value <= high if high is not None else value < float("inf")
+    ):
+        return value
+    logger.warning(
+        "offload.%s %r is not a number in [%s, %s]; keeping %s",
+        key,
+        raw,
+        low,
+        "inf" if high is None else high,
+        default,
+    )
+    return default
+
+
 def _as_opt_int(value: Any, default: int | None) -> int | None:
     if value is None:
         return None
@@ -526,10 +637,10 @@ class GovernorConfig:
 
     The measurement path consumes the measurement subset (enabled, total_vram_gb,
     safety_margin_gb, snapshot_ttl_s, kv_coefficient, ceiling_floor_gb,
-    decisions_ring_size); the remaining keys are carried so the file and
-    the loader are written once and consumed later.
-    ``enabled`` gates the FUTURE admission behaviour; measurement
-    itself stays available regardless.
+    decisions_ring_size); admission, backpressure, the queue, the limits and
+    the offload policy consume the rest.
+    ``enabled`` gates admission; measurement itself stays available
+    regardless.
     """
 
     enabled: bool = True
@@ -564,7 +675,19 @@ class GovernorConfig:
     ceiling_floor_gb: float = 4.0
     # Bounded recent-decisions ring, pruned by count (Section 3.2).
     decisions_ring_size: int = 200
-    # Keys carried for later use (not consumed by the measurement path):
+    # Partial offload: a model the GPU cannot hold, even after evicting idle
+    # models, is admitted split between VRAM and system RAM when the two
+    # together hold it. ``offload_prefer`` orders the attempts: "context"
+    # splits at the requested context before stepping down the ladder,
+    # "speed" steps down on the GPU alone first and splits last. A split
+    # must leave at least ``offload_min_gpu_share`` of the cost on the GPU
+    # (0.0 to 1.0) and never uses the last ``offload_ram_reserve_gb`` of
+    # available RAM (0.0 or more).
+    offload_enabled: bool = True
+    offload_prefer: str = "context"
+    offload_min_gpu_share: float = 0.0
+    offload_ram_reserve_gb: float = 4.0
+    # Admission's context shaping and the backpressure, queue and limits keys:
     ctx_ladder: list[int] = field(
         default_factory=lambda: [32768, 16384, 8192, 4096]
     )
@@ -742,6 +865,28 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
         cfg.ollama_external_advisory = _as_bool(
             ollama_limits.get("external_advisory"), cfg.ollama_external_advisory
         )
+
+    offload = raw.get("offload")
+    if isinstance(offload, dict):
+        cfg.offload_enabled = _as_bool(offload.get("enabled"), cfg.offload_enabled)
+        prefer = offload.get("prefer", cfg.offload_prefer)
+        if prefer in _OFFLOAD_PREFER:
+            cfg.offload_prefer = prefer
+        else:
+            logger.warning(
+                "offload.prefer %r is not one of %s; keeping %s",
+                prefer,
+                ", ".join(_OFFLOAD_PREFER),
+                cfg.offload_prefer,
+            )
+        cfg.offload_min_gpu_share = _bounded_float(
+            offload, "min_gpu_share", cfg.offload_min_gpu_share, 0.0, 1.0
+        )
+        cfg.offload_ram_reserve_gb = _bounded_float(
+            offload, "ram_reserve_gb", cfg.offload_ram_reserve_gb, 0.0, None
+        )
+    elif offload is not None:
+        logger.warning("offload is not a mapping; the offload defaults stand")
 
     return cfg
 
@@ -993,17 +1138,34 @@ def apply_llamacpp_rlimits(
 
 @dataclass
 class LoadedModelView:
-    """One S1 entry: a model the Ollama ps view reports as loaded."""
+    """One S1 entry: a model the Ollama ps view reports as loaded.
+
+    ``size_bytes`` is the total the engine reports for the model, VRAM and
+    system RAM together, 0 when it reports none. A model split between the
+    two shows a total above its ``size_vram_bytes``; one held in RAM alone
+    shows a total and no VRAM at all.
+    """
 
     name: str
     size_vram_bytes: int = 0
     expires_at: float | None = None
     context_length: int | None = None
     digest: str | None = None
+    size_bytes: int = 0
 
     @property
     def size_vram_gb(self) -> float:
         return self.size_vram_bytes / _BYTES_PER_GIB if self.size_vram_bytes else 0.0
+
+    @property
+    def ram_bytes(self) -> int:
+        """The part held outside VRAM; 0 when the engine reports no total."""
+        return max(0, self.size_bytes - self.size_vram_bytes)
+
+    @property
+    def resident(self) -> bool:
+        """Loaded, wherever it sits: on the GPU, split, or in RAM alone."""
+        return self.size_vram_bytes > 0 or self.size_bytes > 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1013,6 +1175,8 @@ class LoadedModelView:
             "expires_at": self.expires_at,
             "context_length": self.context_length,
             "digest": self.digest,
+            "size_bytes": self.size_bytes,
+            "ram_bytes": self.ram_bytes,
         }
 
 
@@ -1105,10 +1269,13 @@ class AdmissionDecision:
     {admit, downsize, refuse, queue}, reason, snapshot provenance, ticket
     id}); the trailing fields are internal companions (accounting,
     testability, payload capture) and not part of the minimum surface.
-    num_gpu stays None (conservative: full offload when the fit
-    holds means no option is sent; computed partial offload stays
-    deferred behind a flag); keep_alive carries the soft-pressure
-    override when the pressure signal fills it.
+    num_gpu stays None: no option is sent for a whole load, and a split
+    admission leaves the layers to the engine, which Ollama places itself.
+    A split names itself in the partial offload companions: the share of
+    the cost on the GPU, the GiB on the GPU and in RAM, and the layers on
+    the GPU when the model's layer count is known. A refusal reached after
+    a split was priced also names the RAM shortfall. keep_alive carries the
+    soft-pressure override when the pressure signal fills it.
     """
 
     admitted: bool
@@ -1128,13 +1295,30 @@ class AdmissionDecision:
     shortfall_gb: float | None = None
     is_estop: bool = False
     payload: dict[str, Any] = field(default_factory=dict)
+    # -- partial offload companions (None when no split was priced) ---------
+    gpu_share: float | None = None
+    vram_cost_gb: float | None = None
+    ram_cost_gb: float | None = None
+    gpu_layers: int | None = None
+    ram_shortfall_gb: float | None = None
+
+    @property
+    def partial_offload(self) -> bool:
+        """Admitted split between VRAM and system RAM."""
+        return (
+            self.admitted
+            and self.gpu_share is not None
+            and self.gpu_share < 1.0
+        )
 
     def refusal_payload(self) -> dict[str, Any]:
         """The honest refusal body, mirroring the estop idiom (D3).
 
         The estop case returns the payload captured at decision time from
-        emergency_stop.refusal_payload() (spec 4.5); the resource case
-        names the model, the shortfall and the options.
+        emergency_stop.refusal_payload() (spec 4.5), and so does a refusal
+        reached after a split was priced, which names both shortfalls, or
+        an engine's refusal of a split; the resource case names the model,
+        the shortfall and the options.
         """
         if self.payload:
             return dict(self.payload)
@@ -1175,6 +1359,11 @@ class AdmissionDecision:
             "load_expected": self.load_expected,
             "conditional_on_eviction": self.conditional_on_eviction,
             "shortfall_gb": self.shortfall_gb,
+            "gpu_share": self.gpu_share,
+            "vram_cost_gb": self.vram_cost_gb,
+            "ram_cost_gb": self.ram_cost_gb,
+            "gpu_layers": self.gpu_layers,
+            "ram_shortfall_gb": self.ram_shortfall_gb,
         }
 
 
@@ -1188,6 +1377,91 @@ class GovernorRefusal(RuntimeError):
             )
         )
         self.decision = decision
+
+
+def _offload_refusal_payload(
+    model: str,
+    vram_shortfall: float,
+    ram_shortfall: float,
+    share: float,
+    min_share: float,
+) -> dict[str, Any]:
+    """The refusal body once a split was priced: what each placement lacked."""
+    message = (
+        f"Not enough resources to load {model}: short by"
+        f" {vram_shortfall:.1f} GB of VRAM on the GPU alone"
+    )
+    if ram_shortfall > 0.0:
+        message += (
+            f", and by {ram_shortfall:.1f} GB of RAM split between the GPU"
+            " and system RAM"
+        )
+    if share < min_share:
+        message += (
+            f"; split, the GPU would hold {share:.0%} of it, under the"
+            f" {min_share:.0%} minimum"
+        )
+    message += ". Evict idle models, pick a smaller model, or lower the context."
+    return {
+        "error": "resource_admission_refused",
+        "message": message,
+        "model": model,
+        "shortfall_gb": vram_shortfall,
+        "ram_shortfall_gb": ram_shortfall,
+        "options": [
+            "evict idle models",
+            "pick a smaller model",
+            "lower context",
+        ],
+    }
+
+
+def _refuse_split(governor: Any, decision: AdmissionDecision, engine: str) -> None:
+    """Refuse a split admission the calling engine cannot run; never returns.
+
+    Recorded like any refusal, so the ring shows the engine's refusal next
+    to the admission it overrules, and raised as the typed refusal every
+    head already lets through.
+    """
+    vram = decision.vram_cost_gb or 0.0
+    ram = decision.ram_cost_gb or 0.0
+    refusal = AdmissionDecision(
+        admitted=False,
+        model=decision.model,
+        action="refuse",
+        reason="partial_offload_unsupported",
+        provenance=list(decision.provenance),
+        ticket_id=decision.ticket_id,
+        caller=decision.caller,
+        requested_ctx=decision.requested_ctx,
+        gpu_share=decision.gpu_share,
+        vram_cost_gb=decision.vram_cost_gb,
+        ram_cost_gb=decision.ram_cost_gb,
+        gpu_layers=decision.gpu_layers,
+        payload={
+            "error": "resource_admission_refused",
+            "message": (
+                f"{decision.model} fits only split between the GPU and system"
+                f" RAM ({vram:.1f} GB on the GPU, {ram:.1f} GB in RAM), and"
+                f" {engine} cannot split it: serve it through Ollama, which"
+                " splits it itself, or pick a smaller model or a shorter"
+                " context."
+            ),
+            "model": decision.model,
+            "vram_cost_gb": decision.vram_cost_gb,
+            "ram_cost_gb": decision.ram_cost_gb,
+            "options": [
+                "serve it through Ollama",
+                "pick a smaller model",
+                "lower context",
+            ],
+        },
+    )
+    try:
+        governor._record_admission(refusal)
+    except Exception as exc:
+        logger.debug("Split refusal record failed: %s", exc)
+    raise GovernorRefusal(refusal)
 
 
 _ticket_local = threading.local()
@@ -1314,7 +1588,12 @@ class AdaptStore:
         num_ctx: int | None = None,
         observed_at: float | None = None,
     ) -> None:
-        """Persist an observed per-model VRAM cost (supersedes statics)."""
+        """Persist an observed per-model cost (supersedes statics).
+
+        The ``size_vram_bytes`` column keeps its name and holds what the
+        model takes as loaded: the total its engine reports when it reports
+        one (a split model's VRAM and RAM together), else its VRAM.
+        """
         with self._lock:
             conn = self._connect()
             try:
@@ -1594,6 +1873,8 @@ class ResourceGovernor:
         self._cache_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._snapshot: ResourceSnapshot | None = None
+        # KV geometries found per model (kv_geometry); dropped at a load.
+        self._geometry: dict[str, dict[str, int]] = {}
         self._pending_attribution: dict[str, int | None] = {}
         self._refresh_in_flight = False
         self._capacity_warning_emitted = False
@@ -1701,9 +1982,12 @@ class ResourceGovernor:
         self, model: str, requested_num_ctx: int | None = None
     ) -> None:
         """An admitted load happened: drop the cache and register the
-        model for post-load cost attribution at the next fresh ps view."""
+        model for post-load cost attribution at the next fresh ps view.
+        The model's KV geometry is read again too: a load may bring other
+        bytes under the same name."""
         with self._cache_lock:
             self._pending_attribution[model] = requested_num_ctx
+            self._geometry.pop(model, None)
             self._snapshot = None
         self._notify_queue()
 
@@ -1737,18 +2021,27 @@ class ResourceGovernor:
     # -- estimation API --------------------------------------------------------
 
     def resolve_kv_coefficient(self, model: str | None) -> float:
-        """Per-model KV coefficient.
+        """Per-model KV coefficient, in GiB per 1024 tokens.
 
         Resolution order: an exact entry in ``kv_override_models``, else
         the LONGEST ``kv_override_families`` key contained in the
-        lowercased name, else the global ``kv_coefficient`` -- the
-        fail-secure default for any model the tables do not cover (an
-        unknown model is never under-budgeted). Matching is
+        lowercased name, else what the model's own geometry gives
+        (:meth:`kv_geometry`), else the global ``kv_coefficient`` -- the
+        fail-secure default for any model neither the tables nor its
+        engine describe (an unknown model is never under-budgeted). An
+        operator's word wins over the computed figure. Matching is
         case-insensitive; the tables hold lowercase keys by load-time
         normalisation.
         """
+        override = self._kv_override(model)
+        if override is not None:
+            return override
+        return self._coefficient_from(self.kv_geometry(model))
+
+    def _kv_override(self, model: str | None) -> float | None:
+        """The operator's KV coefficient for ``model``: exact, then family."""
         if not model:
-            return self._config.kv_coefficient
+            return None
         name = str(model).lower()
         exact = self._config.kv_override_models.get(name)
         if exact is not None:
@@ -1758,9 +2051,56 @@ class ResourceGovernor:
         for family, coeff in self._config.kv_override_families.items():
             if family and family in name and len(family) > best_len:
                 best, best_len = coeff, len(family)
-        if best is not None:
-            return best
-        return self._config.kv_coefficient
+        return best
+
+    def _coefficient_from(self, geometry: dict[str, int] | None) -> float:
+        """GiB per 1024 tokens for a geometry; the flat coefficient for none."""
+        if geometry is None:
+            return self._config.kv_coefficient
+        return geometry["kv_bytes_per_token"] * 1024.0 / _BYTES_PER_GIB
+
+    def kv_geometry(self, model: str | None) -> dict[str, int] | None:
+        """The model's KV cache geometry, as its engine describes it.
+
+        ``{"layers", "kv_bytes_per_token"}`` or None. Each backend is asked
+        in turn for the model's information: the metadata mapping Ollama
+        reports first, else the header of the GGUF file the engine names. A
+        geometry found is kept until the model is loaded again; none found
+        is asked again at the next call, so an engine that was not answering
+        yet is not taken at its silence. Never raises.
+        """
+        if not model:
+            return None
+        with self._cache_lock:
+            known = self._geometry.get(model)
+        if known is not None:
+            return known
+        registry = self._resolve_registry()
+        if registry is None:
+            return None
+        try:
+            backends = list(registry.backends())
+        except Exception as exc:
+            logger.debug("Registry backends() failed: %s", exc)
+            return None
+        for backend in backends:
+            try:
+                info = backend.model_info(model)
+            except Exception as exc:
+                logger.debug("model_info(%s) failed: %s", model, exc)
+                continue
+            if info is None:
+                continue
+            extra = getattr(info, "extra", None)
+            meta = extra.get("model_info") if isinstance(extra, dict) else None
+            geometry = _kv_geometry_from_metadata(meta)
+            if geometry is None:
+                geometry = _kv_geometry_from_gguf(getattr(info, "path", None))
+            if geometry is not None:
+                with self._cache_lock:
+                    self._geometry[model] = geometry
+                return geometry
+        return None
 
     def estimate_kv_cache_gb(
         self, num_ctx: int | None, model: str | None = None
@@ -1910,6 +2250,7 @@ class ResourceGovernor:
                         expires_at=getattr(m, "expires_at", None),
                         context_length=getattr(m, "context_length", None),
                         digest=getattr(m, "digest", None),
+                        size_bytes=int(getattr(m, "size", 0) or 0),
                     )
                 )
             except Exception as exc:
@@ -1917,18 +2258,23 @@ class ResourceGovernor:
         return views, True
 
     def _attribute_pending(self, loaded: list[LoadedModelView]) -> None:
-        """DI-9: write learned costs for pending post-load attributions."""
+        """DI-9: write learned costs for pending post-load attributions.
+
+        The cost learned is the total the engine reports for the model when
+        it reports one: a split model's VRAM part alone would price its next
+        load below what it takes.
+        """
         with self._cache_lock:
             if not self._pending_attribution:
                 return
             pending = dict(self._pending_attribution)
         for view in loaded:
-            if view.name in pending and view.size_vram_bytes > 0:
+            if view.name in pending and view.resident:
                 try:
                     self._store.record_model_cost(
                         view.name,
                         view.digest,
-                        view.size_vram_bytes,
+                        view.size_bytes or view.size_vram_bytes,
                         pending[view.name],
                     )
                 except Exception as exc:
@@ -2364,6 +2710,17 @@ class ResourceGovernor:
         - Capacity unknown: the VRAM half fails open (admit, the 3.1
           arbitration) while the RAM half still applies (known weight cost
           exceeding MemAvailable refuses).
+        - Partial offload: a cost the GPU cannot hold even after eviction
+          is admitted split between VRAM and system RAM when the VRAM free
+          now and the RAM above the reserve hold it together. A split never
+          waits on an eviction, never leaves the GPU less than the minimum
+          share, and is never priced against an unreadable RAM. The prefer
+          key orders the attempts: "context" splits each ctx before stepping
+          down the ladder, "speed" steps down on the GPU alone and splits at
+          the last step. A refusal reached after a split was priced names
+          both shortfalls.
+        - The KV cost of a ctx comes from the model's own geometry when its
+          engine describes it (kv_geometry), under any operator override.
         - Every decision is recorded in the ring; num_gpu stays None
           (conservative); under soft-or-worse pressure (Section 5) an
           admitted decision carries the keep_alive override the funnels
@@ -2436,9 +2793,9 @@ class ResourceGovernor:
             else None
         )
 
-        loaded_names = {
-            v.name for v in snapshot.loaded if v.size_vram_bytes > 0
-        }
+        # Resident wherever it sits: a model split between VRAM and RAM, or
+        # held in RAM alone, loads nothing more either.
+        loaded_names = {v.name for v in snapshot.loaded if v.resident}
         already_loaded = model in loaded_names
         load_expected = not already_loaded
 
@@ -2471,17 +2828,29 @@ class ResourceGovernor:
         effective_ctx = self._clamp_ctx(model, requested_ctx)
         known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
 
+        # The model's geometry and KV coefficient, resolved once for every
+        # candidate below (an engine is asked at most once per decision).
+        geometry = self.kv_geometry(model)
+        kv_override = self._kv_override(model)
+        kv_coefficient = (
+            kv_override
+            if kv_override is not None
+            else self._coefficient_from(geometry)
+        )
+
         # The dynamic quantum runs AFTER the model-window clamp: the
         # clamp answers what the model can hold, the stage answers what
         # the machine should allocate. The pre-stage value keeps the
         # clamp reason honest below.
         _clamped_ctx = effective_ctx
         effective_ctx, _dyn_applied = self._dynamic_ctx_stage(
-            effective_ctx, model, snapshot, known_weights
+            effective_ctx, model, snapshot, known_weights, kv_coefficient
         )
 
         def _cost(ctx: int | None) -> float:
-            return known_weights + self.estimate_kv_cache_gb(ctx, model=model)
+            if not ctx or ctx <= 0:
+                return known_weights
+            return known_weights + (float(ctx) / 1024.0) * kv_coefficient
 
         if snapshot.capacity_gb is None:
             # 3.1: the VRAM half fails open; the RAM half still applies.
@@ -2524,6 +2893,9 @@ class ResourceGovernor:
         evictable = self._evictable_now_gb(snapshot)
         budget_unconditional = snapshot.capacity_gb - in_use - margin
         budget_with_eviction = budget_unconditional + evictable
+        # The RAM a split may use; None when no split is priced at all.
+        ram_budget = self._offload_ram_budget_gb(snapshot)
+        min_share = self._config.offload_min_gpu_share
 
         def _fit(ctx: int | None) -> bool | None:
             """True: fits now. False: fits only after eviction. None: no."""
@@ -2533,6 +2905,24 @@ class ResourceGovernor:
             if evictable > 0.0 and cost <= budget_with_eviction:
                 return False
             return None
+
+        def _placement(cost: float) -> tuple[float, float]:
+            """(GiB on the GPU, GiB in RAM) of a split: the GPU takes what
+            is free NOW -- a split never waits on an eviction."""
+            gpu = max(0.0, min(cost, budget_unconditional))
+            return gpu, cost - gpu
+
+        def _split(ctx: int | None) -> tuple[float, float] | None:
+            """The placement of a split that holds at ``ctx``, else None."""
+            if ram_budget is None:
+                return None
+            cost = _cost(ctx)
+            gpu, ram = _placement(cost)
+            if ram <= 0.0 or ram > ram_budget:
+                return None
+            if gpu / cost < min_share:
+                return None
+            return gpu, ram
 
         candidates: list[int | None] = [effective_ctx]
         floor = self._config.ctx_floor.get(caller)
@@ -2547,11 +2937,34 @@ class ResourceGovernor:
             )
             candidates.extend(steps)
 
-        for index, ctx in enumerate(candidates):
-            verdict = _fit(ctx)
-            if verdict is None:
-                continue
-            conditional = verdict is False
+        # The order of the attempts. Each ctx is tried on the GPU alone
+        # first (now, then after eviction). "context" splits it before
+        # stepping down; "speed" steps down the whole ladder on the GPU
+        # alone and splits only at the last step, where the GPU holds the
+        # largest share -- if no split holds there, none holds above.
+        last = len(candidates) - 1
+        if self._config.offload_prefer == "speed":
+            attempts = [(i, ctx, False) for i, ctx in enumerate(candidates)]
+            attempts.append((last, candidates[last], True))
+        else:
+            attempts = [
+                (i, ctx, split)
+                for i, ctx in enumerate(candidates)
+                for split in (False, True)
+            ]
+
+        for index, ctx, split in attempts:
+            placement: tuple[float, float] | None = None
+            if split:
+                placement = _split(ctx)
+                if placement is None:
+                    continue
+                conditional = False
+            else:
+                verdict = _fit(ctx)
+                if verdict is None:
+                    continue
+                conditional = verdict is False
             action = "downsize" if index > 0 else "admit"
             reason_parts = []
             if action == "downsize":
@@ -2566,6 +2979,8 @@ class ResourceGovernor:
                 reason_parts.append("ctx_quantized")
             if conditional:
                 reason_parts.append("conditional_on_eviction")
+            if placement is not None:
+                reason_parts.append("partial_offload")
             if not reason_parts:
                 reason_parts.append("fits")
             decision = AdmissionDecision(
@@ -2582,10 +2997,19 @@ class ResourceGovernor:
                 load_expected=load_expected,
                 conditional_on_eviction=conditional,
             )
+            if placement is not None:
+                gpu, ram = placement
+                share = gpu / (gpu + ram)
+                decision.gpu_share = share
+                decision.vram_cost_gb = round(gpu, 3)
+                decision.ram_cost_gb = round(ram, 3)
+                if geometry is not None:
+                    decision.gpu_layers = int(share * geometry["layers"])
             self._record_admission(decision)
             return decision
 
         minimal_cost = _cost(candidates[-1])
+        vram_shortfall = round(max(0.0, minimal_cost - budget_with_eviction), 3)
         decision = AdmissionDecision(
             admitted=False,
             model=model,
@@ -2596,12 +3020,40 @@ class ResourceGovernor:
             ticket_id=ticket_id,
             caller=caller,
             requested_ctx=requested_ctx,
-            shortfall_gb=round(
-                max(0.0, minimal_cost - budget_with_eviction), 3
-            ),
+            shortfall_gb=vram_shortfall,
         )
+        if ram_budget is not None:
+            # A split was priced and none held: name what it lacked.
+            gpu, ram = _placement(minimal_cost)
+            share = gpu / minimal_cost if minimal_cost > 0.0 else 1.0
+            ram_shortfall = round(max(0.0, ram - ram_budget), 3)
+            reason_parts = ["vram_insufficient"]
+            if ram_shortfall > 0.0:
+                reason_parts.append("ram_insufficient")
+            if share < min_share:
+                reason_parts.append("gpu_share_below_minimum")
+            decision.reason = "+".join(reason_parts)
+            decision.ram_shortfall_gb = ram_shortfall
+            decision.payload = _offload_refusal_payload(
+                model, vram_shortfall, ram_shortfall, share, min_share
+            )
         self._record_admission(decision)
         return decision
+
+    def _offload_ram_budget_gb(self, snapshot: Any) -> float | None:
+        """The system RAM a split may use, or None when none is priced.
+
+        MemAvailable less the configured reserve. Offload off, or the RAM
+        unreadable (the snapshot then reads 0), means no split: a split
+        priced against RAM nobody measured would be a guess, so the
+        refusal stands instead.
+        """
+        if not self._config.offload_enabled:
+            return None
+        ram_mb = getattr(snapshot, "ram_available_mb", 0.0) or 0.0
+        if ram_mb <= 0.0:
+            return None
+        return ram_mb / 1024.0 - self._config.offload_ram_reserve_gb
 
     def _observe_estop_transition(self, stopped: bool) -> None:
         """R-04 invalidation wiring without editing emergency_stop:
@@ -2661,6 +3113,7 @@ class ResourceGovernor:
         model: str | None,
         snapshot: ResourceSnapshot,
         known_weights_gb: float,
+        kv_coefficient: float | None = None,
     ) -> tuple[int | None, bool]:
         """Ladder-quantized context under a live ceiling: (value, applied).
 
@@ -2672,7 +3125,8 @@ class ResourceGovernor:
         is capped), else the highest step whose KV estimate fits the
         VRAM left after weights and margin. A ceiling below the lowest
         step still answers the lowest step: refusing is the fit math's
-        job, never this stage's.
+        job, never this stage's. ``kv_coefficient`` is the one admission
+        already resolved for the model; without it the stage resolves it.
         """
         if not self._config.dynamic_ctx_enabled or not effective_ctx:
             return effective_ctx, False
@@ -2687,7 +3141,11 @@ class ResourceGovernor:
                 - self._config.safety_margin_gb
                 - known_weights_gb
             )
-            coeff = self.resolve_kv_coefficient(model)
+            coeff = (
+                kv_coefficient
+                if kv_coefficient is not None
+                else self.resolve_kv_coefficient(model)
+            )
             tokens = 0
             if coeff > 0 and kv_budget_gb > 0:
                 tokens = int((kv_budget_gb / coeff) * 1024.0)
@@ -3030,7 +3488,7 @@ def reset_resource_governor() -> None:
 
 
 def backend_admission_gate(
-    model: str, options: dict | None = None
+    model: str, options: dict | None = None, unsplittable: str | None = None
 ) -> None:
     """The internal hook body behind the four generate/stream heads.
 
@@ -3041,12 +3499,19 @@ def backend_admission_gate(
     Section 8 residual), raising the typed GovernorRefusal on a positive
     refusal only. The caller (inference_backend) wraps this in its own
     fail-open handling; a disabled governor stands down entirely.
+
+    ``unsplittable`` names the calling engine when it cannot run a model
+    split between the GPU and system RAM. A split admission, from the
+    ticket or the backstop, is then refused by name before any eviction,
+    accounting or load, instead of failing for memory inside the engine.
     """
     governor = get_resource_governor()
     if not governor.config.enabled:
         return
     ticket = get_active_ticket()
     if ticket is not None and ticket.model == model:
+        if unsplittable and ticket.partial_offload and ticket.load_expected:
+            _refuse_split(governor, ticket, unsplittable)
         if ticket.admitted and ticket.load_expected:
             # Act on a conditional grant just before its load
             # (oldest-idle first, only as much as the shortfall needs;
@@ -3064,6 +3529,8 @@ def backend_admission_gate(
     decision = governor.admit(model, requested, caller="direct")
     if not decision.admitted:
         raise GovernorRefusal(decision)
+    if unsplittable and decision.partial_offload and decision.load_expected:
+        _refuse_split(governor, decision, unsplittable)
     if decision.load_expected:
         if decision.conditional_on_eviction:
             governor._honour_conditional_eviction(decision)

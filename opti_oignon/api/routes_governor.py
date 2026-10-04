@@ -150,6 +150,36 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
         "section": "ollama_limits",
         "leaf": "external_advisory",
     },
+    # The offload policy, held to the ranges load_config holds the file to:
+    # a write the next load would set aside for its default is refused.
+    "offload.enabled": {
+        "attr": "offload_enabled",
+        "type": "bool",
+        "section": "offload",
+        "leaf": "enabled",
+    },
+    "offload.prefer": {
+        "attr": "offload_prefer",
+        "type": "str",
+        "section": "offload",
+        "leaf": "prefer",
+        "choices": ("context", "speed"),
+    },
+    "offload.min_gpu_share": {
+        "attr": "offload_min_gpu_share",
+        "type": "float",
+        "section": "offload",
+        "leaf": "min_gpu_share",
+        "min": 0.0,
+        "max": 1.0,
+    },
+    "offload.ram_reserve_gb": {
+        "attr": "offload_ram_reserve_gb",
+        "type": "float",
+        "section": "offload",
+        "leaf": "ram_reserve_gb",
+        "min": 0.0,
+    },
 }
 
 # Keys deliberately not writable over the API, with the honest reason.
@@ -270,6 +300,12 @@ def _config_to_nested(cfg: Any) -> dict[str, Any]:
             "spawn_applies": cfg.ollama_spawn_applies,
             "external_advisory": cfg.ollama_external_advisory,
         },
+        "offload": {
+            "enabled": cfg.offload_enabled,
+            "prefer": cfg.offload_prefer,
+            "min_gpu_share": cfg.offload_min_gpu_share,
+            "ram_reserve_gb": cfg.offload_ram_reserve_gb,
+        },
     }
 
 
@@ -313,6 +349,25 @@ def _coerce_value(spec_type: str, raw: Any, key: str) -> Any:
             raise ConfigWriteError(400, f"{key} expects a non-empty string")
         return raw
     raise ConfigWriteError(400, f"{key} has an unsupported type")  # pragma: no cover
+
+
+def _check_range(spec: dict[str, Any], value: Any, key: str) -> None:
+    """Refuse a value outside the key's declared choices or range (400).
+
+    A key without an upper bound still refuses infinity, and a NaN is in no
+    range. Keys that declare neither pass untouched.
+    """
+    choices = spec.get("choices")
+    if choices is not None and value not in choices:
+        raise ConfigWriteError(400, f"{key} expects one of {', '.join(choices)}")
+    low, high = spec.get("min"), spec.get("max")
+    if low is None and high is None:
+        return
+    above = low is None or low <= value
+    below = value <= high if high is not None else value < float("inf")
+    if not (above and below):
+        bounds = f"[{low}, {high}]" if high is not None else f"[{low}, inf)"
+        raise ConfigWriteError(400, f"{key} expects a number in {bounds}")
 
 
 def _yaml_scalar(value: Any) -> str:
@@ -418,6 +473,7 @@ def config_write_payload(
         if key not in WRITABLE_KEYS:
             raise ConfigWriteError(400, f"unknown or unwritable key: {key}")
         typed[key] = _coerce_value(WRITABLE_KEYS[key]["type"], raw, key)
+        _check_range(WRITABLE_KEYS[key], typed[key], key)
 
     from pathlib import Path
 

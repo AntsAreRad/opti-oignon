@@ -2526,6 +2526,35 @@ package costs.
   cannot be read pins them too. The Bulbe page drops two gaps the entries
   above closed, code execution and plugins outside any confinement, and
   counts the census as it stands. Seven contracts.
+- The chat runs a model larger than the card again. Since the governor
+  learned the card's capacity from nvidia-smi (2026-09-11), every model
+  whose weights and context exceeded the free VRAM was refused, even when
+  the GPU and system RAM together held it; before that, an unknown
+  capacity let everything through on the VRAM side. Admission now tries the
+  GPU alone, now and then after evicting idle models, and otherwise splits
+  the model between the VRAM free now and the system RAM above a reserve.
+  Ollama places the layers itself: no num_gpu is sent. The order follows
+  `offload.prefer` in resource_governor.yaml: `context`, the default, keeps
+  the requested context and splits before stepping down the ladder; `speed`
+  steps down on the GPU alone first and splits last. `offload.min_gpu_share`
+  (0.0) refuses a split that would leave the GPU less than that share of
+  the cost, `offload.ram_reserve_gb` (4.0) is the RAM a split leaves to the
+  rest of the machine, and `offload.enabled: false` gives back the earlier
+  decisions. The four keys are held to their ranges when the file is read,
+  and the governor's config routes show and write them. A refusal names
+  both shortfalls, the VRAM the GPU alone lacks and the RAM a split lacks;
+  RAM that cannot be read means no split. A split is recorded in the
+  decisions ring as `partial_offload`, without a new column. llama.cpp in
+  process, which puts every layer on the GPU unless `n_gpu_layers` says
+  otherwise, refuses a split by name before loading anything instead of
+  failing for memory inside the engine; llama-server is unchanged. The KV
+  cost of a context now comes from the model's own geometry when Ollama or
+  the GGUF header describes it (layers, KV heads, key and value lengths, at
+  f16), under any configured override, rather than the flat 0.5 GiB per
+  1024 tokens. The loaded view keeps the total size Ollama reports beside
+  its VRAM part, the cost the governor learns is that total, and a model
+  split or held in RAM counts as loaded. Twenty-four contracts; eight
+  earlier ones are superseded by name, each replaced in its own file.
 
 ## 2.2.0 -- 2026-07-28
 

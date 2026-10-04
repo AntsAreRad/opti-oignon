@@ -670,6 +670,20 @@ fail_under = 0
 # pinned that the in-process sandbox kept a plugin from the being; ij13 pins
 # that a plugin's worker cannot import it, with the host package on its path.
 #
+# The governor now admits a model the GPU cannot hold, even after an
+# eviction, split between VRAM and system RAM when the two together hold
+# it. Seven contracts pinned a refusal or a downsize on frames whose
+# snapshots leave the RAM a split needs: c2, and the resource control of c7,
+# in the first governor suite, d1 and d2 in its second, w2 and w3 in its
+# third, and dc8 in the dynamic context suite. The eighth, bh2, pinned the
+# dictionary of a loaded record, which now carries the total size beside
+# size_vram. What each of them pinned holds where no split fits. They stay
+# in the tree word for word; c10 and c11, d4 and d5, w4 and w5, dc13 and
+# bh11, each in the same file, keep their other assertions and reach the
+# same refusal or downsize with no RAM left to split into, or pin the
+# longer record. The split itself is pinned in
+# tests/test_governor_offload_contracts.py.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -774,4 +788,12 @@ addopts = """
     --deselect=tests/test_plugin_out_of_process_contracts.py::test_pl3_bulbe_refuses_an_in_process_load_the_allowlist_accepts
     --deselect=tests/test_allium_injection_contracts.py::test_ij1_no_model_tool_entry_and_no_plugin_loader_reaches_the_being
     --deselect=tests/test_allium_injection_contracts.py::test_ij3_a_sandboxed_plugin_cannot_import_the_being_or_its_entry_modules_cached_or_not
+    --deselect=tests/test_resource_governor_contracts.py::test_c2_refuse_beyond_capacity
+    --deselect=tests/test_resource_governor_contracts.py::test_c7_estop_refusal_never_enters_refusal_window
+    --deselect=tests/test_resource_governor_gate_contracts.py::test_d1_floored_caller_laddered_to_downsize
+    --deselect=tests/test_resource_governor_gate_contracts.py::test_d2_floorless_caller_refused_not_downsized
+    --deselect=tests/test_resource_governor_queue_contracts.py::test_w2_unenrolled_refusal_returns_without_enqueue
+    --deselect=tests/test_resource_governor_queue_contracts.py::test_w3_enrolled_refusal_at_depth_bound_does_not_enqueue
+    --deselect=tests/test_dynamic_ctx_ceiling_contracts.py::test_dc8_a_starved_budget_answers_the_lowest_step_and_lets_fit_refuse
+    --deselect=tests/test_backend_heads_contracts.py::test_bh2_ollama_reads_the_loaded_set_through_ps_in_both_forms_and_unknown_is_none
 """
