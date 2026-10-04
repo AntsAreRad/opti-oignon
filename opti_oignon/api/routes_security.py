@@ -245,24 +245,25 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
             "detail": "Sandbox module not available",
         })
 
-    # 7. Plugin module blocking: +10
+    # 7. Plugin isolation: +10 when no plugin can run outside bubblewrap
+    # (under it, or not started at all in strict mode)
     try:
-        from opti_oignon.plugin_loader import _BLOCKED_IMPORTS
-        passed = "os" in _BLOCKED_IMPORTS and "sys" in _BLOCKED_IMPORTS
+        from opti_oignon.plugin_isolation import MODE_DIRECT, resolve_posture
+        posture = resolve_posture()
+        passed = posture.mode != MODE_DIRECT
         checks.append({
-            "name": "plugin_module_blocking",
+            "name": "plugin_isolation",
             "points": 10 if passed else 0,
             "max_points": 10,
             "passed": passed,
-            "detail": f"Plugin import blocking active ({len(_BLOCKED_IMPORTS)} modules)"
-                      if passed else "Critical modules not blocked in plugin sandbox",
+            "detail": posture.reason,
         })
         total += 10 if passed else 0
     except Exception:
         checks.append({
-            "name": "plugin_module_blocking",
+            "name": "plugin_isolation",
             "points": 0, "max_points": 10, "passed": False,
-            "detail": "Plugin loader not available",
+            "detail": "Plugin isolation state not available",
         })
 
     # 8. Plugin data redaction: +10

@@ -654,6 +654,22 @@ fail_under = 0
 # the replacement lives in tests/test_plugin_bwrap_isolation_contracts.py:
 # pb13 asserts it on a real worker, with the host package forced onto its path.
 #
+# The in-process plugin load is gone, and with it the import, path and
+# builtins restrictions that ran while a plugin's file executed inside the
+# server: a plugin runs only in its worker, behind the process boundary and,
+# where the sandbox has it, bubblewrap. tests/test_plugin_sandbox.py pinned
+# that mechanism; it imports names that no longer exist, so it is ignored
+# rather than deselected, and stays in the tree word for word as the record.
+# What holds instead is pinned by the worker's host-package suite, the plugin
+# isolation suite and pl4. tests/test_plugin_boot_load.py drove the boot path
+# through an in-process loader: its six contracts are re-asserted, unchanged
+# in what they pin, on real workers in tests/test_plugin_boot_path_contracts.py
+# (bt1-bt6). pl3 asserted that Bulbe refuses an in-process load; pl4 asserts
+# that no mode loads one. ij1 pinned the dynamic imports of the tool closure,
+# the in-process load among them; ij12 pins the same set less that one. ij3
+# pinned that the in-process sandbox kept a plugin from the being; ij13 pins
+# that a plugin's worker cannot import it, with the host package on its path.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -661,6 +677,7 @@ fail_under = 0
 #
 addopts = """
     --ignore=tests/life
+    --ignore=tests/test_plugin_sandbox.py
     --deselect=tests/test_semantic_cache_contracts.py
     --deselect=tests/test_semantic_cache_fallback_contracts.py
     --deselect=tests/test_semantic_cache_management_contracts.py
@@ -753,4 +770,8 @@ addopts = """
     --deselect=tests/test_public_clean_guard_contracts.py::test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass
     --deselect=tests/test_egress_census_guard_contracts.py::test_ec4_the_real_tree_is_green_and_its_ledger_never_grows
     --deselect=tests/test_plugin_worker_isolation_contracts.py::test_c4_initialize_handler_completes_fast
+    --deselect=tests/test_plugin_boot_load.py
+    --deselect=tests/test_plugin_out_of_process_contracts.py::test_pl3_bulbe_refuses_an_in_process_load_the_allowlist_accepts
+    --deselect=tests/test_allium_injection_contracts.py::test_ij1_no_model_tool_entry_and_no_plugin_loader_reaches_the_being
+    --deselect=tests/test_allium_injection_contracts.py::test_ij3_a_sandboxed_plugin_cannot_import_the_being_or_its_entry_modules_cached_or_not
 """

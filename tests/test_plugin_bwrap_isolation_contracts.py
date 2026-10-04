@@ -37,7 +37,9 @@ lives under resource limits the server installs before it executes:
   * PB13 -- a plugin that reaches for the host package starts fast, on its
     fallback, refused by the worker's own guard even with the package on
     its path (it supersedes c4 of the worker's host-package suite, whose
-    server was built on a socket path the worker no longer opens).
+    server was built on a socket path the worker no longer opens);
+  * PB14 -- the security score credits plugin isolation only when no
+    plugin can run bare: under bubblewrap, or not started at all.
 
 The posture and the launcher are faked at their seams (the posture provider,
 ``subprocess.Popen``); PB6, PB7, PB12 and PB13 run real worker processes.
@@ -721,3 +723,22 @@ def test_pb12_under_the_real_bubblewrap_the_walls_hold(tmp_path):
     finally:
         listener.close()
         manager.stop_all()
+
+
+def test_pb14_the_security_score_credits_plugin_isolation_only_when_no_plugin_runs_bare(
+        monkeypatch):
+    iso = _iso()
+    security = importlib.import_module("opti_oignon.api.routes_security")
+    walled = iso.resolve_posture(_sandbox_module(_FakeSandbox(in_use=True, strict=True)))
+    blocked = iso.resolve_posture(_sandbox_module(_FakeSandbox(in_use=False, strict=True)))
+    bare = iso.resolve_posture(_sandbox_module(_FakeSandbox(in_use=False, strict=False)))
+
+    def credited(posture):
+        monkeypatch.setattr(iso, "resolve_posture", lambda sandbox_module=None: posture)
+        _total, _max, checks = security._compute_security_score()
+        check = next(c for c in checks if c["name"] == "plugin_isolation")
+        return check["passed"], check["detail"]
+
+    assert credited(walled) == (True, walled.reason)
+    assert credited(blocked) == (True, blocked.reason)
+    assert credited(bare) == (False, bare.reason)

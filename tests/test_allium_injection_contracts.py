@@ -22,6 +22,11 @@ open it. What it may reach of the platform is a closed list.
     labels that are not literals pinned by where they are made.
   * IJ11 -- the being reaches only its closed list of platform modules, and
     only the names it reads of each.
+  * IJ12 -- IJ1 on a loader with no in-process load: the same closure, the
+    same dynamic imports less the one that load made. It supersedes IJ1.
+  * IJ13 -- a plugin's worker cannot import the being or its entry modules,
+    even with the host package on its path: the worker's own guard refuses
+    each. It supersedes IJ3, whose in-process sandbox no longer exists.
 
 Local-only (the public distribution ships no tests). The censuses read the
 syntax trees (``tests/_allium_census.py``); remote inference and the plugin
@@ -50,6 +55,8 @@ BUDGET_S = {
     "test_ij3_a_sandboxed_plugin_cannot_import_the_being_or_its_entry_modules_cached_or_not": 2.0,
     "test_ij8_the_executor_hub_never_imports_the_being_nor_labels_an_untrusted_source_with_it": 2.0,
     "test_ij11_the_being_reaches_only_its_closed_list_of_platform_modules": 2.0,
+    "test_ij12_no_model_tool_entry_and_no_plugin_loader_reaches_the_being_and_no_load_is_in_process": 2.0,
+    "test_ij13_a_plugin_worker_cannot_import_the_being_or_its_entry_modules": 5.0,
 }
 PACKAGE = REPO / "opti_oignon"
 ENTRIES = ("opti_oignon.cli.garden", "opti_oignon.api.routes_allium")
@@ -220,6 +227,41 @@ def test_ij1_no_model_tool_entry_and_no_plugin_loader_reaches_the_being():
     assert _being(reached) == [], _being(reached)
     dynamic = set(census.dynamic_imports(sorted(reached)))
     assert dynamic == DYNAMIC_SITES, (sorted(dynamic - DYNAMIC_SITES), sorted(DYNAMIC_SITES - dynamic))
+    calling = _text("opti_oignon/tool_calling.py")
+    chain = {"opti_oignon.tool_calling": calling + "\n\ndef _planted_hop():\n    from opti_oignon import zz_one  # noqa\n",
+             "opti_oignon.zz_one": "from opti_oignon import zz_two  # noqa\n",
+             "opti_oignon.zz_two": "from opti_oignon import zz_three  # noqa\n",
+             "opti_oignon.zz_three": "from opti_oignon.allium import service  # noqa\n"}
+    assert "opti_oignon.allium.service" in census.closure(TOOL_ROOTS, overrides=chain), "witness: a deep chain"
+    literal = {"opti_oignon.tool_calling": calling + "\n\ndef _planted_literal():\n    import importlib\n"
+                                                     "    return importlib.import_module('opti_oignon.allium.service')\n"}
+    assert "opti_oignon.allium.service" in census.closure(TOOL_ROOTS, overrides=literal), \
+        "witness: an import by a literal name is followed"
+    dispatch = _text("opti_oignon/agent/dispatch.py")
+    planted = {"opti_oignon.agent.dispatch": dispatch + "\n\ndef _planted(name):\n    import importlib\n"
+                                                        "    return importlib.import_module(name)\n"}
+    found = census.dynamic_imports(["agent.dispatch"], overrides=planted)
+    assert ("opti_oignon.agent.dispatch", "_planted", "import_module") in found, "witness: a computed import"
+
+
+# ---------------------------------------------------------------------------
+# IJ12 -- IJ1, on a loader that loads nothing in process
+# ---------------------------------------------------------------------------
+# The plugin loader no longer reads a plugin's file into the server: the one
+# dynamic import that load made is gone, and nothing took its place.
+DYNAMIC_SITES_WITHOUT_IN_PROCESS_LOAD = DYNAMIC_SITES - {
+    ("opti_oignon.plugin_loader", "PluginLoader._load_plugin_inprocess", "spec_from_file_location"),
+}
+
+
+def test_ij12_no_model_tool_entry_and_no_plugin_loader_reaches_the_being_and_no_load_is_in_process():
+    reached = census.closure(TOOL_ROOTS)
+    assert "opti_oignon.inference_backend" in reached and len(reached) > 100, len(reached)
+    assert _being(reached) == [], _being(reached)
+    dynamic = set(census.dynamic_imports(sorted(reached)))
+    assert dynamic == DYNAMIC_SITES_WITHOUT_IN_PROCESS_LOAD, (
+        sorted(dynamic - DYNAMIC_SITES_WITHOUT_IN_PROCESS_LOAD),
+        sorted(DYNAMIC_SITES_WITHOUT_IN_PROCESS_LOAD - dynamic))
     calling = _text("opti_oignon/tool_calling.py")
     chain = {"opti_oignon.tool_calling": calling + "\n\ndef _planted_hop():\n    from opti_oignon import zz_one  # noqa\n",
              "opti_oignon.zz_one": "from opti_oignon import zz_two  # noqa\n",
@@ -709,3 +751,45 @@ def test_ij3_a_sandboxed_plugin_cannot_import_the_being_or_its_entry_modules_cac
         assert not loader._LOADING, "no plugin is held as loading once its load ends"
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# IJ13 -- a plugin's worker, with the host package on its path
+# ---------------------------------------------------------------------------
+REACHING_FOR_THE_BEING = '''
+REFUSALS = []
+for name in ("opti_oignon.allium", "opti_oignon.allium.service",
+             "opti_oignon.cli.garden", "opti_oignon.api.routes_allium"):
+    try:
+        __import__(name)
+        REFUSALS.append("imported")
+    except ImportError as exc:
+        REFUSALS.append(str(exc))
+
+
+def hook_pre_inference(context):
+    return {"refusals": REFUSALS}
+'''
+
+
+def test_ij13_a_plugin_worker_cannot_import_the_being_or_its_entry_modules(tmp_path):
+    from importlib import import_module
+
+    workers = import_module("opti_oignon.plugin_subprocess")
+    isolation = import_module("opti_oignon.plugin_isolation")
+    plugin = tmp_path / "reacher"
+    plugin.mkdir()
+    (plugin / "entry_point.py").write_text(REACHING_FOR_THE_BEING, encoding="utf-8")
+    manager = workers.PluginSubprocessManager(
+        log_dir=tmp_path / "logs",
+        data_root=tmp_path / "data",
+        posture_provider=lambda: isolation.PluginPosture(mode=isolation.MODE_DIRECT, strict=False),
+    )
+    try:
+        # The host package is on the worker's path: only its own guard can refuse.
+        manager.start_plugin("reacher", plugin, "entry_point.py", env_extra={"PYTHONPATH": str(REPO)})
+        out = manager.call_hook("reacher", "pre_inference", {"data": {}})
+    finally:
+        manager.stop_all()
+    assert len(out["refusals"]) >= 4, out
+    assert all("isolation boundary" in refusal for refusal in out["refusals"]), out["refusals"]

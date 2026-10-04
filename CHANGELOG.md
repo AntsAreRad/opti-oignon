@@ -2498,6 +2498,20 @@ package costs.
   channel of a second launcher; that launcher, imported by nothing, is
   removed, and the pages describe what runs. Twelve contracts; one
   superseded by name.
+- [SECURITY] No plugin loads inside the server any more. The loader kept
+  an in-process mode, an explicit choice since the fallback to it was
+  removed: the plugin's file executed in the server under import, path and
+  builtins restrictions that were no boundary against a hostile plugin.
+  The mode is gone with its 650 lines, and `inprocess`, like any unknown
+  mode, is refused when the loader is built. The security score's seventh
+  check credited "plugin import blocking" from that mode's list while
+  plugins ran in their own process, where the list applied to nothing; it
+  now credits plugin isolation only when no plugin can run outside
+  bubblewrap. The plugins configuration loses the import lists only that
+  mode read, and its mode comment says what runs. Ten contracts; the boot
+  path's six are re-asserted on real workers, three more are superseded by
+  name, and the in-process sandbox suite, which imports what is gone, is
+  ignored and kept as the record.
 
 ## 2.2.0 -- 2026-07-28
 

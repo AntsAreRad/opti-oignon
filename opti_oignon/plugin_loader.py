@@ -2,680 +2,22 @@
 """
 Plugin loader for Opti-Oignon.
 
-PluginLoader: load plugins from directories, execute them in a restricted
-sandbox (no host filesystem access outside plugin dir, no network by
-default), manage lifecycle (install, enable, disable, uninstall).
+PluginLoader: load plugins from directories, run each in its own worker
+process (see plugin_subprocess and plugin_isolation; no plugin code runs in
+the server), manage lifecycle (install, enable, disable, uninstall).
 """
 
-import contextlib
-import importlib.util
-import io
 import logging
 import shutil
-import sys
-import threading
 import types
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Modules that plugins are NOT allowed to import
-_BLOCKED_IMPORTS = frozenset({
-    # Original blocks
-    "subprocess",
-    "shutil",
-    "ctypes",
-    "multiprocessing",
-    "signal",
-    "resource",
-    "pty",
-    "fcntl",
-    "termios",
-    "readline",
-    "code",
-    "codeop",
-    "compileall",
-    "py_compile",
-    "importlib",      # importlib.import_module() bypass
-    # Critical additions -- system access
-    "os",             # os.system(), os.popen(), os.environ, os.listdir
-    "sys",            # sys.modules manipulation, sys._getframe
-    "pathlib",        # Path.read_text() / .write_text() bypass builtins.open
-    "io",             # io.open() bypasses builtins.open patch
-    "glob",           # File enumeration
-    # Critical additions -- code execution via deserialization
-    "pickle",         # Arbitrary code execution via __reduce__
-    "shelve",         # Uses pickle internally
-    "marshal",        # Low-level serialization, code object execution
-    # Critical additions -- introspection / memory access
-    "gc",             # gc.get_objects() exposes all Python objects in memory
-    "inspect",        # Read source code of any loaded module
-    "dis",            # Disassemble bytecode of any function
-    "ast",            # Parse + compile arbitrary code
-    # Critical additions -- import system manipulation
-    "zipimport",      # Load code from zip files
-    "pkgutil",        # Package utilities, import scanning
-    "runpy",          # Run modules as scripts
-    # Miscellaneous dangerous modules
-    "webbrowser",     # Open URLs (information disclosure)
-    "antigravity",    # Opens browser via webbrowser
-    "turtle",         # Can open GUI windows
-    "tkinter",        # GUI access
-})
-
-# Modules conditionally blocked unless plugin has network_outbound permission
-_NETWORK_MODULES = frozenset({
-    "socket",
-    "http",
-    "urllib",
-    "requests",
-    "httpx",
-    "aiohttp",
-    "websocket",
-    "ftplib",
-    "smtplib",
-    "poplib",
-    "imaplib",
-    "xmlrpc",
-})
-
-# The componion and the two modules that open it -- the API's garden router,
-# whose garden seam is writable, and the terminal's commands. While a plugin
-# loads in process, its code does not import them, cached or not: the finder
-# refuses them while they are not yet loaded, the import wrapper and
-# importlib's own entries once they are. Every rule acts only while a plugin
-# frame is on the stack, so a platform thread that serves the garden while a
-# plugin loads is never refused, and nothing is hidden from ``sys.modules``.
-# This is a rule of the load, in in-process mode: hooks run after it
-# with no import restriction, and it is no boundary against a hostile plugin
-# (a loader of the plugin's own can execute a file by its path).
-_BLOCKED_PACKAGES = ("opti_oignon.allium", "opti_oignon.api.routes_allium", "opti_oignon.cli.garden")
-
-# The globals of every plugin module whose sandboxed load is running. A frame
-# that runs code of one of them is plugin code, whatever that code binds as its
-# ``__name__``: the dictionary is the one the module was given, and plugin code
-# cannot hand its frames another.
-_LOADING: list = []
-_LOADING_LOCK = threading.Lock()
-
-
-@contextlib.contextmanager
-def _plugin_scope(module: types.ModuleType) -> Any:
-    """Hold ``module``'s globals as a loading plugin's for the length of the block.
-
-    Read as ``module.__dict__``: the sandbox refuses ``vars`` while it stands.
-    """
-    scope = module.__dict__
-    with _LOADING_LOCK:
-        _LOADING.append(scope)
-    try:
-        yield
-    finally:
-        with _LOADING_LOCK:
-            for index, held in enumerate(_LOADING):
-                if held is scope:
-                    del _LOADING[index]
-                    break
-
-
-def _in_blocked_package(name: str, packages: tuple = _BLOCKED_PACKAGES) -> bool:
-    """Whether ``name`` is one of ``packages`` or a submodule of one."""
-    return any(name == package or name.startswith(package + ".") for package in packages)
-
-
-def _is_plugin_frame(frame: Any) -> bool:
-    """Whether ``frame`` runs plugin code: the globals of a loading plugin, or a module named ``_opti_plugin_*``."""
-    scope = frame.f_globals
-    if any(scope is held for held in tuple(_LOADING)):
-        return True
-    name = scope.get("__name__", "")
-    return isinstance(name, str) and name.startswith("_opti_plugin_")
-
-
-def _plugin_on_stack() -> bool:
-    """Whether any frame of the calling thread's stack runs plugin code.
-
-    Stricter than the exec/eval blockers, which look at the immediate caller
-    only: a plugin that reaches an import through a platform helper is
-    still on the stack, and a plugin that rebinds its ``__name__`` still runs
-    in the globals it was loaded with.
-    """
-    frame = sys._getframe(1)
-    while frame is not None:
-        if _is_plugin_frame(frame):
-            return True
-        frame = frame.f_back
-    return False
-
-
-def _package_of(importer_globals: Any) -> str | None:
-    """The package a relative ``__import__`` resolves against, by the import system's own rule; ``None`` if unsure.
-
-    The rule of ``importlib._bootstrap``: ``__package__`` when it is not
-    ``None``, else ``__spec__.parent`` when there is a spec, else the
-    module's name (its parent unless it has ``__path__``). Read once: a
-    caller that must act on it hands the import system this answer.
-    """
-    try:
-        scope = importer_globals if importer_globals is not None else {}
-        package = scope.get("__package__")
-        if package is None:
-            spec = scope.get("__spec__")
-            if spec is not None:
-                package = spec.parent
-            else:
-                package = scope["__name__"]
-                if "__path__" not in scope:
-                    package = package.rpartition(".")[0]
-    except Exception:  # noqa: BLE001 - a package that cannot be read is not resolved here
-        return None
-    return package if isinstance(package, str) and package else None
-
-
-def _absolute_import(name: str, package: str | None, level: Any) -> str | None:
-    """The absolute name an ``__import__`` call resolves to against ``package``; ``None`` when unsure."""
-    if not level:
-        return name
-    if package is None or not isinstance(level, int) or level < 0 or not isinstance(name, str):
-        return None
-    bits = package.rsplit(".", level - 1)
-    if len(bits) < level:
-        return None
-    return bits[0] + "." + name if name else bits[0]
-
-
-def _import_call(name: str, args: tuple, kwargs: dict) -> tuple:
-    """``(given arguments, package or None, targets)`` of an ``__import__`` call, the package read once.
-
-    The targets are the module and each ``from`` name under it; an import
-    this cannot resolve has the one target ``None``.
-    """
-    given = dict(zip(("globals", "locals", "fromlist", "level"), args))
-    given.update(kwargs)
-    level = given.get("level") or 0
-    package = _package_of(given.get("globals")) if level else None
-    base = _absolute_import(name, package, level)
-    if base is None:
-        return given, package, [None]
-    targets: list[str | None] = [base]
-    for item in given.get("fromlist") or ():
-        if isinstance(item, str) and item != "*":
-            targets.append(base + "." + item if base else item)
-    return given, package, targets
-
-
-def _guarded_import(real: Any, via: str, name: str, args: tuple, kwargs: dict) -> Any:
-    """``real(name, ...)``, unless it reaches a blocked module while plugin code is on the stack.
-
-    A relative import made while a plugin is on the stack is handed to the
-    import system with the package this rule judged, so a package that
-    answers differently when read twice cannot pass the rule and then
-    import elsewhere.
-    """
-    given, package, targets = _import_call(name, args, kwargs)
-    if not _plugin_on_stack():
-        return real(name, *args, **kwargs)
-    reached = _reaches_blocked(targets)
-    if reached:
-        raise PluginSandboxViolation(
-            f"Plugin attempted to import a module plugins never reach via {via}: '{reached}'"
-        )
-    if given.get("level"):
-        return real(name, {"__package__": package, "__name__": package}, given.get("locals"),
-                    given.get("fromlist") or (), given["level"])
-    return real(name, *args, **kwargs)
-
-
-def _reaches_blocked(targets: list[str | None]) -> str | None:
-    """The first target that is a blocked module, or an unresolved one (``"?"``); ``None`` when none is."""
-    for target in targets:
-        if target is None:
-            return "?"
-        if _in_blocked_package(target):
-            return target
-    return None
-
 
 class PluginLoadError(Exception):
     """Raised when a plugin fails to load."""
-
-
-class PluginSandboxViolation(Exception):
-    """Raised when a plugin attempts a forbidden operation."""
-
-
-class _RestrictedImporter:
-    """Meta-path finder that blocks forbidden imports for plugin modules.
-
-    Installed into sys.meta_path during plugin loading and removed after.
-    Uses find_spec (Python 3.4+) instead of deprecated find_module.
-    """
-
-    def __init__(
-        self,
-        blocked: frozenset[str],
-        network_blocked: frozenset[str],
-        has_network_permission: bool = False,
-        *,
-        blocked_packages: tuple = _BLOCKED_PACKAGES,
-    ) -> None:
-        self._blocked = blocked
-        self._network_blocked = network_blocked
-        self._has_network = has_network_permission
-        self._blocked_packages = tuple(blocked_packages)
-        self._active = True
-
-    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:
-        """Python 3 meta-path protocol: raise if blocked, return None to allow.
-
-        A module of ``blocked_packages`` is refused only while a plugin frame
-        is on the stack; the finder is asked only for a module that is not
-        loaded yet, and the import wrapper holds the rule once it is.
-        """
-        if not self._active:
-            return None
-        if _in_blocked_package(fullname, self._blocked_packages) and _plugin_on_stack():
-            raise PluginSandboxViolation(
-                f"Plugin attempted to import a module plugins never reach: '{fullname}'"
-            )
-        top = fullname.split(".")[0]
-        if top in self._blocked:
-            raise PluginSandboxViolation(
-                f"Plugin attempted to import blocked module: '{fullname}'"
-            )
-        if not self._has_network and top in self._network_blocked:
-            raise PluginSandboxViolation(
-                f"Plugin attempted to import blocked module: '{fullname}'"
-            )
-        return None
-
-    def deactivate(self) -> None:
-        """Deactivate this importer so it stops blocking."""
-        self._active = False
-
-
-class _RestrictedPathAccessor:
-    """Context manager that patches file access paths to restrict plugins.
-
-    Patches builtins.open, io.open, and pathlib.Path file methods so that
-    only files within the plugin directory and standard library / site-packages
-    can be accessed.  This is defense-in-depth: the primary defense is
-    blocking os/pathlib/io at import time via _RestrictedImporter.
-
-    Extended to cover pathlib.Path.open / read_text / read_bytes /
-    write_text / write_bytes / iterdir / glob / rglob and io.open.
-    """
-
-    def __init__(self, allowed_dirs: list[Path]) -> None:
-        self._allowed = [p.resolve() for p in allowed_dirs]
-        self._original_open: Any = None
-        self._original_io_open: Any = None
-        self._original_path_open: Any = None
-        self._original_path_read_text: Any = None
-        self._original_path_read_bytes: Any = None
-        self._original_path_write_text: Any = None
-        self._original_path_write_bytes: Any = None
-        self._original_path_iterdir: Any = None
-        self._original_path_glob: Any = None
-        self._original_path_rglob: Any = None
-        # Capture module refs so __exit__ works even with __import__ blocked
-        self._builtins_module: Any = None
-        self._io_module: Any = None
-
-    def _is_allowed(self, filepath: str | Path) -> bool:
-        """Check if a file path is within an allowed directory."""
-        try:
-            resolved = Path(filepath).resolve()
-        except (OSError, ValueError):
-            return False
-        for allowed in self._allowed:
-            try:
-                resolved.relative_to(allowed)
-                return True
-            except ValueError:
-                continue
-        # Allow stdlib and site-packages
-        for sp in sys.path:
-            if sp and resolved.is_relative_to(Path(sp).resolve()):
-                return True
-        return False
-
-    def _is_dir_allowed(self, dirpath: Path) -> bool:
-        """Check if a directory path is within an allowed directory."""
-        try:
-            resolved = dirpath.resolve()
-        except (OSError, ValueError):
-            return False
-        for allowed in self._allowed:
-            try:
-                resolved.relative_to(allowed)
-                return True
-            except ValueError:
-                continue
-        for sp in sys.path:
-            if sp and resolved.is_relative_to(Path(sp).resolve()):
-                return True
-        return False
-
-    def __enter__(self) -> "_RestrictedPathAccessor":
-        import builtins
-        # PI-25: reference the module-level `io` (imported before any
-        # import blocking) instead of `import io` here -- io is hidden
-        # from sys.modules and the active importer would otherwise raise
-        # a PluginSandboxViolation on the loader's own setup.
-        _io = io
-
-        self._builtins_module = builtins
-        self._io_module = _io
-
-        self._original_open = builtins.open
-        allowed_check = self._is_allowed
-        dir_allowed_check = self._is_dir_allowed
-        original = self._original_open
-
-        # --- builtins.open ---
-        def restricted_open(file: Any, *args: Any, **kwargs: Any) -> Any:
-            if isinstance(file, (str, Path)):
-                if not allowed_check(str(file)):
-                    raise PluginSandboxViolation(
-                        f"Plugin attempted to access restricted path: {file}"
-                    )
-            return original(file, *args, **kwargs)
-
-        builtins.open = restricted_open  # type: ignore[assignment]
-
-        # --- io.open ---
-        self._original_io_open = _io.open
-
-        def restricted_io_open(file: Any, *args: Any, **kwargs: Any) -> Any:
-            if isinstance(file, (str, Path)):
-                if not allowed_check(str(file)):
-                    raise PluginSandboxViolation(
-                        f"Plugin attempted io.open on restricted path: {file}"
-                    )
-            return self._original_io_open(file, *args, **kwargs)
-
-        _io.open = restricted_io_open  # type: ignore[assignment]
-
-        # --- pathlib.Path methods ---
-        _Path = Path
-
-        self._original_path_open = _Path.open
-
-        def restricted_path_open(self_path: Any, *args: Any, **kwargs: Any) -> Any:
-            if not allowed_check(str(self_path)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.open on restricted path: {self_path}"
-                )
-            return self._original_path_open(self_path, *args, **kwargs)
-
-        _Path.open = restricted_path_open  # type: ignore[assignment]
-
-        self._original_path_read_text = _Path.read_text
-
-        def restricted_read_text(self_path: Any, *args: Any, **kwargs: Any) -> str:
-            if not allowed_check(str(self_path)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.read_text on restricted path: {self_path}"
-                )
-            return self._original_path_read_text(self_path, *args, **kwargs)
-
-        _Path.read_text = restricted_read_text  # type: ignore[assignment]
-
-        self._original_path_read_bytes = _Path.read_bytes
-
-        def restricted_read_bytes(self_path: Any, *args: Any, **kwargs: Any) -> bytes:
-            if not allowed_check(str(self_path)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.read_bytes on restricted path: {self_path}"
-                )
-            return self._original_path_read_bytes(self_path, *args, **kwargs)
-
-        _Path.read_bytes = restricted_read_bytes  # type: ignore[assignment]
-
-        self._original_path_write_text = _Path.write_text
-
-        def restricted_write_text(self_path: Any, *args: Any, **kwargs: Any) -> Any:
-            if not allowed_check(str(self_path)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.write_text on restricted path: {self_path}"
-                )
-            return self._original_path_write_text(self_path, *args, **kwargs)
-
-        _Path.write_text = restricted_write_text  # type: ignore[assignment]
-
-        self._original_path_write_bytes = _Path.write_bytes
-
-        def restricted_write_bytes(self_path: Any, *args: Any, **kwargs: Any) -> Any:
-            if not allowed_check(str(self_path)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.write_bytes on restricted path: {self_path}"
-                )
-            return self._original_path_write_bytes(self_path, *args, **kwargs)
-
-        _Path.write_bytes = restricted_write_bytes  # type: ignore[assignment]
-
-        self._original_path_iterdir = _Path.iterdir
-
-        def restricted_iterdir(self_path: Any) -> Any:
-            if not dir_allowed_check(self_path):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.iterdir on restricted path: {self_path}"
-                )
-            return self._original_path_iterdir(self_path)
-
-        _Path.iterdir = restricted_iterdir  # type: ignore[assignment]
-
-        self._original_path_glob = _Path.glob
-
-        def restricted_glob(self_path: Any, pattern: str, *args: Any, **kwargs: Any) -> Any:
-            if not dir_allowed_check(self_path):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.glob on restricted path: {self_path}"
-                )
-            return self._original_path_glob(self_path, pattern, *args, **kwargs)
-
-        _Path.glob = restricted_glob  # type: ignore[assignment]
-
-        self._original_path_rglob = _Path.rglob
-
-        def restricted_rglob(self_path: Any, pattern: str, *args: Any, **kwargs: Any) -> Any:
-            if not dir_allowed_check(self_path):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted Path.rglob on restricted path: {self_path}"
-                )
-            return self._original_path_rglob(self_path, pattern, *args, **kwargs)
-
-        _Path.rglob = restricted_rglob  # type: ignore[assignment]
-
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        builtins = self._builtins_module
-        _io = self._io_module
-
-        if builtins is not None and self._original_open is not None:
-            builtins.open = self._original_open  # type: ignore[assignment]
-        if _io is not None and self._original_io_open is not None:
-            _io.open = self._original_io_open  # type: ignore[assignment]
-
-        _Path = Path
-        if self._original_path_open is not None:
-            _Path.open = self._original_path_open  # type: ignore[assignment]
-        if self._original_path_read_text is not None:
-            _Path.read_text = self._original_path_read_text  # type: ignore[assignment]
-        if self._original_path_read_bytes is not None:
-            _Path.read_bytes = self._original_path_read_bytes  # type: ignore[assignment]
-        if self._original_path_write_text is not None:
-            _Path.write_text = self._original_path_write_text  # type: ignore[assignment]
-        if self._original_path_write_bytes is not None:
-            _Path.write_bytes = self._original_path_write_bytes  # type: ignore[assignment]
-        if self._original_path_iterdir is not None:
-            _Path.iterdir = self._original_path_iterdir  # type: ignore[assignment]
-        if self._original_path_glob is not None:
-            _Path.glob = self._original_path_glob  # type: ignore[assignment]
-        if self._original_path_rglob is not None:
-            _Path.rglob = self._original_path_rglob  # type: ignore[assignment]
-
-
-# Builtins that plugins are NOT allowed to use.
-# __import__ is handled separately with a selective wrapper.
-# exec/eval/compile are blocked at the builtins level but with a
-# caller-check so Python's own import machinery still works.
-_BLOCKED_BUILTINS_TOTAL = frozenset({
-    "globals",      # Access the full global namespace
-    "vars",         # Access object dictionaries
-})
-
-# These builtins are blocked with a caller check: only raise if
-# called from plugin code (module name starting with _opti_plugin_)
-_BLOCKED_BUILTINS_CALLSITE = frozenset({
-    "exec",         # Execute arbitrary code strings
-    "eval",         # Evaluate arbitrary expressions
-    "compile",      # Compile code objects
-})
-
-
-class _RestrictedBuiltins:
-    """Context manager that blocks dangerous builtins during plugin loading.
-
-    - globals, vars: blocked entirely (raise PluginSandboxViolation)
-    - exec, eval, compile: blocked when called from plugin code
-      (detected by checking the caller's module name), but allowed
-      when called from Python internals (import system, etc.)
-    - __import__: selective wrapper that blocks _BLOCKED_IMPORTS modules
-      but allows safe module imports; it also refuses a module of
-      _BLOCKED_PACKAGES, named directly or as a ``from`` name, whenever a
-      plugin frame is on the stack, cached or not, and a relative import
-      made by plugin code itself
-    - importlib.import_module and importlib.__import__: the same rule for
-      _BLOCKED_PACKAGES, for a platform helper that imports by name while
-      plugin code is on the stack
-
-    Restored on exit.
-    """
-
-    def __init__(self) -> None:
-        self._originals: dict[str, Any] = {}
-        self._importlib_originals: dict[str, Any] = {}
-        self._builtins_module: Any = None
-
-    def __enter__(self) -> "_RestrictedBuiltins":
-        import builtins
-        self._builtins_module = builtins
-
-        # Block globals/vars entirely
-        for name in _BLOCKED_BUILTINS_TOTAL:
-            original = getattr(builtins, name, None)
-            if original is not None:
-                self._originals[name] = original
-
-                def _make_blocker(blocked_name: str) -> Any:
-                    def _blocked(*args: Any, **kwargs: Any) -> Any:
-                        raise PluginSandboxViolation(
-                            f"Plugin attempted to call blocked builtin: {blocked_name}()"
-                        )
-                    return _blocked
-
-                setattr(builtins, name, _make_blocker(name))
-
-        # Block exec/eval/compile with caller check
-        # PI-25: use the module-level `sys` (sys is hidden during a
-        # sandboxed load; re-importing it would trip the importer).
-        _sys = sys
-        for name in _BLOCKED_BUILTINS_CALLSITE:
-            original = getattr(builtins, name, None)
-            if original is not None:
-                self._originals[name] = original
-
-                def _make_callsite_blocker(
-                    blocked_name: str, orig_fn: Any
-                ) -> Any:
-                    def _blocked(*args: Any, **kwargs: Any) -> Any:
-                        # Check if caller is plugin code
-                        frame = _sys._getframe(1)
-                        caller_module = frame.f_globals.get(
-                            "__name__", ""
-                        )
-                        if caller_module.startswith("_opti_plugin_"):
-                            raise PluginSandboxViolation(
-                                f"Plugin attempted to call blocked "
-                                f"builtin: {blocked_name}()"
-                            )
-                        return orig_fn(*args, **kwargs)
-                    return _blocked
-
-                setattr(
-                    builtins, name,
-                    _make_callsite_blocker(name, original),
-                )
-
-        # Selective __import__ wrapper: blocks _BLOCKED_IMPORTS modules
-        # but allows internal Python imports to function normally
-        original_import = builtins.__import__
-        self._originals["__import__"] = original_import
-        blocked_set = _BLOCKED_IMPORTS
-
-        def _restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            top = name.split(".")[0]
-            if top in blocked_set:
-                raise PluginSandboxViolation(
-                    f"Plugin attempted to import blocked module via "
-                    f"__import__: '{name}'"
-                )
-            # A plugin module is top-level: a relative import made by its own
-            # code can only name a package it forged, and is refused.
-            level = args[3] if len(args) > 3 else kwargs.get("level", 0)
-            if level and _is_plugin_frame(_sys._getframe(1)):
-                raise PluginSandboxViolation(
-                    f"Plugin attempted a relative import via __import__: '{name}'"
-                )
-            # The componion and its two doors: refused to plugin code, whether
-            # the module is cached or not, by its name or by a ``from`` name.
-            return _guarded_import(original_import, "__import__", name, args, kwargs)
-
-        builtins.__import__ = _restricted_import  # type: ignore[assignment]
-
-        # importlib's own entries take a module by name without going through
-        # the builtin: a platform helper that imports by name while plugin code
-        # is on the stack is held to the same rule.
-        self._importlib_originals = {"import_module": importlib.import_module,
-                                     "__import__": importlib.__import__}
-        real_import_module = importlib.import_module
-        real_importlib_import = importlib.__import__
-
-        def _restricted_import_module(name: str, package: Any = None) -> Any:
-            try:
-                relative = isinstance(name, str) and name.startswith(".")
-                target = importlib.util.resolve_name(name, package) if relative else name
-            except Exception:  # noqa: BLE001 - a name that cannot be resolved here is unsure
-                target = None
-            reached = _reaches_blocked([target])
-            if reached and _plugin_on_stack():
-                raise PluginSandboxViolation(
-                    f"Plugin attempted to import a module plugins never reach "
-                    f"via importlib.import_module: '{reached}'"
-                )
-            return real_import_module(name, package)
-
-        def _restricted_importlib_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            return _guarded_import(real_importlib_import, "importlib.__import__", name, args, kwargs)
-
-        importlib.import_module = _restricted_import_module  # type: ignore[assignment]
-        importlib.__import__ = _restricted_importlib_import  # type: ignore[assignment]
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        for name, original in self._importlib_originals.items():
-            setattr(importlib, name, original)
-        self._importlib_originals.clear()
-        builtins = self._builtins_module
-        if builtins is None:
-            return
-        for name, original in self._originals.items():
-            setattr(builtins, name, original)
-        self._originals.clear()
 
 
 class LoadedPlugin:
@@ -688,14 +30,12 @@ class LoadedPlugin:
         module: types.ModuleType,
         plugin_dir: Path,
         hooks: dict[str, Any],
-        importer: _RestrictedImporter | None = None,
     ) -> None:
         self.name = name
         self.version = version
         self.module = module
         self.plugin_dir = plugin_dir
         self.hooks = hooks  # {hook_name: callable}
-        self._importer = importer
         self._initialized = False
 
     def initialize(self) -> None:
@@ -722,8 +62,6 @@ class LoadedPlugin:
                 logger.warning(
                     "Plugin '%s' shutdown() failed: %s", self.name, exc,
                 )
-        if self._importer:
-            self._importer.deactivate()
         self._initialized = False
 
     def get_hook(self, hook_name: str) -> Any | None:
@@ -751,7 +89,7 @@ class SubprocessPluginAdapter(LoadedPlugin):
     subprocess_manager : PluginSubprocessManager
         Reference to the manager that owns the subprocess.
     is_subprocess : bool
-        Always True, used to distinguish from in-process LoadedPlugins.
+        Always True: every loaded plugin runs in its own worker process.
     """
 
     def __init__(
@@ -845,18 +183,8 @@ def _make_rpc_hook_proxy(
     return _rpc_proxy
 
 
-def _bulbe_active() -> bool:
-    """Whether Bulbe is on. Fail-closed: a mode that cannot be read counts
-    as Bulbe, so in-process loading is refused when in doubt."""
-    try:
-        from opti_oignon.security_mode import is_bulbe
-        return bool(is_bulbe())
-    except Exception:
-        return True
-
-
 class PluginLoader:
-    """Load and manage plugin lifecycles with sandboxed execution.
+    """Load and manage plugin lifecycles, each plugin in its own worker.
 
     Parameters
     ----------
@@ -865,18 +193,16 @@ class PluginLoader:
     plugins_base_dir : Path or str or None
         Base directory where plugin directories are stored.
     subprocess_mode : str
-        Plugin execution mode:
-        - ``"subprocess"`` -- the plugin runs in its own process (default);
-          a load that fails there leaves the plugin unloaded
-        - ``"inprocess"`` -- the plugin runs inside the server: an explicit
-          choice only, never a fallback, and refused under Bulbe
-        Any other value is refused when the loader is built.
+        Plugin execution mode. ``"subprocess"`` -- the plugin runs in its own
+        worker process, and a load that fails there leaves it unloaded -- is
+        the only one: no mode runs plugin code inside the server, and any
+        other value is refused when the loader is built.
     subprocess_manager : PluginSubprocessManager or None
-        External subprocess manager instance.  If None and subprocess_mode
-        is not ``"inprocess"``, a default manager will be created lazily.
+        External subprocess manager instance. If None, a default manager
+        will be created lazily.
     """
 
-    EXECUTION_MODES = ("subprocess", "inprocess")
+    EXECUTION_MODES = ("subprocess",)
 
     def __init__(
         self,
@@ -902,43 +228,27 @@ class PluginLoader:
         """Currently loaded plugins by name."""
         return dict(self._loaded)
 
-    def load_plugin(
-        self,
-        plugin_dir: Path | str,
-        *,
-        sandbox: bool = True,
-    ) -> LoadedPlugin:
+    def load_plugin(self, plugin_dir: Path | str) -> LoadedPlugin:
         """Load a plugin from a directory containing manifest.yaml + entry point.
 
-        The plugin runs in its own subprocess. A load that fails there
+        The plugin runs in its own worker process. A load that fails there
         raises PluginLoadError naming the cause and leaves the plugin
-        unloaded: nothing re-executes it inside the server. The explicit
-        ``inprocess`` mode is refused under Bulbe.
+        unloaded: nothing executes it inside the server.
 
         Parameters
         ----------
         plugin_dir : Path or str
             Directory containing the plugin files.
-        sandbox : bool
-            Whether to apply import and filesystem restrictions
-            (only relevant in ``inprocess`` mode).
 
         Returns
         -------
-        LoadedPlugin or SubprocessPluginAdapter
+        SubprocessPluginAdapter
 
         Raises
         ------
         PluginLoadError
             If the plugin cannot be loaded.
         """
-        if self._subprocess_mode == "inprocess":
-            if _bulbe_active():
-                raise PluginLoadError(
-                    "Bulbe mode: plugins run only in their own subprocess; "
-                    "in-process loading is refused"
-                )
-            return self._load_plugin_inprocess(plugin_dir, sandbox=sandbox)
         return self._load_plugin_subprocess(plugin_dir)
 
     def _get_subprocess_manager(self) -> Any:
@@ -1067,196 +377,9 @@ class PluginLoader:
         )
         return adapter
 
-    def _load_plugin_inprocess(
-        self,
-        plugin_dir: Path | str,
-        *,
-        sandbox: bool = True,
-    ) -> LoadedPlugin:
-        """Load a plugin in-process (legacy behavior).
-
-        Parameters
-        ----------
-        plugin_dir : Path or str
-            Directory containing the plugin files.
-        sandbox : bool
-            Whether to apply import and filesystem restrictions.
-
-        Returns
-        -------
-        LoadedPlugin
-
-        Raises
-        ------
-        PluginLoadError
-            If the plugin cannot be loaded.
-        """
-        plugin_path = Path(plugin_dir).resolve()
-
-        if not plugin_path.is_dir():
-            raise PluginLoadError(f"Plugin directory not found: {plugin_path}")
-
-        # Load manifest
-        manifest_file = plugin_path / "manifest.yaml"
-        if not manifest_file.exists():
-            raise PluginLoadError(
-                f"No manifest.yaml found in {plugin_path}"
-            )
-
-        try:
-            import yaml
-        except ImportError:
-            raise PluginLoadError("PyYAML required for plugin loading")
-
-        try:
-            with open(manifest_file, encoding="utf-8") as fh:
-                data = yaml.safe_load(fh)
-        except Exception as exc:
-            raise PluginLoadError(
-                f"Failed to parse manifest.yaml: {exc}"
-            ) from exc
-
-        from opti_oignon.plugin_manifest import PluginManifest, PluginManifestError
-        try:
-            manifest = PluginManifest.from_dict(data)
-        except PluginManifestError as exc:
-            raise PluginLoadError(f"Invalid manifest: {exc}") from exc
-
-        # --- Bulbe mode allowlist check ---
-        try:
-            from opti_oignon.security_mode import is_bulbe
-            if is_bulbe():
-                from opti_oignon.plugin_allowlist import plugin_allowlist_manager
-                result = plugin_allowlist_manager.verify_plugin(
-                    plugin_id=manifest.name,
-                    plugin_dir=plugin_path,
-                    permissions=manifest.permissions,
-                )
-                if not result.get("allowed"):
-                    reason = result.get("reason", "Not in allowlist")
-                    logger.critical(
-                        "BULBE MODE: Plugin '%s' REJECTED: %s",
-                        manifest.name, reason,
-                    )
-                    raise PluginLoadError(
-                        f"Bulbe mode: plugin '{manifest.name}' not allowed. "
-                        f"{reason}"
-                    )
-                logger.info(
-                    "BULBE MODE: Plugin '%s' allowlist verified",
-                    manifest.name,
-                )
-        except ImportError:
-            pass  # security_mode not available, skip check
-
-        # Check entry point exists
-        entry_file = plugin_path / manifest.entry_point
-        if not entry_file.exists():
-            raise PluginLoadError(
-                f"Entry point not found: {entry_file}"
-            )
-
-        # Already loaded?
-        if manifest.name in self._loaded:
-            logger.info(
-                "Plugin '%s' already loaded, reloading", manifest.name,
-            )
-            self.unload_plugin(manifest.name)
-
-        # Setup sandbox
-        importer = None
-        hidden_modules: dict[str, types.ModuleType] = {}
-        has_network = "network_outbound" in manifest.permissions
-        if sandbox:
-            importer = _RestrictedImporter(
-                blocked=_BLOCKED_IMPORTS,
-                network_blocked=_NETWORK_MODULES,
-                has_network_permission=has_network,
-            )
-            sys.meta_path.insert(0, importer)
-            # Temporarily hide blocked modules from sys.modules so
-            # the meta-path finder is actually invoked for them
-            all_blocked = set(_BLOCKED_IMPORTS)
-            if not has_network:
-                all_blocked |= set(_NETWORK_MODULES)
-            for mod_name in list(sys.modules.keys()):
-                top = mod_name.split(".")[0]
-                if top in all_blocked:
-                    hidden_modules[mod_name] = sys.modules.pop(mod_name)
-
-        # Load the module
-        try:
-            module_name = f"_opti_plugin_{manifest.name}"
-            spec = importlib.util.spec_from_file_location(
-                module_name, str(entry_file),
-            )
-            if spec is None or spec.loader is None:
-                raise PluginLoadError(
-                    f"Cannot create module spec for {entry_file}"
-                )
-            module = importlib.util.module_from_spec(spec)
-
-            # Inject plugin metadata into the module namespace
-            module.__plugin_name__ = manifest.name  # type: ignore[attr-defined]
-            module.__plugin_version__ = manifest.version  # type: ignore[attr-defined]
-            module.__plugin_dir__ = str(plugin_path)  # type: ignore[attr-defined]
-
-            sys.modules[module_name] = module
-
-            if sandbox:
-                allowed_dirs = [plugin_path]
-                with _RestrictedPathAccessor(allowed_dirs), _RestrictedBuiltins(), _plugin_scope(module):
-                    spec.loader.exec_module(module)
-            else:
-                spec.loader.exec_module(module)
-
-        except PluginSandboxViolation:
-            raise
-        except PluginLoadError:
-            raise
-        except Exception as exc:
-            raise PluginLoadError(
-                f"Failed to load plugin '{manifest.name}': {exc}"
-            ) from exc
-        finally:
-            # Remove the importer from meta_path after loading
-            if importer and importer in sys.meta_path:
-                sys.meta_path.remove(importer)
-            # Restore hidden modules
-            sys.modules.update(hidden_modules)
-
-        # Collect hook callables from the module
-        hooks: dict[str, Any] = {}
-        for hook_name in manifest.hooks:
-            # Look for hook_<name> function or a HOOKS dict
-            hooks_dict = getattr(module, "HOOKS", None)
-            if isinstance(hooks_dict, dict) and hook_name in hooks_dict:
-                hooks[hook_name] = hooks_dict[hook_name]
-            else:
-                fn_name = f"hook_{hook_name}"
-                fn = getattr(module, fn_name, None)
-                if callable(fn):
-                    hooks[hook_name] = fn
-
-        loaded = LoadedPlugin(
-            name=manifest.name,
-            version=manifest.version,
-            module=module,
-            plugin_dir=plugin_path,
-            hooks=hooks,
-            importer=importer,
-        )
-        self._loaded[manifest.name] = loaded
-        logger.info(
-            "Loaded plugin '%s' v%s (%d hooks)",
-            manifest.name, manifest.version, len(hooks),
-        )
-        return loaded
-
     def unload_plugin(self, name: str) -> bool:
         """Unload a plugin, calling its shutdown() and cleaning up.
 
-        Handles both in-process and subprocess plugins.
         Returns True if the plugin was loaded and removed.
         """
         loaded = self._loaded.pop(name, None)
@@ -1265,11 +388,6 @@ class PluginLoader:
 
         self._unregister_hooks(name)
         loaded.shutdown()
-
-        # Clean up sys.modules (in-process plugins only)
-        if not isinstance(loaded, SubprocessPluginAdapter):
-            module_name = f"_opti_plugin_{name}"
-            sys.modules.pop(module_name, None)
 
         logger.info("Unloaded plugin '%s'", name)
         return True

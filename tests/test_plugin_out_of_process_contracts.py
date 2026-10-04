@@ -11,7 +11,10 @@ nothing re-executes it inside the server process:
   * PL2 -- an execution mode the loader does not know is refused when the
     loader is built, rather than falling through to a fallback;
   * PL3 -- under Bulbe, an in-process loader refuses to load even a plugin
-    the allowlist accepts.
+    the allowlist accepts;
+  * PL4 -- no mode loads a plugin inside the server: the in-process mode is
+    refused when the loader is built, whatever the security mode, and the
+    loader has no in-process load left. It supersedes PL3.
 
 Each contract builds a real plugin on disk and stands in for the subprocess
 manager; no process is spawned. The modules are resolved when a contract
@@ -103,3 +106,13 @@ def test_pl3_bulbe_refuses_an_in_process_load_the_allowlist_accepts(tmp_path, mo
         loader.load_plugin(plugin)
     assert loader.loaded_plugins == {}, loader.loaded_plugins
     assert _ran_here("pl3_plugin") == [], "the plugin's code ran inside the server"
+
+
+def test_pl4_no_mode_loads_a_plugin_inside_the_server(monkeypatch):
+    loaders = _live("opti_oignon.plugin_loader")
+    for bulbe in (True, False):
+        monkeypatch.setattr(_live("opti_oignon.security_mode"), "is_bulbe", lambda b=bulbe: b)
+        with pytest.raises(ValueError):
+            loaders.PluginLoader(subprocess_mode="inprocess")
+    assert loaders.PluginLoader.EXECUTION_MODES == ("subprocess",)
+    assert not hasattr(loaders.PluginLoader, "_load_plugin_inprocess")
