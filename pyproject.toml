@@ -646,6 +646,14 @@ fail_under = 0
 # and lowers the floor only by the sinks it names as retired, each proven gone
 # from the census and from the ledger.
 #
+# c4 of the plugin worker's host-package suite built the worker server on a
+# socket path, the rendezvous the worker no longer opens: the host now hands
+# it one end of a socket pair. What c4 pins -- the real initialization
+# completes fast on an entry that reaches for the host package, refused by the
+# worker's own guard -- holds. Its suite is sealed by the isolation ledger, so
+# the replacement lives in tests/test_plugin_bwrap_isolation_contracts.py:
+# pb13 asserts it on a real worker, with the host package forced onto its path.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -744,4 +752,5 @@ addopts = """
     --deselect=tests/test_facade_lazy_contracts.py::test_lf2_every_export_resolves_when_asked_and_only_then
     --deselect=tests/test_public_clean_guard_contracts.py::test_g16_tree_wide_pass_leaves_the_scan_trees_to_the_diff_pass
     --deselect=tests/test_egress_census_guard_contracts.py::test_ec4_the_real_tree_is_green_and_its_ledger_never_grows
+    --deselect=tests/test_plugin_worker_isolation_contracts.py::test_c4_initialize_handler_completes_fast
 """

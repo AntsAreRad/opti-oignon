@@ -114,8 +114,8 @@ opti-oignon/
 |--------|---------|
 | `plugin_loader.py` | Plugin discovery and loading |
 | `plugin_manifest.py` | Manifest validation |
-| `plugin_subprocess.py` | Unix socket IPC with HMAC |
-| `async_plugin_subprocess.py` | Pipe-based async IPC |
+| `plugin_subprocess.py` | Worker launch, socket-pair IPC with HMAC |
+| `plugin_isolation.py` | Worker posture, bubblewrap walls, limits |
 | `plugin_hooks.py` | Hook dispatch and chaining |
 | `plugin_allowlist.py` | Marketplace allowlist |
 | `plugin_installer.py` | Install and dependency resolution |

@@ -149,16 +149,27 @@ permissions are blocked at runtime.
 
 ## Subprocess isolation
 
-Plugins run in isolated subprocesses, not in the main process. This
-means:
+Plugins run in isolated subprocesses, not in the main process. Whenever
+the sandbox runs its commands under bubblewrap, each plugin's worker runs
+there too. This means:
 
 - Plugins cannot access the main application's memory
 - Crashes in a plugin do not crash the backend
-- Network access is blocked when bwrap is available
-- Filesystem access is restricted to the plugin's own directory
-- Communication uses HMAC-authenticated Unix domain sockets (primary)
-  or stdin/stdout pipes (async mode)
+- The worker sees the interpreter and its own directory, read-only, and,
+  with the `filesystem_plugin_dir` or `filesystem_write` permission, a
+  private data folder named in `ctx.metadata["data_dir"]`; nothing else
+  of the disk
+- Network access is cut unless the manifest declares `network_outbound`
+- CPU time, memory, open files, processes and file size are capped by the
+  server before the worker starts: a manifest's `resource_limits` may ask
+  for less, never for more
+- Communication uses HMAC-authenticated messages over a socket pair the
+  worker inherits
 - Each call has a configurable timeout with SIGTERM/SIGKILL escalation
+
+Without bubblewrap, plugins do not start while strict mode is on; with
+strict mode off they run as plain processes, reported as such under
+`plugin_isolation` in `/api/health`.
 
 !!! warning
     Plugins have no direct access to the host filesystem or network.

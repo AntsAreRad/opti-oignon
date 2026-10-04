@@ -49,16 +49,21 @@ Plugins are loaded at startup and can be hot-reloaded via the API.
 Plugins run in isolated subprocesses to prevent them from affecting
 the main application:
 
-- **Unix domain socket IPC** -- communication via HMAC-authenticated
-  Unix sockets (primary mode)
-- **Pipe-based IPC** -- lightweight alternative using stdin/stdout
-  pipes with length-prefixed JSON (async mode, for short-lived calls)
-- **bwrap sandbox** -- kernel-level namespace isolation when available
-  (network disabled, filesystem restricted)
+- **bwrap sandbox** -- whenever the sandbox runs under bubblewrap, so
+  does each plugin's worker: no network unless the plugin declares
+  `network_outbound`, its own folder read-only, and a private data
+  folder only for a plugin that may write
+- **Limits** -- CPU time, memory, open files, processes and file size,
+  set by the server before the worker starts
+- **IPC** -- HMAC-authenticated messages over a socket pair the worker
+  inherits
 - **Timeout enforcement** -- configurable per-call timeout with
   SIGTERM then SIGKILL escalation
 - **Allowlist** -- only plugins on the verified allowlist can be
   installed from the marketplace
+
+Without bubblewrap and with strict mode on, plugins do not start;
+`/api/health` says why under `plugin_isolation`.
 
 See [Plugin Development](../plugin-development.md) for creating your
 own plugins.

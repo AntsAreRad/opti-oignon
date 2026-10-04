@@ -179,7 +179,7 @@ def _format_rate_limit(rate_info: dict, show: bool) -> str:
 class TokenStore:
     """SQLite-backed GitHub token storage.
 
-    Token stored in plugin directory. Never echoed in responses.
+    Token stored in the plugin's private data folder. Never echoed in responses.
     """
 
     def __init__(self, db_path: str | Path) -> None:
@@ -262,15 +262,18 @@ def _get_store(ctx: Any) -> TokenStore:
     if _token_store is not None:
         return _token_store
 
-    plugin_dir = ""
+    # The plugin's private data folder, named by the worker. Without one the
+    # token lasts as long as the worker, in memory: a token never goes to a
+    # shared temporary directory.
+    data_dir = ""
     if hasattr(ctx, "metadata"):
-        plugin_dir = ctx.metadata.get("plugin_dir", "")
+        data_dir = ctx.metadata.get("data_dir", "")
 
-    if plugin_dir:
-        db_path = Path(plugin_dir) / "github_auth.db"
+    if data_dir:
+        db_path: str | Path = Path(data_dir) / "github_auth.db"
     else:
-        import tempfile
-        db_path = Path(tempfile.gettempdir()) / "opti_github_auth.db"
+        logger.warning("GitHub connector has no data folder: the token is kept in memory only")
+        db_path = ":memory:"
 
     _token_store = TokenStore(db_path)
     return _token_store

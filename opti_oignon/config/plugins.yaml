@@ -94,11 +94,18 @@ subprocess:
   # Watchdog interval: how often to check subprocess health (seconds)
   watchdog_interval: 5.0
 
-  # Default resource limits (can be overridden per-plugin in manifest)
-  default_resource_limits:
+  # Ceilings over every plugin process. A manifest's resource_limits may
+  # ask for less (the lower value wins), never for more; the processes and
+  # the file size are the server's alone. The server installs them before
+  # the worker executes, and the worker refuses to serve without them.
+  # Out-of-range values are clamped, never switched off. max_processes
+  # counts every process of the user (RLIMIT_NPROC), so it stays coarse.
+  limit_ceilings:
     cpu_time_seconds: 30
-    memory_bytes: 268435456   # 256 MB
+    memory_bytes: 268435456          # 256 MiB of address space
     max_file_descriptors: 64
+    max_processes: 4096
+    max_file_size_bytes: 268435456   # 256 MiB per written file
 
   # Plugin log capture
   log:

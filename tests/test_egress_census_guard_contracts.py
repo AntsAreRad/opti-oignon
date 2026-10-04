@@ -743,6 +743,9 @@ def test_ec11_a_proving_suite_that_is_not_utf8_fails_the_census_by_name(tmp_path
 RETIRED = {
     # Code execution is a client of the sandbox manager, which owns the process.
     "opti_oignon/code_executor.py": {"process": 1},
+    # A second launcher of the plugin worker, imported by nothing, gone: a
+    # worker starts only through the one that builds its walls.
+    "opti_oignon/async_plugin_subprocess.py": {"process": 1},
 }
 
 

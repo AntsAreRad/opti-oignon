@@ -2,20 +2,25 @@
 """
 Plugin worker process for Opti-Oignon.
 
-This script is launched by PluginSubprocessManager as a child process.
-It reads configuration from environment variables, applies resource
-limits, loads the plugin entry point, creates a Unix domain socket,
-and serves JSON-RPC requests from the host.
+This script is launched by PluginSubprocessManager as a child process,
+under bubblewrap whenever the sandbox runs there. It reads its
+configuration from environment variables, checks that the resource limits
+the host installed before it executed are in place -- and refuses to serve
+when one is not -- then loads the plugin entry point and serves JSON-RPC
+requests from the host over the socket it inherited.
 
 Environment variables (set by the host):
-    OO_PLUGIN_NAME   -- plugin identifier
-    OO_PLUGIN_DIR    -- absolute path to plugin directory
-    OO_PLUGIN_ENTRY  -- relative path to entry point file
-    OO_SOCKET_PATH   -- Unix socket path for IPC
-    OO_HMAC_KEY      -- hex-encoded 32-byte HMAC key
-    OO_RLIMIT_CPU    -- CPU time limit in seconds
-    OO_RLIMIT_MEM    -- memory limit in bytes
-    OO_RLIMIT_NOFILE -- max open file descriptors
+    OO_PLUGIN_NAME     -- plugin identifier
+    OO_PLUGIN_DIR      -- absolute path to plugin directory
+    OO_PLUGIN_ENTRY    -- relative path to entry point file
+    OO_SOCKET_FD       -- inherited descriptor of the worker's socket end
+    OO_HMAC_KEY        -- hex-encoded 32-byte HMAC key
+    OO_RLIMIT_CPU      -- CPU time limit in seconds
+    OO_RLIMIT_MEM      -- address space limit in bytes
+    OO_RLIMIT_NOFILE   -- max open file descriptors
+    OO_RLIMIT_NPROC    -- max processes of the user
+    OO_RLIMIT_FSIZE    -- max size of a written file in bytes
+    OO_PLUGIN_DATA_DIR -- the plugin's private data folder, when it may write
 """
 
 import hashlib
@@ -109,36 +114,39 @@ def send_message(sock: socket.socket, key: bytes, payload: dict[str, Any]) -> No
 # Resource limits
 # ---------------------------------------------------------------------------
 
-def apply_resource_limits(
-    cpu_seconds: int,
-    memory_bytes: int,
-    max_fds: int,
-) -> dict[str, Any]:
-    """Apply OS-level resource limits to this process.
+# Exit status of a worker that refuses to serve without its limits.
+EXIT_LIMITS_MISSING = 3
 
-    Returns a dict of applied limits for logging.
+# Each limit the host installs, and the variable that announces it.
+_ANNOUNCED_LIMITS = (
+    ("OO_RLIMIT_CPU", resource.RLIMIT_CPU, "RLIMIT_CPU"),
+    ("OO_RLIMIT_MEM", resource.RLIMIT_AS, "RLIMIT_AS"),
+    ("OO_RLIMIT_NOFILE", resource.RLIMIT_NOFILE, "RLIMIT_NOFILE"),
+    ("OO_RLIMIT_NPROC", resource.RLIMIT_NPROC, "RLIMIT_NPROC"),
+    ("OO_RLIMIT_FSIZE", resource.RLIMIT_FSIZE, "RLIMIT_FSIZE"),
+)
+
+
+def missing_resource_limits(environ: Any) -> list[str]:
+    """Name each limit the host announced and did not install.
+
+    The host sets the limits before this process executes; the worker only
+    checks them. Setting them here would hide a launcher that forgot to.
     """
-    applied: dict[str, Any] = {}
-
-    try:
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-        applied["RLIMIT_CPU"] = cpu_seconds
-    except (ValueError, OSError) as exc:
-        logger.warning("Failed to set RLIMIT_CPU: %s", exc)
-
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-        applied["RLIMIT_AS"] = memory_bytes
-    except (ValueError, OSError) as exc:
-        logger.warning("Failed to set RLIMIT_AS: %s", exc)
-
-    try:
-        resource.setrlimit(resource.RLIMIT_NOFILE, (max_fds, max_fds))
-        applied["RLIMIT_NOFILE"] = max_fds
-    except (ValueError, OSError) as exc:
-        logger.warning("Failed to set RLIMIT_NOFILE: %s", exc)
-
-    return applied
+    missing: list[str] = []
+    for variable, rid, name in _ANNOUNCED_LIMITS:
+        try:
+            expected = int(environ[variable])
+        except (KeyError, ValueError):
+            missing.append(f"{name} is not announced ({variable})")
+            continue
+        hard = resource.getrlimit(rid)[1]
+        if hard == resource.RLIM_INFINITY or hard > expected:
+            shown = "unlimited" if hard == resource.RLIM_INFINITY else str(hard)
+            missing.append(
+                f"{name} is not in place (hard limit {shown}, expected at most {expected})"
+            )
+    return missing
 
 
 # ---------------------------------------------------------------------------
@@ -270,12 +278,16 @@ def execute_hook(
     module: types.ModuleType,
     hook_name: str,
     data: dict[str, Any],
+    *,
+    data_dir: str | None = None,
 ) -> dict[str, Any]:
     """Execute a hook function on the loaded plugin module.
 
     Looks for either a ``HOOKS`` dict mapping or ``hook_<name>`` function.
     ``data`` is the wire context payload built by the host RPC proxy; the
-    callback receives it rebuilt as a :class:`WorkerHookContext`.
+    callback receives it rebuilt as a :class:`WorkerHookContext`. Its
+    ``metadata["data_dir"]`` is the worker's own fact: the plugin's private
+    data folder when it has one, absent otherwise, whatever the wire said.
 
     Returns
     -------
@@ -301,6 +313,9 @@ def execute_hook(
         hook_name=hook_name,
         plugin_name=getattr(module, "__plugin_name__", ""),
     )
+    context.metadata.pop("data_dir", None)
+    if data_dir:
+        context.metadata["data_dir"] = data_dir
     result = callback(context)
     if isinstance(result, dict):
         return result
@@ -332,58 +347,40 @@ def make_error(
 # ---------------------------------------------------------------------------
 
 class PluginWorkerServer:
-    """Unix domain socket server handling JSON-RPC from the host process."""
+    """Serves JSON-RPC from the host over the socket the worker inherited."""
 
     def __init__(
         self,
         plugin_name: str,
         plugin_dir: str,
         entry_point: str,
-        socket_path: str,
         hmac_key: bytes,
+        *,
+        conn: socket.socket | None = None,
+        data_dir: str | None = None,
     ) -> None:
         self.plugin_name = plugin_name
         self.plugin_dir = plugin_dir
         self.entry_point = entry_point
-        self.socket_path = socket_path
         self.hmac_key = hmac_key
+        self.conn = conn
+        self.data_dir = data_dir
         self.module: types.ModuleType | None = None
         self._running = False
-        self._server_sock: socket.socket | None = None
 
     def start(self) -> None:
-        """Create the listening socket, accept a connection, and serve."""
-        # Create listening socket
-        self._server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            self._server_sock.bind(self.socket_path)
-        except OSError as exc:
-            logger.error("Failed to bind socket %s: %s", self.socket_path, exc)
-            raise
-
-        self._server_sock.listen(1)
-        self._server_sock.settimeout(30.0)  # Accept timeout
-        logger.info(
-            "Worker for '%s' listening on %s",
-            self.plugin_name, self.socket_path,
-        )
-
-        try:
-            conn, _ = self._server_sock.accept()
-        except TimeoutError:
-            logger.error("No connection received within timeout")
-            return
-
-        logger.info("Host connected to worker '%s'", self.plugin_name)
+        """Serve the host on the inherited connection until it ends."""
+        if self.conn is None:
+            raise RuntimeError("no connection to serve")
+        logger.info("Worker for '%s' serving the host", self.plugin_name)
         self._running = True
-
         try:
-            self._serve(conn)
+            self._serve(self.conn)
         except Exception as exc:
             logger.error("Worker loop error: %s", exc)
         finally:
-            conn.close()
-            self._cleanup()
+            self.conn.close()
+            logger.info("Worker '%s' cleaned up", self.plugin_name)
 
     def _serve(self, conn: socket.socket) -> None:
         """Read JSON-RPC requests and dispatch them."""
@@ -475,7 +472,7 @@ class PluginWorkerServer:
         data = params.get("data", {})
 
         try:
-            result = execute_hook(self.module, hook_name, data)
+            result = execute_hook(self.module, hook_name, data, data_dir=self.data_dir)
             return make_response(request_id, result)
         except Exception as exc:
             logger.error(
@@ -510,21 +507,6 @@ class PluginWorkerServer:
 
         return make_response(request_id, {"status": "ok"})
 
-    def _cleanup(self) -> None:
-        """Clean up resources."""
-        if self._server_sock:
-            try:
-                self._server_sock.close()
-            except OSError:
-                pass
-        # Socket file cleanup
-        try:
-            if os.path.exists(self.socket_path):
-                os.unlink(self.socket_path)
-        except OSError:
-            pass
-        logger.info("Worker '%s' cleaned up", self.plugin_name)
-
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -536,22 +518,22 @@ def main() -> None:
     plugin_name = os.environ.get("OO_PLUGIN_NAME", "")
     plugin_dir = os.environ.get("OO_PLUGIN_DIR", "")
     entry_point = os.environ.get("OO_PLUGIN_ENTRY", "")
-    socket_path = os.environ.get("OO_SOCKET_PATH", "")
+    socket_fd = os.environ.get("OO_SOCKET_FD", "")
     hmac_key_hex = os.environ.get("OO_HMAC_KEY", "")
 
-    if not all([plugin_name, plugin_dir, entry_point, socket_path, hmac_key_hex]):
+    if not all([plugin_name, plugin_dir, entry_point, socket_fd, hmac_key_hex]):
         logger.error("Missing required environment variables")
         sys.exit(1)
 
     hmac_key = bytes.fromhex(hmac_key_hex)
 
-    # Apply resource limits
-    cpu_limit = int(os.environ.get("OO_RLIMIT_CPU", "30"))
-    mem_limit = int(os.environ.get("OO_RLIMIT_MEM", str(256 * 1024 * 1024)))
-    fd_limit = int(os.environ.get("OO_RLIMIT_NOFILE", "64"))
-
-    applied = apply_resource_limits(cpu_limit, mem_limit, fd_limit)
-    logger.info("Resource limits applied: %s", applied)
+    # The host installed the limits before this process executed; serve
+    # only once each of them is seen in place.
+    missing = missing_resource_limits(os.environ)
+    if missing:
+        for line in missing:
+            logger.error("Resource limit %s: refusing to serve", line)
+        sys.exit(EXIT_LIMITS_MISSING)
 
     # Ignore SIGINT (host handles signals)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -561,8 +543,9 @@ def main() -> None:
         plugin_name=plugin_name,
         plugin_dir=plugin_dir,
         entry_point=entry_point,
-        socket_path=socket_path,
         hmac_key=hmac_key,
+        conn=socket.socket(fileno=int(socket_fd)),
+        data_dir=os.environ.get("OO_PLUGIN_DATA_DIR") or None,
     )
 
     try:

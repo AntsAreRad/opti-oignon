@@ -125,8 +125,15 @@ the network is off again by construction after the run. Toggles, refusals,
 and every provision run are audited (per-session log and hash-chain rows).
 
 Plugin subprocess isolation runs each plugin in a separate process with
-HMAC-signed JSON-RPC IPC, resource limits (CPU, memory, file descriptors),
-and stdout/stderr capture. Each worker additionally enforces a
+HMAC-signed JSON-RPC IPC over a socket pair the worker inherits, resource
+limits the server installs before the worker starts (CPU, memory, file
+descriptors, processes, file size; the worker refuses to serve without
+them), and stdout/stderr capture. Whenever the sandbox runs under
+bubblewrap, so does each worker: no network unless the manifest declares
+`network_outbound`, and a filesystem holding only the interpreter, the
+plugin's folder (read-only) and, for a plugin that may write, its private
+data folder. Without bubblewrap, strict mode keeps plugins from starting.
+Each worker additionally enforces a
 host-package import boundary: a meta-path guard inside the worker
 process rejects any import of the host application package with an
 immediate, explicitly labelled isolation error, instead of letting such

@@ -646,6 +646,13 @@ def _get_health_security_info() -> dict:
     except Exception:
         info["sandbox"] = {"isolation_level": "unknown"}
 
+    # Plugin isolation: where plugin workers run, and why
+    try:
+        from opti_oignon.plugin_isolation import isolation_status
+        info["plugin_isolation"] = isolation_status()
+    except Exception:
+        info["plugin_isolation"] = {"mode": "unknown"}
+
     # CORS config summary
     info["cors"] = {
         "origins_count": len(_cors_origins),

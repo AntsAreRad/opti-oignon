@@ -2473,6 +2473,31 @@ package costs.
   off, the check used to ask the model to fix the refusal, twice per code
   block; code that never ran is no longer offered for a fix. Eleven
   contracts, and the egress census owes one sink fewer.
+- [SECURITY] A plugin's worker runs under bubblewrap whenever the sandbox
+  does, and under limits the server sets. It ran as a plain process of
+  this user: every file the user can read, the network, and limits taken
+  from the plugin's own manifest with no upper bound, each skipped when it
+  could not be set. It now gets the sandbox's namespaces and seccomp
+  filter, sees the interpreter and its own folder read-only, keeps the
+  network only when its manifest declares `network_outbound`, and, with a
+  write permission, gets a private data folder, `plugin_data/<name>` under
+  the data folder (0700), named to its hooks as `metadata["data_dir"]`.
+  CPU time, memory and open files are the lower of the manifest and a
+  ceiling in `config/plugins.yaml`; processes and file size are the
+  server's alone; all are set before the worker starts, and it refuses to
+  serve without them. Host and worker talk over a socket pair the worker
+  inherits instead of a socket file. Without bubblewrap, strict mode keeps
+  plugins from starting, with the cause and the remedy, and `/api/health`
+  reports the plugin isolation. The scratchpad, the task extractor and the
+  GitHub connector kept their databases in the shared temporary directory,
+  the GitHub token included, since nothing ever gave them their folder:
+  they use the data folder now and, without one, keep nothing on disk. The
+  files they left there (`opti_scratchpad.db`, `opti_tasks.db`,
+  `opti_github_auth.db`) are not migrated. The plugin pages and
+  SECURITY.md described a bubblewrap isolation no plugin had and a pipe
+  channel of a second launcher; that launcher, imported by nothing, is
+  removed, and the pages describe what runs. Twelve contracts; one
+  superseded by name.
 
 ## 2.2.0 -- 2026-07-28
 

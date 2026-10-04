@@ -342,12 +342,14 @@ def _get_db(ctx: Any) -> TaskDB:
     if _db is not None:
         return _db
 
-    plugin_dir = ctx.metadata.get("plugin_dir", "")
-    if plugin_dir:
-        db_path = Path(plugin_dir) / "tasks.db"
+    # The plugin's private data folder, named by the worker; without one the
+    # tasks last as long as the worker, in memory, never in a shared directory.
+    data_dir = ctx.metadata.get("data_dir", "")
+    if data_dir:
+        db_path: str | Path = Path(data_dir) / "tasks.db"
     else:
-        import tempfile
-        db_path = Path(tempfile.gettempdir()) / "opti_tasks.db"
+        logger.warning("Task extractor has no data folder: tasks are kept in memory only")
+        db_path = ":memory:"
 
     max_tasks = ctx.config.get("max_tasks", _MAX_TASKS)
     _db = TaskDB(db_path, max_tasks=max_tasks)

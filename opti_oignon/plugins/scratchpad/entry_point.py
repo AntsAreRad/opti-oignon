@@ -2,8 +2,8 @@
 Scratchpad plugin for Opti-Oignon.
 
 Persistent note-taking via slash commands and a UI panel.
-Notes are stored in a local SQLite database within the plugin
-directory (requires filesystem_plugin_dir permission).
+Notes are stored in a local SQLite database within the plugin's
+private data folder (requires filesystem_plugin_dir permission).
 
 Commands:
     /note <text>           Save a new note
@@ -289,19 +289,20 @@ _db: ScratchpadDB | None = None
 def _get_db(ctx: Any) -> ScratchpadDB:
     """Get or create the scratchpad database.
 
-    Uses the plugin directory from ctx.metadata if available,
-    otherwise falls back to a temp location.
+    The notes live in the plugin's private data folder, which the worker
+    names in ctx.metadata. Without one they last as long as the worker,
+    in memory: never in a shared temporary directory.
     """
     global _db
     if _db is not None:
         return _db
 
-    plugin_dir = ctx.metadata.get("plugin_dir", "")
-    if plugin_dir:
-        db_path = Path(plugin_dir) / "scratchpad.db"
+    data_dir = ctx.metadata.get("data_dir", "")
+    if data_dir:
+        db_path: str | Path = Path(data_dir) / "scratchpad.db"
     else:
-        import tempfile
-        db_path = Path(tempfile.gettempdir()) / "opti_scratchpad.db"
+        logger.warning("Scratchpad has no data folder: notes are kept in memory only")
+        db_path = ":memory:"
 
     max_notes = ctx.config.get("max_notes", _MAX_NOTES)
     _db = ScratchpadDB(db_path, max_notes=max_notes)

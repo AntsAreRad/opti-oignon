@@ -40,6 +40,8 @@ opti_oignon/data/*.db
 opti_oignon/data/*.db-wal
 opti_oignon/data/*.db-shm
 opti_oignon/data/*.db-journal
+# Plugins' private data folders: whatever a plugin keeps is the user's.
+opti_oignon/data/plugin_data/
 
 # Model provenance manifest: local host state, sealed with a local key.
 # Committing it would publish the digests of one machine's model files

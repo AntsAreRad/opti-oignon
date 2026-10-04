@@ -1038,6 +1038,7 @@ class PluginLoader:
                 plugin_dir=plugin_path,
                 entry_point=manifest.entry_point,
                 resource_limits=rlimits,
+                permissions=tuple(manifest.permissions),
             )
         except Exception as exc:
             raise PluginLoadError(

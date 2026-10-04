@@ -2,10 +2,12 @@
 """
 Plugin out-of-process isolation for Opti-Oignon.
 
-Runs each plugin in its own subprocess communicating via JSON-RPC over
-Unix domain sockets.  HMAC-signed messages, resource limits, watchdog
-timers, and stdout/stderr capture ensure that a misbehaving plugin
-cannot compromise the host process.
+Runs each plugin in its own subprocess communicating via JSON-RPC over a
+Unix socket pair whose other end the worker inherits. The worker runs under
+bubblewrap whenever the sandbox does, with limits the server installs
+before it executes (see plugin_isolation). HMAC-signed messages, watchdog
+timers, and stdout/stderr capture ensure that a misbehaving plugin cannot
+compromise the host process.
 """
 
 import hashlib
@@ -18,13 +20,14 @@ import socket
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterable
+
+from opti_oignon import plugin_isolation
 
 logger = logging.getLogger(__name__)
 
@@ -367,10 +370,10 @@ class PluginProcess:
 
     plugin_name: str
     process: subprocess.Popen  # type: ignore[type-arg]
-    socket_path: str
     hmac_key: bytes
     conn: socket.socket | None = None
     plugin_logger: logging.Logger | None = None
+    isolation: str = ""
     started_at: float = field(default_factory=time.time)
     last_heartbeat: float = field(default_factory=time.time)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -416,8 +419,6 @@ class PluginSubprocessManager:
 
     Parameters
     ----------
-    socket_dir : Path or str or None
-        Directory for Unix domain sockets (default: temp dir).
     log_dir : Path or str or None
         Directory for plugin log files (default: data/plugin_logs).
     worker_script : Path or str or None
@@ -428,23 +429,31 @@ class PluginSubprocessManager:
         Default timeout for hook RPC calls in seconds.
     startup_timeout : float
         Timeout waiting for subprocess to become ready.
+    posture_provider : callable or None
+        Returns the plugin posture at each start (default: the sandbox's,
+        read by ``plugin_isolation.resolve_posture``).
+    data_root : Path or str or None
+        Where private data folders are made (default: the server's data
+        folder, ``plugin_data``).
+    limit_ceilings : ProcessLimits or None
+        The ceilings over a manifest's limits (default: config/plugins.yaml).
     """
 
     def __init__(
         self,
         *,
-        socket_dir: Path | str | None = None,
         log_dir: Path | str | None = None,
         worker_script: Path | str | None = None,
         watchdog_interval: float = DEFAULT_WATCHDOG_INTERVAL_S,
         default_hook_timeout: float = DEFAULT_HOOK_TIMEOUT_S,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_S,
+        posture_provider: Callable[[], plugin_isolation.PluginPosture] | None = None,
+        data_root: Path | str | None = None,
+        limit_ceilings: plugin_isolation.ProcessLimits | None = None,
     ) -> None:
-        self._socket_dir: Path
-        if socket_dir:
-            self._socket_dir = Path(socket_dir)
-        else:
-            self._socket_dir = Path(tempfile.mkdtemp(prefix="oo_plugin_"))
+        self._posture_provider = posture_provider or plugin_isolation.resolve_posture
+        self._data_root = Path(data_root) if data_root else None
+        self._limit_ceilings = limit_ceilings
 
         self._log_dir: Path
         if log_dir:
@@ -478,11 +487,6 @@ class PluginSubprocessManager:
             return [n for n, p in self._processes.items() if p.is_alive()]
 
     @property
-    def socket_dir(self) -> Path:
-        """Directory used for Unix domain sockets."""
-        return self._socket_dir
-
-    @property
     def log_dir(self) -> Path:
         """Directory used for plugin log files."""
         return self._log_dir
@@ -499,6 +503,7 @@ class PluginSubprocessManager:
         *,
         resource_limits: PluginResourceLimits | None = None,
         env_extra: dict[str, str] | None = None,
+        permissions: Iterable[str] = (),
     ) -> PluginProcess:
         """Launch a plugin in a new subprocess.
 
@@ -511,79 +516,135 @@ class PluginSubprocessManager:
         entry_point : str
             Relative path to the plugin entry point file.
         resource_limits : PluginResourceLimits, optional
-            Resource limits for the subprocess.
+            The limits the manifest asks for; the ceilings cap them.
         env_extra : dict, optional
             Additional environment variables for the subprocess.
+        permissions : iterable of str
+            The manifest's permissions: ``network_outbound`` keeps the
+            network, a write permission grants the private data folder.
 
         Returns
         -------
         PluginProcess
             Handle to the running subprocess.
+
+        Raises
+        ------
+        PluginIsolationError
+            The posture is blocked, or the walls cannot be built: nothing
+            was started.
+        PluginSubprocessError
+            The worker could not be started, or did not answer.
         """
         with self._lock:
             # Kill existing process if any
             if plugin_name in self._processes:
                 self._kill_plugin_unlocked(plugin_name)
 
-        rlimits = resource_limits or PluginResourceLimits()
+        posture = self._posture_provider()
+        if posture.mode == plugin_isolation.MODE_BLOCKED:
+            raise plugin_isolation.PluginIsolationError(
+                f"Plugin '{plugin_name}' not started: {posture.reason}"
+            )
+
+        granted = set(permissions)
+        if self._limit_ceilings is None:
+            self._limit_ceilings = plugin_isolation.load_ceilings()
+        limits = plugin_isolation.effective_limits(
+            resource_limits or PluginResourceLimits(), self._limit_ceilings,
+        )
+        plugin_path = Path(plugin_dir).resolve()
+        data_dir: Path | None = None
+        if plugin_isolation.grants_data_dir(granted):
+            data_dir = plugin_isolation.prepare_data_dir(
+                self._data_root or plugin_isolation.default_data_root(), plugin_name,
+            )
 
         # Generate per-plugin HMAC key
         hmac_key = secrets.token_bytes(32)
 
-        # Socket path
-        self._socket_dir.mkdir(parents=True, exist_ok=True)
-        sock_path = str(self._socket_dir / f"{plugin_name}.sock")
-        # Clean up stale socket
-        if os.path.exists(sock_path):
-            os.unlink(sock_path)
-
         # Setup plugin logger
         plugin_log = setup_plugin_logger(plugin_name, self._log_dir)
+
+        # The worker inherits one end of a socket pair: no socket file, no
+        # folder shared with it, nothing another process could connect to.
+        host_end, worker_end = socket.socketpair()
 
         # Build subprocess environment. Plugin code runs untrusted in the
         # worker, so the host environment is NOT inherited (see
         # _build_plugin_env); only a minimal, secret-free base plus the explicit
-        # OO_* variables is forwarded.
-        env = _build_plugin_env({
+        # OO_* variables is forwarded. It travels as the environment, never on
+        # a command line, which any local process can read.
+        extra = {
             "OO_PLUGIN_NAME": plugin_name,
-            "OO_PLUGIN_DIR": str(Path(plugin_dir).resolve()),
+            "OO_PLUGIN_DIR": str(plugin_path),
             "OO_PLUGIN_ENTRY": entry_point,
-            "OO_SOCKET_PATH": sock_path,
+            "OO_SOCKET_FD": str(worker_end.fileno()),
             "OO_HMAC_KEY": hmac_key.hex(),
-            "OO_RLIMIT_CPU": str(rlimits.cpu_time_seconds),
-            "OO_RLIMIT_MEM": str(rlimits.memory_bytes),
-            "OO_RLIMIT_NOFILE": str(rlimits.max_file_descriptors),
-        })
+            **plugin_isolation.limits_env(limits),
+        }
+        if data_dir is not None:
+            extra["OO_PLUGIN_DATA_DIR"] = str(data_dir)
+        env = _build_plugin_env(extra)
         if env_extra:
             env.update(env_extra)
 
-        # Launch subprocess
+        seccomp_file = None
         try:
+            # PSB-04: launch the worker with the host's own interpreter
+            # (ui.py convention); a bare "python3" resolves via PATH and can
+            # differ in venv/conda setups.
+            argv = [sys.executable, str(self._worker_script)]
+            pass_fds = [worker_end.fileno()]
+            if posture.mode == plugin_isolation.MODE_BWRAP:
+                seccomp_file = plugin_isolation.stage_seccomp(posture, plugin_name)
+                if seccomp_file is not None:
+                    pass_fds.append(seccomp_file.fileno())
+                argv = plugin_isolation.build_bwrap_argv(
+                    posture,
+                    interpreter=sys.executable,
+                    worker_script=str(self._worker_script),
+                    plugin_dir=str(plugin_path),
+                    data_dir=str(data_dir) if data_dir is not None else None,
+                    allow_network=plugin_isolation.grants_network(granted),
+                    seccomp_fd=seccomp_file.fileno() if seccomp_file is not None else None,
+                )
+                env["HOME"] = "/tmp"
+                env["TMPDIR"] = "/tmp"
+            else:
+                logger.warning(
+                    "Plugin '%s' starts WITHOUT isolation: %s",
+                    plugin_name, posture.reason,
+                )
             proc = subprocess.Popen(
-                [
-                    # PSB-04: launch the worker with the host's own
-                    # interpreter (ui.py convention); a bare "python3"
-                    # resolves via PATH and can differ in venv/conda
-                    # setups.
-                    sys.executable,
-                    str(self._worker_script),
-                ],
+                argv,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=str(Path(plugin_dir).resolve()),
+                cwd=str(plugin_path),
+                preexec_fn=plugin_isolation.limits_preexec(limits),
+                pass_fds=tuple(pass_fds),
             )
-        except OSError as exc:
+        except plugin_isolation.PluginIsolationError:
+            host_end.close()
+            raise
+        except (OSError, subprocess.SubprocessError) as exc:
+            host_end.close()
             raise PluginSubprocessError(
                 f"Failed to start subprocess for plugin '{plugin_name}': {exc}"
             ) from exc
+        finally:
+            worker_end.close()
+            if seccomp_file is not None:
+                seccomp_file.close()
 
         pp = PluginProcess(
             plugin_name=plugin_name,
             process=proc,
-            socket_path=sock_path,
             hmac_key=hmac_key,
+            conn=host_end,
             plugin_logger=plugin_log,
+            isolation=posture.mode,
         )
 
         # Start stdout/stderr capture threads
@@ -604,37 +665,23 @@ class PluginSubprocessManager:
             )
             t_err.start()
 
-        # Wait for socket to appear (worker creates it)
-        if not self._wait_for_socket(sock_path, proc):
-            rc = proc.poll()
-            raise PluginSubprocessError(
-                f"Plugin '{plugin_name}' subprocess did not create socket "
-                f"within {self._startup_timeout}s (exit code: {rc})"
-            )
-
-        # Connect to the plugin socket
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            conn.connect(sock_path)
-        except OSError as exc:
-            proc.kill()
-            raise PluginSubprocessError(
-                f"Failed to connect to plugin '{plugin_name}' socket: {exc}"
-            ) from exc
-
-        pp.conn = conn
-
-        # Send init handshake
+        # Send init handshake. A worker that refused to serve has closed its
+        # end already, and the handshake fails at once.
         try:
             self._rpc_call(
                 pp, "initialize", {"plugin_name": plugin_name},
                 timeout=self._startup_timeout,
             )
         except Exception as exc:
-            conn.close()
+            host_end.close()
             proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
             raise PluginSubprocessError(
-                f"Plugin '{plugin_name}' failed initialization handshake: {exc}"
+                f"Plugin '{plugin_name}' failed initialization handshake "
+                f"(exit code: {proc.poll()}): {exc}"
             ) from exc
 
         pp.touch_heartbeat()
@@ -648,8 +695,8 @@ class PluginSubprocessManager:
         self.start_watchdog()
 
         logger.info(
-            "Started plugin '%s' subprocess (pid=%d, socket=%s)",
-            plugin_name, proc.pid, sock_path,
+            "Started plugin '%s' subprocess (pid=%d, isolation=%s)",
+            plugin_name, proc.pid, posture.mode,
         )
         return pp
 
@@ -829,7 +876,11 @@ class PluginSubprocessManager:
                     )
                 with self._lock:
                     self._processes.pop(name, None)
-                self._cleanup_socket(pp.socket_path)
+                if pp.conn:
+                    try:
+                        pp.conn.close()
+                    except OSError:
+                        pass
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -867,21 +918,6 @@ class PluginSubprocessManager:
 
         return resp.get("result", {})
 
-    def _wait_for_socket(
-        self,
-        sock_path: str,
-        proc: subprocess.Popen,  # type: ignore[type-arg]
-    ) -> bool:
-        """Wait for a socket file to appear, with timeout."""
-        deadline = time.time() + self._startup_timeout
-        while time.time() < deadline:
-            if proc.poll() is not None:
-                return False  # Process exited
-            if os.path.exists(sock_path):
-                return True
-            time.sleep(0.05)
-        return False
-
     def _shutdown_process(self, pp: PluginProcess, timeout: float = 5.0) -> None:
         """Gracefully shutdown a plugin subprocess."""
         # Try graceful RPC shutdown
@@ -910,7 +946,6 @@ class PluginSubprocessManager:
                 pp.process.kill()
                 pp.process.wait(timeout=2.0)
 
-        self._cleanup_socket(pp.socket_path)
         logger.info("Stopped plugin '%s' subprocess", pp.plugin_name)
 
     def _kill_plugin_unlocked(self, plugin_name: str) -> None:
@@ -929,16 +964,6 @@ class PluginSubprocessManager:
                 pp.process.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 pass
-        self._cleanup_socket(pp.socket_path)
-
-    @staticmethod
-    def _cleanup_socket(sock_path: str) -> None:
-        """Remove a Unix socket file."""
-        try:
-            if os.path.exists(sock_path):
-                os.unlink(sock_path)
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
