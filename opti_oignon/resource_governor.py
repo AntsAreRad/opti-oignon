@@ -220,6 +220,11 @@ _BYTES_PER_GIB = 1024.0 ** 3
 # The two orders a split admission can follow (the offload.prefer key).
 _OFFLOAD_PREFER = ("context", "speed")
 
+# The natures of model an engine may declare (InferenceBackend.cost_model):
+# a token generator keeps a KV cache that grows with the context; an encoder
+# or a predictor need not.
+_MODEL_KINDS = ("generator", "encoder", "predictor")
+
 # Bytes per cached key or value element: f16, the KV cache type the engines
 # use unless told otherwise. A quantized cache holds less, so pricing every
 # model at f16 errs on the side of the larger cost.
@@ -1420,6 +1425,16 @@ class AdmissionDecision:
     ram_cost_gb: float | None = None
     gpu_layers: int | None = None
     ram_shortfall_gb: float | None = None
+    # -- what the load was charged, and by whom it will be served ------------
+    # ``engine`` is the backend that will serve the call, when the registry
+    # or the caller can say; ``cost_gb`` the GiB charged for the admitted
+    # context (weights, any declared per-request state, and the KV cache
+    # when the model keeps one); ``credit_gb`` the GiB a reload of a
+    # resident model frees first. The eviction a conditional grant plans
+    # prices the load with these, exactly as the admission did.
+    engine: str | None = None
+    cost_gb: float | None = None
+    credit_gb: float = 0.0
 
     @property
     def partial_offload(self) -> bool:
@@ -2214,15 +2229,19 @@ class ResourceGovernor:
             return self._config.kv_coefficient
         return geometry["kv_bytes_per_token"] * 1024.0 / _BYTES_PER_GIB
 
-    def kv_geometry(self, model: str | None) -> dict[str, int] | None:
+    def kv_geometry(
+        self, model: str | None, engine: str | None = None
+    ) -> dict[str, int] | None:
         """The model's KV cache geometry, as its engine describes it.
 
-        ``{"layers", "kv_bytes_per_token"}`` or None. Each backend is asked
-        in turn for the model's information: the metadata mapping Ollama
-        reports first, else the header of the GGUF file the engine names. A
-        geometry found is kept until the model is loaded again; none found
-        is asked again at the next call, so an engine that was not answering
-        yet is not taken at its silence. Never raises.
+        ``{"layers", "kv_bytes_per_token"}`` or None. The backend that will
+        serve the model is asked first (``_serving_backend``), then the
+        others in their registration order, for the model's information:
+        the metadata mapping Ollama reports first, else the header of the
+        GGUF file the engine names. A geometry found is kept until the
+        model is loaded again; none found is asked again at the next call,
+        so an engine that was not answering yet is not taken at its
+        silence. Never raises.
         """
         if not model:
             return None
@@ -2230,15 +2249,7 @@ class ResourceGovernor:
             known = self._geometry.get(model)
         if known is not None:
             return known
-        registry = self._resolve_registry()
-        if registry is None:
-            return None
-        try:
-            backends = list(registry.backends())
-        except Exception as exc:
-            logger.debug("Registry backends() failed: %s", exc)
-            return None
-        for backend in backends:
+        for backend in self._backend_order(model, engine):
             try:
                 info = backend.model_info(model)
             except Exception as exc:
@@ -2273,14 +2284,15 @@ class ResourceGovernor:
         return (float(num_ctx) / 1024.0) * self.resolve_kv_coefficient(model)
 
     def estimate_model_vram_gb(
-        self, model: str, digest: str | None = None
+        self, model: str, digest: str | None = None, engine: str | None = None
     ) -> tuple[float | None, str]:
         """Best-available weight-cost estimate for one model, with basis.
 
         Order: live S1 observation (when the cached snapshot holds the
         model with a positive size_vram) > learned cost (the adapt store)
-        > the S3 static table via registry metadata > GGUF file size as a
-        floor > (None, "unknown") -- never "too large" (Section 3.1).
+        > the S3 static table via registry metadata, the serving backend
+        asked first > GGUF file size as a floor > (None, "unknown") --
+        never "too large" (Section 3.1).
         """
         with self._cache_lock:
             snap = self._snapshot
@@ -2293,17 +2305,10 @@ class ResourceGovernor:
         if learned is not None and learned.get("size_vram_bytes"):
             return learned["size_vram_bytes"] / _BYTES_PER_GIB, "learned"
 
-        registry = self._resolve_registry()
-        if registry is not None:
-            try:
-                backends = list(registry.backends())
-            except Exception as exc:
-                logger.debug("Registry backends() failed: %s", exc)
-                backends = []
-            for backend in backends:
-                est, basis = self._estimate_from_backend(backend, model)
-                if est is not None:
-                    return est, basis
+        for backend in self._backend_order(model, engine):
+            est, basis = self._estimate_from_backend(backend, model)
+            if est is not None:
+                return est, basis
         return None, "unknown"
 
     def resolve_weights_override(
@@ -2344,6 +2349,125 @@ class ResourceGovernor:
             except Exception as exc:
                 logger.debug("Backend registry unavailable: %s", exc)
         return None
+
+    def _serving_backend(self, model: str | None, engine: str | None = None) -> Any:
+        """The backend that will serve ``model``, or None when none can be told.
+
+        An engine the caller names wins, and a name no backend carries
+        serves nothing. Otherwise the registry's cached resolution answers
+        (``cached_backend``: the funnels' last ``resolve_backend`` for the
+        model, read without a health check or a probe, so admission calls
+        no engine for it); before the first resolution, or from a registry
+        without that cache, nothing answers and the backends are asked in
+        their registration order, as before. Never raises.
+        """
+        registry = self._resolve_registry()
+        if registry is None or not model:
+            return None
+        if engine:
+            try:
+                for backend in registry.backends():
+                    if str(getattr(backend, "name", "")) == engine:
+                        return backend
+            except Exception as exc:
+                logger.debug("Registry backends() failed: %s", exc)
+            return None
+        cached = getattr(registry, "cached_backend", None)
+        if not callable(cached):
+            return None
+        try:
+            return cached(model)
+        except Exception as exc:
+            logger.debug("cached_backend(%s) failed: %s", model, exc)
+            return None
+
+    def _backend_order(self, model: str | None, engine: str | None = None) -> list[Any]:
+        """Every registered backend, the one that will serve ``model`` first."""
+        registry = self._resolve_registry()
+        if registry is None:
+            return []
+        try:
+            backends = list(registry.backends())
+        except Exception as exc:
+            logger.debug("Registry backends() failed: %s", exc)
+            return []
+        serving = self._serving_backend(model, engine)
+        if serving is None:
+            return backends
+        return [serving] + [b for b in backends if b is not serving]
+
+    def _declared_cost(self, backend: Any, model: str | None) -> dict[str, Any] | None:
+        """What ``backend`` declares one request to ``model`` costs, or None.
+
+        None -- every engine today -- is a token generator, priced by the
+        governor. A declaration that does not hold together (an unknown
+        kind, a negative, non-finite or non-numeric figure, a KV flag that
+        is not a boolean, a generator declared without a KV cache) is set
+        aside for the same answer.
+        """
+        declare = getattr(backend, "cost_model", None) if backend is not None else None
+        if not callable(declare) or not model:
+            return None
+        try:
+            raw = declare(model)
+        except Exception as exc:
+            logger.debug("cost_model(%s) failed: %s", model, exc)
+            return None
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            logger.debug("cost_model(%s) is not a mapping; ignored", model)
+            return None
+        kind = raw.get("kind", "generator")
+        weights = raw.get("weights_gb")
+        state = raw.get("state_gb", 0.0)
+        kv = raw.get("kv", kind == "generator")
+
+        def _figure(value: Any) -> bool:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False
+            try:
+                return math.isfinite(value) and value >= 0.0
+            except (OverflowError, ValueError):
+                return False
+
+        if (
+            kind not in _MODEL_KINDS
+            or not isinstance(kv, bool)
+            or (kind == "generator" and not kv)
+            or not _figure(state)
+            or (weights is not None and not _figure(weights))
+        ):
+            logger.debug("cost_model(%s) does not hold together; ignored: %r", model, raw)
+            return None
+        return {
+            "kind": kind,
+            "weights_gb": float(weights) if weights is not None else None,
+            "state_gb": float(state),
+            "kv": kv,
+        }
+
+    def _load_cost_gb(self, model: str, num_ctx: int | None, snapshot: Any) -> float:
+        """The GiB a load of ``model`` at ``num_ctx`` costs, priced as admit
+        prices it: the operator's override over a declared figure over the
+        estimate, nothing for a resident model, its own KV coefficient when
+        it keeps a KV cache, and any declared per-request state."""
+        resident = {v.name for v in getattr(snapshot, "loaded", []) if v.resident}
+        declared = self._declared_cost(self._serving_backend(model), model)
+        weights = 0.0
+        if model not in resident:
+            estimate, _basis = self.estimate_model_vram_gb(model)
+            if declared is not None and declared["weights_gb"] is not None:
+                estimate = declared["weights_gb"]
+            override = self.resolve_weights_override(model)
+            if override is not None:
+                estimate = override
+            weights = estimate or 0.0
+        kv = 0.0
+        if declared is None or declared["kv"]:
+            kv = self.estimate_kv_cache_gb(num_ctx, model)
+        state = declared["state_gb"] if declared is not None else 0.0
+        return weights + kv + state
 
     def _estimate_from_backend(
         self, backend: Any, model: str
@@ -3013,6 +3137,7 @@ class ResourceGovernor:
         caller: str = "chat",
         extra_models: list[str] | None = None,
         digest: str | None = None,
+        engine: str | None = None,
     ) -> AdmissionDecision:
         """R-01: does (model, requested num_ctx) fit the machine right now?
 
@@ -3053,6 +3178,17 @@ class ResourceGovernor:
           both shortfalls.
         - The KV cost of a ctx comes from the model's own geometry when its
           engine describes it (kv_geometry), under any operator override.
+        - The engine that will serve (named by the caller, else resolved by
+          the registry) is asked first, and may declare what a request
+          costs (InferenceBackend.cost_model): a model without a KV cache
+          is charged none and is never stepped down for memory, a declared
+          per-request state is charged once, declared weights replace the
+          estimate and an operator override replaces both.
+        - A resident model asked no more context than it holds is admitted
+          at the context it holds and charged nothing; asked more, it is a
+          reload, its own memory credited and its whole cost charged; its
+          loaded context unknown, it is charged the KV of the call as
+          before.
         - Every decision is recorded in the ring; num_gpu stays None
           (conservative); under soft-or-worse pressure (Section 5) an
           admitted decision carries the keep_alive override the funnels
@@ -3125,30 +3261,45 @@ class ResourceGovernor:
             else None
         )
 
+        # The engine that will serve, and what it declares one request costs:
+        # None, every engine today, is a token generator.
+        serving = self._serving_backend(model, engine)
+        engine_name = (str(getattr(serving, "name", "")) or None) if serving is not None else None
+        declared = self._declared_cost(serving, model)
+        kv_charged = declared["kv"] if declared is not None else True
+        state_gb = declared["state_gb"] if declared is not None else 0.0
+
         # Resident wherever it sits: a model split between VRAM and RAM, or
-        # held in RAM alone, loads nothing more either.
+        # held in RAM alone, loads nothing more either -- unless the call
+        # asks more context than it holds (below).
+        resident_view = next(
+            (v for v in snapshot.loaded if v.name == model and v.resident), None
+        )
         loaded_names = {v.name for v in snapshot.loaded if v.resident}
-        already_loaded = model in loaded_names
+        already_loaded = resident_view is not None
         load_expected = not already_loaded
+
+        def _full_weights() -> float | None:
+            # A declared figure replaces the estimate; an operator-named
+            # weights-residency override (the MoE active-params gap)
+            # replaces both; absent, the estimator answer stands.
+            estimate, _basis = self.estimate_model_vram_gb(model, digest, engine=engine)
+            if declared is not None and declared["weights_gb"] is not None:
+                estimate = declared["weights_gb"]
+            override = self.resolve_weights_override(model)
+            return override if override is not None else estimate
 
         # Weights cost (4.2): zero when already resident; unknown is never
         # "too large" (3.1) and contributes zero to the fit.
-        if already_loaded:
-            weights_gb: float | None = 0.0
-        else:
-            weights_gb, _basis = self.estimate_model_vram_gb(model, digest)
-            # An operator-named weights-residency override (the
-            # MoE active-params gap) replaces the estimate; absent, the
-            # estimator answer above stands -- today's pricing.
-            weights_override = self.resolve_weights_override(model)
-            if weights_override is not None:
-                weights_gb = weights_override
+        weights_gb: float | None = 0.0 if already_loaded else _full_weights()
 
         extra_gb = 0.0
+        extras_pending = False
         for extra in extra_models or []:
             if not extra or extra == model or extra in loaded_names:
                 continue
             load_expected = True
+            extras_pending = True
             extra_est, _eb = self.estimate_model_vram_gb(extra)
             # The same override seam for the extra models.
             extra_override = self.resolve_weights_override(extra)
@@ -3158,11 +3309,11 @@ class ResourceGovernor:
                 extra_gb += extra_est
 
         effective_ctx = self._clamp_ctx(model, requested_ctx)
-        known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
 
         # The model's geometry and KV coefficient, resolved once for every
-        # candidate below (an engine is asked at most once per decision).
-        geometry = self.kv_geometry(model)
+        # candidate below (an engine is asked at most once per decision); a
+        # model without a KV cache needs neither.
+        geometry = self.kv_geometry(model, engine=engine) if kv_charged else None
         kv_override = self._kv_override(model)
         kv_coefficient = (
             kv_override
@@ -3170,24 +3321,92 @@ class ResourceGovernor:
             else self._coefficient_from(geometry)
         )
 
+        def _kv(ctx: int | None) -> float:
+            if not kv_charged or not ctx or ctx <= 0:
+                return 0.0
+            return (float(ctx) / 1024.0) * kv_coefficient
+
+        # A resident model whose loaded context is known holds that context.
+        # Asked no more, it loads nothing and costs nothing, whatever the
+        # card's occupancy, which it is itself part of; it is admitted at
+        # the context it holds, since another can make the engine reload.
+        # Asked more, it is a reload: the engine frees all it holds, VRAM
+        # and RAM, then allocates the whole cost -- weights taken as what it
+        # holds less the KV of its loaded context, unless an operator or an
+        # engine names them.
+        credit = 0.0
+        ram_credit = 0.0
+        loaded_ctx = resident_view.context_length if resident_view is not None else None
+        holds = already_loaded and isinstance(loaded_ctx, int) and loaded_ctx > 0
+        main_kv = kv_charged
+        reload = False
+
+        def _holds_decision(action: str, reason: str) -> AdmissionDecision:
+            held = AdmissionDecision(
+                admitted=True,
+                model=model,
+                num_ctx=loaded_ctx,
+                keep_alive=ka_override,
+                action=action,
+                reason=reason,
+                provenance=provenance,
+                ticket_id=ticket_id,
+                caller=caller,
+                requested_ctx=requested_ctx,
+                load_expected=False,
+                engine=engine_name,
+                cost_gb=0.0,
+            )
+            self._record_admission(held)
+            return held
+
+        if holds and (effective_ctx is None or effective_ctx <= loaded_ctx):
+            if not extras_pending:
+                return _holds_decision("admit", "fits_resident")
+            # Only the extra models load: the resident keeps its context.
+            effective_ctx = loaded_ctx
+            main_kv = False
+        elif holds:
+            reload = True
+            load_expected = True
+            override = self.resolve_weights_override(model)
+            if override is not None:
+                weights_gb = override
+            elif declared is not None and declared["weights_gb"] is not None:
+                weights_gb = declared["weights_gb"]
+            else:
+                total_gb = (
+                    resident_view.size_bytes or resident_view.size_vram_bytes
+                ) / _BYTES_PER_GIB
+                weights_gb = max(0.0, total_gb - _kv(loaded_ctx))
+            credit = resident_view.size_vram_gb
+            ram_credit = resident_view.ram_bytes / _BYTES_PER_GIB
+
+        known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
+
         # The dynamic quantum runs AFTER the model-window clamp: the
         # clamp answers what the model can hold, the stage answers what
         # the machine should allocate. The pre-stage value keeps the
-        # clamp reason honest below.
+        # clamp reason honest below. A reload sizes it with the memory it
+        # frees, and a quantum at or below the held context is no reload.
         _clamped_ctx = effective_ctx
-        effective_ctx, _dyn_applied = self._dynamic_ctx_stage(
-            effective_ctx, model, snapshot, known_weights, kv_coefficient
-        )
+        _dyn_applied = False
+        if main_kv:
+            effective_ctx, _dyn_applied = self._dynamic_ctx_stage(
+                effective_ctx, model, snapshot, known_weights + state_gb - credit, kv_coefficient
+            )
+            if reload and (effective_ctx is None or effective_ctx <= loaded_ctx) and not extras_pending:
+                return _holds_decision("admit", "fits_resident")
 
         def _cost(ctx: int | None) -> float:
-            if not ctx or ctx <= 0:
-                return known_weights
-            return known_weights + (float(ctx) / 1024.0) * kv_coefficient
+            return known_weights + state_gb + (_kv(ctx) if main_kv else 0.0)
 
         if snapshot.capacity_gb is None:
-            # 3.1: the VRAM half fails open; the RAM half still applies.
+            # 3.1: the VRAM half fails open; the RAM half still applies,
+            # less what a reload frees there.
             ram_mb = snapshot.ram_available_mb
-            if ram_mb > 0.0 and known_weights * 1024.0 > ram_mb:
+            ram_need = known_weights - ram_credit
+            if ram_mb > 0.0 and ram_need * 1024.0 > ram_mb:
                 decision = AdmissionDecision(
                     admitted=False,
                     model=model,
@@ -3198,7 +3417,8 @@ class ResourceGovernor:
                     ticket_id=ticket_id,
                     caller=caller,
                     requested_ctx=requested_ctx,
-                    shortfall_gb=round(known_weights - ram_mb / 1024.0, 3),
+                    shortfall_gb=round(ram_need - ram_mb / 1024.0, 3),
+                    engine=engine_name,
                 )
             else:
                 decision = AdmissionDecision(
@@ -3216,6 +3436,9 @@ class ResourceGovernor:
                     caller=caller,
                     requested_ctx=requested_ctx,
                     load_expected=load_expected,
+                    engine=engine_name,
+                    cost_gb=round(_cost(effective_ctx), 3),
+                    credit_gb=round(credit, 3),
                 )
             self._record_admission(decision)
             return decision
@@ -3223,11 +3446,19 @@ class ResourceGovernor:
         in_use = snapshot.vram_in_use_gb
         others = getattr(snapshot, "vram_others_gb", 0.0) or 0.0
         margin = self._vram_margin_gb(snapshot)
-        evictable = self._evictable_now_gb(snapshot)
-        budget_unconditional = snapshot.capacity_gb - in_use - others - margin
+        # A model is never its own eviction candidate: a reload credits its
+        # memory instead.
+        evictable = sum(
+            size
+            for name, _idle, size in self._evictable_candidates(snapshot)
+            if name != model
+        )
+        budget_unconditional = snapshot.capacity_gb - in_use - others - margin + credit
         budget_with_eviction = budget_unconditional + evictable
         # The RAM a split may use; None when no split is priced at all.
         ram_budget = self._offload_ram_budget_gb(snapshot)
+        if ram_budget is not None:
+            ram_budget += ram_credit
         min_share = self._config.offload_min_gpu_share
 
         def _fit(ctx: int | None) -> bool | None:
@@ -3259,7 +3490,8 @@ class ResourceGovernor:
 
         candidates: list[int | None] = [effective_ctx]
         floor = self._config.ctx_floor.get(caller)
-        if effective_ctx is not None and floor is not None:
+        # Without a KV cache a shorter context costs no less: no ladder.
+        if effective_ctx is not None and floor is not None and main_kv:
             steps = sorted(
                 {
                     int(s)
@@ -3269,26 +3501,41 @@ class ResourceGovernor:
                 reverse=True,
             )
             candidates.extend(steps)
+        # Below the context a resident model holds, a reload buys nothing:
+        # the model at its own context is the last step instead, where the
+        # caller's floor allows it (a caller without a floor is never
+        # downsized).
+        resident_step = False
+        if reload:
+            candidates = [c for c in candidates if c is None or c > loaded_ctx]
+            resident_step = floor is not None and loaded_ctx >= floor
 
         # The order of the attempts. Each ctx is tried on the GPU alone
         # first (now, then after eviction). "context" splits it before
         # stepping down; "speed" steps down the whole ladder on the GPU
         # alone and splits only at the last step, where the GPU holds the
-        # largest share -- if no split holds there, none holds above.
+        # largest share -- if no split holds there, none holds above. A
+        # resident model's own context comes after the GPU-alone steps.
         last = len(candidates) - 1
         if self._config.offload_prefer == "speed":
-            attempts = [(i, ctx, False) for i, ctx in enumerate(candidates)]
-            attempts.append((last, candidates[last], True))
+            attempts = [(i, ctx, "gpu") for i, ctx in enumerate(candidates)]
+            if resident_step:
+                attempts.append((last + 1, loaded_ctx, "resident"))
+            attempts.append((last, candidates[last], "split"))
         else:
             attempts = [
-                (i, ctx, split)
+                (i, ctx, mode)
                 for i, ctx in enumerate(candidates)
-                for split in (False, True)
+                for mode in ("gpu", "split")
             ]
+            if resident_step:
+                attempts.append((last + 1, loaded_ctx, "resident"))
 
-        for index, ctx, split in attempts:
+        for index, ctx, mode in attempts:
+            if mode == "resident":
+                return _holds_decision("downsize", "ctx_laddered_to_fit+fits_resident")
             placement: tuple[float, float] | None = None
-            if split:
+            if mode == "split":
                 placement = _split(ctx)
                 if placement is None:
                     continue
@@ -3329,6 +3576,9 @@ class ResourceGovernor:
                 requested_ctx=requested_ctx,
                 load_expected=load_expected,
                 conditional_on_eviction=conditional,
+                engine=engine_name,
+                cost_gb=round(_cost(ctx), 3),
+                credit_gb=round(credit, 3),
             )
             if placement is not None:
                 gpu, ram = placement
@@ -3354,6 +3604,9 @@ class ResourceGovernor:
             caller=caller,
             requested_ctx=requested_ctx,
             shortfall_gb=vram_shortfall,
+            engine=engine_name,
+            cost_gb=round(minimal_cost, 3),
+            credit_gb=round(credit, 3),
         )
         if ram_budget is not None:
             # A split was priced and none held: name what it lacked.
@@ -3593,23 +3846,26 @@ class ResourceGovernor:
         Recomputes the shortfall against the current cached view (the
         snapshot has typically moved since the grant), walks the
         idle-past-threshold candidates oldest-idle FIRST and evicts
-        ONLY as many as the shortfall needs. Every path fails open:
-        any miss or error leaves the admitted call untouched and
-        Ollama's own LRU carries it (Section 12). Never raises.
+        ONLY as many as the shortfall needs. The load is priced exactly as
+        the admission priced it (the grant's cost and the memory a reload
+        frees); a grant the admission did not price is priced its way.
+        Every path fails open: any miss or error leaves the admitted call
+        untouched and Ollama's own LRU carries it (Section 12). Never
+        raises.
         """
         try:
             snapshot = self.get_snapshot_fast()
             if snapshot.capacity_gb is None:
                 return
-            loaded_names = {
-                v.name for v in snapshot.loaded if v.size_vram_bytes > 0
-            }
-            weights = 0.0
-            if decision.model not in loaded_names:
-                est, _basis = self.estimate_model_vram_gb(decision.model)
-                if est is not None:
-                    weights = est
-            cost = weights + self.estimate_kv_cache_gb(decision.num_ctx)
+            cost = getattr(decision, "cost_gb", None)
+            credit = getattr(decision, "credit_gb", 0.0) or 0.0
+            if cost is None:
+                cost = self._load_cost_gb(decision.model, decision.num_ctx, snapshot)
+                credit = 0.0
+            if credit and decision.model not in {v.name for v in snapshot.loaded if v.resident}:
+                # The model left since the grant: a reload frees nothing now.
+                credit = 0.0
+            cost -= credit
             budget = (
                 snapshot.capacity_gb
                 - snapshot.vram_in_use_gb

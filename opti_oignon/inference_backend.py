@@ -797,6 +797,20 @@ class InferenceBackend(ABC):
         """
         return None
 
+    def cost_model(self, model: str) -> dict | None:
+        """What one request to ``model`` costs, as this backend knows it.
+
+        ``None`` -- every backend today -- leaves the resource governor to
+        price a token generator: weights plus a KV cache that grows with the
+        context. A backend serving a model of another nature declares it
+        instead: ``{"kind": "generator" | "encoder" | "predictor",
+        "weights_gb": float or None, "state_gb": float, "kv": bool}``, where
+        ``state_gb`` is the memory one request holds while it runs and
+        ``kv`` says whether the model keeps a cache that grows with the
+        context. A declaration that does not hold together is ignored.
+        """
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Ollama backend
@@ -2223,6 +2237,18 @@ class BackendRegistry:
             self._active_name = name
             logger.info("Active inference backend: %s", name)
             return True
+
+    def cached_backend(self, model: str) -> InferenceBackend | None:
+        """The backend ``resolve_backend`` last chose for ``model``, from its cache alone.
+
+        No health check and no ``model_info`` probe: a reader that must not
+        call an engine on its own hot path -- the resource governor's
+        admission -- gets the funnels' last resolution, or None before the
+        first one.
+        """
+        with self._lock:
+            name = self._route_cache.get(model)
+            return self._backends.get(name) if name is not None else None
 
     def resolve_backend(self, model: str) -> InferenceBackend | None:
         """Select the backend that should serve ``model`` (BR, per-model routing).

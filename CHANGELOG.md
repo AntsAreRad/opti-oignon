@@ -2599,6 +2599,35 @@ package costs.
   detected cards, and from its configured 24 GB only when none is
   detected. Thirty-six contracts; go17, which pinned the shipped 4.0, is
   superseded by name by go25 in its own file.
+- The governor asks the engine that will serve a call, charges a model
+  already loaded only what the call adds, and plans an eviction at the
+  price it admitted. Admission asks the backend that will serve the model
+  first for its geometry and size, and the decision names it: one the
+  caller names, else the registry's last resolution for the model, read
+  from its cache (`BackendRegistry.cached_backend`) so admission calls no
+  engine for it; a name no backend carries serves nothing. An engine may
+  declare what one request costs
+  (`InferenceBackend.cost_model`): a model with no KV cache is charged none
+  at any context and is never stepped down for memory, a declared
+  per-request state is charged once, and declared weights replace the
+  estimate while an operator override still replaces both. No engine
+  declares anything yet, so every model still prices as a token generator,
+  and a declaration that does not hold together is ignored. A resident
+  model asked at or below the context it holds is admitted at that context
+  and charged nothing; its KV used to be charged again on top of the memory
+  it held, so a full card split it with nothing on the GPU; a draft that
+  loads beside it is still charged. Asked more, it is priced as a reload:
+  its weights are what it holds less the KV of its loaded context, its VRAM
+  and RAM are credited, the context ladder stops at the context it holds,
+  which is the last step where the caller's floor allows it, and the
+  dynamic context counts what the reload frees. With its loaded context
+  unknown, it is priced as before. A model is never its own eviction
+  candidate. The eviction a conditional grant plans uses the grant's own
+  price, credit included only while the model is still loaded; it used to
+  price the load without the operator's overrides or the model's KV
+  coefficient, and could evict nothing for a load the admission had found
+  too large. A grant the admission did not price is priced the admission's
+  way. Twenty-two contracts.
 
 ## 2.2.0 -- 2026-07-28
 
