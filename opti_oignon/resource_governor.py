@@ -118,6 +118,7 @@ import logging
 import math
 import os
 import re
+import stat
 import threading
 import time
 import uuid
@@ -316,7 +317,7 @@ def _positive_int(value: Any) -> int | None:
     return value
 
 
-def _kv_geometry_from_metadata(meta: Any) -> dict[str, int] | None:
+def _kv_geometry_from_metadata(meta: Any) -> dict[str, Any] | None:
     """The KV cache geometry a model's metadata names, or None.
 
     ``meta`` is the key/value mapping Ollama's model information reports or a
@@ -326,6 +327,8 @@ def _kv_geometry_from_metadata(meta: Any) -> dict[str, int] | None:
     attention heads, a model that names no KV head count keeps one per
     attention head, and a per-layer KV head list is summed. Anything else
     missing or malformed answers None, and the flat coefficient stands.
+    ``kv_bytes_per_layer`` holds each layer's share of the bytes per token,
+    in layer order: a split carries each layer's KV with it.
     """
     if not isinstance(meta, Mapping):
         return None
@@ -342,12 +345,13 @@ def _kv_geometry_from_metadata(meta: Any) -> dict[str, int] | None:
             isinstance(h, bool) or not isinstance(h, int) or h < 0 for h in kv_heads
         ):
             return None
-        total_kv_heads = sum(kv_heads)
+        layer_heads = tuple(kv_heads)
     else:
         per_layer = _positive_int(kv_heads)
         if per_layer is None:
             return None
-        total_kv_heads = per_layer * layers
+        layer_heads = (per_layer,) * layers
+    total_kv_heads = sum(layer_heads)
     key_len = _positive_int(meta.get(f"{arch}.attention.key_length"))
     value_len = _positive_int(meta.get(f"{arch}.attention.value_length"))
     if key_len is None or value_len is None:
@@ -357,13 +361,18 @@ def _kv_geometry_from_metadata(meta: Any) -> dict[str, int] | None:
             return None
         key_len = key_len or width // n_heads
         value_len = value_len or width // n_heads
-    per_token = total_kv_heads * (key_len + value_len) * _KV_BYTES_PER_ELEMENT
+    per_head = (key_len + value_len) * _KV_BYTES_PER_ELEMENT
+    per_token = total_kv_heads * per_head
     if per_token <= 0:
         return None
-    return {"layers": layers, "kv_bytes_per_token": per_token}
+    return {
+        "layers": layers,
+        "kv_bytes_per_token": per_token,
+        "kv_bytes_per_layer": tuple(h * per_head for h in layer_heads),
+    }
 
 
-def _kv_geometry_from_gguf(path: Any) -> dict[str, int] | None:
+def _kv_geometry_from_gguf(path: Any) -> dict[str, Any] | None:
     """The KV geometry a GGUF file's header names, or None.
 
     The header reader is the model manager's, imported only when a file is
@@ -378,6 +387,59 @@ def _kv_geometry_from_gguf(path: Any) -> dict[str, int] | None:
         return _kv_geometry_from_metadata(parse_gguf_header(path).metadata)
     except Exception as exc:  # noqa: BLE001 - an unreadable header is no geometry
         logger.debug("GGUF header of %s unreadable: %s", path, exc)
+        return None
+
+
+# An Ollama blob: content addressed, named after its digest.
+_OLLAMA_BLOB = re.compile(r"sha256-[0-9a-f]{64}")
+# Tensor tables kept per governor, by file identity: a handful of models.
+_TABLE_CACHE_SIZE = 16
+
+
+def _model_files(info: Any) -> list[str]:
+    """The model files an engine's model information names, in its order.
+
+    The file the engine loads (``path``, as llama.cpp names it), then each
+    blob the modelfile's FROM lines name (Ollama): an absolute path, already
+    in normal form, to a file called ``sha256-<64 hex>`` in a ``blobs``
+    directory. Any other path is not a model file and is never opened.
+    """
+    files: list[str] = []
+    path = getattr(info, "path", None)
+    if isinstance(path, str) and path:
+        files.append(path)
+    extra = getattr(info, "extra", None)
+    modelfile = extra.get("modelfile") if isinstance(extra, dict) else None
+    if not isinstance(modelfile, str):
+        return files
+    for line in modelfile.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2 or parts[0].upper() != "FROM":
+            continue
+        target = parts[1].strip()
+        parent, name = os.path.split(target)
+        if (
+            os.path.isabs(target)
+            and os.path.normpath(target) == target
+            and os.path.basename(parent) == "blobs"
+            and _OLLAMA_BLOB.fullmatch(name)
+        ):
+            files.append(target)
+    return files
+
+
+def _read_tensor_table(path: str) -> Any:
+    """The tensor table of the GGUF file at ``path``, or None when refused.
+
+    The reader is the model manager's, imported only when a split is priced,
+    so importing the governor costs nothing.
+    """
+    try:
+        from opti_oignon.model_manager import read_gguf_tensors
+
+        return read_gguf_tensors(path)
+    except Exception as exc:  # noqa: BLE001 - a table that cannot be read places nothing
+        logger.debug("Tensor table of %s unreadable: %s", path, exc)
         return None
 
 
@@ -581,6 +643,41 @@ def _as_weights_override_map(value: Any) -> dict[str, float]:
     return out
 
 
+def _optional_above(
+    section: Mapping,
+    key: str,
+    default: float | None,
+    low: float,
+    inclusive: bool,
+) -> float | None:
+    """``section[key]`` as a finite number above ``low``, or None; else ``default``.
+
+    ``low`` itself is allowed when ``inclusive``. An absent key is the
+    default, silently; a null is None; anything else out of range is the
+    default with a warning naming it.
+    """
+    if key not in section:
+        return default
+    raw = section.get(key)
+    if raw is None:
+        return None
+    try:
+        value = None if isinstance(raw, bool) else float(raw)
+    except (TypeError, ValueError):
+        value = None
+    if value is not None and math.isfinite(value) and (value >= low if inclusive else value > low):
+        return value
+    logger.warning(
+        "split_speed.%s %r is not a number %s %s; keeping %s",
+        key,
+        raw,
+        "at or above" if inclusive else "above",
+        low,
+        default,
+    )
+    return default
+
+
 def _bounded_float(
     section: Mapping,
     key: str,
@@ -700,6 +797,13 @@ class GovernorConfig:
     ram_reserve_floor_gb: float = 2.0
     ram_reserve_ceiling_gb: float = 8.0
     ram_reserve_pressure_factor: float = 2.0
+    # The speed of a split placed layer by layer: the bandwidths, in GB/s,
+    # at which the GPU (the slowest card a split may take) and the system RAM
+    # are read, and the largest slowdown against the GPU alone a split may
+    # bring. None is unknown; a speed that cannot be told never refuses.
+    split_gpu_bandwidth_gbs: float | None = None
+    split_ram_bandwidth_gbs: float | None = None
+    split_max_slowdown: float | None = None
     host_pressure_enabled: bool = True
     host_pressure_memory_enter: float = 10.0
     host_pressure_memory_exit: float = 5.0
@@ -942,6 +1046,20 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
         cfg.ram_reserve_pressure_factor = factor
     elif reserve is not None:
         logger.warning("ram_reserve is not a mapping; the reserve defaults stand")
+
+    speed = raw.get("split_speed")
+    if isinstance(speed, dict):
+        cfg.split_gpu_bandwidth_gbs = _optional_above(
+            speed, "gpu_bandwidth_gbs", cfg.split_gpu_bandwidth_gbs, 0.0, False
+        )
+        cfg.split_ram_bandwidth_gbs = _optional_above(
+            speed, "ram_bandwidth_gbs", cfg.split_ram_bandwidth_gbs, 0.0, False
+        )
+        cfg.split_max_slowdown = _optional_above(
+            speed, "max_slowdown", cfg.split_max_slowdown, 1.0, True
+        )
+    elif speed is not None:
+        logger.warning("split_speed is not a mapping; the speed is unknown")
 
     host = raw.get("host_pressure")
     if isinstance(host, dict):
@@ -1393,11 +1511,15 @@ class AdmissionDecision:
     {admit, downsize, refuse, queue}, reason, snapshot provenance, ticket
     id}); the trailing fields are internal companions (accounting,
     testability, payload capture) and not part of the minimum surface.
-    num_gpu stays None: no option is sent for a whole load, and a split
-    admission leaves the layers to the engine, which Ollama places itself.
-    A split names itself in the partial offload companions: the share of
-    the cost on the GPU, the GiB on the GPU and in RAM, and the layers on
-    the GPU when the model's layer count is known. A refusal reached after
+    num_gpu is the number of layers a split puts on the GPU when the model's
+    file says what each layer weighs, and the count a split load pinned when
+    the model is resident; else None, and the engine places the layers.
+    Ollama is told it only as ``ollama_layers`` allows. A split names itself
+    in the partial offload companions: the share of the cost on the GPU, the
+    GiB on the GPU and in RAM, the layers on the GPU
+    when their count is known (from the file, else in proportion to the
+    cost), and how many times slower than on the GPU alone the split is
+    expected to run, when the bandwidths are known. A refusal reached after
     a split was priced also names the RAM shortfall. keep_alive carries the
     soft-pressure override when the pressure signal fills it.
     """
@@ -1425,6 +1547,12 @@ class AdmissionDecision:
     ram_cost_gb: float | None = None
     gpu_layers: int | None = None
     ram_shortfall_gb: float | None = None
+    expected_slowdown: float | None = None
+    # How many sequences Ollama keeps a KV cache for at once, as the operator
+    # names it (ollama_limits.num_parallel), or None unnamed. A split prices
+    # the KV of one sequence, so Ollama is told num_gpu only while it keeps
+    # one (``ollama_layers``); llama.cpp in process always keeps one.
+    num_parallel: int | None = None
     # -- what the load was charged, and by whom it will be served ------------
     # ``engine`` is the backend that will serve the call, when the registry
     # or the caller can say; ``cost_gb`` the GiB charged for the admitted
@@ -1444,6 +1572,27 @@ class AdmissionDecision:
             and self.gpu_share is not None
             and self.gpu_share < 1.0
         )
+
+    def ollama_layers(self, options: Mapping[str, Any] | None) -> int | None:
+        """The layer count Ollama may be told as num_gpu for a call with
+        ``options``, or None, and Ollama places the layers itself.
+
+        Only a count priced for the KV Ollama will keep: while it keeps one
+        sequence (``num_parallel`` 1), for a call at the context the count was
+        priced for, which names no num_gpu of its own. The engine head that
+        sends it and the gate that pins it both ask here.
+        """
+        layers = self.num_gpu
+        if isinstance(layers, bool) or not isinstance(layers, int) or layers < 0:
+            return None
+        if type(self.num_parallel) is not int or self.num_parallel != 1:
+            return None
+        sent = options if isinstance(options, Mapping) else {}
+        if "num_gpu" in sent:
+            return None
+        if sent.get("num_ctx") != self.num_ctx:
+            return None
+        return layers
 
     def refusal_payload(self) -> dict[str, Any]:
         """The honest refusal body, mirroring the estop idiom (D3).
@@ -1498,6 +1647,7 @@ class AdmissionDecision:
             "ram_cost_gb": self.ram_cost_gb,
             "gpu_layers": self.gpu_layers,
             "ram_shortfall_gb": self.ram_shortfall_gb,
+            "expected_slowdown": self.expected_slowdown,
         }
 
 
@@ -1519,6 +1669,10 @@ def _offload_refusal_payload(
     ram_shortfall: float,
     share: float,
     min_share: float,
+    *,
+    no_layer_fits: bool = False,
+    slowdown: float | None = None,
+    max_slowdown: float | None = None,
 ) -> dict[str, Any]:
     """The refusal body once a split was priced: what each placement lacked."""
     message = (
@@ -1534,6 +1688,13 @@ def _offload_refusal_payload(
         message += (
             f"; split, the GPU would hold {share:.0%} of it, under the"
             f" {min_share:.0%} minimum"
+        )
+    if no_layer_fits:
+        message += "; split, not one of its layers fits the VRAM free now"
+    if slowdown is not None and max_slowdown is not None:
+        message += (
+            f"; split, it would run {slowdown:.1f} times slower than on the"
+            f" GPU alone, over the {max_slowdown:.1f} allowed"
         )
     message += ". Evict idle models, pick a smaller model, or lower the context."
     return {
@@ -2019,7 +2180,14 @@ class ResourceGovernor:
         self._refresh_lock = threading.Lock()
         self._snapshot: ResourceSnapshot | None = None
         # KV geometries found per model (kv_geometry); dropped at a load.
-        self._geometry: dict[str, dict[str, int]] = {}
+        self._geometry: dict[str, dict[str, Any]] = {}
+        # Tensor tables by file identity (path, size, mtime_ns), the latest
+        # last; a table that was refused is kept as None, so a damaged file
+        # is read once until it changes.
+        self._tables: dict[tuple[str, int, int], Any] = {}
+        # The layer count each split load pinned, and whether the loaded view
+        # has shown the model since (only then does leaving it clear the pin).
+        self._pins: dict[str, list[Any]] = {}
         self._pending_attribution: dict[str, int | None] = {}
         self._refresh_in_flight = False
         self._capacity_warning_emitted = False
@@ -2129,16 +2297,24 @@ class ResourceGovernor:
         """An admitted load happened: drop the cache and register the
         model for post-load cost attribution at the next fresh ps view.
         The model's KV geometry is read again too: a load may bring other
-        bytes under the same name."""
+        bytes under the same name. A load ends the layer count a previous
+        split load pinned; a split load pins its own after this."""
         with self._cache_lock:
             self._pending_attribution[model] = requested_num_ctx
             self._geometry.pop(model, None)
+            self._pins.pop(model, None)
             self._snapshot = None
         self._invalidate_card_reading()
         self._notify_queue()
 
     def invalidate_on_evict(self, model: str | None = None) -> None:
         with self._cache_lock:
+            # An eviction ends the model's pin; one that names no model may
+            # have unloaded any of them.
+            if model:
+                self._pins.pop(model, None)
+            else:
+                self._pins.clear()
             self._snapshot = None
         self._invalidate_card_reading()
         self._notify_queue()
@@ -2223,7 +2399,7 @@ class ResourceGovernor:
                 best, best_len = coeff, len(family)
         return best
 
-    def _coefficient_from(self, geometry: dict[str, int] | None) -> float:
+    def _coefficient_from(self, geometry: dict[str, Any] | None) -> float:
         """GiB per 1024 tokens for a geometry; the flat coefficient for none."""
         if geometry is None:
             return self._config.kv_coefficient
@@ -2231,10 +2407,11 @@ class ResourceGovernor:
 
     def kv_geometry(
         self, model: str | None, engine: str | None = None
-    ) -> dict[str, int] | None:
+    ) -> dict[str, Any] | None:
         """The model's KV cache geometry, as its engine describes it.
 
-        ``{"layers", "kv_bytes_per_token"}`` or None. The backend that will
+        ``{"layers", "kv_bytes_per_token", "kv_bytes_per_layer"}`` or None.
+        The backend that will
         serve the model is asked first (``_serving_backend``), then the
         others in their registration order, for the model's information:
         the metadata mapping Ollama reports first, else the header of the
@@ -2267,6 +2444,103 @@ class ResourceGovernor:
                     self._geometry[model] = geometry
                 return geometry
         return None
+
+    def tensor_table(self, model: str | None, engine: str | None = None) -> Any:
+        """The tensor table of the file that serves ``model``, or None.
+
+        The backend that will serve the model is asked first, then the others
+        in their registration order, for the file it loads: llama.cpp names
+        it, Ollama's modelfile names its blob (``_model_files``). A file whose
+        architecture is not the model's, a vision projector, is set aside, and
+        so is a table without blocks. Never raises.
+        """
+        if not model:
+            return None
+        for backend in self._backend_order(model, engine):
+            try:
+                info = backend.model_info(model)
+            except Exception as exc:
+                logger.debug("model_info(%s) failed: %s", model, exc)
+                continue
+            if info is None:
+                continue
+            extra = getattr(info, "extra", None)
+            meta = extra.get("model_info") if isinstance(extra, dict) else None
+            arch = meta.get("general.architecture") if isinstance(meta, Mapping) else None
+            for path in _model_files(info):
+                table = self._table_at(path)
+                if table is None or not table.blocks:
+                    continue
+                if isinstance(arch, str) and arch and table.architecture != arch:
+                    continue
+                return table
+        return None
+
+    def _table_at(self, path: str) -> Any:
+        """The tensor table of the regular file at ``path``, by its identity.
+
+        Read once per identity (path, size, modification time) and again
+        when the file changes; a refused table is kept as None until then.
+        """
+        try:
+            info = os.lstat(path)
+        except (OSError, ValueError):
+            return None
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        key = (path, info.st_size, info.st_mtime_ns)
+        with self._cache_lock:
+            if key in self._tables:
+                table = self._tables.pop(key)
+                self._tables[key] = table
+                return table
+        table = _read_tensor_table(path)
+        with self._cache_lock:
+            self._tables[key] = table
+            while len(self._tables) > _TABLE_CACHE_SIZE:
+                self._tables.pop(next(iter(self._tables)))
+        return table
+
+    def pin_layers(self, model: str, layers: int, num_ctx: int | None) -> None:
+        """A split load of ``model`` at ``num_ctx`` put ``layers`` on the GPU.
+
+        The decisions for the resident model at that same context carry the
+        same count, so the engine keeps the model as it is rather than load
+        it again; at another context the count was not priced, and is not
+        carried.
+        """
+        with self._cache_lock:
+            self._pins[model] = (layers, num_ctx, False)
+
+    def pinned_layers(self, model: str | None, num_ctx: int | None) -> int | None:
+        """The layer count a split load of ``model`` pinned at ``num_ctx``."""
+        with self._cache_lock:
+            pin = self._pins.get(model) if model else None
+        if pin is None or num_ctx is None or pin[1] != num_ctx:
+            return None
+        return pin[0]
+
+    def _ollama_sequences(self) -> int | None:
+        """How many sequences Ollama keeps a KV cache for at once, as the
+        operator names it (ollama_limits.num_parallel); None unnamed, or
+        named as no parallelism at all."""
+        named = self._config.ollama_num_parallel
+        if isinstance(named, bool) or not isinstance(named, int) or named < 1:
+            return None
+        return named
+
+    def _release_pins(self, loaded: list[LoadedModelView]) -> None:
+        """Drop the pin of a model the loaded view has shown and shows no more.
+
+        A view that has not shown the model yet only lags its load.
+        """
+        names = {view.name for view in loaded if view.resident}
+        with self._cache_lock:
+            for model, (layers, num_ctx, seen) in list(self._pins.items()):
+                if model in names:
+                    self._pins[model] = (layers, num_ctx, True)
+                elif seen:
+                    del self._pins[model]
 
     def estimate_kv_cache_gb(
         self, num_ctx: int | None, model: str | None = None
@@ -2651,6 +2925,7 @@ class ResourceGovernor:
         if s1_answered:
             sources.append("S1")
             self._attribute_pending(loaded)
+            self._release_pins(loaded)
 
         resident, s2_answered, s3_used, unread = self._read_s2(
             {view.name for view in loaded}
@@ -3189,10 +3464,19 @@ class ResourceGovernor:
           reload, its own memory credited and its whole cost charged; its
           loaded context unknown, it is charged the KV of the call as
           before.
-        - Every decision is recorded in the ring; num_gpu stays None
-          (conservative); under soft-or-worse pressure (Section 5) an
-          admitted decision carries the keep_alive override the funnels
-          apply for that call.
+        - A split is placed layer by layer when the file that serves the
+          model says what each layer weighs (tensor_table): the last layers
+          that fit the VRAM free now, each with its KV, go to the GPU with
+          the cost the tensors and the KV do not explain; num_gpu is their
+          count, and the cost is never priced under the tensors. A split
+          slower than split_speed allows does not hold. Without a plan (no
+          table, no context told, or weights the operator or the engine
+          names) the split is the even one and num_gpu stays None. A
+          resident model's decision at the context its split load used
+          carries the count that load pinned.
+        - Every decision is recorded in the ring; under soft-or-worse
+          pressure (Section 5) an admitted decision carries the keep_alive
+          override the funnels apply for that call.
         """
         ticket_id = uuid.uuid4().hex[:12]
 
@@ -3346,6 +3630,7 @@ class ResourceGovernor:
                 admitted=True,
                 model=model,
                 num_ctx=loaded_ctx,
+                num_gpu=self.pinned_layers(model, loaded_ctx),
                 keep_alive=ka_override,
                 action=action,
                 reason=reason,
@@ -3355,6 +3640,7 @@ class ResourceGovernor:
                 requested_ctx=requested_ctx,
                 load_expected=False,
                 engine=engine_name,
+                num_parallel=self._ollama_sequences(),
                 cost_gb=0.0,
             )
             self._record_admission(held)
@@ -3476,17 +3762,107 @@ class ResourceGovernor:
             gpu = max(0.0, min(cost, budget_unconditional))
             return gpu, cost - gpu
 
-        def _split(ctx: int | None) -> tuple[float, float] | None:
-            """The placement of a split that holds at ``ctx``, else None."""
+        # A split placed layer by layer, when the file that serves the model
+        # says what each layer weighs: the table is read once a split is
+        # priced, and only for a load of the model itself (a resident that
+        # makes room for extra models places nothing). An operator's weights
+        # override or an engine's declared weights replace the file's (the
+        # residency of a mixture of experts whose experts stay in RAM), so no
+        # layer count can be told from the file then. Without a plan, the
+        # split is the even one.
+        figured = self.resolve_weights_override(model) is not None or (
+            declared is not None and declared["weights_gb"] is not None
+        )
+        main_loads = (not already_loaded or reload) and not figured
+        tables: list[Any] = []
+        too_slow: list[float] = []
+        gpu_speed = self._config.split_gpu_bandwidth_gbs
+        ram_speed = self._config.split_ram_bandwidth_gbs
+        max_slowdown = self._config.split_max_slowdown
+
+        def _layer_kv(ctx: int | None, layers: int) -> list[float]:
+            """Each layer's KV at ``ctx``, in GiB: its share of the KV priced,
+            from the geometry, or an even share under an operator override."""
+            kv = _kv(ctx) if main_kv else 0.0
+            shares = None
+            if geometry is not None and kv_override is None:
+                shares = geometry.get("kv_bytes_per_layer")
+            if shares and len(shares) == layers and sum(shares) > 0:
+                whole = float(sum(shares))
+                return [kv * share / whole for share in shares]
+            return [kv / layers] * layers
+
+        def _plan(ctx: int | None) -> tuple[float, float, float, int, float | None] | None:
+            """(GiB on the GPU, GiB in RAM, total GiB, layers on the GPU,
+            expected slowdown or None) of the split placed layer by layer at
+            ``ctx``; None without a table whose blocks are 0 to N-1, or for a
+            model with a KV cache whose context is not told: the engine would
+            hold its own default context's KV on layers priced without it."""
+            if main_kv and not ctx:
+                return None
+            if not tables:
+                tables.append(self.tensor_table(model, engine=engine) if main_loads else None)
+            table = tables[0]
+            if table is None:
+                return None
+            layers = len(table.blocks)
+            if not layers or list(table.blocks) != list(range(layers)):
+                return None
+            weights = [table.blocks[i] / _BYTES_PER_GIB for i in range(layers)]
+            kv = _layer_kv(ctx, layers)
+            tensors = table.total_bytes / _BYTES_PER_GIB
+            kv_total = sum(kv)
+            # The model's own weights are never priced under its tensors;
+            # extra models (a draft) and a declared state come on top.
+            main_weights = 0.0 if weights_gb is None else weights_gb
+            total = max(main_weights, tensors) + extra_gb + state_gb + kv_total
+            # What the tensors and the KV do not explain -- the compute
+            # buffers, the estimate's margin, a draft, a declared state --
+            # stays on the GPU; the layers are then taken from the last, as
+            # the engines place them, while they fit what is free now.
+            gpu = total - tensors - kv_total
+            count = 0
+            for index in reversed(range(layers)):
+                step = weights[index] + kv[index]
+                if gpu + step > budget_unconditional:
+                    break
+                gpu += step
+                count += 1
+            slowdown = None
+            if gpu_speed and ram_speed and count:
+                # The bytes read per token: each layer and its KV, and the
+                # output head, which a split leaves in RAM.
+                first = layers - count
+                on_gpu = sum(weights[i] + kv[i] for i in range(first, layers))
+                in_ram = sum(weights[i] + kv[i] for i in range(first))
+                in_ram += table.output_bytes / _BYTES_PER_GIB
+                read = on_gpu + in_ram
+                if read > 0.0:
+                    slowdown = (on_gpu / gpu_speed + in_ram / ram_speed) / (read / gpu_speed)
+            return gpu, total - gpu, total, count, slowdown
+
+        def _split(ctx: int | None) -> tuple[float, float, float, int | None, float | None] | None:
+            """The placement of a split that holds at ``ctx``, else None:
+            (GiB on the GPU, GiB in RAM, total GiB, layers on the GPU when
+            placed layer by layer, expected slowdown when known)."""
             if ram_budget is None:
                 return None
+            plan = _plan(ctx)
+            if plan is not None:
+                gpu, ram, total, count, slowdown = plan
+                if not count or ram <= 0.0 or ram > ram_budget or gpu / total < min_share:
+                    return None
+                if slowdown is not None and max_slowdown is not None and slowdown > max_slowdown:
+                    too_slow.append(slowdown)
+                    return None
+                return plan
             cost = _cost(ctx)
             gpu, ram = _placement(cost)
             if ram <= 0.0 or ram > ram_budget:
                 return None
             if gpu / cost < min_share:
                 return None
-            return gpu, ram
+            return gpu, ram, cost, None, None
 
         candidates: list[int | None] = [effective_ctx]
         floor = self._config.ctx_floor.get(caller)
@@ -3534,7 +3910,7 @@ class ResourceGovernor:
         for index, ctx, mode in attempts:
             if mode == "resident":
                 return _holds_decision("downsize", "ctx_laddered_to_fit+fits_resident")
-            placement: tuple[float, float] | None = None
+            placement: tuple[float, float, float, int | None, float | None] | None = None
             if mode == "split":
                 placement = _split(ctx)
                 if placement is None:
@@ -3577,17 +3953,27 @@ class ResourceGovernor:
                 load_expected=load_expected,
                 conditional_on_eviction=conditional,
                 engine=engine_name,
+                num_parallel=self._ollama_sequences(),
                 cost_gb=round(_cost(ctx), 3),
                 credit_gb=round(credit, 3),
             )
             if placement is not None:
-                gpu, ram = placement
+                gpu, ram, total, count, slowdown = placement
                 share = gpu / (gpu + ram)
                 decision.gpu_share = share
                 decision.vram_cost_gb = round(gpu, 3)
                 decision.ram_cost_gb = round(ram, 3)
-                if geometry is not None:
+                if count is not None:
+                    decision.num_gpu = count
+                    decision.gpu_layers = count
+                    decision.cost_gb = round(total, 3)
+                    if slowdown is not None:
+                        decision.expected_slowdown = round(slowdown, 3)
+                elif geometry is not None:
                     decision.gpu_layers = int(share * geometry["layers"])
+            if already_loaded and not reload and decision.num_gpu is None:
+                # The resident model stays as its split load placed it.
+                decision.num_gpu = self.pinned_layers(model, ctx)
             self._record_admission(decision)
             return decision
 
@@ -3609,19 +3995,42 @@ class ResourceGovernor:
             credit_gb=round(credit, 3),
         )
         if ram_budget is not None:
-            # A split was priced and none held: name what it lacked.
-            gpu, ram = _placement(minimal_cost)
-            share = gpu / minimal_cost if minimal_cost > 0.0 else 1.0
+            # A split was priced and none held: name what it lacked, from the
+            # layer-by-layer placement when the model's file gave one.
+            plan = _plan(candidates[-1])
+            if plan is not None:
+                gpu, ram, total, count, _slowdown = plan
+                share = gpu / total if total > 0.0 else 1.0
+                # The plan's total, never under the model's own tensors, is
+                # what the GPU alone would have had to hold.
+                vram_shortfall = round(max(0.0, total - budget_with_eviction), 3)
+                decision.shortfall_gb = vram_shortfall
+                decision.cost_gb = round(total, 3)
+            else:
+                gpu, ram = _placement(minimal_cost)
+                share = gpu / minimal_cost if minimal_cost > 0.0 else 1.0
+                count = None
             ram_shortfall = round(max(0.0, ram - ram_budget), 3)
             reason_parts = ["vram_insufficient"]
             if ram_shortfall > 0.0:
                 reason_parts.append("ram_insufficient")
             if share < min_share:
                 reason_parts.append("gpu_share_below_minimum")
+            if count == 0:
+                reason_parts.append("no_layer_fits")
+            if too_slow:
+                reason_parts.append("split_too_slow")
             decision.reason = "+".join(reason_parts)
             decision.ram_shortfall_gb = ram_shortfall
             decision.payload = _offload_refusal_payload(
-                model, vram_shortfall, ram_shortfall, share, min_share
+                model,
+                vram_shortfall,
+                ram_shortfall,
+                share,
+                min_share,
+                no_layer_fits=count == 0,
+                slowdown=min(too_slow) if too_slow else None,
+                max_slowdown=max_slowdown,
             )
         self._record_admission(decision)
         return decision
@@ -4078,9 +4487,23 @@ def reset_resource_governor() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _account_load(
+    governor: Any, model: str, decision: AdmissionDecision, options: dict | None
+) -> None:
+    """The load a decision admits is about to happen: account it, then pin
+    the layer count a split placed, so the calls that follow keep it. Only
+    a count Ollama is told is pinned, asked as the engine head asks
+    (``AdmissionDecision.ollama_layers``); otherwise the engine places the
+    layers itself, and nothing is pinned."""
+    governor.invalidate_on_load(model, decision.num_ctx)
+    layers = decision.ollama_layers(options) if decision.partial_offload else None
+    if layers is not None:
+        governor.pin_layers(model, layers, decision.num_ctx)
+
+
 def backend_admission_gate(
     model: str, options: dict | None = None, unsplittable: str | None = None
-) -> None:
+) -> AdmissionDecision | None:
     """The internal hook body behind the four generate/stream heads.
 
     A matching ticket means the funnel already decided: account the load
@@ -4089,19 +4512,22 @@ def backend_admission_gate(
     default semantics (caller "direct", the mechanical backstop for the
     Section 8 residual), raising the typed GovernorRefusal on a positive
     refusal only. The caller (inference_backend) wraps this in its own
-    fail-open handling; a disabled governor stands down entirely.
+    fail-open handling; a disabled governor stands down entirely. Returns
+    the decision acted on, the ticket or the backstop's, so the engine can
+    load what it admits (num_ctx, num_gpu); None when disabled.
 
-    ``unsplittable`` names the calling engine when it cannot run a model
-    split between the GPU and system RAM. A split admission, from the
+    ``unsplittable`` names the calling engine when it cannot place a model's
+    layers itself. A split admission that carries no layer count, from the
     ticket or the backstop, is then refused by name before any eviction,
-    accounting or load, instead of failing for memory inside the engine.
+    accounting or load, instead of failing for memory inside the engine; a
+    split that carries one is loaded with it.
     """
     governor = get_resource_governor()
     if not governor.config.enabled:
-        return
+        return None
     ticket = get_active_ticket()
     if ticket is not None and ticket.model == model:
-        if unsplittable and ticket.partial_offload and ticket.load_expected:
+        if _uncounted_split(ticket, unsplittable):
             _refuse_split(governor, ticket, unsplittable)
         if ticket.admitted and ticket.load_expected:
             # Act on a conditional grant just before its load
@@ -4109,9 +4535,9 @@ def backend_admission_gate(
             # fail-open to Ollama's own LRU, Section 12).
             if ticket.conditional_on_eviction:
                 governor._honour_conditional_eviction(ticket)
-            governor.invalidate_on_load(model, ticket.num_ctx)
+            _account_load(governor, model, ticket, options)
             ticket.load_expected = False
-        return
+        return ticket
     requested: int | None = None
     if isinstance(options, dict):
         raw = options.get("num_ctx")
@@ -4120,9 +4546,20 @@ def backend_admission_gate(
     decision = governor.admit(model, requested, caller="direct")
     if not decision.admitted:
         raise GovernorRefusal(decision)
-    if unsplittable and decision.partial_offload and decision.load_expected:
+    if _uncounted_split(decision, unsplittable):
         _refuse_split(governor, decision, unsplittable)
     if decision.load_expected:
         if decision.conditional_on_eviction:
             governor._honour_conditional_eviction(decision)
-        governor.invalidate_on_load(model, decision.num_ctx)
+        _account_load(governor, model, decision, options)
+    return decision
+
+
+def _uncounted_split(decision: AdmissionDecision, unsplittable: str | None) -> bool:
+    """A split load the calling engine cannot place: no layer count to load."""
+    return bool(
+        unsplittable
+        and decision.partial_offload
+        and decision.load_expected
+        and decision.num_gpu is None
+    )

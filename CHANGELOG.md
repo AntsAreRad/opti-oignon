@@ -2628,6 +2628,44 @@ package costs.
   coefficient, and could evict nothing for a load the admission had found
   too large. A grant the admission did not price is priced the admission's
   way. Twenty-two contracts.
+- The governor places a split model layer by layer, as the model's own
+  file weighs it, and tells the engine how many layers go to the GPU. It
+  reads the tensor table of the file the serving engine loads -- the GGUF
+  file llama.cpp names, or the blob Ollama's modelfile names, a vision
+  projector set aside -- once per file identity and only when a split is
+  priced (`model_manager.read_gguf_tensors`: versions 2 and 3, the 34
+  tensor types ggml defines with their exact block sizes, metadata stepped
+  over and never kept, every bound held against a damaged or hostile file,
+  and each refusal named from a closed set). The last layers that fit the
+  VRAM free now go to the GPU, each with its share of the KV cache, as
+  llama.cpp and Ollama place them; what the tensors and the KV do not
+  explain stays on the GPU, a model priced under its own tensors is charged
+  them, and a draft loading beside it is charged on top. The decision
+  carries the count (`num_gpu`, and `gpu_layers`): Ollama is sent it with
+  the context it was priced for, unless the caller names its own -- a call
+  that tells another context, or none, is placed by Ollama itself -- and a
+  resident model's calls at the context its split load used keep sending
+  it; a load, an eviction or the model leaving the loaded view ends that.
+  The split prices the KV of one sequence, and Ollama keeps a cache for
+  `num_parallel` of them at once: it is told the count only when
+  `ollama_limits.num_parallel` is 1; unnamed, as shipped, or more, it places
+  the layers itself. llama.cpp in process loads at the admitted
+  context and layer count, an explicit `n_gpu_layers` being a ceiling the
+  count can only lower; it loads a model it holds again only for a longer
+  context on the GPU alone, closing the old copy first and never while a
+  call runs on it; it refuses a split only when no count could be told; and
+  its loaded view carries the context each model is held at. A new
+  `split_speed` block, null as shipped, takes the GPU and RAM bandwidths
+  and a `max_slowdown`: the decision reports how many times slower than on
+  the GPU alone the split should run, a slower split does not hold and the
+  context ladder goes on, and a speed that cannot be told never refuses. A
+  refusal reached after a planned split is figured on the plan's total and
+  names `no_layer_fits` or `split_too_slow` when they apply. There is no
+  plan, and the split is the even one given before, when the file cannot
+  be read, when the call names no context, or when the operator or the
+  engine names the model's weights. Ollama's streaming head now refuses
+  malformed options before admission, as generation does, so a refused
+  stream leaves no load accounted. Forty-one contracts.
 
 ## 2.2.0 -- 2026-07-28
 

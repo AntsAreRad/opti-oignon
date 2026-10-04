@@ -90,7 +90,7 @@ def _resolve_resource_governor() -> Any:
 
 def _governor_admission(
     model: str, options: dict | None, unsplittable: str | None = None
-) -> None:
+) -> Any:
     """The internal hook at the six generate/stream heads and the embedding head.
 
     Six, not four: the external llama-server backend was the one that talks
@@ -104,23 +104,67 @@ def _governor_admission(
     Module absent, disabled by config, or any governor error: proceed
     unguarded. Only the governor's own typed GovernorRefusal propagates.
 
-    ``unsplittable`` is how a head that cannot run a model split between
-    the GPU and system RAM names itself to the gate, which then refuses a
-    split admission by that name. Heads that can split pass nothing.
+    ``unsplittable`` is how a head that cannot place a model's layers
+    between the GPU and system RAM by itself names itself to the gate, which
+    then refuses a split admission that carries no layer count by that
+    name. Heads that can split pass nothing.
+
+    Returns the decision the gate acted on, so the head loads what it
+    admits (its num_ctx and num_gpu); None when nothing decided.
     """
     rg = _resolve_resource_governor()
     if rg is None:
-        return
+        return None
     try:
         if unsplittable:
-            rg.backend_admission_gate(model, options, unsplittable=unsplittable)
-        else:
-            rg.backend_admission_gate(model, options)
+            return rg.backend_admission_gate(model, options, unsplittable=unsplittable)
+        return rg.backend_admission_gate(model, options)
     except Exception as exc:
         refusal = getattr(rg, "GovernorRefusal", None)
         if refusal is not None and isinstance(exc, refusal):
             raise
         logger.debug("Governor gate failed open: %s", exc)
+        return None
+
+
+def _admitted_layers(decision: Any) -> int | None:
+    """The layer count an admission put on the GPU, or None."""
+    layers = getattr(decision, "num_gpu", None)
+    if isinstance(layers, bool) or not isinstance(layers, int) or layers < 0:
+        return None
+    return layers
+
+
+def _admitted_ctx(decision: Any) -> int | None:
+    """The context an admission granted, or None."""
+    ctx = getattr(decision, "num_ctx", None)
+    if isinstance(ctx, bool) or not isinstance(ctx, int) or ctx <= 0:
+        return None
+    return ctx
+
+
+def _close_model(llm: Any) -> None:
+    """Free a model's memory now, not whenever it is collected."""
+    close = getattr(llm, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as exc:
+            logger.warning("Closing a llama.cpp model failed: %s", exc)
+
+
+def _with_layers(options: dict | None, decision: Any) -> dict | None:
+    """``options`` with the layer count the admission lets Ollama be told,
+    as its num_gpu (``AdmissionDecision.ollama_layers``: the count priced
+    for the one sequence Ollama keeps, at the context the call tells, unless
+    the caller names its own). Otherwise Ollama places the layers itself.
+    The caller's dict is never changed.
+    """
+    tell = getattr(decision, "ollama_layers", None)
+    layers = tell(options) if callable(tell) else None
+    if layers is None:
+        return options
+    return {**(options or {}), "num_gpu": layers}
 
 
 # The light sink. Passive by construction: nothing in this module resolves,
@@ -1159,7 +1203,7 @@ class OllamaBackend(InferenceBackend):
 
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
-        _governor_admission(model, options)
+        decision = _governor_admission(model, options)
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1171,7 +1215,7 @@ class OllamaBackend(InferenceBackend):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": engine_options,
+            "options": _with_layers(engine_options, decision),
             "keep_alive": keep_alive,
         }
         flag = self._think_flag(model, think)
@@ -1224,10 +1268,16 @@ class OllamaBackend(InferenceBackend):
         if not OLLAMA_AVAILABLE:
             raise RuntimeError("Ollama is not installed (pip install ollama)")
 
+        # Before the admission hook and before any telemetry, as generate
+        # does: options refused here leave no load accounted, no layer count
+        # pinned and no request started behind them.
+        engine_options, schema, tools = _split_extras(options)
+        engine_options, timeout = _pop_timeout(engine_options)
+
         # Governor admission hook. A generator head runs at first
         # iteration; the funnel's ticket is thread-local, so funnels set it
         # on the consuming thread (see resource_governor.ticket_scope).
-        _governor_admission(model, options)
+        decision = _governor_admission(model, options)
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1238,12 +1288,10 @@ class OllamaBackend(InferenceBackend):
         if images:
             messages = _inject_images(messages, images)
 
-        engine_options, schema, tools = _split_extras(options)
-        engine_options, timeout = _pop_timeout(engine_options)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": engine_options,
+            "options": _with_layers(engine_options, decision),
             "stream": True,
             "keep_alive": keep_alive,
         }
@@ -1454,6 +1502,10 @@ class LlamaCppBackend(InferenceBackend):
         self._type_k = type_k
         self._type_v = type_v
         self._loaded_models: dict[str, Any] = {}
+        # The context each model was loaded with, by this backend, and the
+        # (n_ctx, n_gpu_layers) an admission prepared for a model's next load.
+        self._held_ctx: dict[str, int] = {}
+        self._load_plans: dict[str, tuple[int, int]] = {}
         # IB-02: guard for the per-model lock dicts below. Held only while
         # creating-and-registering a missing lock, never during a load or
         # an inference call, so it cannot serialize the hot path.
@@ -1526,14 +1578,13 @@ class LlamaCppBackend(InferenceBackend):
     ) -> ChatResponse:
         """Non-streaming inference via llama-cpp-python."""
         # Governor admission hook (additive, signature untouched).
-        _governor_admission(model, options, self._unsplittable(model))
+        decision = _governor_admission(model, options, self._unsplittable(model))
 
         # Telemetry start.
         tel = _get_telemetry()
         rid = tel.on_inference_start(model, messages) if tel else ""
         t0 = time.time()
 
-        llm = self._get_or_load(model)
         opts, schema, tools = _split_extras(options)
         temperature = opts.get("temperature", 0.7)
 
@@ -1551,7 +1602,11 @@ class LlamaCppBackend(InferenceBackend):
         if tools is not None:
             completion_kwargs["tools"] = tools
 
+        # The model is fetched, loaded or reloaded under its inference lock:
+        # no call is running on a model a reload closes.
         with self._lock_for(self._inference_locks, model):
+            self._admit_load(model, decision)
+            llm = self._get_or_load(model)
             result = llm.create_chat_completion(**completion_kwargs)
 
         content = ""
@@ -1589,7 +1644,7 @@ class LlamaCppBackend(InferenceBackend):
     ) -> Generator[StreamChunk, None, None]:
         """Streaming inference via llama-cpp-python."""
         # Governor admission hook (additive, signature untouched).
-        _governor_admission(model, options, self._unsplittable(model))
+        decision = _governor_admission(model, options, self._unsplittable(model))
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1597,7 +1652,6 @@ class LlamaCppBackend(InferenceBackend):
         t0 = time.time()
         token_count = 0
 
-        llm = self._get_or_load(model)
         opts, schema, tools = _split_extras(options)
         temperature = opts.get("temperature", 0.7)
 
@@ -1616,6 +1670,8 @@ class LlamaCppBackend(InferenceBackend):
             completion_kwargs["tools"] = tools
 
         with self._lock_for(self._inference_locks, model):
+            self._admit_load(model, decision)
+            llm = self._get_or_load(model)
             stream_iter = llm.create_chat_completion(**completion_kwargs)
 
             for chunk in stream_iter:
@@ -1653,11 +1709,13 @@ class LlamaCppBackend(InferenceBackend):
     def _unsplittable(self, model_name: str) -> str | None:
         """How this engine names itself to the gate when a split would fail.
 
-        A negative n_gpu_layers puts every layer on the GPU: a model the
-        governor admits only split between the GPU and system RAM would then
-        fail for memory at its load, so the gate refuses it by this name. A
-        model already held loads nothing, and an explicit layer count is
-        the operator's own placement; neither is named.
+        A negative n_gpu_layers puts every layer on the GPU unless the
+        admission says how many: a model the governor admits only split
+        between the GPU and system RAM, without a layer count, would then
+        fail for memory at its load, so the gate refuses it by this name; a
+        split that carries a count is loaded with it. A model already held
+        loads nothing, and an explicit layer count is the operator's own
+        placement; neither is named.
         """
         if self._n_gpu_layers >= 0 or model_name in self._loaded_models:
             return None
@@ -1724,6 +1782,37 @@ class LlamaCppBackend(InferenceBackend):
                     return resolved_gguf
         return None
 
+    def _admit_load(self, model_name: str, decision: Any) -> None:
+        """Prepare the load the call's admission grants, before the fetch.
+
+        The next load of the model takes the admission's context (num_ctx)
+        and layer count (num_gpu, unless the operator set n_gpu_layers). A
+        model held at a shorter context than the admission grants is closed
+        and dropped first, so the fetch loads it again at the longer one and
+        the two never hold memory together. The callers hold the model's
+        inference lock: no call runs on a model this closes. No admission,
+        or one the held model already serves, changes nothing.
+        """
+        if decision is None:
+            return
+        cached = self._loaded_models.get(model_name)
+        if cached is not None:
+            if not self._reload_wanted(model_name, decision):
+                return
+            held = self._held_ctx.pop(model_name, None)
+            self._loaded_models.pop(model_name, None)
+            logger.info(
+                "Reloading %s: held at %s tokens, admitted at %s",
+                model_name,
+                held,
+                _admitted_ctx(decision),
+            )
+            _close_model(cached)
+        self._load_plans[model_name] = (
+            _admitted_ctx(decision) or self._n_ctx,
+            self._layers_for(decision),
+        )
+
     def _get_or_load(self, model_name: str) -> Any:
         """Get a cached model or load it from disk.
 
@@ -1733,7 +1822,8 @@ class LlamaCppBackend(InferenceBackend):
         a per-model load lock and re-checks the cache (double-checked
         locking), so the model is constructed exactly once even under
         concurrent first use -- no double GGUF load, no race on the
-        _loaded_models dict.
+        _loaded_models dict. A load takes the context and layer count
+        _admit_load prepared for it, else the configured ones.
         """
         if not LLAMA_CPP_AVAILABLE:
             raise RuntimeError(
@@ -1751,6 +1841,9 @@ class LlamaCppBackend(InferenceBackend):
             cached = self._loaded_models.get(model_name)
             if cached is not None:
                 return cached
+            n_ctx, n_gpu_layers = self._load_plans.pop(
+                model_name, (self._n_ctx, self._n_gpu_layers)
+            )
 
             gguf_path = self._resolve_model_path(model_name)
             if gguf_path is None:
@@ -1776,8 +1869,8 @@ class LlamaCppBackend(InferenceBackend):
 
             kwargs: dict[str, Any] = {
                 "model_path": str(gguf_path),
-                "n_ctx": self._n_ctx,
-                "n_gpu_layers": self._n_gpu_layers,
+                "n_ctx": n_ctx,
+                "n_gpu_layers": n_gpu_layers,
                 "verbose": False,
             }
             if self._n_threads is not None:
@@ -1826,7 +1919,37 @@ class LlamaCppBackend(InferenceBackend):
             )
 
             self._loaded_models[model_name] = llm
+            self._held_ctx[model_name] = n_ctx
             return llm
+
+    def _reload_wanted(self, model_name: str, decision: Any) -> bool:
+        """The admission grants the held model more context than it was
+        loaded with, on the GPU alone.
+
+        A split never reloads a held model: the governor does not see what
+        this backend holds (its loaded view reports no size), so a split it
+        prices for a held model counts the model's own memory against it and
+        would reload it with fewer layers than the card holds once freed. A
+        whole admission fits even with that memory counted. A held model
+        whose context this backend never saw is served as held.
+        """
+        wanted = _admitted_ctx(decision)
+        held = self._held_ctx.get(model_name)
+        if wanted is None or held is None or held >= wanted:
+            return False
+        return not getattr(decision, "partial_offload", False)
+
+    def _layers_for(self, decision: Any) -> int:
+        """The layers a load puts on the GPU: the operator's explicit count,
+        which a split's own count can only lower (the split was priced at
+        the admitted context, which may be longer than the one the count was
+        chosen for), else the admission's, else every layer (-1)."""
+        layers = _admitted_layers(decision)
+        if self._n_gpu_layers >= 0:
+            if layers is not None and getattr(decision, "partial_offload", False):
+                return min(self._n_gpu_layers, layers)
+            return self._n_gpu_layers
+        return layers if layers is not None else self._n_gpu_layers
 
     def unload_model(self, model_name: str) -> bool:
         """Unload a model from memory.
@@ -1836,6 +1959,7 @@ class LlamaCppBackend(InferenceBackend):
         under concurrent unload of the same name.
         """
         unloaded = self._loaded_models.pop(model_name, None) is not None
+        self._held_ctx.pop(model_name, None)
         if unloaded:
             logger.info("Unloaded GGUF model: %s", model_name)
         return unloaded
@@ -1849,6 +1973,7 @@ class LlamaCppBackend(InferenceBackend):
         """
         count = 0
         for name in list(self._loaded_models.keys()):
+            self._held_ctx.pop(name, None)
             if self._loaded_models.pop(name, None) is not None:
                 count += 1
         logger.info("Unloaded %d model(s)", count)
@@ -1858,10 +1983,16 @@ class LlamaCppBackend(InferenceBackend):
         """The in-process set: a known answer, empty when nothing is loaded.
 
         VRAM size and expiry are not observed by this backend, so they stay
-        ``None`` rather than a zero that would read as measured.
+        ``None`` rather than a zero that would read as measured. The context
+        is the one each model was loaded with, None when this backend did not
+        load it.
         """
         return [
-            BackendLoadedModel(name=name, backend=self.name)
+            BackendLoadedModel(
+                name=name,
+                backend=self.name,
+                context_length=self._held_ctx.get(name),
+            )
             for name in list(self._loaded_models.keys())
         ]
 

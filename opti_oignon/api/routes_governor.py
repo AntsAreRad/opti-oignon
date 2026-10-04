@@ -212,6 +212,30 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
         "leaf": "pressure_factor",
         "min": 1.0,
     },
+    # The speed of a split: null is unknown, and a bandwidth is above 0.
+    "split_speed.gpu_bandwidth_gbs": {
+        "attr": "split_gpu_bandwidth_gbs",
+        "type": "opt_float",
+        "section": "split_speed",
+        "leaf": "gpu_bandwidth_gbs",
+        "min": 0.0,
+        "min_exclusive": True,
+    },
+    "split_speed.ram_bandwidth_gbs": {
+        "attr": "split_ram_bandwidth_gbs",
+        "type": "opt_float",
+        "section": "split_speed",
+        "leaf": "ram_bandwidth_gbs",
+        "min": 0.0,
+        "min_exclusive": True,
+    },
+    "split_speed.max_slowdown": {
+        "attr": "split_max_slowdown",
+        "type": "opt_float",
+        "section": "split_speed",
+        "leaf": "max_slowdown",
+        "min": 1.0,
+    },
     "host_pressure.enabled": {
         "attr": "host_pressure_enabled",
         "type": "bool",
@@ -375,6 +399,11 @@ def _config_to_nested(cfg: Any) -> dict[str, Any]:
             "ceiling_gb": cfg.ram_reserve_ceiling_gb,
             "pressure_factor": cfg.ram_reserve_pressure_factor,
         },
+        "split_speed": {
+            "gpu_bandwidth_gbs": cfg.split_gpu_bandwidth_gbs,
+            "ram_bandwidth_gbs": cfg.split_ram_bandwidth_gbs,
+            "max_slowdown": cfg.split_max_slowdown,
+        },
         "host_pressure": {
             "enabled": cfg.host_pressure_enabled,
             "memory_enter_some_avg10": cfg.host_pressure_memory_enter,
@@ -440,10 +469,12 @@ def _check_range(spec: dict[str, Any], value: Any, key: str) -> None:
     low, high = spec.get("min"), spec.get("max")
     if low is None and high is None:
         return
-    above = low is None or low <= value
+    strict = bool(spec.get("min_exclusive"))
+    above = low is None or (low < value if strict else low <= value)
     below = value <= high if high is not None else value < float("inf")
     if not (above and below):
-        bounds = f"[{low}, {high}]" if high is not None else f"[{low}, inf)"
+        opening = "(" if strict else "["
+        bounds = f"{opening}{low}, {high}]" if high is not None else f"{opening}{low}, inf)"
         raise ConfigWriteError(400, f"{key} expects a number in {bounds}")
 
 

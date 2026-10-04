@@ -24,11 +24,16 @@ import hashlib
 import hmac
 import http.client
 import logging
+import os
+import re
 import socket
+import stat
 import struct
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -358,6 +363,390 @@ def _estimate_parameter_count(
 
     total = embed_params + (n_layers * layer_params) + final_params
     return total
+
+
+# ---------------------------------------------------------------------------
+# GGUF tensor table (pure Python, bounded)
+#
+# What each layer of a model weighs, read from the table of tensors that
+# follows the metadata: a split model is placed layer by layer, and only the
+# file says how large each layer is. The reader is held to bounds a damaged or
+# hostile file cannot widen. Metadata values are stepped over, never kept,
+# except the architecture name and the alignment; nothing is allocated from a
+# declared length but a name already found short; and every refusal carries a
+# reason from a closed set.
+# ---------------------------------------------------------------------------
+
+# ggml tensor types: id -> (name, elements per block, bytes per block), as
+# ggml's type traits define them (checked against libggml 0.11.1). ggml
+# retired ids 4 and 5, 31 to 33 and 36 to 38; an id not listed is refused.
+GGML_TENSOR_TYPES: dict[int, tuple[str, int, int]] = {
+    0: ("F32", 1, 4),
+    1: ("F16", 1, 2),
+    2: ("Q4_0", 32, 18),
+    3: ("Q4_1", 32, 20),
+    6: ("Q5_0", 32, 22),
+    7: ("Q5_1", 32, 24),
+    8: ("Q8_0", 32, 34),
+    9: ("Q8_1", 32, 36),
+    10: ("Q2_K", 256, 84),
+    11: ("Q3_K", 256, 110),
+    12: ("Q4_K", 256, 144),
+    13: ("Q5_K", 256, 176),
+    14: ("Q6_K", 256, 210),
+    15: ("Q8_K", 256, 292),
+    16: ("IQ2_XXS", 256, 66),
+    17: ("IQ2_XS", 256, 74),
+    18: ("IQ3_XXS", 256, 98),
+    19: ("IQ1_S", 256, 50),
+    20: ("IQ4_NL", 32, 18),
+    21: ("IQ3_S", 256, 110),
+    22: ("IQ2_S", 256, 82),
+    23: ("IQ4_XS", 256, 136),
+    24: ("I8", 1, 1),
+    25: ("I16", 1, 2),
+    26: ("I32", 1, 4),
+    27: ("I64", 1, 8),
+    28: ("F64", 1, 8),
+    29: ("IQ1_M", 256, 56),
+    30: ("BF16", 1, 2),
+    34: ("TQ1_0", 256, 54),
+    35: ("TQ2_0", 256, 66),
+    39: ("MXFP4", 32, 17),
+    40: ("NVFP4", 64, 36),
+    41: ("Q1_0", 128, 18),
+}
+
+# Every reason a tensor table is refused for; GGUFTableError.reason is one.
+GGUF_TABLE_REFUSALS = frozenset(
+    {
+        "bad_magic",
+        "unsupported_version",
+        "too_many_tensors",
+        "too_many_pairs",
+        "name_too_long",
+        "string_too_long",
+        "array_too_long",
+        "nesting_too_deep",
+        "unknown_value_type",
+        "bad_alignment",
+        "bad_dimensions",
+        "unknown_tensor_type",
+        "partial_block",
+        "misaligned_offset",
+        "past_end_of_file",
+        "duplicate_tensor",
+        "truncated",
+    }
+)
+
+# The reader's bounds. A tensor name shorter than 64 bytes and at most four
+# dimensions are ggml's own limits (GGML_MAX_NAME, GGML_MAX_DIMS), and a key
+# is at most 65535 bytes, as the format says. The rest bound the work a header
+# can ask for, far above any model file: the tensors, the key/value pairs, the
+# array elements declared over the whole header, and how deep arrays nest.
+_TABLE_MAX_TENSORS = 1 << 17
+_TABLE_MAX_PAIRS = 1 << 16
+_TABLE_MAX_KEY = 65535
+_TABLE_MAX_NAME = 63
+_TABLE_MAX_ARCHITECTURE = 256
+_TABLE_MAX_ELEMENTS = 1 << 24
+_TABLE_MAX_NESTING = 4
+_TABLE_MAX_DIMS = 4
+_TABLE_DEFAULT_ALIGNMENT = 32
+_TABLE_CHUNK = 1 << 20
+_INT64_MAX = (1 << 63) - 1
+_U32 = struct.Struct("<I")
+_U64 = struct.Struct("<Q")
+_KEY_ARCHITECTURE = GGUF_KEY_ARCHITECTURE.encode("ascii")
+_KEY_ALIGNMENT = b"general.alignment"
+_KEPT_KEY_LENGTHS = frozenset({len(_KEY_ARCHITECTURE), len(_KEY_ALIGNMENT)})
+# A block's tensors: "blk.N." with N written as ggml writes it.
+_BLOCK_NAME = re.compile(rb"blk\.(0|[1-9][0-9]{0,5})\.")
+
+
+class GGUFTableError(GGUFParseError):
+    """A tensor table refused; ``reason`` names why, from GGUF_TABLE_REFUSALS."""
+
+    def __init__(self, reason: str, detail: str = ""):
+        self.reason = reason
+        super().__init__(f"{reason}: {detail}" if detail else reason)
+
+
+@dataclass(frozen=True)
+class GGUFTensorTable:
+    """What a model file's tensors weigh, as its tensor table declares them.
+
+    ``blocks`` maps each block index N (the tensors named ``blk.N.``) to its
+    bytes, and ``other_bytes`` counts every tensor outside the blocks. The
+    output head is ``output.weight``, else the token embedding the head is
+    tied to (``output_tied``); its bytes are among ``other_bytes`` too. Bytes
+    are exact: ggml's block layout of each tensor's type and shape.
+    """
+
+    version: int
+    architecture: str | None
+    alignment: int
+    data_offset: int
+    tensor_count: int
+    blocks: Mapping[int, int]
+    other_bytes: int
+    output_bytes: int
+    output_tied: bool
+    total_bytes: int
+
+
+class _TableReader:
+    """Little-endian reads over a file in chunks, never past its size.
+
+    ``elements`` is what the header may still declare in array elements.
+    """
+
+    def __init__(self, handle, size: int):
+        self._handle = handle
+        self.size = size
+        self._buf = b""
+        self._base = 0  # file offset of _buf[0]
+        self._pos = 0  # read position within _buf
+        self.elements = _TABLE_MAX_ELEMENTS
+
+    def tell(self) -> int:
+        return self._base + self._pos
+
+    def _need(self, n: int) -> None:
+        if self._pos + n <= len(self._buf):
+            return
+        at = self._base + self._pos
+        if at + n > self.size:
+            raise GGUFTableError("truncated", f"{n} bytes wanted at {at} of {self.size}")
+        self._handle.seek(at)
+        self._buf = self._handle.read(max(n, _TABLE_CHUNK))
+        self._base, self._pos = at, 0
+        if len(self._buf) < n:
+            raise GGUFTableError("truncated", f"the file ended at {at + len(self._buf)}")
+
+    def u32(self) -> int:
+        self._need(4)
+        value = _U32.unpack_from(self._buf, self._pos)[0]
+        self._pos += 4
+        return value
+
+    def u64(self) -> int:
+        self._need(8)
+        value = _U64.unpack_from(self._buf, self._pos)[0]
+        self._pos += 8
+        return value
+
+    def take(self, n: int) -> bytes:
+        self._need(n)
+        data = self._buf[self._pos:self._pos + n]
+        self._pos += n
+        return data
+
+    def skip(self, n: int) -> None:
+        at = self.tell() + n
+        if at > self.size:
+            raise GGUFTableError("truncated", f"{n} bytes skipped past the end at {self.tell()}")
+        if self._pos + n <= len(self._buf):
+            self._pos += n
+        else:
+            self._buf, self._base, self._pos = b"", at, 0
+
+    def skip_strings(self, count: int) -> None:
+        """Step over ``count`` strings, reading only their lengths."""
+        buf, pos, end, unpack = self._buf, self._pos, len(self._buf), _U64.unpack_from
+        for _ in range(count):
+            if pos + 8 > end:
+                self._pos = pos
+                self._need(8)
+                buf, pos, end = self._buf, self._pos, len(self._buf)
+            n = unpack(buf, pos)[0]
+            pos += 8
+            if pos + n <= end:
+                pos += n
+            else:
+                self._pos = pos
+                self.skip(n)
+                buf, pos, end = self._buf, self._pos, len(self._buf)
+        self._pos = pos
+
+
+def _scalar_bytes(kind: int) -> int:
+    layout = _GGUF_SCALAR_FORMATS.get(kind)
+    if layout is None:
+        raise GGUFTableError("unknown_value_type", str(kind))
+    return layout[1]
+
+
+def _skip_value(reader: _TableReader, kind: int, depth: int = 0) -> None:
+    """Step over one metadata value of type ``kind``, ``depth`` arrays deep."""
+    if kind == GGUF_TYPE_STRING:
+        reader.skip(reader.u64())
+        return
+    if kind != GGUF_TYPE_ARRAY:
+        reader.skip(_scalar_bytes(kind))
+        return
+    if depth >= _TABLE_MAX_NESTING:
+        raise GGUFTableError("nesting_too_deep", f"more than {_TABLE_MAX_NESTING} levels")
+    element = reader.u32()
+    count = reader.u64()
+    size = 0 if element in (GGUF_TYPE_STRING, GGUF_TYPE_ARRAY) else _scalar_bytes(element)
+    if count > reader.elements:
+        raise GGUFTableError("array_too_long", f"{count} elements over the header's bound")
+    reader.elements -= count
+    if element == GGUF_TYPE_STRING:
+        reader.skip_strings(count)
+    elif element == GGUF_TYPE_ARRAY:
+        for _ in range(count):
+            _skip_value(reader, GGUF_TYPE_ARRAY, depth + 1)
+    else:
+        reader.skip(count * size)
+
+
+def read_gguf_tensors(path: str | Path) -> GGUFTensorTable:
+    """Read the tensor table of a GGUF file, version 2 or 3.
+
+    Raises GGUFTableError, whose reason is one of GGUF_TABLE_REFUSALS, for a
+    table that cannot be trusted; GGUFParseError for a path that is not a
+    regular file; OSError when the file cannot be opened. A symbolic link is
+    not followed, and opening never waits on a pipe.
+    """
+    flags = os.O_RDONLY
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, name, 0)
+    try:
+        fd = os.open(path, flags)
+    except (TypeError, ValueError) as exc:
+        raise GGUFParseError(f"Not a file path: {path!r}") from exc
+    try:
+        # Before the descriptor becomes a file object, which refuses a
+        # directory in a type of its own.
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise GGUFParseError(f"Not a regular file: {path}")
+        handle = os.fdopen(fd, "rb", buffering=0)
+    except BaseException:
+        os.close(fd)
+        raise
+    with handle:
+        return _read_table(_TableReader(handle, info.st_size))
+
+
+def _read_table(reader: _TableReader) -> GGUFTensorTable:
+    if reader.take(4) != GGUF_MAGIC_BYTES:
+        raise GGUFTableError("bad_magic")
+    version = reader.u32()
+    if version not in (2, 3):
+        raise GGUFTableError("unsupported_version", str(version))
+    tensor_count = reader.u64()
+    if tensor_count > _TABLE_MAX_TENSORS:
+        raise GGUFTableError("too_many_tensors", str(tensor_count))
+    pair_count = reader.u64()
+    if pair_count > _TABLE_MAX_PAIRS:
+        raise GGUFTableError("too_many_pairs", str(pair_count))
+
+    architecture: str | None = None
+    alignment = _TABLE_DEFAULT_ALIGNMENT
+    for _ in range(pair_count):
+        key_length = reader.u64()
+        if key_length > _TABLE_MAX_KEY:
+            raise GGUFTableError("name_too_long", f"a {key_length}-byte key")
+        key = None
+        if key_length in _KEPT_KEY_LENGTHS:
+            key = reader.take(key_length)
+        else:
+            reader.skip(key_length)
+        kind = reader.u32()
+        if key == _KEY_ALIGNMENT:
+            if kind != GGUF_TYPE_UINT32:
+                raise GGUFTableError("bad_alignment", f"of type {kind}")
+            alignment = reader.u32()
+            if alignment == 0 or alignment & (alignment - 1):
+                raise GGUFTableError("bad_alignment", str(alignment))
+        elif key == _KEY_ARCHITECTURE and kind == GGUF_TYPE_STRING:
+            length = reader.u64()
+            if length > _TABLE_MAX_ARCHITECTURE:
+                raise GGUFTableError("string_too_long", f"a {length}-byte architecture name")
+            architecture = reader.take(length).decode("utf-8", errors="replace")
+        else:
+            _skip_value(reader, kind)
+
+    seen: set[bytes] = set()
+    placed: list[tuple[int, int]] = []
+    blocks: dict[int, int] = {}
+    other = 0
+    output: int | None = None
+    embedding: int | None = None
+    for _ in range(tensor_count):
+        name_length = reader.u64()
+        if name_length > _TABLE_MAX_NAME:
+            raise GGUFTableError("name_too_long", f"a {name_length}-byte tensor name")
+        name = reader.take(name_length)
+        if name in seen:
+            raise GGUFTableError("duplicate_tensor", name.decode("utf-8", errors="replace"))
+        seen.add(name)
+        n_dims = reader.u32()
+        if n_dims > _TABLE_MAX_DIMS:
+            raise GGUFTableError("bad_dimensions", f"{n_dims} dimensions")
+        dims = [reader.u64() for _ in range(n_dims)]
+        elements = 1
+        for dim in dims:
+            elements *= dim
+        if any(dim > _INT64_MAX for dim in dims) or elements > _INT64_MAX:
+            raise GGUFTableError("bad_dimensions", str(dims))
+        kind = reader.u32()
+        layout = GGML_TENSOR_TYPES.get(kind)
+        if layout is None:
+            raise GGUFTableError("unknown_tensor_type", str(kind))
+        _type_name, per_block, block_bytes = layout
+        if (dims[0] if dims else 1) % per_block:
+            raise GGUFTableError("partial_block", f"{dims} in blocks of {per_block}")
+        nbytes = elements // per_block * block_bytes
+        offset = reader.u64()
+        if offset % alignment:
+            raise GGUFTableError("misaligned_offset", f"{offset} against {alignment}")
+        placed.append((offset, nbytes))
+        block = _BLOCK_NAME.match(name)
+        if block is not None:
+            index = int(block.group(1))
+            blocks[index] = blocks.get(index, 0) + nbytes
+        else:
+            other += nbytes
+            if name == b"output.weight":
+                output = nbytes
+            elif name == b"token_embd.weight":
+                embedding = nbytes
+
+    # The data begins at the next multiple of the alignment. Each tensor must
+    # lie inside the file, and together they cannot claim more bytes than the
+    # file holds after that point.
+    data_offset = -(-reader.tell() // alignment) * alignment
+    total = 0
+    for offset, nbytes in placed:
+        if data_offset + offset + nbytes > reader.size:
+            raise GGUFTableError("past_end_of_file", f"{nbytes} bytes at {offset}")
+        total += nbytes
+    if placed and total > reader.size - data_offset:
+        raise GGUFTableError("past_end_of_file", f"{total} bytes claimed")
+
+    if output is not None:
+        head, tied = output, False
+    elif embedding is not None:
+        head, tied = embedding, True
+    else:
+        head, tied = 0, False
+    return GGUFTensorTable(
+        version=version,
+        architecture=architecture,
+        alignment=alignment,
+        data_offset=data_offset,
+        tensor_count=tensor_count,
+        blocks=MappingProxyType(dict(sorted(blocks.items()))),
+        other_bytes=other,
+        output_bytes=head,
+        output_tied=tied,
+        total_bytes=total,
+    )
 
 
 # ---------------------------------------------------------------------------

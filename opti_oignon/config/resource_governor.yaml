@@ -108,6 +108,10 @@ rlimits:
   data_gb: null
 ollama_limits:
   max_loaded_models: null
+  # Also how many sequences Ollama keeps a KV cache for at once. A split
+  # placed layer by layer prices one: at 1, Ollama is told its layer count;
+  # null or more, Ollama places a split's layers itself. Name it as the
+  # server runs it.
   num_parallel: null
   max_queue: null
   spawn_applies: true
@@ -126,12 +130,15 @@ dynamic_ctx:
 
 # Partial offload. A model the GPU cannot hold, even after evicting idle
 # models, is admitted split between VRAM and system RAM when the VRAM free
-# now and the RAM above the reserve hold it together. Ollama places the
-# layers itself (no num_gpu is sent); llama.cpp in process, which puts every
-# layer on the GPU unless n_gpu_layers says otherwise, refuses such a split
-# by name instead of failing for memory at the load. A split never waits on
-# an eviction, and RAM that cannot be read means no split: the refusal
-# stands, naming what the GPU alone lacks.
+# now and the RAM above the reserve hold it together. When the model's file
+# can be read (the GGUF file llama.cpp loads, the blob Ollama's modelfile
+# names), the split is placed layer by layer: the last layers that fit the
+# VRAM free now go to the GPU, and the engine is told how many (num_gpu,
+# n_gpu_layers). Otherwise Ollama places the layers itself, and llama.cpp in
+# process, which puts every layer on the GPU unless n_gpu_layers says
+# otherwise, refuses such a split by name instead of failing for memory at
+# the load. A split never waits on an eviction, and RAM that cannot be read
+# means no split: the refusal stands, naming what the GPU alone lacks.
 #   prefer          -- context: keep the requested context and split before
 #                      stepping down the ladder; speed: step down the ladder
 #                      on the GPU alone first, and split only at the last step.
@@ -164,6 +171,22 @@ ram_reserve:
   floor_gb: 2.0
   ceiling_gb: 8.0
   pressure_factor: 2.0
+
+# The speed of a split placed layer by layer. Each token reads every layer
+# and its KV cache once, on the GPU at the GPU's bandwidth and in RAM at the
+# RAM's: a split is expected to run (GPU bytes / GPU bandwidth + RAM bytes /
+# RAM bandwidth) / (all bytes / GPU bandwidth) times slower than on the GPU
+# alone. A split slower than max_slowdown does not hold: the context ladder
+# goes on, and a final refusal names it. A bandwidth left null leaves the
+# speed unknown, and an unknown speed never refuses.
+#   gpu_bandwidth_gbs -- the memory bandwidth of the slowest card a split may
+#                        take, in GB/s, above 0.
+#   ram_bandwidth_gbs -- the system RAM's bandwidth, in GB/s, above 0.
+#   max_slowdown      -- 1.0 or more, or null for no limit.
+split_speed:
+  gpu_bandwidth_gbs: null
+  ram_bandwidth_gbs: null
+  max_slowdown: null
 
 # The kernel's pressure stall information (/proc/pressure), read with every
 # snapshot: the share of time, over the last ten seconds, that some task
