@@ -366,7 +366,25 @@ def status_payload(governor: Any) -> dict[str, Any]:
         "queue_depth": governor.queue_depth,
         "scheduling": governor.scheduling_state(),
         "ollama_limits": governor.ollama_limits_advisory(),
+        "threads": governor.threads_state(),
+        "background": background_payload(),
     }
+
+
+def background_payload() -> dict[str, Any]:
+    """The server's background pool as its module gives it
+    (``background_state``): reading it never creates the pool. A module
+    that cannot be reached or read makes this section unavailable, not the
+    status."""
+    try:
+        import importlib
+
+        state = dict(importlib.import_module("opti_oignon.background_pool").background_state())
+    except Exception as exc:
+        logger.debug("Background pool state unavailable: %s", exc)
+        return {"available": False}
+    state["available"] = True
+    return state
 
 
 def admissions_payload(governor: Any, limit: int = 20) -> dict[str, Any]:

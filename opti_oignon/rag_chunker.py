@@ -710,3 +710,27 @@ def get_rag_chunker(
             chunk_overlap=chunk_overlap,
         )
     return _default_chunker
+
+
+# One chunker per process and per settings, for chunk_file_task.
+_task_chunkers: dict[tuple[int, int], RAGChunker] = {}
+
+
+def chunk_file_task(
+    filepath: str,
+    doc_id: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> ChunkingResult:
+    """Chunk ``filepath`` as a RAGChunker at these settings does.
+
+    The task a background worker runs for an indexing job: a module-level
+    function, so a worker process imports this module alone to run it, and
+    the settings travel with each task, so the worker cuts as the store's
+    own chunker would.
+    """
+    key = (int(chunk_size), int(chunk_overlap))
+    chunker = _task_chunkers.get(key)
+    if chunker is None:
+        chunker = _task_chunkers[key] = RAGChunker(chunk_size=key[0], chunk_overlap=key[1])
+    return chunker.chunk_file(filepath, doc_id=doc_id)

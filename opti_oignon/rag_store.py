@@ -554,6 +554,17 @@ class RAGVectorStore:
                     self._embedder = None
         return self._embedder
 
+    @property
+    def embedding_model(self) -> str:
+        """The model this store embeds with."""
+        return self._embedding_model
+
+    def chunker_settings(self) -> tuple[int, int]:
+        """(chunk_size, chunk_overlap) of this store's chunker, for a chunk
+        task that runs elsewhere and must cut as the store does."""
+        chunker = self._get_chunker()
+        return chunker.chunk_size, chunker.chunk_overlap
+
     def _get_chunker(self):
         """Lazy-init the RAGChunker."""
         if self._chunker is None:
@@ -680,14 +691,36 @@ class RAGVectorStore:
         Returns:
             IngestedDocument record.
         """
-        collection = collection or self.DEFAULT_COLLECTION
         doc_id = doc_id or uuid.uuid4().hex[:12]
+        chunker = self._get_chunker()
+        result = chunker.chunk_file(filepath, doc_id=doc_id)
+        return self.store_chunked(result, collection=collection, metadata=metadata)
+
+    def store_chunked(
+        self,
+        result: Any,
+        collection: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> IngestedDocument:
+        """
+        Store a file already chunked: embed its chunks into ChromaDB and
+        record the document. The storage half of ingest_file, for a job
+        whose chunking ran elsewhere (a background worker).
+
+        Args:
+            result: The chunker's ChunkingResult for the file.
+            collection: Target collection name (default: 'default').
+            metadata: Extra metadata to attach.
+
+        Returns:
+            IngestedDocument record.
+        """
+        collection = collection or self.DEFAULT_COLLECTION
+        filepath = result.source_file
+        doc_id = result.doc_id
 
         # Ensure collection exists
         self.db.create_collection(collection)
-
-        chunker = self._get_chunker()
-        result = chunker.chunk_file(filepath, doc_id=doc_id)
 
         if not result.chunks:
             logger.warning("No chunks produced for %s", filepath)

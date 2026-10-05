@@ -79,6 +79,35 @@ fixed 4 GiB, whatever the machine and whatever its neighbours went through.
     * HW41 -- the governor's snapshot says what the profile knows: no card,
       or a capacity unknown.
 
+  The CPUs this process may run on, and how fast each core is:
+    * HW42 -- the usable CPUs are those online and in the affinity; only
+      their cores count.
+    * HW43 -- SMT siblings fold into one physical core, and SMT is said.
+    * HW44 -- L3 domains and NUMA nodes are read as the kernel groups them.
+    * HW45 -- the CPU quota is the tightest cpu.max from the process's
+      cgroup up to the root.
+    * HW46 -- cores are classed by the first rank source that parts them.
+    * HW47 -- a flat or incomplete source is not believed when a later one
+      parts the cores.
+    * HW48 -- without a source that parts them, every core is one class,
+      said uniform, each keeping its rank.
+    * HW49 -- the class gap and an explicit class list come from the file.
+    * HW50 -- a topology the kernel does not describe is unknown, never
+      guessed.
+    * HW51 -- the CPU list parser reads the kernel's form and refuses
+      anything else.
+    * HW52 -- the topology is read at the first question, kept for its TTL,
+      then read again.
+    * HW53 -- the profile file ships the topology defaults and holds their
+      ranges.
+    * HW54 -- an AMD controller is integrated when its DRM card at the same
+      address is: an APU alone is no card.
+    * HW55 -- the profile's view carries the CPU topology the plans read, as
+      plain data, and None when the kernel does not describe it.
+    * HW56 -- the machine's view, for an engine in a process of its own:
+      every online CPU whatever the server's affinity, with no quota of the
+      server's; the profile reads it apart from the server's own view.
+
 Everything here is proven in the container, on fixture trees and scripted
 answers loaded through the shared isolation window: no card, no nvidia-smi,
 no /proc of the host. What the cards of a real machine report, and what its
@@ -86,8 +115,10 @@ neighbours feel, is owed to the machine.
 """
 
 import ast
+import json
 import logging
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1246,3 +1277,441 @@ def test_hw41_the_governors_snapshot_says_what_the_profile_knows_of_the_cards():
     hidden = _on_bus(hp, tmp / "b", _pci(tmp / "b" / "pci", [_BRIDGE, _HIDDEN]))
     seen = [_governor(rg, tmp / name, profile=p).refresh(force=True) for name, p in (("a", bare), ("b", hidden))]
     assert [(s.capacity_gb, s.cards_absent) for s in seen] == [(None, True), (None, False)]
+
+
+# ---------------------------------------------------------------------------
+# HW42-HW54 -- the CPUs this process may run on, and how fast each core is
+# ---------------------------------------------------------------------------
+
+
+def _cpu_list(cpus):
+    """CPU numbers in the kernel's list form: 0-3,12-15."""
+    cpus = sorted(set(cpus))
+    runs, start = [], None
+    for i, cpu in enumerate(cpus):
+        if start is None:
+            start = cpu
+        if i + 1 == len(cpus) or cpus[i + 1] != cpu + 1:
+            runs.append(f"{start}-{cpu}" if cpu != start else f"{start}")
+            start = None
+    return ",".join(runs)
+
+
+def _cpu_tree(root, cores, *, online=None, ranks=None, l3=None, l3_index=3, siblings_file="core_cpus_list"):
+    """A /sys/devices/system/cpu of our own.
+
+    ``cores`` lists the physical cores, each a tuple of the CPUs that share
+    it (its SMT siblings); ``ranks`` maps a rank file, relative to a CPU's
+    directory, to the value of each CPU (a CPU left out has no such file);
+    ``l3`` lists the L3 domains, written under ``cache/index<l3_index>``
+    with their level, beside an L1 entry at index0.
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    every = sorted(cpu for core in cores for cpu in core)
+    (root / "online").write_text(_cpu_list(every if online is None else online) + "\n", encoding="utf-8")
+    for core in cores:
+        for cpu in core:
+            base = root / f"cpu{cpu}"
+            (base / "topology").mkdir(parents=True)
+            if siblings_file:
+                (base / "topology" / siblings_file).write_text(_cpu_list(core) + "\n", encoding="utf-8")
+            l1 = base / "cache" / "index0"
+            l1.mkdir(parents=True)
+            (l1 / "level").write_text("1\n", encoding="utf-8")
+            (l1 / "shared_cpu_list").write_text(_cpu_list(core) + "\n", encoding="utf-8")
+    for domain in l3 or ():
+        for cpu in domain:
+            entry = root / f"cpu{cpu}" / "cache" / f"index{l3_index}"
+            entry.mkdir(parents=True, exist_ok=True)
+            (entry / "level").write_text("3\n", encoding="utf-8")
+            (entry / "shared_cpu_list").write_text(_cpu_list(domain) + "\n", encoding="utf-8")
+    for relative, values in (ranks or {}).items():
+        for cpu, value in values.items():
+            path = root / f"cpu{cpu}" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{value}\n", encoding="utf-8")
+    return str(root)
+
+
+# This machine's shape, read on it on 5 October: four fast cores (CPPC ranks
+# 202, 196, 208, 208) and eight compact ones (125), each with an SMT sibling
+# twelve CPUs up; the scheduler's capacity is flat, the highest frequencies
+# part the two kinds, and each kind shares its own L3.
+_CORES = tuple((n, n + 12) for n in range(12))
+_CPPC = "acpi_cppc/highest_perf"
+_PREFCORE = "cpufreq/amd_pstate_prefcore_ranking"
+_CAPACITY = "cpu_capacity"
+_MAX_FREQ = "cpufreq/cpuinfo_max_freq"
+
+
+def _per_cpu(per_core):
+    """One value per core of _CORES, written for both of its CPUs."""
+    return {cpu: per_core[n] for n, core in enumerate(_CORES) for cpu in core}
+
+
+_HYBRID_RANKS = [202, 196, 208, 208] + [125] * 8
+_HYBRID = {
+    _CPPC: _per_cpu(_HYBRID_RANKS),
+    _PREFCORE: _per_cpu(_HYBRID_RANKS),
+    _CAPACITY: _per_cpu([1024] * 12),
+    _MAX_FREQ: _per_cpu([5157895] * 4 + [3289474] * 8),
+}
+_L3 = ((0, 1, 2, 3, 12, 13, 14, 15), tuple(range(4, 12)) + tuple(range(16, 24)))
+
+
+def _read_cpus(hp, tmp, cores=_CORES, *, affinity=None, nodes=None, gap=0.15, classes=(), **tree):
+    """The topology of a CPU tree of our own; no node tree and no cgroup unless given."""
+    root = _cpu_tree(Path(tmp) / "cpu", cores, **tree)
+    every = {cpu for core in cores for cpu in core}
+    return hp.read_cpu_topology(
+        root,
+        nodes if nodes is not None else Path(tmp) / "no-node",
+        affinity=every if affinity is None else affinity,
+        cgroup_root=Path(tmp) / "no-cg",
+        self_cgroup=Path(tmp) / "no-self",
+        class_gap=gap,
+        classes=classes,
+    )
+
+
+def _cpu_profile(hp, tmp, cpu_root, *, clock=None, config=None, affinity=None):
+    """A profile whose CPUs are the tree at ``cpu_root``, with no card and no cgroup."""
+    return hp.HardwareProfile(
+        config=config if config is not None else hp.ProfileConfig(),
+        drm_root=_drm(Path(tmp) / "drm", []),
+        pressure_root=str(Path(tmp) / "no-pressure"),
+        nvidia_query=_Query(None),
+        environ={},
+        clock=clock if clock is not None else _Clock(),
+        spawn=_Spawn(),
+        cgroup_root=str(Path(tmp) / "no-cg"),
+        self_cgroup=str(Path(tmp) / "no-self"),
+        cpu_root=cpu_root,
+        node_root=str(Path(tmp) / "no-node"),
+        affinity=affinity if affinity is not None else (lambda: set(range(24))),
+    )
+
+
+def test_hw42_the_usable_cpus_are_those_online_and_in_the_affinity_and_only_their_cores_count():
+    """HW42 -- a CPU the kernel lists offline, or one outside the process's
+    affinity, is not usable; a core none of whose CPUs is usable is not
+    counted, and a core with one sibling left is one core. Counting every
+    CPU directory -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    cores = ((0, 4), (1, 5), (2, 6), (3, 7))
+    # CPU 3 and its sibling 7 are offline; CPU 2 is outside the affinity, its sibling 6 is not.
+    topology = _read_cpus(hp, tmp, cores, online=[0, 1, 2, 4, 5, 6], affinity={0, 1, 3, 4, 5, 6, 7})
+    assert topology.usable == (0, 1, 4, 5, 6)
+    assert [core.cpus for core in topology.cores] == [(0, 4), (1, 5), (6,)]
+    assert topology.physical == 3
+
+
+def test_hw43_smt_siblings_fold_into_one_physical_core_and_smt_is_said():
+    """HW43 -- the CPUs that share a core (core_cpus_list, or
+    thread_siblings_list on older kernels) are one physical core: twelve
+    cores of two siblings are twelve, not twenty-four, and the topology says
+    it has SMT; one CPU per core says it has none. Counting the siblings as
+    cores -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    smt = _read_cpus(hp, tmp / "a")
+    older = _read_cpus(hp, tmp / "b", siblings_file="thread_siblings_list")
+    single = _read_cpus(hp, tmp / "c", tuple((n,) for n in range(8)))
+    assert (smt.physical, smt.smt, len(smt.usable)) == (12, True, 24)
+    assert (older.physical, older.smt) == (12, True)
+    assert (single.physical, single.smt) == (8, False)
+
+
+def test_hw44_l3_domains_and_numa_nodes_are_read_as_the_kernel_groups_them():
+    """HW44 -- the L3 domains come from the cache entry whose level is 3,
+    whatever its index, and the NUMA nodes from each node's cpulist, both
+    kept to the usable CPUs; a tree without them names none. Reading index3
+    as the L3 -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    nodes = tmp / "node"
+    for n, cpus in enumerate(_L3):
+        (nodes / f"node{n}").mkdir(parents=True)
+        (nodes / f"node{n}" / "cpulist").write_text(_cpu_list(cpus) + "\n", encoding="utf-8")
+    # CPU 23 is outside the affinity: neither its L3 domain nor its node keeps it.
+    topology = _read_cpus(hp, tmp / "a", l3=_L3, l3_index=2, nodes=nodes, affinity=set(range(23)))
+    kept = (_L3[0], tuple(range(4, 12)) + tuple(range(16, 23)))
+    assert topology.l3 == kept
+    assert topology.numa == kept
+    bare = _read_cpus(hp, tmp / "b")
+    assert (bare.l3, bare.numa) == ((), ())
+
+
+def test_hw45_the_cpu_quota_is_the_tightest_cpu_max_from_the_process_cgroup_to_the_root():
+    """HW45 -- cpu.max is read at every level from the process's cgroup up
+    to the root: "max" is no limit, a quota over its period is that many
+    CPUs, and the tightest level wins, since a parent's limit binds every
+    cgroup under it; nothing read is no quota known. Reading the process's
+    own level only -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    own = f"{_USER_ROOT}/app.slice/oo.service"
+    leaf = _cgroup(tmp / "cg", own)
+    user = tmp / "cg" / "user.slice" / "user-1000.slice"
+    (tmp / "cg" / "user.slice" / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+    (user / "cpu.max").write_text("400000 100000\n", encoding="utf-8")
+    (leaf / "cpu.max").write_text("600000 100000\n", encoding="utf-8")
+    self_cgroup = _self_cgroup(tmp, own)
+    assert hp.read_cpu_quota(tmp / "cg", self_cgroup) == 4.0
+    (user / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+    assert hp.read_cpu_quota(tmp / "cg", self_cgroup) == 6.0
+    (leaf / "cpu.max").write_text("150000 100000\n", encoding="utf-8")
+    assert hp.read_cpu_quota(tmp / "cg", self_cgroup) == 1.5
+    (leaf / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+    assert hp.read_cpu_quota(tmp / "cg", self_cgroup) is None
+    assert hp.read_cpu_quota(tmp / "no-cg", tmp / "no-self") is None
+
+
+def test_hw46_cores_are_classed_by_the_first_rank_source_that_parts_them():
+    """HW46 -- ACPI CPPC's highest performance is believed first: on this
+    machine's shape (202, 196, 208, 208, then eight at 125) the ranks group
+    by their drops into two classes, the four fast cores first, each core
+    keeping its own rank. Believing the frequency first, or parting at every
+    distinct rank -> RED."""
+    hp = _hp()
+    topology = _read_cpus(hp, _tmp(), ranks=_HYBRID)
+    assert topology.class_source == "acpi_cppc"
+    assert [core.perf_class for core in topology.cores] == [0] * 4 + [1] * 8
+    assert [core.rank for core in topology.cores] == [202.0, 196.0, 208.0, 208.0] + [125.0] * 8
+
+
+def test_hw47_a_flat_or_incomplete_source_is_not_believed_when_a_later_one_parts_the_cores():
+    """HW47 -- a source that ranks every core alike, or that one usable CPU
+    lacks, is passed over for the next: CPPC flat or incomplete and the
+    preferred-core ranking parting (prefcore disabled, its ranks readable)
+    classes by the ranking; both flat, the scheduler's capacity (a
+    big.LITTLE machine); all three flat, the highest frequency. Believing
+    the first readable source -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    flat = {cpu: 166 for cpu in range(24)}
+    partial = {cpu: rank for cpu, rank in _HYBRID[_CPPC].items() if cpu != 23}
+    seen = [
+        _read_cpus(hp, tmp / "a", ranks={_CPPC: flat, _PREFCORE: _HYBRID[_PREFCORE]}),
+        _read_cpus(hp, tmp / "b", ranks={_CPPC: partial, _PREFCORE: _HYBRID[_PREFCORE]}),
+        _read_cpus(hp, tmp / "c", ranks={_CPPC: flat, _PREFCORE: flat, _CAPACITY: _per_cpu([1024] * 4 + [446] * 8)}),
+        _read_cpus(hp, tmp / "d", ranks={_CPPC: flat, _PREFCORE: flat, _CAPACITY: _HYBRID[_CAPACITY], _MAX_FREQ: _HYBRID[_MAX_FREQ]}),
+    ]
+    assert [t.class_source for t in seen] == ["prefcore", "prefcore", "cpu_capacity", "max_freq"]
+    for topology in seen:
+        assert [core.perf_class for core in topology.cores] == [0] * 4 + [1] * 8
+
+
+def test_hw48_without_a_source_that_parts_the_cores_every_core_is_one_class_said_uniform():
+    """HW48 -- every source flat or absent: one class, said uniform; each
+    core keeps the rank of the first complete source, so the reserve still
+    takes the preferred cores first, and none is invented where no source
+    reads. Inventing a second class -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    flat = _read_cpus(hp, tmp / "a", ranks={_CAPACITY: _per_cpu([1024] * 12)})
+    bare = _read_cpus(hp, tmp / "b")
+    # 236 down to 214 in steps well under the gap: one class, ranks kept.
+    steps = _read_cpus(hp, tmp / "c", ranks={_PREFCORE: _per_cpu([236 - 2 * n for n in range(12)])})
+    assert (flat.class_source, {c.perf_class for c in flat.cores}, {c.rank for c in flat.cores}) == ("uniform", {0}, {1024.0})
+    assert (bare.class_source, {c.perf_class for c in bare.cores}, {c.rank for c in bare.cores}) == ("uniform", {0}, {None})
+    assert (steps.class_source, {c.perf_class for c in steps.cores}) == ("uniform", {0})
+    assert [c.rank for c in steps.cores] == [236.0 - 2 * n for n in range(12)]
+
+
+def test_hw49_the_class_gap_and_an_explicit_class_list_come_from_the_profile_file():
+    """HW49 -- the drop that starts a new class is the file's cpu_class_gap:
+    at 0.01 every distinct rank is a class of its own; a cpu_classes list,
+    fastest first, wins over every source and is said override, a core it
+    does not name falling in the class after its last. Ignoring the file's
+    gap or list -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    root = _cpu_tree(tmp / "cpu", _CORES, ranks=_HYBRID)
+
+    def classes(body, name):
+        path = tmp / f"{name}.yaml"
+        path.write_text(body, encoding="utf-8")
+        topology = _cpu_profile(hp, tmp / name, root, config=hp.load_config(path)).cpu_topology()
+        return topology.class_source, [core.perf_class for core in topology.cores]
+
+    assert classes("cpu_class_gap: 0.01\n", "tight") == ("acpi_cppc", [1, 2, 0, 0] + [3] * 8)
+    assert classes("cpu_classes: [[4, 5, 16, 17], [0, 1, 2, 3, 12, 13, 14, 15]]\n", "named") == (
+        "override", [1, 1, 1, 1, 0, 0] + [2] * 6,
+    )
+
+
+def test_hw50_a_topology_the_kernel_does_not_describe_is_unknown_never_guessed():
+    """HW50 -- no online list, a usable CPU with no sibling list, or an
+    affinity that cannot be read: the topology is None, so nothing counts a
+    sibling as a core. Taking each CPU for a core when its siblings are
+    unread -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    root = _cpu_tree(tmp / "a" / "cpu", _CORES)
+    (Path(root) / "online").unlink()
+    no_online = hp.read_cpu_topology(
+        root, tmp / "no-node", affinity=set(range(24)), cgroup_root=tmp / "no-cg", self_cgroup=tmp / "no-self"
+    )
+    no_siblings = _read_cpus(hp, tmp / "b", siblings_file=None)
+
+    def unreadable():
+        raise OSError("affinity unreadable")
+
+    blind = _cpu_profile(hp, tmp / "c", _cpu_tree(tmp / "c" / "cpu", _CORES), affinity=unreadable).cpu_topology()
+    assert (no_online, no_siblings, blind) == (None, None, None)
+
+
+def test_hw51_the_cpu_list_parser_reads_the_kernel_form_and_refuses_anything_else():
+    """HW51 -- "0-3,12-15", "7", " 0,2" and the empty list parse; a reversed
+    range, a word, a sign, a dangling range, an empty item, a digit outside
+    ASCII, or a range past any kernel's CPU numbering is refused (None),
+    never a guess. Accepting every digit str.isdigit accepts -> RED."""
+    hp = _hp()
+    parse = hp.parse_cpu_list
+    assert parse("0-3,12-15\n") == (0, 1, 2, 3, 12, 13, 14, 15)
+    assert parse("7") == (7,)
+    assert parse(" 0,2\n") == (0, 2)
+    assert parse("") == ()
+    refused = ["3-1", "a", "-1", "1-", "0-3,,4", chr(0xB2), "0-99999999"]
+    assert [parse(text) for text in refused] == [None] * len(refused)
+
+
+def test_hw52_the_topology_is_read_at_the_first_question_kept_for_its_ttl_then_read_again():
+    """HW52 -- building the profile reads no CPU file; the first question
+    reads the tree, the next ones within topology_ttl_s get that answer, and
+    one asked after it reads again, so a quota or an affinity changed at
+    run time is seen. Reading once for ever -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    clock = _Clock()
+    root = tmp / "cpu"
+    profile = _cpu_profile(hp, tmp, str(root), clock=clock)
+    # Built before the tree exists: building the profile read nothing.
+    _cpu_tree(root, _CORES)
+    assert profile.cpu_topology().physical == 12
+    (root / "online").write_text("0-3,12-15\n", encoding="utf-8")
+    clock.t += 59.0
+    assert profile.cpu_topology().physical == 12
+    clock.t += 2.0
+    assert profile.cpu_topology().physical == 4
+
+
+def test_hw53_the_profile_file_ships_the_topology_defaults_and_holds_their_ranges(caplog):
+    """HW53 -- the shipped file's class gap, class list and topology TTL are
+    the defaults (0.15, none, 60 s) and read back as written; a gap outside
+    (0, 1), a class list that is not lists of CPU numbers, or a negative TTL
+    is warned by name and the default kept. Accepting a gap of 1, which
+    classes every core alike -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    shipped = hp.load_config(Path(source("config", "hardware_profile.yaml")))
+    assert (shipped.cpu_class_gap, shipped.cpu_classes, shipped.topology_ttl_s) == (0.15, [], 60.0)
+    path = tmp / "hardware_profile.yaml"
+    path.write_text("cpu_class_gap: 0.3\ncpu_classes: [[0, 1], [2]]\ntopology_ttl_s: 5\n", encoding="utf-8")
+    read = hp.load_config(path)
+    assert (read.cpu_class_gap, read.cpu_classes, read.topology_ttl_s) == (0.3, [[0, 1], [2]], 5.0)
+    for body, key in (
+        ("cpu_class_gap: 1.0\n", "cpu_class_gap"),
+        ("cpu_class_gap: 0\n", "cpu_class_gap"),
+        ("cpu_classes: [[0, -1]]\n", "cpu_classes"),
+        ("cpu_classes: [0, 1]\n", "cpu_classes"),
+        ("cpu_classes: [[true]]\n", "cpu_classes"),
+        ("topology_ttl_s: -1\n", "topology_ttl_s"),
+    ):
+        path.write_text(body, encoding="utf-8")
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger=_HP):
+            assert hp.load_config(path) == hp.ProfileConfig(), body
+        assert key in " ".join(r.getMessage() for r in caplog.records), body
+
+
+_AMD_SLOT = "0000:66:00.0"
+_AMD_APU = (_AMD_SLOT, "0x030000", "0x1002")
+
+
+def test_hw54_an_amd_controller_is_integrated_when_its_drm_card_at_the_same_address_is():
+    """HW54 -- a machine whose only display controller is an AMD APU, its
+    DRM card integrated by its carve-out, has no card: the background then
+    loads under the RAM's control. An AMD controller whose DRM card is
+    discrete, of unknown memory, not listed, or integrated at another
+    address is a card all the same, and so is an NVIDIA controller beside
+    the APU. Taking every AMD controller for integrated, or none -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    carve_out = {"n": 1, "vendor": "0x1002", "slot": _AMD_SLOT, "total": 512 * _MIB, "used": 0}
+    machines = {
+        "apu": ([_BRIDGE, _AMD_APU], [carve_out]),
+        "discrete": ([_BRIDGE, _AMD_APU], [{**carve_out, "total": 16 * _GIB}]),
+        "unknown": ([_BRIDGE, _AMD_APU], [{"n": 1, "vendor": "0x1002", "slot": _AMD_SLOT}]),
+        "unlisted": ([_BRIDGE, _AMD_APU], []),
+        "elsewhere": ([_BRIDGE, _AMD_APU], [{**carve_out, "slot": "0000:67:00.0"}]),
+        "beside": ([_BRIDGE, _AMD_APU, _HIDDEN], [carve_out]),
+    }
+    absent = {
+        name: _on_bus(hp, tmp / name, _pci(tmp / name / "pci", bus), cards=cards).cards_absent()
+        for name, (bus, cards) in machines.items()
+    }
+    assert absent == {
+        "apu": True, "discrete": False, "unknown": False, "unlisted": False, "elsewhere": False, "beside": False,
+    }
+
+
+def test_hw55_the_profile_view_carries_the_cpus_as_the_topology_reads_them_and_none_unread():
+    """HW55 -- the profile's view, the one the status surface shows, carries
+    the CPU topology the plans read: the usable CPUs, each physical core
+    with its CPUs, rank and class, the L3 domains, the NUMA nodes, the quota
+    and where the classes come from, as plain data the status sends as
+    JSON; a topology the kernel does not describe is None, and the rest of
+    the view stands. A view that folds the SMT siblings away -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    _CLOSERS.append(lambda: shutil.rmtree(tmp, ignore_errors=True))
+    profile = _cpu_profile(hp, tmp, _cpu_tree(tmp / "cpu", _CORES, ranks=_HYBRID, l3=_L3))
+    topology = profile.cpu_topology()
+    view = profile.to_dict()
+    cpu = view["cpu"]
+    assert json.loads(json.dumps(view)) == view
+    assert cpu["usable"] == list(range(24))
+    assert (cpu["physical"], cpu["smt"]) == (12, True)
+    assert [core["cpus"] for core in cpu["cores"]] == [[n, n + 12] for n in range(12)]
+    assert [core["class"] for core in cpu["cores"]] == [0] * 4 + [1] * 8
+    assert [core["rank"] for core in cpu["cores"]] == _HYBRID_RANKS
+    assert sorted(map(tuple, cpu["l3"])) == sorted(_L3)
+    assert (cpu["numa"], cpu["quota_cpus"]) == ([], None)
+    assert cpu["class_source"] == topology.class_source and cpu["class_source"] != "uniform"
+    assert view["devices"] == []
+    unread = _cpu_profile(hp, tmp / "unread", str(tmp / "unread" / "no-cpu")).to_dict()
+    assert unread["cpu"] is None
+    assert unread["devices"] == []
+
+
+def test_hw56_the_machines_view_is_every_online_cpu_whatever_the_affinity_and_no_quota_of_the_servers():
+    """HW56 -- the machine's view, for an engine that computes in a process
+    of its own: every online CPU, whatever the server's affinity, folded
+    into its cores and classed as the server's own view is, with no quota,
+    since the server's cgroup does not bind another process; an offline CPU
+    is still left out. The profile reads it apart from the server's own
+    view, which keeps the affinity and the quota. Reading the machine
+    through the server's affinity, or charging it the server's quota
+    -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    own = f"{_USER_ROOT}/app.slice/oo.service"
+    leaf = _cgroup(tmp / "cg", own)
+    (leaf / "cpu.max").write_text("200000 100000\n", encoding="utf-8")
+    self_cgroup = _self_cgroup(tmp, own)
+    root = _cpu_tree(tmp / "cpu", _CORES, online=[n for n in range(24) if n not in (11, 23)])
+    held = {0, 1, 12, 13}
+    seen = {
+        machine: hp.read_cpu_topology(
+            root, tmp / "no-node", affinity=held, cgroup_root=tmp / "cg", self_cgroup=self_cgroup, machine=machine
+        )
+        for machine in (False, True)
+    }
+    assert (seen[False].physical, seen[False].quota_cpus) == (2, 2.0)
+    assert (seen[True].physical, len(seen[True].usable), seen[True].quota_cpus) == (11, 22, None)
+    profile = _cpu_profile(hp, tmp, root, affinity=lambda: held)
+    assert (profile.cpu_topology().physical, profile.machine_cpu_topology().physical) == (2, 11)

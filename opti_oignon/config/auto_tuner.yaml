@@ -14,9 +14,24 @@ auto_tuner:
 
 # Parameter search space.
 # Each parameter lists candidate values to try.
+#   threads           -- auto: the counts the resource governor's thread plan
+#                        gives this machine at each run -- the plan itself
+#                        (the machine's physical cores less the reserve:
+#                        the engine runs in a process of its own, which the
+#                        server's quota does not bind), each fraction below
+#                        of it rounded up, and the
+#                        fastest class's core count -- never past the plan;
+#                        the baseline runs at the plan's count. A list of
+#                        whole numbers is swept as written.
+#   threads_fractions -- with auto: fractions of the plan's count, each above
+#                        0 and under 1.
+# A count the sweep confirms (measured, applied per call by the engine, on
+# one placement, no slower than the baseline) is kept by the governor for
+# that model, engine and placement, and planned from then on.
 parameter_space:
   batch_size: [512, 1024, 2048, 4096]
   ubatch_size: [256, 512, 1024]
-  threads: [2, 4, 6, 8]        # 'auto' resolved at runtime to os.cpu_count()
+  threads: auto
+  threads_fractions: [0.5, 0.75]
   flash_attention: [true, false]
   # gpu_layers is auto-detected from model size, not searched.

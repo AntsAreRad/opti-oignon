@@ -710,6 +710,16 @@ fail_under = 0
 # gc55, gc59, gc60, gc56, gc52 and gc57, in the same file, keep their
 # properties on frames of their own.
 #
+# The thread count an engine is told is now planned on the machine's cores:
+# Ollama computes in a process of its own, which neither the server's
+# affinity nor its cgroup quota binds, and the server's own cap bounds only
+# what computes in its process (llama.cpp, the background pool). Four
+# contracts held the plan to the server's quota: gt4 (the quota capping the
+# count), gt26 (a plan fallen under a kept count by the quota), gt29 (the
+# status's plan within the quota) and at4 (the sweep within the quota). They
+# stay in the tree word for word; gt35 and gt36, gt37, gt38 and at12, in the
+# same files, keep their properties under the new meaning.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -832,4 +842,8 @@ addopts = """
     --deselect=tests/test_governor_classes_contracts.py::test_gc14_holding_and_releasing_a_ticket_count_the_calls_in_flight_per_thread_and_class
     --deselect=tests/test_governor_classes_contracts.py::test_gc25_no_caller_passes_a_waiter_of_a_higher_class
     --deselect=tests/test_governor_classes_contracts.py::test_gc29_a_waiter_is_admitted_when_memory_frees_and_its_slot_is_given_back
+    --deselect=tests/test_governor_threads_contracts.py::test_gt4_never_an_smt_sibling_never_past_the_quota_never_under_one_thread
+    --deselect=tests/test_governor_threads_contracts.py::test_gt26_a_count_measured_for_this_model_engine_and_placement_is_planned_said_measured
+    --deselect=tests/test_governor_threads_contracts.py::test_gt29_the_status_shows_the_plan_the_reserve_and_the_background_budget_as_the_governor_plans_them
+    --deselect=tests/test_auto_tuner_threads_contracts.py::test_at4_auto_sweeps_the_plan_its_fractions_and_the_fast_class_never_past_the_plan
 """

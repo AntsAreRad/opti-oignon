@@ -163,6 +163,9 @@ class IngestJobResponse(BaseModel):
     completed_at: float | None = None
     error_message: str | None = None
     files: list[IngestFileStatusResponse] = []
+    # The disks the background read the job's files from, and what each
+    # does with the idle I/O class (the detail route fills it).
+    disks: list[dict[str, Any]] = []
 
 
 class IngestJobsListResponse(BaseModel):
@@ -600,12 +603,15 @@ def list_ingest_jobs(
 
 @router.get("/ingest/jobs/{job_id}", response_model=IngestJobResponse)
 def get_ingest_job(job_id: str) -> dict:
-    """Get detailed status of a single ingestion job, including per-file progress."""
+    """Get detailed status of a single ingestion job, including per-file
+    progress and the disks the background read its files from."""
     engine = _get_batch_engine()
     job = engine.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
-    return _job_to_response(job)
+    response = _job_to_response(job)
+    response.disks = engine.job_disks(job_id)
+    return response
 
 
 @router.delete("/ingest/jobs/{job_id}", response_model=IngestJobDeleteResponse)

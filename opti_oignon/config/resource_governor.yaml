@@ -257,3 +257,73 @@ host_pressure:
   enabled: true
   memory_enter_some_avg10: 10.0
   memory_exit_some_avg10: 5.0
+
+# The CPU threads an engine computes with, when it computes on the CPU: a
+# model split between the GPU and system RAM, or any model on a machine
+# with no card. The count is the machine's physical cores (online, never an
+# SMT sibling) less a reserve left to the user's programs, never under one;
+# the prompt gets the same count. Ollama, in a process of its own, is told
+# it as num_thread: neither the server's affinity nor its cgroup quota binds
+# that process. llama.cpp, in the server's own process, takes it as
+# n_threads and n_threads_batch (unless backends.yaml names its own) within
+# the server's own cores less the reserve and its cpu.max quota. A resident
+# model keeps the count its load was told: Ollama reloads a model for any
+# other. A load the GPU holds whole is told nothing.
+#   enabled          -- false: no count is told, every engine picks its own.
+#   reserve_fraction -- 0.0 to below 1.0 of the physical cores, rounded up.
+#   reserve_floor    -- the fewest cores reserved, a whole number.
+#   reserve_ceiling  -- the most cores reserved, at least reserve_floor.
+#                       The reserve never takes the last core.
+#   fast_cores_only  -- count no more cores than the fastest class (on a
+#                       machine of fast and compact cores). Off until a
+#                       machine has measured it faster.
+#   models           -- a model's own count, e.g. {"qwen3:8b": 6}.
+#   status_limit     -- how many of the counts a tuner measured and kept the
+#                       status lists, newest first; a whole number of at
+#                       least one.
+#   background       -- the background's own budget: the chunking of an
+#                       indexing job runs in worker processes, each of
+#                       which enters SCHED_IDLE, the idle I/O class and the
+#                       CPUs of the cores outside the reserve before any
+#                       task (the reserve being the highest-ranked cores).
+#                       The server's own threads are never lowered.
+#     enabled              -- false: background work runs on the thread
+#                             that asks for it, at that thread's priority.
+#     max_workers          -- the most workers, a whole number of at least
+#                             one; one per core outside the reserve, and
+#                             never more than the quota less the reserve.
+#     in_flight_per_worker -- tasks queued per worker, at least one.
+#     idle_shutdown_s      -- seconds without a task before the workers
+#                             exit; they start again with the next task.
+#     held_retry_s         -- seconds an indexing job waits before asking
+#                             again after a refusal a wait can lift.
+#     parse_expansion      -- how many times its size a file's parse takes
+#                             in memory, by extension, "default" for any
+#                             other; each at least 1. An indexing job sends
+#                             a file only while the estimates of the files
+#                             in flight fit the room the governor gives the
+#                             background (the RAM available less the
+#                             reserve); a file larger than the room goes
+#                             alone. Laid over these values: name only the
+#                             kinds to change. Estimates, not measurements.
+threads:
+  enabled: true
+  reserve_fraction: 0.125
+  reserve_floor: 1
+  reserve_ceiling: 4
+  fast_cores_only: false
+  models: {}
+  status_limit: 50
+  background:
+    enabled: true
+    max_workers: 4
+    in_flight_per_worker: 2
+    idle_shutdown_s: 120
+    held_retry_s: 30
+    parse_expansion:
+      default: 4
+      .pdf: 10
+      .docx: 30
+      .doc: 30
+      .xlsx: 50
+      .xls: 50

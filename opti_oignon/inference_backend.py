@@ -127,6 +127,25 @@ def _governor_admission(
         return None
 
 
+def _governor_note_threads(model: str, options: dict | None) -> None:
+    """Tell the governor the CPU thread count an Ollama call sends of its
+    own (a tuner's trial): Ollama reloads a resident model for any count
+    other than the one it holds, so that count is the one pinned from then
+    on (``resource_governor.note_own_threads``). Asked only by the heads of
+    an engine that applies a count per call. Fail-open: no governor, or any
+    error, leaves the pin as it was."""
+    if not isinstance(options, dict) or "num_thread" not in options:
+        return
+    rg = _resolve_resource_governor()
+    note = getattr(rg, "note_own_threads", None) if rg is not None else None
+    if not callable(note):
+        return
+    try:
+        note(model, options)
+    except Exception as exc:
+        logger.debug("Governor thread note failed open: %s", exc)
+
+
 def _admitted_layers(decision: Any) -> int | None:
     """The layer count an admission put on the GPU, or None."""
     layers = getattr(decision, "num_gpu", None)
@@ -165,6 +184,52 @@ def _with_layers(options: dict | None, decision: Any) -> dict | None:
     if layers is None:
         return options
     return {**(options or {}), "num_gpu": layers}
+
+
+def _with_threads(options: dict | None, decision: Any) -> dict | None:
+    """``options`` with the CPU thread count the admission lets Ollama be
+    told, as its num_thread (``AdmissionDecision.ollama_threads``: the count
+    planned for a load that computes on the CPU, or pinned to the resident,
+    unless the caller names its own). Ollama reloads a resident model for
+    any num_thread other than the one it was loaded with, so every head that
+    talks to it tells the same. Otherwise Ollama picks its own. The caller's
+    dict is never changed.
+    """
+    tell = getattr(decision, "ollama_threads", None)
+    threads = tell(options) if callable(tell) else None
+    if threads is None:
+        return options
+    return {**(options or {}), "num_thread": threads}
+
+
+def _admitted_threads(decision: Any) -> tuple[int | None, int | None]:
+    """The (threads, threads_batch) an admission planned for a load, or Nones."""
+    counts = []
+    for name in ("threads", "threads_batch"):
+        value = getattr(decision, name, None)
+        counts.append(value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None)
+    return counts[0], counts[1]
+
+
+def _in_process_threads(counts: tuple[int | None, int | None]) -> tuple[int | None, int | None]:
+    """An admission's counts for an engine that computes in the server's own
+    process (llama.cpp): the plan is made on the machine's cores for an
+    engine in a process of its own, so here the server's own affinity and
+    cgroup quota bound it (``resource_governor.server_threads``). Fail-open:
+    no governor, or any error, leaves the counts as admitted."""
+    rg = _resolve_resource_governor()
+    read = getattr(rg, "server_threads", None) if rg is not None else None
+    if not callable(read):
+        return counts
+    try:
+        cap = read()
+    except Exception as exc:
+        logger.debug("Governor server threads failed open: %s", exc)
+        return counts
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+        return counts
+    tokens, prompt = counts
+    return (None if tokens is None else min(tokens, cap), None if prompt is None else min(prompt, cap))
 
 
 # The light sink. Passive by construction: nothing in this module resolves,
@@ -719,6 +784,12 @@ class InferenceBackend(ABC):
     can switch engines transparently.
     """
 
+    # Whether a CPU thread count a call sends (num_thread) is applied to that
+    # call. False where the count is fixed when the model loads (llama.cpp in
+    # process, llama-server): a sweep of counts through such an engine
+    # measures one count, and the tuner keeps none of it.
+    threads_per_call: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -866,6 +937,10 @@ class OllamaBackend(InferenceBackend):
     This is a transparent wrapper: all current Ollama functionality
     keeps working exactly as before.
     """
+
+    # Ollama applies the num_thread of each call, reloading a resident model
+    # for any count other than the one it holds.
+    threads_per_call = True
 
     def __init__(self, host: str | None = None, connect_timeout: float | None = None):
         # The host every request goes to, from ``backends.yaml`` through
@@ -1053,12 +1128,15 @@ class OllamaBackend(InferenceBackend):
 
         ``None`` without the client or when the client answers no vector; a
         client failure propagates. Admission is asked first: an embedding
-        loads a model like any other request.
+        loads a model like any other request, and is told the CPU threads
+        the admission carries (``_with_threads``); without them it sends no
+        options.
         """
         if not OLLAMA_AVAILABLE:
             return None
-        _governor_admission(model, None)
-        result = self._embed_client(timeout).embed(model=model, input=text)
+        told = _with_threads(None, _governor_admission(model, None))
+        extra = {"options": told} if told else {}
+        result = self._embed_client(timeout).embed(model=model, input=text, **extra)
         vectors = _field(result, "embeddings") or []
         if not vectors:
             return None
@@ -1067,14 +1145,16 @@ class OllamaBackend(InferenceBackend):
     def embed_many(
         self, model: str, texts: list[str], timeout: float | None = None,
     ) -> list[list[float]] | None:
-        """The whole batch through one ``embed`` of the client, after one admission."""
+        """The whole batch through one ``embed`` of the client, after one
+        admission, told its CPU threads as ``embed`` is."""
         if not OLLAMA_AVAILABLE:
             return None
         texts = list(texts)
         if not texts:
             return []
-        _governor_admission(model, None)
-        result = self._embed_client(timeout).embed(model=model, input=texts)
+        told = _with_threads(None, _governor_admission(model, None))
+        extra = {"options": told} if told else {}
+        result = self._embed_client(timeout).embed(model=model, input=texts, **extra)
         vectors = _field(result, "embeddings") or []
         if len(vectors) != len(texts):
             raise ValueError(
@@ -1204,6 +1284,7 @@ class OllamaBackend(InferenceBackend):
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
         decision = _governor_admission(model, options)
+        _governor_note_threads(model, options)
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1215,7 +1296,7 @@ class OllamaBackend(InferenceBackend):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": _with_layers(engine_options, decision),
+            "options": _with_threads(_with_layers(engine_options, decision), decision),
             "keep_alive": keep_alive,
         }
         flag = self._think_flag(model, think)
@@ -1278,6 +1359,7 @@ class OllamaBackend(InferenceBackend):
         # iteration; the funnel's ticket is thread-local, so funnels set it
         # on the consuming thread (see resource_governor.ticket_scope).
         decision = _governor_admission(model, options)
+        _governor_note_threads(model, options)
 
         # Telemetry start.
         tel = _get_telemetry()
@@ -1291,7 +1373,7 @@ class OllamaBackend(InferenceBackend):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "options": _with_layers(engine_options, decision),
+            "options": _with_threads(_with_layers(engine_options, decision), decision),
             "stream": True,
             "keep_alive": keep_alive,
         }
@@ -1488,12 +1570,16 @@ class LlamaCppBackend(InferenceBackend):
         flash_attn: bool = False,
         type_k: str | None = None,
         type_v: str | None = None,
+        n_threads_batch: int | None = None,
     ):
         # A configured directory written with ~ is the home directory.
         self._model_dirs = [Path(d).expanduser() for d in (model_dirs or [])]
         self._n_ctx = n_ctx
         self._n_gpu_layers = n_gpu_layers
+        # The operator's thread counts, for the tokens and for the prompt;
+        # None leaves each to the admission's plan.
         self._n_threads = n_threads
+        self._n_threads_batch = n_threads_batch
         # Perf knobs, inert by default: flash attention and KV-cache
         # quantization type names (e.g. "q8_0"), resolved to ggml type
         # constants at load time, fail-open when the installed
@@ -1503,9 +1589,10 @@ class LlamaCppBackend(InferenceBackend):
         self._type_v = type_v
         self._loaded_models: dict[str, Any] = {}
         # The context each model was loaded with, by this backend, and the
-        # (n_ctx, n_gpu_layers) an admission prepared for a model's next load.
+        # (n_ctx, n_gpu_layers, threads, threads_batch) an admission prepared
+        # for a model's next load.
         self._held_ctx: dict[str, int] = {}
-        self._load_plans: dict[str, tuple[int, int]] = {}
+        self._load_plans: dict[str, tuple[int, int, int | None, int | None]] = {}
         # IB-02: guard for the per-model lock dicts below. Held only while
         # creating-and-registering a missing lock, never during a load or
         # an inference call, so it cannot serialize the hot path.
@@ -1811,6 +1898,7 @@ class LlamaCppBackend(InferenceBackend):
         self._load_plans[model_name] = (
             _admitted_ctx(decision) or self._n_ctx,
             self._layers_for(decision),
+            *_in_process_threads(_admitted_threads(decision)),
         )
 
     def _get_or_load(self, model_name: str) -> Any:
@@ -1841,8 +1929,8 @@ class LlamaCppBackend(InferenceBackend):
             cached = self._loaded_models.get(model_name)
             if cached is not None:
                 return cached
-            n_ctx, n_gpu_layers = self._load_plans.pop(
-                model_name, (self._n_ctx, self._n_gpu_layers)
+            n_ctx, n_gpu_layers, threads, threads_batch = self._load_plans.pop(
+                model_name, (self._n_ctx, self._n_gpu_layers, None, None)
             )
 
             gguf_path = self._resolve_model_path(model_name)
@@ -1873,8 +1961,21 @@ class LlamaCppBackend(InferenceBackend):
                 "n_gpu_layers": n_gpu_layers,
                 "verbose": False,
             }
-            if self._n_threads is not None:
-                kwargs["n_threads"] = self._n_threads
+            # The operator's counts, else the admission's: the tokens on
+            # n_threads, the prompt on n_threads_batch, which follows the
+            # operator's n_threads when only that is named (llama.cpp's own
+            # rule). Neither named nor planned: the library's defaults.
+            n_threads = self._n_threads if self._n_threads is not None else threads
+            if self._n_threads_batch is not None:
+                n_threads_batch = self._n_threads_batch
+            elif self._n_threads is not None:
+                n_threads_batch = self._n_threads
+            else:
+                n_threads_batch = threads_batch
+            if n_threads is not None:
+                kwargs["n_threads"] = n_threads
+            if n_threads_batch is not None:
+                kwargs["n_threads_batch"] = n_threads_batch
             # Perf knobs: flash attention is a plain boolean; the
             # KV-cache type names resolve against the installed
             # llama-cpp-python's GGML_TYPE_* constants. Fail-open: an
@@ -2558,6 +2659,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
         n_ctx = llama_cfg.get("n_ctx", 4096)
         n_gpu_layers = llama_cfg.get("n_gpu_layers", -1)
         n_threads = llama_cfg.get("n_threads")
+        n_threads_batch = llama_cfg.get("n_threads_batch")
         # Perf knobs (inert when absent).
         flash_attn = bool(llama_cfg.get("flash_attn", False))
         type_k = llama_cfg.get("type_k")
@@ -2572,6 +2674,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
                 flash_attn=flash_attn,
                 type_k=type_k,
                 type_v=type_v,
+                n_threads_batch=n_threads_batch,
             )
             registry.register(llama_backend)
         elif model_dirs:

@@ -232,6 +232,11 @@ _BACKGROUND = "background"
 _FINAL_REFUSALS = frozenset(
     {"background_capacity_unknown", "background_cost_unknown", "background_ctx_unknown"}
 )
+# How many times its size a file's parse takes in memory, by extension, with
+# a "default" for any other: the shipped file's threads.background block
+# holds the same table. Estimates, not measurements: owed to the machine.
+_PARSE_EXPANSION = {"default": 4.0, ".pdf": 10.0, ".docx": 30.0, ".doc": 30.0, ".xlsx": 50.0, ".xls": 50.0}
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]+")
 _DEFAULT_CALLER_CLASSES = {
     "chat": "interactive",
     "pipeline": "interactive",
@@ -889,6 +894,40 @@ class GovernorConfig:
     background_gate_pending_load_max_s: float = 600.0
     background_gate_cpu_enter: float = 10.0
     background_gate_cpu_exit: float = 5.0
+    # The CPU threads an engine computes with when the plan computes on the
+    # CPU (a split, or a machine with no card): the machine's physical cores
+    # less a reserve left to the user's programs (``threads_reserve_fraction``
+    # of them, rounded up, within the floor and the ceiling), never an SMT
+    # sibling; no more than the fastest class with ``threads_fast_cores_only``;
+    # a model ``threads_models`` names takes its own count. The server's own
+    # affinity and cgroup quota bound only what computes in its process
+    # (``server_threads``). Off, no decision carries one and every engine
+    # picks its own.
+    threads_enabled: bool = True
+    threads_reserve_fraction: float = 0.125
+    threads_reserve_floor: int = 1
+    threads_reserve_ceiling: int = 4
+    threads_fast_cores_only: bool = False
+    threads_models: dict[str, int] = field(default_factory=dict)
+    # How many of the counts kept in the store the status lists, newest first.
+    threads_status_limit: int = 50
+    # The background's own budget (background_pool): worker processes that
+    # each enter SCHED_IDLE, the idle I/O class and the CPUs of the cores
+    # outside the reserve as they start; one per such core, never more than
+    # ``threads_background_max_workers`` nor the quota less the reserve;
+    # ``threads_background_in_flight`` tasks queued per worker; closed after
+    # ``threads_background_idle_s`` without a task. A background caller the
+    # admission holds asks again after ``threads_background_held_retry_s``.
+    # ``threads_background_parse_expansion`` says how many times its size a
+    # file's parse takes in memory, by extension ("default" for the others),
+    # so a job sends no more files at once than the memory room holds.
+    # Off, background work runs on the thread that asks for it.
+    threads_background_enabled: bool = True
+    threads_background_max_workers: int = 4
+    threads_background_in_flight: int = 2
+    threads_background_idle_s: float = 120.0
+    threads_background_held_retry_s: float = 30.0
+    threads_background_parse_expansion: dict[str, float] = field(default_factory=lambda: dict(_PARSE_EXPANSION))
     rlimits_enabled: bool = False
     rlimits_as_gb: float | None = None
     rlimits_data_gb: float | None = None
@@ -953,6 +992,135 @@ def _load_classes(cfg: GovernorConfig, classes: Mapping) -> None:
     cfg.class_queued = queued
     cfg.class_depth = depth
     cfg.class_wait_s = wait
+
+
+def _whole(section: Mapping, key: str, default: int) -> int:
+    """``section[key]`` as a whole number at or above zero, else ``default``
+    with a warning naming it; an absent key is the default, silently."""
+    if key not in section:
+        return default
+    raw = section.get(key)
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    logger.warning("threads.%s %r is not a whole number at or above 0; keeping %s", key, raw, default)
+    return default
+
+
+def _load_threads(cfg: GovernorConfig, threads: Mapping) -> None:
+    """The ``threads`` block onto ``cfg``: each key out of its range is
+    warned and its default kept; a ceiling under the floor keeps both."""
+    cfg.threads_enabled = _as_bool(threads.get("enabled"), cfg.threads_enabled)
+    if "reserve_fraction" in threads:
+        raw = threads.get("reserve_fraction")
+        value = None if isinstance(raw, bool) else _finite_or_none(raw)
+        if value is not None and 0.0 <= value < 1.0:
+            cfg.threads_reserve_fraction = value
+        else:
+            logger.warning(
+                "threads.reserve_fraction %r is not a number in [0, 1); keeping %s", raw, cfg.threads_reserve_fraction
+            )
+    floor = _whole(threads, "reserve_floor", cfg.threads_reserve_floor)
+    ceiling = _whole(threads, "reserve_ceiling", cfg.threads_reserve_ceiling)
+    if ceiling < floor:
+        logger.warning(
+            "threads.reserve_ceiling %s is under reserve_floor %s; keeping %s and %s",
+            ceiling, floor, cfg.threads_reserve_floor, cfg.threads_reserve_ceiling,
+        )
+    else:
+        cfg.threads_reserve_floor, cfg.threads_reserve_ceiling = floor, ceiling
+    cfg.threads_fast_cores_only = _as_bool(threads.get("fast_cores_only"), cfg.threads_fast_cores_only)
+    if "models" in threads:
+        named = threads.get("models")
+        if isinstance(named, dict):
+            kept: dict[str, int] = {}
+            for model, count in named.items():
+                if isinstance(model, str) and model and isinstance(count, int) and not isinstance(count, bool) and count >= 1:
+                    kept[model] = count
+                else:
+                    logger.warning("threads.models %r: %r is not a thread count of at least 1; ignored", model, count)
+            cfg.threads_models = kept
+        elif named is not None:
+            logger.warning("threads.models is not a mapping of model names to thread counts; ignored")
+    if "status_limit" in threads:
+        raw = threads.get("status_limit")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+            cfg.threads_status_limit = raw
+        else:
+            logger.warning(
+                "threads.status_limit %r is not a whole number of at least 1; keeping %s", raw, cfg.threads_status_limit
+            )
+    if "background" in threads:
+        _load_background(cfg, threads.get("background"))
+
+
+def _load_background(cfg: GovernorConfig, block: Any) -> None:
+    """The ``threads.background`` block onto ``cfg``: each key out of its
+    range is warned by name and its default kept."""
+    if not isinstance(block, Mapping):
+        logger.warning("threads.background %r is not a mapping; keeping its defaults", block)
+        return
+    cfg.threads_background_enabled = _as_bool(block.get("enabled"), cfg.threads_background_enabled)
+    for key, attr in (
+        ("max_workers", "threads_background_max_workers"),
+        ("in_flight_per_worker", "threads_background_in_flight"),
+    ):
+        if key not in block:
+            continue
+        raw = block.get(key)
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+            setattr(cfg, attr, raw)
+        else:
+            logger.warning(
+                "threads.background.%s %r is not a whole number at or above 1; keeping %s", key, raw, getattr(cfg, attr)
+            )
+    for key, attr in (
+        ("idle_shutdown_s", "threads_background_idle_s"),
+        ("held_retry_s", "threads_background_held_retry_s"),
+    ):
+        if key not in block:
+            continue
+        raw = block.get(key)
+        value = None if isinstance(raw, bool) else _finite_or_none(raw)
+        if value is not None and value >= 0.0:
+            setattr(cfg, attr, value)
+        else:
+            logger.warning(
+                "threads.background.%s %r is not a number at or above 0; keeping %s", key, raw, getattr(cfg, attr)
+            )
+    if "parse_expansion" in block:
+        cfg.threads_background_parse_expansion = _parse_expansion(block.get("parse_expansion"))
+
+
+def _parse_expansion(raw: Any) -> dict[str, float]:
+    """``threads.background.parse_expansion`` laid over the shipped factors:
+    each key "default" or an extension (a dot, then letters or digits), each
+    factor a number at or above 1; any other entry is warned by name and
+    dropped, and a value that is not a mapping keeps the shipped factors."""
+    factors = dict(_PARSE_EXPANSION)
+    if not isinstance(raw, Mapping):
+        logger.warning("threads.background.parse_expansion %r is not a mapping; keeping its defaults", raw)
+        return factors
+    for key, value in raw.items():
+        name = str(key)
+        number = None if isinstance(value, bool) else _finite_or_none(value)
+        if (name != "default" and not _EXTENSION.fullmatch(name)) or number is None or number < 1.0:
+            logger.warning(
+                'threads.background.parse_expansion.%s %r is not a factor at or above 1 for "default" or an '
+                "extension; dropped",
+                name,
+                value,
+            )
+            continue
+        factors[name.lower()] = float(number)
+    return factors
+
+
+def _finite_or_none(raw: Any) -> float | None:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def load_config(config_path: str | Path | None = None) -> GovernorConfig:
@@ -1113,6 +1281,12 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
         cfg.background_gate_cpu_exit = leave
     elif gate is not None:
         logger.warning("background_gate is not a mapping; its defaults stand")
+
+    threads = raw.get("threads")
+    if isinstance(threads, dict):
+        _load_threads(cfg, threads)
+    elif threads is not None:
+        logger.warning("threads is not a mapping; its defaults stand")
 
     rlimits = raw.get("rlimits")
     if isinstance(rlimits, dict):
@@ -1730,6 +1904,21 @@ class AdmissionDecision:
     # held a background admission (None when it did not) --------------------
     admission_class: str = _DEFAULT_CLASS
     held_by: str | None = None
+    # -- the CPU threads the engine computes with: ``threads`` for the tokens
+    # it makes (Ollama's num_thread, llama.cpp's n_threads), ``threads_batch``
+    # for the prompt it reads (llama.cpp's n_threads_batch), and where they
+    # come from ("plan", "override", or "pinned" to a resident or a pending
+    # load); all None when the load does not compute on the CPU, or the CPUs
+    # cannot be read, and the engine picks its own --------------------------
+    threads: int | None = None
+    threads_batch: int | None = None
+    threads_source: str | None = None
+    # -- where the CPU computes, as exactly as the governor knows it: "cpu"
+    # on a machine with no card, "split:<n>" for a split that puts n layers
+    # on the GPU; None where the card holds the model whole, or where a
+    # split's layers are not counted. A thread count measured for a model is
+    # kept and read for its engine and this placement alone --------------
+    placement: str | None = None
 
     @property
     def partial_offload(self) -> bool:
@@ -1760,6 +1949,20 @@ class AdmissionDecision:
         if sent.get("num_ctx") != self.num_ctx:
             return None
         return layers
+
+    def ollama_threads(self, options: Mapping[str, Any] | None) -> int | None:
+        """The thread count Ollama may be told as num_thread for a call with
+        ``options``, or None: the decision's own, unless the call names its
+        own. Ollama reloads a resident model for any num_thread other than
+        the one it was loaded with, so the engine heads that send it and the
+        gate that pins it all ask here."""
+        threads = self.threads
+        if isinstance(threads, bool) or not isinstance(threads, int) or threads < 1:
+            return None
+        sent = options if isinstance(options, Mapping) else {}
+        if "num_thread" in sent:
+            return None
+        return threads
 
     def refusal_payload(self) -> dict[str, Any]:
         """The honest refusal body, mirroring the estop idiom (D3).
@@ -1817,6 +2020,10 @@ class AdmissionDecision:
             "expected_slowdown": self.expected_slowdown,
             "admission_class": self.admission_class,
             "held_by": self.held_by,
+            "threads": self.threads,
+            "threads_batch": self.threads_batch,
+            "threads_source": self.threads_source,
+            "placement": self.placement,
         }
 
 
@@ -1845,6 +2052,11 @@ class _PendingLoad:
     admission_class: str
     since: float
     released_at: float | None = None
+    # The CPU threads the load was admitted with, and where it computes: a
+    # call joining it carries them.
+    threads: int | None = None
+    threads_batch: int | None = None
+    placement: str | None = None
 
 
 @dataclass
@@ -2046,9 +2258,11 @@ class AdaptStore:
     open-use-close connections per operation, parameterized SQL only.
     Holds derived, regenerable state: learned per-model VRAM cost (keyed
     name+digest when the digest is present), the learned capacity ceiling
-    (fast down, slow up, config floor) and the bounded recent-decisions
+    (fast down, slow up, config floor), the bounded recent-decisions
     ring (schema and prune-by-count land here; the admission path writes
-    the rows).
+    the rows), and the CPU thread counts a tuner measured and kept, per
+    model, engine and placement, with the fingerprint of the machine they
+    were measured on.
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -2094,6 +2308,19 @@ class AdaptStore:
                         admitted_ctx INTEGER,
                         decision TEXT NOT NULL,
                         reason TEXT NOT NULL DEFAULT ''
+                    );
+
+                    CREATE TABLE IF NOT EXISTS thread_optima (
+                        model TEXT NOT NULL,
+                        engine TEXT NOT NULL,
+                        placement TEXT NOT NULL,
+                        fingerprint TEXT NOT NULL,
+                        threads INTEGER NOT NULL,
+                        threads_batch INTEGER NOT NULL,
+                        tg REAL NOT NULL,
+                        base_tg REAL NOT NULL,
+                        measured_at REAL NOT NULL,
+                        PRIMARY KEY (model, engine, placement)
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_costs_name
@@ -2175,6 +2402,95 @@ class AdaptStore:
                 }
             finally:
                 conn.close()
+
+    # -- thread counts a tuner measured and kept ------------------------------
+
+    def record_thread_optimum(
+        self,
+        model: str,
+        engine: str,
+        placement: str,
+        fingerprint: str,
+        threads: int,
+        threads_batch: int,
+        tg: float,
+        base_tg: float,
+        measured_at: float | None = None,
+    ) -> None:
+        """Keep the thread counts measured for ``model`` served by ``engine``
+        at ``placement``, replacing what was kept there before."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO thread_optima
+                       (model, engine, placement, fingerprint, threads,
+                        threads_batch, tg, base_tg, measured_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        model,
+                        engine,
+                        placement,
+                        fingerprint,
+                        int(threads),
+                        int(threads_batch),
+                        float(tg),
+                        float(base_tg),
+                        measured_at if measured_at is not None else time.time(),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_thread_optimum(self, model: str, engine: str, placement: str) -> dict[str, Any] | None:
+        """The counts kept for exactly (``model``, ``engine``, ``placement``),
+        or None. A row that does not hold together -- a count that is not a
+        whole number of one or more, a rate that is not a positive finite
+        number, no fingerprint -- is ignored rather than trusted: the file
+        is written by this process, but read back from a disk anyone may
+        have edited."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """SELECT fingerprint, threads, threads_batch, tg, base_tg,
+                              measured_at
+                       FROM thread_optima
+                       WHERE model = ? AND engine = ? AND placement = ?""",
+                    (model, engine, placement),
+                ).fetchone()
+            finally:
+                conn.close()
+        if row is None:
+            return None
+        return _held_optimum(model, engine, placement, *row)
+
+    def thread_optima(self, limit: int) -> list[dict[str, Any]]:
+        """The counts kept, newest first, at most ``limit`` of them. A row
+        that does not hold together is passed over, as get_thread_optimum
+        ignores it, and takes no place in the list."""
+        kept: list[dict[str, Any]] = []
+        if limit < 1:
+            return kept
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """SELECT model, engine, placement, fingerprint, threads,
+                              threads_batch, tg, base_tg, measured_at
+                       FROM thread_optima
+                       ORDER BY measured_at DESC"""
+                )
+                for row in rows:
+                    held = _held_optimum(*row)
+                    if held is not None:
+                        kept.append(held)
+                        if len(kept) >= limit:
+                            break
+            finally:
+                conn.close()
+        return kept
 
     # -- learned capacity ceiling (fast down, slow up) -----------------------
 
@@ -2358,6 +2674,82 @@ class AdaptStore:
 
 
 # ---------------------------------------------------------------------------
+# The background's own budget
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BackgroundPlan:
+    """How many background workers, on which CPUs, and why.
+
+    ``cpus`` empty leaves each worker the CPUs it inherits; ``reserved`` are
+    the CPUs of the cores left to the user's programs; ``source`` is "plan",
+    "disabled" (no worker: background work runs on the thread that asks) or
+    "unknown" (the CPUs could not be read). ``parse_expansion`` says how many
+    times its size a file's parse takes in memory, by extension, with a
+    "default" for the others.
+    """
+
+    workers: int
+    cpus: tuple[int, ...]
+    reserved: tuple[int, ...]
+    in_flight: int
+    idle_s: float
+    held_retry_s: float
+    source: str
+    parse_expansion: dict[str, float] = field(default_factory=dict)
+
+
+def _reserve_order(core: Any) -> tuple:
+    """A core's place in the reserve: the fastest class first, then the
+    highest rank its source reads (a core with no rank after every ranked
+    one), then the lowest CPU."""
+    rank = getattr(core, "rank", None)
+    read = isinstance(rank, (int, float)) and not isinstance(rank, bool) and math.isfinite(rank)
+    cpus = tuple(getattr(core, "cpus", ()) or ())
+    return (getattr(core, "perf_class", 0), 0 if read else 1, -rank if read else 0.0, cpus[0] if cpus else 0)
+
+
+def _held_optimum(
+    model: Any, engine: Any, placement: Any, fingerprint: Any, threads: Any, threads_batch: Any, tg: Any,
+    base_tg: Any, measured_at: Any,
+) -> dict[str, Any] | None:
+    """A kept thread count as the store returns it, or None when the row
+    does not hold together: a key that is not a name, a count that is not a
+    whole number of one or more, a rate that is not a positive finite
+    number, no fingerprint. The file is written by this process, but read
+    back from a disk anyone may have edited."""
+    keys_hold = all(isinstance(k, str) and k for k in (model, engine, placement))
+    counts_hold = all(isinstance(n, int) and not isinstance(n, bool) and n >= 1 for n in (threads, threads_batch))
+    rates_hold = all(
+        isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and r > 0 for r in (tg, base_tg)
+    )
+    if not keys_hold or not counts_hold or not rates_hold or not isinstance(fingerprint, str) or not fingerprint:
+        logger.debug("thread_optima row for %s/%s/%s does not hold together; ignored", model, engine, placement)
+        return None
+    return {
+        "model": model,
+        "engine": engine,
+        "placement": placement,
+        "fingerprint": fingerprint,
+        "threads": threads,
+        "threads_batch": threads_batch,
+        "tg": float(tg),
+        "base_tg": float(base_tg),
+        "measured_at": measured_at,
+    }
+
+
+def refusal_is_final(decision: Any) -> bool:
+    """Whether ``decision`` refuses for good: the emergency stop, or a
+    refusal no wait can lift (the card unreadable, the cost or the context
+    unknown). An admission is no refusal."""
+    if decision is None or getattr(decision, "admitted", False):
+        return False
+    return bool(getattr(decision, "is_estop", False)) or getattr(decision, "reason", "") in _FINAL_REFUSALS
+
+
+# ---------------------------------------------------------------------------
 # The governor
 # ---------------------------------------------------------------------------
 
@@ -2425,6 +2817,9 @@ class ResourceGovernor:
         # The layer count each split load pinned, and whether the loaded view
         # has shown the model since (only then does leaving it clear the pin).
         self._pins: dict[str, list[Any]] = {}
+        # The CPU threads each load was told, [threads, threads_batch, seen],
+        # ended the same way as the layer pins.
+        self._thread_pins: dict[str, list[Any]] = {}
         self._pending_attribution: dict[str, int | None] = {}
         self._refresh_in_flight = False
         self._capacity_warning_emitted = False
@@ -2567,6 +2962,7 @@ class ResourceGovernor:
             self._pending_attribution[model] = requested_num_ctx
             self._geometry.pop(model, None)
             self._pins.pop(model, None)
+            self._thread_pins.pop(model, None)
             self._snapshot = None
         with self._queue_cond:
             self._owners.pop(model, None)
@@ -2579,8 +2975,10 @@ class ResourceGovernor:
             # have unloaded any of them.
             if model:
                 self._pins.pop(model, None)
+                self._thread_pins.pop(model, None)
             else:
                 self._pins.clear()
+                self._thread_pins.clear()
             self._snapshot = None
         with self._queue_cond:
             if model:
@@ -2791,6 +3189,361 @@ class ResourceGovernor:
             return None
         return pin[0]
 
+    def pin_threads(self, model: str, threads: int, threads_batch: int | None) -> None:
+        """A load of ``model`` was told ``threads`` CPU threads for its tokens
+        (and ``threads_batch`` for its prompt).
+
+        The decisions for the resident model carry the same counts, whatever
+        the plan says by then: Ollama reloads a resident model for any
+        num_thread other than the one it was loaded with. The pin ends with
+        the resident, as the layer pins do. A count pinned again for the
+        same resident (a call sent its own) keeps the placement of the load
+        and whether the loaded view has shown the model.
+        """
+        with self._cache_lock:
+            old = self._thread_pins.get(model)
+            seen, placement = (old[2], old[3]) if old is not None else (False, None)
+            self._thread_pins[model] = [threads, threads_batch, seen, placement]
+
+    def pinned_threads(self, model: str | None) -> tuple[int, int | None] | None:
+        """The (threads, threads_batch) a load of ``model`` was told, or None."""
+        with self._cache_lock:
+            pin = self._thread_pins.get(model) if model else None
+        return None if pin is None else (pin[0], pin[1])
+
+    def pin_placement(self, model: str, placement: str | None) -> None:
+        """The load of ``model`` whose CPU threads are pinned computes at
+        ``placement``: the decisions for the resident say it, so a count
+        measured there is read for it. Nothing is pinned without a count."""
+        with self._cache_lock:
+            pin = self._thread_pins.get(model)
+            if pin is not None:
+                pin[3] = placement
+
+    def pinned_placement(self, model: str | None) -> str | None:
+        """The placement of the load whose threads are pinned for ``model``."""
+        with self._cache_lock:
+            pin = self._thread_pins.get(model) if model else None
+        return None if pin is None else pin[3]
+
+    def _cpu_topology(self) -> Any:
+        """The CPU topology the hardware profile reads for this process (its
+        affinity, its quota), or None."""
+        hardware = self._hardware()
+        read = getattr(hardware, "cpu_topology", None) if hardware is not None else None
+        if not callable(read):
+            return None
+        try:
+            return read()
+        except Exception as exc:
+            logger.debug("CPU topology read failed: %s", exc)
+            return None
+
+    def _machine_topology(self) -> Any:
+        """The machine's CPU topology, as an engine that computes in a
+        process of its own may run on it (the profile's machine view: every
+        online CPU, no quota), or None; a profile with no such view answers
+        with this process's own."""
+        hardware = self._hardware()
+        read = getattr(hardware, "machine_cpu_topology", None) if hardware is not None else None
+        if not callable(read):
+            return self._cpu_topology()
+        try:
+            return read()
+        except Exception as exc:
+            logger.debug("Machine CPU topology read failed: %s", exc)
+            return None
+
+    def thread_reserve(self, physical: int) -> int:
+        """The physical cores a plan leaves to the user's programs.
+
+        ``threads_reserve_fraction`` of ``physical``, rounded up, held
+        between the floor and the ceiling, and never every core.
+        """
+        cfg = self._config
+        count = math.ceil(cfg.threads_reserve_fraction * physical)
+        count = max(cfg.threads_reserve_floor, min(cfg.threads_reserve_ceiling, count))
+        return max(0, min(count, physical - 1))
+
+    def plan_threads(
+        self, model: str | None, engine: str | None = None, placement: str | None = None
+    ) -> tuple[int | None, int | None, str]:
+        """(threads, threads_batch, source) for a load of ``model`` that
+        computes on the CPU, served by ``engine`` at ``placement``.
+
+        A model ``threads_models`` names takes its count ("override").
+        Otherwise the machine's physical cores, less the reserve: never an
+        SMT sibling, since the tokens a core makes are bound by its memory
+        and its execution units, which its siblings share; never more than
+        the fastest class with ``threads_fast_cores_only``; and never under
+        one ("plan"). The count is told to an engine that computes in a
+        process of its own (Ollama), which neither the server's affinity nor
+        its cgroup quota binds; an engine in the server's own process is
+        held to ``server_threads``. The prompt gets the same count. A count
+        a tuner measured and kept
+        for exactly this model, engine and placement, on this machine, is
+        planned instead ("measured"), unless it is past the plan of the CPUs
+        read now: a measurement never takes the reserve. The plan is the
+        model's, whatever class loads it: the count is pinned to the
+        resident. None with "disabled" when the plan is off, "unknown" when
+        the CPUs cannot be read: the engine picks its own.
+        """
+        cfg = self._config
+        if not cfg.threads_enabled:
+            return None, None, "disabled"
+        named = cfg.threads_models.get(model) if model else None
+        if named is not None:
+            return named, named, "override"
+        count = self._plan_count()
+        if count is None:
+            return None, None, "unknown"
+        if model and engine and placement:
+            measured = self._measured_threads(model, engine, placement, count)
+            if measured is not None:
+                return measured[0], measured[1], "measured"
+        return count, count, "plan"
+
+    def _plan_count(self) -> int | None:
+        """The plan's own count (``plan_threads``), whatever any model's
+        override or measurement says, on the machine's CPUs: no quota of the
+        server's applies; None when the CPUs cannot be read."""
+        return self._count_on(self._machine_topology(), quota=False)
+
+    def server_threads(self) -> int | None:
+        """The most CPU threads a computation in the server's own process
+        may take (llama.cpp in process): the plan's rule on the server's own
+        CPUs -- the physical cores of its affinity less the reserve, no more
+        than the fastest class's with ``threads_fast_cores_only`` -- never
+        past its cgroup quota, floored, since a thread the quota throttles
+        stalls every other at the engine's barriers, and never under one.
+        None when the plan is off or the CPUs cannot be read."""
+        if not self._config.threads_enabled:
+            return None
+        return self._count_on(self._cpu_topology(), quota=True)
+
+    def _count_on(self, topology: Any, *, quota: bool) -> int | None:
+        """The physical cores of ``topology`` less the reserve, within the
+        fastest class when asked, within its quota when ``quota``, and never
+        under one; None when it names no core."""
+        physical = getattr(topology, "physical", None)
+        if isinstance(physical, bool) or not isinstance(physical, int) or physical < 1:
+            return None
+        count = physical - self.thread_reserve(physical)
+        if self._config.threads_fast_cores_only:
+            fast = sum(1 for core in getattr(topology, "cores", ()) if getattr(core, "perf_class", None) == 0)
+            if fast > 0:
+                count = min(count, fast)
+        limit = getattr(topology, "quota_cpus", None) if quota else None
+        if isinstance(limit, (int, float)) and not isinstance(limit, bool) and math.isfinite(limit) and limit > 0:
+            count = min(count, int(math.floor(limit)))
+        return max(1, count)
+
+    def _measured_threads(self, model: str, engine: str, placement: str, cap: int) -> tuple[int, int] | None:
+        """The counts kept for (model, engine, placement) when they were
+        measured on this machine and fit within ``cap``; None otherwise,
+        and when the store cannot answer."""
+        fingerprint = self.cpu_fingerprint()
+        if fingerprint is None:
+            return None
+        try:
+            row = self._store.get_thread_optimum(model, engine, placement)
+        except Exception as exc:
+            logger.debug("Measured thread count for %s unreadable: %s", model, exc)
+            return None
+        if row is None or row["fingerprint"] != fingerprint:
+            return None
+        if row["threads"] > cap or row["threads_batch"] > cap:
+            return None
+        return row["threads"], row["threads_batch"]
+
+    def cpu_fingerprint(self) -> str | None:
+        """What a thread count is measured on: the machine's architecture
+        and the shape of its cores, as the plan reads them (how many, the
+        SMT siblings of each, their classes and where the classes come
+        from), hashed; None when the CPUs cannot be read. A count measured
+        on another shape is not this machine's, and is not planned."""
+        topology = self._machine_topology()
+        cores = tuple(getattr(topology, "cores", None) or ())
+        if not cores:
+            return None
+        import hashlib
+
+        uname = getattr(os, "uname", None)
+        shape = [uname().machine if callable(uname) else "", str(getattr(topology, "class_source", ""))]
+        shape += [f"{len(getattr(core, 'cpus', ()))}:{getattr(core, 'perf_class', '')}" for core in cores]
+        return hashlib.sha256("|".join(shape).encode("utf-8")).hexdigest()[:16]
+
+    def thread_candidates(self, model: str | None, fractions: Any) -> tuple[int | None, list[int], str]:
+        """The thread counts a tuner's sweep measures for ``model``:
+        (base, candidates, source).
+
+        The base is the plan's count ("plan"), the count a load takes while
+        nothing is measured, and the sweep's baseline. The candidates are the
+        base, each of ``fractions`` (each above 0 and under 1) of it rounded
+        up, and the fastest class's core count, each held to [1, base],
+        deduplicated, ascending: never past the plan, so no measurement
+        takes the reserve. A model the file names
+        keeps its count, its only candidate ("override"). The plan off or
+        the CPUs unreadable: (None, [], "disabled" or "unknown").
+        """
+        threads, _batch, source = self.plan_threads(model)
+        if threads is None:
+            return None, [], source
+        if source != "plan":
+            return threads, [threads], source
+        counts = {threads}
+        for fraction in fractions or ():
+            if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+                continue
+            if math.isfinite(fraction) and 0 < fraction < 1:
+                counts.add(math.ceil(fraction * threads))
+        cores = getattr(self._machine_topology(), "cores", None) or ()
+        fast = sum(1 for core in cores if getattr(core, "perf_class", None) == 0)
+        if fast > 0:
+            counts.add(fast)
+        return threads, sorted({max(1, min(threads, count)) for count in counts}), "plan"
+
+    def record_thread_optimum(
+        self,
+        model: str,
+        engine: str,
+        placement: str | None,
+        *,
+        threads: int,
+        threads_batch: int,
+        tg: float,
+        base_tg: float,
+    ) -> bool:
+        """Keep the counts a tuner measured for ``model`` served by
+        ``engine`` at ``placement``, with this machine's fingerprint; True
+        when written. Nothing is written for no model, engine or placement,
+        a count that is not a whole number from one to the plan of the CPUs
+        read now (a measurement never takes the reserve), a rate that is not
+        a positive finite number, or CPUs that cannot be read."""
+        if not model or not engine or not placement:
+            return False
+        cap = self._plan_count()
+        fingerprint = self.cpu_fingerprint()
+        if cap is None or fingerprint is None:
+            return False
+        for count in (threads, threads_batch):
+            if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= cap:
+                return False
+        for rate in (tg, base_tg):
+            if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate) or rate <= 0:
+                return False
+        self._store.record_thread_optimum(
+            model, engine, placement, fingerprint, threads, threads_batch, float(tg), float(base_tg)
+        )
+        return True
+
+    def plan_background(self) -> BackgroundPlan:
+        """The background workers' budget, apart from any engine's plan.
+
+        The reserve is the plan's own count of physical cores
+        (thread_reserve), taken from the top of the reserve's order, so the
+        cores the user's programs are scheduled on first stay theirs. The
+        workers get every CPU of the other cores, SMT siblings included
+        (they yield the CPU to anything else), and one worker per such core,
+        within the file's ceiling and the cgroup quota less the reserve (a
+        worker charges the quota the server's threads draw on), never under
+        one ("plan"). Off, no worker ("disabled"). CPUs unreadable, one
+        worker on the CPUs it inherits ("unknown").
+        """
+        cfg = self._config
+        common = {
+            "in_flight": cfg.threads_background_in_flight,
+            "idle_s": cfg.threads_background_idle_s,
+            "held_retry_s": cfg.threads_background_held_retry_s,
+            "parse_expansion": dict(cfg.threads_background_parse_expansion),
+        }
+        if not cfg.threads_background_enabled:
+            return BackgroundPlan(workers=0, cpus=(), reserved=(), source="disabled", **common)
+        topology = self._cpu_topology()
+        cores = tuple(getattr(topology, "cores", None) or ())
+        if not cores:
+            return BackgroundPlan(workers=1, cpus=(), reserved=(), source="unknown", **common)
+        reserve = self.thread_reserve(len(cores))
+        ordered = sorted(cores, key=_reserve_order)
+        kept = ordered[reserve:]
+        workers = min(cfg.threads_background_max_workers, len(kept))
+        quota = getattr(topology, "quota_cpus", None)
+        if isinstance(quota, (int, float)) and not isinstance(quota, bool) and math.isfinite(quota) and quota > 0:
+            workers = min(workers, int(math.floor(quota)) - reserve)
+        return BackgroundPlan(
+            workers=max(1, workers),
+            cpus=tuple(sorted(cpu for core in kept for cpu in core.cpus)),
+            reserved=tuple(sorted(cpu for core in ordered[:reserve] for cpu in core.cpus)),
+            source="plan",
+            **common,
+        )
+
+    def threads_state(self) -> dict[str, Any]:
+        """The CPU threads for the status surface, each value the call the
+        admissions make: the plan's own count and its source (plan_threads
+        with no model), the machine's physical cores, the reserve
+        (thread_reserve), the fast-cores switch, the server's cgroup quota
+        and its own cap (server_threads), the background's budget
+        (plan_background) with the CPUs it leaves to the user, the count and
+        placement pinned to each resident, and the counts kept in the store,
+        newest first, each said measured on the CPUs read now or not. A
+        reading that fails makes this section unavailable, not the status."""
+        try:
+            return self._threads_state()
+        except Exception as exc:
+            logger.debug("Threads state unavailable: %s", exc)
+            return {"available": False}
+
+    def _threads_state(self) -> dict[str, Any]:
+        cfg = self._config
+        topology = self._machine_topology()
+        server = self._cpu_topology()
+        physical = getattr(topology, "physical", None)
+        if isinstance(physical, bool) or not isinstance(physical, int) or physical < 1:
+            physical = None
+        threads, threads_batch, source = self.plan_threads(None)
+        background = self.plan_background()
+        with self._cache_lock:
+            held = sorted((model, list(pin)) for model, pin in self._thread_pins.items())
+        pins = [
+            {"model": model, "threads": pin[0], "threads_batch": pin[1], "placement": pin[3], "seen": bool(pin[2])}
+            for model, pin in held
+        ]
+        fingerprint = self.cpu_fingerprint()
+        shown = ("model", "engine", "placement", "threads", "threads_batch", "tg", "base_tg", "measured_at")
+        measured = []
+        for row in self._store.thread_optima(cfg.threads_status_limit):
+            entry = {key: row[key] for key in shown}
+            entry["this_machine"] = fingerprint is not None and row["fingerprint"] == fingerprint
+            measured.append(entry)
+        return {
+            "available": True,
+            "enabled": bool(cfg.threads_enabled),
+            "plan": {"threads": threads, "threads_batch": threads_batch, "source": source},
+            "physical": physical,
+            "reserve": self.thread_reserve(physical) if physical is not None else None,
+            "fast_cores_only": bool(cfg.threads_fast_cores_only),
+            "quota_cpus": getattr(server, "quota_cpus", None) if server is not None else None,
+            "server_threads": self.server_threads(),
+            "background": {
+                "enabled": bool(cfg.threads_background_enabled),
+                "workers": background.workers,
+                "cpus": list(background.cpus),
+                "reserved": list(background.reserved),
+                "source": background.source,
+                "in_flight": background.in_flight,
+                "idle_s": background.idle_s,
+                "held_retry_s": background.held_retry_s,
+            },
+            "pins": pins,
+            "measured": measured,
+        }
+
+    def caller_class(self, caller: str | None) -> str:
+        """The admission class the file gives ``caller``; an unnamed one is
+        a user."""
+        return _current_governor(self)._config.class_of(caller)
+
     def _ollama_sequences(self) -> int | None:
         """How many sequences Ollama keeps a KV cache for at once, as the
         operator names it (ollama_limits.num_parallel); None unnamed, or
@@ -2812,6 +3565,11 @@ class ResourceGovernor:
                     self._pins[model] = (layers, num_ctx, True)
                 elif seen:
                     del self._pins[model]
+            for model, pin in list(self._thread_pins.items()):
+                if model in names:
+                    pin[2] = True
+                elif pin[2]:
+                    del self._thread_pins[model]
         # The class a model was loaded for ends the same way.
         with self._queue_cond:
             for model, owner in list(self._owners.items()):
@@ -4008,10 +4766,18 @@ class ResourceGovernor:
         main_kv = kv_charged
         reload = False
 
-        def _holds_decision(action: str, reason: str, at: Any = _UNSET) -> AdmissionDecision:
-            # Served at the context the resident holds, or ``at``: the
-            # context of a pending load the call joins.
+        def _holds_decision(action: str, reason: str, at: Any = _UNSET, joins: Any = _UNSET) -> AdmissionDecision:
+            # Served at the context the resident holds, with the CPU threads
+            # its load was told and where that load computes; or at ``at``,
+            # the context of a pending load the call joins, with the threads
+            # and the placement that load was admitted with (``joins``):
+            # Ollama would reload the model for any other count.
             ctx = loaded_ctx if at is _UNSET else at
+            if joins is _UNSET:
+                pinned = self.pinned_threads(model)
+                told = None if pinned is None else (pinned[0], pinned[1], self.pinned_placement(model))
+            else:
+                told = joins
             held = AdmissionDecision(
                 admitted=True,
                 model=model,
@@ -4030,8 +4796,32 @@ class ResourceGovernor:
                 cost_gb=0.0,
                 admission_class=klass,
             )
+            if told is not None and told[0] is not None:
+                held.threads, held.threads_batch, held.threads_source = told[0], told[1], "pinned"
+                held.placement = told[2]
             self._record_admission(held)
             return held
+
+        def _carry_threads(decision: AdmissionDecision, on_cpu: bool) -> None:
+            # A resident served as it is keeps the threads its load was told,
+            # and says where that load computes; a load computes with the
+            # plan for where it computes when it computes on the CPU, and
+            # otherwise the engine picks its own.
+            if already_loaded and not reload:
+                told = self.pinned_threads(model)
+                if told is not None:
+                    decision.threads, decision.threads_batch, decision.threads_source = told[0], told[1], "pinned"
+                    decision.placement = self.pinned_placement(model)
+                return
+            if not on_cpu:
+                return
+            if not decision.partial_offload:
+                decision.placement = "cpu"
+            elif isinstance(decision.gpu_layers, int) and not isinstance(decision.gpu_layers, bool):
+                decision.placement = f"split:{decision.gpu_layers}"
+            threads, threads_batch, source = self.plan_threads(model, engine_name, decision.placement)
+            if threads is not None:
+                decision.threads, decision.threads_batch, decision.threads_source = threads, threads_batch, source
 
         def _refuse(reason: str) -> AdmissionDecision:
             refused = AdmissionDecision(
@@ -4079,7 +4869,12 @@ class ResourceGovernor:
                 # not show yet: the call joins that load at its context, and
                 # waits for it when it asks more.
                 if effective_ctx is None or (joined.num_ctx is not None and effective_ctx <= joined.num_ctx):
-                    return _holds_decision("admit", "fits_pending", joined.num_ctx)
+                    return _holds_decision(
+                        "admit",
+                        "fits_pending",
+                        joined.num_ctx,
+                        (joined.threads, joined.threads_batch, joined.placement),
+                    )
                 return _refuse("background_load_pending")
             if main_kv and effective_ctx is None:
                 # Told no context, the engine would load at its own: the load
@@ -4174,6 +4969,9 @@ class ResourceGovernor:
                     credit_gb=round(credit, 3),
                     admission_class=klass,
                 )
+                # On a machine with no card the CPU computes the whole model;
+                # with a card of unknown memory, where is unknown.
+                _carry_threads(decision, bool(getattr(snapshot, "cards_absent", False)))
                 # Where the engine puts a foreground load is unknown here:
                 # it counts against both memories. The background's is RAM.
                 taken = max(0.0, _cost(effective_ctx) - ram_credit)
@@ -4430,6 +5228,8 @@ class ResourceGovernor:
             if already_loaded and not reload and decision.num_gpu is None:
                 # The resident model stays as its split load placed it.
                 decision.num_gpu = self.pinned_layers(model, ctx)
+            # A split computes its RAM share on the CPU.
+            _carry_threads(decision, placement is not None)
             if placement is not None:
                 vram_taken, ram_taken = placement[0] - credit, placement[1] - ram_credit
             else:
@@ -4827,8 +5627,18 @@ class ResourceGovernor:
         extra_models: list[str] | None = None,
         digest: str | None = None,
         wait_s: float | None = None,
+        engine: str | None = None,
+        cancel: Any = None,
     ) -> AdmissionDecision:
         """admit() with the Section 5 bounded priority queue.
+
+        ``engine`` names the backend that will serve the call, as admit()
+        takes it (a tuner's trial names the engine it measures).
+
+        ``cancel`` is the caller's own cancel (an event): once it is set, a
+        caller about to wait does not enter the queue, and a waiter leaves
+        it at its next wake, its place given back, both refused "cancelled"
+        -- the work they would serve is gone.
 
         Who waits: a caller queue.enabled_per_caller names, as it names it;
         any other as its class does (classes.<class>.queued: the shipped
@@ -4873,7 +5683,14 @@ class ResourceGovernor:
         current = _current_governor(self)
         if current is not self:
             return current.admit_or_wait(
-                model, requested_ctx, caller=caller, extra_models=extra_models, digest=digest, wait_s=wait_s
+                model,
+                requested_ctx,
+                caller=caller,
+                extra_models=extra_models,
+                digest=digest,
+                wait_s=wait_s,
+                engine=engine,
+                cancel=cancel,
             )
         cfg = self._config
         klass = cfg.class_of(caller)
@@ -4889,6 +5706,7 @@ class ResourceGovernor:
                 caller=caller,
                 extra_models=extra_models,
                 digest=digest,
+                engine=engine,
             )
 
         def _final(decision: AdmissionDecision) -> bool:
@@ -4907,6 +5725,8 @@ class ResourceGovernor:
             self._give_back(passed)
             if not queued or _final(last):
                 return last
+        if _cancelled(cancel):
+            return self._queue_refusal(model, requested_ctx, caller, klass, "cancelled")
         with self._queue_cond:
             depth = max(0, cfg.class_depth.get(klass, cfg.queue_depth))
             waiting = sum(1 for w in self._waiters if w.admission_class == klass)
@@ -4923,6 +5743,7 @@ class ResourceGovernor:
             logger.debug("Queue depth bound reached; %s refusal stands for %s", caller, model)
             return last if last is not None else self._queue_refusal(model, requested_ctx, caller, klass, "queue_full")
         unrecorded = False
+        cancelled = False
         try:
             try:
                 # Ring visibility of the enqueue (the 4.4 "queue" action).
@@ -4941,6 +5762,9 @@ class ResourceGovernor:
                     )
                 if self._estop_engaged():
                     return _admit()
+                if _cancelled(cancel):
+                    cancelled = True
+                    break
                 if klass == _BACKGROUND and _current_governor(self)._background_hold() is not None:
                     continue
                 with self._queue_cond:
@@ -4959,6 +5783,8 @@ class ResourceGovernor:
                 self._give_back(passed)
         finally:
             self._dequeue(waiter)
+        if cancelled:
+            return _current_governor(self)._queue_refusal(model, requested_ctx, caller, klass, "cancelled")
         if last is not None:
             if unrecorded:
                 _current_governor(self)._record_admission(last)
@@ -5177,6 +6003,9 @@ class ResourceGovernor:
                 extras=tuple(extras),
                 admission_class=decision.admission_class,
                 since=self._clock(),
+                threads=decision.threads,
+                threads_batch=decision.threads_batch,
+                placement=decision.placement,
             )
             return True
 
@@ -5357,6 +6186,43 @@ class ResourceGovernor:
             held = self._shared.cpu_held
         return "cpu_pressure" if held else None
 
+    def background_memory_short(self) -> str | None:
+        """Why background work should keep one task at a time now, or None.
+
+        Parsing a document can take many times its size in memory, and the
+        tasks of a background pool parse at once: while the kernel reports
+        memory pressure (the hysteresis the RAM reserve reads) the answer is
+        "memory_pressure"; while the RAM available is under the reserve a
+        split leaves the rest of the machine, "ram_under_reserve". RAM that
+        cannot be read is no reason.
+        """
+        snapshot = self.get_snapshot_fast()
+        if getattr(snapshot, "memory_pressure_active", False):
+            return "memory_pressure"
+        total_mb = getattr(snapshot, "ram_total_mb", 0.0) or 0.0
+        available_mb = getattr(snapshot, "ram_available_mb", None)
+        if total_mb <= 0.0 or isinstance(available_mb, bool) or not isinstance(available_mb, (int, float)):
+            return None
+        if available_mb < self.effective_ram_reserve_gb(snapshot) * 1024.0:
+            return "ram_under_reserve"
+        return None
+
+    def background_memory_room(self) -> int | None:
+        """The memory background work may take now, in bytes: the RAM
+        available less the reserve a split leaves the machine, never under
+        zero, and none while the kernel reports memory pressure; None where
+        the RAM cannot be read, which then bounds nothing. A job charges the
+        estimated parse of each file it sends against it."""
+        snapshot = self.get_snapshot_fast()
+        total_mb = getattr(snapshot, "ram_total_mb", 0.0) or 0.0
+        available_mb = getattr(snapshot, "ram_available_mb", None)
+        if total_mb <= 0.0 or isinstance(available_mb, bool) or not isinstance(available_mb, (int, float)):
+            return None
+        if getattr(snapshot, "memory_pressure_active", False):
+            return 0
+        room_mb = available_mb - self.effective_ram_reserve_gb(snapshot) * 1024.0
+        return int(max(0.0, room_mb) * 1024 * 1024)
+
     def background_gate_state(self) -> dict[str, Any]:
         """The background gate for the status surface: on or off, open or
         held and why, and the pressure reading it last saw."""
@@ -5388,13 +6254,18 @@ class ResourceGovernor:
         (resource decisions only -- an estop refusal is not a resource
         signal and never enters it, and neither does any decision of the
         background, whose refusals are its manners, not the machine's
-        pressure: they must not change what the foreground is granted). A
-        waiter's retry is not recorded at all: admit_or_wait records its
-        entry in the queue and its outcome.
+        pressure: they must not change what the foreground is granted; nor
+        a refusal a caller's own cancel made). A waiter's retry is not
+        recorded at all: admit_or_wait records its entry in the queue and
+        its outcome.
         """
         if getattr(self._quiet, "on", False):
             return
-        if not decision.is_estop and decision.admission_class != _BACKGROUND:
+        if (
+            not decision.is_estop
+            and decision.admission_class != _BACKGROUND
+            and decision.reason != "cancelled"
+        ):
             try:
                 with self._cache_lock:
                     self._refusal_events.append(
@@ -5449,8 +6320,8 @@ def reset_resource_governor() -> None:
 # flight and the interactive admissions not yet held, the class each resident
 # was loaded for, the loads not yet seen and their count, the lock the
 # background's decisions take, the quiet flag of the queue's retries, and,
-# with the lock that guards them, the layer counts split loads pinned, the
-# loads waiting for their cost to be learned, the refusal window and what the
+# with the lock that guards them, the layer counts split loads pinned and the
+# CPU thread counts loads were told, the loads waiting for their cost to be learned, the refusal window and what the
 # pressure readings leave behind them (_SharedPressure). Each is one object
 # both governors hold, so what a call still running on the replaced one
 # writes is not lost.
@@ -5467,6 +6338,7 @@ _LIVE_STATE = (
     "_quiet",
     "_cache_lock",
     "_pins",
+    "_thread_pins",
     "_pending_attribution",
     "_refusal_events",
     "_shared",
@@ -5506,6 +6378,17 @@ def reload_resource_governor() -> ResourceGovernor:
     return new
 
 
+def _cancelled(cancel: Any) -> bool:
+    """Whether a caller's cancel (an event, or None) is set; a cancel that
+    cannot be read cancels nothing."""
+    if cancel is None:
+        return False
+    try:
+        return bool(cancel.is_set())
+    except Exception:  # noqa: BLE001 - an unreadable cancel cancels nothing
+        return False
+
+
 def _current_governor(governor: ResourceGovernor) -> ResourceGovernor:
     """The governor a reload built from ``governor``, when there is one (it
     shares the queue), else ``governor`` itself."""
@@ -5527,7 +6410,11 @@ def _account_load(
     model with the class it is loaded for, then pin the layer count a split
     placed, so the calls that follow keep it. Only a count Ollama is told is
     pinned, asked as the engine head asks (``AdmissionDecision.ollama_layers``);
-    otherwise the engine places the layers itself, and nothing is pinned."""
+    otherwise the engine places the layers itself, and nothing is pinned.
+    The CPU threads the load is told are pinned the same way: the call's own
+    num_thread when it names one, else the decision's
+    (``AdmissionDecision.ollama_threads``); with them, where the load
+    computes (``AdmissionDecision.placement``)."""
     governor.invalidate_on_load(model, decision.num_ctx)
     note = getattr(governor, "note_loaded_by", None)
     if callable(note):
@@ -5535,6 +6422,64 @@ def _account_load(
     layers = decision.ollama_layers(options) if decision.partial_offload else None
     if layers is not None:
         governor.pin_layers(model, layers, decision.num_ctx)
+    pin = getattr(governor, "pin_threads", None)
+    if not callable(pin):
+        return
+    own = options.get("num_thread") if isinstance(options, Mapping) else None
+    if isinstance(own, int) and not isinstance(own, bool) and own >= 1:
+        pin(model, own, own)
+    else:
+        threads = decision.ollama_threads(options)
+        if threads is None:
+            return
+        pin(model, threads, decision.threads_batch)
+    place = getattr(governor, "pin_placement", None)
+    if callable(place):
+        place(model, getattr(decision, "placement", None))
+
+
+def note_own_threads(model: str, options: Mapping[str, Any] | None) -> None:
+    """A call sent ``model`` its own num_thread through an engine that
+    applies a count per call and reloads a resident model for any count
+    other than the one it holds (Ollama): that count is the one the resident
+    holds from then on, so it is the one pinned, with the placement of its
+    load (``ResourceGovernor.pin_threads``), and the next decisions carry
+    it. A load's own count was pinned as the load was accounted
+    (``_account_load``), and a call that sends none changes nothing. No
+    governor yet, or a disabled one: nothing to tell."""
+    own = options.get("num_thread") if isinstance(options, Mapping) else None
+    if isinstance(own, bool) or not isinstance(own, int) or own < 1:
+        return
+    governor = _governor
+    if governor is None or not governor.config.enabled:
+        return
+    pinned = getattr(governor, "pinned_threads", None)
+    pin = getattr(governor, "pin_threads", None)
+    if not callable(pinned) or not callable(pin):
+        return
+    if pinned(model) != (own, own):
+        pin(model, own, own)
+
+
+def running_governor() -> ResourceGovernor | None:
+    """The governor this process runs, or None when none has started:
+    reading what only a running governor holds (a resident's pinned thread
+    count) never starts one, with its store and its refresh."""
+    return _governor
+
+
+def server_threads() -> int | None:
+    """The most CPU threads a computation in the server's own process may
+    take (``ResourceGovernor.server_threads``), for an engine that runs
+    there (llama.cpp in process); None with no governor, a disabled one, or
+    one that cannot say."""
+    governor = _governor
+    if governor is None or not governor.config.enabled:
+        return None
+    read = getattr(governor, "server_threads", None)
+    if not callable(read):
+        return None
+    return read()
 
 
 def backend_admission_gate(

@@ -26,6 +26,19 @@
 #   vram_used_max_age_s  -- a reading of the used memory older than this is
 #                           unknown, so a refresh that never returns does not
 #                           leave a frozen figure behind.
+#   cpu_class_gap        -- the CPUs: walking the cores' performance ranks
+#                           down, a new class starts where a rank falls more
+#                           than this fraction below the one above it (the
+#                           ranks come from the first kernel source that parts
+#                           the cores: CPPC highest performance, AMD's
+#                           preferred-core ranking, the scheduler's capacity,
+#                           the highest frequency). Between 0 and 1.
+#   cpu_classes          -- the classes named outright, fastest first, as
+#                           lists of CPU numbers; a core none names falls in
+#                           the class after the last. Empty: read the kernel.
+#   topology_ttl_s       -- how long a reading of the CPUs is kept before the
+#                           next question reads them again, so an affinity or
+#                           a cgroup quota changed at run time is seen.
 # A value out of its range is ignored for its default, with a warning.
 devices: auto
 integrated_below_gb: 1.0
@@ -33,3 +46,6 @@ kind_overrides: {}
 vram_used_ttl_s: 5.0
 nvidia_smi_timeout_s: 5.0
 vram_used_max_age_s: 600.0
+cpu_class_gap: 0.15
+cpu_classes: []
+topology_ttl_s: 60.0

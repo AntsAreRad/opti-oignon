@@ -2857,7 +2857,10 @@ class ParameterSpaceSchema(BaseModel):
     """Parameter search space."""
     batch_size: list[int] = Field(default_factory=lambda: [512, 1024, 2048, 4096])
     ubatch_size: list[int] = Field(default_factory=lambda: [256, 512, 1024])
-    threads: list[int] = Field(default_factory=lambda: [2, 4, 6, 8])
+    # A list, or "auto": the counts the resource governor's thread plan gives
+    # the machine at each run, with ``threads_fractions`` of the plan's count.
+    threads: list[int] | str = Field(default_factory=lambda: [2, 4, 6, 8])
+    threads_fractions: list[float] = Field(default_factory=lambda: [0.5, 0.75])
     flash_attention: list[bool] = Field(default_factory=lambda: [True, False])
 
 
@@ -2906,6 +2909,11 @@ class TunerProfileSchema(BaseModel):
     # unknown. Defaults to unknown so a payload that says nothing about its
     # provenance is never read as a measurement.
     source: str = "unknown"
+    # The thread count the sweep kept for the resource governor to plan from
+    # (engine, placement, threads, threads_batch, tg, base_tg), or None, and
+    # why none was kept.
+    threads_optimum: dict | None = None
+    threads_note: str = ""
 
 
 class TunerResultsResponse(BaseModel):

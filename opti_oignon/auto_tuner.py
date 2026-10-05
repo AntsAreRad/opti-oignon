@@ -31,6 +31,7 @@ import platform
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -181,14 +182,71 @@ class TunerConfig:
         return cls(**filtered)
 
 
+_AUTO = "auto"
+_DEFAULT_THREAD_FRACTIONS = (0.5, 0.75)
+
+
+def _thread_counts(value: Any) -> tuple[list[int], bool]:
+    """(counts, auto) for the file's ``threads`` setting.
+
+    "auto", or no setting, takes the counts from the resource governor's
+    plan at each run. A list is swept as written: whole numbers of one or
+    more, each once, in order. Anything else, or a list with no such number,
+    cannot be read and falls back to "auto", by name in the log.
+    """
+    if value is None or (isinstance(value, str) and value.strip().lower() == _AUTO):
+        return [], True
+    if isinstance(value, list):
+        counts: list[int] = []
+        for item in value:
+            if isinstance(item, int) and not isinstance(item, bool) and item >= 1 and item not in counts:
+                counts.append(item)
+        if counts:
+            return counts, False
+    logger.warning("auto_tuner.yaml parameter_space.threads %r cannot be read; 'auto' is used", value)
+    return [], True
+
+
+def _thread_fractions(value: Any) -> list[float]:
+    """The fractions of the plan's count an "auto" sweep measures besides the
+    plan itself: numbers above 0 and under 1, each once. None, or a value
+    with no such number, takes the default, by name in the log when one was
+    written."""
+    if value is None:
+        return list(_DEFAULT_THREAD_FRACTIONS)
+    fractions: list[float] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, (int, float)) and not isinstance(item, bool) and 0 < item < 1:
+            if float(item) not in fractions:
+                fractions.append(float(item))
+    if fractions:
+        return fractions
+    logger.warning(
+        "auto_tuner.yaml parameter_space.threads_fractions %r cannot be read; %s is used",
+        value,
+        list(_DEFAULT_THREAD_FRACTIONS),
+    )
+    return list(_DEFAULT_THREAD_FRACTIONS)
+
+
 @dataclass
 class ParameterSpace:
-    """Defines the grid of parameters to search."""
+    """Defines the grid of parameters to search.
+
+    ``threads_auto`` (the file's ``threads: auto``, its default) takes the
+    thread counts from the resource governor's plan for the machine at each
+    run (``AutoTuner._thread_axis``): the plan's count, each of
+    ``threads_fractions`` of it rounded up, and the fastest class's core
+    count, never past the plan; ``threads`` is then unused. A space built in
+    code names its own lists.
+    """
 
     batch_size: list[int] = field(default_factory=lambda: [512, 1024, 2048, 4096])
     ubatch_size: list[int] = field(default_factory=lambda: [256, 512, 1024])
     threads: list[int] = field(default_factory=lambda: [2, 4, 6, 8])
     flash_attention: list[bool] = field(default_factory=lambda: [True, False])
+    threads_auto: bool = False
+    threads_fractions: list[float] = field(default_factory=lambda: list(_DEFAULT_THREAD_FRACTIONS))
 
     def total_combinations(self) -> int:
         """Total number of parameter combinations in the grid."""
@@ -204,18 +262,22 @@ class ParameterSpace:
         return {
             "batch_size": self.batch_size,
             "ubatch_size": self.ubatch_size,
-            "threads": self.threads,
+            "threads": _AUTO if self.threads_auto else self.threads,
+            "threads_fractions": list(self.threads_fractions),
             "flash_attention": self.flash_attention,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "ParameterSpace":
-        """Create from dict."""
+        """Create from dict; ``threads`` is "auto" unless it names a list."""
+        threads, auto = _thread_counts(data.get("threads"))
         return cls(
             batch_size=data.get("batch_size", [512, 1024, 2048, 4096]),
             ubatch_size=data.get("ubatch_size", [256, 512, 1024]),
-            threads=data.get("threads", [2, 4, 6, 8]),
+            threads=threads,
             flash_attention=data.get("flash_attention", [True, False]),
+            threads_auto=auto,
+            threads_fractions=_thread_fractions(data.get("threads_fractions")),
         )
 
 
@@ -231,6 +293,13 @@ class BenchmarkResult:
     # Defaults to unknown so a result built without saying where its rates
     # came from cannot pass for a measurement.
     source: str = SOURCE_UNKNOWN
+    # The engine that served the trial, where the model computed (the
+    # admission's placement: "cpu", "split:<n>", or None where the card held
+    # it whole or the split's layers were not counted), and whether the
+    # engine applied the thread count asked. None and False claim nothing.
+    engine: str | None = None
+    placement: str | None = None
+    threads_applied: bool = False
 
     def to_dict(self) -> dict:
         """Serialize to dict."""
@@ -241,6 +310,9 @@ class BenchmarkResult:
             "total_time_ms": round(self.total_time_ms, 2),
             "error": self.error,
             "source": self.source,
+            "engine": self.engine,
+            "placement": self.placement,
+            "threads_applied": self.threads_applied,
         }
 
 
@@ -260,6 +332,11 @@ class TunerProfile:
     all_results: list[dict] = field(default_factory=list)
     # The weakest provenance among the results this profile was built from.
     source: str = SOURCE_UNKNOWN
+    # The thread count the sweep kept for the governor to plan from
+    # ({"engine", "placement", "threads", "threads_batch", "tg", "base_tg"}),
+    # or None, with why in ``threads_note``.
+    threads_optimum: dict | None = None
+    threads_note: str = ""
 
     def to_dict(self) -> dict:
         """Serialize to dict."""
@@ -275,6 +352,8 @@ class TunerProfile:
             "timestamp": self.timestamp,
             "all_results": self.all_results,
             "source": self.source,
+            "threads_optimum": dict(self.threads_optimum) if self.threads_optimum else None,
+            "threads_note": self.threads_note,
         }
 
     @classmethod
@@ -294,6 +373,10 @@ class TunerProfile:
             # A record written before provenance existed carries no claim, so
             # it rehydrates as unknown rather than being promoted.
             source=data.get("source", SOURCE_UNKNOWN),
+            threads_optimum=(
+                dict(data["threads_optimum"]) if isinstance(data.get("threads_optimum"), dict) else None
+            ),
+            threads_note=data.get("threads_note", "") if isinstance(data.get("threads_note"), str) else "",
         )
 
 
@@ -636,6 +719,12 @@ class AutoTuner:
     The tuner works with a benchmark function that accepts a parameter
     dict and returns a BenchmarkResult. This allows it to be used with
     any inference backend.
+
+    ``thread_plan`` answers (base, candidates, source) for the model being
+    tuned, as the resource governor plans its CPU threads
+    (``ResourceGovernor.thread_candidates``): the baseline's thread count
+    and, with "auto", the counts swept. Without it a list is swept from its
+    middle, as before, and "auto" measures no count.
     """
 
     def __init__(
@@ -644,11 +733,24 @@ class AutoTuner:
         param_space: ParameterSpace,
         benchmark_fn: Callable[[dict], BenchmarkResult] | None = None,
         progress_fn: Callable[[TunerJob], None] | None = None,
+        thread_plan: Callable[[], tuple[int | None, list[int], str] | None] | None = None,
     ):
         self._config = config
         self._param_space = param_space
         self._benchmark_fn = benchmark_fn
         self._progress_fn = progress_fn
+        self._thread_plan = thread_plan
+        # Resolved once per run: (counts swept, baseline count, source).
+        self._threads: tuple[list[int], int | None, str] | None = None
+        # What each point's successful trials said: who served them and
+        # where the model computed, and whether every one applied its count.
+        self._labels: dict[str, set[tuple[str | None, str | None]]] = {}
+        self._applied: dict[str, bool] = {}
+        self._last_params: dict | None = None
+        # The engines the run's trials reached, warm-ups included, and the
+        # count the governor held pinned for the model as the run began.
+        self._engines: set[str] = set()
+        self._pin_at_start: tuple[int, int] | None = None
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -673,6 +775,12 @@ class AutoTuner:
             raise RuntimeError("No benchmark function provided")
 
         self._cancelled = False
+        self._threads = None
+        self._labels = {}
+        self._applied = {}
+        self._last_params = None
+        self._engines = set()
+        self._pin_at_start = self._read_pin(model_name)
         job.status = "running"
         job.started_at = time.time()
         job.model_name = model_name
@@ -697,7 +805,7 @@ class AutoTuner:
             default_params = self._default_params()
             for i in range(self._config.warmup_runs):
                 self._check_cancelled()
-                self._benchmark_fn(default_params)
+                self._note_engine(self._benchmark_fn(default_params))
                 job.completed_steps += 1
                 job.progress = job.completed_steps / max(job.total_steps, 1)
                 self._report_progress(job)
@@ -706,6 +814,10 @@ class AutoTuner:
             job.current_step = "Measuring baseline..."
             self._report_progress(job)
             baseline = self._run_averaged(default_params)
+            if baseline.error:
+                # Nothing to compare a configuration with: the run ends here,
+                # by the reason, rather than keep a profile of failures.
+                raise RuntimeError(f"the baseline could not be measured: {baseline.error}")
 
             # Phase 2: Parameter sweep
             all_results: list[BenchmarkResult] = [baseline]
@@ -735,6 +847,15 @@ class AutoTuner:
             )
             if not confirmed.error:
                 best = confirmed
+
+            # Phase 4: the thread count the governor may plan from, and the
+            # model left at the count its next decisions carry.
+            job.current_step = "Confirming the best thread count..."
+            self._report_progress(job)
+            threads_optimum, threads_note = self._keep_threads(all_results, baseline, confirmed)
+            if threads_optimum is None:
+                self._settle()
+                self._pin_plan(model_name)
             job.completed_steps = job.total_steps
             job.progress = 1.0
 
@@ -761,6 +882,8 @@ class AutoTuner:
                 source=weakest_source(
                     [r.source for r in all_results] + [best.source]
                 ),
+                threads_optimum=threads_optimum,
+                threads_note=threads_note,
             )
 
             job.status = "completed"
@@ -773,17 +896,93 @@ class AutoTuner:
 
         except ValueError as exc:
             # Cancelled
+            self._pin_plan(model_name)
             job.status = "cancelled"
             job.error = str(exc)
             job.finished_at = time.time()
             self._report_progress(job)
             raise
         except Exception as exc:
+            self._pin_plan(model_name)
             job.status = "failed"
             job.error = str(exc)
             job.finished_at = time.time()
             self._report_progress(job)
             raise
+
+    def _pin_plan(self, model_name: str) -> None:
+        """A run whose last trial to reach the engine was not at the count a
+        fresh load would get -- cancelled, refused or failed, or settled by
+        a trial the governor held -- leaves the model loaded at that trial's
+        count, which the governor pinned. When the plan gave the baseline
+        its count, the governor is told to pin what a fresh load of the
+        model would get instead (its plan for the engine the trials ran on
+        and the placement the resident holds, so a kept count wins), and the
+        next call reloads the model once at it, rather than every call
+        keeping a count nobody plans. Decided on the pin itself, not on the
+        last trial tried: a trial the governor held never reached the
+        engine. No pin, a run whose trials reached no engine (whatever moved
+        the pin, it did not), the pin the run found, one at the fresh count
+        already, or no governor: nothing to do."""
+        _axis, base, source = self._thread_axis()
+        if source != "plan" or base is None:
+            return
+        governor = _running_governor()
+        pinned = getattr(governor, "pinned_threads", None)
+        pin = getattr(governor, "pin_threads", None)
+        if not callable(pinned) or not callable(pin):
+            return
+        if not self._engines:
+            # No trial reached an engine: whatever moved the pin, this run
+            # did not, and with no engine named a plan would ignore a kept
+            # count.
+            return
+        try:
+            current = pinned(model_name)
+            if current is None or current == self._pin_at_start:
+                return
+            target = self._fresh_count(governor, model_name, base)
+            if current != target:
+                pin(model_name, *target)
+        except Exception as exc:  # noqa: BLE001 - the run has already ended
+            logger.debug("pinning %s back at its planned thread count failed: %s", model_name, exc)
+
+    def _fresh_count(self, governor: Any, model_name: str, base: int) -> tuple[int, int]:
+        """The (threads, threads_batch) a fresh load of ``model_name`` would
+        get: the governor's plan for the one engine the trials ran on and
+        the placement the resident holds (a count kept for them wins), else
+        the plan's own count."""
+        plan = getattr(governor, "plan_threads", None)
+        if not callable(plan):
+            return base, base
+        engines = self._engines
+        placement_of = getattr(governor, "pinned_placement", None)
+        placement = placement_of(model_name) if callable(placement_of) else None
+        threads, threads_batch, _source = plan(model_name, next(iter(engines)) if len(engines) == 1 else None, placement)
+        if isinstance(threads, bool) or not isinstance(threads, int) or threads < 1:
+            return base, base
+        if isinstance(threads_batch, bool) or not isinstance(threads_batch, int) or threads_batch < 1:
+            threads_batch = threads
+        return threads, threads_batch
+
+    def _read_pin(self, model_name: str) -> tuple[int, int] | None:
+        """The count the governor holds pinned for ``model_name``, or None
+        (no pin, or no governor to ask)."""
+        pinned = getattr(_running_governor(), "pinned_threads", None)
+        if not callable(pinned):
+            return None
+        try:
+            return pinned(model_name)
+        except Exception as exc:  # noqa: BLE001 - an unread pin is no pin
+            logger.debug("reading the pin of %s failed: %s", model_name, exc)
+            return None
+
+    def _note_engine(self, result: Any) -> None:
+        """Note the engine a trial reached, warm-ups included: a trial that
+        failed, or that the governor held, reached none."""
+        engine = getattr(result, "engine", None)
+        if engine and not getattr(result, "error", ""):
+            self._engines.add(str(engine))
 
     def _build_smart_sweep(self) -> list[dict]:
         """Build a smart subset of parameter combinations.
@@ -812,7 +1011,7 @@ class AutoTuner:
                 combos.append(p)
                 seen.add(key)
 
-        for t in self._param_space.threads:
+        for t in self._thread_axis()[0]:
             p = {**defaults, "threads": t}
             key = _param_key(p)
             if key not in seen:
@@ -829,16 +1028,131 @@ class AutoTuner:
         return combos
 
     def _default_params(self) -> dict:
-        """Return default (middle-of-range) parameters."""
+        """Return default (middle-of-range) parameters, the thread count
+        being the baseline's (``_thread_axis``): absent when there is none,
+        and the engine picks its own."""
         def mid(lst: list) -> Any:
             return lst[len(lst) // 2] if lst else None
 
-        return {
+        params = {
             "batch_size": mid(self._param_space.batch_size) or 1024,
             "ubatch_size": mid(self._param_space.ubatch_size) or 512,
-            "threads": mid(self._param_space.threads) or 4,
-            "flash_attention": True,
         }
+        base = self._thread_axis()[1]
+        if base is not None:
+            params["threads"] = base
+        params["flash_attention"] = True
+        return params
+
+    def _thread_axis(self) -> tuple[list[int], int | None, str]:
+        """(counts swept, baseline count, source), resolved once per run.
+
+        "auto" sweeps the candidates of the plan (``thread_plan``) from the
+        plan's count, so the gain is told against what the plan would do;
+        without a plan it measures no count, and the engine picks its own as
+        it would for the calls it serves. A list is swept as written, from
+        the plan's count when there is one, else from its middle as before.
+        """
+        if self._threads is not None:
+            return self._threads
+        base: int | None = None
+        candidates: list[int] = []
+        source = "none"
+        if self._thread_plan is not None:
+            try:
+                planned = self._thread_plan()
+            except Exception as exc:  # noqa: BLE001 - no plan is an answer
+                logger.debug("thread plan unavailable to the tuner: %s", exc)
+                planned = None
+            if planned is not None:
+                base, candidates, source = planned
+        if self._param_space.threads_auto:
+            axis = list(candidates) if base is not None else []
+        else:
+            axis = list(self._param_space.threads)
+            if base is None:
+                base = (axis[len(axis) // 2] if axis else None) or 4
+        self._threads = (axis, base, source)
+        return self._threads
+
+    def _keep_threads(
+        self, results: list[BenchmarkResult], baseline: BenchmarkResult, confirmed: BenchmarkResult
+    ) -> tuple[dict | None, str]:
+        """The thread count this sweep leaves for the governor to plan from,
+        or None and why.
+
+        The thread trials are the points that differ from the baseline in
+        their thread count alone, the baseline among them. The fastest, the
+        lowest count on a tie since it leaves the most cores, is confirmed
+        with extra runs (``confirmed`` when it is the best configuration).
+        It is kept only when the plan gave the baseline its count, and
+        only if it holds: the confirmation ran; every thread trial was
+        measured; by an engine that applied the count asked; on one engine
+        and one placement, known exactly; at no more than the plan's count;
+        and confirmed no slower than the baseline.
+        """
+        _axis, base, source = self._thread_axis()
+        if source == "override":
+            return None, "the resource governor's file names this model's thread count: none is kept"
+        if source != "plan" or base is None:
+            return None, "no thread plan for this machine: no count is measured against one"
+        others = {k: v for k, v in baseline.params.items() if k != "threads"}
+        trials = [r for r in results if {k: v for k, v in r.params.items() if k != "threads"} == others]
+        ran = [r for r in trials if not r.error]
+        if not ran:
+            return None, "no thread trial ran"
+        top = min(ran, key=lambda r: (-r.tokens_per_second_tg, r.params.get("threads", 0)))
+        if _param_key(top.params) == _param_key(confirmed.params):
+            check = confirmed
+        else:
+            check = self._run_averaged(top.params, extra_trials=self._config.trials_per_param)
+        keys = {_param_key(r.params) for r in trials} | {_param_key(check.params)}
+        labels: set[tuple[str | None, str | None]] = set()
+        for key in keys:
+            labels |= self._labels.get(key, set())
+        threads = top.params.get("threads")
+        if check.error:
+            return None, f"the confirmation of the best count failed: {check.error}"
+        if any(r.source != SOURCE_MEASURED for r in trials + [check]):
+            return None, "a thread trial was not measured"
+        if not all(self._applied.get(key, False) for key in keys):
+            return None, "the engine does not apply a thread count per call"
+        if len(labels) != 1:
+            return None, "the engine or the placement changed during the sweep"
+        engine, placement = next(iter(labels))
+        if not engine or not placement:
+            return None, "placement unknown: the card held the model whole, or its split was not counted"
+        if not isinstance(threads, int) or isinstance(threads, bool) or not 1 <= threads <= base:
+            return None, "the best count is past the plan"
+        if check.tokens_per_second_tg < baseline.tokens_per_second_tg:
+            return None, "the best count's confirmation was slower than the baseline"
+        return {
+            "engine": engine,
+            "placement": placement,
+            "threads": threads,
+            "threads_batch": threads,
+            "tg": check.tokens_per_second_tg,
+            "base_tg": baseline.tokens_per_second_tg,
+        }, ""
+
+    def _settle(self) -> None:
+        """One more trial at the plan's count, every other knob at its
+        default, when the plan gave the baseline its count and the last
+        trial ran at another: the model is left at the count its next
+        decisions carry, not at one nobody plans. Its result measures
+        nothing and joins no profile; its failure fails nothing."""
+        _axis, base, source = self._thread_axis()
+        if source != "plan" or base is None or self._last_params is None:
+            return
+        if self._last_params.get("threads") == base:
+            return
+        self._check_cancelled()
+        defaults = self._default_params()
+        self._last_params = defaults
+        try:
+            self._benchmark_fn(defaults)
+        except Exception as exc:  # noqa: BLE001 - the sweep is already done
+            logger.debug("settling trial at the plan's thread count failed: %s", exc)
 
     def _run_averaged(
         self, params: dict, extra_trials: int = 0
@@ -849,10 +1163,13 @@ class AutoTuner:
         pp_speeds: list[float] = []
         total_times: list[float] = []
         sources: list[str] = []
+        labels: set[tuple[str | None, str | None]] = set()
+        applied: list[bool] = []
         last_error = ""
 
         for _ in range(trials):
             self._check_cancelled()
+            self._last_params = params
             result = self._benchmark_fn(params)
             if result.error:
                 last_error = result.error
@@ -861,6 +1178,14 @@ class AutoTuner:
             pp_speeds.append(result.tokens_per_second_pp)
             total_times.append(result.total_time_ms)
             sources.append(result.source)
+            labels.add((result.engine, result.placement))
+            self._note_engine(result)
+            applied.append(bool(result.threads_applied))
+
+        key = _param_key(params)
+        self._labels.setdefault(key, set()).update(labels)
+        if applied:
+            self._applied[key] = self._applied.get(key, True) and all(applied)
 
         if not tg_speeds:
             return BenchmarkResult(
@@ -868,6 +1193,7 @@ class AutoTuner:
                 error=last_error or "All trials failed",
             )
 
+        engine, placement = next(iter(labels)) if len(labels) == 1 else (None, None)
         return BenchmarkResult(
             params=params,
             tokens_per_second_tg=sum(tg_speeds) / len(tg_speeds),
@@ -875,6 +1201,9 @@ class AutoTuner:
             total_time_ms=sum(total_times) / len(total_times),
             # An average is only as good as the weakest trial inside it.
             source=weakest_source(sources),
+            engine=engine,
+            placement=placement,
+            threads_applied=all(applied),
         )
 
     def _check_cancelled(self) -> None:
@@ -1054,6 +1383,7 @@ class AutoTunerManager:
                 param_space=self._param_space,
                 benchmark_fn=benchmark_fn,
                 progress_fn=progress_fn,
+                thread_plan=self._thread_plan_for(model_name),
             )
             self._active_tuners[model_name] = tuner
 
@@ -1097,12 +1427,56 @@ class AutoTunerManager:
                 return None
             return dict(profile.best_params)
 
+    def _thread_plan_for(self, model_name: str) -> Callable[[], tuple[int | None, list[int], str] | None]:
+        """What a run for ``model_name`` asks the resource governor for its
+        thread counts (``ResourceGovernor.thread_candidates``), with the
+        fractions of the file; None without a governor to ask."""
+        fractions = list(self._param_space.threads_fractions)
+
+        def _plan() -> tuple[int | None, list[int], str] | None:
+            governor = _tuner_governor()
+            candidates = getattr(governor, "thread_candidates", None) if governor is not None else None
+            if not callable(candidates):
+                return None
+            return candidates(model_name, fractions)
+
+        return _plan
+
+    def _record_threads_optimum(self, model_name: str, profile: TunerProfile) -> None:
+        """Hand the count the run kept to the resource governor, which plans
+        from it (``ResourceGovernor.record_thread_optimum``); the profile
+        says so when the governor did not keep it."""
+        kept = profile.threads_optimum
+        if not kept:
+            return
+        governor = _tuner_governor()
+        record = getattr(governor, "record_thread_optimum", None) if governor is not None else None
+        written = False
+        if callable(record):
+            try:
+                written = bool(
+                    record(
+                        model_name,
+                        kept["engine"],
+                        kept["placement"],
+                        threads=kept["threads"],
+                        threads_batch=kept["threads_batch"],
+                        tg=kept["tg"],
+                        base_tg=kept["base_tg"],
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - the profile says so
+                logger.warning("the resource governor could not keep the thread count for %s: %s", model_name, exc)
+        if not written:
+            profile.threads_note = "the resource governor did not keep the count"
+
     def _run_tuning_thread(
         self, model_name: str, tuner: AutoTuner, job: TunerJob
     ) -> None:
         """Thread target for running tuning."""
         try:
             profile = tuner.run(model_name, job)
+            self._record_threads_optimum(model_name, profile)
             with self._lock:
                 self._profiles[model_name] = profile
                 self._save_results()
@@ -1228,6 +1602,107 @@ def _registry_backend(name: str) -> Any:
         return None
 
 
+# The caller a tuner's trial is admitted as: nobody waits on a sweep, so the
+# governor's caller table makes it the background -- it waits for a quiet
+# machine and never evicts or splits a model to make room.
+TUNER_CALLER = "tuner"
+
+
+class TunerRefused(RuntimeError):
+    """The governor refused a trial for good: no wait can lift the refusal,
+    and the run ends by it."""
+
+
+def _tuner_governor() -> Any:
+    """The resource governor, or None when there is none to ask: a trial
+    then runs unadmitted, as every funnel fails open."""
+    try:
+        from opti_oignon.resource_governor import get_resource_governor
+
+        return get_resource_governor()
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("resource governor unavailable to the tuner: %s", exc)
+        return None
+
+
+def _running_governor() -> Any:
+    """The resource governor if one runs in this process, else None: the
+    pins a run reads and restores live there, and reading one never starts
+    a governor for nothing."""
+    try:
+        from opti_oignon.resource_governor import running_governor
+
+        return running_governor()
+    except Exception as exc:  # noqa: BLE001 - no governor running: no pin
+        logger.debug("resource governor unavailable to the tuner's pins: %s", exc)
+        return None
+
+
+def _admit_trial(model_name: str, engine: str) -> tuple[Any, str]:
+    """(decision, error) for one trial of ``model_name`` on ``engine``.
+
+    The trial asks its own ticket as the tuner, naming its engine, so the
+    decision says who serves it and where the model computes. A refusal a
+    wait may lift is the trial's error, by its reason, and nothing runs; one
+    no wait can lift raises TunerRefused. No governor: (None, "").
+    """
+    governor = _tuner_governor()
+    if governor is None:
+        return None, ""
+    try:
+        decision = governor.admit_or_wait(model_name, caller=TUNER_CALLER, engine=engine)
+    except Exception as exc:  # noqa: BLE001 - the trial fails by it
+        return None, f"resource governor admission failed: {exc}"
+    if decision is None or getattr(decision, "admitted", True):
+        return decision, ""
+    reason = getattr(decision, "reason", "") or "refused"
+    try:
+        from opti_oignon.resource_governor import refusal_is_final
+
+        final = refusal_is_final(decision)
+    except Exception:  # noqa: BLE001 - unknown is not final
+        final = False
+    if final:
+        raise TunerRefused(f"refused by the resource governor: {reason}")
+    return None, f"held by the resource governor: {reason}"
+
+
+@contextmanager
+def _holding(decision: Any):
+    """Hold the trial's own ticket around the engine call, so the engine
+    gate accounts the load the governor admitted instead of admitting it
+    again as a user call, which may evict."""
+    if decision is None:
+        yield
+        return
+    from opti_oignon.resource_governor import ticket_scope
+
+    with ticket_scope(decision):
+        yield
+
+
+def _at_admitted_ctx(options: dict, decision: Any) -> dict:
+    """``options`` with the context the admission priced, so the engine
+    loads or keeps the model at that context; unchanged without one."""
+    ctx = getattr(decision, "num_ctx", None)
+    if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0:
+        return {**options, "num_ctx": ctx}
+    return options
+
+
+def _trial_labels(decision: Any, backend: Any, default_engine: str, params: dict) -> dict:
+    """What a trial's result says of itself: the engine that served it (the
+    admission's, else the backend's own name), where the model computed (the
+    admission's placement), and whether the engine applied the thread count
+    asked (``threads_per_call``, as the engine declares it)."""
+    engine = getattr(decision, "engine", None) or str(getattr(backend, "name", "") or default_engine)
+    return {
+        "engine": engine,
+        "placement": getattr(decision, "placement", None),
+        "threads_applied": "threads" in params and bool(getattr(backend, "threads_per_call", False)),
+    }
+
+
 def create_ollama_benchmark_fn(
     model_name: str,
     host: str = "http://localhost:11434",
@@ -1284,13 +1759,19 @@ def create_ollama_benchmark_fn(
                 error="no ollama backend in the inference registry: nothing was run",
             )
 
+        engine = str(getattr(_backend, "name", "") or "ollama")
+        decision, refused = _admit_trial(model_name, engine)
+        if refused:
+            return BenchmarkResult(params=params, error=refused, engine=engine)
+
         try:
             start = time.time()
-            response = _backend.generate(
-                model=model_name,
-                messages=[{"role": "user", "content": _BENCHMARK_PROMPT}],
-                options=options,
-            )
+            with _holding(decision):
+                response = _backend.generate(
+                    model=model_name,
+                    messages=[{"role": "user", "content": _BENCHMARK_PROMPT}],
+                    options=_at_admitted_ctx(options, decision),
+                )
             elapsed_ms = (time.time() - start) * 1000.0
 
             # The counters the engine reported, in nanoseconds; absent
@@ -1325,6 +1806,7 @@ def create_ollama_benchmark_fn(
                     SOURCE_MEASURED if tg_counted and pp_counted
                     else SOURCE_UNKNOWN
                 ),
+                **_trial_labels(decision, _backend, "ollama", params),
             )
 
         except Exception as exc:
@@ -1332,6 +1814,7 @@ def create_ollama_benchmark_fn(
             return BenchmarkResult(
                 params=params,
                 error=f"Ollama benchmark failed: {exc}",
+                engine=engine,
             )
 
     return _ollama_benchmark
@@ -1363,18 +1846,23 @@ def create_llamacpp_benchmark_fn(
     def _llamacpp_benchmark(params: dict) -> BenchmarkResult:
         nonlocal backend
 
+        # Resolve backend lazily if not provided.
+        _backend = backend
+        if _backend is None:
+            _backend = _registry_backend("llama_cpp")
+
+        if _backend is None:
+            return BenchmarkResult(
+                params=params,
+                error="llama.cpp backend not available",
+            )
+
+        engine = str(getattr(_backend, "name", "") or "llama_cpp")
+        decision, refused = _admit_trial(model_name, engine)
+        if refused:
+            return BenchmarkResult(params=params, error=refused, engine=engine)
+
         try:
-            # Resolve backend lazily if not provided.
-            _backend = backend
-            if _backend is None:
-                _backend = _registry_backend("llama_cpp")
-
-            if _backend is None:
-                return BenchmarkResult(
-                    params=params,
-                    error="llama.cpp backend not available",
-                )
-
             # Build Ollama-style options from tuner params.
             options: dict = {}
             if "threads" in params:
@@ -1395,11 +1883,12 @@ def create_llamacpp_benchmark_fn(
             ]
 
             start = time.time()
-            response = _backend.generate(
-                model=model_name,
-                messages=messages,
-                options=options,
-            )
+            with _holding(decision):
+                response = _backend.generate(
+                    model=model_name,
+                    messages=messages,
+                    options=_at_admitted_ctx(options, decision),
+                )
             elapsed_ms = (time.time() - start) * 1000.0
 
             # Estimate token speeds from wall-clock time.
@@ -1452,12 +1941,14 @@ def create_llamacpp_benchmark_fn(
                     SOURCE_MEASURED if tg_counted and pp_counted
                     else SOURCE_ESTIMATED
                 ),
+                **_trial_labels(decision, _backend, "llama_cpp", params),
             )
 
         except Exception as exc:
             return BenchmarkResult(
                 params=params,
                 error=f"llama.cpp benchmark failed: {exc}",
+                engine=engine,
             )
 
     return _llamacpp_benchmark

@@ -2751,6 +2751,178 @@ package costs.
   until a restart. The readings themselves are taken again, and the new
   file's marks judge them. Two loads of one model not yet seen now count
   once against the background, at the larger of the two. Nine contracts.
+- The hardware profile reads the CPUs as the kernel describes them. The
+  cores the server may use are the CPUs online and in its affinity, each set
+  of SMT siblings folded into one physical core; the profile also names the
+  L3 domains, the NUMA nodes and the tightest `cpu.max` quota from the
+  server's cgroup up to the root. The cores are ranked by the first kernel
+  source that parts them (CPPC highest performance, AMD's preferred-core
+  ranking, readable with preferred cores off, the scheduler's capacity, the
+  highest frequency), and a new performance class starts where a rank falls
+  more than `cpu_class_gap` (0.15) below the one above it; a flat or
+  incomplete source is passed over, and with none the cores form one class,
+  still ordered for the reserve. `cpu_classes` names the classes outright,
+  and a reading is kept `topology_ttl_s` (60 s), so an affinity or a quota
+  changed at run time is seen. A second view reads the machine itself: every
+  online CPU, whatever the server's affinity, and no quota, the CPUs an
+  engine in a process of its own may run on. An AMD display controller
+  counts as integrated when its DRM card at the same PCI address does: a
+  machine with an APU alone is judged on its RAM, like a machine with no
+  card. Fourteen contracts.
+- The governor plans the CPU threads an engine computes with, when it
+  computes on the CPU: a model split between the GPU and system RAM, or any
+  model on a machine with no card. The count is the machine's physical cores
+  less a reserve left to the user's programs (`threads.reserve_fraction`,
+  0.125 rounded up, between `reserve_floor` 1 and `reserve_ceiling` 4, never
+  the last core), never under one, and no more than the fastest class's
+  cores with `fast_cores_only` (shipped off until a machine measures it
+  faster); `threads.models` names a model's own count. That count is told to
+  an engine in a process of its own (Ollama), which neither the server's
+  affinity nor its cgroup quota binds. llama.cpp computes in the server's
+  own process and loads within the server's own cap: the cores of its
+  affinity less the reserve, never past its `cpu.max` quota rounded down
+  (one throttled thread stalls the others at the engine's barriers). Every
+  decision carries `threads`, `threads_batch` and where they come from: the
+  plan, an override, or the count a resident was loaded with. With the plan
+  off or the CPUs unreadable no count is told, and neither is a load the GPU
+  holds whole. Ollama is told `num_thread` by both generation heads, `embed`
+  and `embed_many` (these two send options only when there is a count; the
+  warm-up and its ping go through a generation head), unless the call names
+  its own; llama.cpp gets `n_threads` and `n_threads_batch`, unless
+  `backends.yaml` names its own (`n_threads_batch: null` follows
+  `n_threads`, as llama.cpp does). The count is pinned with the resident,
+  like its layers: a resident served as it is keeps the count its load was
+  told, so no call reloads a model for a thread count; a pending load keeps
+  its count for the call that joins it. Known limits: an engine under CPU
+  limits of its own (a container's cpuset or quota) is told the machine's
+  count, which `threads.models` can lower per model; another client of the
+  same Ollama that does not repeat `num_thread` reloads the model; a restart
+  of the server forgets the pins, so the first call to a resident loaded
+  with a count reloads it once; the status shows a llama.cpp resident at the
+  count admitted, before the server's cap. Twenty-two contracts.
+- Background work runs in worker processes that leave the machine to its
+  user. `background_pool.py` starts them with `spawn` (no Unix socket, a
+  persistent pool); before any task, each puts every one of its threads in
+  SCHED_IDLE, enters the idle I/O class (`ioprio_set`, with the syscall
+  numbers of x86-64 and of the generic table arm64 and riscv64 share, for a
+  64-bit interpreter only; a 32-bit interpreter on a 64-bit kernel, whose
+  numbers differ, is said unsupported) and takes the CPUs of the cores
+  outside the reserve, the reserve being the highest-ranked cores (fastest
+  class, highest rank, lowest CPU). A kernel refusal leaves the worker at
+  normal priority and is named by its errno, the other steps done all the
+  same. The server's own threads are never lowered, and the worker setup
+  refuses to run in the server's process. There is one worker per core
+  outside the reserve, at most `threads.background.max_workers` (4), never
+  more than the quota less the reserve, never under one;
+  `in_flight_per_worker` (2) tasks are queued per worker, and the workers
+  exit after `idle_shutdown_s` (120 s) without a task, to start again with
+  the next one. Stopping the server ends the workers at once instead of
+  running the tasks still queued, those of executors retired without waiting
+  too, and closes the server's end of their result pipes, so a result cut
+  halfway holds nothing. With the plan missing or off, or processes that
+  cannot start (said, and remembered), the work runs on the thread that asks
+  for it. Indexing is the first user: the chunking of each file runs in the
+  pool, and a worker holds a whole document as it parses it, so a file is
+  sent only while the estimated parses of the files in flight, of every
+  indexing job and its own included, fit the room the governor gives the
+  background (the RAM available less the reserve a split leaves the machine,
+  none under memory pressure); the estimate is the file's size times
+  `threads.background.parse_expansion` for its kind (4 by default, 10 for a
+  PDF, 30 for a Word document, 50 for a spreadsheet). A job with nothing in
+  flight waits for room, and is served before a job with files in flight
+  sends more; a file larger than the room goes once nothing is in flight; a
+  parse that runs on after its job is cancelled keeps its room until it
+  ends. The job stores the chunks in order, each file under a governor
+  ticket for the embedding model as the background caller `index`; a refusal
+  a wait can lift is asked again after `held_retry_s` (30 s), a final
+  refusal fails the file with its reason. The pool is shared by every job: a
+  task that breaks retires only the workers it ran on, and each file that
+  may have killed them is chunked again alone, in a worker no other task
+  shares, so only a file whose own worker dies fails, by name; a file whose
+  task an executor retired under it is sent again; a worker the pool's own
+  shutdown ends blames no file. A cancel is seen within half a second while
+  the job waits for a chunking or for its admission (the governor's queue
+  takes the job's cancel): the files in flight go back to the queue, nothing
+  chunked after the cancel is stored, and an admission granted as the cancel
+  lands is handed back. Whatever stops a job, every file it holds goes back
+  to the queue. `ingest_file` now creates the collection after the chunking.
+  Known limits: on a machine whose GPU memory cannot be read, indexing fails
+  every file unless the embedding model is already loaded (the background is
+  refused a load it cannot price); if the kernel refuses SCHED_IDLE, the
+  pool keeps its workers at normal priority, said; results come back from
+  the workers by pickle, so the pool is no security boundary, as the
+  server's own thread was not; an `index` caller the configuration would
+  move out of the background class fails the job with the pool's reason;
+  under a quota an idle worker draws from the server's own quota, hence the
+  bound of the quota less the reserve; each worker imports the server's main
+  module again (under `oo` the entry script imports only the command line;
+  not proven when the server is launched by path); the parse factors are
+  estimates, not measurements. Forty-four contracts.
+- The auto-tuner measures the thread count, and the governor keeps what it
+  confirms. `parameter_space.threads: auto`, now the default, sweeps the
+  plan's count, each of `threads_fractions` (0.5, 0.75) of it rounded up,
+  and the fastest class's core count, never past the plan; a list is swept
+  as written, and an unreadable value falls back to auto, named in the log.
+  The baseline runs at the plan's count. Each trial takes a governor ticket
+  as the background caller `tuner`, naming its engine, holds it through the
+  call and sends the context it was admitted at: a sweep now waits for the
+  machine and no longer evicts. A held trial is an error named as such; a
+  final refusal ends the sweep, and so does a baseline that could not be
+  measured. Each result carries its engine, its placement (`cpu`,
+  `split:<GPU layers>`, or none when the card holds the model whole or the
+  split's layers are not counted) and the count applied. The best thread
+  trial (the smaller count on a tie) is confirmed and kept only when the
+  confirmation has no error, every thread trial was measured, the engine
+  applies a count per call (Ollama does; llama.cpp fixes it at load), one
+  engine and one placement ran every trial, the placement is known, the
+  count is within the plan, and the confirmed generation rate is no lower
+  than the baseline's; otherwise a last trial runs at the plan's count. When
+  the last trial to reach the engine ran at another count (the run
+  cancelled, refused or failed, or its settling trial held by the governor),
+  the governor pins what a fresh load would get, the plan or a count kept
+  for that model, engine and placement, so the next call reloads the model
+  once at it; a run that changed no pin, or whose trials reached no engine,
+  changes none, and a run reads and restores pins only in a running
+  governor, starting none. The fastest class's candidate counts the
+  machine's cores, as the plan does. A kept count is stored per model,
+  engine and placement with a fingerprint of the machine's cores, and is
+  planned from then on when all three match and the fingerprint holds,
+  within the current plan; a model's own count still wins. A call that sends
+  a resident its own count re-pins it, since Ollama reloads for any other.
+  The tuner's status route no longer fails on `auto` (the schema takes a
+  list or the word, with its fractions), and a tuner profile carries the
+  count it kept, or why it kept none. Known limits: a model that must be
+  split is measured only when already loaded (the background does not
+  split); the sweep measures at the background's context (the model's last
+  interactive context when there is one); the first load after a start does
+  not know its engine yet, so a kept count applies from the next load;
+  threads are measured at the tuner's other defaults (batch 2048, flash
+  attention); a split whose layers are not counted, and llama.cpp, keep
+  nothing; the fingerprint names neither the RAM nor the card. Eighteen
+  contracts.
+- The governor's `/status` shows the cores and the background. `threads`
+  gives the plan, the machine's physical cores, the reserve, the server's
+  quota and its own cap, the background's budget, the pins, and the counts
+  the tuner kept with whether each holds on this machine (at most
+  `threads.status_limit`, 50, newest first); `background` gives the pool's
+  state (reading it creates no pool), the I/O class policy of the nearest
+  cgroup that names one, and what the idle I/O class does on each disk the
+  indexing reads: it takes effect under bfq, is deferred under mq-deadline
+  (whose aging is given), and does nothing under kyber or none; a policy
+  that promotes it takes effect under bfq and mq-deadline only. oo never
+  changes a disk's scheduler. A section that cannot be read says it is
+  unavailable while the rest of the status stands. The hardware profile's
+  view carries the CPUs as the topology reads them. An indexing job notes
+  the device of each file it sends the pool, and its route names the disks
+  behind each device once (a partition's disk, the disks under device-mapper
+  and md, a mount's device, found by the file's path where its device number
+  shows on no mount, as on a btrfs subvolume), in device order. Known
+  limits: a btrfs over several disks names only the device its mount gives;
+  overlayfs, ZFS and network filesystems are unknown; the disks are those of
+  the files sent since the server started. Owed to the machine: what the
+  idle CPU and I/O classes spare a loaded desktop, the thread count each
+  model runs best at, and whether the fast cores alone run faster. Eleven
+  contracts.
 
 ## 2.2.0 -- 2026-07-28
 

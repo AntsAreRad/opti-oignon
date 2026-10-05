@@ -3265,7 +3265,8 @@ export interface TunerConfig {
 export interface TunerParameterSpace {
 	batch_size: number[];
 	ubatch_size: number[];
-	threads: number[];
+	threads: number[] | 'auto';
+	threads_fractions: number[];
 	flash_attention: boolean[];
 }
 
@@ -3302,6 +3303,8 @@ export interface TunerProfile {
 	hardware_fingerprint: string;
 	timestamp: number;
 	all_results: Record<string, unknown>[];
+	threads_optimum: Record<string, unknown> | null;
+	threads_note: string;
 }
 
 export interface TunerResultsResponse {
@@ -3412,6 +3415,28 @@ export interface RAGIngestJob {
 	completed_at: number | null;
 	error_message: string | null;
 	files: RAGIngestFileStatus[];
+	/** The disks the background read the job's files from (the detail route fills it). */
+	disks?: RAGIngestDevice[];
+}
+
+/** What a disk's scheduler does with the idle I/O class the background reads in. */
+export type RAGIdleClassEffect = 'honored' | 'deferred' | 'no_effect' | 'promoted_to_rt' | 'unknown' | 'mixed';
+
+export interface RAGIngestDisk {
+	name: string;
+	scheduler: string | null;
+	/** Under mq-deadline, the wait after which a lower class is served anyway. */
+	aging_ms: number | null;
+	idle_class: RAGIdleClassEffect;
+}
+
+export interface RAGIngestDevice {
+	device: string;
+	disks: RAGIngestDisk[];
+	/** The io.prio.class of the nearest cgroup that names one. */
+	policy: string | null;
+	idle_class: RAGIdleClassEffect;
+	reason: string | null;
 }
 
 export interface RAGIngestJobsListResponse {

@@ -71,8 +71,12 @@ llama_cpp:
   # Set to 0 for CPU-only inference
   n_gpu_layers: -1
 
-  # Number of CPU threads (null = auto-detect)
+  # CPU threads for the tokens and for the prompt. null: the resource
+  # governor's plan (the physical cores less a reserve, when the model
+  # computes on the CPU; resource_governor.yaml, threads), else the
+  # library's own. n_threads_batch follows n_threads when only that is set.
   n_threads: null
+  n_threads_batch: null
 
   # Batch size for prompt processing
   n_batch: 512
