@@ -21,10 +21,14 @@ loads and is exercised without the backend.
 Module note: there is intentionally no API here to put untrusted content in
 the system role. ``untrusted_message`` always returns role ``user``; for this
 module's helpers the system-role exclusion is a property of the code, not a
-convention. The chat executor places its memory block and its web results,
-each wrapped by ``wrap``, inside a system message: the policy header and the
-markers are the same there, the role is not, and moving both to the user role
-is owed to a later context change.
+convention. The chat builders hold to it too: every block they wrap here,
+summaries of earlier turns included, rides a user-role message, and their
+system messages carry the instruction head alone. ``coalesce_user_turns``
+joins the user messages that placement leaves side by side.
+
+A wrapped block also loses any frame marker of the onion's composer it
+carries: only the composer writes ``[data ...]`` and ``[/data]``, and only
+the window it renders is wrapped with its frames kept.
 """
 
 from __future__ import annotations
@@ -71,6 +75,19 @@ UNTRUSTED_POLICY = (
 
 # Matches any forged untrusted-data marker (open or close) inside content.
 _DELIM_RE = re.compile(r"</?\s*untrusted_data\b[^>]*>?", re.IGNORECASE)
+
+# Matches a frame marker of the onion's composer inside content: the closing
+# tag, bare or with attributes, or the opening bracket of a frame with its
+# first attribute. A bracket holding the bare word -- an index, a list, a
+# section header, a link text -- is ordinary code or prose and is left alone.
+_FRAME_RE = re.compile(
+    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data\s*[:\s]\s*[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
+    re.IGNORECASE,
+)
+FRAME_MARKER_REDACTED = "[redacted-frame-marker]"
+
+# The header that opens every summary of earlier turns inside its envelope.
+SUMMARY_HEADER = "[Summary of earlier conversation]"
 _SOURCE_RE = re.compile(r"[^a-z0-9_\-]")
 
 # Reads back the source label of a genuine open marker. Only markers this
@@ -100,31 +117,42 @@ def _safe_source(source: Any) -> str:
     return cleaned or SOURCE_EXTERNAL
 
 
-def _neutralize(text: str) -> str:
+def _neutralize(text: str, *, frames: bool = False) -> str:
     """Defang any untrusted-data marker the content tries to forge.
 
     Defense in depth behind the policy statement: a payload cannot close the
     wrapper early or open a fake one, so the real close marker appears exactly
-    once. The policy remains the primary defence.
+    once. The policy remains the primary defence. Composer frame markers are
+    defanged as well, unless ``frames`` says the content is the composer's
+    own rendered window, whose segment texts it has already defanged.
     """
-    return _DELIM_RE.sub("[redacted-untrusted-marker]", text)
+    text = _DELIM_RE.sub("[redacted-untrusted-marker]", text)
+    if not frames:
+        text = neutralize_frames(text)
+    return text
 
 
-def _block(source: str, content: str) -> str:
+def neutralize_frames(text: str) -> str:
+    """Defang every composer frame marker in ``text``."""
+    return _FRAME_RE.sub(FRAME_MARKER_REDACTED, text)
+
+
+def _block(source: str, content: str, *, frames: bool = False) -> str:
     open_tag = OPEN_FMT.format(source=_safe_source(source))
-    return f"{open_tag}\n{_neutralize(str(content))}\n{CLOSE}"
+    return f"{open_tag}\n{_neutralize(str(content), frames=frames)}\n{CLOSE}"
 
 
-def wrap(content: str, *, source: str = SOURCE_EXTERNAL) -> str:
+def wrap(content: str, *, source: str = SOURCE_EXTERNAL, frames: bool = False) -> str:
     """Wrap a single piece of external content as an untrusted-data block.
 
     Returns the policy statement followed by the delimited, neutralised
     content. Empty or whitespace-only content yields an empty string (there is
-    nothing to wrap).
+    nothing to wrap). ``frames`` keeps composer frame markers, and is for the
+    composer's rendered window alone.
     """
     if not content or not str(content).strip():
         return ""
-    return f"{UNTRUSTED_POLICY}\n\n{_block(source, content)}"
+    return f"{UNTRUSTED_POLICY}\n\n{_block(source, content, frames=frames)}"
 
 
 def wrap_items(items: Iterable[tuple[str, str]]) -> str:
@@ -150,6 +178,52 @@ def untrusted_message(content: str, *, source: str = SOURCE_EXTERNAL) -> dict[st
     system role.
     """
     return {"role": ROLE, "content": wrap(content, source=source)}
+
+
+def summary_message(text: Any) -> dict[str, str] | None:
+    """A summary of earlier turns as memory data in a user-role message, or None.
+
+    A summary is what a model wrote about turns that may have carried anything
+    a page or a tool put there: it is data, quoted under the memory label,
+    never an instruction. Empty text gives None: there is nothing to place.
+    """
+    body = str(text or "").strip()
+    if not body:
+        return None
+    return untrusted_message(f"{SUMMARY_HEADER}\n{body}", source=SOURCE_MEMORY)
+
+
+_SUMMARY_PREFIX = (
+    f"{UNTRUSTED_POLICY}\n\n{OPEN_FMT.format(source=SOURCE_MEMORY)}\n{SUMMARY_HEADER}\n"
+)
+
+
+def is_summary_message(message: Any) -> bool:
+    """Whether ``message`` is a summary written by ``summary_message``."""
+    return (
+        isinstance(message, dict)
+        and message.get("role") == ROLE
+        and str(message.get("content", "")).startswith(_SUMMARY_PREFIX)
+    )
+
+
+def coalesce_user_turns(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Join each run of adjacent user messages into one, in order.
+
+    A chat template written for strictly alternating turns may refuse two
+    user messages in a row, and data blocks ride the user role beside the
+    turn they belong to. Each run is joined with a blank line between its
+    parts, every byte kept; any other message passes through as it is. The
+    caller's list and dicts are left untouched.
+    """
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        if out and message.get("role") == ROLE and out[-1].get("role") == ROLE:
+            joined = f"{out[-1].get('content', '')}\n\n{message.get('content', '')}"
+            out[-1] = {**out[-1], "content": joined}
+        else:
+            out.append(dict(message))
+    return out
 
 
 def untrusted_message_many(items: Iterable[tuple[str, str]]) -> dict[str, str] | None:

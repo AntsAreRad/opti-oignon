@@ -124,6 +124,13 @@ class ReceiptLedger:
                     f"receipt {receipt.key} resolves to no Cellar span: refused before it reaches the model"
                 )
 
+    def read(self, key, cellar):
+        """Hand the span back; no receipt changes."""
+        self._check(cellar)
+        if not any(receipt.key == key for receipt in self._receipts):
+            raise DanglingReceiptError(f"receipt {key} is not in the ledger")
+        return cellar.get(key)
+
     def resolve(self, key, cellar):
         """Hand the span back and mark its receipt resolved."""
         self._check(cellar)

@@ -22,6 +22,7 @@ plus the reserve exceed the window. Nothing on the chat path imports this
 module yet, and a contract on the tree says so.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,22 @@ checkpoint_before_apply = True
 LAYERS = ("core", "receipts", "peels", "flesh", "turn")
 _INSTRUCTION_BEARING = frozenset({"core", "turn"})
 _CONFIG = Path(__file__).resolve().parent.parent / "config" / "onion.yaml"
+
+# A frame marker found inside a segment's own text: the closing tag, bare or
+# with attributes, or the opening bracket of a frame with its first attribute.
+# Only ``render`` writes frames, so one found in a text was forged there and is
+# defanged; a bracket holding the bare word is ordinary code and stays.
+_FRAME_RE = re.compile(
+    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data\s*[:\s]\s*[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
+    re.IGNORECASE,
+)
+_FRAME_REDACTED = "[redacted-frame-marker]"
+# The start of a marker left open at the very end of a text: segments are
+# joined by blank lines, which a marker may hold, so ``[data`` closing one
+# segment and ``]`` opening the next would make a frame between them.
+_FRAME_TAIL_RE = re.compile(r"\[\s*(?:/\s*)?(?:data\s*)?$", re.IGNORECASE)
+# What a frame header may carry from a tag: no bracket, no line break.
+_TAG_UNSAFE = re.compile(r"[\[\]\r\n]")
 
 
 class BudgetError(ValueError):
@@ -118,13 +135,21 @@ class Prompt:
     dropped_peels: int
 
     def render(self):
-        """The window as text. Recalled segments are framed as quoted data with their tag."""
+        """The window as text. Recalled segments are framed as quoted data with their tag.
+
+        No segment text opens or closes a frame: a marker found in any of
+        them, the Core and the turn included, is defanged first, so the only
+        frames in the window are the ones written here.
+        """
         parts = []
         for seg in self.segments:
+            text = _FRAME_TAIL_RE.sub(_FRAME_REDACTED, _FRAME_RE.sub(_FRAME_REDACTED, str(seg.text)))
             if seg.instruction_bearing:
-                parts.append(seg.text)
+                parts.append(text)
             else:
-                parts.append(f"[data layer={seg.layer} provenance={seg.provenance}]\n{seg.text}\n[/data]")
+                layer = _TAG_UNSAFE.sub("", str(seg.layer))
+                provenance = _TAG_UNSAFE.sub("", str(seg.provenance))
+                parts.append(f"[data layer={layer} provenance={provenance}]\n{text}\n[/data]")
         return "\n\n".join(parts)
 
 

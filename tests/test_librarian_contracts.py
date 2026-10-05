@@ -742,5 +742,55 @@ def test_lb18_an_open_after_a_restart_returns_the_persisted_block_or_refuses_by_
         restore()
 
 
+# ---------------------------------------------------------------------------
+# LB19 -- what LB14 pinned, now that a recall reads and the user closes
+# ---------------------------------------------------------------------------
+def test_lb19_a_recall_reads_the_span_a_user_close_is_saved_and_every_mutation_is_saved(tmp_path):
+    import sqlite3
+
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        path = tmp_path / "onion.db"
+        cfg = _config(lib, persist_path=str(path), require_encryption=False)
+        opener = lambda p: sqlite3.connect(str(p))  # noqa: E731
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=opener, require_encryption=False)
+
+        state = lib.state_for("c1", cfg)
+        state.mirror(_messages(12))
+        while lib.curate(state, _faithful, gate=gate, budget=budget).evicted:
+            pass
+        receipts = lib.open_receipts("c1", config=cfg)
+        assert len(receipts) >= 2, "control: open receipts to recall"
+        key = receipts[0].key
+        span = lib.recall("c1", key, config=cfg)
+        assert [t["turn_id"] for t in span] == list(receipts[0].turn_ids)
+        assert span[0]["text"].startswith("Turn 1:"), "the verbatim span, not a summary"
+        assert key in [r.key for r in lib.open_receipts("c1", config=cfg)], "a read leaves the receipt open"
+        with pytest.raises(KeyError, match="not in the ledger"):
+            lib.recall("c1", "0" * 64, config=cfg)
+
+        assert lib.resolve_receipt("c1", key, actor="user", config=cfg) is True
+        assert key not in [r.key for r in lib.open_receipts("c1", config=cfg)], "the user closed it"
+        assert receipts[0].stub not in lib.memory_block("c1", "service", budget=budget, config=cfg), "the digest no longer shows it"
+        just_closed = store_mod.OnionStore(path, connect=opener, require_encryption=False).load("c1", lib.OnionState())
+        assert [r.resolved for r in just_closed.ledger.all() if r.key == key] == [True], (
+            "the close itself was saved, before any later mutation could save it"
+        )
+
+        entry_id = lib.pin("c1", "The user is Alice.", actor="user", config=cfg)
+        lib.supersede("c1", entry_id, "The user is Alice, in Lyon.", actor="user", config=cfg)
+        reader = store_mod.OnionStore(path, connect=opener, require_encryption=False)
+        fresh = reader.load("c1", lib.OnionState())
+        assert [e.text for e in fresh.core.active()] == ["The user is Alice, in Lyon."], "pin and supersession were saved"
+        assert [r.resolved for r in fresh.ledger.all()][0] is True, "the close was saved"
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

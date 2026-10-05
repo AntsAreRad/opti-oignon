@@ -51,14 +51,13 @@ report:
   # Keep last N reports in memory for API access
   max_retained: 10
 
-# Stable prompt prefix. When enabled, the per-turn volatile blocks
-# (ranked memory, web results, archive snippets, project retrieval)
-# leave the leading system message and ride one trailing context message
-# placed after the history and before the user turn, so the leading
-# bytes -- and the KV cache a local engine computed over them -- survive
-# from turn to turn. Applies to the optimizer pipeline and the manual
-# fallback alike; cache identity (head plus tail) never moves with the
-# placement. Rollback: enabled false.
+# Stable prompt prefix. The per-turn blocks (ranked memory, web results,
+# archive snippets, project retrieval) never enter the leading system
+# message: on every path they ride the user role, wrapped as untrusted
+# data, in front of the user turn, so the leading bytes -- and the KV cache
+# a local engine computed over them -- survive from turn to turn whatever
+# this says. When enabled, a llama-server engine is also asked to reuse its
+# prompt cache. Cache identity (head plus tail) never moves with it.
 stable_prefix:
   enabled: false
 

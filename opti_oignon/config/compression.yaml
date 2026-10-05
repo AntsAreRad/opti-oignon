@@ -64,3 +64,36 @@ retrieval_trigger_enabled: true
 
 # Minimum confidence score to auto-inject retrieved context
 retrieval_trigger_min_confidence: 0.6
+
+
+# -- Live summary: the manual pipeline's summary of turns that left the window --
+# Every value is checked when read; one that cannot be right is refused by
+# its full name, and the summarizer then asks no model at all.
+live_summary:
+  # The preferred summary model, tried first among the installed ones
+  model: "qwen3:8b"
+  # Tried in order after it when it is not installed
+  fallback_models: ["qwen3:8b", "nemotron-3-nano:8b", "qwen3:4b", "qwen3:1.7b"]
+  # Sampling temperature (low = factual)
+  temperature: 0.3
+  # Cap on the summary the model writes, in tokens
+  max_summary_tokens: 400
+  # A call slower than this, in seconds, is logged as slow
+  timeout_s: 15
+  # Cap on the turns handed to the model, in tokens (oldest dropped first)
+  max_input_tokens: 4000
+  # Fewest history messages before a summary is attempted
+  min_messages: 4
+
+# -- Summary tiers: frozen segments of the archive, each summarized from its turns --
+summary_tiers:
+  # Archived tokens that make one frozen segment
+  segment_budget_tokens: 1200
+  # Most recent messages never frozen
+  tail_keep_messages: 4
+  # Room the composed segments may take in a window, in tokens: the first
+  # segment and then the newest that fit; the others stay in the archive
+  compose_budget_tokens: 1600
+  # Largest share of the window's soft limit the composed segments may take,
+  # so a small window keeps its recent turns word for word (0 < share <= 1)
+  compose_share: 0.25

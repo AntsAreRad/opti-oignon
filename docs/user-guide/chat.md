@@ -64,8 +64,9 @@ selected automatically based on query analysis:
 - **Web search** -- augments the response with web results. The query
   goes through the ddgs package, which sends it to Wikipedia and to one
   or more search engines it picks at random. The results reach the model
-  wrapped as untrusted data, still inside a system message. Refused in
-  Bulbe mode and while the search kill switch is engaged.
+  wrapped as untrusted data, in front of your question, never in a system
+  message. Refused in Bulbe mode and while the search kill switch is
+  engaged.
 - **Reasoning** -- advanced strategies (Decompose-and-Solve,
   Tree-of-Thought, Self-Consistency)
 - **Consensus** -- multiple models vote on the best answer

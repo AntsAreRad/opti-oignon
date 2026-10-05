@@ -301,10 +301,17 @@ class OnionPinResponse(BaseModel):
 
 
 class OnionRecallResponse(BaseModel):
-    """The verbatim span behind a receipt, now resolved."""
+    """The verbatim span behind a receipt; the receipt stays open."""
     conversation_id: str
     key: str
     span: list[dict] = []
+
+
+class OnionResolveResponse(BaseModel):
+    """A receipt the user closed: it left the digest and stays in the ledger."""
+    conversation_id: str
+    key: str
+    resolved: bool
 
 
 # -- Memory store (two-tier MemoryStore) --

@@ -106,6 +106,7 @@ REQUIRED = {
     'OnionPinResponse': ('conversation_id', 'id'),
     'OnionRecallResponse': ('conversation_id', 'key'),
     'OnionReceiptSchema': ('key', 'stub'),
+    'OnionResolveResponse': ('conversation_id', 'key', 'resolved'),
     'OnionStateResponse': ('conversation_id',),
     'OnionSupersedeRequest': ('old_id', 'text'),
     'NoteActionResultSchema': ('action', 'ok'),
@@ -786,6 +787,38 @@ def test_q33_window_holds_and_the_module_is_import_pure_at_330_models():
             "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse", "OnionRecallResponse",
             "OnionReceiptSchema", "OnionStateResponse", "OnionSupersedeRequest",
         }, "the seven are the onion's user surface and nothing else"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q34_window_holds_and_the_module_is_import_pure_at_331_models():
+    """q33 word for word, at the count the receipt's close brought the module
+    to: one schema for the user's resolution of a receipt (q33 is deselected
+    by name; its literal was 330).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 331
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse", "OnionRecallResponse",
+            "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse", "OnionSupersedeRequest",
+        }, "the eight are the onion's user surface and nothing else"
         residue = {
             k
             for k, v in vars(S).items()

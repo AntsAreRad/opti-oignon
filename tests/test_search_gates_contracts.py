@@ -118,6 +118,7 @@ BUDGET_S = {
     "test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed": 2.0,
     "test_ks4_web_results_reach_a_model_only_inside_the_untrusted_envelope": 2.0,
     "test_ks5_the_allowlist_and_the_breaker_act_on_every_real_search": 2.0,
+    "test_ks7_web_results_reach_a_model_only_inside_the_untrusted_envelope_in_the_user_turn": 2.0,
     "test_ud1_a_page_fetch_reaches_only_a_public_address_the_one_it_checked": 2.0,
     "test_ud2_a_page_fetch_is_bounded_and_the_ingest_route_keeps_its_answers": 2.0,
 }
@@ -2573,6 +2574,177 @@ def test_ud2_a_page_fetch_is_bounded_and_the_ingest_route_keeps_its_answers(tmp_
         status, detail, response = _ingest(w, "http://pages.example/typed")
         assert status == 200 and response.chunk_count == 1, (status, detail)
         assert accented.strip() in w.store._chunker.texts[-1], w.store._chunker.texts[-1][-120:]
+
+
+# ---------------------------------------------------------------------------
+# KS7 -- what KS4 pinned, with the block in the user turn
+# ---------------------------------------------------------------------------
+def test_ks7_web_results_reach_a_model_only_inside_the_untrusted_envelope_in_the_user_turn(tmp_path):
+    """The chat executor carries the wrapped block in the user turn.
+
+    KS4 pinned the block in a system message and named that placement a known
+    weakness, owed to the change that moves untrusted blocks to the user role.
+    That change is made: whatever the stable-prefix flag says, the block rides
+    the final user turn, wrapped, and no system message carries the canary.
+    c3 to c7 are KS4's own, word for word.
+    """
+    executor_names = (_WRAPPER, _OPT, _DEDUP, _EX)
+
+    # c1 -- flag off: the block rides the user turn, wrapped; no system message carries it.
+    with _window(tmp_path, executor_names, seeded={_WS: _hostile_engine()}) as w:
+        calls, _statuses = _turn(w)
+        messages = calls[-1]["messages"]
+        turn = messages[-1]["content"]
+        assert messages[-1]["role"] == "user"
+        assert _OPEN_WEB in turn, "the web results are wrapped as untrusted data"
+        assert _inside_web_block(turn), turn
+        assert w.mods[_WRAPPER].sources_present(turn) >= {"web"}
+        close = turn.index(_CLOSE, turn.index(_OPEN_WEB))
+        assert "Use the web results" in turn[close:], "the platform's sentence stays outside the block"
+        assert not any(_CANARY in m["content"] for m in messages if m["role"] == "system")
+
+    # c2 -- flag on: the same placement; the flag no longer moves the block.
+    with _window(tmp_path, executor_names, seeded={_WS: _hostile_engine()}, flag_on=True) as w:
+        calls, _statuses = _turn(w)
+        messages = calls[-1]["messages"]
+        assert messages[-1]["role"] == "user"
+        assert _inside_web_block(messages[-1]["content"]), messages[-1]["content"]
+        assert not any(_CANARY in m["content"] for m in messages if m["role"] == "system")
+
+    # c3 -- without the wrapper the results are withheld, and it is said.
+    with _window(tmp_path, (_OPT, _DEDUP, _EX), seeded={_WS: _hostile_engine()}, blocked=(_WRAPPER,)) as w:
+        calls, statuses = _turn(w)
+        assert len(calls) == 1
+        assert not any(_CANARY in m["content"] for m in calls[-1]["messages"]), "no bare web text"
+        assert any("withheld" in s for s in statuses), statuses
+
+    # c4 -- the tool loop wraps its own listing, and withholds it without
+    # the wrapper.
+    loaded, restore = isolate(
+        targets={_WRAPPER: _SOURCES[_WRAPPER], _TR: _SOURCES[_TR]},
+        seeded={_WS: _hostile_engine()},
+        packages=("opti_oignon.agent",),
+    )
+    try:
+        out = loaded[_TR]._handle_web_search("q")
+        assert out.startswith(loaded[_WRAPPER].UNTRUSTED_POLICY), out[:120]
+        assert _inside_web_block(out), out
+    finally:
+        restore()
+    loaded, restore = isolate(
+        targets={_TR: _SOURCES[_TR]},
+        seeded={_WS: _hostile_engine()},
+        blocked=(_WRAPPER,),
+        packages=("opti_oignon.agent",),
+    )
+    try:
+        out = loaded[_TR]._handle_web_search("q")
+        assert "withheld" in out and _CANARY not in out, out
+    finally:
+        restore()
+
+    # c5 -- the agent loop wraps every observation, web included.
+    allowlists = types.ModuleType("opti_oignon.agent.allowlists")
+    dispatch = types.ModuleType("opti_oignon.agent.dispatch")
+    loaded, restore = isolate(
+        targets={_WRAPPER: _SOURCES[_WRAPPER], _AGENT_TOOLS: _SOURCES[_AGENT_TOOLS], _AGENT_LOOP: _SOURCES[_AGENT_LOOP]},
+        seeded={"opti_oignon.agent.allowlists": allowlists, "opti_oignon.agent.dispatch": dispatch},
+        packages=("opti_oignon.agent",),
+    )
+    try:
+        handler = loaded[_AGENT_TOOLS].make_web_search_handler(
+            search_fn=lambda query, max_results=3: "[1] T1\n" + _HOSTILE_SNIPPET + "\nURL: http://local/1"
+        )
+        observation = handler({"query": "q"})
+        assert _CANARY in observation
+        message = loaded[_AGENT_LOOP]._observations_message(
+            [SimpleNamespace(tool_name="web_search", observation=observation)]
+        )
+        assert message["role"] == "user"
+        content = message["content"]
+        at = content.index(_CANARY)
+        opened = content.rfind("<untrusted_data ", 0, at)
+        closed = content.rfind(_CLOSE, 0, at)
+        assert opened > closed and content.find(_CLOSE, at) > at, "the observation lies inside a block"
+        assert "[redacted-untrusted-marker]" in content
+    finally:
+        restore()
+    loop_tree = ast.parse(_PKG.joinpath("agent", "loop.py").read_text(encoding="utf-8"))
+
+    def _wraps(call):
+        return (
+            isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "untrusted_message_many"
+            and isinstance(call.func.value, ast.Name) and call.func.value.id == "untrusted_context"
+        )
+
+    plain = [r for r in ast.walk(_function(loop_tree, "_observations_message")) if isinstance(r, ast.Return)]
+    assert plain and all(_wraps(r.value) for r in plain)
+    capped = [r for r in ast.walk(_function(loop_tree, "_capped_observations_message")) if isinstance(r, ast.Return)]
+    assert capped and all(isinstance(r.value, ast.Tuple) and _wraps(r.value.elts[0]) for r in capped)
+
+    # c6 -- the consumers of web results are exactly these.
+    consumers = _web_consumers(_PKG)
+    assert consumers == _MODEL_CONSUMERS | _NON_MODEL | _UNWIRED, sorted(consumers)
+    assert consumers & _MODEL_CONSUMERS and consumers & _NON_MODEL and consumers & _UNWIRED
+    importers = [
+        path for path in _package_files(_PKG)
+        if "search_integration" in path.read_text(encoding="utf-8", errors="ignore")
+        and path.name != "search_integration.py"
+        and any(
+            (isinstance(n, ast.ImportFrom) and (n.module or "").endswith("search_integration"))
+            or (isinstance(n, ast.Import) and any(a.name.endswith("search_integration") for a in n.names))
+            for n in ast.walk(ast.parse(path.read_text(encoding="utf-8", errors="ignore")))
+        )
+    ]
+    assert importers == [], importers
+    planted = tmp_path / "planted" / "opti_oignon"
+    planted.mkdir(parents=True)
+    (planted / "router.py").write_text("from opti_oignon.web_search import web_searcher\n", encoding="utf-8")
+    assert _web_consumers(planted) == {"router.py"}, "witness: a planted consumer is found"
+
+    # c7 -- the non-model consumers feed no model.
+    routes_search = ast.parse(_PKG.joinpath("api", "routes_search.py").read_text(encoding="utf-8"))
+    assert not [
+        n for n in ast.walk(routes_search) if isinstance(n, ast.Call) and (
+            (isinstance(n.func, ast.Attribute) and n.func.attr in ("search", "search_and_format"))
+            or (isinstance(n.func, ast.Name) and n.func.id in ("search", "search_and_format"))
+        )
+    ], "the search routes run no search"
+    deps = ast.parse(_PKG.joinpath("api", "deps.py").read_text(encoding="utf-8"))
+    assert not [
+        n for n in ast.walk(deps) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and isinstance(n.func.value, ast.Name) and n.func.value.id == "web_searcher"
+    ], "deps only imports the searcher"
+    plugin = ast.parse(_PKG.joinpath("plugins", "fact-checker", "entry_point.py").read_text(encoding="utf-8"))
+    assert not [
+        n for n in ast.walk(plugin) if isinstance(n, ast.Call) and (
+            (isinstance(n.func, ast.Attribute) and n.func.attr in ("generate", "chat", "stream"))
+            or (isinstance(n.func, ast.Name) and n.func.id in ("generate", "chat", "stream"))
+        )
+    ], "the fact-checker calls no model"
+    imported = [
+        (n.module or "") if isinstance(n, ast.ImportFrom) else ",".join(a.name for a in n.names)
+        for n in ast.walk(plugin) if isinstance(n, (ast.Import, ast.ImportFrom))
+    ]
+    assert imported and not [m for m in imported if "ollama" in m or "inference_backend" in m or "registry" in m], imported
+    hook = _function(plugin, "hook_post_inference")
+    keys = set()
+    for ret in ast.walk(hook):
+        if isinstance(ret, ast.Return) and isinstance(ret.value, ast.Dict):
+            keys |= {k.value for k in ret.value.keys if isinstance(k, ast.Constant)}
+    assert keys == {"response", "fact_check_summary"}, keys
+    chat = ast.parse(_PKG.joinpath("api", "routes_chat.py").read_text(encoding="utf-8"))
+    read = set()
+    for node in ast.walk(chat):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" \
+                and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "modified_data" \
+                and node.args and isinstance(node.args[0], ast.Constant):
+            read.add(node.args[0].value)
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) \
+                and node.value.attr == "modified_data" and isinstance(node.slice, ast.Constant):
+            read.add(node.slice.value)
+    assert read == {"annotation", "response_suffix"}, read
 
 
 if __name__ == "__main__":

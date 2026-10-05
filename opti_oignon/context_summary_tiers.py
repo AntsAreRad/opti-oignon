@@ -7,17 +7,23 @@ notices when the ground under it moves: a branch switch or a wiped span
 leaves the stored summary narrating messages that no longer exist. This
 module gives the summary levels, and gives every level a proof.
 
-Three tiers, from coarse to live:
+Two tiers, from frozen to live:
 
   * SEGMENT -- a frozen summary of one exact span of archived messages,
     stamped with the ids it covers and a digest of the very bytes it was
     built from.
-  * ROLLUP -- one conversation-level summary built from the segment texts
-    ONLY, never from the raw messages a second time, naming the exact
-    segments it stands on.
-  * The live partial -- whatever the caller still summarizes on the fly for
-    the span no segment covers yet. It belongs to the caller; this module
-    only leaves room for it.
+  * The live partial -- whatever the caller summarizes on the fly, from the
+    archived turns, for the span no segment covers yet. It belongs to the
+    caller; this module only leaves room for it.
+
+There is no tier above the segments. A summary of summaries restates the
+last pass in fresh words and keeps whatever an earlier pass let in, so the
+composition does not summarize again: it selects. It keeps the first
+segment, where a conversation usually states its task, then the newest
+segments that fit its budget, and says how many it left out; their turns
+stay in the archive. A record written before this rule may still carry a
+rollup: it is read without failing and never composed, and the next advance
+drops it.
 
 The archive is the ground truth and it is read-only here: this module never
 opens the store itself and never writes anywhere. Reads go through an
@@ -25,11 +31,14 @@ injected reader; the updated record is handed BACK to the caller as a
 metadata mapping, and whether it is persisted is the caller's decision.
 
 Staleness is refused, not hoped away. On every load the span digests are
-recomputed against the archive: a segment whose span changed is dropped, a
-rollup standing on a dropped segment goes with it, and what still matches
-survives byte for byte. An archive that cannot be read proves nothing, so
-nothing is composed from tiers and -- just as important -- nothing is
-destroyed: refusing to verify must never persist the refusal.
+recomputed against the archive: a segment whose span changed is dropped,
+and what still matches survives byte for byte. An archive that cannot be
+read proves nothing, so nothing is composed from tiers and -- just as
+important -- nothing is destroyed: refusing to verify must never persist
+the refusal.
+
+The budgets live in the ``summary_tiers`` section of ``compression.yaml``,
+checked when read; a value that cannot be right is refused by its full name.
 """
 
 from __future__ import annotations
@@ -38,6 +47,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -49,9 +59,60 @@ checkpoint_before_apply = True
 TIERS_METADATA_KEY = "context_summary_tiers"
 TIERS_VERSION = 1
 
-DEFAULT_SEGMENT_BUDGET_TOKENS = 1200
-DEFAULT_TAIL_KEEP_MESSAGES = 4
-ROLLUP_MIN_SEGMENTS = 2
+_CONFIG = Path(__file__).resolve().parent / "config" / "compression.yaml"
+
+
+class TierSettingsError(ValueError):
+    """A summary-tier setting that cannot be right, named in full."""
+
+
+@dataclass(frozen=True)
+class TierSettings:
+    """The ``summary_tiers`` section of ``compression.yaml``, checked."""
+
+    segment_budget_tokens: int
+    tail_keep_messages: int
+    compose_budget_tokens: int
+    compose_share: float
+
+    def compose_bound(self, soft_limit_tokens: int) -> int:
+        """The most a composition may take in a window of this soft limit."""
+        return max(0, min(self.compose_budget_tokens, int(self.compose_share * soft_limit_tokens)))
+
+
+def load_tier_settings(path=None) -> TierSettings:
+    """Read and check the tier budgets; refuse a bad one by its full name."""
+    import yaml
+
+    source = Path(path or _CONFIG)
+    try:
+        raw = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001 - any failure to read or build the file is a refusal by name
+        raise TierSettingsError(f"summary_tiers: {source.name} cannot be read: {exc}") from exc
+    section = raw.get("summary_tiers") if isinstance(raw, dict) else None
+    if not isinstance(section, dict):
+        raise TierSettingsError("summary_tiers: the section is missing or is not a mapping")
+
+    def integer(key, low):
+        value = section.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TierSettingsError(f"summary_tiers.{key}: {value!r} is not an integer")
+        if value < low:
+            raise TierSettingsError(f"summary_tiers.{key}: {value!r} is below {low}")
+        return value
+
+    share = section.get("compose_share")
+    if isinstance(share, bool) or not isinstance(share, (int, float)):
+        raise TierSettingsError(f"summary_tiers.compose_share: {share!r} is not a number")
+    if not 0 < share <= 1:
+        raise TierSettingsError(f"summary_tiers.compose_share: {share!r} is outside (0, 1]")
+    return TierSettings(
+        segment_budget_tokens=integer("segment_budget_tokens", 1),
+        tail_keep_messages=integer("tail_keep_messages", 0),
+        compose_budget_tokens=integer("compose_budget_tokens", 1),
+        compose_share=float(share),
+    )
+
 
 # reader(conversation_id) -> ordered user/assistant messages carrying
 # ``id``, ``role`` and ``content`` -- or None when the archive cannot be
@@ -171,6 +232,15 @@ class TierState:
             return cls()
 
 
+def omission_line(count: int) -> str:
+    """The line a composition writes for the segments it leaves out."""
+    plural = "s" if count != 1 else ""
+    return (
+        f"[{count} earlier summary segment{plural} omitted here; "
+        "the archive keeps their turns]"
+    )
+
+
 def covered_up_to(state: TierState) -> int:
     """The highest archived message id any segment covers, or zero."""
     if not state.segments:
@@ -225,13 +295,30 @@ class TierManager:
         self,
         archive_reader: ArchiveReader | None = None,
         *,
-        segment_budget_tokens: int = DEFAULT_SEGMENT_BUDGET_TOKENS,
-        tail_keep_messages: int = DEFAULT_TAIL_KEEP_MESSAGES,
+        segment_budget_tokens: int | None = None,
+        tail_keep_messages: int | None = None,
+        compose_budget_tokens: int | None = None,
+        settings_path=None,
         estimate: Callable[[str], int] | None = None,
     ) -> None:
+        """A budget given here wins; any other comes from ``compression.yaml``.
+
+        Settings that cannot be read or checked raise ``TierSettingsError``
+        by name: a tier manager never runs on a budget it guessed.
+        """
+        settings = None
+        if None in (segment_budget_tokens, tail_keep_messages, compose_budget_tokens):
+            settings = load_tier_settings(settings_path)
         self._reader = archive_reader or _default_archive_reader
-        self._segment_budget = max(1, int(segment_budget_tokens))
-        self._tail_keep = max(0, int(tail_keep_messages))
+        self._segment_budget = max(1, int(
+            settings.segment_budget_tokens if segment_budget_tokens is None else segment_budget_tokens
+        ))
+        self._tail_keep = max(0, int(
+            settings.tail_keep_messages if tail_keep_messages is None else tail_keep_messages
+        ))
+        self._compose_budget = max(1, int(
+            settings.compose_budget_tokens if compose_budget_tokens is None else compose_budget_tokens
+        ))
         self._estimate = estimate or _default_estimate
 
     # ------------------------------------------------------------------
@@ -290,15 +377,18 @@ class TierManager:
         conversation_id: str,
         metadata: dict[str, Any] | None,
         summarize_fn: SummarizeFn | None = None,
+        *,
+        up_to_id: int | None = None,
     ) -> dict[str, Any]:
-        """Verify the record, freeze what has grown past the budget, roll up.
+        """Verify the record and freeze what has grown past the budget.
 
         Freezing is oldest-first over the span no segment covers yet, never
-        touches the verbatim tail, and is fail-safe: a summarizer that
-        declines freezes nothing and destroys nothing. The updated record is
-        returned as a metadata mapping for the caller to persist; when the
-        archive cannot be read the mapping is empty, because refusing to
-        verify must never persist anything.
+        touches the verbatim tail nor, when ``up_to_id`` is given, any message
+        after it, and is fail-safe: a summarizer that declines freezes nothing
+        and destroys nothing. Every summarizer input is a run of archived
+        turns. The updated record is returned as a metadata mapping for the
+        caller to persist; when the archive cannot be read the mapping is
+        empty, because refusing to verify must never persist anything.
         """
         messages = self._reader(conversation_id)
         if messages is None:
@@ -308,8 +398,9 @@ class TierManager:
         state = self._verify_against(
             TierState.from_metadata(metadata), messages
         )
-        frozen_any = self._freeze(state, messages, summarize)
-        self._refresh_rollup(state, summarize, frozen_any)
+        self._freeze(state, messages, summarize, up_to_id)
+        # A rollup read from an older record is never composed; drop it.
+        state.rollup = None
         return {TIERS_METADATA_KEY: state.to_metadata_value()}
 
     def _freeze(
@@ -317,9 +408,14 @@ class TierManager:
         state: TierState,
         messages: list[dict[str, Any]],
         summarize: SummarizeFn,
+        up_to_id: int | None = None,
     ) -> bool:
         """Freeze budget-sized spans off the uncovered prefix, oldest-first."""
         boundary = len(messages) - self._tail_keep
+        if up_to_id is not None:
+            boundary = min(
+                boundary, sum(1 for m in messages if int(m["id"]) <= up_to_id)
+            )
         covered = covered_up_to(state)
         freezable = [
             m for i, m in enumerate(messages)
@@ -353,30 +449,6 @@ class TierManager:
             span_tokens = 0
         return frozen_any
 
-    def _refresh_rollup(
-        self, state: TierState, summarize: SummarizeFn, frozen_any: bool
-    ) -> None:
-        """Rebuild the rollup from segment texts only, when it is due."""
-        if len(state.segments) < ROLLUP_MIN_SEGMENTS:
-            return
-        current = [s.digest for s in state.segments]
-        if (
-            not frozen_any
-            and state.rollup is not None
-            and state.rollup.built_from == current
-        ):
-            return
-        text = summarize(
-            [{"role": "summary", "content": s.text} for s in state.segments]
-        )
-        if text is None:
-            # A stale rollup is worse than none: keep the previous one only
-            # if it still names exactly the segments that exist.
-            if state.rollup is not None and state.rollup.built_from != current:
-                state.rollup = None
-            return
-        state.rollup = ConversationRollup(text=text, built_from=current)
-
     # ------------------------------------------------------------------
     # Composition
     # ------------------------------------------------------------------
@@ -386,19 +458,52 @@ class TierManager:
         conversation_id: str,
         metadata: dict[str, Any] | None,
         live_partial: str = "",
+        *,
+        up_to_id: int | None = None,
+        budget_tokens: int | None = None,
     ) -> str:
-        """The injectable block: verified rollup first, then the partial.
+        """The injectable block: selected verified segments, then the partial.
 
-        Without a rollup the segment texts stand in, oldest first. Tiers
-        that cannot be verified contribute nothing -- the partial stands
-        alone, exactly as it did before this module existed.
+        Only segments wholly at or before ``up_to_id`` take part, when it is
+        given. The budget is the configured one, or ``budget_tokens`` when the
+        caller has less room, and the whole block keeps to it, the line that
+        counts the omitted segments included. The first segment stays when it
+        fits; then the newest that fit, kept in order; a line says how many
+        were left out, their turns kept in the archive. Nothing here is
+        summarized again. Tiers that cannot be verified contribute nothing --
+        the partial stands alone, exactly as it did before this module existed.
         """
         state = self.verify(TierState.from_metadata(metadata), conversation_id)
+        segments = sorted(
+            (s for s in state.segments if up_to_id is None or s.last_id <= up_to_id),
+            key=lambda s: s.first_id,
+        )
+        budget = self._compose_budget
+        if budget_tokens is not None:
+            budget = min(budget, int(budget_tokens))
         blocks: list[str] = []
-        if state.rollup is not None:
-            blocks.append(state.rollup.text)
-        else:
-            blocks.extend(s.text for s in state.segments)
+        if segments:
+            # The whole block keeps to the budget: the line that counts what
+            # is left out is paid for first, at the most it could cost.
+            room = budget - self._estimate(omission_line(len(segments)))
+            first, rest = segments[0], segments[1:]
+            keep_first = self._estimate(first.text) <= room
+            if keep_first:
+                room -= self._estimate(first.text)
+            newest: list[SegmentRecord] = []
+            for segment in reversed(rest):
+                cost = self._estimate(segment.text)
+                if cost > room:
+                    break
+                newest.append(segment)
+                room -= cost
+            newest.reverse()
+            omitted = len(segments) - len(newest) - (1 if keep_first else 0)
+            if keep_first:
+                blocks.append(first.text)
+            if omitted:
+                blocks.append(omission_line(omitted))
+            blocks.extend(s.text for s in newest)
         if live_partial:
             blocks.append(live_partial)
         return "\n\n".join(b for b in blocks if b)

@@ -52,8 +52,10 @@ The user's surface on the Core and the receipts is a memory route scoped
 to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
 Core entries and the open receipts, `POST .../pin` pins a statement as the
 user, `POST .../supersede` pins a successor and links the old entry to it,
-`POST .../recall/{key}` hands the verbatim span back and marks the receipt
-resolved. The route imports the librarian inside its handlers and passes
+`POST .../recall/{key}` hands the verbatim span back and leaves the receipt
+open, and `POST .../resolve/{key}` closes it as the user. Reading is not
+closing: no tool a model can reach imports either verb. The route imports
+the librarian inside its handlers and passes
 the user as actor; the store refuses any other actor, and a pin that would
 push the Core over its cap is refused before it lands, because the
 composer never cuts the Core and would otherwise blank the whole block.
@@ -117,7 +119,8 @@ Drift against a no-onion baseline has a host command of its own,
 replaced on known turns, and asked about long after the history window has
 dropped them -- through two arms that differ the way the chat path does:
 the same system prompt, history window and model, and in one arm the
-onion's block, wrapped as untrusted data. The librarian runs in process
+onion's block, wrapped as untrusted data in front of the turn, as on the
+chat path. The librarian runs in process
 with persistence off, so neither arm reads or writes the data directory.
 Each arm gets contradictions per 1000 turns against the facts holding at
 each turn, the sentences that agree with them, and the sentences the

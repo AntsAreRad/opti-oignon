@@ -20,6 +20,7 @@ from .schemas import (
     OnionPinRequest,
     OnionPinResponse,
     OnionRecallResponse,
+    OnionResolveResponse,
     OnionStateResponse,
     OnionSupersedeRequest,
 )
@@ -237,13 +238,24 @@ def onion_supersede(conv_id: str, request: OnionSupersedeRequest) -> dict:
 
 @router.post("/onion/{conv_id}/recall/{key}", response_model=OnionRecallResponse)
 def onion_recall(conv_id: str, key: str) -> dict:
-    """The verbatim span behind a receipt; the receipt is marked resolved."""
+    """The verbatim span behind a receipt; the receipt stays open until the user closes it."""
     librarian = _onion()
     try:
         span = librarian.recall(conv_id, key)
     except Exception as exc:  # noqa: BLE001 - every refusal travels by name
         raise _refused(exc)
     return OnionRecallResponse(conversation_id=conv_id, key=key, span=[dict(t) for t in span]).model_dump()
+
+
+@router.post("/onion/{conv_id}/resolve/{key}", response_model=OnionResolveResponse)
+def onion_resolve(conv_id: str, key: str) -> dict:
+    """Close a receipt, as the user: it leaves the digest and stays in the ledger."""
+    librarian = _onion()
+    try:
+        resolved = librarian.resolve_receipt(conv_id, key, actor="user")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionResolveResponse(conversation_id=conv_id, key=key, resolved=bool(resolved)).model_dump()
 
 
 @router.post("/migrate")

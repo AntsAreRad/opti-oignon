@@ -29,6 +29,24 @@ from typing import Any
 
 import yaml
 
+# The untrusted-data helpers write every data block this module places: in
+# the user role, under its source label. Without them a data block is
+# withheld, never placed bare.
+try:
+    from .agent.untrusted_context import SOURCE_FILE as _SOURCE_FILE
+    from .agent.untrusted_context import SOURCE_RETRIEVED as _SOURCE_RETRIEVED
+    from .agent.untrusted_context import coalesce_user_turns as _coalesce_user_turns
+    from .agent.untrusted_context import is_summary_message as _is_summary_block
+    from .agent.untrusted_context import summary_message as _summary_message
+    from .agent.untrusted_context import wrap as _wrap_untrusted
+except ImportError:
+    _SOURCE_FILE = "file"
+    _SOURCE_RETRIEVED = "retrieved"
+    _coalesce_user_turns = None
+    _is_summary_block = None
+    _summary_message = None
+    _wrap_untrusted = None
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -499,17 +517,15 @@ class ContextOptimizer:
                 truncation. None or an empty string is the exact
                 pre-pin behavior (no zone, no extra message).
             volatile_block: Per-turn context (memory, web results,
-                archive snippets) relocated OUT of the leading system
-                message. None is the exact historical behavior: the
-                caller has already appended any such content to
-                ``system_prompt``. A string (even an empty one) switches
-                the placement: the leading system message stays byte-equal
-                to ``system_prompt``, project retrieval joins this block
-                instead of the head, and the combined block rides one
-                trailing system message placed after the history and
-                before the user turn -- so the leading bytes, and the KV
-                cache computed over them, survive from turn to turn. The
-                ``system_prompt`` reported on the result is always the
+                archive snippets), each block already wrapped by the
+                caller. None means the caller has none. The leading system
+                message always stays byte-equal to ``system_prompt``:
+                project retrieval joins this block, wrapped under its
+                label, and the combined block rides the user role after
+                the history, joined to the user turn -- so the leading
+                bytes, and the KV cache computed over them, survive from
+                turn to turn, and no data speaks with the system's voice.
+                The ``system_prompt`` reported on the result is always the
                 head-plus-block concatenation: cache identity never moves
                 with the placement.
 
@@ -550,7 +566,9 @@ class ContextOptimizer:
                 project_id=project_id,
                 budget_tokens=budget.project_tokens,
                 model=model,
-                already_composed=system_prompt,
+                # What the turn already carries: the head, and the per-turn
+                # blocks the caller placed in the tail.
+                already_composed=system_prompt + (volatile_block or ""),
             )
         elif project_id and self._project_builder is not None:
             project_text, project_zone = self._inject_project_context(
@@ -560,30 +578,34 @@ class ContextOptimizer:
                 model=model,
             )
 
-        # Relocation mode: the caller asked for the per-turn split. The
-        # head stays byte-equal to ``system_prompt`` and project
-        # retrieval joins the volatile tail instead, with the same glue
-        # bytes it would have carried in the head.
-        relocate = volatile_block is not None
+        # Every data block rides the user role. The head stays byte-equal
+        # to ``system_prompt``, whatever the caller passed, and retrieval
+        # joins the per-turn tail, wrapped under its source label -- or is
+        # withheld when nothing can wrap it.
         volatile_tail = volatile_block or ""
-
-        # Augment system prompt with project context
         final_system = system_prompt
         if project_text:
-            if relocate:
-                volatile_tail = volatile_tail + "\n\n" + project_text
+            if _wrap_untrusted is None:
+                wrapped_project = ""
+            elif project_zone.strategy == "unified":
+                # Several sources under provenance headers: quoted as retrieved.
+                wrapped_project = _wrap_untrusted(project_text, source=_SOURCE_RETRIEVED)
             else:
-                final_system = system_prompt + "\n\n" + project_text
+                wrapped_project = _wrap_untrusted(project_text, source=_SOURCE_FILE)
+            if wrapped_project:
+                volatile_tail = volatile_tail + "\n\n" + wrapped_project
+            else:
+                logger.warning(
+                    "Retrieved context withheld: the untrusted-data wrapper is unavailable"
+                )
+                project_zone.detail = (project_zone.detail or "") + " | withheld: no wrapper"
 
         zones.append(project_zone)
 
-        # The identity view: the assembled context as one string. The
-        # response and semantic caches fingerprint THIS, so it must not
-        # move when the placement does -- head plus tail reproduces the
-        # historical composed prompt byte for byte.
-        identity_prompt = (
-            (final_system + volatile_tail) if relocate else final_system
-        )
+        # The identity view: the assembled context as one string, head plus
+        # tail. The response and semantic caches fingerprint THIS, whatever
+        # role each part rides.
+        identity_prompt = final_system + volatile_tail
 
         # -- System zone report --
         system_actual = self._estimate_tokens(identity_prompt, model)
@@ -686,16 +708,18 @@ class ContextOptimizer:
 
         # -- Build final messages --
         # Order: system prompt, then the pinned capability block (when
-        # present), then the compressed history, then the relocated
-        # per-turn tail (when the caller asked for the split and the
-        # tail is non-empty), then the current turn.
+        # present), then the compressed history, then the per-turn tail in
+        # the user role (when non-empty), then the current turn, joined to
+        # the tail. No system message carries data or conversation text.
         messages: list[dict[str, str]] = [{"role": "system", "content": final_system}]
         if manifest_block:
             messages.append({"role": "system", "content": manifest_block})
         messages.extend(history)
-        if relocate and volatile_tail:
-            messages.append({"role": "system", "content": volatile_tail})
+        if volatile_tail and volatile_tail.strip():
+            messages.append({"role": "user", "content": volatile_tail.strip()})
         messages.append({"role": "user", "content": user_message})
+        if _coalesce_user_turns is not None:
+            messages = _coalesce_user_turns(messages)
 
         total_tokens = self._estimate_messages_tokens(messages, model)
 
@@ -956,13 +980,15 @@ class ContextOptimizer:
                 model=model,
                 strategy=strategy,
             )
-            if result.compressed_count > 0 and result.summary:
-                compressed_history: list[dict[str, str]] = []
-                if result.summary:
-                    compressed_history.append({
-                        "role": "system",
-                        "content": result.summary,
-                    })
+            # The summary is memory data in the user role; with no wrapper
+            # to write it, the history is left whole for the steps below.
+            summary_block = (
+                _summary_message(result.summary)
+                if _summary_message is not None and result.summary
+                else None
+            )
+            if result.compressed_count > 0 and summary_block is not None:
+                compressed_history: list[dict[str, str]] = [summary_block]
                 compressed_history.extend(result.recent_messages)
 
                 after_tokens = self._estimate_messages_tokens(
@@ -1035,7 +1061,9 @@ class ContextOptimizer:
         """Emergency truncation when all other strategies fail.
 
         Drops oldest messages until within target, keeping at least
-        min_recent messages.
+        min_recent messages. A summary block opening the history stands for
+        turns already gone: the turns after it go first, and it goes only
+        when no other message can.
 
         Args:
             history: Current messages.
@@ -1057,7 +1085,14 @@ class ContextOptimizer:
             self._estimate_messages_tokens(truncated, model) > target_tokens
             and len(truncated) > min_recent
         ):
-            removed = truncated.pop(0)
+            keep = 0
+            while (
+                _is_summary_block is not None
+                and keep < len(truncated)
+                and _is_summary_block(truncated[keep])
+            ):
+                keep += 1
+            removed = truncated.pop(keep if len(truncated) - keep > min_recent else 0)
             removed_tokens = self._estimate_tokens(
                 removed.get("content", ""), model
             )

@@ -67,7 +67,8 @@ command, and every command is a user action:
 | `/open ID` | Find a persisted onion again and continue that conversation |
 | `/close` | Evict the whole Flesh through the gate, save, and end the conversation |
 | `/pin TEXT` | Pin a statement to the conversation's Core, as the user |
-| `/recall KEY` | Show the verbatim span behind a receipt; this marks the receipt resolved |
+| `/recall KEY` | Show the verbatim span behind a receipt; the receipt stays open |
+| `/resolve KEY` | Close a receipt, as the user: it leaves the digest and stays in the ledger |
 | `/skill NAME ARGS` | Run `ARGS` as a turn with a published skill as the system suffix |
 | `/adopt NAME [DIGEST]` | Show a skill received from a paired device with its digest; with the digest, adopt exactly those bytes |
 | `/help` | List the commands |

@@ -269,8 +269,9 @@ class ResponseCache:
         Args:
             model: Ollama model name
             system_prompt: Full system prompt text
-            messages: Conversation history as list of {role, content} dicts.
-                Should include only history messages (not system or current).
+            messages: Conversation messages as list of {role, content} dicts,
+                system messages left out; the chat path passes every other
+                message, the current turn included.
             user_content: Current user message
 
         Returns:

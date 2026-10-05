@@ -204,5 +204,49 @@ def test_or3_the_route_imports_the_onion_in_its_handlers_only_and_names_no_other
         restore()
 
 
+# ---------------------------------------------------------------------------
+# OR4 -- what OR1 pinned, now that reading a span leaves its receipt open
+# ---------------------------------------------------------------------------
+def test_or4_the_handlers_reach_the_librarian_as_the_user_and_a_recall_leaves_the_receipt_open():
+    routes, lib, loaded, restore = _open()
+    try:
+        seen = []
+        real_pin = lib.pin
+
+        def recording_pin(conversation_id, text, *, actor, **kwargs):
+            seen.append((conversation_id, text, actor))
+            return real_pin(conversation_id, text, actor=actor, **kwargs)
+
+        lib.pin = recording_pin
+        pinned = routes.onion_pin("c1", routes.OnionPinRequest(text="Answers cite their source."))
+        assert seen == [("c1", "Answers cite their source.", "user")], "the conversation id and the user as actor"
+        assert pinned["conversation_id"] == "c1" and len(pinned["id"]) == 64
+        succeeded = routes.onion_supersede("c1", routes.OnionSupersedeRequest(old_id=pinned["id"], text="Answers cite their source, always."))
+        assert succeeded["id"] != pinned["id"]
+
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+        state = lib.peek_state("c1")
+        state.mirror(_messages(12))
+        while lib.curate(state, _faithful, gate=gate, budget=budget).evicted:
+            pass
+        listed = routes.onion_state("c1")
+        assert [(e["status"], e["superseded_by"] is not None) for e in listed["core"]] == [("superseded", True), ("active", False)]
+        assert len(listed["receipts"]) >= 2 and all(len(r["key"]) == 64 and r["stub"] for r in listed["receipts"])
+        key = listed["receipts"][0]["key"]
+        recalled = routes.onion_recall("c1", key)
+        assert recalled["key"] == key and recalled["span"][0]["text"].startswith("Turn 1:"), "the verbatim span"
+        assert key in [r["key"] for r in routes.onion_state("c1")["receipts"]], "read, and still open"
+        closed = routes.onion_resolve("c1", key)
+        assert closed == {"conversation_id": "c1", "key": key, "resolved": True}
+        assert key not in [r["key"] for r in routes.onion_state("c1")["receipts"]], "closed by the user"
+        assert routes.onion_state("nobody") == {"conversation_id": "nobody", "core": [], "receipts": []}
+        assert lib.peek_state("nobody") is None, "listing an unknown conversation creates nothing"
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

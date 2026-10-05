@@ -276,5 +276,83 @@ def test_xw5_an_absent_or_failing_librarian_never_breaks_the_turn():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# The block rides the user turn. XW6 to XW9 keep what XW1, XW2, XW3 and XW5
+# pinned, read where the block now arrives: in front of the question, in the
+# user role. The onion's window keeps the frames its composer wrote.
+# ---------------------------------------------------------------------------
+def _turn(scripted):
+    assert scripted.calls, "the request must reach the scripted registry"
+    messages = scripted.calls[0]["messages"]
+    assert messages and messages[-1].get("role") == "user"
+    return messages[-1]["content"]
+
+
+def test_xw6_the_onion_block_arrives_in_the_turn_with_its_frames_and_the_legacy_composer_is_not_consulted():
+    lib = _Librarian(enabled=True, block=_ONION)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        turn = _turn(scripted)
+        assert wrapper.wrap(_ONION, source=wrapper.SOURCE_MEMORY, frames=True) in turn
+        assert turn.count("The user is called Alice.") == 1
+        assert _LEGACY not in turn and "The user is called Alice." not in _system(scripted)
+        assert composer.calls == 0, "today's composer is not consulted when the onion answers"
+        assert lib.block_calls == [("conv-1", "What is my name?")]
+    finally:
+        restore()
+
+
+def test_xw7_with_the_onion_off_the_librarian_is_never_asked_and_the_legacy_block_rides_the_turn():
+    lib = _Librarian(enabled=False, block=_ONION)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        turn = _turn(scripted)
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in turn
+        assert "The user is called Alice." not in turn
+        assert lib.block_calls == [] and lib.enabled_calls >= 1
+        assert composer.calls == 1
+        assert lib.curate_calls == [], "off means off on the write side too"
+    finally:
+        restore()
+
+
+def test_xw8_with_the_onion_on_but_empty_the_legacy_block_rides_the_turn():
+    lib = _Librarian(enabled=True, block="")
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted)
+        assert lib.block_calls == [("conv-1", "What is my name?")]
+        assert composer.calls == 1
+    finally:
+        restore()
+
+
+def test_xw9_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legacy_block_rides_it():
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian_absent=True)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted)
+        assert composer.calls == 1
+    finally:
+        restore()
+    lib = _Librarian(enabled=True, block=_ONION, raise_on_block=True, raise_on_curate=True)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted)
+        assert lib.block_calls and lib.curate_calls, "both seams were tried and both failures were swallowed"
+        assert conversations.messages.get("conv-1")
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

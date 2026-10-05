@@ -1133,6 +1133,57 @@ package costs.
 
 ### Changed
 
+- [SECURITY] No system message carries data any more. The working memory,
+  project retrieval, web results, archive snippets and every summary of
+  earlier turns ride the user role, each wrapped as untrusted data under its
+  own source label and joined to the turn it belongs to, on the context
+  optimizer, the manual pipeline and the single turn alike; the system
+  message is the instruction head alone. Project text and archive snippets
+  were not wrapped at all and now are; with no wrapper they are withheld.
+  Runs of user messages are joined, so a chat template written for strictly
+  alternating turns never meets two in a row. The `stable_prefix` switch in
+  `context_optimizer.yaml` no longer moves anything: the head is stable on
+  every path, and the switch only asks a llama-server engine to reuse its
+  prompt cache. Cache fingerprints cover the same head and tail as before.
+- [SECURITY] A summary is made from conversation turns only, never from an
+  earlier summary. The manual pipeline no longer restores a stored summary
+  beside the archive it loads in full: a summary stands only for turns the
+  window lets go, computed from the archived turns, with the frozen tier
+  segments inside that span composed as they are. The cumulative merge and
+  the tier rollup are gone; the composition keeps the first segment and the
+  newest that fit, and says how many it left out. Its room is reserved before
+  any turn is cut and bounded by a share of the window (`compose_share`), so
+  no verbatim turn is cut to make room for a summary and a small window keeps
+  its recent turns. The segments are weighed as the engine counts, and the
+  summary is fitted as it is placed, envelope included: what an estimate
+  misses comes off the segments, counted as left out, never off the turns.
+  Once a summary is placed, the soft limit is a target rather than a cut,
+  and the hard limit still bounds the window. The three summarizers hand
+  their model one JSON object per turn, so no turn can forge another. The
+  pipeline's cutting steps keep a summary while an older turn can still go.
+- [SECURITY] A frame marker of the onion's composer -- an opening `[data` with
+  an attribute, or a closing `[/data]`, with or without attributes -- inside a
+  recalled segment, the Core and the turn included, or inside any other
+  wrapped block, is defanged: only the composer's own frames reach a window.
+  A bare `[data]` (an index, a list, a section header) is ordinary text and
+  is left alone. Unified retrieval skips what the turn's data blocks already
+  carry, as it did when they sat in the system prompt. The response cache
+  key covers the whole turn, so a user turn left without a reply no longer
+  shares a key with the history without it.
+- The live summarizer's model, fallback chain, temperature, output cap,
+  timeout, input cap and message threshold, and the tier budgets, are read
+  from `compression.yaml` (`live_summary`, `summary_tiers`); each value is
+  checked and a wrong one is refused by its full name. A file that cannot be
+  read, decoded or built leaves the live summary unavailable, with the reason,
+  where it used to stop the pipeline from importing. The shipped values are
+  the former ones. The named summary model is now tried before its
+  fallbacks.
+- [SECURITY] Reading a receipt's span no longer closes the receipt. Closing
+  it is the user's verb: `POST /api/memory/onion/{conv_id}/resolve/{key}`,
+  or `/resolve KEY` in the terminal session; any other actor is refused by
+  name, and no module a model can reach imports either verb.
+- The drift A/B harness places the onion's block where the chat path does,
+  in front of the turn, with its frames.
 - The public-clean guard reads every tracked line, the source trees
   included: their standing debt is paid, so its rule now holds everywhere.
   The contract that pinned the old boundary is superseded by name.

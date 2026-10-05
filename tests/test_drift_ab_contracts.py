@@ -286,5 +286,61 @@ def test_da7_the_pair_is_tried_before_the_first_turn_and_a_refusal_asks_no_turn(
     finally:
         restore()
 
+
+# ---------------------------------------------------------------------------
+# DA8 -- what DA3 pinned, with the block in front of the turn, as on the chat
+# path: the same system prompt, the same window, and the turn carrying the
+# onion's block, its frames kept, before the question.
+# ---------------------------------------------------------------------------
+def test_da8_the_arms_differ_by_the_onion_block_in_front_of_the_turn_and_nothing_else(tmp_path):
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        composer = loaded["opti_oignon.memory.composer"]
+        uc = loaded["opti_oignon.agent.untrusted_context"]
+        config = lib.LibrarianConfig(enabled=True, model="fake:1b", keep_alive="0", min_new_turns=1, temperature=0.1,
+                                     num_predict=64, persist_path="", require_encryption=False)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        budget = composer.Budget(window=2000, reserve=200, core=300, receipts=300, peels=800, flesh=200, turn=200)
+
+        def recorder(calls):
+            def ask(messages):
+                calls.append(messages)
+                return "Noted."
+            return ask
+
+        def wrap(block):
+            return uc.wrap(block, source=uc.SOURCE_MEMORY, frames=True)
+
+        plain_calls, onion_calls = [], []
+        turns = ab.TURNS[:40]
+        ab.run_arm(turns, ab.plain_arm(recorder(plain_calls), history_tokens=300))
+        onion = ab.onion_arm(recorder(onion_calls), librarian=lib, config=config, summarize=_faithful, wrap=wrap,
+                             history_tokens=300, gate=gate, budget=budget)
+        ab.run_arm(turns, onion)
+        assert len(plain_calls) == len(onion_calls) == len(turns)
+        for plain, with_onion in zip(plain_calls, onion_calls):
+            assert plain[:-1] == with_onion[:-1], "the same system prompt and the same history window"
+            assert plain[0] == {"role": "system", "content": ab.SYSTEM_PROMPT}, "no block in the system message"
+            assert plain[-1]["role"] == with_onion[-1]["role"] == "user"
+            assert with_onion[-1]["content"].endswith(plain[-1]["content"]), "the question closes the turn"
+        blocks = [
+            o[-1]["content"][: -len(p[-1]["content"])]
+            for p, o in zip(plain_calls, onion_calls) if o[-1]["content"] != p[-1]["content"]
+        ]
+        policy = wrap("x").splitlines()[0]
+        assert blocks and all(policy in b for b in blocks), "the onion's block reached the model, wrapped as untrusted data"
+        assert any("layer=peels" in b for b in blocks), "curation ran: a Peel reached the model"
+        assert len(plain_calls[-1]) < 2 + 2 * 39, "the history window dropped the oldest turns"
+        with pytest.raises(ValueError):
+            ab.onion_arm(recorder([]), librarian=lib, config=replace(config, persist_path=str(tmp_path / "onion.db")),
+                         summarize=_faithful, wrap=wrap)
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

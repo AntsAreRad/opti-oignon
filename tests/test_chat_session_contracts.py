@@ -185,6 +185,7 @@ def _onion_seam(loaded, tmp_path, *, summarize=_faithful, enabled=True):
         close_onion=lambda cid: lib.close_onion(cid, config=cfg, summarize=summarize, gate=gate),
         pin=lambda cid, text, actor: lib.pin(cid, text, actor=actor, config=cfg, budget=budget),
         recall=lambda cid, key: lib.recall(cid, key, config=cfg),
+        resolve_receipt=lambda cid, key, actor: lib.resolve_receipt(cid, key, actor=actor, config=cfg),
     )
     return seam, lib, cfg, install_store
 
@@ -493,5 +494,52 @@ def test_ch8_adopt_shows_the_bytes_and_adopts_those_and_no_others(tmp_path):
         missing = _run(session, "/adopt nowhere")
         assert len(_kinds(missing, "refusal")) == 1 and "no published skill nowhere" in _kinds(missing, "refusal")[0]
         assert len(scripted.calls) == 1, "adopting sends nothing"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# CH9 -- what CH3 pinned, now that reading a span leaves its receipt open:
+# /recall reads and says the receipt stays open, /resolve closes it.
+# ---------------------------------------------------------------------------
+def test_ch9_pin_close_open_recall_and_resolve_act_on_the_real_onion(tmp_path):
+    loaded, scripted, conversations, restore = _load()
+    try:
+        seam, lib, cfg, install_store = _onion_seam(loaded, tmp_path)
+        session = _session(loaded, librarian=seam)
+        for question in ("Alice runs service 1 on 2026-03-01.", "Service 2 stays on the new cluster.", "Bob owns service 3."):
+            _run(session, question)
+        cid = session.conversation_id
+        _mirror(lib, cfg, conversations, cid)
+
+        pinned = _run(session, "/pin The user is called Alice.")
+        assert _kinds(pinned, "refusal") == [] and _kinds(pinned, "info")[0].startswith("pinned ")
+        assert [e.text for e in lib.core_entries(cid, config=cfg)] == ["The user is called Alice."]
+
+        closed = _run(session, "/close")
+        assert _kinds(closed, "refusal") == []
+        assert "3 span(s) evicted, 0 turn(s) left verbatim" in closed[0].text and "saved" in closed[0].text
+        root = lib.peek_state(cid, cfg).core.root()
+        assert root[:12] in closed[0].text, "the Core root it leaves is printed"
+        assert session.conversation_id is None, "a closed conversation is no longer the session's"
+
+        lib.reset_librarian()
+        install_store()
+        opened = _run(session, f"/open {cid}")
+        assert _kinds(opened, "refusal") == [] and session.conversation_id == cid
+        assert f"opened {cid}: 0 turn(s) in the Flesh, 3 peel(s), Core root {root[:12]}" == opened[0].text
+        key = lib.open_receipts(cid, config=cfg)[0].key
+        assert key[:12] in opened[1].text, "the open receipts are listed"
+
+        recalled = _run(session, f"/recall {key}")
+        assert _kinds(recalled, "refusal") == []
+        assert "Alice runs service 1 on 2026-03-01." in recalled[0].text, "the verbatim span"
+        assert "stays open" in recalled[0].text, "what a read leaves is said"
+        assert key in [r.key for r in lib.open_receipts(cid, config=cfg)]
+
+        resolved = _run(session, f"/resolve {key}")
+        assert _kinds(resolved, "refusal") == [] and key[:12] in resolved[0].text
+        assert key not in [r.key for r in lib.open_receipts(cid, config=cfg)]
+        assert len(_kinds(_run(session, "/resolve"), "refusal")) == 1, "a key is required"
     finally:
         restore()

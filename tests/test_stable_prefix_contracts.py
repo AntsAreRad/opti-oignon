@@ -42,6 +42,8 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
@@ -570,5 +572,142 @@ def test_sp11_flag_on_web_results_ride_the_trailing_context_message():
         trailing = msgs[-2]["content"]
         assert "--- Web Search Results ---" in trailing
         assert "http://local/1" in trailing
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# The tail rides the user role. sp13 to sp18 keep what sp1, sp5, sp2, sp12,
+# sp8, sp9 and sp10 pinned, on the layout where no system message carries
+# data: the per-turn tail is joined to the user turn it belongs to.
+# ---------------------------------------------------------------------------
+
+def _load_optimizer_wrapped(project_text=None):
+    loaded, restore = isolate(
+        targets={
+            _WRAPPER: source("agent", "untrusted_context.py"),
+            _OPTIMIZER: source("context_optimizer.py"),
+        },
+        seeded={},
+        packages=("opti_oignon.agent",),
+    )
+    opt = loaded[_OPTIMIZER].ContextOptimizer()
+    if project_text is not None:
+        opt._project_builder = _ProjectBuilder(project_text)
+    return loaded[_WRAPPER], opt, restore
+
+
+@pytest.mark.parametrize("tail", [None, ""])
+def test_sp13_project_retrieval_rides_the_user_turn_wrapped_whatever_the_tail(tail):
+    wrapper, opt, restore = _load_optimizer_wrapped(project_text="PROJECT CONTEXT: loam")
+    try:
+        msgs = opt.optimize(
+            model="test-model:1b",
+            system_prompt=_STABLE_HEAD,
+            user_message="q",
+            conversation_history=_history(),
+            project_id="p-1",
+            volatile_block=tail,
+        ).messages
+        assert msgs[0] == {"role": "system", "content": _STABLE_HEAD}
+        assert [m for m in msgs if m["role"] == "system" and "PROJECT CONTEXT" in m["content"]] == []
+        assert msgs[-1]["role"] == "user" and msgs[-1]["content"].endswith("\n\nq")
+        assert wrapper.wrap("PROJECT CONTEXT: loam", source=wrapper.SOURCE_FILE) in msgs[-1]["content"]
+    finally:
+        restore()
+
+
+def test_sp14_the_tail_rides_the_final_user_turn_and_the_head_stays_bare():
+    wrapper, opt, restore = _load_optimizer_wrapped()
+    try:
+        tail = "\n\nVOLATILE: facts ranked for monoids"
+        msgs = opt.optimize(
+            model="test-model:1b",
+            system_prompt=_STABLE_HEAD,
+            user_message="What is a monoid?",
+            conversation_history=_history(),
+            volatile_block=tail,
+        ).messages
+        assert msgs[0] == {"role": "system", "content": _STABLE_HEAD}
+        assert msgs[-1] == {"role": "user", "content": tail.strip() + "\n\nWhat is a monoid?"}
+        assert [m for m in msgs if m["role"] == "system" and "VOLATILE" in m["content"]] == []
+    finally:
+        restore()
+
+
+def test_sp15_degraded_collaborators_keep_the_head_first_and_the_turn_last():
+    wrapper, opt, restore = _load_optimizer_wrapped()
+    try:
+        opt._project_builder = None
+        opt._budget_manager = None
+        msgs = opt.optimize(
+            model="test-model:1b",
+            system_prompt=_STABLE_HEAD,
+            user_message="q",
+            conversation_history=_history(),
+            volatile_block="\n\nVOLATILE: tail",
+        ).messages
+        assert msgs[0] == {"role": "system", "content": _STABLE_HEAD}
+        assert msgs[-1] == {"role": "user", "content": "VOLATILE: tail\n\nq"}
+    finally:
+        restore()
+
+
+@pytest.mark.parametrize("flag_on", [False, True])
+def test_sp16_the_head_is_byte_stable_across_turns_and_the_new_data_rides_the_turn(flag_on):
+    world, restore = _load_executor(flag_on=flag_on)
+    try:
+        world.composer.next_block = "facts ranked for monoids"
+        m1 = _drive(world, "What is a monoid?", conversation_id="c-1")
+        world.conv.history += [
+            {"role": "user", "content": "What is a monoid?"},
+            {"role": "assistant", "content": "ok"},
+        ]
+        world.composer.next_block = "facts ranked for functors"
+        m2 = _drive(world, "And a functor?", conversation_id="c-1")
+        assert m1[0] == m2[0], "the leading system message must not move"
+        assert [m for m in m2 if m["role"] == "system" and "facts ranked" in m["content"]] == []
+        assert m2[-1]["role"] == "user"
+        assert "facts ranked for functors" in m2[-1]["content"]
+        assert m2[-1]["content"].endswith("And a functor?")
+    finally:
+        restore()
+
+
+def test_sp17_the_cache_fingerprint_is_head_plus_tail_and_ignores_the_flag():
+    seen = {}
+    for flag_on in (False, True):
+        world, restore = _load_executor(flag_on=flag_on, with_cache=True)
+        try:
+            msgs = _drive(world, "What is a monoid?")
+            seen[flag_on] = (world.cache.fingerprints[-1], msgs)
+        finally:
+            restore()
+    fp_off, msgs_off = seen[False]
+    fp_on, msgs_on = seen[True]
+    assert fp_off is not None and fp_on is not None
+    assert fp_on == fp_off, "the flag must not move the cache identity"
+    head = msgs_on[0]["content"]
+    tail = msgs_on[-1]["content"][: -len("\n\nWhat is a monoid?")]
+    assert tail, "the turn carries its data"
+    assert fp_on == hashlib.sha256((head + "\n\n" + tail).encode("utf-8")).hexdigest()
+
+
+def test_sp18_the_manual_build_prices_the_tail_it_joins_to_the_turn():
+    world, restore = _load_executor(flag_on=True)
+    try:
+        ex = world.mod.Executor()
+        tail = "\n\nVOLATILE: " + "x" * 400
+        msgs, total, stats = ex._build_conversation_messages(
+            system_prompt=_STABLE_HEAD,
+            conversation_id="c-1",
+            current_message="q",
+            model="test-model:1b",
+            volatile_block=tail,
+        )
+        assert msgs[-1] == {"role": "user", "content": tail.strip() + "\n\nq"}
+        tail_tokens = ex._estimate_tokens(tail, "test-model:1b")
+        assert total >= tail_tokens, "the tail must be priced into the total"
+        assert stats["total_tokens"] == total
     finally:
         restore()

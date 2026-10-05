@@ -720,6 +720,27 @@ fail_under = 0
 # stay in the tree word for word; gt35 and gt36, gt37, gt38 and at12, in the
 # same files, keep their properties under the new meaning.
 #
+# The leading system message now carries the instruction head alone: every
+# data block -- working memory, project retrieval, web results, archive
+# snippets, and every summary of earlier turns -- rides the user role,
+# wrapped under its source label and joined to the turn it belongs to, on
+# the context optimizer, the manual pipeline and the single turn alike. A
+# summary is made from archived turns only: no stored summary is restored
+# beside the archive, the cumulative merge and the tier rollup are gone, and
+# reading a receipt no longer closes it. Thirty-five contracts pinned the
+# earlier layout or behaviour, or read only the system message, where memory
+# no longer goes (w4, w5 and w6 give way to w14 to w16, which read every
+# message sent). In the stable-prefix suite, sp1 and sp5 give
+# way to sp13, sp2 to sp14, sp12 to sp15, sp8 to sp16, sp9 to sp17 and sp10
+# to sp18; sp6, sp7 and sp11 to lv4, lv5 and lv11 in
+# tests/test_live_path_roles_contracts.py. In the tier suite, t3 gives way
+# to fs5 in tests/test_summary_from_sources_contracts.py, t4 to t12, t8 to
+# t13 and t9 to t14. or1 gives way to or4, lb14 to lb19, w1, w2, w3, w7 and
+# w8 to w9 to w13, xw1, xw2, xw3 and xw5 to xw6 to xw9, ks4 to ks7 (its
+# parts c3 to c7 word for word), g1 to g3 to g5 to g7, da3 to da8, ch3 to
+# ch9 and q33 to q34, each in its own file. They stay in the tree word for
+# word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -846,4 +867,39 @@ addopts = """
     --deselect=tests/test_governor_threads_contracts.py::test_gt26_a_count_measured_for_this_model_engine_and_placement_is_planned_said_measured
     --deselect=tests/test_governor_threads_contracts.py::test_gt29_the_status_shows_the_plan_the_reserve_and_the_background_budget_as_the_governor_plans_them
     --deselect=tests/test_auto_tuner_threads_contracts.py::test_at4_auto_sweeps_the_plan_its_fractions_and_the_fast_class_never_past_the_plan
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp1_legacy_call_keeps_volatile_inside_the_leading_system_message
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp2_volatile_block_rides_one_trailing_message_and_head_stays_bare
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp5_empty_tail_still_moves_project_retrieval_behind_the_history
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp6_flag_off_keeps_wrapped_memory_in_the_leading_system_message
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp7_flag_on_moves_wrapped_memory_to_the_trailing_context_message
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp8_flag_on_conversation_head_is_byte_stable_across_turns
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp9_context_fingerprint_is_identical_across_flag_states
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp10_manual_build_counts_the_tail_in_its_fixed_token_cost
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp11_flag_on_web_results_ride_the_trailing_context_message
+    --deselect=tests/test_stable_prefix_contracts.py::test_sp12_degraded_collaborators_keep_the_relocated_order
+    --deselect=tests/test_context_summary_tiers_contracts.py::test_t3_the_rollup_is_built_from_segment_texts_only
+    --deselect=tests/test_context_summary_tiers_contracts.py::test_t4_a_stale_span_is_refused_and_takes_its_rollup_with_it
+    --deselect=tests/test_context_summary_tiers_contracts.py::test_t8_composition_is_ordered_and_total
+    --deselect=tests/test_context_summary_tiers_contracts.py::test_t9_the_executor_reaches_the_seam_on_both_paths
+    --deselect=tests/test_onion_routes_contracts.py::test_or1_the_handlers_reach_the_librarian_as_the_user_and_hand_back_its_answers
+    --deselect=tests/test_librarian_contracts.py::test_lb14_a_recall_hands_back_the_span_marks_the_receipt_and_every_mutation_is_saved
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w1_memory_block_arrives_wrapped_exactly_as_the_wrapper_renders_it
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w2_envelope_carries_the_policy_and_names_the_memory_source
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w3_forged_close_marker_in_the_block_is_defanged
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w4_empty_block_leaves_the_prompt_without_any_envelope
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w5_disabled_memory_never_consults_the_composer
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w6_wrapper_absent_drops_the_block_instead_of_injecting_it_bare
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w7_multiline_payload_survives_verbatim_inside_the_envelope
+    --deselect=tests/test_executor_memory_wrap_contracts.py::test_w8_prompt_head_precedes_the_envelope
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw1_the_onion_block_arrives_wrapped_and_the_legacy_composer_is_not_consulted
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw2_with_the_onion_off_the_librarian_is_never_asked
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw3_with_the_onion_on_but_empty_the_legacy_block_arrives
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw5_an_absent_or_failing_librarian_never_breaks_the_turn
+    --deselect=tests/test_search_gates_contracts.py::test_ks4_web_results_reach_a_model_only_inside_the_untrusted_envelope
+    --deselect=tests/test_context_optimizer_unified_gate_contracts.py::test_g1_the_layer_is_off_by_default_and_never_touched
+    --deselect=tests/test_context_optimizer_unified_gate_contracts.py::test_g2_enabled_means_the_layer_fills_the_project_zone
+    --deselect=tests/test_context_optimizer_unified_gate_contracts.py::test_g3_a_failing_layer_falls_back_to_the_builder_in_the_same_call
+    --deselect=tests/test_drift_ab_contracts.py::test_da3_the_arms_differ_by_the_onion_block_and_nothing_else
+    --deselect=tests/test_chat_session_contracts.py::test_ch3_pin_close_open_and_recall_act_on_the_real_onion
+    --deselect=tests/test_api_schemas_contracts.py::test_q33_window_holds_and_the_module_is_import_pure_at_330_models
 """

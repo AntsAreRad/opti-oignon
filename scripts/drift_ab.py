@@ -11,9 +11,10 @@ the model's context, and the driver that runs both over the same turns.
 The two arms differ the way the chat path does. With the onion switched
 on, the executor adds one thing to the prompt: the onion's memory block --
 Core, receipts digest, the Peels selected for the turn -- wrapped as
-untrusted data after the system prompt. So both arms send the same system
-prompt and the same history window to the same model, and the onion arm
-adds its block. The librarian runs in this process with persistence off
+untrusted data with its composer's frames, in front of the user's turn, in
+the user role. So both arms send the same system prompt and the same
+history window to the same model, and the onion arm adds its block to the
+turn. The librarian runs in this process with persistence off
 and curates after every turn, not on a thread, so the reading never
 depends on timing, and none of the user's memories enters either arm: no
 memory store is read or written. The requests go through the inference
@@ -243,7 +244,7 @@ def plain_arm(ask, *, history_tokens=HISTORY_TOKENS, system=SYSTEM_PROMPT):
 
 def onion_arm(ask, *, librarian, config, summarize, wrap, history_tokens=HISTORY_TOKENS, system=SYSTEM_PROMPT,
               conversation_id="drift-ab", gate=None, budget=None):
-    """The chat with the onion: the same window, plus the onion's block after the system prompt.
+    """The chat with the onion: the same window, plus the onion's block in front of the turn.
 
     The librarian runs in this process and never writes a store: a
     configuration with a persistence path is refused, so a measurement can
@@ -255,9 +256,9 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, history_tokens=HISTORY
 
     def answer(text):
         block = librarian.memory_block(conversation_id, text, budget=budget, config=config)
-        head = system + "\n\n" + wrap(block) if block else system
-        messages = [{"role": "system", "content": head}, *history_window(history, history_tokens),
-                    {"role": "user", "content": text}]
+        turn = wrap(block) + "\n\n" + text if block else text
+        messages = [{"role": "system", "content": system}, *history_window(history, history_tokens),
+                    {"role": "user", "content": turn}]
         reply = str(ask(messages))
         history.extend([{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
         state = librarian.state_for(conversation_id, config)
@@ -390,7 +391,8 @@ def main(argv=None, *, resolve=None):
         return str(getattr(response, "content", "") or "")
 
     def wrap(block):
-        return untrusted_context.wrap(block, source=untrusted_context.SOURCE_MEMORY)
+        # The onion's window keeps the frames its composer wrote, as on the chat path.
+        return untrusted_context.wrap(block, source=untrusted_context.SOURCE_MEMORY, frames=True)
 
     started = time.perf_counter()
     try:

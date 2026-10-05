@@ -11,7 +11,8 @@ A line that starts with a slash is a user action:
   /open ID          find a persisted onion again and continue that conversation
   /close            evict the whole Flesh through the gate, save, and end the conversation
   /pin TEXT         pin a statement to the conversation's Core, as the user
-  /recall KEY       show the verbatim span behind a receipt, which marks it resolved
+  /recall KEY       show the verbatim span behind a receipt; the receipt stays open
+  /resolve KEY      close a receipt, as the user: it leaves the digest
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
   /adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes
   /help             list the commands
@@ -47,7 +48,8 @@ HELP = (
     "/open ID          find a persisted onion again and continue that conversation\n"
     "/close            evict the whole Flesh through the gate, save, and end the conversation\n"
     "/pin TEXT         pin a statement to the conversation's Core, as the user\n"
-    "/recall KEY       show the verbatim span behind a receipt (this marks the receipt resolved)\n"
+    "/recall KEY       show the verbatim span behind a receipt (the receipt stays open)\n"
+    "/resolve KEY      close a receipt, as the user: it leaves the digest\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
     "/help             list the commands\n"
@@ -160,6 +162,7 @@ class ChatSession:
             "close": self._close,
             "pin": self._pin,
             "recall": self._recall,
+            "resolve": self._resolve,
             "skill": self._skill,
             "adopt": self._adopt,
             "help": self._help,
@@ -246,7 +249,14 @@ class ChatSession:
             raise _Refused("/recall needs a receipt key")
         span = self._onion().recall(cid, rest)
         lines = [f"[{t.get('turn_id', '')}] {t.get('role', '')}: {t.get('text', '')}" for t in span]
-        yield _info("\n".join(lines) + "\n(the receipt is now resolved)")
+        yield _info("\n".join(lines) + "\n(the receipt stays open; /resolve KEY closes it)")
+
+    def _resolve(self, rest):
+        cid = self._require_conversation("/resolve")
+        if not rest:
+            raise _Refused("/resolve needs a receipt key")
+        self._onion().resolve_receipt(cid, rest, actor="user")
+        yield _info(f"receipt {rest[:12]} closed: it leaves the digest and stays in the ledger")
 
     def _skill(self, rest):
         ref, _, args = rest.partition(" ")

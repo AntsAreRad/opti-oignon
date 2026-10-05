@@ -296,6 +296,7 @@ _ARTIFACT_MARKERS = [
 ]
 # Summary-message pattern (compatible with context_summary)
 _SUMMARY_PREFIX = "[Summary of earlier conversation]"
+_WRAPPED_SUMMARY = '<untrusted_data source="memory" trusted="false">\n' + _SUMMARY_PREFIX
 
 
 @dataclass
@@ -409,10 +410,13 @@ class SlidingWindowManager:
         Returns:
             True if it is a summary message
         """
-        if msg.get("role") != "system":
-            return False
         content = msg.get("content", "")
-        return content.startswith(_SUMMARY_PREFIX)
+        if msg.get("role") == "system":
+            return content.startswith(_SUMMARY_PREFIX)
+        # A summary now rides the user role, quoted as memory data: the
+        # header right inside a memory envelope is what marks it, never the
+        # header alone, which any user could type.
+        return msg.get("role") == "user" and _WRAPPED_SUMMARY in content
 
     def _score_message(
         self, msg: dict[str, str], index: int, total: int

@@ -467,6 +467,132 @@ def test_t11_advancing_is_bounded_ordered_and_idempotent():
 
 
 # ---------------------------------------------------------------------------
+# Without a rollup: t12 carries what t4 pinned, t13 what t8 pinned
+# ---------------------------------------------------------------------------
+
+def test_t12_a_stale_span_is_refused_and_what_still_matches_survives():
+    module, restore = _load()
+    try:
+        archive = _messages(10)
+        reader = _Reader(archive)
+        manager = _manager(module, reader)
+        update = manager.advance("conv", {}, summarize_fn=_SummarizeSpy())
+        state = module.TierState.from_metadata(update)
+        assert len(state.segments) == 2
+
+        intact = state.segments[1]
+        victim_id = state.segments[0].first_id
+        for m in archive:
+            if m["id"] == victim_id:
+                m["content"] = "rewritten behind the digest's back"
+
+        verified = manager.verify(state, "conv")
+        digests = [s.digest for s in verified.segments]
+        assert state.segments[0].digest not in digests, (
+            "a span that no longer matches its digest must be dropped"
+        )
+        kept = [s for s in verified.segments if s.digest == intact.digest]
+        assert kept and kept[0].text == intact.text, (
+            "what still matches must survive byte for byte"
+        )
+    finally:
+        restore()
+
+
+def test_t13_composition_is_ordered_and_ends_with_the_partial():
+    module, restore = _load()
+    try:
+        reader = _Reader(_messages(10))
+        manager = _manager(module, reader)
+        update = manager.advance("conv", {}, summarize_fn=_SummarizeSpy())
+        state = module.TierState.from_metadata(update)
+        assert len(state.segments) == 2
+
+        block = manager.compose("conv", update, live_partial="LIVE-TAIL")
+        for segment in state.segments:
+            assert segment.text in block
+        assert block.index(state.segments[0].text) < block.index(
+            state.segments[1].text
+        )
+        assert block.endswith("LIVE-TAIL")
+        assert block == "\n\n".join([state.segments[0].text, state.segments[1].text, "LIVE-TAIL"]), (
+            "nothing but the segments, in order, then the partial"
+        )
+
+        assert manager.compose("conv", {}, live_partial="LIVE-TAIL") == "LIVE-TAIL"
+        assert manager.compose("conv", {}) == ""
+    finally:
+        restore()
+
+
+def test_t14_the_executor_reaches_the_seam_on_the_summary_path_and_restores_nothing():
+    """What t9 pinned, now that a summary stands only for evicted turns:
+    the tiers are advanced and composed where a summary is made, and the
+    builder never puts a stored summary back beside the archive."""
+    tree = ast.parse(_EXECUTOR_PATH.read_text(encoding="utf-8"))
+    guarded = any(
+        isinstance(stmt, ast.ImportFrom) and stmt.module == "context_summary_tiers"
+        for node in ast.walk(tree) if isinstance(node, ast.Try)
+        for stmt in ast.walk(node)
+    )
+    assert guarded, (
+        "the tier import must be guarded like every sibling feature, so an "
+        "install without the module keeps the exact historical pipeline"
+    )
+    functions = {
+        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    for name in ("_summarize_old_messages", "_summary_from_sources", "_build_conversation_messages"):
+        assert name in functions, name
+
+    def _attr_calls(fn, name):
+        return [
+            node.lineno for node in ast.walk(functions[fn])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == name
+        ]
+
+    assert _attr_calls("_summary_from_sources", "advance"), "the summary path never advances the tiers"
+    assert _attr_calls("_summary_from_sources", "compose"), "the summary path never composes the tiers"
+    assert _attr_calls("_summarize_old_messages", "_summary_from_sources")
+    assert _attr_calls("_summarize_old_messages", "update_conversation_metadata"), (
+        "the summary path lost its metadata write"
+    )
+    stored_reads = [
+        node.lineno for node in ast.walk(functions["_build_conversation_messages"])
+        if (isinstance(node, ast.Constant) and node.value == "context_summary")
+        or (isinstance(node, ast.Name) and node.id == "TIERS_METADATA_KEY")
+    ]
+    assert stored_reads == [], "the builder must not restore a stored summary beside the archive"
+
+
+def test_t15_a_rollup_stored_by_an_older_record_is_never_composed_and_the_next_advance_drops_it():
+    module, restore = _load()
+    try:
+        reader = _Reader(_messages(10))
+        manager = _manager(module, reader)
+        update = manager.advance("conv", {}, summarize_fn=_SummarizeSpy())
+        state = module.TierState.from_metadata(update)
+        assert len(state.segments) == 2, "control: two verified segments"
+        legacy = module.TierState(
+            segments=list(state.segments),
+            rollup=module.ConversationRollup(
+                text="ROLLUP-SENTINEL a summary of summaries",
+                built_from=[s.digest for s in state.segments],
+            ),
+        )
+        meta = {module.TIERS_METADATA_KEY: legacy.to_metadata_value()}
+        assert module.TierState.from_metadata(meta).rollup is not None, "control: the record carries a rollup"
+        block = manager.compose("conv", meta, live_partial="LIVE-TAIL")
+        assert "ROLLUP-SENTINEL" not in block
+        assert all(s.text in block for s in state.segments)
+        again = module.TierState.from_metadata(manager.advance("conv", meta, summarize_fn=_SummarizeSpy()))
+        assert again.rollup is None
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
