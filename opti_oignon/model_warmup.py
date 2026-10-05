@@ -47,6 +47,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -148,6 +149,49 @@ DEFAULT_KEEP_ALIVE = "30m"
 DEFAULT_KEEPALIVE_INTERVAL = 240  # 4 minutes (before the 5min default expiration)
 # Minimal prompt for warm-up
 WARMUP_PROMPT = "hi"
+# The caller the warm-up and its keepalive ping are admitted as: nobody waits
+# on them, so the governor's caller table makes them the background.
+WARMUP_CALLER = "warmup"
+
+
+def _governor() -> Any:
+    """The resource governor, or None when there is none to ask: the
+    warm-up then loads as it always did (fail-open, as every funnel)."""
+    try:
+        from opti_oignon.resource_governor import get_resource_governor
+
+        return get_resource_governor()
+    except Exception as exc:  # noqa: BLE001 - absence is an answer here
+        logger.debug("Resource governor unavailable: %s", exc)
+        return None
+
+
+def _held(decision: Any) -> bool:
+    """A decision the governor took and refused."""
+    return decision is not None and not getattr(decision, "admitted", True)
+
+
+def _at_admitted_ctx(options: dict[str, Any], decision: Any) -> dict[str, Any]:
+    """``options`` with the context the admission priced, so the engine
+    loads the model, or keeps it, at that context rather than at its own
+    default; unchanged when the admission names none."""
+    ctx = getattr(decision, "num_ctx", None)
+    if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0:
+        return {**options, "num_ctx": ctx}
+    return options
+
+
+@contextmanager
+def _holding(decision: Any):
+    """Hold the warm-up's own ticket around the engine call, so the engine
+    gate accounts the load it admitted instead of admitting it again."""
+    if decision is None:
+        yield
+        return
+    from opti_oignon.resource_governor import ticket_scope
+
+    with ticket_scope(decision):
+        yield
 
 
 class ModelWarmup:
@@ -285,10 +329,20 @@ class ModelWarmup:
         Sends a minimal prompt to force Ollama to load the model.
         If the model is already loaded, skips unless force=True.
 
+        The warm-up is asked of the governor as the background: it waits
+        while an interactive call runs or other programs are short of CPU,
+        and it loads only into memory known to be free, never evicting,
+        reloading or splitting a model to make room. It sends the context it
+        was admitted at, the one the governor priced. A warm-up the governor
+        holds, or whose admission fails, sends nothing and fails with its
+        reason: without a ticket the engine's backstop would admit it as a
+        user, which may evict.
+
         Args:
             model: Model name to warm up
             force: If True, warm up even if already loaded
-            timeout: Maximum seconds to wait for loading
+            timeout: Maximum seconds to wait in the governor's queue (the
+                background's own bound caps it)
 
         Returns:
             WarmupResult with success status and timing
@@ -310,17 +364,38 @@ class ModelWarmup:
                 already_loaded=True,
             )
 
+        decision = None
+        governor = _governor()
+        if governor is not None:
+            try:
+                decision = governor.admit_or_wait(model, caller=WARMUP_CALLER, wait_s=timeout)
+            except Exception as e:
+                logger.warning(f"Warm-up of {model} not sent: its admission failed: {e}")
+                return WarmupResult(
+                    model=model,
+                    success=False,
+                    error=f"resource governor admission failed: {e}",
+                )
+        if _held(decision):
+            logger.info(f"Warm-up of {model} held by the governor: {decision.reason}")
+            return WarmupResult(
+                model=model,
+                success=False,
+                error=f"held by the resource governor: {decision.reason}",
+            )
+
         # Send a minimal request to force loading
         start = time.time()
         try:
             # The warm-up prompt travels as one user message: the registry
             # has chat heads only, and a single token is all that is asked.
-            backend.generate(
-                model,
-                [{"role": "user", "content": WARMUP_PROMPT}],
-                options={"num_predict": 1},
-                keep_alive=self._keep_alive,
-            )
+            with _holding(decision):
+                backend.generate(
+                    model,
+                    [{"role": "user", "content": WARMUP_PROMPT}],
+                    options=_at_admitted_ctx({"num_predict": 1}, decision),
+                    keep_alive=self._keep_alive,
+                )
             duration = time.time() - start
 
             with self._lock:
@@ -390,7 +465,11 @@ class ModelWarmup:
 
         Asks the registry's backend with no messages and the keep_alive
         parameter: the engine's documented way to renew a model's residency
-        without generating anything.
+        without generating anything. The ping is admitted as the background
+        and never waits: one the governor holds, or whose admission fails,
+        is skipped, and the next interval pings again. It sends the context
+        the resident holds, as the admission names it, so the engine renews
+        the model as it is instead of loading it again at its own default.
 
         Args:
             model: Model name to keep alive
@@ -402,13 +481,26 @@ class ModelWarmup:
         if backend is None:
             return False
 
+        decision = None
+        governor = _governor()
+        if governor is not None:
+            try:
+                decision = governor.admit(model, caller=WARMUP_CALLER)
+            except Exception as e:
+                logger.warning(f"Keepalive of {model} not sent: its admission failed: {e}")
+                return False
+        if _held(decision):
+            logger.debug(f"Keepalive of {model} held by the governor: {decision.reason}")
+            return False
+
         try:
-            backend.generate(
-                model,
-                [],
-                options={"num_predict": 0},
-                keep_alive=self._keep_alive,
-            )
+            with _holding(decision):
+                backend.generate(
+                    model,
+                    [],
+                    options=_at_admitted_ctx({"num_predict": 0}, decision),
+                    keep_alive=self._keep_alive,
+                )
             with self._lock:
                 self._total_keepalives += 1
 

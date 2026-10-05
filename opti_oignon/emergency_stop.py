@@ -383,11 +383,22 @@ def _step_reconnect_ollama(warmup_model: str | None) -> dict[str, Any]:
             if warmer is None:
                 out["warmup"] = "skipped: warmup helper unavailable"
             else:
-                result = warmer.warmup(warmup_model)
-                out["warmup"] = {
-                    "model": warmup_model,
-                    "success": bool(getattr(result, "success", result)),
-                }
+                # The warm-up is the background: it may wait its turn in the
+                # governor's queue, on a thread of its own, while the resume
+                # answers at once.
+                def _warm() -> None:
+                    try:
+                        result = warmer.warmup(warmup_model)
+                        logger.info(
+                            "Resume warm-up of %s: %s",
+                            warmup_model,
+                            "done" if getattr(result, "success", result) else getattr(result, "error", "not done"),
+                        )
+                    except Exception as exc:
+                        logger.warning("Resume warm-up of %s failed: %s", warmup_model, exc)
+
+                threading.Thread(target=_warm, name="estop-resume-warmup", daemon=True).start()
+                out["warmup"] = {"model": warmup_model, "queued": True}
     return out
 
 

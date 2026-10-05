@@ -96,6 +96,63 @@ queue:
   enabled_per_caller: {}
   depth: 2
   wait_s: 30
+  # Within a class, how many later callers that fit may pass a waiter that
+  # does not before it keeps its place; 0 keeps strict arrival order.
+  max_bypass: 2
+
+# Who asks. Each caller belongs to one class: interactive (a person is
+# waiting on the answer), user (asked by a person, not watched) or background
+# (asked by nobody). A caller not named here is a user. The queue serves the
+# classes in that order. The background never evicts: no eviction credit, no
+# reload of a resident for more context, no load whose fit the free memory
+# cannot show; and a resident only the background loaded is evicted first.
+# Per class: queued (whether a refused caller waits, unless
+# queue.enabled_per_caller names it), depth and wait_s (queue.depth and
+# queue.wait_s when not named); the background also allow_split (whether it
+# may split a model between VRAM and RAM).
+classes:
+  callers:
+    chat: interactive
+    pipeline: interactive
+    benchmark: user
+    agent_eval: user
+    direct: user
+    warmup: background
+    index: background
+    tuner: background
+    reverie: background
+  interactive:
+    queued: false
+  user:
+    queued: false
+  background:
+    queued: true
+    depth: 8
+    wait_s: 120
+    allow_split: false
+
+# The background gate holds every background admission while an interactive
+# call is in flight, admitted and not yet held, or waiting, while a user
+# caller waits in the queue, and while the CPU pressure other programs
+# suffer is high: the highest some avg10 among the user's other cgroups, or
+# the system-wide reading where they cannot be told apart. A pressure nobody
+# can read holds nothing. The background also leaves free the memory of every
+# load admitted that the engine does not show yet.
+#   in_flight_max_s      -- seconds; a ticket held longer is a leak and is
+#                           no longer counted in flight.
+#   admitted_grace_s     -- seconds an interactive admission holds the gate
+#                           before any thread holds its ticket; 0: none.
+#   pending_load_max_s   -- seconds, above 0; a load admitted and never
+#                           shown by the engine stops counting after it.
+#   cpu_enter_some_avg10 -- 0 to 100 (percent): held at or above.
+#   cpu_exit_some_avg10  -- 0 to 100, at most the enter mark: released below.
+background_gate:
+  enabled: true
+  in_flight_max_s: 900
+  admitted_grace_s: 10
+  pending_load_max_s: 600
+  cpu_enter_some_avg10: 10.0
+  cpu_exit_some_avg10: 5.0
 
 # Optional in-process rlimits (off by default) and Ollama limit
 # management (spawn-path env application; advisory for external servers).

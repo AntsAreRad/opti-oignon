@@ -691,6 +691,25 @@ fail_under = 0
 # file, keeps its other assertions and pins the shipped null. The sizing
 # itself is pinned in tests/test_hardware_profile_contracts.py.
 #
+# Each admission class now has its own queue depth. w5 pinned the inclusive
+# bound by setting the one counter every caller shared, which no longer
+# bounds anything. It stays in the tree word for word; w6, in the same file,
+# keeps its assertions and fills the caller's class to its bound through the
+# queue's own entry. The classes themselves are pinned in
+# tests/test_governor_classes_contracts.py.
+#
+# The background now leaves the memory of every load admitted and not yet
+# seen, joins a pending load of the model it asks, is charged a context when
+# it names none, and is held by an interactive admission no thread holds yet
+# and by a user waiting in the queue. Eight classes contracts built their
+# frames on the earlier behaviour: gc2 and gc14 admitted the background after
+# a chat no thread held, gc4, gc6, gc7 and gc9 asked for the background the
+# model a foreground call had just been admitted to load, gc25 expected the
+# expiry reason the gate now names, and gc29 priced the background without
+# the context it loads at. They stay in the tree word for word; gc58, gc54,
+# gc55, gc59, gc60, gc56, gc52 and gc57, in the same file, keep their
+# properties on frames of their own.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -804,4 +823,13 @@ addopts = """
     --deselect=tests/test_dynamic_ctx_ceiling_contracts.py::test_dc8_a_starved_budget_answers_the_lowest_step_and_lets_fit_refuse
     --deselect=tests/test_backend_heads_contracts.py::test_bh2_ollama_reads_the_loaded_set_through_ps_in_both_forms_and_unknown_is_none
     --deselect=tests/test_governor_offload_contracts.py::test_go17_the_offload_block_parses_and_the_shipped_file_carries_the_decided_defaults
+    --deselect=tests/test_resource_governor_queue_contracts.py::test_w5_enrolled_refusal_at_depth_bound_does_not_enqueue_when_no_split_fits
+    --deselect=tests/test_governor_classes_contracts.py::test_gc2_a_decision_carries_the_class_of_its_caller_and_a_stranger_is_a_user
+    --deselect=tests/test_governor_classes_contracts.py::test_gc4_the_background_never_gets_a_grant_conditional_on_an_eviction
+    --deselect=tests/test_governor_classes_contracts.py::test_gc6_the_background_splits_between_vram_and_ram_only_when_allowed
+    --deselect=tests/test_governor_classes_contracts.py::test_gc7_the_background_is_refused_a_load_when_the_free_memory_cannot_be_known
+    --deselect=tests/test_governor_classes_contracts.py::test_gc9_the_background_is_refused_a_load_whose_cost_is_unknown
+    --deselect=tests/test_governor_classes_contracts.py::test_gc14_holding_and_releasing_a_ticket_count_the_calls_in_flight_per_thread_and_class
+    --deselect=tests/test_governor_classes_contracts.py::test_gc25_no_caller_passes_a_waiter_of_a_higher_class
+    --deselect=tests/test_governor_classes_contracts.py::test_gc29_a_waiter_is_admitted_when_memory_frees_and_its_slot_is_given_back
 """

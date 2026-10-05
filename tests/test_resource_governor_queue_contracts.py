@@ -17,6 +17,9 @@ container-isolable after the second, each proven red-before-green by mutation:
     * W4, W5 supersede W2 and W3 now that a model the GPU cannot hold is
       admitted split when VRAM and RAM together hold it: the same refusals,
       reached with no RAM left to split into, keep the same queue semantics.
+    * W6 supersedes W5 now that each admission class has its own depth bound:
+      the caller's class, filled to its bound through the queue's own entry,
+      keeps the same inclusive bound.
 
   The conditional-grant decision (``admit``, Section 4.2) -- the DECISION only;
   the eviction act (``_honour_conditional_eviction``) is host-side and untouched:
@@ -257,6 +260,23 @@ def test_w5_enrolled_refusal_at_depth_bound_does_not_enqueue_when_no_split_fits(
     gov, clk = _governor(rg, config=cfg)
     gov._snapshot = _fresh_snapshot(rg, clk, capacity=8.0, in_use=0.0, ram_mb=4096.0)
     gov._queue_depth = gov._config.queue_depth  # already at the bound
+    decision = gov.admit_or_wait("m", requested_ctx=None, caller="benchmark")
+    assert decision.admitted is False
+    assert _queue_decisions(gov) == []  # at the bound -> no new enqueue
+
+
+def test_w6_enrolled_refusal_at_its_class_depth_bound_does_not_enqueue():
+    """W6 -- supersedes W5: an enrolled refused caller whose class is already
+    AT its depth bound stands on its refusal without a new enqueue (the bound
+    is inclusive). Loosening the comparison from >= to > admits one more past
+    the bound -> RED."""
+    rg = _load_rg()
+    cfg = _queue_config(rg, capacity=8.0, enrolled=True, depth=2)
+    cfg.weights_override_models = {"m": 50.0}  # refuse
+    gov, clk = _governor(rg, config=cfg)
+    gov._snapshot = _fresh_snapshot(rg, clk, capacity=8.0, in_use=0.0, ram_mb=4096.0)
+    for _ in range(gov._config.queue_depth):
+        gov._enqueue("user")  # the benchmark's class, already at its bound
     decision = gov.admit_or_wait("m", requested_ctx=None, caller="benchmark")
     assert decision.admitted is False
     assert _queue_decisions(gov) == []  # at the bound -> no new enqueue

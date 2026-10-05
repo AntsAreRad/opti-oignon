@@ -2666,6 +2666,91 @@ package costs.
   engine names the model's weights. Ollama's streaming head now refuses
   malformed options before admission, as generation does, so a refused
   stream leaves no load accounted. Forty-one contracts.
+- The governor knows who asks. Every caller belongs to one of three
+  classes, named in `resource_governor.yaml` (`classes.callers`):
+  interactive (chat, pipeline: a person is waiting on the answer), user
+  (benchmark, agent_eval, the direct backstop, and any caller the file does
+  not name) and background (warm-ups, indexing, tuning, consolidation);
+  every decision carries its class. The background never evicts: it counts
+  no eviction credit, so it is never granted on condition of an eviction;
+  it never reloads a resident for more context, and is served by the
+  resident at the context it holds when its own floor allows; and it splits
+  a model between VRAM and RAM only when `classes.background.allow_split`
+  says so (shipped false). Where the free memory cannot show a fit, a user
+  is admitted fail-open, since the engine's own LRU would then evict for
+  it, while the background is refused at once, without waiting: a card
+  whose free memory cannot be read, or a load whose cost cannot be told. A
+  machine whose PCI bus lists no display controller but integrated Intel
+  ones is checked against its RAM, the reserve kept; a card the DRM tree
+  does not list still counts, and a bus that cannot be read proves nothing.
+  A background load that names no context is priced and loaded at the one
+  the governor names: the context last admitted to an interactive call on
+  that model (read back from the decision ring, so it survives a restart),
+  else the model's `max_output`, else the smallest step of the context
+  ladder; with none of them it is refused. The background also leaves free
+  the memory of every load admitted, in any class, that the engine does not
+  show yet: it joins a pending load of the model it asks, at that load's
+  context and loading nothing, and is refused until a later try a longer
+  context than that load's, or a decision during which another load was
+  admitted. A pending load stops counting once the engine shows it, once
+  its call has given its ticket back and a later view still does not show
+  it, or after `background_gate.pending_load_max_s` (600 s). A call on a
+  resident at the context it holds still loads nothing and is admitted.
+  The background is also evicted first: a resident only the background
+  loaded, with no call in flight on it, is an eviction candidate before any
+  other, whatever its idle time, and a ticket of a higher class held on it
+  makes it that class's. Holding and releasing a ticket now counts the
+  calls in flight per class; a ticket held longer than
+  `background_gate.in_flight_max_s` (900 s; 0 or less is refused) is
+  counted as a leak and no longer held. A background gate holds every
+  background admission while an interactive call is in flight, waiting, or
+  admitted and not yet held by any thread (for at most
+  `background_gate.admitted_grace_s`, 10 s); while a user caller waits in
+  the queue; and while the CPU pressure other programs suffer is at or
+  above 10 (some avg10, percent) until it falls below 5: the highest among
+  the user's other leaf cgroups under
+  `user@UID.service`, the process's own cgroup and everything under it left
+  out, or the system-wide reading where they cannot be told apart
+  (`hardware_profile.read_cgroup_cpu_pressure`); a reading nobody can take
+  holds nothing, and only the background pays for the reading. A held
+  admission is recorded with its reason, and no background decision enters
+  the refusal-rate window that drives backpressure. The queue
+  (`admit_or_wait`) is now a priority queue: class first, then arrival; no
+  caller passes a waiter of a higher class; within a class a waiter is
+  passed by later callers that fit at most `queue.max_bypass` times (2); a
+  caller that may not try waits without trying; every wake honours the
+  emergency stop first, whether the waiter may try or not; and a waiter's
+  retries are written neither to the decision ring nor to the refusal
+  window, only its entry and its outcome. Each class has its own depth and
+  wait (`classes.<class>.depth` and `wait_s`, else `queue.depth` and
+  `queue.wait_s`); the background waits by default, eight deep, two
+  minutes, and a caller may shorten its own wait. The warm-up is the first
+  background caller: it asks as `warmup`, waits at most its `timeout`,
+  loads under its own ticket and sends Ollama the context it was admitted
+  at; its keepalive ping sends the context the resident holds, never
+  waits, and is skipped while held; when the admission itself raises, both
+  send nothing and say why. Resuming after an emergency stop answers at
+  once, the warm-up waiting its turn on a thread of its own. `/status`
+  gains a `scheduling` section (calls in flight and waiting by class, the
+  gate's state, reason and reading, and the loads admitted and not yet
+  seen); `queue.max_bypass` and the gate's scalars are writable through the
+  config route, in range and with the CPU marks kept in order; the class
+  tables stay read-only. Owed to the machine: what the gate spares a
+  desktop under load, the context Ollama loads at when a call sends none,
+  and the PCI reading with a card present. Sixty-eight contracts.
+- A configuration write no longer changes the rules under a caller already
+  waiting, nor forgets the pressure the governor has seen. A caller still
+  holding the governor the write replaced is answered by the new one; a
+  waiter's turn, the background gate it waits on and its refusal at the end
+  of its wait follow the file just written (its deadline does not move). The
+  refusal-rate window, the side each pressure hysteresis is on (memory, and
+  the CPU pressure other programs suffer), the sustained-pressure timer and
+  the warm-up keep_alive a sustained pressure shortened are shared with the
+  rebuilt governor, under the one lock both hold: a write under sustained
+  pressure used to forget the keep_alive to restore, which then stayed short
+  until a restart. The readings themselves are taken again, and the new
+  file's marks judge them. Two loads of one model not yet seen now count
+  once against the background, at the larger of the two. Nine contracts.
 
 ## 2.2.0 -- 2026-07-28
 

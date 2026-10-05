@@ -66,6 +66,19 @@ fixed 4 GiB, whatever the machine and whatever its neighbours went through.
     * HW36 -- a first reading slower than the TTL does not start a second one
       at once.
 
+  The pressure other programs suffer, which the background gate reads:
+    * HW37 -- the CPU pressure others suffer is the highest of the user's
+      other leaf cgroups.
+    * HW38 -- neither the process's own cgroup, nor anything under it, nor a
+      parent of other cgroups counts.
+    * HW39 -- without a user root the profile falls back to the system-wide
+      reading, and without that it says it does not know.
+    * HW40 -- the profile says a machine has no card only when its PCI bus
+      shows none: an integrated controller is none, a controller the DRM tree
+      does not list is one all the same, an unreadable bus proves nothing.
+    * HW41 -- the governor's snapshot says what the profile knows: no card,
+      or a capacity unknown.
+
 Everything here is proven in the container, on fixture trees and scripted
 answers loaded through the shared isolation window: no card, no nvidia-smi,
 no /proc of the host. What the cards of a real machine report, and what its
@@ -1100,3 +1113,136 @@ def test_hw36_a_first_reading_slower_than_the_ttl_does_not_start_a_second_at_onc
     first = profile.placement()
     assert (first.used_mib, first.used_age_s) == (1000.0, 0.0)
     assert spawn.pending == []
+
+
+_USER_ROOT = "user.slice/user-1000.slice/user@1000.service"
+
+
+def _cgroup(root, relative, some=None):
+    """A cgroup directory under ``root``; with ``some``, its cpu.pressure."""
+    path = Path(root).joinpath(*relative.split("/"))
+    path.mkdir(parents=True, exist_ok=True)
+    if some is not None:
+        (path / "cpu.pressure").write_text(_psi_line("some", some) + _psi_line("full", 0.0), encoding="utf-8")
+    return path
+
+
+def _self_cgroup(tmp, relative):
+    """A /proc/self/cgroup of our own, naming the process's cgroup."""
+    path = tmp / "self-cgroup"
+    path.write_text(f"0::/{relative}\n", encoding="utf-8")
+    return path
+
+
+def test_hw37_the_cpu_pressure_others_suffer_is_the_highest_of_the_users_other_leaf_cgroups():
+    hp = _hp()
+    tmp = _tmp()
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/editor.scope", 3.5)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/browser.scope", 12.25)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/session.slice/audio.service", 0.5)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/oo.service", 0.0)
+    reading = hp.read_cgroup_cpu_pressure(tmp / "cg", _self_cgroup(tmp, f"{_USER_ROOT}/app.slice/oo.service"))
+    assert reading == {"source": "cgroups", "some_avg10": 12.25, "cgroup": "app.slice/browser.scope", "count": 3}
+
+
+def test_hw38_neither_the_process_own_cgroup_nor_anything_under_it_nor_a_parent_counts():
+    hp = _hp()
+    tmp = _tmp()
+    # The slice carries the stalls of every cgroup under it, ours included.
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice", 60.0)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/oo.service", 50.0)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/oo.service/sandbox-1.scope", 40.0)
+    _cgroup(tmp / "cg", f"{_USER_ROOT}/app.slice/editor.scope", 2.0)
+    reading = hp.read_cgroup_cpu_pressure(tmp / "cg", _self_cgroup(tmp, f"{_USER_ROOT}/app.slice/oo.service"))
+    assert reading == {"source": "cgroups", "some_avg10": 2.0, "cgroup": "app.slice/editor.scope", "count": 1}
+
+
+def test_hw39_without_a_user_root_the_profile_falls_back_to_the_system_reading_or_says_it_does_not_know():
+    hp = _hp()
+    tmp = _tmp()
+    _cgroup(tmp / "cg", "system.slice/oo.service", 30.0)
+    _cgroup(tmp / "cg", "system.slice/other.service", 20.0)
+    own = _self_cgroup(tmp, "system.slice/oo.service")
+    assert hp.read_cgroup_cpu_pressure(tmp / "cg", own) is None
+
+    def profile(pressure_root):
+        return hp.HardwareProfile(
+            config=hp.ProfileConfig(),
+            drm_root=_drm(tmp / "drm", []),
+            pressure_root=pressure_root,
+            nvidia_query=_Query(None),
+            environ={},
+            clock=_Clock(),
+            spawn=_Spawn(),
+            cgroup_root=str(tmp / "cg"),
+            self_cgroup=str(own),
+        )
+
+    system = _psi(tmp / "pressure", cpu=_psi_line("some", 7.5) + _psi_line("full", 1.0))
+    assert profile(system).others_cpu_pressure() == {"source": "system", "some_avg10": 7.5, "cgroup": None, "count": None}
+    assert profile(str(tmp / "no-pressure")).others_cpu_pressure() is None
+
+
+# ---------------------------------------------------------------------------
+# HW40-HW41 -- a machine with no card
+# ---------------------------------------------------------------------------
+
+
+def _pci(root, devices):
+    """A /sys/bus/pci/devices of our own: (address, class, vendor) per device."""
+    root.mkdir(parents=True, exist_ok=True)
+    for address, klass, vendor in devices:
+        device = root / address
+        device.mkdir()
+        (device / "class").write_text(klass + "\n", encoding="utf-8")
+        (device / "vendor").write_text(vendor + "\n", encoding="utf-8")
+    return str(root)
+
+
+def _on_bus(hp, tmp, pci, *, cards=()):
+    """A profile whose PCI bus is ``pci``, a fixture tree or a path that is none."""
+    return hp.HardwareProfile(
+        config=hp.ProfileConfig(),
+        drm_root=_drm(tmp / "drm", list(cards)),
+        pressure_root=str(tmp / "no-pressure"),
+        nvidia_query=_Query(None),
+        environ={},
+        clock=_Clock(),
+        spawn=_Spawn(),
+        pci_root=pci,
+    )
+
+
+_BRIDGE = ("0000:00:00.0", "0x060000", "0x8086")
+_IGPU = ("0000:00:02.0", "0x030000", "0x8086")
+_HIDDEN = ("0000:01:00.0", "0x030200", "0x10de")
+
+
+def test_hw40_the_profile_says_a_machine_has_no_card_only_when_its_bus_shows_none():
+    """HW40 -- a bus whose only display controller is integrated (Intel), or
+    that has none, is a machine with no card; an NVIDIA controller the DRM
+    tree does not list (no nvidia-drm, nvidia-smi silent) is a card all the
+    same, and a bus that cannot be read proves nothing. Reading an
+    unreadable bus as empty -> RED."""
+    hp = _hp()
+    tmp = _tmp()
+    igpu = {"n": 0, "vendor": "0x8086", "slot": "0000:00:02.0"}
+    integrated = _on_bus(hp, tmp / "a", _pci(tmp / "a" / "pci", [_BRIDGE, _IGPU]), cards=[igpu])
+    bare = _on_bus(hp, tmp / "b", _pci(tmp / "b" / "pci", [_BRIDGE]))
+    hidden = _on_bus(hp, tmp / "c", _pci(tmp / "c" / "pci", [_BRIDGE, _IGPU, _HIDDEN]), cards=[igpu])
+    unread = _on_bus(hp, tmp / "d", str(tmp / "d" / "no-bus"))
+    assert [p.cards_absent() for p in (integrated, bare, hidden, unread)] == [True, True, False, False]
+
+
+def test_hw41_the_governors_snapshot_says_what_the_profile_knows_of_the_cards():
+    """HW41 -- with no capacity configured, a profile that knows the machine
+    has no card makes a snapshot that says so; an NVIDIA controller on the
+    bus whose memory nothing reads leaves the capacity unknown, not absent.
+    Leaving the snapshot blind to the profile -> RED."""
+    loaded = _rg_hp()
+    hp, rg = loaded[_HP], loaded[_RG]
+    tmp = _tmp()
+    bare = _on_bus(hp, tmp / "a", _pci(tmp / "a" / "pci", [_BRIDGE]))
+    hidden = _on_bus(hp, tmp / "b", _pci(tmp / "b" / "pci", [_BRIDGE, _HIDDEN]))
+    seen = [_governor(rg, tmp / name, profile=p).refresh(force=True) for name, p in (("a", bare), ("b", hidden))]
+    assert [(s.capacity_gb, s.cards_absent) for s in seen] == [(None, True), (None, False)]

@@ -122,6 +122,13 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
         "section": "queue",
         "leaf": "wait_s",
     },
+    "queue.max_bypass": {
+        "attr": "queue_max_bypass",
+        "type": "int",
+        "section": "queue",
+        "leaf": "max_bypass",
+        "min": 0,
+    },
     "ollama_limits.max_loaded_models": {
         "attr": "ollama_max_loaded_models",
         "type": "opt_int",
@@ -258,6 +265,51 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
         "min": 0.0,
         "max": 100.0,
     },
+    "background_gate.enabled": {
+        "attr": "background_gate_enabled",
+        "type": "bool",
+        "section": "background_gate",
+        "leaf": "enabled",
+    },
+    "background_gate.in_flight_max_s": {
+        "attr": "background_gate_in_flight_max_s",
+        "type": "float",
+        "section": "background_gate",
+        "leaf": "in_flight_max_s",
+        "min": 0.0,
+        "min_exclusive": True,
+    },
+    "background_gate.admitted_grace_s": {
+        "attr": "background_gate_admitted_grace_s",
+        "type": "float",
+        "section": "background_gate",
+        "leaf": "admitted_grace_s",
+        "min": 0.0,
+    },
+    "background_gate.pending_load_max_s": {
+        "attr": "background_gate_pending_load_max_s",
+        "type": "float",
+        "section": "background_gate",
+        "leaf": "pending_load_max_s",
+        "min": 0.0,
+        "min_exclusive": True,
+    },
+    "background_gate.cpu_enter_some_avg10": {
+        "attr": "background_gate_cpu_enter",
+        "type": "float",
+        "section": "background_gate",
+        "leaf": "cpu_enter_some_avg10",
+        "min": 0.0,
+        "max": 100.0,
+    },
+    "background_gate.cpu_exit_some_avg10": {
+        "attr": "background_gate_cpu_exit",
+        "type": "float",
+        "section": "background_gate",
+        "leaf": "cpu_exit_some_avg10",
+        "min": 0.0,
+        "max": 100.0,
+    },
 }
 
 # Pairs load_config holds in order, (low, high): a write that crosses one
@@ -265,6 +317,7 @@ WRITABLE_KEYS: dict[str, dict[str, Any]] = {
 ORDERED_PAIRS: tuple[tuple[str, str], ...] = (
     ("ram_reserve.floor_gb", "ram_reserve.ceiling_gb"),
     ("host_pressure.memory_exit_some_avg10", "host_pressure.memory_enter_some_avg10"),
+    ("background_gate.cpu_exit_some_avg10", "background_gate.cpu_enter_some_avg10"),
 )
 
 # Keys deliberately not writable over the API, with the honest reason.
@@ -281,6 +334,7 @@ READ_ONLY_KEYS: dict[str, str] = {
     "queue.enabled_per_caller": (
         "structured key; edit the YAML directly this release"
     ),
+    "classes": "structured key; edit the YAML directly this release",
 }
 
 
@@ -310,6 +364,7 @@ def status_payload(governor: Any) -> dict[str, Any]:
         "hardware": governor.hardware_state(),
         "ram_reserve": governor.ram_reserve_state(snapshot),
         "queue_depth": governor.queue_depth,
+        "scheduling": governor.scheduling_state(),
         "ollama_limits": governor.ollama_limits_advisory(),
     }
 
@@ -374,6 +429,25 @@ def _config_to_nested(cfg: Any) -> dict[str, Any]:
             "enabled_per_caller": dict(cfg.queue_enabled_per_caller),
             "depth": cfg.queue_depth,
             "wait_s": cfg.queue_wait_s,
+            "max_bypass": cfg.queue_max_bypass,
+        },
+        "classes": {
+            "callers": dict(cfg.caller_classes),
+            **{
+                klass: {
+                    "queued": bool(cfg.class_queued.get(klass, False)),
+                    "depth": cfg.class_depth.get(klass, cfg.queue_depth),
+                    "wait_s": cfg.class_wait_s.get(klass, cfg.queue_wait_s),
+                    **({"allow_split": cfg.background_allow_split} if klass == "background" else {}),
+                }
+                for klass in (_rg.ADMISSION_CLASSES if _rg is not None else tuple(cfg.class_queued))
+            },
+        },
+        "background_gate": {
+            "enabled": cfg.background_gate_enabled,
+            "in_flight_max_s": cfg.background_gate_in_flight_max_s,
+            "cpu_enter_some_avg10": cfg.background_gate_cpu_enter,
+            "cpu_exit_some_avg10": cfg.background_gate_cpu_exit,
         },
         "rlimits": {
             "enabled": cfg.rlimits_enabled,
@@ -596,9 +670,9 @@ def config_write_payload(
     """Validate, persist, reload and audit an allowlisted config write.
 
     All-or-nothing: a single bad key rejects the whole write before any
-    file change. After a successful persist the singleton is dropped so the
-    next governor resolution reloads the file (the file stays the single
-    source of truth); in-flight operations finish on the config they hold.
+    file change. After a successful persist ``reset_fn`` builds the governor
+    again from the file (the file stays the single source of truth); the
+    route's keeps the live state, so calls in flight and waiting carry over.
     Raises ConfigWriteError (mapped to 400/409 at the route).
     """
     if not isinstance(changes, dict) or not changes:
@@ -651,8 +725,8 @@ def config_write_payload(
         "applied": applied,
         "persisted": True,
         "effective": (
-            "next governor access; in-flight operations finish on the"
-            " previous config"
+            "at once; the calls in flight, the queue and the loads not yet"
+            " seen carry over to the new config"
         ),
         "notes": [
             "the startup security checklist view is cached for the process"
@@ -760,7 +834,7 @@ try:
                 governor.config,
                 changes if changes is not None else {},
                 _rg._DEFAULT_CONFIG_PATH,
-                _rg.reset_resource_governor,
+                _rg.reload_resource_governor,
             )
         except ConfigWriteError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail)

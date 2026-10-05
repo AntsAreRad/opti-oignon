@@ -114,6 +114,7 @@ backup excluded).
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 import os
@@ -215,6 +216,33 @@ _CEILING_RELAX_STEP_GB = 1.0
 _QUEUE_WAIT_SLICE_S = 0.5
 _REFUSAL_RATE_SOFT = 0.5
 _REFUSAL_RATE_MIN_DECISIONS = 3
+
+# Who asks: the admission classes, highest first. Interactive: a person is
+# waiting on the answer. User: asked by a person, not watched. Background:
+# asked by nobody. A caller the configuration does not name is a user, never
+# the background.
+ADMISSION_CLASSES = ("interactive", "user", "background")
+_CLASS_RANK = {name: rank for rank, name in enumerate(ADMISSION_CLASSES)}
+_INTERACTIVE = "interactive"
+_DEFAULT_CLASS = "user"
+_BACKGROUND = "background"
+# The refusals no wait can lift: a caller refused by one of them is answered
+# at once, never queued. The card unreadable, the cost unknown, or no context
+# to price stay so however long the caller waits.
+_FINAL_REFUSALS = frozenset(
+    {"background_capacity_unknown", "background_cost_unknown", "background_ctx_unknown"}
+)
+_DEFAULT_CALLER_CLASSES = {
+    "chat": "interactive",
+    "pipeline": "interactive",
+    "benchmark": "user",
+    "agent_eval": "user",
+    "direct": "user",
+    "warmup": "background",
+    "index": "background",
+    "tuner": "background",
+    "reverie": "background",
+}
 
 _BYTES_PER_GIB = 1024.0 ** 3
 
@@ -685,12 +713,14 @@ def _bounded_float(
     low: float,
     high: float | None,
     section_name: str = "offload",
+    low_open: bool = False,
 ) -> float:
     """``section[key]`` as a number within [low, high], else ``default``.
 
-    No upper bound when ``high`` is None, but never infinite. An absent key
-    is the default, silently; a present one that is not a number, NaN, or
-    out of range is the default with a warning naming it.
+    No upper bound when ``high`` is None, but never infinite; ``low_open``
+    excludes ``low`` itself. An absent key is the default, silently; a
+    present one that is not a number, NaN, or out of range is the default
+    with a warning naming it.
     """
     if key not in section:
         return default
@@ -699,15 +729,16 @@ def _bounded_float(
         value = None if isinstance(raw, bool) else float(raw)
     except (TypeError, ValueError):
         value = None
-    if value is not None and low <= value and (
+    if value is not None and (low < value if low_open else low <= value) and (
         value <= high if high is not None else value < float("inf")
     ):
         return value
     logger.warning(
-        "%s.%s %r is not a number in [%s, %s]; keeping %s",
+        "%s.%s %r is not a number in %s%s, %s]; keeping %s",
         section_name,
         key,
         raw,
+        "(" if low_open else "[",
         low,
         "inf" if high is None else high,
         default,
@@ -827,6 +858,37 @@ class GovernorConfig:
     queue_enabled_per_caller: dict[str, bool] = field(default_factory=dict)
     queue_depth: int = 2
     queue_wait_s: float = 30.0
+    # Who asks: each caller's admission class (ADMISSION_CLASSES). Per
+    # class: whether a refused caller waits in the queue when
+    # queue.enabled_per_caller does not name it, and the class's own depth
+    # and wait (queue.depth and queue.wait_s for a class that names none).
+    # Within a class a waiter is passed by later callers that fit at most
+    # ``queue_max_bypass`` times.
+    caller_classes: dict[str, str] = field(default_factory=lambda: dict(_DEFAULT_CALLER_CLASSES))
+    class_queued: dict[str, bool] = field(
+        default_factory=lambda: {"interactive": False, "user": False, "background": True}
+    )
+    class_depth: dict[str, int] = field(default_factory=lambda: {"background": 8})
+    class_wait_s: dict[str, float] = field(default_factory=lambda: {"background": 120.0})
+    queue_max_bypass: int = 2
+    # The background splits a model between VRAM and RAM only when allowed.
+    background_allow_split: bool = False
+    # The background gate holds every background admission while an
+    # interactive call is in flight (an entry held longer than
+    # ``background_gate_in_flight_max_s`` is a leak and stops counting), or
+    # admitted and not yet held (for at most
+    # ``background_gate_admitted_grace_s``), or while a caller of a higher
+    # class waits in the queue, and while the CPU pressure other programs
+    # suffer (some avg10, percent) is at or above the enter mark, until it
+    # falls below the exit mark. A load admitted and never seen by the loaded
+    # view stops counting against the background after
+    # ``background_gate_pending_load_max_s``.
+    background_gate_enabled: bool = True
+    background_gate_in_flight_max_s: float = 900.0
+    background_gate_admitted_grace_s: float = 10.0
+    background_gate_pending_load_max_s: float = 600.0
+    background_gate_cpu_enter: float = 10.0
+    background_gate_cpu_exit: float = 5.0
     rlimits_enabled: bool = False
     rlimits_as_gb: float | None = None
     rlimits_data_gb: float | None = None
@@ -835,6 +897,62 @@ class GovernorConfig:
     ollama_max_queue: int | None = None
     ollama_spawn_applies: bool = True
     ollama_external_advisory: bool = True
+
+    def class_of(self, caller: str | None) -> str:
+        """The admission class of ``caller``; one not named is a user."""
+        named = self.caller_classes.get(str(caller)) if caller is not None else None
+        return named if named in _CLASS_RANK else _DEFAULT_CLASS
+
+
+def _load_classes(cfg: GovernorConfig, classes: Mapping) -> None:
+    """Merge the ``classes`` block over the defaults.
+
+    ``callers`` may add a caller or move one to another class; a class
+    outside ADMISSION_CLASSES, or no name at all (a list, a mapping), is
+    refused with a warning and the caller keeps its class. Each class may
+    name ``queued``, ``depth`` and ``wait_s``; the background also
+    ``allow_split``.
+    """
+    callers = classes.get("callers")
+    if isinstance(callers, dict):
+        merged = dict(cfg.caller_classes)
+        for caller, klass in callers.items():
+            if isinstance(klass, str) and klass in _CLASS_RANK:
+                merged[str(caller)] = klass
+            else:
+                logger.warning(
+                    "classes.callers.%s %r is not one of %s; keeping %s",
+                    caller,
+                    klass,
+                    ", ".join(ADMISSION_CLASSES),
+                    cfg.class_of(str(caller)),
+                )
+        cfg.caller_classes = merged
+    elif callers is not None:
+        logger.warning("classes.callers is not a mapping; the caller table stands")
+    queued = dict(cfg.class_queued)
+    depth = dict(cfg.class_depth)
+    wait = dict(cfg.class_wait_s)
+    for klass in ADMISSION_CLASSES:
+        block = classes.get(klass)
+        if block is None:
+            continue
+        if not isinstance(block, dict):
+            logger.warning("classes.%s is not a mapping; its defaults stand", klass)
+            continue
+        if "queued" in block:
+            queued[klass] = _as_bool(block.get("queued"), queued.get(klass, False))
+        if "depth" in block:
+            depth[klass] = max(0, _as_int(block.get("depth"), depth.get(klass, cfg.queue_depth)))
+        if "wait_s" in block:
+            wait[klass] = _bounded_float(
+                block, "wait_s", wait.get(klass, cfg.queue_wait_s), 0.0, None, f"classes.{klass}"
+            )
+        if klass == _BACKGROUND and "allow_split" in block:
+            cfg.background_allow_split = _as_bool(block.get("allow_split"), cfg.background_allow_split)
+    cfg.class_queued = queued
+    cfg.class_depth = depth
+    cfg.class_wait_s = wait
 
 
 def load_config(config_path: str | Path | None = None) -> GovernorConfig:
@@ -954,6 +1072,47 @@ def load_config(config_path: str | Path | None = None) -> GovernorConfig:
             }
         cfg.queue_depth = _as_int(queue.get("depth"), cfg.queue_depth)
         cfg.queue_wait_s = _as_float(queue.get("wait_s"), cfg.queue_wait_s)
+        cfg.queue_max_bypass = max(0, _as_int(queue.get("max_bypass"), cfg.queue_max_bypass))
+
+    classes = raw.get("classes")
+    if isinstance(classes, dict):
+        _load_classes(cfg, classes)
+    elif classes is not None:
+        logger.warning("classes is not a mapping; the class defaults stand")
+
+    gate = raw.get("background_gate")
+    if isinstance(gate, dict):
+        cfg.background_gate_enabled = _as_bool(gate.get("enabled"), cfg.background_gate_enabled)
+        cfg.background_gate_in_flight_max_s = _bounded_float(
+            gate, "in_flight_max_s", cfg.background_gate_in_flight_max_s, 0.0, None, "background_gate",
+            low_open=True,
+        )
+        cfg.background_gate_admitted_grace_s = _bounded_float(
+            gate, "admitted_grace_s", cfg.background_gate_admitted_grace_s, 0.0, None, "background_gate"
+        )
+        cfg.background_gate_pending_load_max_s = _bounded_float(
+            gate, "pending_load_max_s", cfg.background_gate_pending_load_max_s, 0.0, None, "background_gate",
+            low_open=True,
+        )
+        enter = _bounded_float(
+            gate, "cpu_enter_some_avg10", cfg.background_gate_cpu_enter, 0.0, 100.0, "background_gate"
+        )
+        leave = _bounded_float(
+            gate, "cpu_exit_some_avg10", cfg.background_gate_cpu_exit, 0.0, 100.0, "background_gate"
+        )
+        if leave > enter:
+            logger.warning(
+                "background_gate.cpu_exit_some_avg10 %s is above cpu_enter_some_avg10 %s; keeping %s and %s",
+                leave,
+                enter,
+                cfg.background_gate_cpu_exit,
+                cfg.background_gate_cpu_enter,
+            )
+            enter, leave = cfg.background_gate_cpu_enter, cfg.background_gate_cpu_exit
+        cfg.background_gate_cpu_enter = enter
+        cfg.background_gate_cpu_exit = leave
+    elif gate is not None:
+        logger.warning("background_gate is not a mapping; its defaults stand")
 
     rlimits = raw.get("rlimits")
     if isinstance(rlimits, dict):
@@ -1451,6 +1610,9 @@ class ResourceSnapshot:
     vram_others_carried: bool = False
     host_pressure: dict[str, Any] | None = None
     memory_pressure_active: bool = False
+    # The capacity is unknown because the profile knows the machine has no
+    # card, not because a card could not be read.
+    cards_absent: bool = False
 
     def age_s(self, now: float) -> float:
         return max(0.0, now - self.taken_at)
@@ -1485,6 +1647,7 @@ class ResourceSnapshot:
                 else None
             ),
             "vram_others_carried": self.vram_others_carried,
+            "cards_absent": self.cards_absent,
             "host_pressure": (
                 {
                     resource: {kind: dict(values) for kind, values in lines.items()}
@@ -1563,6 +1726,10 @@ class AdmissionDecision:
     engine: str | None = None
     cost_gb: float | None = None
     credit_gb: float = 0.0
+    # -- who asked: the caller's admission class, and why the background gate
+    # held a background admission (None when it did not) --------------------
+    admission_class: str = _DEFAULT_CLASS
+    held_by: str | None = None
 
     @property
     def partial_offload(self) -> bool:
@@ -1648,7 +1815,54 @@ class AdmissionDecision:
             "gpu_layers": self.gpu_layers,
             "ram_shortfall_gb": self.ram_shortfall_gb,
             "expected_slowdown": self.expected_slowdown,
+            "admission_class": self.admission_class,
+            "held_by": self.held_by,
         }
+
+
+@dataclass(eq=False)
+class _Waiter:
+    """One caller waiting in the admission queue: its class, its place in
+    the order of arrival, and how many later callers have passed it."""
+
+    admission_class: str
+    seq: int
+    bypassed: int = 0
+
+
+@dataclass
+class _PendingLoad:
+    """A load admitted that the loaded view does not show yet: the model, the
+    context it loads at, what it adds to VRAM and to RAM, the extra models
+    loading with it, the class it was admitted for, since when, and when the
+    call that held its ticket released it (None while held, or never held)."""
+
+    model: str
+    num_ctx: int | None
+    vram_gb: float
+    ram_gb: float
+    extras: tuple[str, ...]
+    admission_class: str
+    since: float
+    released_at: float | None = None
+
+
+@dataclass
+class _SharedPressure:
+    """What the pressure readings leave behind them, one object for a
+    governor and every governor a reload builds from it (_LIVE_STATE), so a
+    configuration write never reopens a held gate nor forgets a keep_alive
+    to restore: the side of the memory hysteresis and of the background
+    gate's CPU hysteresis (the readings are taken again, and the marks of
+    the file judge them), since when soft-or-worse pressure has lasted, and
+    the warm-up keep_alive a sustained pressure replaced. Read and written
+    only under the cache lock, which a reload shares too: each governor
+    builds its snapshot under a lock of its own, so both may judge at once."""
+
+    memory_pressure_active: bool = False
+    cpu_held: bool = False
+    pressure_soft_since: float | None = None
+    keep_alive_original: str | None = None
 
 
 class GovernorRefusal(RuntimeError):
@@ -1733,6 +1947,7 @@ def _refuse_split(governor: Any, decision: AdmissionDecision, engine: str) -> No
         vram_cost_gb=decision.vram_cost_gb,
         ram_cost_gb=decision.ram_cost_gb,
         gpu_layers=decision.gpu_layers,
+        admission_class=decision.admission_class,
         payload={
             "error": "resource_admission_refused",
             "message": (
@@ -1756,6 +1971,10 @@ def _refuse_split(governor: Any, decision: AdmissionDecision, engine: str) -> No
         governor._record_admission(refusal)
     except Exception as exc:
         logger.debug("Split refusal record failed: %s", exc)
+    # The load the admission counted on will not happen.
+    end = getattr(governor, "end_pending_load", None)
+    if callable(end):
+        end(decision.ticket_id)
     raise GovernorRefusal(refusal)
 
 
@@ -1768,13 +1987,27 @@ def get_active_ticket() -> AdmissionDecision | None:
 
 
 def set_active_ticket(decision: AdmissionDecision | None) -> None:
-    """Set the thread-local ticket the backend gate will see (4.4)."""
+    """Set the thread-local ticket the backend gate will see (4.4); the
+    governor counts it in flight until it is released."""
     _ticket_local.ticket = decision
+    _note_held(decision)
 
 
 def clear_active_ticket() -> None:
     """Drop the thread-local ticket."""
     _ticket_local.ticket = None
+    _note_held(None)
+
+
+def _note_held(decision: AdmissionDecision | None) -> None:
+    """Tell the governor, when there is one, what this thread now holds."""
+    governor = _governor
+    if governor is None:
+        return
+    try:
+        governor.note_held(decision)
+    except Exception as exc:
+        logger.debug("In-flight registry update failed open: %s", exc)
 
 
 @contextmanager
@@ -2152,6 +2385,9 @@ class ResourceGovernor:
     ):
         self._config = load_config(config_path)
         self._store = AdaptStore(db_path)
+        # What a reload builds the governor again from (reload_resource_governor).
+        self._paths = (config_path, db_path)
+        self._vram_probe_arg = vram_probe
         if warmup is _UNSET:
             self._warmup = _load_default_warmup()
         else:
@@ -2170,7 +2406,8 @@ class ResourceGovernor:
         # still spawns no subprocess and touches no device.
         self._hardware_arg = hardware
         self._hardware_resolved: Any = _UNSET
-        self._memory_pressure_active = False
+        # What the pressure readings leave behind them (_SharedPressure).
+        self._shared = _SharedPressure()
         # What other programs held on the cards at the last reading that
         # paired with the engines' holdings: carried across a load or an
         # eviction until the cards are read again.
@@ -2198,17 +2435,38 @@ class ResourceGovernor:
         # Runtime backpressure state. The refusal-rate
         # window is in-memory by design (a runtime signal, never
         # persisted; the maxlen is a memory bound, the time window is
-        # the config key). The remembered keep_alive original does NOT
-        # survive a process restart: the warmup re-initialises at its
-        # own default, which is the honest restore in that case.
+        # the config key). The remembered keep_alive original (_shared)
+        # survives a reload but NOT a process restart: the warmup
+        # re-initialises at its own default, which is the honest restore
+        # in that case.
         self._refusal_events: deque = deque(maxlen=512)
-        self._pressure_soft_since: float | None = None
-        self._keep_alive_original: str | None = None
         self._last_pressure_level: str | None = None
         # Queue: waiters block on the condition in bounded slices;
-        # the invalidation hooks notify it (capacity may have moved).
+        # the invalidation hooks notify it (capacity may have moved). Its
+        # lock also guards the calls in flight (thread -> the ticket it
+        # holds, and since when) and the class each resident was loaded for
+        # ([class, seen in the loaded view since]).
         self._queue_cond = threading.Condition()
-        self._queue_depth = 0
+        self._waiters: list[_Waiter] = []
+        self._queue_seq = itertools.count(1)
+        self._in_flight: dict[int, tuple[AdmissionDecision, float]] = {}
+        self._owners: dict[str, list[Any]] = {}
+        # Under the same lock: the interactive admissions no thread holds
+        # yet (ticket -> the decision, since when), and the loads admitted
+        # and not yet seen (ticket -> _PendingLoad) with the count of loads
+        # ever claimed (a one-item list, so a governor a reload builds shares
+        # it), which a background decision reads before it starts and checks
+        # before it claims its own. Background decisions are taken one at a
+        # time; a retry in the queue records nothing (_quiet).
+        self._admitted: dict[str, tuple[AdmissionDecision, float]] = {}
+        self._pending_loads: dict[str, _PendingLoad] = {}
+        self._pending_version = [0]
+        self._background_lock = threading.Lock()
+        self._quiet = threading.local()
+        # The background gate's last reading of the CPU pressure other
+        # programs suffer, (taken at, reading); whether it holds the gate is
+        # in _shared.
+        self._others_cpu: tuple[float, dict[str, Any] | None] | None = None
 
     # -- public configuration / store accessors ------------------------------
 
@@ -2245,6 +2503,10 @@ class ResourceGovernor:
             built = self._build_snapshot()
             with self._cache_lock:
                 self._snapshot = built
+            # Only once the snapshot is stored: a background decision that
+            # read the loads before it ends one reads this snapshot or a
+            # newer one, which counts the load's memory itself.
+            self._settle_pending_loads(built)
             return built
 
     def get_snapshot(self) -> ResourceSnapshot:
@@ -2298,12 +2560,16 @@ class ResourceGovernor:
         model for post-load cost attribution at the next fresh ps view.
         The model's KV geometry is read again too: a load may bring other
         bytes under the same name. A load ends the layer count a previous
-        split load pinned; a split load pins its own after this."""
+        split load pinned; a split load pins its own after this. It also
+        ends the class the model was loaded for: the engine gate names the
+        new one (note_loaded_by)."""
         with self._cache_lock:
             self._pending_attribution[model] = requested_num_ctx
             self._geometry.pop(model, None)
             self._pins.pop(model, None)
             self._snapshot = None
+        with self._queue_cond:
+            self._owners.pop(model, None)
         self._invalidate_card_reading()
         self._notify_queue()
 
@@ -2316,6 +2582,11 @@ class ResourceGovernor:
             else:
                 self._pins.clear()
             self._snapshot = None
+        with self._queue_cond:
+            if model:
+                self._owners.pop(model, None)
+            else:
+                self._owners.clear()
         self._invalidate_card_reading()
         self._notify_queue()
 
@@ -2541,6 +2812,13 @@ class ResourceGovernor:
                     self._pins[model] = (layers, num_ctx, True)
                 elif seen:
                     del self._pins[model]
+        # The class a model was loaded for ends the same way.
+        with self._queue_cond:
+            for model, owner in list(self._owners.items()):
+                if model in names:
+                    owner[1] = True
+                elif owner[1]:
+                    del self._owners[model]
 
     def estimate_kv_cache_gb(
         self, num_ctx: int | None, model: str | None = None
@@ -3027,6 +3305,18 @@ class ResourceGovernor:
                 logger.debug("Host pressure read failed: %s", exc)
         memory_pressure = self._update_memory_pressure(host_pressure)
 
+        # A capacity unknown because the machine has no card, as the profile
+        # knows it, is no unreadable card: the background then loads into
+        # the RAM alone.
+        cards_absent = False
+        if capacity is None and hardware is not None:
+            absent = getattr(hardware, "cards_absent", None)
+            if callable(absent):
+                try:
+                    cards_absent = absent() is True
+                except Exception as exc:
+                    logger.debug("Card presence unreadable: %s", exc)
+
         if capacity is None:
             vram_status = "disabled_capacity_unknown"
             available: float | None = None
@@ -3065,6 +3355,7 @@ class ResourceGovernor:
             vram_others_carried=carried,
             host_pressure=host_pressure,
             memory_pressure_active=memory_pressure,
+            cards_absent=cards_absent,
         )
 
     # -- the machine: cards, pressure, the RAM reserve ------------------------
@@ -3112,13 +3403,14 @@ class ResourceGovernor:
         if cfg.host_pressure_enabled and isinstance(host_pressure, dict):
             memory = host_pressure.get("memory") or {}
             some = (memory.get("some") or {}).get("avg10")
-        if not isinstance(some, (int, float)) or isinstance(some, bool):
-            self._memory_pressure_active = False
-        elif some >= cfg.host_pressure_memory_enter:
-            self._memory_pressure_active = True
-        elif some < cfg.host_pressure_memory_exit:
-            self._memory_pressure_active = False
-        return self._memory_pressure_active
+        with self._cache_lock:
+            if not isinstance(some, (int, float)) or isinstance(some, bool):
+                self._shared.memory_pressure_active = False
+            elif some >= cfg.host_pressure_memory_enter:
+                self._shared.memory_pressure_active = True
+            elif some < cfg.host_pressure_memory_exit:
+                self._shared.memory_pressure_active = False
+            return self._shared.memory_pressure_active
 
     def _vram_margin_gb(self, snapshot: Any) -> float:
         """The safety margin, kept on every card the capacity was summed from."""
@@ -3301,6 +3593,8 @@ class ResourceGovernor:
             )
             self._last_pressure_level = level
         self._apply_pressure_policy(level)
+        with self._cache_lock:
+            overridden = self._shared.keep_alive_original is not None
         return {
             "level": level,
             "ratio": round(ratio, 4) if ratio is not None else None,
@@ -3313,7 +3607,7 @@ class ResourceGovernor:
             "refusals_in_window": refusals,
             "decisions_in_window": decisions,
             "refusal_window_s": cfg.pressure_refusal_window_s,
-            "keep_alive_overridden": self._keep_alive_original is not None,
+            "keep_alive_overridden": overridden,
         }
 
     def _refusal_window_stats(self) -> tuple[float, int, int]:
@@ -3349,16 +3643,17 @@ class ResourceGovernor:
         """
         now = self._clock()
         cfg = self._config
+        shared = self._shared
         with self._cache_lock:
             if level in ("soft", "hard"):
-                if self._pressure_soft_since is None:
-                    self._pressure_soft_since = now
+                if shared.pressure_soft_since is None:
+                    shared.pressure_soft_since = now
                     return
                 sustained = (
-                    now - self._pressure_soft_since
+                    now - shared.pressure_soft_since
                     >= max(0.0, cfg.pressure_sustain_s)
                 )
-                if not sustained or self._keep_alive_original is not None:
+                if not sustained or shared.keep_alive_original is not None:
                     return
                 warmup = self._warmup
                 if warmup is None:
@@ -3371,7 +3666,7 @@ class ResourceGovernor:
                         and original != cfg.pressure_keep_alive
                     ):
                         warmup.keep_alive = cfg.pressure_keep_alive
-                        self._keep_alive_original = original
+                        shared.keep_alive_original = original
                         logger.info(
                             "Sustained pressure: warmup keep_alive %s -> %s"
                             " (restored when pressure clears)",
@@ -3384,11 +3679,11 @@ class ResourceGovernor:
                     )
                 return
             # Level none: clear the sustain timer and restore once.
-            self._pressure_soft_since = None
-            if self._keep_alive_original is None:
+            shared.pressure_soft_since = None
+            if shared.keep_alive_original is None:
                 return
-            original = self._keep_alive_original
-            self._keep_alive_original = None
+            original = shared.keep_alive_original
+            shared.keep_alive_original = None
             warmup = self._warmup
             if warmup is None:
                 return
@@ -3477,8 +3772,70 @@ class ResourceGovernor:
         - Every decision is recorded in the ring; under soft-or-worse
           pressure (Section 5) an admitted decision carries the keep_alive
           override the funnels apply for that call.
+        - Who asks: every decision carries the caller's admission class. The
+          background never evicts: the background gate may hold it first;
+          it counts no eviction credit, so it is never granted on condition
+          of an eviction; it never reloads a resident for more context (a
+          resident whose context the dynamic stage or the caller's floor
+          accepts serves it instead), never splits unless the file allows
+          it, and is refused a load whose fit the free memory cannot show
+          (a card unreadable, the cost unknown, no context to price), since
+          the engine's own LRU would then evict for it. A call on a resident
+          at the context it holds loads nothing and stays admitted.
+        - The background prices a load against the memory free now less
+          every load admitted, of any class, that the loaded view does not
+          show yet (pending_loads); a call on a model whose load is pending
+          joins that load at its context and loads nothing. Its decisions
+          are taken one at a time, and one that sees a load admitted
+          meanwhile refuses itself, by a reason waiting lifts. A background
+          load told no context is priced, and loaded, at the context the
+          interactive class was last admitted at for the model, else the
+          model's output reserve, else the ladder's smallest step. On a
+          machine the profile knows has no card it loads into the RAM free
+          above the reserve. The foreground prices as before.
         """
+        klass = self._config.class_of(caller)
+        if klass == _BACKGROUND:
+            with self._background_lock:
+                decision = self._decide(
+                    model, requested_ctx, caller, extra_models, digest, engine, self._pending_view()
+                )
+        else:
+            decision = self._decide(model, requested_ctx, caller, extra_models, digest, engine, None)
+        if decision.admitted and klass == _INTERACTIVE:
+            # Held from its admission: the thread that holds the ticket may
+            # take it a moment later, and note_held hands it over.
+            now = self._clock()
+            with self._queue_cond:
+                self._live_admitted(now)
+                self._admitted[decision.ticket_id] = (decision, now)
+        return decision
+
+    def _decide(
+        self,
+        model: str,
+        requested_ctx: int | None,
+        caller: str,
+        extra_models: list[str] | None,
+        digest: str | None,
+        engine: str | None,
+        view: tuple[int, list[_PendingLoad]] | None,
+    ) -> AdmissionDecision:
+        """The body of admit(). ``view`` is the background's reading of the
+        loads admitted and not yet seen, (the count of loads ever claimed,
+        the loads); None for the other classes, which deduct nothing."""
         ticket_id = uuid.uuid4().hex[:12]
+        klass = self._config.class_of(caller)
+        background = klass == _BACKGROUND
+        pending = view[1] if view is not None else []
+        # A model loads once, however many callers asked for it: each model
+        # counts once, at the most any of its loads adds.
+        largest: dict[str, tuple[float, float]] = {}
+        for p in pending:
+            vram, ram = largest.get(p.model, (0.0, 0.0))
+            largest[p.model] = (max(vram, p.vram_gb), max(ram, p.ram_gb))
+        pending_vram = sum(vram for vram, _ in largest.values())
+        pending_ram = sum(ram for _, ram in largest.values())
 
         # 4.5 / R-04: the stopped flag comes before everything else.
         estop = _resolve_emergency_stop()
@@ -3512,6 +3869,7 @@ class ResourceGovernor:
                 requested_ctx=requested_ctx,
                 is_estop=True,
                 payload=payload,
+                admission_class=klass,
             )
             self._record_admission(decision)
             return decision
@@ -3526,7 +3884,26 @@ class ResourceGovernor:
                 ticket_id=ticket_id,
                 caller=caller,
                 requested_ctx=requested_ctx,
+                admission_class=klass,
             )
+
+        if background:
+            hold = self._background_hold()
+            if hold is not None:
+                decision = AdmissionDecision(
+                    admitted=False,
+                    model=model,
+                    num_ctx=None,
+                    action="refuse",
+                    reason=f"background_held:{hold}",
+                    ticket_id=ticket_id,
+                    caller=caller,
+                    requested_ctx=requested_ctx,
+                    admission_class=klass,
+                    held_by=hold,
+                )
+                self._record_admission(decision)
+                return decision
 
         snapshot = self.get_snapshot_fast()
         provenance = list(snapshot.sources)
@@ -3579,11 +3956,15 @@ class ResourceGovernor:
 
         extra_gb = 0.0
         extras_pending = False
+        extras_unknown = False
+        loading_extras: list[str] = []
         for extra in extra_models or []:
             if not extra or extra == model or extra in loaded_names:
                 continue
             load_expected = True
             extras_pending = True
+            if extra not in loading_extras:
+                loading_extras.append(extra)
             extra_est, _eb = self.estimate_model_vram_gb(extra)
             # The same override seam for the extra models.
             extra_override = self.resolve_weights_override(extra)
@@ -3591,6 +3972,8 @@ class ResourceGovernor:
                 extra_est = extra_override
             if extra_est is not None:
                 extra_gb += extra_est
+            else:
+                extras_unknown = True
 
         effective_ctx = self._clamp_ctx(model, requested_ctx)
 
@@ -3625,12 +4008,15 @@ class ResourceGovernor:
         main_kv = kv_charged
         reload = False
 
-        def _holds_decision(action: str, reason: str) -> AdmissionDecision:
+        def _holds_decision(action: str, reason: str, at: Any = _UNSET) -> AdmissionDecision:
+            # Served at the context the resident holds, or ``at``: the
+            # context of a pending load the call joins.
+            ctx = loaded_ctx if at is _UNSET else at
             held = AdmissionDecision(
                 admitted=True,
                 model=model,
-                num_ctx=loaded_ctx,
-                num_gpu=self.pinned_layers(model, loaded_ctx),
+                num_ctx=ctx,
+                num_gpu=self.pinned_layers(model, ctx),
                 keep_alive=ka_override,
                 action=action,
                 reason=reason,
@@ -3642,9 +4028,27 @@ class ResourceGovernor:
                 engine=engine_name,
                 num_parallel=self._ollama_sequences(),
                 cost_gb=0.0,
+                admission_class=klass,
             )
             self._record_admission(held)
             return held
+
+        def _refuse(reason: str) -> AdmissionDecision:
+            refused = AdmissionDecision(
+                admitted=False,
+                model=model,
+                num_ctx=None,
+                action="refuse",
+                reason=reason,
+                provenance=provenance,
+                ticket_id=ticket_id,
+                caller=caller,
+                requested_ctx=requested_ctx,
+                engine=engine_name,
+                admission_class=klass,
+            )
+            self._record_admission(refused)
+            return refused
 
         if holds and (effective_ctx is None or effective_ctx <= loaded_ctx):
             if not extras_pending:
@@ -3668,6 +4072,20 @@ class ResourceGovernor:
             credit = resident_view.size_vram_gb
             ram_credit = resident_view.ram_bytes / _BYTES_PER_GIB
 
+        if background and load_expected and not already_loaded:
+            joined = next((p for p in pending if p.model == model), None)
+            if joined is not None:
+                # The model is loading for an admission the loaded view does
+                # not show yet: the call joins that load at its context, and
+                # waits for it when it asks more.
+                if effective_ctx is None or (joined.num_ctx is not None and effective_ctx <= joined.num_ctx):
+                    return _holds_decision("admit", "fits_pending", joined.num_ctx)
+                return _refuse("background_load_pending")
+            if main_kv and effective_ctx is None:
+                # Told no context, the engine would load at its own: the load
+                # is priced, and loaded, at one the governor names.
+                effective_ctx = self._clamp_ctx(model, self._background_ctx(model))
+
         known_weights = (0.0 if weights_gb is None else weights_gb) + extra_gb
 
         # The dynamic quantum runs AFTER the model-window clamp: the
@@ -3675,24 +4093,52 @@ class ResourceGovernor:
         # the machine should allocate. The pre-stage value keeps the
         # clamp reason honest below. A reload sizes it with the memory it
         # frees, and a quantum at or below the held context is no reload.
+        # The background sizes it with the loads not yet seen taken.
         _clamped_ctx = effective_ctx
         _dyn_applied = False
         if main_kv:
             effective_ctx, _dyn_applied = self._dynamic_ctx_stage(
-                effective_ctx, model, snapshot, known_weights + state_gb - credit, kv_coefficient
+                effective_ctx, model, snapshot, known_weights + state_gb - credit + pending_vram, kv_coefficient
             )
             if reload and (effective_ctx is None or effective_ctx <= loaded_ctx) and not extras_pending:
                 return _holds_decision("admit", "fits_resident")
+        if reload and background:
+            # A reload frees the resident first: the background is served by
+            # the resident at its own context where the caller's floor allows
+            # it, and otherwise waits for the resident to leave.
+            floor = self._config.ctx_floor.get(caller)
+            if floor is not None and loaded_ctx >= floor and not extras_pending:
+                return _holds_decision("downsize", "ctx_laddered_to_fit+fits_resident")
+            return _refuse("background_never_reloads")
 
         def _cost(ctx: int | None) -> float:
             return known_weights + state_gb + (_kv(ctx) if main_kv else 0.0)
 
+        if background and load_expected:
+            # The background loads only into memory known to be free.
+            if snapshot.capacity_gb is None and not getattr(snapshot, "cards_absent", False):
+                return _refuse("background_capacity_unknown")
+            if weights_gb is None or extras_unknown:
+                return _refuse("background_cost_unknown")
+            if main_kv and not effective_ctx:
+                return _refuse("background_ctx_unknown")
+
         if snapshot.capacity_gb is None:
             # 3.1: the VRAM half fails open; the RAM half still applies,
-            # less what a reload frees there.
+            # less what a reload frees there. A background load gets here
+            # only on a machine with no card: the whole of its cost goes to
+            # the RAM free above the reserve, less the loads not yet seen.
             ram_mb = snapshot.ram_available_mb
-            ram_need = known_weights - ram_credit
-            if ram_mb > 0.0 and ram_need * 1024.0 > ram_mb:
+            ram_only = background and load_expected
+            if ram_only:
+                ram_need = _cost(effective_ctx) - ram_credit
+                ram_free = ram_mb / 1024.0 - self.effective_ram_reserve_gb(snapshot) - pending_ram
+                short = ram_mb <= 0.0 or ram_need > ram_free
+            else:
+                ram_need = known_weights - ram_credit
+                ram_free = ram_mb / 1024.0
+                short = ram_mb > 0.0 and ram_need > ram_free
+            if short:
                 decision = AdmissionDecision(
                     admitted=False,
                     model=model,
@@ -3703,20 +4149,21 @@ class ResourceGovernor:
                     ticket_id=ticket_id,
                     caller=caller,
                     requested_ctx=requested_ctx,
-                    shortfall_gb=round(ram_need - ram_mb / 1024.0, 3),
+                    shortfall_gb=round(ram_need - ram_free, 3),
                     engine=engine_name,
+                    admission_class=klass,
                 )
             else:
+                if ram_only:
+                    reason = "fits_ram+ctx_capped" if _dyn_applied else "fits_ram"
+                else:
+                    reason = "capacity_unknown_fail_open+ctx_capped" if _dyn_applied else "capacity_unknown_fail_open"
                 decision = AdmissionDecision(
                     admitted=True,
                     model=model,
                     num_ctx=effective_ctx,
                     action="admit",
-                    reason=(
-                        "capacity_unknown_fail_open+ctx_capped"
-                        if _dyn_applied
-                        else "capacity_unknown_fail_open"
-                    ),
+                    reason=reason,
                     provenance=provenance,
                     ticket_id=ticket_id,
                     caller=caller,
@@ -3725,7 +4172,13 @@ class ResourceGovernor:
                     engine=engine_name,
                     cost_gb=round(_cost(effective_ctx), 3),
                     credit_gb=round(credit, 3),
+                    admission_class=klass,
                 )
+                # Where the engine puts a foreground load is unknown here:
+                # it counts against both memories. The background's is RAM.
+                taken = max(0.0, _cost(effective_ctx) - ram_credit)
+                if not self._claim_load(decision, view, 0.0 if ram_only else taken, taken, loading_extras):
+                    return _refuse("background_pending_changed")
             self._record_admission(decision)
             return decision
 
@@ -3733,18 +4186,20 @@ class ResourceGovernor:
         others = getattr(snapshot, "vram_others_gb", 0.0) or 0.0
         margin = self._vram_margin_gb(snapshot)
         # A model is never its own eviction candidate: a reload credits its
-        # memory instead.
-        evictable = sum(
+        # memory instead. The background evicts nothing.
+        evictable = 0.0 if background else sum(
             size
             for name, _idle, size in self._evictable_candidates(snapshot)
             if name != model
         )
-        budget_unconditional = snapshot.capacity_gb - in_use - others - margin + credit
+        # The background also leaves what the loads not yet seen will take.
+        budget_unconditional = snapshot.capacity_gb - in_use - others - margin + credit - pending_vram
         budget_with_eviction = budget_unconditional + evictable
         # The RAM a split may use; None when no split is priced at all.
-        ram_budget = self._offload_ram_budget_gb(snapshot)
+        split_allowed = not background or self._config.background_allow_split
+        ram_budget = self._offload_ram_budget_gb(snapshot) if split_allowed else None
         if ram_budget is not None:
-            ram_budget += ram_credit
+            ram_budget += ram_credit - pending_ram
         min_share = self._config.offload_min_gpu_share
 
         def _fit(ctx: int | None) -> bool | None:
@@ -3956,6 +4411,7 @@ class ResourceGovernor:
                 num_parallel=self._ollama_sequences(),
                 cost_gb=round(_cost(ctx), 3),
                 credit_gb=round(credit, 3),
+                admission_class=klass,
             )
             if placement is not None:
                 gpu, ram, total, count, slowdown = placement
@@ -3974,6 +4430,12 @@ class ResourceGovernor:
             if already_loaded and not reload and decision.num_gpu is None:
                 # The resident model stays as its split load placed it.
                 decision.num_gpu = self.pinned_layers(model, ctx)
+            if placement is not None:
+                vram_taken, ram_taken = placement[0] - credit, placement[1] - ram_credit
+            else:
+                vram_taken, ram_taken = _cost(ctx) - credit, 0.0
+            if not self._claim_load(decision, view, max(0.0, vram_taken), max(0.0, ram_taken), loading_extras):
+                return _refuse("background_pending_changed")
             self._record_admission(decision)
             return decision
 
@@ -3993,6 +4455,7 @@ class ResourceGovernor:
             engine=engine_name,
             cost_gb=round(minimal_cost, 3),
             credit_gb=round(credit, 3),
+            admission_class=klass,
         )
         if ram_budget is not None:
             # A split was priced and none held: name what it lacked, from the
@@ -4166,38 +4629,51 @@ class ResourceGovernor:
     def _evictable_candidates(
         self, snapshot: ResourceSnapshot
     ) -> list[tuple[str, float, float]]:
-        """(name, idle_s, size_gb) for every loaded model idle past the
-        threshold, sorted oldest-idle FIRST (the Section 5 eviction
-        order).
+        """(name, idle_s, size_gb) for every eviction candidate, in the
+        Section 5 eviction order: first every resident only the background
+        loaded with no call in flight on it, whatever its idle time; then
+        every other loaded model idle past the threshold. Each group is
+        sorted oldest-idle FIRST.
 
         Idle time is derived from the snapshot's expirations: a model's
         ``expires_at`` is last activity plus the warmup keep_alive, so
         idle = keep_alive_s - (expires_at - now), compared on the WALL
         clock (expirations are wall-clock stamps; the snapshot's monotonic
         ``taken_at`` is deliberately not used). Anything that cannot be
-        coerced or computed counts as NOT evictable (conservative).
+        coerced or computed counts as NOT evictable (conservative) -- except
+        a resident of the background, which needs no idle time and counts
+        as idle for none when it has none.
         """
+        with self._queue_cond:
+            busy = {d.model for d in self._live_in_flight(self._clock())}
+            guests = {
+                name
+                for name, (owner, _seen) in self._owners.items()
+                if owner == _BACKGROUND and name not in busy
+            }
         threshold = self._config.idle_evict_threshold_s
-        if threshold is None or threshold < 0:
-            return []
         keep_alive_s = _parse_duration_s(
             getattr(self._warmup, "keep_alive", None)
         )
-        if keep_alive_s is None:
-            return []
         now = time.time()
+        first: list[tuple[str, float, float]] = []
         candidates: list[tuple[str, float, float]] = []
         for view in snapshot.loaded:
             if view.size_vram_bytes <= 0:
                 continue
             expires = _coerce_epoch_s(view.expires_at)
-            if expires is None:
-                continue
-            idle_s = keep_alive_s - (expires - now)
-            if idle_s >= threshold:
+            idle_s = (
+                keep_alive_s - (expires - now)
+                if keep_alive_s is not None and expires is not None
+                else None
+            )
+            if view.name in guests:
+                first.append((view.name, idle_s if idle_s is not None else 0.0, view.size_vram_gb))
+            elif idle_s is not None and threshold is not None and 0 <= threshold <= idle_s:
                 candidates.append((view.name, idle_s, view.size_vram_gb))
+        first.sort(key=lambda c: c[1], reverse=True)
         candidates.sort(key=lambda c: c[1], reverse=True)
-        return candidates
+        return first + candidates
 
     # -- Targeted eviction (Section 5, honouring conditional grants) ---------
 
@@ -4350,44 +4826,103 @@ class ResourceGovernor:
         caller: str = "benchmark",
         extra_models: list[str] | None = None,
         digest: str | None = None,
+        wait_s: float | None = None,
     ) -> AdmissionDecision:
-        """admit() with the Section 5 bounded queue for enrolled callers.
+        """admit() with the Section 5 bounded priority queue.
 
-        The escalation contract verbatim: a caller NOT enrolled in
-        queue.enabled_per_caller (the shipped default enrolls nobody)
-        gets plain admit() semantics -- chat and pipeline additionally
-        never call this entry, so the interactive path stays
-        refuse-by-default at the call site (D3). An enrolled caller
-        whose admission was refused waits, bounded in depth and wait:
-        beyond either bound the entry resolves to the caller's existing
-        refusal semantics (the refusal decision is returned). Every
-        wake re-runs admission -- the estop is re-honoured FIRST by
-        construction, so a drain releases waiters to refusal (the
-        drain's invalidation notify wakes them immediately) and no
-        queued entry can outlive it. Waiters hold no lock while
-        waiting; the wait is sliced so an injected fake clock drives
-        the deadline in container tests.
+        Who waits: a caller queue.enabled_per_caller names, as it names it;
+        any other as its class does (classes.<class>.queued: the shipped
+        file enrolls the background only). A caller that does not wait gets
+        plain admit() semantics -- chat and pipeline additionally never call
+        this entry, so the interactive path stays refuse-by-default at the
+        call site (D3).
+
+        The order: class first (interactive, user, background), then
+        arrival. A caller may try for admission only while no waiter of a
+        higher class waits and no waiter of its own class ahead of it has
+        been passed ``queue.max_bypass`` times; every try through this entry
+        passes each waiter of its class ahead of it once, charged in the
+        same step as the check (two callers trying at once never pass a
+        waiter past its allowance) and given back when the try is refused.
+        A caller that may not try waits without trying, so callers that fit
+        cannot starve one that does not, and a lower class never takes
+        memory a higher one waits for. A background waiter tries only while
+        the background gate is open.
+
+        The bounds: each class has its own depth (classes.<class>.depth,
+        else queue.depth) and wait (classes.<class>.wait_s, else
+        queue.wait_s); ``wait_s`` may shorten the caller's wait, never
+        lengthen it, and the deadline is set as the caller enters the
+        queue. At the depth bound the caller's refusal stands, and a refusal
+        no wait can lift (the card unreadable, the cost or the context
+        unknown) is answered at once; at the end of the wait the caller gets
+        the last refusal admission gave it, or, if it never tried, one that
+        says why it waited. A waiter's retries are silent: the ring and the
+        refusal window keep its first try, its entry and its outcome. Every
+        wake honours the estop FIRST, whether the waiter may try or not, so
+        a drain releases every waiter to refusal (the drain's invalidation
+        notify wakes them immediately) and no queued entry can outlive it.
+        Waiters hold no lock while waiting; the wait is sliced so an
+        injected fake clock drives the deadline in container tests.
+
+        A reload keeps the queue and judges by the file it read: a caller
+        still holding the governor it replaced is answered by the current
+        one, and a waiter's turn, its gate and its refusal are the current
+        one's (its deadline stays).
         """
-        decision = self.admit(
-            model,
-            requested_ctx,
-            caller=caller,
-            extra_models=extra_models,
-            digest=digest,
-        )
-        if decision.admitted or decision.is_estop:
-            return decision
-        if not self._config.queue_enabled_per_caller.get(caller, False):
-            return decision
+        current = _current_governor(self)
+        if current is not self:
+            return current.admit_or_wait(
+                model, requested_ctx, caller=caller, extra_models=extra_models, digest=digest, wait_s=wait_s
+            )
+        cfg = self._config
+        klass = cfg.class_of(caller)
+        named = cfg.queue_enabled_per_caller.get(caller)
+        queued = bool(named) if named is not None else bool(cfg.class_queued.get(klass, False))
+
+        def _admit() -> AdmissionDecision:
+            # A reload builds a governor that keeps this one's queue: a
+            # waiter asks whichever of the two is current.
+            return _current_governor(self).admit(
+                model,
+                requested_ctx,
+                caller=caller,
+                extra_models=extra_models,
+                digest=digest,
+            )
+
+        def _final(decision: AdmissionDecision) -> bool:
+            return decision.is_estop or decision.reason in _FINAL_REFUSALS
+
+        last: AdmissionDecision | None = None
+        if queued:
+            with self._queue_cond:
+                passed = self._take_turn(klass, None)
+        else:
+            passed = []
+        if passed is not None:
+            last = _admit()
+            if last.admitted:
+                return last
+            self._give_back(passed)
+            if not queued or _final(last):
+                return last
         with self._queue_cond:
-            if self._queue_depth >= max(0, self._config.queue_depth):
-                logger.debug(
-                    "Queue depth bound reached; %s refusal stands for %s",
-                    caller,
-                    model,
-                )
-                return decision
-            self._queue_depth += 1
+            depth = max(0, cfg.class_depth.get(klass, cfg.queue_depth))
+            waiting = sum(1 for w in self._waiters if w.admission_class == klass)
+            waiter = None
+            if waiting < depth:
+                bound = cfg.class_wait_s.get(klass, cfg.queue_wait_s)
+                if wait_s is not None:
+                    bound = min(bound, wait_s)
+                # Set as the caller enters the queue: nothing slower that
+                # follows (the ring write) lengthens the wait.
+                deadline = self._clock() + max(0.0, bound)
+                waiter = self._enqueue(klass)
+        if waiter is None:
+            logger.debug("Queue depth bound reached; %s refusal stands for %s", caller, model)
+            return last if last is not None else self._queue_refusal(model, requested_ctx, caller, klass, "queue_full")
+        unrecorded = False
         try:
             try:
                 # Ring visibility of the enqueue (the 4.4 "queue" action).
@@ -4396,43 +4931,470 @@ class ResourceGovernor:
                 )
             except Exception as exc:
                 logger.debug("Queue ring write failed: %s", exc)
-            deadline = self._clock() + max(0.0, self._config.queue_wait_s)
-            last = decision
             while True:
                 remaining = deadline - self._clock()
                 if remaining <= 0.0:
-                    return last
+                    break
                 with self._queue_cond:
                     self._queue_cond.wait(
                         timeout=min(remaining, _QUEUE_WAIT_SLICE_S)
                     )
-                last = self.admit(
-                    model,
-                    requested_ctx,
-                    caller=caller,
-                    extra_models=extra_models,
-                    digest=digest,
-                )
-                if last.admitted or last.is_estop:
+                if self._estop_engaged():
+                    return _admit()
+                if klass == _BACKGROUND and _current_governor(self)._background_hold() is not None:
+                    continue
+                with self._queue_cond:
+                    passed = _current_governor(self)._take_turn(klass, waiter)
+                if passed is None:
+                    continue
+                self._quiet.on = True
+                try:
+                    last = _admit()
+                finally:
+                    self._quiet.on = False
+                unrecorded = True
+                if last.admitted or _final(last):
+                    _current_governor(self)._record_admission(last)
                     return last
+                self._give_back(passed)
         finally:
-            with self._queue_cond:
-                self._queue_depth -= 1
+            self._dequeue(waiter)
+        if last is not None:
+            if unrecorded:
+                _current_governor(self)._record_admission(last)
+            return last
+        current = _current_governor(self)
+        hold = current._background_hold() if klass == _BACKGROUND else None
+        reason = f"background_held:{hold}" if hold is not None else "queue_wait_expired"
+        return current._queue_refusal(model, requested_ctx, caller, klass, reason, held_by=hold)
+
+    def _may_try(self, klass: str, waiter: _Waiter | None) -> bool:
+        """Whether a caller of ``klass`` may try for admission now: ``waiter``
+        in the queue, or a newcomer (None), behind every waiter of its
+        class. No waiter of a higher class may wait, and no waiter of its
+        own class ahead of it may have used up its passes. Called under the
+        queue lock."""
+        rank = _CLASS_RANK[klass]
+        allowance = max(0, self._config.queue_max_bypass)
+        for other in self._waiters:
+            if other is waiter:
+                continue
+            other_rank = _CLASS_RANK[other.admission_class]
+            if other_rank < rank:
+                return False
+            ahead = waiter is None or other.seq < waiter.seq
+            if other_rank == rank and ahead and other.bypassed >= allowance:
+                return False
+        return True
+
+    def _charge_bypass(self, klass: str, waiter: _Waiter | None) -> list[_Waiter]:
+        """A try through the queue's entry passes every waiter of its class
+        ahead of it: each is charged one pass, and returned. Called under the
+        queue lock."""
+        charged: list[_Waiter] = []
+        for other in self._waiters:
+            if other is waiter or other.admission_class != klass:
+                continue
+            if waiter is None or other.seq < waiter.seq:
+                other.bypassed += 1
+                charged.append(other)
+        return charged
+
+    def _take_turn(self, klass: str, waiter: _Waiter | None) -> list[_Waiter] | None:
+        """None when a caller of ``klass`` may not try now; otherwise the
+        waiters its try passes, each charged in the same step as the check.
+        Called under the queue lock."""
+        if not self._may_try(klass, waiter):
+            return None
+        return self._charge_bypass(klass, waiter)
+
+    def _give_back(self, passed: list[_Waiter]) -> None:
+        """A try that was refused passed nobody: its passes are given back."""
+        with self._queue_cond:
+            for other in passed:
+                other.bypassed = max(0, other.bypassed - 1)
+
+    def _enqueue(self, klass: str) -> _Waiter:
+        """A waiter of ``klass`` at the end of the order of arrival."""
+        with self._queue_cond:
+            waiter = _Waiter(admission_class=klass, seq=next(self._queue_seq))
+            self._waiters.append(waiter)
+            return waiter
+
+    def _dequeue(self, waiter: _Waiter) -> None:
+        """``waiter`` leaves the queue; those behind it may now try."""
+        with self._queue_cond:
+            if waiter in self._waiters:
+                self._waiters.remove(waiter)
+            self._queue_cond.notify_all()
+
+    def _queue_refusal(
+        self,
+        model: str,
+        requested_ctx: int | None,
+        caller: str,
+        klass: str,
+        reason: str,
+        held_by: str | None = None,
+    ) -> AdmissionDecision:
+        """The refusal of a caller the queue kept from trying, recorded."""
+        decision = AdmissionDecision(
+            admitted=False,
+            model=model,
+            num_ctx=None,
+            action="refuse",
+            reason=reason,
+            ticket_id=uuid.uuid4().hex[:12],
+            caller=caller,
+            requested_ctx=requested_ctx,
+            admission_class=klass,
+            held_by=held_by,
+        )
+        self._record_admission(decision)
+        return decision
+
+    def _estop_engaged(self) -> bool:
+        """Whether the emergency stop is engaged, through its own seam."""
+        estop = _resolve_emergency_stop()
+        if estop is None:
+            return False
+        try:
+            return bool(estop.is_stopped())
+        except Exception as exc:
+            logger.debug("Estop flag read failed open: %s", exc)
+            return False
 
     @property
     def queue_depth(self) -> int:
-        """Current number of queued admissions (the status-API field)."""
+        """Current number of queued admissions, every class (the
+        status-API field)."""
         with self._queue_cond:
-            return self._queue_depth
+            return len(self._waiters)
+
+    def queue_by_class(self) -> dict[str, int]:
+        """How many callers wait in the queue, by class."""
+        counts = dict.fromkeys(ADMISSION_CLASSES, 0)
+        with self._queue_cond:
+            for waiter in self._waiters:
+                counts[waiter.admission_class] += 1
+        return counts
+
+    # -- Who asks: the calls in flight, the residents' classes, the gate -------
+
+    def note_held(self, decision: AdmissionDecision | None) -> None:
+        """The calling thread now holds ``decision`` (None: it holds none).
+
+        Fed by set_active_ticket and clear_active_ticket, so by ticket_scope
+        and the funnels' hold and release; only an admitted ticket is a call
+        in flight, and an interactive admission held is no longer counted as
+        admitted only. Holding a ticket on a model loaded for a lower class
+        makes the model the holder's class: the background's guest is the
+        foreground's own once the foreground uses it. A release marks the
+        load the ticket admitted, if it is still pending, as ended by its
+        call, and wakes the queue, since the background gate may open.
+        """
+        ident = threading.get_ident()
+        now = self._clock()
+        with self._queue_cond:
+            released = self._in_flight.pop(ident, None)
+            if decision is not None and decision.admitted:
+                klass = getattr(decision, "admission_class", _DEFAULT_CLASS)
+                self._in_flight[ident] = (decision, now)
+                self._admitted.pop(decision.ticket_id, None)
+                owner = self._owners.get(decision.model)
+                if owner is not None and _CLASS_RANK.get(klass, 1) < _CLASS_RANK.get(owner[0], 1):
+                    owner[0] = klass
+            if released is not None:
+                ticket = released[0].ticket_id
+                load = self._pending_loads.get(ticket)
+                still_held = decision is not None and decision.ticket_id == ticket
+                if load is not None and load.released_at is None and not still_held:
+                    load.released_at = now
+                self._queue_cond.notify_all()
+
+    def note_loaded_by(self, model: str, admission_class: str) -> None:
+        """A load of ``model`` admitted for ``admission_class`` is about to
+        happen (the engine gate accounts it): the model is that class's
+        until it leaves the loaded view or a higher class holds a ticket on
+        it."""
+        klass = admission_class if admission_class in _CLASS_RANK else _DEFAULT_CLASS
+        with self._queue_cond:
+            self._owners[model] = [klass, False]
+
+    # -- The loads admitted and not yet seen -----------------------------------
+
+    def _expire_pending_loads(self, now: float) -> None:
+        """Drop each load admitted longer ago than
+        background_gate.pending_load_max_s without the loaded view showing
+        it: a load that never happened, or a signal lost, with a warning.
+        Called under the queue lock."""
+        bound = self._config.background_gate_pending_load_max_s
+        for ticket, load in list(self._pending_loads.items()):
+            if now - load.since > bound:
+                del self._pending_loads[ticket]
+                logger.warning(
+                    "Load of %s admitted %.0f s ago for the %s class never showed in the loaded view, past"
+                    " the %.0f s bound: no longer counted against the background",
+                    load.model,
+                    now - load.since,
+                    load.admission_class,
+                    bound,
+                )
+
+    def _pending_view(self) -> tuple[int, list[_PendingLoad]]:
+        """What a background decision reads before it starts: the count of
+        loads ever claimed and the loads not yet seen. Read before the
+        snapshot, so a load the snapshot does not show yet is never missed
+        by both."""
+        with self._queue_cond:
+            self._expire_pending_loads(self._clock())
+            return self._pending_version[0], list(self._pending_loads.values())
+
+    def _claim_load(
+        self,
+        decision: AdmissionDecision,
+        view: tuple[int, list[_PendingLoad]] | None,
+        vram_gb: float,
+        ram_gb: float,
+        extras: list[str],
+    ) -> bool:
+        """Register the load ``decision`` admits, what it adds to VRAM and to
+        RAM, until the loaded view shows it. A background decision taken on
+        ``view`` claims it only if no load was claimed since it read the
+        view; otherwise it claims nothing and False is returned. A decision
+        that loads nothing claims nothing."""
+        if not decision.load_expected:
+            return True
+        with self._queue_cond:
+            if view is not None and self._pending_version[0] != view[0]:
+                return False
+            self._pending_version[0] += 1
+            self._pending_loads[decision.ticket_id] = _PendingLoad(
+                model=decision.model,
+                num_ctx=decision.num_ctx,
+                vram_gb=vram_gb,
+                ram_gb=ram_gb,
+                extras=tuple(extras),
+                admission_class=decision.admission_class,
+                since=self._clock(),
+            )
+            return True
+
+    def _settle_pending_loads(self, snapshot: ResourceSnapshot) -> None:
+        """End each pending load ``snapshot`` accounts for: shown, with its
+        extra models, at its context (the view now counts its memory), or
+        released by its call before the view was taken, shown or not: the
+        engine answers a call only once its model is loaded, so a view taken
+        after the release counts whatever the load left resident (nothing
+        when it failed, or is gone already). A view the engine did not
+        answer proves nothing. Called once ``snapshot`` is stored."""
+        if "S1" not in snapshot.sources:
+            return
+        shown = {view.name: view.context_length for view in snapshot.loaded if view.resident}
+        with self._queue_cond:
+            for ticket, load in list(self._pending_loads.items()):
+                held_ctx = shown.get(load.model)
+                seen = (
+                    load.model in shown
+                    and all(extra in shown for extra in load.extras)
+                    and (load.num_ctx is None or held_ctx is None or held_ctx == load.num_ctx)
+                )
+                gone = load.released_at is not None and load.released_at <= snapshot.taken_at
+                if seen or gone:
+                    del self._pending_loads[ticket]
+
+    def end_pending_load(self, ticket_id: str) -> None:
+        """The load ``ticket_id`` admitted will not happen: the engine gate
+        refused it."""
+        with self._queue_cond:
+            self._pending_loads.pop(ticket_id, None)
+
+    def pending_loads(self) -> list[dict[str, Any]]:
+        """The loads admitted and not yet seen, oldest first (the status)."""
+        now = self._clock()
+        with self._queue_cond:
+            self._expire_pending_loads(now)
+            loads = sorted(self._pending_loads.values(), key=lambda load: load.since)
+            return [
+                {
+                    "model": load.model,
+                    "admission_class": load.admission_class,
+                    "num_ctx": load.num_ctx,
+                    "vram_gb": round(load.vram_gb, 3),
+                    "ram_gb": round(load.ram_gb, 3),
+                    "age_s": round(now - load.since, 3),
+                    "released": load.released_at is not None,
+                }
+                for load in loads
+            ]
+
+    def _background_ctx(self, model: str) -> int | None:
+        """The context a background load told none is priced and loaded at:
+        the one the interactive class was last admitted at for ``model`` (the
+        decisions ring, which outlives a restart), else the model's output
+        reserve (the context a chat asks before its prompt), else the
+        ladder's smallest step; None without any of them."""
+        try:
+            rows = self._store.recent_decisions(self._config.decisions_ring_size)
+        except Exception as exc:
+            logger.debug("Decisions ring unreadable for a background context: %s", exc)
+            rows = []
+        for row in rows:
+            ctx = row.get("admitted_ctx")
+            if row.get("model") != model or row.get("decision") not in ("admit", "downsize"):
+                continue
+            if isinstance(ctx, int) and ctx > 0 and self._config.class_of(row.get("caller")) == _INTERACTIVE:
+                return ctx
+        cm = _resolve_context_manager()
+        if cm is not None:
+            try:
+                reserve = int(getattr(cm.get_model_limits(model), "max_output", 0) or 0)
+            except Exception as exc:
+                logger.debug("Output reserve unavailable for a background context: %s", exc)
+                reserve = 0
+            if reserve > 0:
+                return reserve
+        steps = [int(step) for step in self._config.ctx_ladder if int(step) > 0]
+        return min(steps) if steps else None
+
+    def _live_admitted(self, now: float) -> bool:
+        """Whether an interactive admission no thread holds yet is younger
+        than background_gate.admitted_grace_s; older ones are dropped: a
+        call that admits without ever taking its ticket. Called under the
+        queue lock."""
+        grace = self._config.background_gate_admitted_grace_s
+        for ticket, (_decision, since) in list(self._admitted.items()):
+            if now - since >= grace:
+                del self._admitted[ticket]
+        return bool(self._admitted)
+
+    def _live_in_flight(self, now: float) -> list[AdmissionDecision]:
+        """The tickets held now. An entry held longer than
+        background_gate.in_flight_max_s is a leak: it is dropped, with a
+        warning, and holds nothing. Called under the queue lock."""
+        bound = self._config.background_gate_in_flight_max_s
+        live: list[AdmissionDecision] = []
+        for ident, (decision, since) in list(self._in_flight.items()):
+            if now - since > bound:
+                del self._in_flight[ident]
+                logger.warning(
+                    "Admission ticket %s (%s, %s) held %.0f s, past the %.0f s bound: no longer counted in flight",
+                    decision.ticket_id,
+                    decision.caller,
+                    decision.model,
+                    now - since,
+                    bound,
+                )
+                continue
+            live.append(decision)
+        return live
+
+    def in_flight_by_class(self) -> dict[str, int]:
+        """How many calls are in flight, by class."""
+        counts = dict.fromkeys(ADMISSION_CLASSES, 0)
+        with self._queue_cond:
+            live = self._live_in_flight(self._clock())
+        for decision in live:
+            klass = getattr(decision, "admission_class", _DEFAULT_CLASS)
+            counts[klass if klass in counts else _DEFAULT_CLASS] += 1
+        return counts
+
+    def _others_cpu_reading(self) -> dict[str, Any] | None:
+        """The CPU pressure other programs suffer, as the hardware profile
+        reads it (others_cpu_pressure), at most once per snapshot_ttl_s:
+        only the background pays the reading. Each fresh reading moves the
+        gate's hysteresis: held at or above the enter mark, released below
+        the exit mark. None, and no hold, when nothing can read it."""
+        now = self._clock()
+        with self._cache_lock:
+            cached = self._others_cpu
+        if cached is not None and now - cached[0] <= self._config.snapshot_ttl_s:
+            return cached[1]
+        hardware = self._hardware()
+        read = getattr(hardware, "others_cpu_pressure", None) if hardware is not None else None
+        reading = None
+        if callable(read):
+            try:
+                reading = read()
+            except Exception as exc:
+                logger.debug("CPU pressure of other programs unreadable: %s", exc)
+        some = reading.get("some_avg10") if isinstance(reading, dict) else None
+        with self._cache_lock:
+            self._others_cpu = (now, reading)
+            if not isinstance(some, (int, float)) or isinstance(some, bool):
+                self._shared.cpu_held = False
+            elif some >= self._config.background_gate_cpu_enter:
+                self._shared.cpu_held = True
+            elif some < self._config.background_gate_cpu_exit:
+                self._shared.cpu_held = False
+        return reading
+
+    def _background_hold(self) -> str | None:
+        """Why the background gate holds a background admission now, or None.
+
+        In order: an interactive call in flight, an interactive admission no
+        thread holds yet (within its grace), an interactive caller waiting in
+        the queue, a user caller waiting in it (the background never takes
+        memory a higher class waits for, whatever entry it comes through),
+        the CPU pressure other programs suffer. A gate switched off never
+        holds, and a pressure nobody can read holds nothing.
+        """
+        if not self._config.background_gate_enabled:
+            return None
+        now = self._clock()
+        with self._queue_cond:
+            live = self._live_in_flight(now)
+            if any(getattr(d, "admission_class", None) == _INTERACTIVE for d in live):
+                return "interactive_in_flight"
+            if self._live_admitted(now):
+                return "interactive_admitted"
+            if any(w.admission_class == _INTERACTIVE for w in self._waiters):
+                return "interactive_queued"
+            if any(w.admission_class != _BACKGROUND for w in self._waiters):
+                return "user_queued"
+        self._others_cpu_reading()
+        with self._cache_lock:
+            held = self._shared.cpu_held
+        return "cpu_pressure" if held else None
+
+    def background_gate_state(self) -> dict[str, Any]:
+        """The background gate for the status surface: on or off, open or
+        held and why, and the pressure reading it last saw."""
+        reason = self._background_hold()
+        reading = self._others_cpu_reading()
+        with self._cache_lock:
+            active = self._shared.cpu_held
+        return {
+            "enabled": bool(self._config.background_gate_enabled),
+            "state": "held" if reason is not None else "open",
+            "reason": reason,
+            "pressure": None if reading is None else {**reading, "active": active},
+        }
+
+    def scheduling_state(self) -> dict[str, Any]:
+        """Who is in flight and who waits, by class, the background gate,
+        and the loads admitted and not yet seen (the status-API section)."""
+        return {
+            "in_flight": self.in_flight_by_class(),
+            "queued": self.queue_by_class(),
+            "background_gate": self.background_gate_state(),
+            "pending_loads": self.pending_loads(),
+        }
 
     def _record_admission(self, decision: AdmissionDecision) -> None:
         """Ring write for every recorded decision (4.4); never raises.
 
         The same seam feeds the in-memory refusal-rate window
         (resource decisions only -- an estop refusal is not a resource
-        signal and never enters it).
+        signal and never enters it, and neither does any decision of the
+        background, whose refusals are its manners, not the machine's
+        pressure: they must not change what the foreground is granted). A
+        waiter's retry is not recorded at all: admit_or_wait records its
+        entry in the queue and its outcome.
         """
-        if not decision.is_estop:
+        if getattr(self._quiet, "on", False):
+            return
+        if not decision.is_estop and decision.admission_class != _BACKGROUND:
             try:
                 with self._cache_lock:
                     self._refusal_events.append(
@@ -4482,6 +5444,77 @@ def reset_resource_governor() -> None:
         _governor = None
 
 
+# What a governor built again from its files keeps of the one it replaces:
+# its queue (the condition, the waiters, their order of arrival), the calls in
+# flight and the interactive admissions not yet held, the class each resident
+# was loaded for, the loads not yet seen and their count, the lock the
+# background's decisions take, the quiet flag of the queue's retries, and,
+# with the lock that guards them, the layer counts split loads pinned, the
+# loads waiting for their cost to be learned, the refusal window and what the
+# pressure readings leave behind them (_SharedPressure). Each is one object
+# both governors hold, so what a call still running on the replaced one
+# writes is not lost.
+_LIVE_STATE = (
+    "_queue_cond",
+    "_waiters",
+    "_queue_seq",
+    "_in_flight",
+    "_admitted",
+    "_owners",
+    "_pending_loads",
+    "_pending_version",
+    "_background_lock",
+    "_quiet",
+    "_cache_lock",
+    "_pins",
+    "_pending_attribution",
+    "_refusal_events",
+    "_shared",
+)
+
+
+def reload_resource_governor() -> ResourceGovernor:
+    """Build the module-level governor again from its files, at once, with
+    the same paths and seams, and hand it the live state of the one it
+    replaces (_LIVE_STATE): the configuration route's reload. Dropping the
+    governor instead would forget a call in flight mid-call (opening the
+    background gate under it), unmark the background's guests, leave the
+    waiters and the loads not yet seen on an instance nobody asks, and
+    forget the keep_alive a sustained pressure replaced (never restored)."""
+    global _governor
+    with _governor_lock:
+        old = _governor
+        if old is None:
+            _governor = ResourceGovernor()
+            return _governor
+        config_path, db_path = old._paths
+        new = ResourceGovernor(
+            config_path=config_path,
+            db_path=db_path,
+            warmup=old._warmup,
+            registry=old._registry_override,
+            clock=old._clock,
+            meminfo_path=old._meminfo_path,
+            vram_probe=old._vram_probe_arg,
+            hardware=old._hardware_arg,
+        )
+        for name in _LIVE_STATE:
+            setattr(new, name, getattr(old, name))
+        _governor = new
+    # The new configuration may let a waiter in at once.
+    new._notify_queue()
+    return new
+
+
+def _current_governor(governor: ResourceGovernor) -> ResourceGovernor:
+    """The governor a reload built from ``governor``, when there is one (it
+    shares the queue), else ``governor`` itself."""
+    current = _governor
+    if current is not None and current is not governor and current._queue_cond is governor._queue_cond:
+        return current
+    return governor
+
+
 # ---------------------------------------------------------------------------
 # The mechanical-seam gate (4.1/4.4, consumed by inference_backend)
 # ---------------------------------------------------------------------------
@@ -4490,12 +5523,15 @@ def reset_resource_governor() -> None:
 def _account_load(
     governor: Any, model: str, decision: AdmissionDecision, options: dict | None
 ) -> None:
-    """The load a decision admits is about to happen: account it, then pin
-    the layer count a split placed, so the calls that follow keep it. Only
-    a count Ollama is told is pinned, asked as the engine head asks
-    (``AdmissionDecision.ollama_layers``); otherwise the engine places the
-    layers itself, and nothing is pinned."""
+    """The load a decision admits is about to happen: account it, mark the
+    model with the class it is loaded for, then pin the layer count a split
+    placed, so the calls that follow keep it. Only a count Ollama is told is
+    pinned, asked as the engine head asks (``AdmissionDecision.ollama_layers``);
+    otherwise the engine places the layers itself, and nothing is pinned."""
     governor.invalidate_on_load(model, decision.num_ctx)
+    note = getattr(governor, "note_loaded_by", None)
+    if callable(note):
+        note(model, getattr(decision, "admission_class", _DEFAULT_CLASS))
     layers = decision.ollama_layers(options) if decision.partial_offload else None
     if layers is not None:
         governor.pin_layers(model, layers, decision.num_ctx)
