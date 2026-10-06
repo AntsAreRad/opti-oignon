@@ -16,20 +16,28 @@ stated contract executable:
   * C3 -- every requirements file the workflow installs from exists in the
     tree. A dead reference swallowed by an error guard installs nothing
     and reads as a passing step.
+  * C4 -- no step runs a contract the selection rule deselects. A step
+    that overrides the rule (pytest -o addopts=...) drops every
+    deselection for the files it names, and a contract superseded by name
+    runs there as if it still held.
 
 Local-only. Runs under pytest or via the __main__ runner. The workflow is
-parsed as text and YAML; no application module is imported.
+parsed as text and YAML, pyproject.toml as TOML; no application module is
+imported.
 """
 
 import re
+import shlex
 import traceback
 from pathlib import Path
 
+import tomllib
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 _CI_PATH = REPO / ".github" / "workflows" / "ci.yml"
 _SCRIPTS_DIR = REPO / ".github" / "scripts"
+_PYPROJECT = REPO / "pyproject.toml"
 
 # A header inventory line: comment marker, three spaces, a job id, then a
 # dash-introduced description. Continuation lines indent deeper and do not
@@ -39,6 +47,11 @@ _HEADER_ENTRY = re.compile(r"^#   ([a-z][a-z0-9-]*)\s+- ")
 # A requirements reference: pip's -r flag and the file it names. Anchored
 # on the install verb so the recursive flag of other tools never matches.
 _REQUIREMENTS_REF = re.compile(r"pip install\s+-r\s+([\w./-]+)")
+
+# A pytest option that replaces the selection rule: -o or --override-ini
+# setting addopts. The rule's deselections stop applying to whatever that
+# invocation collects.
+_OVERRIDES_RULE = re.compile(r"(?:-o\s*|--override-ini[=\s]+)[\"']?addopts=")
 
 
 def _ci_text():
@@ -60,6 +73,49 @@ def _header_inventory(text):
 def _declared_jobs(text):
     data = yaml.safe_load(text)
     return list(data["jobs"].keys())
+
+
+def _deselected():
+    """Node ids the selection rule deselects by name, split as pytest does."""
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    addopts = data["tool"]["pytest"]["ini_options"]["addopts"]
+    args = shlex.split(addopts) if isinstance(addopts, str) else list(addopts)
+    ids = []
+    for index, arg in enumerate(args):
+        if arg.startswith("--deselect="):
+            ids.append(arg.split("=", 1)[1])
+        elif arg == "--deselect" and index + 1 < len(args):
+            ids.append(args[index + 1])
+    return ids
+
+
+def _pytest_runs(text):
+    """(job, step name, command) for each step whose command runs pytest."""
+    runs = []
+    for job_id, job in yaml.safe_load(text)["jobs"].items():
+        for step in job.get("steps", []):
+            command = step.get("run") or ""
+            if "pytest" in command:
+                command = command.replace("\\\n", " ")
+                runs.append((job_id, step.get("name", ""), command))
+    return runs
+
+
+def _collects(command, node_id):
+    """Whether a pytest command collects node_id; no path named is the tree."""
+    named = [t for t in shlex.split(command) if t.startswith("tests")]
+    if not named:
+        return True
+    target = node_id.split("::")[0]
+    for token in named:
+        if "::" in token:
+            if node_id == token or node_id.startswith(token + "["):
+                return True
+            continue
+        path = token.rstrip("/")
+        if target == path or target.startswith(path + "/"):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +163,33 @@ def test_c3_requirements_references_name_real_files():
 
 
 # ---------------------------------------------------------------------------
+# C4 -- no step runs a contract the selection rule deselects
+# ---------------------------------------------------------------------------
+def test_c4_no_step_runs_a_contract_the_selection_rule_deselects():
+    for override in ('pytest -o addopts="" tests',
+                     "pytest --override-ini=addopts= tests"):
+        assert _OVERRIDES_RULE.search(override), (
+            f"control: the pattern must recognise {override!r}"
+        )
+    runs = _pytest_runs(_ci_text())
+    deselected = _deselected()
+    assert runs, "the workflow must run pytest in at least one step"
+    assert deselected, (
+        "the selection rule must read as deselecting contracts by name; an "
+        "empty read would let every step pass unexamined"
+    )
+    for job_id, name, command in runs:
+        if not _OVERRIDES_RULE.search(command):
+            continue
+        running = [node for node in deselected if _collects(command, node)]
+        assert not running, (
+            f"{job_id} / {name!r} overrides the selection rule and so runs "
+            f"{len(running)} contract(s) it deselects by name, superseded "
+            f"ones among them, as if they still held: {running[:3]}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 def _run_all():
@@ -117,6 +200,8 @@ def _run_all():
          test_c2_every_shipped_guard_is_wired),
         ("C3 requirements references are real",
          test_c3_requirements_references_name_real_files),
+        ("C4 no step runs a deselected contract",
+         test_c4_no_step_runs_a_contract_the_selection_rule_deselects),
     ]
     passed = 0
     for label, fn in tests:

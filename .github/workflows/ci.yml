@@ -225,9 +225,9 @@ jobs:
 
   # -------------------------------------------------------------------
   # Native core -- build the Rust crate from its committed lock file and
-  # prove the native path against the Python reference. nc1-nc3 need the
-  # built artefact; pyproject.toml deselects them for machines without
-  # cargo, so this job runs the whole file by name with that list cleared.
+  # prove the native path against the Python reference. The file runs
+  # under the selection rule like every other suite: a contract superseded
+  # by name stays deselected here too.
   # -------------------------------------------------------------------
   native-core:
     name: Native core (Rust build + contracts)
@@ -250,7 +250,7 @@ jobs:
         run: bash scripts/build_oo_core.sh
 
       - name: Native-core contracts (native path against the reference)
-        run: python -m pytest -q -o addopts="" tests/test_native_core_contracts.py
+        run: python -m pytest -q tests/test_native_core_contracts.py
 
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
