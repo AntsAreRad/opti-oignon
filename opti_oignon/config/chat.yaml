@@ -1,0 +1,12 @@
+# Chat turns -- Opti-Oignon
+# =========================
+# What one chat turn may carry beside the words the user typed. Each file the
+# user attaches travels as a document of its own and is saved as a segment of
+# the turn, never as typed words. A request over these bounds is refused, the
+# refusal names the file and the rule, and nothing is run or written. When this
+# file cannot be read, every attached file is refused.
+
+attachments:
+  max_documents: 10           # files one turn may carry
+  max_document_bytes: 500000  # bytes of one file's text, encoded as UTF-8
+  max_filename_chars: 255     # characters of one file's name

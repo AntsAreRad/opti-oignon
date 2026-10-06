@@ -678,13 +678,14 @@ class _Turn:
 
     Built from the caller's run when it brings one (its ``stop`` when that
     is a ``threading.Event``, its ``results`` when that is a dict, its
-    ``steps`` recorder when it has one), fresh otherwise. It satisfies the
-    executor's run protocol, so the executor's stop is the turn's and its
-    per-call results land in the turn's dict. Nothing of a turn is ever
-    stored on the shared instance.
+    ``steps`` recorder when it has one, its ``user_turn`` when it carries
+    the turn's claim), fresh otherwise. It satisfies the executor's run
+    protocol, so the executor's stop is the turn's, its per-call results
+    land in the turn's dict, and the user turn it saves is judged by the
+    same claim. Nothing of a turn is ever stored on the shared instance.
     """
 
-    __slots__ = ("stop", "results", "steps", "on_tool_call", "on_reasoning_step",
+    __slots__ = ("stop", "results", "steps", "user_turn", "on_tool_call", "on_reasoning_step",
                  "on_consensus_model", "on_correction_step")
 
     def __init__(
@@ -701,6 +702,8 @@ class _Turn:
         self.stop = stop if isinstance(stop, threading.Event) else threading.Event()
         self.results = results if isinstance(results, dict) else {}
         self.steps = getattr(run, "steps", None)
+        claim = getattr(run, "user_turn", None)
+        self.user_turn = claim if callable(getattr(claim, "parts_for", None)) else None
         self.on_tool_call = on_tool_call
         self.on_reasoning_step = on_reasoning_step
         self.on_consensus_model = on_consensus_model
@@ -1739,7 +1742,7 @@ class AgenticExecutor:
                 if turn.stopped():
                     return
                 self._save_to_conversation(
-                    conversation_id, message, full_response, model,
+                    conversation_id, message, full_response, model, turn=turn,
                 )
                 return
 
@@ -1775,7 +1778,7 @@ class AgenticExecutor:
 
             # Save to the conversation when needed
             self._save_to_conversation(
-                conversation_id, message, result.response, model,
+                conversation_id, message, result.response, model, turn=turn,
             )
 
         except Exception as e:
@@ -1912,7 +1915,7 @@ class AgenticExecutor:
         # persists nothing here. A stopped turn is not saved.
         if turn.stopped():
             return
-        self._save_to_conversation(conversation_id, message, full_response, model)
+        self._save_to_conversation(conversation_id, message, full_response, model, turn=turn)
 
     def _execute_reasoning_pipeline(
         self,
@@ -1975,7 +1978,7 @@ class AgenticExecutor:
             if turn.stopped():
                 return
             self._save_to_conversation(
-                conversation_id, message, full_response, model,
+                conversation_id, message, full_response, model, turn=turn,
             )
 
         except Exception as e:
@@ -2049,7 +2052,7 @@ class AgenticExecutor:
             if turn.stopped():
                 return
             self._save_to_conversation(
-                conversation_id, message, full_response, model,
+                conversation_id, message, full_response, model, turn=turn,
             )
 
         except Exception as e:
@@ -2187,7 +2190,7 @@ class AgenticExecutor:
                 return
             step("end", 1, "done")
             self._save_to_conversation(
-                conversation_id, message, full_response, model,
+                conversation_id, message, full_response, model, turn=turn,
             )
 
         except Exception as e:
@@ -2199,7 +2202,7 @@ class AgenticExecutor:
             # Fallback: stream the initial response
             yield initial_response
             self._save_to_conversation(
-                conversation_id, message, initial_response, model,
+                conversation_id, message, initial_response, model, turn=turn,
             )
 
     # -----------------------------------------------------------------
@@ -2288,11 +2291,16 @@ class AgenticExecutor:
         user_message: str,
         assistant_response: str,
         model: str,
+        turn: _Turn | None = None,
     ) -> None:
         """Save messages in the conversation.
 
         Used by the pipelines that do not go through the Executor
-        (which handles saving internally).
+        (which handles saving internally). The user message is judged by
+        the claim the turn carries, when it carries one: the claimed text
+        keeps the claim's origin and segments, any other text -- a prompt a
+        pipeline composed from the turn -- is saved as legacy. With no
+        claim the message is the words the user typed.
         """
         if not conversation_id or not assistant_response:
             return
@@ -2302,19 +2310,24 @@ class AgenticExecutor:
             if conversation_manager is None:
                 return
 
-            # Save the user message
+            claim = getattr(turn, "user_turn", None)
+            origin, segments = claim.parts_for(user_message) if claim is not None else ("typed", [])
             conversation_manager.add_message(
                 conv_id=conversation_id,
                 role="user",
                 content=user_message,
+                origin=origin,
+                segments=segments,
             )
-            # Save the response
+            # Save the response, flagged: a pipeline that may have called
+            # tools stands behind it.
             conversation_manager.add_message(
                 conv_id=conversation_id,
                 role="assistant",
                 content=assistant_response,
                 model=model,
                 metadata={"model": model},
+                origin="assistant+tool",
             )
 
         except Exception as e:
@@ -2363,6 +2376,7 @@ class AgenticExecutor:
                     message,
                     result.final_response,
                     getattr(result, "model", None) or self._default_model,
+                    turn=turn,
                 )
 
             # Emit cascade result as structured event
@@ -2423,6 +2437,7 @@ class AgenticExecutor:
                     message,
                     result.final_response,
                     getattr(result, "model", None) or self._default_model,
+                    turn=turn,
                 )
 
             # Emit speculative result as structured event

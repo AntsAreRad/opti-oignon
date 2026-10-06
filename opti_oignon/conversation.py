@@ -92,6 +92,77 @@ _CONV_UPDATE_COLS = frozenset({
 
 
 # ============================================================================
+# The origin of a turn
+# ============================================================================
+
+# Who wrote a turn's words: the user typing, the user's question as the model
+# rewrote it, a document the user attached, the model answering, or a time
+# before origins were kept. Flags say what else reached an answer: results
+# from the web or from tools. Only typed text may later make a decision
+# probe, so an origin is a trust label, and the default is the least trusted
+# one. The model never sees it: the chat context is role and content alone.
+# Segments are [start, end, base] bounds on the content, in code points,
+# sorted and disjoint; a character no segment covers belongs to no one.
+#
+# The grammar stands as one text in conversation.py, conversation_branches.py
+# and memory/probes.py: each is loaded alone where it is tested, and a
+# contract holds the three to one text.
+_ORIGIN_BASES = ("typed", "refined", "document", "assistant", "legacy")
+_ORIGIN_FLAGS = ("tool", "web")
+_ORIGIN_ROLES = {
+    "user": ("typed", "refined", "document", "legacy"),
+    "assistant": ("assistant", "legacy"),
+}
+
+
+def _origin_defect(role, origin, segments, length):
+    """Why a turn's origin lies outside the grammar, or None when it lies inside."""
+    if not isinstance(origin, str) or not origin:
+        return "an origin is a non-empty string"
+    base, *flags = origin.split("+")
+    if base not in _ORIGIN_BASES:
+        return f"origin base {base[:24]!r} is not in the grammar"
+    for flag in flags:
+        if flag not in _ORIGIN_FLAGS:
+            return f"origin flag {flag[:24]!r} is not in the grammar"
+    if flags != sorted(set(flags)):
+        return "origin flags are written once each, in order"
+    if flags and base != "assistant":
+        return f"a {base} origin carries no flag"
+    allowed = _ORIGIN_ROLES.get(role, ("legacy",)) if isinstance(role, str) else ("legacy",)
+    if base not in allowed:
+        return f"role {str(role)[:24]!r} cannot carry {base}"
+    if not isinstance(segments, (list, tuple)):
+        return "segments are a list"
+    if segments and base == "legacy":
+        return "a legacy turn has no segments"
+    end = 0
+    for segment in segments:
+        if not isinstance(segment, (list, tuple)) or len(segment) != 3:
+            return "a segment is [start, end, base]"
+        start, stop, label = segment
+        if type(start) is not int or type(stop) is not int:
+            return "segment bounds are integers"
+        if not end <= start < stop <= length:
+            return f"segment [{start}, {stop}] overlaps, is empty or leaves the content"
+        if label == "legacy" or label not in allowed:
+            return f"role {str(role)[:24]!r} carries no {str(label)[:24]} segment"
+        end = stop
+    return None
+
+
+# The two columns that carry a turn's origin, as an older file gains them.
+_MESSAGE_ORIGIN_COLUMNS = (
+    ("origin", "TEXT NOT NULL DEFAULT 'legacy'"),
+    ("segments", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
+
+class OriginError(ValueError):
+    """A turn's origin or segments lie outside the grammar: refused by name, nothing written."""
+
+
+# ============================================================================
 # DATA CLASSES
 # ============================================================================
 
@@ -374,6 +445,8 @@ class ConversationManager:
                         token_estimate INTEGER DEFAULT 0,
                         model TEXT,
                         metadata TEXT DEFAULT '{}',
+                        origin TEXT NOT NULL DEFAULT 'legacy',
+                        segments TEXT NOT NULL DEFAULT '[]',
                         FOREIGN KEY (conversation_id)
                             REFERENCES conversations(id) ON DELETE CASCADE
                     );
@@ -383,6 +456,12 @@ class ConversationManager:
                     CREATE INDEX IF NOT EXISTS idx_conversations_updated
                         ON conversations(updated_at DESC);
                 """)
+                # Origins arrived after the table: an older file gains the
+                # columns here, and every row it already holds reads legacy.
+                present = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                for column, definition in _MESSAGE_ORIGIN_COLUMNS:
+                    if column not in present:
+                        conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
                 conn.commit()
         except Exception as e:
             logger.error(f"Error initializing DB: {e}")
@@ -891,11 +970,13 @@ class ConversationManager:
                                 token_estimate, bool
                             ):
                                 token_estimate = _estimate_tokens(content, m.get("model"))
+                            # A received turn is legacy whatever the payload
+                            # claims: no peer vouches for who typed it here.
                             conn.execute(
                                 """INSERT INTO messages
                                    (conversation_id, role, content, timestamp,
-                                    token_estimate, model, metadata)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                    token_estimate, model, metadata, origin, segments)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, 'legacy', '[]')""",
                                 (
                                     conv_id,
                                     role,
@@ -924,6 +1005,9 @@ class ConversationManager:
         content: str,
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        origin: str = "legacy",
+        segments: list | tuple = (),
     ) -> Message | None:
         """Add a message to a conversation.
 
@@ -935,10 +1019,22 @@ class ConversationManager:
             content: Message content
             model: Model used (for assistant messages)
             metadata: Additional metadata
+            origin: Who wrote the words, in the turn-origin grammar; a
+                writer that cannot vouch for one leaves it legacy
+            segments: [start, end, base] bounds of the parts that came
+                from elsewhere, empty when the whole has the origin
 
         Returns:
             The created Message object, or None on error
+
+        Raises:
+            OriginError: the origin or segments lie outside the grammar;
+                nothing is written
         """
+        defect = _origin_defect(role, origin, segments, len(content or ""))
+        if defect is not None:
+            raise OriginError(f"message refused, its origin lies outside the grammar: {defect}")
+        segments_json = json.dumps([list(s) for s in segments])
         now = datetime.now().isoformat()
         token_estimate = _estimate_tokens(content, model)
         meta_json = json.dumps(metadata or {})
@@ -960,9 +1056,10 @@ class ConversationManager:
                 cursor = conn.execute(
                     """INSERT INTO messages
                        (conversation_id, role, content, timestamp,
-                        token_estimate, model, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (conv_id, role, stored_content, now, token_estimate, model, meta_json),
+                        token_estimate, model, metadata, origin, segments)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (conv_id, role, stored_content, now, token_estimate, model, meta_json,
+                     origin, segments_json),
                 )
 
                 # Update updated_at and the conversation model
@@ -1057,6 +1154,51 @@ class ConversationManager:
             for m in messages
             if m.role in ("user", "assistant")
         ]
+
+    def get_mirror_messages(self, conv_id: str) -> list[dict[str, Any]]:
+        """The turns of :meth:`get_context_messages`, with who wrote them.
+
+        Same turns, same order, each as role, content, origin and segments.
+        This read feeds the onion's mirror and nothing else: the model's
+        context is built by the read above, which leaves the origin out on
+        purpose. Segments that no longer decode are handed on as None, and
+        the mirror then holds the turn legacy.
+
+        Args:
+            conv_id: Conversation UUID
+
+        Returns:
+            List of dicts with 'role', 'content', 'origin' and 'segments'
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    """SELECT role, content, origin, segments FROM messages
+                       WHERE conversation_id = ?
+                       ORDER BY timestamp ASC, id ASC""",
+                    (conv_id,),
+                ).fetchall()
+            except Exception as e:
+                logger.error(f"Error reading messages {conv_id}: {e}")
+                return []
+            finally:
+                conn.close()
+        turns = []
+        for row in rows:
+            if row["role"] not in ("user", "assistant"):
+                continue
+            try:
+                segments = json.loads(row["segments"])
+            except (TypeError, ValueError):
+                segments = None
+            turns.append({
+                "role": row["role"],
+                "content": _decrypt(row["content"]),
+                "origin": row["origin"],
+                "segments": segments,
+            })
+        return turns
 
     def get_token_count(self, conv_id: str) -> int:
         """Get the total estimated token count for a conversation.
@@ -1629,12 +1771,14 @@ class ConversationManager:
                     (conv_id, title, timestamp, timestamp, model, task_type, preset, meta_json),
                 )
 
-                # Message user
+                # Message user. An imported entry is legacy: the old
+                # history never said who wrote its words.
                 user_tokens = _estimate_tokens(question, model)
                 conn.execute(
                     """INSERT INTO messages
-                       (conversation_id, role, content, timestamp, token_estimate, model, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, '{}')""",
+                       (conversation_id, role, content, timestamp, token_estimate, model, metadata,
+                        origin, segments)
+                       VALUES (?, ?, ?, ?, ?, ?, '{}', 'legacy', '[]')""",
                     (conv_id, "user", question, timestamp, user_tokens, None),
                 )
 
@@ -1643,8 +1787,9 @@ class ConversationManager:
                     assistant_tokens = _estimate_tokens(response, model)
                     conn.execute(
                         """INSERT INTO messages
-                           (conversation_id, role, content, timestamp, token_estimate, model, metadata)
-                           VALUES (?, ?, ?, ?, ?, ?, '{}')""",
+                           (conversation_id, role, content, timestamp, token_estimate, model, metadata,
+                            origin, segments)
+                           VALUES (?, ?, ?, ?, ?, ?, '{}', 'legacy', '[]')""",
                         (conv_id, "assistant", response, timestamp, assistant_tokens, model),
                     )
 

@@ -30,6 +30,7 @@ import type {
 	VerificationInfo,
 } from '$lib/types';
 import { chatRequest, type ChatOptions } from '$lib/chat/requestFields';
+import { userTurnText } from '$lib/chat/userTurn';
 import {
 	lose,
 	observe,
@@ -249,10 +250,12 @@ export async function sendMessage(
 	beginStream(conversationId);
 
 	// Ajouter le message user localement
+	// As the server will save the turn: the words, then each attached file
+	// under a line naming it.
 	const userMsg = {
 		id: null,
 		role: 'user',
-		content: message,
+		content: userTurnText(message, options.documents ?? []),
 		timestamp: new Date().toISOString(),
 		model: null,
 		token_estimate: 0,

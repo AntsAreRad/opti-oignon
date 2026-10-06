@@ -29,6 +29,24 @@ and add up to the window exactly; the composer refuses a file that does not.
   recall probes drawn from the span, class by class, at the configured
   thresholds. The probes read English and French: decisions, negations, names and whole words, accents included. An empty probe set on a rich span is a defect, and an unknown
   rate is not a pass.
+- The same peel must say nothing its span does not hold. The second face
+  of the gate reads the summary as a source is read and refuses, by name,
+  a name, a date, a number or a code block its span lacks, inline code its
+  span never wrote as inline code, and a sentence
+  that decides with no typed decision of the span behind it; a sentence
+  whose subject is a reporter -- the assistant, a document, a tool, from a
+  closed list in `onion.yaml` -- tells another speaker's words and needs
+  none. Two bounds come last, each refused with its figure: the share of
+  the summary's content words its span holds no word for
+  (`max_novelty`), and its words over its span's (`max_length_ratio`). A
+  summary longer than its span saves nothing, and the verbatim turns stay.
+- The probes are not taken on trust. The gate reads the span's facts again
+  -- its names, dates, numbers, fenced blocks and typed decisions, piece by
+  piece as the origins bound them, and never by the native core -- and a
+  probe set that asks for a smaller share of them than the floor
+  (`probe_floor`) is refused after the bounds, with its share and the facts
+  it leaves unasked. A generator, a native twin or a caller that draws less
+  cannot raise an acceptance rate.
 - A parent peel is summarised from the union of its children's Cellar
   spans, never from the children's text. A peel handed in that stands on
   anything else -- a dangling key, sources that are not its children's, a
@@ -47,6 +65,13 @@ inference registry with `keep_alive: "0"`, so the model holds nothing while
 idle. On the next turn, the librarian's block -- Core, receipts digest and
 the peels selected for the question -- replaces today's working-memory
 block when it has one, and today's block stands when it does not.
+
+The librarian asks its model for a summary in the language of the turns
+that attributes each decision to its source: a decision is the user's
+only if the user typed it, and what the assistant, a document or a tool
+said is told with them as the subject, the form the second face accepts.
+What the request changes in the share of refused summaries is a host
+measurement.
 
 The user's surface on the Core and the receipts is a memory route scoped
 to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
@@ -111,8 +136,45 @@ threshold sweep the calibration needs -- come from
 `scripts/onion_runbook.py` on the host, labelled `source: measured`. The
 script refuses to print a number it did not measure. The thresholds in
 `onion.yaml` are the design's proposed defaults; on the fixtures, a single
-wrong entity or date in a four-turn span passes at 0.7, and that finding is
-recorded as a contract until the calibration replaces the numbers.
+wrong entity or date in a four-turn span passes the probes at 0.7, and the
+second face refuses it by name. The bounds are proposed defaults too: on
+the fixtures a faithful summary reads at most a tenth new and one that
+drifts two thirds or more, and a faithful summary that tells who said what
+can be longer than a short span, which keeps the verbatim turns. The
+runbook reports what the second face refuses, kind by kind, and the spread
+of each bound's figures -- how many are over, the median, the ninetieth
+percentile -- the figures their calibration is owed on.
+
+A rate counts the probes a summary answers; it cannot count a fact no probe
+was drawn for. The recall instrument, in `opti_oignon/memory/probes.py`
+beside the generator it measures, reads a labelled set -- spans whose facts a reader marked by class, at the turn
+that first writes them -- and counts, class by class, the facts the
+generator draws a probe for: of their class, at their turn, with their
+answer. A date or a number is answered by its canonical form, a name by its
+writing, a code block by the marker of its body, and a decision by its
+polarity and the acts, dates and numbers it was marked with; the other
+words a decision is keyed by are the generator's, never compared. The
+recall read on the fixture set the contracts hold, French and English, is
+stated in `onion.yaml` under `gate.probe_recall` with the version of the
+generator and the fingerprint of the lexicon it was read with, and a
+contract reads it again; the facts the set marks as known misses are held
+missed. Every gate decision, every fidelity reading and every rate of the
+runbook carries that recall, or None and the reason when the generator or
+the lexicon differs: the lexicon is the user's to change, and a figure read
+on another one is never borrowed. It is a fixture figure, not a
+calibration. `scripts/onion_runbook.py --probe-recall SET` reads it on a
+labelled set of real conversations, kept off the repository, with no model
+and counts only, never a writing or a turn of the set; that reading is owed
+on the host.
+
+The recall reads the generator against a reader's labels; the floor reads
+every probe set against the span itself, with no label. On the fixtures
+every probe set the generator draws asks for every fact the span holds, and
+the shipped floor asks the same of a native twin, a caller or a later
+generator. It is set from the fixtures, not calibrated: the runbook reports,
+span by span, the spread of the share and how many spans fall under the
+floor, and the facts left unasked counted kind by kind, never written out;
+its calibration on real conversations is owed on the host.
 
 Drift against a no-onion baseline has a host command of its own,
 `scripts/drift_ab.py`. It runs one scripted conversation -- facts stated,

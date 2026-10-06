@@ -30,6 +30,9 @@ rate of 0.0 when there were no probes to score has invented a measurement.
   * RP13 -- a French decision keeps its words whole in its key.
   * RP14 -- on ASCII text the expressions that read French draw and score
     exactly what the ASCII expressions did, over a deterministic corpus.
+  * RP15 to RP22 -- RP1, RP5, RP6, RP9, RP10, RP11, RP13 and RP14 held on
+    typed turns, with names off the head of a sentence: only typed text
+    decides, and a head names nothing by its capital alone.
 
 Local-only (the public distribution ships no tests). Loaded through the shared
 isolation window; the module is pure and reaches nothing.
@@ -346,6 +349,158 @@ def test_rp14_on_ascii_text_the_expressions_that_read_french_draw_and_score_as_b
         assert entities >= 1500 and decisions >= 1200, (entities, decisions)
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# RP15-RP22 -- the contracts above, on typed turns and names off the head
+# ---------------------------------------------------------------------------
+# Only typed text decides, and a capital at the head of a sentence names
+# nothing unless the span capitalises the word elsewhere. The contracts above
+# drew their decisions from turns of no origin and some names from the head
+# of a sentence; each one below holds the same property on typed turns, with
+# its names where a capital still says something.
+_TYPED_SPAN = [dict(t, role="user", origin="typed") for t in _SPAN]
+_E, _EG, _A, _OU = chr(0xE9), chr(0xE8), chr(0xE0), chr(0xF6)
+
+
+def _typed_turn(text, turn_id="t1"):
+    return {"turn_id": turn_id, "role": "user", "origin": "typed", "text": text}
+
+
+def test_rp15_a_rich_typed_span_yields_probes_of_every_kind():
+    mod, restore = _open()
+    try:
+        probes = mod.generate_probes(_TYPED_SPAN)
+        assert len(probes) >= 4, "a span this rich yields several probes"
+        kinds = {p.kind for p in probes}
+        assert {"entity", "number", "date", "decision"} <= kinds, (
+            f"every probe kind is represented on this span, got {sorted(kinds)}"
+        )
+    finally:
+        restore()
+
+
+def test_rp16_inverting_a_typed_decision_fails_a_probe():
+    mod, restore = _open()
+    try:
+        probes = mod.generate_probes(_TYPED_SPAN)
+        inverted = _with(_TYPED_SPAN, "t4", "The team agreed to use Docker for the demo.")
+        result = mod.score(probes, _text(inverted))
+        assert result.failed >= 1, "a decision turned into its opposite is caught"
+        assert any(p.kind == "decision" for p in result.failures), "and it is a decision probe that catches it"
+    finally:
+        restore()
+
+
+def test_rp17_deleting_a_typed_decision_fails_a_probe():
+    mod, restore = _open()
+    try:
+        probes = mod.generate_probes(_TYPED_SPAN)
+        without = [t for t in _TYPED_SPAN if t["turn_id"] != "t2"]
+        result = mod.score(probes, _text(without))
+        assert result.failed >= 1, "a dropped decision is caught"
+        assert any(p.kind == "decision" and p.turn_id == "t2" for p in result.failures), (
+            "by the decision probe drawn from the dropped turn"
+        )
+    finally:
+        restore()
+
+
+def test_rp18_a_typed_french_decision_is_drawn_and_inverting_it_fails_its_probe():
+    mod, restore = _open()
+    try:
+        decide, demo = f"d{_E}cid{_E}", f"d{_E}mo"
+        cases = (
+            (f"Nous avons {decide} de ne pas utiliser Docker pour la {demo}.",
+             f"Nous avons {decide} d'utiliser Docker pour la {demo}."),
+            (f"On a {decide} : on utilisera pas Docker pour la {demo}.",
+             f"On a {decide} : on utilisera Docker pour la {demo}."),
+            (f"Il faut qu'on n'utilise plus Docker pour la {demo}.",
+             f"Il faut qu'on utilise Docker pour la {demo}."),
+        )
+        for source_text, inverted in cases:
+            drawn = mod.generate_probes([_typed_turn(source_text)])
+            decisions = [p for p in drawn if p.kind == "decision"]
+            assert decisions, f"a French decision is drawn: {source_text!r}"
+            assert decisions[0].negations >= 1, "its negation is counted"
+            assert mod.score(drawn, source_text).failed == 0, "the source answers its own probes"
+            failures = mod.score(drawn, inverted).failures
+            assert any(p.kind == "decision" for p in failures), f"the inversion is caught: {inverted!r}"
+    finally:
+        restore()
+
+
+def test_rp19_a_typographic_apostrophe_negates_a_typed_decision_as_the_ascii_one():
+    mod, restore = _open()
+    try:
+        typographic = "We decided we don" + chr(0x2019) + "t ship the demo on Friday."
+        drawn = mod.generate_probes([_typed_turn(typographic)])
+        decision = next(p for p in drawn if p.kind == "decision")
+        assert decision.negations == 1, "the typographic n't is a negation"
+        assert mod.score(drawn, "We decided we don't ship the demo on Friday.").failed == 0, "either apostrophe answers"
+        assert mod.score(drawn, "We decided we do ship the demo on Friday.").failed >= 1, "the inversion is caught"
+    finally:
+        restore()
+
+
+def test_rp20_french_function_words_are_neither_entities_nor_words_of_a_typed_decision():
+    mod, restore = _open()
+    try:
+        drawn = mod.generate_probes([_typed_turn(f"Nous avons d{_E}cid{_E} que Carol m{_EG}ne la revue avec Bob.")])
+        entities = {p.answer for p in drawn if p.kind == "entity"}
+        assert entities == {"Carol", "Bob"}, entities
+        decision = next(p for p in drawn if p.kind == "decision")
+        assert not decision.key & {"nous", "avons", "que", "la", "avec"}, decision.key
+        assert {"carol", "bob", "revue"} <= decision.key
+    finally:
+        restore()
+
+
+def test_rp21_a_typed_french_decision_keeps_its_words_whole_in_its_key():
+    mod, restore = _open()
+    try:
+        chloe, andre, zoe = f"Chlo{_E}", f"Andr{_E}", f"Z{_OU}e"
+        text = f"Hier, {chloe} et {andre} ont d{_E}cid{_E} que {zoe} m{_EG}ne la d{_E}mo {_A} Lyon."
+        drawn = mod.generate_probes([_typed_turn(text)])
+        decision = next(p for p in drawn if p.kind == "decision")
+        whole = {chloe.lower(), andre.lower(), f"d{_E}cid{_E}", zoe.lower(), f"m{_EG}ne", f"d{_E}mo", "lyon"}
+        assert whole <= decision.key, decision.key
+        assert not decision.key & {_A, "e", "m", "mo", "cid", "chlo", "andr", "z"}, decision.key
+        assert {p.answer for p in drawn if p.kind == "entity"} == {chloe, andre, zoe, "Lyon"}
+    finally:
+        restore()
+
+
+def test_rp22_on_ascii_typed_text_the_expressions_that_read_french_draw_and_score_as_before():
+    mod, restore = _open()
+    try:
+        rng = random.Random(14)
+        texts = [_text(_SPAN)] + [
+            "".join(rng.choice(_ASCII_PIECES) for _ in range(rng.randint(1, 30))) for _ in range(2000)
+        ]
+        spans = [[_typed_turn(text, f"t{i}")] for i, text in enumerate(texts)]
+        candidates = [(text, rng.choice(texts), text.lower()) for text in texts]
+
+        def run():
+            drawn = [mod.generate_probes(span) for span in spans]
+            scored = [[mod.score(probes, c) for c in cands] for probes, cands in zip(drawn, candidates)]
+            return drawn, scored
+
+        now = run()
+        saved = mod._WORD, mod._CAPITALISED
+        mod._WORD, mod._CAPITALISED = re.compile(_ASCII_WORD), re.compile(_ASCII_NAME)
+        try:
+            before = run()
+        finally:
+            mod._WORD, mod._CAPITALISED = saved
+        assert now[0] == before[0], "the same probes, in the same order"
+        assert now[1] == before[1], "the same verdicts on every candidate"
+        entities = sum(p.kind == "entity" for probes in now[0] for p in probes)
+        decisions = sum(p.kind == "decision" for probes in now[0] for p in probes)
+        assert entities >= 1200 and decisions >= 1200, (entities, decisions)
+    finally:
+        restore()
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

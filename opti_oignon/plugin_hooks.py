@@ -7,6 +7,7 @@ in the inference pipeline. Each hook runs with error isolation so one
 plugin failure never crashes others or the main pipeline.
 """
 
+import copy
 import logging
 import time
 from dataclasses import dataclass, field
@@ -265,13 +266,15 @@ class HookManager:
             if not reg.enabled:
                 continue
 
-            # Per-plugin data redaction
+            # Per-plugin data redaction, on a deep copy: a plugin that edits
+            # what it is shown in place, then fails, changes nothing; only
+            # what a plugin returns is merged.
             if redact_sensitive:
-                plugin_data = redact_hook_data(
+                plugin_data = _isolated(redact_hook_data(
                     current_data, reg.plugin_name,
-                )
+                ))
             else:
-                plugin_data = dict(current_data)
+                plugin_data = _isolated(current_data)
 
             ctx = HookContext(
                 hook_name=hook_name,
@@ -432,6 +435,7 @@ REDACTED_PLACEHOLDER = "[REDACTED -- requires inference_content permission]"
 # Fields in hook data that contain sensitive inference content
 _SENSITIVE_FIELDS = frozenset({
     "message",      # User prompt
+    "documents",    # Files attached beside the user prompt
     "response",     # LLM response
     "arguments",    # Tool call arguments
     "result",       # Tool call result
@@ -464,6 +468,15 @@ def get_plugin_permissions(plugin_name: str) -> list[str]:
         return list(record.manifest.permissions)
     except Exception:
         return []
+
+
+def _isolated(data: dict[str, Any]) -> dict[str, Any]:
+    """A deep copy of the data a plugin is shown; a shallow one, said, when a value cannot be copied."""
+    try:
+        return copy.deepcopy(data)
+    except Exception as exc:
+        logger.debug("hook data shown as a shallow copy: %s", exc)
+        return dict(data)
 
 
 def has_inference_content_permission(plugin_name: str) -> bool:

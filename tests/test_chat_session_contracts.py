@@ -44,6 +44,7 @@ registry are loaded from source beside it.
 """
 
 import ast
+import hashlib
 import sqlite3
 import sys
 import types
@@ -541,5 +542,36 @@ def test_ch9_pin_close_open_recall_and_resolve_act_on_the_real_onion(tmp_path):
         assert _kinds(resolved, "refusal") == [] and key[:12] in resolved[0].text
         assert key not in [r.key for r in lib.open_receipts(cid, config=cfg)]
         assert len(_kinds(_run(session, "/resolve"), "refusal")) == 1, "a key is required"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# CH10 -- /recall reads a code block by the key its marker names
+# ---------------------------------------------------------------------------
+_CODE = "def ship(release):\n    return release.tag"
+
+
+def test_ch10_recall_reads_a_code_block_by_the_key_its_marker_names(tmp_path):
+    loaded, scripted, conversations, restore = _load()
+    try:
+        seam, lib, cfg, install_store = _onion_seam(loaded, tmp_path)
+        seam.recall_code = lambda cid, key: lib.recall_code(cid, key, config=cfg)
+        session = _session(loaded, librarian=seam)
+        _run(session, "Alice runs service 1 on 2026-03-01.")
+        cid = session.conversation_id
+        conversations.add_message(cid, "user", f"Here is the helper.\n```python\n{_CODE}\n```\nIt stays in the tools folder.")
+        conversations.add_message(cid, "assistant", "Noted: the helper stays in the tools folder.")
+        _mirror(lib, cfg, conversations, cid)
+        assert _kinds(_run(session, "/close"), "refusal") == []
+        lib.reset_librarian()
+        install_store()
+        assert _kinds(_run(session, f"/open {cid}"), "refusal") == []
+        key = "code:" + hashlib.sha256(_CODE.encode("utf-8")).hexdigest()[:12]
+        recalled = _run(session, f"/recall {key}")
+        assert _kinds(recalled, "refusal") == [], "a code key is read, not refused as an unknown receipt"
+        assert _CODE in recalled[0].text and "python" in recalled[0].text, "the block and its language"
+        refused = _kinds(_run(session, "/recall code:ffffffffffff"), "refusal")
+        assert len(refused) == 1 and "no code block behind code:ffffffffffff" in refused[0], "an unknown key, by name"
     finally:
         restore()

@@ -31,7 +31,8 @@ import threading
 import time
 import uuid
 import weakref
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from .config import config
@@ -464,6 +465,129 @@ def _ledger_record(fields: dict) -> None:
             ledger.record(**fields)
     except Exception as exc:
         logger.debug("Context ledger write skipped: %s", exc)
+
+
+_DOCUMENT_HEAD = "\n\n---\nDocument provided:"
+
+
+def compose_user_turn(question: str, documents: Sequence[tuple[str | None, str]] = ()) -> tuple[str, list]:
+    """The user turn a question and its documents make, and where each document lies in it.
+
+    Each document follows a line the executor writes -- ``---``, then
+    ``Document provided:`` and the document's name when it has one -- and
+    those words belong to no one. Returns the content and the [start, end]
+    of each document's text. A document with no text has no bounds: its
+    line alone tells the model the file was empty.
+    """
+    content = question
+    bounds = []
+    for name, text in documents:
+        content += f"{_DOCUMENT_HEAD} {name}\n" if name else f"{_DOCUMENT_HEAD}\n"
+        if text:
+            bounds.append([len(content), len(content) + len(text)])
+            content += text
+    return content, bounds
+
+
+def _turn_parts(base: str, sent: str, documents: Sequence[tuple[str | None, str]]) -> tuple[str, str, list]:
+    """The content, origin and segments of a turn whose words, of ``base``, carry ``documents`` after them."""
+    content, bounds = compose_user_turn(sent, documents)
+    if content == sent:
+        return content, base, []
+    segments = [[0, len(sent), base]] if sent else []
+    segments += [[start, end, "document"] for start, end in bounds]
+    if not segments:
+        return content, "legacy", []
+    return content, (base if sent else "document"), segments
+
+
+@dataclass(frozen=True)
+class UserTurn:
+    """A user turn as its caller composed it: its text, who wrote it, and where each part lies.
+
+    The chat route makes one for every turn, and the turn carries it to
+    every path that saves the user's words: this executor, the agentic
+    pipelines, the execution pipelines and the coding agent. It vouches for
+    its own text and for nothing else -- a prompt a pipeline or an agent
+    composes from that text is no one's turn, and is saved as legacy.
+    """
+
+    content: str
+    origin: str
+    segments: tuple = ()
+
+    def parts_for(self, text: str) -> tuple[str, list]:
+        """The origin and segments of a saved turn whose content is ``text``."""
+        if text == self.content:
+            return self.origin, [list(segment) for segment in self.segments]
+        return "legacy", []
+
+    def rewritten(self, text: str) -> "UserTurn":
+        """This turn once something rewrote it into ``text``.
+
+        Words of one origin, typed or refined, become refined: the user's
+        question as a program rewrote it. A turn of parts, or one no one
+        vouched for, cannot be located in the rewrite and becomes legacy.
+        """
+        if text == self.content:
+            return self
+        if not self.segments and self.origin in ("typed", "refined"):
+            return UserTurn(text, "refined")
+        return UserTurn(text, "legacy")
+
+
+def user_turn(typed: str, sent: str, documents: Sequence[tuple[str | None, str]] = ()) -> UserTurn:
+    """The turn the words a user typed make once sent, with the documents attached after them.
+
+    ``typed`` is what the user typed and ``sent`` what the turn carries:
+    the same words, or a hook's rewrite of them.
+    """
+    content, origin, segments = _turn_parts("typed" if sent == typed else "refined", sent, documents)
+    return UserTurn(content, origin, tuple(tuple(segment) for segment in segments))
+
+
+def _user_turn_origin(
+    question: str,
+    sent: str,
+    documents: Sequence[tuple[str | None, str]],
+    content: str,
+    claim: Any = None,
+) -> tuple[str, list]:
+    """The origin and segments of the user turn the executor saves.
+
+    ``question`` is the question as this call received it, before the
+    vision step can rewrite it; ``sent`` is the question the turn carries --
+    those words, or the model's rewrite of them -- and ``documents`` the
+    attachments the executor joins after it, each a (name, text) pair. The
+    question is typed when it is the user's own words and refined when the
+    model rewrote it; each attachment is a segment of its own, and the words
+    the executor writes between them belong to no one. ``claim`` is the turn
+    as its caller composed it, when one did: it says who wrote the question
+    it was composed from and vouches for nothing else, so a text composed
+    from that turn -- a pipeline step, an agent's prompt -- is saved as
+    legacy. The bounds are found on ``content``: a turn whose parts are not
+    where they are claimed to be is saved as legacy, the least trusted
+    origin, and said, never mislabelled and never lost.
+    """
+    expected, origin, segments = _turn_parts("typed" if sent == question else "refined", sent, documents)
+    if content != expected:
+        logger.warning("the saved turn does not carry its parts where claimed: saved as legacy")
+        return "legacy", []
+    if claim is None:
+        return origin, segments
+    if claim.content != compose_user_turn(question, documents)[0]:
+        logger.debug("a turn composed from the user's turn is saved as legacy")
+        return "legacy", []
+    if sent == question:
+        return claim.origin, [list(segment) for segment in claim.segments]
+    # Rewritten here, by the vision step: the claimed words are no longer
+    # the words sent, and only words of one origin can become refined.
+    head = [list(segment) for segment in claim.segments if segment[0] < len(question)]
+    if documents:
+        plain = len(head) == 1 and head[0][:2] == [0, len(question)] and head[0][2] in ("typed", "refined")
+    else:
+        plain = not head and claim.origin in ("typed", "refined")
+    return (origin, segments) if plain else ("legacy", [])
 
 
 logger = logging.getLogger(__name__)
@@ -1882,6 +2006,7 @@ class Executor:
         persist: bool = True,
         capability_block: str | None = None,
         run: Any = None,
+        documents: Sequence[tuple[str, str]] | None = None,
     ) -> Generator[str, None, tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -1920,7 +2045,17 @@ class Executor:
                 With no run the call owns a private one. ``cancel()`` is the
                 emergency broadcast that sets the stop of every live call.
                 A stopped call saves, captures, caches and records nothing,
-                even when its caller reads it to the end.
+                even when its caller reads it to the end. A run that carries
+                ``user_turn`` (the chat route's turn, or one handed on from
+                it) brings the turn as its caller composed it: the user turn
+                is saved with that claim's origin and segments when the
+                question is the claimed text, and as legacy when it is a text
+                composed from it.
+            documents: The files a chat turn carries, each a (name, text)
+                pair, joined after the question one by one, each under a
+                line naming it; each is saved as a document segment of its
+                own. A document of no name, given as ``document``, comes
+                first.
 
         Yields:
             Response chunks in streaming. When think=True, thinking chunks
@@ -1935,6 +2070,16 @@ class Executor:
         """
         _call_run = run if run is not None else _Run()
         stop, _run_results = _call_run.stop, _call_run.results
+        # The question as this call received it: the vision step may rewrite
+        # it, and the saved turn is measured against these words.
+        _entry_question = question
+        # The turn as its caller composed it, when one did: it rides the run.
+        _claim = getattr(run, "user_turn", None)
+        # Every attachment as (name, text): a document of no name first, then
+        # the named documents a chat turn carries.
+        _attachments = ([(None, document)] if document else []) + [
+            (name, text) for name, text in (documents or ())
+        ]
         with self._live_lock:
             self._live_stops.add(stop)
         self._current_task = routing.task_type
@@ -1970,17 +2115,23 @@ class Executor:
             logger.info(msg)
 
         # Step 0: Context validation (NEW: Phase A4)
-        adjusted_document = document or ""
-        if validate_context and document and CONTEXT_MANAGER_AVAILABLE:
+        # The attachments' text, as the check and the refinement read it.
+        adjusted_document = "\n\n".join(text for _name, text in _attachments if text)
+        if validate_context and adjusted_document and CONTEXT_MANAGER_AVAILABLE:
             system_prompt = self.get_system_prompt(routing.task_type, routing.prompt_variant)
 
+            _checked_document = adjusted_document
             adjusted_document, context_check, context_warning = self.validate_context(
                 question=question,
-                document=document,
+                document=_checked_document,
                 system_prompt=system_prompt,
                 model=routing.model,
                 auto_truncate=auto_truncate
             )
+            # A truncation cuts the attachments' joined text: what is left
+            # is one document of no name.
+            if adjusted_document != _checked_document:
+                _attachments = [(None, adjusted_document)] if adjusted_document else []
 
             if context_check:
                 if context_check.exceeds_limit and not auto_truncate:
@@ -2247,6 +2398,8 @@ class Executor:
         # wrapper is unavailable. The block joins the per-turn tail, which
         # rides the user role in front of the question, never a system
         # message. The <search>-tag interceptor is not wired into this path.
+        # Whether results reached the prompt: the answer is flagged web then.
+        _web_injected = False
         if web_search:
             try:
                 from opti_oignon.search_killswitch import search_killswitch as _ks
@@ -2303,6 +2456,7 @@ class Executor:
                                 "information only. Cite sources when relevant."
                             )
                             _volatile_parts.append(search_context)
+                            _web_injected = True
                             status(f"[OK] {len(results)} search results injected")
                     else:
                         status("[!] Web search returned no results")
@@ -2314,10 +2468,8 @@ class Executor:
                         logger.warning(f"Web search error: {e}")
 
         # Step 3: Build messages (multi-turn ou single-turn)
-        # Final user content (refined question + possible document)
-        user_content = refined_question
-        if adjusted_document:
-            user_content += f"\n\n---\nDocument provided:\n{adjusted_document}"
+        # Final user content (refined question + possible documents)
+        user_content = compose_user_turn(refined_question, _attachments)[0]
 
         # Multi-turn mode: load the conversation history
         use_conversation = (
@@ -2708,12 +2860,17 @@ class Executor:
                 # Save multi-turn even on cache hit
                 if use_conversation and persist and cached.response:
                     try:
+                        _turn_origin, _turn_segments = _user_turn_origin(
+                            _entry_question, refined_question, _attachments, user_content, _claim
+                        )
                         conversation_manager.add_message(
-                            conversation_id, "user", user_content
+                            conversation_id, "user", user_content,
+                            origin=_turn_origin, segments=_turn_segments,
                         )
                         conversation_manager.add_message(
                             conversation_id, "assistant", cached.response,
-                            model=routing.model
+                            model=routing.model,
+                            origin="assistant+web" if _web_injected else "assistant",
                         )
                     except Exception as e:
                         logger.error(f"Conversation save error (cache hit): {e}")
@@ -3081,12 +3238,17 @@ class Executor:
         # Save messages to conversation after full reception
         if use_conversation and persist and full_response and not _thread_error and _answered:
             try:
+                _turn_origin, _turn_segments = _user_turn_origin(
+                    _entry_question, refined_question, _attachments, user_content, _claim
+                )
                 conversation_manager.add_message(
-                    conversation_id, "user", user_content
+                    conversation_id, "user", user_content,
+                    origin=_turn_origin, segments=_turn_segments,
                 )
                 conversation_manager.add_message(
                     conversation_id, "assistant", full_response,
-                    model=routing.model
+                    model=routing.model,
+                    origin="assistant+web" if _web_injected else "assistant",
                 )
                 conversation_manager.update_conversation_metadata(
                     conversation_id,
@@ -3112,13 +3274,14 @@ class Executor:
                     logger.debug(f"Auto-capture skipped: {_cap_err}")
 
             # The librarian mirrors the saved conversation and curates off
-            # the interactive path, only when the onion is switched on.
+            # the interactive path, only when the onion is switched on. It
+            # reads who wrote each turn, which the model's context never does.
             if _maybe_curate is not None and _onion_enabled is not None:
                 try:
                     if _onion_enabled():
                         _maybe_curate(
                             conversation_id,
-                            conversation_manager.get_context_messages(conversation_id),
+                            conversation_manager.get_mirror_messages(conversation_id),
                         )
                 except Exception as _lib_err:
                     logger.debug(f"Librarian skipped: {_lib_err}")

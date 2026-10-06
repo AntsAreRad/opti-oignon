@@ -741,6 +741,55 @@ fail_under = 0
 # ch9 and q33 to q34, each in its own file. They stay in the tree word for
 # word.
 #
+# A turn now carries its origin, and the onion's mirror reads it through the
+# store's origin read instead of the context read. Seven contracts seeded a
+# store that predates the origin: xw4 gives way to ot16 in
+# tests/test_turn_origin_contracts.py, xw9 to xw10, fc9 to fc13, and the four
+# contracts of tests/test_pipeline_persistence.py, whose fake store refuses
+# the origin keyword, to ot17 to ot20. They stay in the tree word for word.
+#
+# The probe generator now reads a text as blocks first (lists, fenced code,
+# inline code) and declares its version; the native twin reproduces the
+# version before it and is asked no more until it reproduces the current
+# one. Seven contracts held that the core is asked and answers: nc6, nc7,
+# nc8, nc9, nc10, nc13 and ot31 give way to sm8 in
+# tests/test_probe_segmentation_contracts.py, which holds that a twin of
+# another version is never asked and one of the current version is. The
+# recall of a code block adds one schema: q34 gives way to q35, and the
+# required-field census q26 to q36. They stay in the tree word for word.
+#
+# The probe generator now draws a decision from typed text only, and reads a
+# capital at the head of a sentence as a name only where the span
+# capitalises the word elsewhere. Fourteen contracts drew their decisions
+# from turns of no origin or from the assistant's words, or swapped a name
+# that opens its sentence: rp1, rp5, rp6, rp9, rp10, rp11, rp13 and rp14 give
+# way to rp15 to rp22 in tests/test_memory_recall_probe_contracts.py, and
+# ge1, ge2, ge3, ge4, ge7 and ge10 to ge11 to ge16 in
+# tests/test_gated_eviction_contracts.py, the same properties on typed turns
+# with names off the head; rp22 floors the names it counts at 1200 where
+# rp14 floored them at 1500, the heads it no longer reads as names. They
+# stay in the tree word for word.
+#
+# The eviction gate now has a second face: a summary that says what its span
+# does not hold is refused by name, and a sentence that decides needs a typed
+# decision behind it. Twenty-six contracts summarised, word for word, turns
+# of no origin that said "we agreed that service N stays", a decision no
+# probe ever asked: fm1, fm2, or4, lb4, lb5, lb6, lb8, lb15 to lb19, ro1 to
+# ro4, os1, os2, os3, os5 and pt1 to pt6 give way to gf17 to gf42 in
+# tests/test_gate_faithfulness_contracts.py, the same contracts run on their
+# fixtures with those words replaced by words of the same length that decide
+# nothing (gf16 holds that nothing else changes); fm1 loses a name where it
+# swapped one. ge16 recorded that a single swap or shift passes the gate at
+# the proposed defaults; it gives way to gf15, where the first face still
+# lets it through and the second refuses it. They stay in the tree word for
+# word.
+#
+# A chat turn now carries the files the user attached beside the typed words,
+# each saved as a document segment of its own. The request schema gains one
+# field and the module one model: q25 (the request's seventeen fields) gives
+# way to q37, q35 (332 models) to q38, and the required-field census q36 to
+# q39. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -902,4 +951,64 @@ addopts = """
     --deselect=tests/test_drift_ab_contracts.py::test_da3_the_arms_differ_by_the_onion_block_and_nothing_else
     --deselect=tests/test_chat_session_contracts.py::test_ch3_pin_close_open_and_recall_act_on_the_real_onion
     --deselect=tests/test_api_schemas_contracts.py::test_q33_window_holds_and_the_module_is_import_pure_at_330_models
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw4_after_the_turn_the_librarian_is_offered_the_conversation
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw9_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legacy_block_rides_it
+    --deselect=tests/test_turn_stop_reach_contracts.py::test_fc9_a_stopped_call_leaves_no_answer_behind
+    --deselect=tests/test_pipeline_persistence.py::test_cascading_pipeline_persists_turn
+    --deselect=tests/test_pipeline_persistence.py::test_speculative_pipeline_persists_turn
+    --deselect=tests/test_pipeline_persistence.py::test_think_tools_pipeline_persists_tool_output
+    --deselect=tests/test_pipeline_persistence.py::test_tools_pipeline_persists_turn
+    --deselect=tests/test_native_core_contracts.py::test_nc6_the_native_probe_generator_draws_what_the_reference_draws
+    --deselect=tests/test_native_core_contracts.py::test_nc7_the_native_scorer_fails_the_probes_the_reference_fails
+    --deselect=tests/test_native_core_contracts.py::test_nc8_the_probes_scope_is_exact_and_everything_outside_it_goes_to_the_reference
+    --deselect=tests/test_native_core_contracts.py::test_nc9_a_pattern_the_core_does_not_implement_sends_the_call_to_the_reference
+    --deselect=tests/test_native_core_contracts.py::test_nc10_the_native_probes_read_french_the_typographic_apostrophe_and_the_folded_letters
+    --deselect=tests/test_native_core_contracts.py::test_nc13_the_native_probes_draw_french_names_and_whole_words_as_the_reference
+    --deselect=tests/test_api_schemas_contracts.py::test_q34_window_holds_and_the_module_is_import_pure_at_331_models
+    --deselect=tests/test_api_schemas_contracts.py::test_q26_required_field_census_matches_the_snapshot
+    --deselect=tests/test_turn_origin_contracts.py::test_ot31_the_native_core_draws_the_same_probes_piece_by_piece
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp1_a_rich_span_yields_probes_of_every_kind
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp5_inverting_a_decision_fails_a_probe
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp6_deleting_a_decision_fails_a_probe
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp9_a_french_decision_is_drawn_and_inverting_it_fails_its_probe
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp10_a_typographic_apostrophe_negates_as_the_ascii_one
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp11_french_function_words_are_neither_entities_nor_decision_words
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp13_a_french_decision_keeps_its_words_whole_in_its_key
+    --deselect=tests/test_memory_recall_probe_contracts.py::test_rp14_on_ascii_text_the_expressions_that_read_french_draw_and_score_as_before
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge1_a_faithful_summary_evicts_with_a_receipt_a_span_and_a_peel
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge2_a_fact_inversion_in_the_summary_is_refused
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge3_a_deleted_decision_is_refused
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge4_an_entity_swap_is_caught_by_the_probes_and_refused_when_the_gate_demands
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge7_the_same_summary_passes_one_gate_and_fails_a_stricter_one
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge10_at_the_proposed_defaults_one_swap_and_one_shift_pass_the_gate
+    --deselect=tests/test_gated_eviction_contracts.py::test_ge16_at_the_proposed_defaults_one_swap_and_one_shift_in_a_typed_span_pass_the_gate
+    --deselect=tests/test_memory_fidelity_contracts.py::test_fm1_fidelity_is_a_resample_against_the_cellar_and_unknown_when_empty
+    --deselect=tests/test_memory_fidelity_contracts.py::test_fm2_the_multiplier_is_source_tokens_over_peel_tokens
+    --deselect=tests/test_onion_routes_contracts.py::test_or4_the_handlers_reach_the_librarian_as_the_user_and_a_recall_leaves_the_receipt_open
+    --deselect=tests/test_librarian_contracts.py::test_lb4_curation_evicts_through_the_gate_until_the_flesh_fits
+    --deselect=tests/test_librarian_contracts.py::test_lb5_the_memory_block_carries_core_receipts_and_peels_as_data
+    --deselect=tests/test_librarian_contracts.py::test_lb6_the_memory_block_is_within_the_sum_of_its_layer_caps
+    --deselect=tests/test_librarian_contracts.py::test_lb8_the_state_is_saved_and_comes_back_across_a_restart_with_its_cursor
+    --deselect=tests/test_librarian_contracts.py::test_lb15_a_close_empties_the_flesh_through_the_gate_and_returns_digest_and_root
+    --deselect=tests/test_librarian_contracts.py::test_lb16_a_refused_span_stops_the_close_and_stays_verbatim_with_its_failures_named
+    --deselect=tests/test_librarian_contracts.py::test_lb17_a_close_is_saved_through_the_store_with_its_refused_remainder
+    --deselect=tests/test_librarian_contracts.py::test_lb18_an_open_after_a_restart_returns_the_persisted_block_or_refuses_by_name
+    --deselect=tests/test_librarian_contracts.py::test_lb19_a_recall_reads_the_span_a_user_close_is_saved_and_every_mutation_is_saved
+    --deselect=tests/test_recall_read_only_contracts.py::test_ro1_a_recall_through_the_route_hands_back_the_span_and_leaves_the_receipt_open
+    --deselect=tests/test_recall_read_only_contracts.py::test_ro2_the_librarian_s_recall_changes_no_receipt
+    --deselect=tests/test_recall_read_only_contracts.py::test_ro3_the_user_closes_a_receipt_through_its_route
+    --deselect=tests/test_recall_read_only_contracts.py::test_ro4_a_close_by_any_other_actor_is_refused_by_name_and_changes_nothing
+    --deselect=tests/test_onion_store_contracts.py::test_os1_a_state_round_trips_byte_for_byte_and_composes_the_same_block
+    --deselect=tests/test_onion_store_contracts.py::test_os2_a_moved_byte_is_refused_by_name_and_never_leaves_a_partial_state
+    --deselect=tests/test_onion_store_contracts.py::test_os3_plaintext_is_refused_by_name_unless_allowed_and_a_wrong_key_is_not_an_empty_state
+    --deselect=tests/test_onion_store_contracts.py::test_os5_the_root_is_a_pure_function_of_the_four_stores
+    --deselect=tests/test_peel_tree_contracts.py::test_pt1_a_leaf_points_at_its_cellar_span_and_verifies
+    --deselect=tests/test_peel_tree_contracts.py::test_pt2_a_parent_is_summarised_from_the_cellar_turns_never_from_child_text
+    --deselect=tests/test_peel_tree_contracts.py::test_pt3_a_pointer_that_does_not_resolve_is_refused_by_name
+    --deselect=tests/test_peel_tree_contracts.py::test_pt4_a_peel_that_diverged_from_its_spans_or_its_id_is_refused
+    --deselect=tests/test_peel_tree_contracts.py::test_pt5_selection_ranks_the_subject_first_never_stacks_and_fits_the_cap
+    --deselect=tests/test_peel_tree_contracts.py::test_pt6_one_bad_peel_refuses_the_whole_tree
+    --deselect=tests/test_api_schemas_contracts.py::test_q25_chat_request_surface_is_exactly_its_seventeen_fields
+    --deselect=tests/test_api_schemas_contracts.py::test_q35_window_holds_and_the_module_is_import_pure_at_332_models
+    --deselect=tests/test_api_schemas_contracts.py::test_q36_required_field_census_matches_the_snapshot_with_the_code_response
 """

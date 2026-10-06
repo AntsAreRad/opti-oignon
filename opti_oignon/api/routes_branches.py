@@ -217,8 +217,14 @@ def get_branch_messages(
 
 @router.post("/{branch_id}/messages", response_model=BranchMessageResponse)
 def add_message_to_branch(branch_id: str, req: AddBranchMessageRequest) -> dict:
-    """Add a message to a branch."""
+    """Add a message to a branch.
+
+    The message is typed when the user posted it and legacy otherwise: a
+    client vouches for no other origin.
+    """
     mgr = _check_available()
+    from opti_oignon.conversation_branches import posted_origin
+
     msg = mgr.add_branch_message(
         branch_id=branch_id,
         conversation_id=req.conversation_id,
@@ -226,6 +232,7 @@ def add_message_to_branch(branch_id: str, req: AddBranchMessageRequest) -> dict:
         content=req.content,
         model=req.model,
         metadata=req.metadata,
+        origin=posted_origin(req.role),
     )
     if not msg:
         raise HTTPException(status_code=400, detail="Failed to add message (branch not found?)")

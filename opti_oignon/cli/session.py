@@ -12,6 +12,7 @@ A line that starts with a slash is a user action:
   /close            evict the whole Flesh through the gate, save, and end the conversation
   /pin TEXT         pin a statement to the conversation's Core, as the user
   /recall KEY       show the verbatim span behind a receipt; the receipt stays open
+  /recall code:KEY  show the code block behind a [code:KEY] marker
   /resolve KEY      close a receipt, as the user: it leaves the digest
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
   /adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes
@@ -49,6 +50,7 @@ HELP = (
     "/close            evict the whole Flesh through the gate, save, and end the conversation\n"
     "/pin TEXT         pin a statement to the conversation's Core, as the user\n"
     "/recall KEY       show the verbatim span behind a receipt (the receipt stays open)\n"
+    "/recall code:KEY  show the code block behind a [code:KEY] marker\n"
     "/resolve KEY      close a receipt, as the user: it leaves the digest\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
@@ -247,6 +249,10 @@ class ChatSession:
         cid = self._require_conversation("/recall")
         if not rest:
             raise _Refused("/recall needs a receipt key")
+        if rest.startswith("code:"):
+            block = self._onion().recall_code(cid, rest)
+            yield _info(f"{block['key']} ({block['language'] or 'no language named'}):\n{block['code']}")
+            return
         span = self._onion().recall(cid, rest)
         lines = [f"[{t.get('turn_id', '')}] {t.get('role', '')}: {t.get('text', '')}" for t in span]
         yield _info("\n".join(lines) + "\n(the receipt stays open; /resolve KEY closes it)")

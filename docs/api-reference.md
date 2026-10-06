@@ -2,7 +2,7 @@
 
 ## Overview
 
-Opti-Oignon exposes a REST API via FastAPI with 532 endpoints. All
+Opti-Oignon exposes a REST API via FastAPI with 533 endpoints. All
 endpoints require JWT cookie authentication unless noted otherwise.
 Admin-only endpoints require `role: admin`.
 
@@ -65,6 +65,18 @@ HTTP status codes follow standard semantics: 400 for bad requests,
 WebSocket endpoints are used for real-time chat streaming. The RAG
 query stream endpoint (`/api/rag/query/stream`) uses chunked transfer
 encoding with UTF-8 safe chunk boundaries.
+
+#### Chat request: attached files
+
+A chat request on `/api/chat/stream` may carry `documents`, a list of
+`{"filename": ..., "content": ...}` objects: the files attached to the
+turn, sent beside the typed `message` and never inside it. Each is saved
+as a document part of the turn, under a line naming it. `config/chat.yaml`
+bounds them: files per turn, bytes of text per file, and characters per
+name, which must be printable. A request over a bound is answered with an
+`error` frame that names the file and the bound, and nothing runs or is
+saved. A turn may carry files and no typed words. The request has no field
+for who wrote a turn: the server says so itself.
 
 #### Chat stream frames
 

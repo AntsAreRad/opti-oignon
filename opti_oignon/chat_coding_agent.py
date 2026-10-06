@@ -489,6 +489,8 @@ class ChatCodingSession:
         self._turn_should_stop: Callable[[], bool] | None = None
         self._turn_llm_call = None
         self._turn_rich: bool | None = None
+        # The turn as the chat route composed it: the user turn is saved by it.
+        self._turn_user_turn: Any = None
 
         # Last call metadata (tool calls, vision, plugins from last LLM call)
         self._last_tool_calls: list[dict[str, Any]] = []
@@ -818,12 +820,17 @@ class ChatCodingSession:
         if not CONVERSATION_AVAILABLE or _conversation_manager is None:
             return
         try:
+            # The user's words are judged by the turn's claim when the turn
+            # carries one (any other text is no one's), typed otherwise; the
+            # answer is flagged, the agent stands on its tools.
+            claim = getattr(self, "_turn_user_turn", None)
+            origin, segments = claim.parts_for(user_message) if claim is not None else ("typed", [])
             _conversation_manager.add_message(
-                self._conversation_id, "user", user_message
+                self._conversation_id, "user", user_message, origin=origin, segments=segments
             )
             _conversation_manager.add_message(
                 self._conversation_id, "assistant", assistant_response,
-                model=model,
+                model=model, origin="assistant+tool",
             )
         except Exception as exc:
             logger.warning(
@@ -1338,6 +1345,7 @@ class ChatCodingSession:
         think: bool = False,
         should_stop: Callable[[], bool] | None = None,
         llm_call: "RichLLMCall | SimpleLLMCall | None" = None,
+        user_turn: Any = None,
     ) -> Generator[CodingEvent, None, dict[str, Any]]:
         """Execute a coding task as part of the ongoing conversation.
 
@@ -1365,6 +1373,10 @@ class ChatCodingSession:
                 data carries ``stopped`` and ``stopped_during``.
             llm_call: The turn's own model callback; the session's is a
                 default that belongs to no turn.
+            user_turn: The turn as the chat route composed it: the user
+                turn is saved with its origin and segments when it is the
+                claimed text, and as legacy otherwise. Held for this turn
+                alone.
 
         One coding turn runs per session at a time: a second turn waits,
         watching its own stop, until the first has ended.
@@ -1389,6 +1401,7 @@ class ChatCodingSession:
             self._turn_should_stop = should_stop
             self._turn_llm_call = llm_call
             self._turn_rich = None
+            self._turn_user_turn = user_turn
             return (yield from self._execute_task_locked(
                 message, model, directives, images, web_search, think,
             ))
@@ -1396,6 +1409,7 @@ class ChatCodingSession:
             self._turn_should_stop = None
             self._turn_llm_call = None
             self._turn_rich = None
+            self._turn_user_turn = None
             self._turn_images = None
             self._turn_web_search = False
             self._turn_think = False

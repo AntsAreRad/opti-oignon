@@ -1133,6 +1133,97 @@ package costs.
 
 ### Changed
 
+- [SECURITY] Every conversation turn is saved with the origin of its words:
+  typed by the user, the user's question as the model rewrote it (refined), a
+  document the user attached, the assistant's answer -- flagged when tools or
+  web results stood behind it -- or legacy, for a turn written before origins
+  were kept, synced from another device or imported. An attached document is
+  a part of its own, and the words the executor writes between the question
+  and the document belong to no one. An origin outside the closed grammar is
+  refused by name before anything is written. Origins and segments are bounds
+  on content, never text, and the model never sees them; they travel into the
+  onion memory, where the archive, its receipts and its summaries answer for
+  the union of their turns' origins.
+- [SECURITY] A file attached in the chat travels beside the typed words, no
+  longer wrapped into them: each is saved as a document part of its own,
+  under a line the executor writes naming it, so no file's text is saved as
+  the user's words, whatever it contains. A request is held to the bounds
+  `config/chat.yaml` sets -- files per turn, bytes per file, characters per
+  name -- and one over them is refused by name before anything runs or is
+  written; files with no typed words still make a turn. Words a hook or the
+  vision step rewrote are saved as refined. The turn as the chat route
+  composed it reaches every path that saves it -- the executor, the agentic
+  pipelines, the execution pipelines and the coding agent -- and vouches for
+  its own text only: a prompt a pipeline step or the coding agent composes
+  from it is saved as legacy. A retry re-creates
+  the turn with the origin and segments it was saved with, read as the
+  grammar admits them, and never more trusted. The `pre_inference` hooks are
+  shown the files beside the words -- hidden, as the words are, from a
+  plugin without the `inference_content` permission -- and may rewrite
+  their text within the bounds of `config/chat.yaml`, which stays a document
+  part; a hook that edits what it is shown in place and then fails changes
+  nothing. On the coding path, the hook of each model call hides the words
+  and the files from such a plugin too. The coding agent reads its
+  directives from the typed words
+  alone, on a retry too, and every phase it runs reads the whole turn.
+  Routing reads the files with the words; on the plain chat path the web
+  search and the memory read the words alone. The chat page shows the user's
+  message as it is saved.
+- [SECURITY] Only typed text decides. A decision probe is drawn from the
+  user's own words alone -- never from the assistant's, a document's, a
+  rewritten question or a legacy turn -- and a native twin that draws one
+  elsewhere is overruled. A decision needs no marker: "we keep", "on garde"
+  or "let's go with" are read by a bilingual lexicon in `onion.yaml`, each
+  act in a class, and a summary keeps a decision only with an act of each of
+  its classes, its dates and numbers, and the same polarity. A decision is
+  read however its text is written: accents typed or not, in either Unicode
+  form, its acts included; a marker of two words split by a line break or a
+  no-break space; an elided word read whole ("prevu d'utiliser"). An
+  accented marker decides wherever it opens a word, and never inside one
+  ("helicopter", "undecidable"); an English word that opens with one
+  ("decide between") is read as a decision, the safe side, where the span
+  stays verbatim. Negations are counted word by word: one written as a word
+  in inline code ("`will not`", "`won't`") inverts as a plain one, and one
+  fused into a flag such as `--no-cache` is none, in prose as in code.
+- The recall probes read French and English as they are written: a date in
+  any common form to its canonical day, month or day of a month, never a
+  relative one; a number to its value, its written precision kept, with a
+  unit from a closed table (Go is GB, nothing converted), and a writing that
+  reads two ways kept as written; a name by the span it stands in, a word at
+  the head of a sentence only where the span capitalises it elsewhere, a
+  part of a full name as its alias; list items without their bullets; a
+  fenced code block as one artifact keyed by the digest of its body, nothing
+  inside it probed, inline code never. Every figure names the version of the
+  generator that drew its probes.
+- [SECURITY] The eviction gate has a second face. A summary that says what
+  its span does not hold -- a name, a date, a number, a code block, or a
+  sentence that decides with no typed decision behind it -- is refused by
+  name, whatever its probes answer; a sentence whose subject is the
+  assistant, a document or a tool reports another speaker's words. Two bounds
+  join it, each refused with its figure: the share of the summary's content
+  words its span holds no word for (`max_novelty`), and its length against
+  its span's (`max_length_ratio`).
+- The gate no longer takes its probe set on trust. It reads the span's facts
+  again, piece by piece and never through the native core, and refuses a set
+  that asks for a smaller share of them than `probe_floor`, naming the facts
+  left unasked: a generator, a twin or a caller that draws less can no
+  longer raise an acceptance rate. Every decision carries that coverage and
+  the recall of the probes measured on a labelled fixture set
+  (`gate.probe_recall`), stated with the generator's version and the
+  lexicon's fingerprint and never borrowed by another;
+  `scripts/onion_runbook.py --probe-recall SET` reads the recall on a labelled
+  set of real conversations, counts only.
+- A code block summarised away is read back by the key its marker names:
+  `POST /api/memory/onion/{conv_id}/code/{digest}`, or `/recall code:KEY` in
+  the terminal session; a malformed, unknown or ambiguous key is refused by
+  name, and nothing changes.
+- Peel selection reads words in any script, folded as the probes fold them,
+  with the function and question words of both languages aside: a French
+  query no longer breaks at its accents.
+- What the native core serves of the probes' work is counted, call by call,
+  with the reason the reference served the rest, and reported by the
+  runbook. The core's probe twin, written for an earlier generator, is not
+  asked until it declares the current one.
 - [SECURITY] No system message carries data any more. The working memory,
   project retrieval, web results, archive snippets and every summary of
   earlier turns ride the user role, each wrapped as untrusted data under its

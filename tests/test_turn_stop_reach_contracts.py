@@ -28,6 +28,8 @@ contracts pin the reach of the stop and its aftermath:
   stopped while its answer streams.
 * FC12 -- two coding turns of one conversation stay apart, and a turn with
   no conversation never runs on the coding session kept under the empty id.
+* FC13 -- supersedes FC9 over the store as it stands, whose origin read
+  feeds the onion's mirror.
 
 Every window comes from the shared isolation module and loads the real
 modules under contract, with scripted stand-ins behind the registry
@@ -61,6 +63,7 @@ BUDGET_S = {
     "test_fc10_the_executors_results_belong_to_its_call": 2.0,
     "test_fc11_the_stop_reaches_the_tool_stages": 2.0,
     "test_fc12_two_coding_turns_of_one_conversation_stay_apart": 2.0,
+    "test_fc13_a_stopped_call_leaves_no_answer_behind_over_the_store_with_its_origin_read": 2.0,
 }
 
 _WAIT = 3.0
@@ -1309,6 +1312,67 @@ def _fc9_c3(world):
 
 def test_fc9_a_stopped_call_leaves_no_answer_behind():
     _fc9_c1()
+    for clause in (_fc9_c2i, _fc9_c2ii, _fc9_c2_witness, _fc9_c3):
+        world, close = _load_exec()
+        try:
+            clause(world)
+        finally:
+            close()
+
+
+# FC13 supersedes FC9. The onion's mirror now reads the conversation through
+# the store's origin read, which the store FC9's witness seeds does not carry,
+# so its witness was never curated. The same clauses over the store as it
+# stands; the four that never reach the store are FC9's own.
+class _OriginSinks(_Sinks):
+    """The same sinks, over a store that carries the mirror's read."""
+
+    def seeded(self):
+        seeded = super().seeded()
+        seeded["opti_oignon.conversation"].conversation_manager.get_mirror_messages = lambda conv_id: []
+        return seeded
+
+
+def _fc13_c1():
+    """A drained cancelled call saves, captures, curates, caches and measures nothing."""
+    for conversation_id in ("conv-9", None):
+        for stopped in (False, True):
+            sinks, holder = _OriginSinks(), {}
+            world, close = _load_exec(sinks.seeded(), packages=("opti_oignon.memory",))
+            try:
+                ex = world.mod.Executor()
+                holder["ex"] = ex
+                if stopped:
+                    world.client.factory = _cancelling_stream(holder)
+                before = set(threading.enumerate())
+                chunks, (refined, response) = _drive(
+                    ex.execute("q", _routing(), refine=False, conversation_id=conversation_id)
+                )
+                assert _settled(before) == [], "a thread outlived the call"
+                record = world.recorder.records[-1]
+                kept = sinks.kept()
+                if not stopped:
+                    if conversation_id:
+                        expected = {"added": ["user", "assistant"], "captured": ["conv-9"],
+                                    "curated": ["conv-9"], "puts": ["turn-key"], "sem_puts": [],
+                                    "embeds": [], "perf": ["m"]}
+                    else:
+                        expected = {"added": [], "captured": [], "curated": [], "puts": ["exact-key"],
+                                    "sem_puts": ["q"], "embeds": ["exact-key"], "perf": ["m"]}
+                    assert kept == expected, f"the witness kept {kept}"
+                    assert record["cache_stored"] is True
+                    continue
+                assert _CANCEL in response, response
+                assert all(v == [] for v in kept.values()), (
+                    f"a cancelled call left an answer behind: {kept}"
+                )
+                assert record["outcome"] == "cancelled" and record["cache_stored"] is False, record
+            finally:
+                close()
+
+
+def test_fc13_a_stopped_call_leaves_no_answer_behind_over_the_store_with_its_origin_read():
+    _fc13_c1()
     for clause in (_fc9_c2i, _fc9_c2ii, _fc9_c2_witness, _fc9_c3):
         world, close = _load_exec()
         try:

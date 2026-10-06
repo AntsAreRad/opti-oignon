@@ -19,14 +19,120 @@ layers:
   flesh: 5120       # last turns verbatim; a turn leaves only with a receipt
   turn: 512         # the current turn; refused if over, never truncated
 
-# The eviction gate. A span leaves the flesh only once its peel answers the
-# recall probes drawn from the span, class by class. These two thresholds
-# are the design's PROPOSED defaults, not a calibration: on the fixtures a
-# single wrong entity or date in a four-turn span passes at 0.7. Calibrating
-# them on real conversations is a host measurement, still owed.
+# The eviction gate, with two faces. A span leaves the flesh only once its
+# peel answers the recall probes drawn from the span, class by class, and
+# says nothing the span does not hold: a name, a date, a number or a code
+# block the span lacks, and a deciding sentence with no typed decision
+# behind it, are refused by name. The thresholds are the design's PROPOSED
+# defaults, not a calibration: on the fixtures a single wrong entity or
+# date in a four-turn span passes the probes at 0.7, and the second face
+# refuses it. Calibrating them on real conversations is a host measurement,
+# still owed.
 gate:
   decision_threshold: 0.9   # decision-class probes (polarity counts)
   episodic_threshold: 0.7   # entity, number and date probes
+  code_threshold: 1.0       # code probes: a lost marker is a block the model no longer knows of
+  # A deciding sentence of a summary whose subject -- its first word that
+  # is no function word -- is one of these words reports what another
+  # speaker said, and needs no typed decision behind it. Each word stands
+  # with its plural in -s; lower-case ASCII, accents folded. An empty table
+  # ({}) holds every deciding sentence to a typed decision.
+  reporters:
+    en: [assistant, model, agent, bot, tool, output, log, document, file, attachment, page, site, web, search,
+         result, source, article, paper, report, author, email, message]
+    fr: [assistant, assistante, modele, agent, outil, sortie, journal, document, fichier, piece, page, site, web,
+         recherche, resultat, source, article, rapport, auteur, courriel, message]
+  # The bounds of a summary against its span, each refused by name with its
+  # figure. Novelty is the share of the summary's content words that its
+  # span holds no word of the same key for (folded, the final s off, the
+  # first five letters); function words, figures, the words decisions are
+  # told with and the reporters are not counted. The length ratio is the
+  # summary's words over its span's, code included: a summary longer than
+  # its span saves nothing, and the verbatim turns stay, shorter and exact.
+  # PROPOSED defaults, not a calibration: on the fixtures a faithful summary
+  # reads at most a tenth new and one that drifts two thirds or more, and a
+  # faithful summary that tells who said what can be longer than a short
+  # span. Calibrating both on real conversations is a host measurement,
+  # still owed.
+  max_novelty: 0.5          # the most of a summary's content words its span may hold no word for
+  max_length_ratio: 1.0     # the most words a summary may write per word of its span
+  # The floor of the probes against their span: the least share of the facts
+  # the span holds that its probes must ask for -- its names, dates, numbers,
+  # fenced blocks and typed decisions, read again piece by piece as the second
+  # face reads a summary, never by the native core. A probe set is not taken
+  # on trust: one that asks for less judged the summary on less than its span
+  # holds, and the verbatim turns stay, refused by name with the facts no
+  # probe asks for. On the fixtures every probe set the generator draws asks
+  # for every fact; the floor holds a native twin, a caller or a later
+  # generator to the same. Calibrating it on real conversations is a host
+  # measurement, still owed.
+  probe_floor: 1.0          # the least share of a span's facts its probes must ask for
+  # What the probes recall of the facts a reader keeps, class by class: of
+  # size facts a reader marked in the labelled fixture set the contracts
+  # read, recalled had a probe drawn for them, of their class, at their
+  # turn, with their answer. Read with one version of the generator and one
+  # lexicon (its fingerprint, quoted): a gate whose generator or lexicon
+  # differs carries no recall and says so, and the figure is never
+  # borrowed. A contract reads it again and holds this table to it. A
+  # fixture figure, not a calibration: the recall on real conversations is
+  # a host measurement, still owed.
+  probe_recall:
+    source: fixture
+    generator: 7
+    lexicon: "7ec69b482a6c"
+    classes:
+      entity: {size: 15, recalled: 12}
+      date: {size: 12, recalled: 10}
+      number: {size: 20, recalled: 20}
+      code: {size: 10, recalled: 10}
+      decision: {size: 14, recalled: 14}
+
+# The words a decision is said with, in French and in English. Besides a
+# marker ("decided", "on va"), a typed sentence decides when an act of a
+# language follows a subject of the same language, at most reach words
+# before it, or when an act opens it. Each act belongs to a class, and a
+# summary keeps a decision only by keeping an act of each class the
+# decision carries, in either language, with its dates and numbers in any
+# writing. A wider reach finds more decisions and keeps more verbatim; a
+# narrower one, fewer. Words are lower-case ASCII, accents folded. Under acts,
+# lemmas the rules inflect: French verbs in -er and -ir, English verbs by
+# their spelling, a member of several words by its first. Under as_written,
+# forms taken as they stand. Refused by name: a form in two classes, a
+# member carrying a negation or a subject of its language, a capital or a
+# letter outside ASCII, an empty class, a reach that is not a whole number
+# of words, one or more. "use", "utiliser", "prendre",
+# "passer a" and "move to" stay out: too common outside a decision. The
+# subject "on" is quoted: bare, YAML reads it as a boolean.
+decisions:
+  fr:
+    subjects: ["on", je, j, nous]
+    reach: 3
+    acts:
+      keep: [garder, conserver, rester sur]
+      drop: [abandonner, laisser tomber, renoncer]
+      choose: [choisir, opter]
+      prefer: [preferer]
+      avoid: [eviter]
+      switch: [remplacer, migrer, basculer]
+    as_written:
+      choose: [retenir, retiens, retient, retenons, retenez, retiennent, retenu, retenue, retenus, retenues,
+               retiendra, retiendrons, partir sur, pars sur, part sur, partons sur, partez sur, partent sur,
+               parti sur, partis sur, partira sur, partirons sur]
+  en:
+    subjects: [we, i, let]
+    reach: 3
+    acts:
+      keep: [keep, retain, stick with, stay with]
+      drop: [drop, abandon, ditch, give up]
+      choose: [choose, pick, select, opt, go with, settle on]
+      prefer: [prefer]
+      avoid: [avoid]
+      switch: [switch, replace, migrate]
+    as_written:
+      keep: [kept, stuck with]
+      drop: [gave up, given up]
+      choose: [chose, chosen, went with, gone with]
+      prefer: [would rather, d rather]
 
 peels:
   span_turns: 4             # turns evicted together into one leaf peel

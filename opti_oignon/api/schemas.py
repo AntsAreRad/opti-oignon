@@ -105,6 +105,12 @@ class ErrorResponse(BaseModel):
 
 # -- Chat --
 
+class ChatDocument(BaseModel):
+    """A file attached to a chat turn: its name and its text, sent beside the typed words."""
+    filename: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     """Request de chat via WebSocket."""
     conversation_id: str | None = None  # None = creer new conv
@@ -118,6 +124,9 @@ class ChatRequest(BaseModel):
     web_search: bool | None = None   # None = auto, True = force, False = disable
     # Images pour vision multimodale
     images: list[str] | None = None  # Liste de base64 (sans prefixe data:...)
+    # Files attached to the turn: each is saved as a document of its own,
+    # within the bounds config/chat.yaml sets
+    documents: list[ChatDocument] | None = None
     # Consensus multi-model
     consensus: bool | None = None             # None = auto, True = force
     consensus_models: list[str] | None = None  # Models specifiques
@@ -305,6 +314,14 @@ class OnionRecallResponse(BaseModel):
     conversation_id: str
     key: str
     span: list[dict] = []
+
+
+class OnionCodeResponse(BaseModel):
+    """The code block behind a [code:KEY] marker, with its language when its fence named one."""
+    conversation_id: str
+    key: str
+    language: str = ""
+    code: str = ""
 
 
 class OnionResolveResponse(BaseModel):

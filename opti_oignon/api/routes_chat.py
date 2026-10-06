@@ -12,7 +12,9 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -38,6 +40,24 @@ from .schemas import (
     ConsensusConfigResponse,
     ConsensusRequest,
 )
+
+# The executor's own composer of a user turn and its claim: the route
+# composes a turn exactly as the executor saves it.
+try:
+    from opti_oignon.executor import UserTurn
+    from opti_oignon.executor import compose_user_turn as _compose_user_turn
+    from opti_oignon.executor import user_turn as _user_turn
+except ImportError:
+    UserTurn = None
+    _compose_user_turn = None
+    _user_turn = None
+
+# A stored turn is judged by the store's own grammar: the turn a retry
+# re-creates must be one the store accepts.
+try:
+    from opti_oignon.conversation import _origin_defect
+except ImportError:
+    _origin_defect = None
 
 # Import conditionnel du tool executor
 try:
@@ -249,15 +269,96 @@ _THREAD_POLL_S = 0.1
 
 class ChatTurn:
     """One chat turn's stop, results and step recorder. Made per turn,
-    never reused. ``steps`` is set when the turn streams."""
+    never reused. ``steps`` is set when the turn streams. ``user_turn`` is
+    the turn as the route composed it -- the words sent, who wrote them,
+    the files after them -- and every path that saves the user's words
+    reads it from the turn; a retry sets it first, to the stored turn it
+    regenerates."""
 
-    __slots__ = ("conversation_id", "stop", "results", "steps")
+    __slots__ = ("conversation_id", "stop", "results", "steps", "user_turn")
 
     def __init__(self, conversation_id: str) -> None:
         self.conversation_id = conversation_id
         self.stop = threading.Event()
         self.results: dict = {}
         self.steps = None
+        self.user_turn = None
+
+
+# What a chat turn may carry beside the typed words.
+_CHAT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "chat.yaml"
+_ATTACHMENT_BOUNDS = ("max_documents", "max_document_bytes", "max_filename_chars")
+
+
+def _attachment_bounds() -> dict | None:
+    """The attachment bounds config/chat.yaml sets, or None when it sets none a request can be held to."""
+    try:
+        section = yaml.safe_load(_CHAT_CONFIG.read_text(encoding="utf-8"))["attachments"]
+        bounds = {key: section[key] for key in _ATTACHMENT_BOUNDS}
+    except Exception as exc:
+        logger.warning("attachment bounds unreadable in %s: %s", _CHAT_CONFIG.name, exc)
+        return None
+    if not all(type(value) is int and value > 0 for value in bounds.values()):
+        logger.warning("attachment bounds in %s are not positive integers", _CHAT_CONFIG.name)
+        return None
+    return bounds
+
+
+def _attachment_refusal(documents: list[tuple[str, str]]) -> str | None:
+    """Why a turn's attached documents are refused, naming the file and the rule; None when they are not.
+
+    The bounds are read from config/chat.yaml at each request that carries a
+    document, and every document is refused when that file cannot be read.
+    """
+    if not documents:
+        return None
+    bounds = _attachment_bounds()
+    if bounds is None:
+        return "attached documents are refused: config/chat.yaml does not set their bounds"
+    if len(documents) > bounds["max_documents"]:
+        return (f"{len(documents)} documents attached, over the limit of "
+                f"{bounds['max_documents']} set in config/chat.yaml")
+    for index, (name, text) in enumerate(documents, start=1):
+        if not name:
+            return f"document {index} has no name"
+        if len(name) > bounds["max_filename_chars"]:
+            return (f"document {index}'s name is {len(name):,} characters, over the limit of "
+                    f"{bounds['max_filename_chars']} set in config/chat.yaml: {ascii(name[:40])}")
+        if not name.isprintable():
+            return f"document {index}'s name holds a character that is not printable: {ascii(name[:40])}"
+        try:
+            size = len(text.encode("utf-8"))
+        except UnicodeEncodeError:
+            return f"document {name!r} is not valid UTF-8 text"
+        if size > bounds["max_document_bytes"]:
+            return (f"document {name!r} is {size:,} bytes, over the limit of "
+                    f"{bounds['max_document_bytes']:,} set in config/chat.yaml")
+    return None
+
+
+def _rewritten_documents(documents: list[tuple[str, str]], rewritten) -> list[tuple[str, str]]:
+    """The attached files once the hooks have read them.
+
+    A hook may rewrite the text of each file it was shown -- to redact it,
+    say -- and nothing else: the same files, by the same names, in the same
+    order, within the bounds config/chat.yaml sets. Anything else it hands
+    back is set aside, said, and the files go on as they were sent.
+    """
+    if not documents or rewritten is None:
+        return documents
+    try:
+        names = [item["filename"] for item in rewritten]
+        texts = [item["content"] for item in rewritten]
+    except (TypeError, KeyError):
+        names, texts = None, None
+    if names != [name for name, _text in documents] or not all(type(text) is str for text in texts):
+        logger.warning("a pre_inference hook handed back the attached files out of shape: kept as sent")
+        return documents
+    refusal = _attachment_refusal(list(zip(names, texts)))
+    if refusal:
+        logger.warning("a pre_inference hook's rewrite of the attached files is refused, kept as sent: %s", refusal)
+        return documents
+    return list(zip(names, texts))
 
 
 def _close_turn_steps(turn: ChatTurn, cause: str, reason: str | None = None) -> bool:
@@ -507,15 +608,20 @@ async def _stream_response(
     conversation_id: str,
     message: str,
     request: ChatRequest,
+    prior=None,
 ) -> None:
     """Stream one chat turn: open it, run it, and always close it.
 
     The turn owns its stop and its results. Closing it sets its stop, so a
     generation still running after an abnormal exit is never left without
     one. When the socket can be read, a watcher stops the turn as soon as
-    the client disconnects.
+    the client disconnects. A retry hands ``prior``, the stored turn it
+    regenerates: the turn carries it, and the user turn is re-created with
+    its origin and segments. It is never read from the request: a client
+    does not declare who wrote a turn.
     """
     turn = _open_turn(conversation_id)
+    turn.user_turn = prior
     watcher = None
     if callable(getattr(websocket, "receive", None)):
         watcher = asyncio.ensure_future(_watch_disconnect(websocket, turn))
@@ -548,8 +654,19 @@ async def _stream_turn(
         await _send_token(websocket, "error", "Executor module not available")
         return
 
-    # Routage
-    routing, routing_error = _resolve_model_and_route(message, request)
+    # The words as the user typed them, the files sent beside them, and the
+    # stored turn a retry regenerates, when this turn is one.
+    typed = message
+    documents = [(d.filename, d.content) for d in getattr(request, "documents", None) or ()]
+    prior = turn.user_turn
+    if documents and _compose_user_turn is None:
+        await _send_token(websocket, "error", "Attached files need the executor module")
+        return
+
+    # Routage: the files say what the turn is about as much as the words do.
+    routing, routing_error = _resolve_model_and_route(
+        _compose_user_turn(message, documents)[0] if documents else message, request
+    )
     if routing_error or routing is None:
         await _send_token(websocket, "error", routing_error or "Routing failed")
         return
@@ -662,6 +779,8 @@ async def _stream_turn(
             routing=routing,
             start_time=start_time,
             turn=turn,
+            documents=documents,
+            prior=prior,
         )
         return
 
@@ -787,7 +906,7 @@ async def _stream_turn(
                 # between steps and reaches the step in progress.
                 gen = get_pipeline_runner().execute(
                     pipeline=_exec_pipeline_obj,
-                    message=message,
+                    message=_turn_message,
                     routing=routing,
                     conversation_id=conversation_id if conversation_id else None,
                     on_status=_on_status,
@@ -800,7 +919,7 @@ async def _stream_turn(
             elif use_agentic:
                 # Execution via AgenticExecutor, under this turn
                 gen = _agentic_executor.execute(
-                    message=message,
+                    message=_turn_message,
                     routing=routing,
                     conversation_id=conversation_id if conversation_id else None,
                     think=request.think if request.think is not None else None,
@@ -823,7 +942,9 @@ async def _stream_turn(
                     run=turn,
                 )
             else:
-                # Execution classique via Executor
+                # Execution classique via Executor: the words and the files
+                # travel apart, the executor joins them as the claim says.
+                # The context check stays as it was for an attached file.
                 gen = executor.execute(
                     question=message,
                     routing=routing,
@@ -835,6 +956,7 @@ async def _stream_turn(
                     web_search=request.web_search if request.web_search else False,
                     images=_images,
                     run=turn,
+                    **({"documents": documents, "validate_context": False} if documents else {}),
                 )
             _stopped_seen = False
             for chunk in gen:
@@ -921,19 +1043,34 @@ async def _stream_turn(
     # redact_sensitive=True applies per-plugin data redaction
     if PLUGIN_HOOKS_AVAILABLE and _hook_manager and _hook_manager.has_hooks("pre_inference"):
         try:
+            # The hooks are shown the files attached beside the words, as they
+            # were shown them inside the message before the files travelled apart.
+            _hook_data = {"message": message, "model": routing.model}
+            if documents:
+                _hook_data["documents"] = [{"filename": name, "content": text} for name, text in documents]
             pre_report = _hook_manager.execute(
                 "pre_inference",
                 conversation_id=conversation_id,
                 model=routing.model,
-                data={"message": message, "model": routing.model},
+                data=_hook_data,
                 redact_sensitive=True,
             )
             # Allow hooks to modify the message (e.g. chain-of-thought-enforcer)
             if pre_report.final_data.get("message") and pre_report.final_data["message"] != message:
                 message = pre_report.final_data["message"]
                 logger.debug("pre_inference hooks modified message (conv=%s)", conversation_id[:8] if conversation_id else "?")
+            # ... and the text of the files they were shown, each still a document.
+            documents = _rewritten_documents(documents, pre_report.final_data.get("documents"))
         except Exception as exc:
             logger.warning("pre_inference hook dispatch failed: %s", exc)
+
+    # The turn as the route composed it -- the words sent, typed or refined
+    # by a hook, and the files after them -- rides the turn to every path
+    # that saves it; a retry's stored turn is kept, or demoted if a hook
+    # rewrote it. The paths that take one message are handed its text.
+    if _user_turn is not None:
+        turn.user_turn = prior.rewritten(message) if prior is not None else _user_turn(typed, message, documents)
+    _turn_message = turn.user_turn.content if turn.user_turn is not None else message
 
     gen_thread = threading.Thread(target=_generate, daemon=True)
 
@@ -1383,11 +1520,14 @@ def _build_rich_llm_callback(
         if PLUGIN_HOOKS_AVAILABLE and _hook_manager:
             try:
                 if _hook_manager.has_hooks("pre_inference"):
+                    # The phase prompt holds the turn's words and files: a
+                    # plugin without the permission is shown neither.
                     _hook_manager.execute(
                         "pre_inference",
                         conversation_id=conversation_id,
                         model=model,
                         data={"message": user_msg, "model": model},
+                        redact_sensitive=True,
                     )
             except Exception as exc:
                 logger.debug("pre_inference in coding: %s", exc)
@@ -1478,6 +1618,8 @@ async def _stream_chat_coding(
     routing,
     start_time: float,
     turn: ChatTurn,
+    documents: list[tuple[str, str]] = (),
+    prior=None,
 ) -> None:
     """Execute the chat coding agent and stream CodingEvents via WebSocket.
 
@@ -1519,11 +1661,28 @@ async def _stream_chat_coding(
         conversation_id[:8], session.session_id, session.turn_count + 1,
     )
 
-    # Parse directives from the message
+    # Parse directives from the words typed, never from a file. A retry sends
+    # the stored turn again as it was, and reads its directives from the
+    # words the user typed in it.
     directives = (
-        _parse_coding_directives(message)
+        _parse_coding_directives(message if prior is None else _typed_words(prior))
         if _parse_coding_directives else None
     )
+    if prior is not None:
+        turn.user_turn = prior
+        task = prior.content
+    else:
+        words = directives.cleaned_message if directives else message
+        # The turn as the route composed it: the words, cleared of
+        # directives, and the files after them. The session saves the turn
+        # by it, and the agent's model calls carry it on the turn.
+        if _user_turn is not None:
+            turn.user_turn = _user_turn(words, words, documents)
+        task = turn.user_turn.content if turn.user_turn is not None else words
+    # Every phase that reads the directives' message reads the whole turn,
+    # files included.
+    if directives is not None:
+        directives.raw_message = task
 
     # Run the coding pipeline in a thread (LLM calls are synchronous)
     events: list = []
@@ -1534,9 +1693,7 @@ async def _stream_chat_coding(
         nonlocal final_result
         try:
             gen = session.execute_task(
-                message=(
-                    directives.cleaned_message if directives else message
-                ),
+                message=task,
                 model=routing.model,
                 directives=directives,
                 images=request.images if request else None,
@@ -1544,6 +1701,7 @@ async def _stream_chat_coding(
                 think=bool(request.think) if request else False,
                 should_stop=turn.stop.is_set,
                 llm_call=rich_callback,
+                user_turn=turn.user_turn,
             )
             for event in gen:
                 events.append(event)
@@ -1685,7 +1843,16 @@ async def chat_stream(websocket: WebSocket) -> None:
             await websocket.close()
             return
 
-        if not request.message.strip():
+        # Attached files are held to config/chat.yaml before anything runs
+        # or is written; files with no typed words still make a turn.
+        documents = [(d.filename, d.content) for d in request.documents or ()]
+        refusal = _attachment_refusal(documents)
+        if refusal:
+            await _send_token(websocket, "error", f"Invalid request: {refusal}")
+            await websocket.close()
+            return
+
+        if not request.message.strip() and not any(text for _name, text in documents):
             await _send_token(websocket, "error", "Empty message")
             await websocket.close()
             return
@@ -1734,6 +1901,36 @@ async def chat_stream(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+
+
+def _stored_user_turn(conversation_id: str, content: str):
+    """The last user turn as it was saved, its origin and segments with it.
+
+    Read through the store's origin read, and judged by the store's own
+    grammar. A turn whose labels lie outside it, or whose text is not
+    ``content``, comes back as legacy: a retry never makes a turn more
+    trusted than it was, and never re-creates one the store would refuse.
+    """
+    try:
+        turns = conversation_manager.get_mirror_messages(conversation_id)
+    except Exception as exc:
+        logger.warning("the stored turn's origin is unreadable: %s", exc)
+        turns = []
+    stored = next((t for t in reversed(turns) if t.get("role") == "user"), None)
+    if stored is None or stored.get("content") != content or _origin_defect is None:
+        return UserTurn(content, "legacy")
+    origin, segments = stored.get("origin"), stored.get("segments")
+    if _origin_defect("user", origin, segments, len(content)) is not None:
+        return UserTurn(content, "legacy")
+    return UserTurn(content, origin, tuple(tuple(s) for s in segments))
+
+
+def _typed_words(claim) -> str:
+    """The words of a stored turn that its user typed, or a hook rewrote: its first part, when that part is theirs."""
+    if not claim.segments:
+        return claim.content if claim.origin in ("typed", "refined") else ""
+    start, stop, label = claim.segments[0]
+    return claim.content[start:stop] if start == 0 and label in ("typed", "refined") else ""
 
 
 # ---------------------------------------------------------------------------
@@ -1829,6 +2026,10 @@ async def chat_retry(websocket: WebSocket) -> None:
             await websocket.close()
             return
 
+        # The stored turn's origin and segments, read before it is removed:
+        # the turn the executor re-creates carries them.
+        prior = _stored_user_turn(conv_id, last_user_message) if UserTurn is not None else None
+
         # Supprimer also le dernier user message (executor va le re-creer)
         conversation_manager.delete_last_message(conv_id, role="user")
 
@@ -1840,7 +2041,10 @@ async def chat_retry(websocket: WebSocket) -> None:
         )
 
         # Stream la new reponse
-        await _stream_response(websocket, conv_id, last_user_message, chat_request)
+        await _stream_response(
+            websocket, conv_id, last_user_message, chat_request,
+            **({"prior": prior} if prior is not None else {}),
+        )
 
     except WebSocketDisconnect:
         logger.debug("Client WebSocket disconnected (retry)")

@@ -1,0 +1,186 @@
+{"format": "labelled-recall-set", "version": 1, "spans": [
+  {"span_id": "fr-1", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Bonjour, je pr\u00e9pare le s\u00e9minaire de l'\u00e9quipe avec H\u00e9l\u00e8ne Garnier. On garde la salle de Lyon pour le 14 mars 2027."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Tr\u00e8s bien. Voulez-vous que je pr\u00e9vienne toute l'\u00e9quipe ?"},
+    {"turn_id": "t3", "role": "user", "origin": "typed", "text": "Oui, et demain je t'envoie la liste."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "H\u00e9l\u00e8ne Garnier", "answer": "H\u00e9l\u00e8ne Garnier"},
+    {"class": "entity", "turn_id": "t1", "writing": "Lyon", "answer": "Lyon"},
+    {"class": "date", "turn_id": "t1", "writing": "14 mars 2027", "answer": "2027-03-14"},
+    {"class": "decision", "turn_id": "t1", "writing": "On garde la salle de Lyon pour le 14 mars 2027.", "negated": false, "acts": ["keep"], "dates": ["2027-03-14"], "numbers": []}
+  ]},
+  {"span_id": "fr-2", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Le script de sauvegarde plante depuis la mise \u00e0 jour. Voici la commande :\n```bash\nrsync -a --delete /srv/photos/ /mnt/sauvegarde/photos/\n```"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Le disque cible n'a plus que 1,5 Go libres ; il faut au moins 12 Go pour la copie compl\u00e8te. Essayez d'abord `df -h` pour v\u00e9rifier. Je garderais la derni\u00e8re sauvegarde en attendant."}
+   ], "facts": [
+    {"class": "code", "turn_id": "t1", "writing": "rsync -a --delete /srv/photos/ /mnt/sauvegarde/photos/", "answer": "bf4361c3d7bf"},
+    {"class": "number", "turn_id": "t2", "writing": "1,5 Go", "answer": "1.5 GB"},
+    {"class": "number", "turn_id": "t2", "writing": "12 Go", "answer": "12 GB"}
+  ]},
+  {"span_id": "fr-3", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Mathilde arrive vendredi."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Parfait, je note son arriv\u00e9e."},
+    {"turn_id": "t3", "role": "user", "origin": "typed", "text": "Nous abandonnons l'option du train de nuit, trop cher \u00e0 180\u00a0\u20ac par personne."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Mathilde", "answer": "Mathilde", "tags": ["known-miss"]},
+    {"class": "number", "turn_id": "t3", "writing": "180\u00a0\u20ac", "answer": "180 EUR"},
+    {"class": "decision", "turn_id": "t3", "writing": "Nous abandonnons l'option du train de nuit, trop cher \u00e0 180\u00a0\u20ac par personne.", "negated": false, "acts": ["drop"], "dates": [], "numbers": ["180 EUR"]}
+  ]},
+  {"span_id": "fr-4", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Les r\u00e9sultats du sondage arrivent en mars."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "D'apr\u00e8s le premier lot, 62\u00a0% des r\u00e9pondants pr\u00e9f\u00e8rent la version courte. La publication est pr\u00e9vue le 2027-04-02.\n```sql\nSELECT reponse, count(*) FROM sondage GROUP BY reponse;\n```"}
+   ], "facts": [
+    {"class": "date", "turn_id": "t1", "writing": "mars", "answer": "--03", "note": "a month named alone has no canonical form in the reader; written in the ISO 8601 month-only form", "tags": ["known-miss"]},
+    {"class": "number", "turn_id": "t2", "writing": "62\u00a0%", "answer": "62 %"},
+    {"class": "date", "turn_id": "t2", "writing": "2027-04-02", "answer": "2027-04-02"},
+    {"class": "code", "turn_id": "t2", "writing": "SELECT reponse, count(*) FROM sondage GROUP BY reponse;", "answer": "be2377582876"}
+  ]},
+  {"span_id": "fr-5", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "J\u2019abandonne la piste du compilateur maison pour l\u2019outil d\u2019import. On reste sur Python."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "D'accord. Voici le squelette :\n```python\ndef importer(chemin):\n    with open(chemin, encoding=\"utf-8\") as f:\n        return [ligne.rstrip() for ligne in f]\n```"}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "J\u2019abandonne la piste du compilateur maison pour l\u2019outil d\u2019import.", "negated": false, "acts": ["drop"], "dates": [], "numbers": []},
+    {"class": "decision", "turn_id": "t1", "writing": "On reste sur Python.", "negated": false, "acts": ["keep"], "dates": [], "numbers": []},
+    {"class": "entity", "turn_id": "t1", "writing": "Python", "answer": "Python"},
+    {"class": "code", "turn_id": "t2", "writing": "def importer(chemin):\n    with open(chemin, encoding=\"utf-8\") as f:\n        return [ligne.rstrip() for ligne in f]", "answer": "e321c381682d"}
+  ]},
+  {"span_id": "fr-6", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Le devis de l'entreprise B\u00e2ti-Sud s'\u00e9l\u00e8ve \u00e0 3\u202f200\u00a0\u20ac pour la toiture."},
+    {"turn_id": "t2", "role": "user", "origin": "typed", "text": "Nous ne gardons pas l'ancien devis. Les travaux commencent le 1er juillet 2027.\n1. d\u00e9pose de l'ancienne toiture\n2. pose des tuiles"}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "B\u00e2ti-Sud", "answer": "B\u00e2ti-Sud"},
+    {"class": "number", "turn_id": "t1", "writing": "3\u202f200\u00a0\u20ac", "answer": "3200 EUR"},
+    {"class": "decision", "turn_id": "t2", "writing": "Nous ne gardons pas l'ancien devis.", "negated": true, "acts": ["keep"], "dates": [], "numbers": []},
+    {"class": "date", "turn_id": "t2", "writing": "1er juillet 2027", "answer": "2027-07-01"}
+  ]},
+  {"span_id": "fr-7", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Voici la config que Karim Benali a \u00e9crite pour le serveur de Nantes :\n~~~yaml\nport: 8443\nworkers: 4\n~~~"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "La configuration ouvre le port pr\u00e9vu ; au d\u00e9marrage, comptez environ 250 millisecondes par requ\u00eate."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Karim Benali", "answer": "Karim Benali"},
+    {"class": "entity", "turn_id": "t1", "writing": "Nantes", "answer": "Nantes"},
+    {"class": "code", "turn_id": "t1", "writing": "port: 8443\nworkers: 4", "answer": "e84890771cd7"},
+    {"class": "number", "turn_id": "t2", "writing": "250 millisecondes", "answer": "250 ms"}
+  ]},
+  {"span_id": "fr-8", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Pour l'h\u00e9bergement, nous avons retenu l'offre \u00e0 9 \u20ac par mois. Le script de nuit :\n```\n30 2 * * * /usr/local/bin/sauvegarde.sh\n```"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Not\u00e9. Le contrat court jusqu'en septembre 2028."},
+    {"turn_id": "t3", "role": "user", "origin": "document", "text": "Extrait du contrat : le prestataire conserve les sauvegardes pendant 30 jours."}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "Pour l'h\u00e9bergement, nous avons retenu l'offre \u00e0 9 \u20ac par mois.", "negated": false, "acts": ["choose"], "dates": [], "numbers": ["9 EUR"]},
+    {"class": "number", "turn_id": "t1", "writing": "9 \u20ac", "answer": "9 EUR"},
+    {"class": "code", "turn_id": "t1", "writing": "30 2 * * * /usr/local/bin/sauvegarde.sh", "answer": "93a68798194c"},
+    {"class": "date", "turn_id": "t2", "writing": "septembre 2028", "answer": "2028-09"},
+    {"class": "number", "turn_id": "t3", "writing": "30 jours", "answer": "30 day"}
+  ]},
+  {"span_id": "fr-9", "language": "fr",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "On migre la base vers le nouveau serveur le 3 novembre 2026, avec 32 Go de m\u00e9moire."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant+tool", "text": "La commande a renvoy\u00e9 : migration planifi\u00e9e, dur\u00e9e estim\u00e9e 45 min."}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "On migre la base vers le nouveau serveur le 3 novembre 2026, avec 32 Go de m\u00e9moire.", "negated": false, "acts": ["switch"], "dates": ["2026-11-03"], "numbers": ["32 GB"]},
+    {"class": "date", "turn_id": "t1", "writing": "3 novembre 2026", "answer": "2026-11-03"},
+    {"class": "number", "turn_id": "t1", "writing": "32 Go", "answer": "32 GB"},
+    {"class": "number", "turn_id": "t2", "writing": "45 min", "answer": "45 min"}
+  ]},
+  {"span_id": "en-1", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "I'm planning the offsite with Priya Raman. We'll keep the Toronto venue for March 3, 2027."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Great, I'll draft the agenda next week."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Priya Raman", "answer": "Priya Raman"},
+    {"class": "entity", "turn_id": "t1", "writing": "Toronto", "answer": "Toronto"},
+    {"class": "date", "turn_id": "t1", "writing": "March 3, 2027", "answer": "2027-03-03"},
+    {"class": "decision", "turn_id": "t1", "writing": "We'll keep the Toronto venue for March 3, 2027.", "negated": false, "acts": ["keep"], "dates": ["2027-03-03"], "numbers": []}
+  ]},
+  {"span_id": "en-2", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "The nightly backup fails since the upgrade. Here is the job:\n```bash\npg_dump -Fc shop > /backups/shop.dump\n```"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "The target volume has only 2.5 GB free, and the dump needs about 40 GB. Run `du -sh /backups` to see what takes the space. I would keep the last dump until then."}
+   ], "facts": [
+    {"class": "code", "turn_id": "t1", "writing": "pg_dump -Fc shop > /backups/shop.dump", "answer": "6ea3bde2723e"},
+    {"class": "number", "turn_id": "t2", "writing": "2.5 GB", "answer": "2.5 GB"},
+    {"class": "number", "turn_id": "t2", "writing": "40 GB", "answer": "40 GB"}
+  ]},
+  {"span_id": "en-3", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Tobias joins on Monday."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Noted, I'll set up an account."},
+    {"turn_id": "t3", "role": "user", "origin": "typed", "text": "We dropped the hotel option, too expensive at $240 a night."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Tobias", "answer": "Tobias", "tags": ["known-miss"]},
+    {"class": "number", "turn_id": "t3", "writing": "$240", "answer": "240 $"},
+    {"class": "decision", "turn_id": "t3", "writing": "We dropped the hotel option, too expensive at $240 a night.", "negated": false, "acts": ["drop"], "dates": [], "numbers": ["240 $"]}
+  ]},
+  {"span_id": "en-4", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "The survey results come in June."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "From the first batch, 58% of respondents prefer the short version. Publication is set for 2027-05-20.\n```sql\nSELECT answer, count(*) FROM responses GROUP BY answer;\n```"}
+   ], "facts": [
+    {"class": "date", "turn_id": "t1", "writing": "June", "answer": "--06", "note": "a month named alone has no canonical form in the reader; written in the ISO 8601 month-only form", "tags": ["known-miss"]},
+    {"class": "number", "turn_id": "t2", "writing": "58%", "answer": "58 %"},
+    {"class": "date", "turn_id": "t2", "writing": "2027-05-20", "answer": "2027-05-20"},
+    {"class": "code", "turn_id": "t2", "writing": "SELECT answer, count(*) FROM responses GROUP BY answer;", "answer": "2c8d449d0553"}
+  ]},
+  {"span_id": "en-5", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Let's not migrate the importer to Go. We stick with Python for now."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Here is a starting point:\n```python\ndef load(path):\n    with open(path, encoding=\"utf-8\") as f:\n        return [line.rstrip() for line in f]\n```"}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "Let's not migrate the importer to Go.", "negated": true, "acts": ["switch"], "dates": [], "numbers": []},
+    {"class": "decision", "turn_id": "t1", "writing": "We stick with Python for now.", "negated": false, "acts": ["keep"], "dates": [], "numbers": []},
+    {"class": "entity", "turn_id": "t1", "writing": "Go", "answer": "Go"},
+    {"class": "entity", "turn_id": "t1", "writing": "Python", "answer": "Python"},
+    {"class": "code", "turn_id": "t2", "writing": "def load(path):\n    with open(path, encoding=\"utf-8\") as f:\n        return [line.rstrip() for line in f]", "answer": "a89199512d2a"}
+  ]},
+  {"span_id": "en-6", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "The quote from Brightline Roofing comes to $480 for the gutters."},
+    {"turn_id": "t2", "role": "user", "origin": "typed", "text": "We won't keep the old quote. Work starts on the 1st of July 2027.\n1. remove the old gutters\n2. fit the new ones"}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Brightline Roofing", "answer": "Brightline Roofing"},
+    {"class": "number", "turn_id": "t1", "writing": "$480", "answer": "480 $"},
+    {"class": "decision", "turn_id": "t2", "writing": "We won't keep the old quote.", "negated": true, "acts": ["keep"], "dates": [], "numbers": []},
+    {"class": "date", "turn_id": "t2", "writing": "1st of July 2027", "answer": "2027-07-01"}
+  ]},
+  {"span_id": "en-7", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "Here is the config Dana Whitfield wrote for the Seattle server:\n~~~yaml\nport: 9443\nworkers: 8\n~~~"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "That config opens the expected port; at startup expect about 300 milliseconds per request."}
+   ], "facts": [
+    {"class": "entity", "turn_id": "t1", "writing": "Dana Whitfield", "answer": "Dana Whitfield"},
+    {"class": "entity", "turn_id": "t1", "writing": "Seattle", "answer": "Seattle"},
+    {"class": "code", "turn_id": "t1", "writing": "port: 9443\nworkers: 8", "answer": "048285f7e0d1"},
+    {"class": "number", "turn_id": "t2", "writing": "300 milliseconds", "answer": "300 ms"}
+  ]},
+  {"span_id": "en-8", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "For hosting we went with the $12 monthly plan. The nightly job:\n```\n0 3 * * * /usr/local/bin/backup.sh\n```"},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant", "text": "Noted. The contract runs until September 2028."},
+    {"turn_id": "t3", "role": "user", "origin": "document", "text": "Contract excerpt: the provider keeps backups for 30 days."}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "For hosting we went with the $12 monthly plan.", "negated": false, "acts": ["choose"], "dates": [], "numbers": ["12 $"]},
+    {"class": "number", "turn_id": "t1", "writing": "$12", "answer": "12 $"},
+    {"class": "code", "turn_id": "t1", "writing": "0 3 * * * /usr/local/bin/backup.sh", "answer": "503f2e0b6487"},
+    {"class": "date", "turn_id": "t2", "writing": "September 2028", "answer": "2028-09"},
+    {"class": "number", "turn_id": "t3", "writing": "30 days", "answer": "30 day"}
+  ]},
+  {"span_id": "en-9", "language": "en",
+   "turns": [
+    {"turn_id": "t1", "role": "user", "origin": "typed", "text": "We switch the database to the new server on November 3, 2026, with 64 GB of memory."},
+    {"turn_id": "t2", "role": "assistant", "origin": "assistant+tool", "text": "The command returned: migration scheduled, estimated duration 50 min."}
+   ], "facts": [
+    {"class": "decision", "turn_id": "t1", "writing": "We switch the database to the new server on November 3, 2026, with 64 GB of memory.", "negated": false, "acts": ["switch"], "dates": ["2026-11-03"], "numbers": ["64 GB"]},
+    {"class": "date", "turn_id": "t1", "writing": "November 3, 2026", "answer": "2026-11-03"},
+    {"class": "number", "turn_id": "t1", "writing": "64 GB", "answer": "64 GB"},
+    {"class": "number", "turn_id": "t2", "writing": "50 min", "answer": "50 min"}
+  ]}
+]}

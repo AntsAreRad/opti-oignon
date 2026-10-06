@@ -111,21 +111,15 @@
 		shouldAutoScroll = true;
 		const options = getChatOptions();
 
-		// Prepend attached file contents to message
-		let messageText = event.detail.text;
-		const messageImages = event.detail.images;
-		if (attachedFiles.length > 0) {
-			const fileBlocks = attachedFiles.map(
-				(f) => `[File: ${f.filename}]\n\`\`\`\n${f.content}\n\`\`\``
-			).join('\n\n');
-			messageText = `${fileBlocks}\n\n${messageText}`;
-			attachedFiles = [];
-		}
-
 		// Images travel with the options; an empty list is not sent.
-		options.images = messageImages;
+		options.images = event.detail.images;
+		// Attached files travel beside the typed words, never inside them: the
+		// server saves each as a document of its own, and an empty list is not
+		// sent.
+		options.documents = attachedFiles.map(({ filename, content }) => ({ filename, content }));
+		attachedFiles = [];
 
-		await sendMessage(convId, messageText, options);
+		await sendMessage(convId, event.detail.text, options);
 		await tick();
 		scrollToBottom();
 	}

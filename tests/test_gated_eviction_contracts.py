@@ -27,6 +27,8 @@ defaults let through on this fixture, so the arbitration has a number.
   * GE9 -- an empty Flesh evicts nothing and leaves no trace.
   * GE10 -- the finding, recorded: at the proposed defaults a single entity
     swap and a single date shift on the four-turn fixture pass the gate.
+  * GE11 to GE16 -- GE1, GE2, GE3, GE4, GE7 and GE10 held on a span whose
+    decision is typed and whose names stand off the head of a sentence.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source.
@@ -266,6 +268,133 @@ def test_ge10_at_the_proposed_defaults_one_swap_and_one_shift_pass_the_gate():
         gate = peels.load_gate()
         for summarize in (_edit("Alice", "Dave"), _edit("2026-03-04", "2026-04-04")):
             s = _setup(peels, receipts, gate=gate)
+            outcome = peels.evict_gated(summarize=summarize, **s)
+            assert outcome.decision.result.failed == 1, "control: the probe caught it"
+            assert outcome.decision.episodic_rate == round(12 / 13, 4)
+            assert outcome.evicted is True, (
+                "recorded, not endorsed: at 0.7 a single wrong entity or date in a "
+                "four-turn span passes the gate; the threshold is the arbitration's"
+            )
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# GE11-GE16 -- GE1, GE2, GE3, GE4, GE7 and GE10 on a span that can decide
+# ---------------------------------------------------------------------------
+# Only typed text decides, and a capital at the head of a sentence names
+# nothing unless the span capitalises the word elsewhere. The fixture above
+# decides in the assistant's words and opens two sentences on a name; the one
+# below decides in a typed turn and keeps its names off the head, and the
+# contracts that follow hold the same properties on it, figures included.
+_TYPED_SPAN = [
+    {"turn_id": "t01", "role": "user", "origin": "typed",
+     "text": "On 2026-03-04, Alice and Bob met to review the Harvest release with a budget of 1200 euros."},
+    {"turn_id": "t02", "role": "assistant", "origin": "assistant",
+     "text": "The venue in Oslo has no container runtime, and Carol handles the Oslo account with a latency "
+             "target of 45 milliseconds."},
+    {"turn_id": "t03", "role": "user", "origin": "typed",
+     "text": "We agreed that the demo will not use Docker for the Oslo venue."},
+    {"turn_id": "t04", "role": "assistant", "origin": "assistant",
+     "text": "Bob reviews the release on 2026-05-02 and the rollback keeps the old cluster warm for 7 days."},
+]
+
+
+def _setup_typed(peels, receipts, *, gate=None):
+    gate = gate or peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=4)
+    return dict(flesh=receipts.Flesh(_TYPED_SPAN + _TAIL), cellar=receipts.Cellar(),
+                ledger=receipts.ReceiptLedger(), tree=peels.PeelTree(), gate=gate)
+
+
+def _refused_typed(peels, receipts, summarize, kind):
+    s = _setup_typed(peels, receipts)
+    outcome = peels.evict_gated(summarize=summarize, **s)
+    assert outcome.evicted is False
+    assert outcome.receipt is None and outcome.peel is None
+    assert len(s["flesh"].turns()) == 8, "the verbatim turns stay"
+    assert s["ledger"].all() == [] and len(s["cellar"]) == 0 and s["tree"].all() == []
+    kinds = {p.kind for p in outcome.decision.result.failures}
+    assert kind in kinds, f"a {kind} probe failed: {outcome.decision.reason}"
+    return outcome
+
+
+def test_ge11_a_faithful_summary_of_a_typed_span_evicts_with_a_receipt_a_span_and_a_peel():
+    peels, receipts, restore = _open()
+    try:
+        s = _setup_typed(peels, receipts)
+        outcome = peels.evict_gated(summarize=_faithful, **s)
+        assert outcome.evicted is True, outcome.decision.reason
+        assert outcome.receipt.turn_ids == ("t01", "t02", "t03", "t04")
+        assert s["ledger"].open() == [outcome.receipt]
+        assert s["cellar"].get(outcome.receipt.key) == _TYPED_SPAN
+        assert outcome.peel.sources == (outcome.receipt.key,)
+        assert s["tree"].get(outcome.peel.id) == outcome.peel
+        assert outcome.peel.probes_total >= 10 and outcome.peel.probes_passed == outcome.peel.probes_total
+        assert [t["turn_id"] for t in s["flesh"].turns()] == ["t05", "t06", "t07", "t08"]
+        assert outcome.decision.decision_rate == 1.0 and outcome.decision.episodic_rate == 1.0
+    finally:
+        restore()
+
+
+def test_ge12_a_typed_decision_inverted_in_the_summary_is_refused():
+    peels, receipts, restore = _open()
+    try:
+        outcome = _refused_typed(peels, receipts, _edit("will not use Docker", "will use Docker"), "decision")
+        assert outcome.decision.decision_rate == 0.0
+        assert "decision" in outcome.decision.reason
+    finally:
+        restore()
+
+
+def test_ge13_a_typed_decision_deleted_from_the_summary_is_refused():
+    peels, receipts, restore = _open()
+    try:
+        def drop_decision(span):
+            return " ".join(t["text"] for t in span if "agreed" not in t["text"])
+        outcome = _refused_typed(peels, receipts, drop_decision, "decision")
+        assert outcome.decision.decision_rate == 0.0
+    finally:
+        restore()
+
+
+def test_ge14_an_entity_swap_in_a_typed_span_is_caught_and_refused_when_the_gate_demands():
+    peels, receipts, restore = _open()
+    try:
+        s = _setup_typed(peels, receipts, gate=peels.Gate(decision_threshold=0.9, episodic_threshold=1.0, span_turns=4))
+        outcome = peels.evict_gated(summarize=_edit("Alice", "Dave"), **s)
+        assert outcome.evicted is False
+        failed = [(p.kind, p.answer, p.turn_id) for p in outcome.decision.result.failures]
+        assert failed == [("entity", "Alice", "t01")], "exactly the swapped entity, with its turn"
+        assert len(s["flesh"].turns()) == 8 and s["ledger"].all() == []
+        assert outcome.decision.episodic_rate < 1.0
+    finally:
+        restore()
+
+
+def test_ge15_the_same_summary_of_a_typed_span_passes_one_gate_and_fails_a_stricter_one():
+    peels, receipts, restore = _open()
+    try:
+        def drop_second(span):
+            return " ".join(t["text"] for t in span if t["turn_id"] != "t02")
+        loose = _setup_typed(peels, receipts, gate=peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=4))
+        passed = peels.evict_gated(summarize=drop_second, **loose)
+        assert passed.evicted is True, passed.decision.reason
+        assert 0.7 <= passed.decision.episodic_rate < 0.9, "the fixture sits between the two gates"
+        strict = _setup_typed(peels, receipts, gate=peels.Gate(decision_threshold=0.9, episodic_threshold=0.9, span_turns=4))
+        refused = peels.evict_gated(summarize=drop_second, **strict)
+        assert refused.evicted is False
+        assert refused.decision.episodic_rate == passed.decision.episodic_rate
+        assert "episodic" in refused.decision.reason and "0.9" in refused.decision.reason
+    finally:
+        restore()
+
+
+def test_ge16_at_the_proposed_defaults_one_swap_and_one_shift_in_a_typed_span_pass_the_gate():
+    peels, receipts, restore = _open()
+    try:
+        gate = peels.load_gate()
+        for summarize in (_edit("Alice", "Dave"), _edit("2026-03-04", "2026-04-04")):
+            s = _setup_typed(peels, receipts, gate=gate)
             outcome = peels.evict_gated(summarize=summarize, **s)
             assert outcome.decision.result.failed == 1, "control: the probe caught it"
             assert outcome.decision.episodic_rate == round(12 / 13, 4)

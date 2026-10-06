@@ -197,6 +197,12 @@ export interface SmartRouterConfig {
 
 /** The chat request the web chat sends: the fields lib/chat/requestFields.ts
  * fills, each a field of the server's ChatRequest. */
+/** A file attached to a chat turn: its name and its text, sent beside the typed words. */
+export interface ChatDocument {
+	filename: string;
+	content: string;
+}
+
 export interface ChatRequest {
 	conversation_id: string;
 	message: string;
@@ -207,6 +213,7 @@ export interface ChatRequest {
 	think?: boolean;
 	web_search?: boolean;
 	images?: string[];
+	documents?: ChatDocument[];
 	quick_sandbox?: boolean;
 	chat_coding?: boolean;
 	exec_pipeline?: string;

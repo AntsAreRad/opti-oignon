@@ -828,3 +828,151 @@ def test_q34_window_holds_and_the_module_is_import_pure_at_331_models():
         assert residue == {"Any", "Field"}
     finally:
         restore()
+
+
+def test_q35_window_holds_and_the_module_is_import_pure_at_332_models():
+    """q34 word for word, at the count the code block's recall brought the
+    module to: one schema for the code behind a marker (q34 is deselected by
+    name; its literal was 331, and its onion surface held eight schemas).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 332
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCodeResponse", "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse",
+            "OnionRecallResponse", "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse",
+            "OnionSupersedeRequest",
+        }, "the nine are the onion's user surface and nothing else"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q36_required_field_census_matches_the_snapshot_with_the_code_response():
+    """q26 word for word, with the two fields the code block's response
+    refuses to go without (q26 is deselected by name; its snapshot stays
+    REQUIRED, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            req = tuple(n for n, f in cls.model_fields.items() if f.is_required())
+            if req:
+                actual[name] = req
+        assert actual == {**REQUIRED, "OnionCodeResponse": ("conversation_id", "key")}
+    finally:
+        restore()
+
+
+def test_q37_chat_request_surface_is_exactly_its_eighteen_fields():
+    """q25 word for word, with the files a turn carries beside the typed
+    words (q25 is deselected by name). No field of the request names an
+    origin: a client never declares who wrote a turn.
+    """
+    S, restore = _load()
+    try:
+        fields = list(S.ChatRequest.model_fields)
+        assert len(fields) == 18
+        assert set(fields) == {
+            "conversation_id",
+            "message",
+            "model",
+            "preset",
+            "temperature",
+            "use_presets",
+            "think",
+            "web_search",
+            "images",
+            "documents",
+            "consensus",
+            "consensus_models",
+            "consensus_strategy",
+            "self_correct",
+            "optimize",
+            "quick_sandbox",
+            "chat_coding",
+            "exec_pipeline",
+        }
+        assert not {"origin", "segments", "user_turn"} & set(fields), "a client declares no origin"
+        _rejects(S.ChatRequest)  # message is the single required field
+        m = S.ChatRequest(message="x")
+        assert m.use_presets is True and m.exec_pipeline is None and m.documents is None
+        carried = S.ChatRequest(message="", documents=[{"filename": "a.txt", "content": "A"}])
+        assert [(d.filename, d.content) for d in carried.documents] == [("a.txt", "A")]
+        _rejects(S.ChatDocument, filename="a.txt")
+        _rejects(S.ChatDocument, content="A")
+        _rejects(S.ChatRetryRequest)
+        assert S.ChatRetryRequest(conversation_id="c").model is None
+        _rejects(S.ChatCancelRequest)
+    finally:
+        restore()
+
+
+def test_q38_window_holds_and_the_module_is_import_pure_at_333_models():
+    """q35 word for word, at the count the chat document brought the module
+    to: one schema for a file a turn carries (q35 is deselected by name; its
+    literal was 332).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 333
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCodeResponse", "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse",
+            "OnionRecallResponse", "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse",
+            "OnionSupersedeRequest",
+        }, "the nine are the onion's user surface and nothing else"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q39_required_field_census_matches_the_snapshot_with_the_chat_document():
+    """q36 word for word, with the two fields a chat document refuses to go
+    without (q36 is deselected by name; its snapshot stays REQUIRED with the
+    code response, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            req = tuple(n for n, f in cls.model_fields.items() if f.is_required())
+            if req:
+                actual[name] = req
+        assert actual == {
+            **REQUIRED,
+            "OnionCodeResponse": ("conversation_id", "key"),
+            "ChatDocument": ("filename", "content"),
+        }
+    finally:
+        restore()

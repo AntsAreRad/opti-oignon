@@ -94,6 +94,26 @@ class Receipt:
     resolved: bool = False
 
 
+def span_origins(span):
+    """Every origin a span's turns declare, sorted: the labels its receipt and peels answer for.
+
+    Gathered as declared, never re-judged here: the store refuses a
+    declaration outside the grammar, the mirror makes one legacy, and the
+    probe reader is the place a label is relied on. A turn that declares
+    nothing is legacy.
+    """
+    found = set()
+    for turn in span:
+        origin = turn.get("origin")
+        found.add(origin if isinstance(origin, str) and origin else "legacy")
+        segments = turn.get("segments")
+        if isinstance(segments, (list, tuple)):
+            for segment in segments:
+                if isinstance(segment, (list, tuple)) and len(segment) == 3 and isinstance(segment[2], str):
+                    found.add(segment[2])
+    return tuple(sorted(found))
+
+
 def make_receipt(span, key):
     ids = tuple(str(t.get("turn_id", "")) for t in span)
     head = " ".join(str(span[0].get("text", "")).split())[:_STUB_HEAD] if span else ""
@@ -144,6 +164,10 @@ class ReceiptLedger:
         """One line per open receipt, only once every key is known to resolve."""
         self._check(cellar)
         return "\n".join(r.stub for r in self.open())
+
+    def origins(self, key, cellar):
+        """The origins the receipt's span declares, read from the Cellar now; no receipt changes."""
+        return span_origins(self.read(key, cellar))
 
 
 class Flesh:

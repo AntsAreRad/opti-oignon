@@ -17,6 +17,7 @@ from .schemas import (
     MemoryExtractResponse,
     MemoryFactSchema,
     MemoryRecordSchema,
+    OnionCodeResponse,
     OnionPinRequest,
     OnionPinResponse,
     OnionRecallResponse,
@@ -245,6 +246,17 @@ def onion_recall(conv_id: str, key: str) -> dict:
     except Exception as exc:  # noqa: BLE001 - every refusal travels by name
         raise _refused(exc)
     return OnionRecallResponse(conversation_id=conv_id, key=key, span=[dict(t) for t in span]).model_dump()
+
+
+@router.post("/onion/{conv_id}/code/{digest}", response_model=OnionCodeResponse)
+def onion_code(conv_id: str, digest: str) -> dict:
+    """The code block behind a [code:KEY] marker, read from the archive; nothing changes."""
+    librarian = _onion()
+    try:
+        block = librarian.recall_code(conv_id, f"code:{digest}")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionCodeResponse(conversation_id=conv_id, **block).model_dump()
 
 
 @router.post("/onion/{conv_id}/resolve/{key}", response_model=OnionResolveResponse)

@@ -29,6 +29,7 @@ FastAPI would turn into a response is read directly.
 """
 
 import ast
+import hashlib
 import sys
 import types
 from pathlib import Path
@@ -244,6 +245,33 @@ def test_or4_the_handlers_reach_the_librarian_as_the_user_and_a_recall_leaves_th
         assert key not in [r["key"] for r in routes.onion_state("c1")["receipts"]], "closed by the user"
         assert routes.onion_state("nobody") == {"conversation_id": "nobody", "core": [], "receipts": []}
         assert lib.peek_state("nobody") is None, "listing an unknown conversation creates nothing"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OR5 -- the code route reads a block by its key, as the user
+# ---------------------------------------------------------------------------
+def test_or5_the_code_route_reads_a_block_by_its_key_and_refuses_an_unknown_one_by_name():
+    routes, lib, loaded, restore = _open()
+    try:
+        peels = loaded["opti_oignon.memory.peels"]
+        body = "SELECT name FROM nodes WHERE alive = 1"
+        state = lib.state_for("c1")
+        state.mirror([
+            {"role": "user", "origin": "typed", "content": f"Here is the query.\n```sql\n{body}\n```\nCarol runs it every morning."},
+            {"role": "assistant", "origin": "assistant", "content": "Noted: Carol runs the query every morning."},
+        ])
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        step = peels.evict_gated(flesh=state.flesh, cellar=state.cellar, ledger=state.ledger,
+                                 tree=state.tree, gate=gate, summarize=_faithful)
+        assert step.evicted, step.reason
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        got = routes.onion_code("c1", digest)
+        assert got == {"conversation_id": "c1", "key": f"code:{digest}", "language": "sql", "code": body}
+        assert _status(routes, lambda: routes.onion_code("c1", "f" * 12)) == (404, "no code block behind code:" + "f" * 12)
+        assert _status(routes, lambda: routes.onion_code("nobody", digest))[0] == 404
+        assert _status(routes, lambda: routes.onion_code("c1", "XYZ"))[0] == 404
     finally:
         restore()
 

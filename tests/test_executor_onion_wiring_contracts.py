@@ -112,7 +112,7 @@ def _routing(**overrides):
     return SimpleNamespace(**fields)
 
 
-def _load(*, librarian=None, librarian_absent=False):
+def _load(*, librarian=None, librarian_absent=False, conversations=None):
     composer = _Composer(_LEGACY)
     scripted = _Scripted()
     ollama_stub = types.ModuleType("ollama")
@@ -124,7 +124,8 @@ def _load(*, librarian=None, librarian_absent=False):
     retrieval = types.ModuleType("opti_oignon.memory.retrieval")
     retrieval.build_memory_block = composer.build
     retrieval.working_memory_block = composer.build
-    conversations = _Conversations()
+    if conversations is None:
+        conversations = _Conversations()
     conversation = types.ModuleType("opti_oignon.conversation")
     conversation.conversation_manager = conversations
     seeded = {
@@ -344,6 +345,43 @@ def test_xw9_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legacy
         restore()
     lib = _Librarian(enabled=True, block=_ONION, raise_on_block=True, raise_on_curate=True)
     mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted)
+        assert lib.block_calls and lib.curate_calls, "both seams were tried and both failures were swallowed"
+        assert conversations.messages.get("conv-1")
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# XW10 supersedes XW9. The librarian now mirrors the conversation through the
+# store's origin read, which the store XW9 seeds does not carry, so its
+# failing librarian was never offered the turn. Same properties over the
+# store as it stands. XW4 is superseded by OT16, in the turn-origin suite.
+# ---------------------------------------------------------------------------
+class _OriginConversations(_Conversations):
+    """The store as it stands: the mirror reads who wrote each turn."""
+
+    def get_mirror_messages(self, conversation_id):
+        return [dict(m, origin="legacy", segments=[]) for m in self.get_context_messages(conversation_id)]
+
+
+def test_xw10_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legacy_block_rides_it():
+    mod, wrapper, scripted, composer, conversations, restore = _load(
+        librarian_absent=True, conversations=_OriginConversations())
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted)
+        assert composer.calls == 1
+        assert conversations.messages.get("conv-1"), "the turn is saved with no librarian at all"
+    finally:
+        restore()
+    lib = _Librarian(enabled=True, block=_ONION, raise_on_block=True, raise_on_curate=True)
+    mod, wrapper, scripted, composer, conversations, restore = _load(
+        librarian=lib, conversations=_OriginConversations())
     try:
         ex = mod.Executor()
         _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))

@@ -36,6 +36,8 @@ SQLite schema:
         token_estimate INTEGER DEFAULT 0
         model TEXT
         metadata TEXT DEFAULT '{}'
+        origin TEXT NOT NULL DEFAULT 'legacy'
+        segments TEXT NOT NULL DEFAULT '[]'
 
 Author: Leon
 """
@@ -128,6 +130,80 @@ def _estimate_tokens(text: str, model: str | None = None) -> int:
         except Exception:
             pass
     return int(len(text) / 4)
+
+
+# ---------------------------------------------------------------------------
+# The origin of a message
+# ---------------------------------------------------------------------------
+
+# The turn-origin grammar of conversation.py, as one text: this module is
+# loaded alone where it is tested, and a contract holds the copies to one
+# text. A branch message carries an origin like any turn; one posted by a
+# client is typed only when the user posted it, and a merge copies the
+# origin it found.
+_ORIGIN_BASES = ("typed", "refined", "document", "assistant", "legacy")
+_ORIGIN_FLAGS = ("tool", "web")
+_ORIGIN_ROLES = {
+    "user": ("typed", "refined", "document", "legacy"),
+    "assistant": ("assistant", "legacy"),
+}
+
+
+def _origin_defect(role, origin, segments, length):
+    """Why a turn's origin lies outside the grammar, or None when it lies inside."""
+    if not isinstance(origin, str) or not origin:
+        return "an origin is a non-empty string"
+    base, *flags = origin.split("+")
+    if base not in _ORIGIN_BASES:
+        return f"origin base {base[:24]!r} is not in the grammar"
+    for flag in flags:
+        if flag not in _ORIGIN_FLAGS:
+            return f"origin flag {flag[:24]!r} is not in the grammar"
+    if flags != sorted(set(flags)):
+        return "origin flags are written once each, in order"
+    if flags and base != "assistant":
+        return f"a {base} origin carries no flag"
+    allowed = _ORIGIN_ROLES.get(role, ("legacy",)) if isinstance(role, str) else ("legacy",)
+    if base not in allowed:
+        return f"role {str(role)[:24]!r} cannot carry {base}"
+    if not isinstance(segments, (list, tuple)):
+        return "segments are a list"
+    if segments and base == "legacy":
+        return "a legacy turn has no segments"
+    end = 0
+    for segment in segments:
+        if not isinstance(segment, (list, tuple)) or len(segment) != 3:
+            return "a segment is [start, end, base]"
+        start, stop, label = segment
+        if type(start) is not int or type(stop) is not int:
+            return "segment bounds are integers"
+        if not end <= start < stop <= length:
+            return f"segment [{start}, {stop}] overlaps, is empty or leaves the content"
+        if label == "legacy" or label not in allowed:
+            return f"role {str(role)[:24]!r} carries no {str(label)[:24]} segment"
+        end = stop
+    return None
+
+
+# The two columns that carry a message's origin, as an older file gains them.
+_BRANCH_ORIGIN_COLUMNS = (
+    ("origin", "TEXT NOT NULL DEFAULT 'legacy'"),
+    ("segments", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
+
+class OriginError(ValueError):
+    """A message's origin or segments lie outside the grammar: refused by name, nothing written."""
+
+
+def posted_origin(role: Any) -> str:
+    """The origin of a message a client posts: typed from the user, legacy otherwise.
+
+    A client posts whole messages and vouches for none of their parts; only
+    the user's own message is taken as typed, and a pasted text counts as
+    typed, as it does in the chat.
+    """
+    return "typed" if role == "user" else "legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +399,8 @@ class ConversationBranchManager:
                         token_estimate INTEGER DEFAULT 0,
                         model TEXT,
                         metadata TEXT DEFAULT '{}',
+                        origin TEXT NOT NULL DEFAULT 'legacy',
+                        segments TEXT NOT NULL DEFAULT '[]',
                         FOREIGN KEY (branch_id)
                             REFERENCES branches(branch_id) ON DELETE CASCADE
                     );
@@ -334,6 +412,12 @@ class ConversationBranchManager:
                     CREATE INDEX IF NOT EXISTS idx_branch_messages_conv
                         ON branch_messages(conversation_id);
                 """)
+                # Origins arrived after the table: an older file gains the
+                # columns here, and every row it already holds reads legacy.
+                present = {row[1] for row in conn.execute("PRAGMA table_info(branch_messages)")}
+                for column, definition in _BRANCH_ORIGIN_COLUMNS:
+                    if column not in present:
+                        conn.execute(f"ALTER TABLE branch_messages ADD COLUMN {column} {definition}")
                 conn.commit()
             except Exception as e:
                 logger.error("Failed to initialize branches DB: %s", e)
@@ -681,6 +765,9 @@ class ConversationBranchManager:
         content: str,
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        origin: str = "legacy",
+        segments: list | tuple = (),
     ) -> BranchMessage | None:
         """Add a message to a branch.
 
@@ -691,10 +778,22 @@ class ConversationBranchManager:
             content: Message content.
             model: Model used (for assistant messages).
             metadata: Extra metadata.
+            origin: Who wrote the words, in the turn-origin grammar;
+                legacy when the writer cannot vouch for one.
+            segments: [start, end, base] bounds of the parts that came
+                from elsewhere.
 
         Returns:
             The created BranchMessage, or None on error.
+
+        Raises:
+            OriginError: the origin or segments lie outside the grammar;
+                nothing is written.
         """
+        defect = _origin_defect(role, origin, segments, len(content or ""))
+        if defect is not None:
+            raise OriginError(f"branch message refused, its origin lies outside the grammar: {defect}")
+        segments_json = json.dumps([list(s) for s in segments])
         now = datetime.now().isoformat()
         token_estimate = _estimate_tokens(content, model)
         meta_json = json.dumps(metadata or {})
@@ -714,10 +813,10 @@ class ConversationBranchManager:
                 cursor = conn.execute(
                     """INSERT INTO branch_messages
                        (branch_id, conversation_id, role, content,
-                        timestamp, token_estimate, model, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        timestamp, token_estimate, model, metadata, origin, segments)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (branch_id, conversation_id, role, content,
-                     now, token_estimate, model, meta_json),
+                     now, token_estimate, model, meta_json, origin, segments_json),
                 )
 
                 # Update branch updated_at
@@ -773,6 +872,37 @@ class ConversationBranchManager:
                 return []
             finally:
                 conn.close()
+
+    def _origins_of(self, branch_id: str) -> dict[int, tuple[str, list]]:
+        """Each branch message's origin and segments, by id.
+
+        A stored origin that lies outside the grammar is read as legacy with
+        no segment, and said by the message id: the closed position.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, role, content, origin, segments FROM branch_messages WHERE branch_id = ?",
+                    (branch_id,),
+                ).fetchall()
+            except Exception as e:
+                logger.error("Failed to read branch message origins: %s", e)
+                return {}
+            finally:
+                conn.close()
+        found: dict[int, tuple[str, list]] = {}
+        for row in rows:
+            try:
+                segments = json.loads(row["segments"])
+            except (TypeError, ValueError):
+                segments = None
+            if _origin_defect(row["role"], row["origin"], segments, len(row["content"] or "")) is None:
+                found[row["id"]] = (row["origin"], segments)
+            else:
+                logger.warning("branch message %s: stored origin outside the grammar, read as legacy", row["id"])
+                found[row["id"]] = ("legacy", [])
+        return found
 
     def get_branch_messages_full(
         self,
@@ -1167,12 +1297,15 @@ class ConversationBranchManager:
             logger.error("Target branch not found: %s", target_branch_id)
             return []
 
+        # A copy keeps the origin and segments of the message it copies.
+        origins = self._origins_of(source_branch_id)
         merged: list[BranchMessage] = []
         for msg in source_msgs:
             meta = dict(msg.metadata)
             if tag_merged:
                 meta["merged_from"] = source_branch_id
                 meta["original_message_id"] = msg.id
+            origin, segments = origins.get(msg.id, ("legacy", []))
 
             new_msg = self.add_branch_message(
                 branch_id=target_branch_id,
@@ -1181,6 +1314,8 @@ class ConversationBranchManager:
                 content=msg.content,
                 model=msg.model,
                 metadata=meta,
+                origin=origin,
+                segments=segments,
             )
             if new_msg:
                 merged.append(new_msg)
