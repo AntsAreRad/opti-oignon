@@ -2026,6 +2026,26 @@ package costs.
   or more engines it picks at random among DuckDuckGo, Bing, Google, Brave,
   Mojeek, Yahoo, Yandex and Mullvad, and every result is still labelled
   "duckduckgo". Which engines to use is left as it was.
+- The ladder's directed-mutation tier proves that every contract a change
+  adds has its blade. It counted only the unchecked lines of the blade
+  register, so a contract added without any line went through unseen. `bash
+  scripts/ladder.sh t3` now takes a census of the contracts in the tree --
+  the tests pytest collects under the selection rule's own file, class,
+  function and directory names, through module-level blocks and unittest
+  cases; the Rust `#[test]` functions; the front-end tests -- compares it
+  with HEAD, staged and untracked files included, and fails on each added
+  contract that no checked line names: by its bare name when no other
+  contract shares it, by its path otherwise. Contracts the selection rule
+  deselects or ignores, those deselected parameter by parameter, those
+  marked to skip and ignored Rust tests are exempt and listed; a front-end
+  test runs outside the ladder, so its blade is owed to the machine and the
+  tier ends OWED. A census that finds no Python contract, meets a Rust test
+  attribute it cannot pair with a function or cannot read a file fails
+  rather than passes; what it cannot read of the selection rule exempts
+  nothing; the data places are never opened. The tier also counts the
+  checked lines that name nothing in the tree. On this tree the census
+  agrees with pytest's own collection, with `cargo test -- --list` and with
+  Playwright's list. Twenty-eight contracts.
 - `published_prose_guard.py`, `summary_fidelity_guard.py` and
   `red_team_guard.py` are unchanged in this cycle and continue to gate
   merges. `isolation_seal_guard.py` changed only in its sealed ledger, which

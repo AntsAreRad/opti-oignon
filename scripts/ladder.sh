@@ -246,7 +246,178 @@ t3() {
     pending=${pending:-0}
     if [ "$pending" -eq 0 ]; then pass "no blade left unproven"
     else fail "$pending blade(s) still unproven in $blades"; fi
+    blade_census "$blades"
   else skip "no blade register (set git config oo.bladeRegister <path>)"; fi
+}
+
+# The unchecked lines say nothing of a contract nobody wrote a line for. The
+# census lists the contracts in the tree - the tests pytest collects under the
+# selection rule's own names and directories, the Rust tests, the front-end
+# tests - and holds every one the change adds against HEAD to a checked line
+# naming it: by its bare name when no other contract shares it, by its path
+# otherwise. Deselected, ignored or skipped ones are exempt and named; a
+# front-end test runs outside the ladder, so its blade is owed to the machine.
+# A census that finds no Python contract, misses a Rust test or cannot read a
+# file fails: it could not see. What the census cannot read of the selection
+# rule exempts nothing, so it only ever asks for more. The data places are
+# never opened.
+blade_census() {
+  python3 - "$1" <<'PY'
+import ast,fnmatch,os,re,shlex,subprocess,sys
+def git(*a): return subprocess.run(["git",*a],capture_output=True,text=True,encoding="utf-8",errors="replace",check=True).stdout
+def say(s): print("  "+s)
+def show(lines):
+    for x in lines[:20]: say("  "+x)
+    if len(lines)>20: say(f"  ... and {len(lines)-20} more")
+DATA=("data/","opti_oignon/data/")
+try:
+    import tomllib
+    with open("pyproject.toml","rb") as f: ini=tomllib.load(f).get("tool",{}).get("pytest",{}).get("ini_options",{})
+except (ImportError,OSError,ValueError): ini={}
+def opt(k,d):
+    v=ini.get(k,d); return v.split() if isinstance(v,str) else [str(x) for x in v]
+FILES,CLASSES,FUNCS=opt("python_files",["test_*.py","*_test.py"]),opt("python_classes",["Test"]),opt("python_functions",["test"])
+NOREC=opt("norecursedirs",["*.egg",".*","_darcs","build","CVS","dist","node_modules","venv","{arch}"])
+add=ini.get("addopts","")
+args=[a for x in ([add] if isinstance(add,str) else add) for a in shlex.split(str(x))]
+rule={"--ignore":[],"--ignore-glob":[],"--deselect":[]}
+for k,a in enumerate(args):
+    for o in rule:
+        if a==o and k+1<len(args): rule[o].append(args[k+1])
+        elif a.startswith(o+"="): rule[o].append(a[len(o)+1:])
+IGN=[os.path.relpath(p) for p in rule["--ignore"]]
+DES=[os.path.relpath(p.split("::")[0])+p[len(p.split("::")[0]):] for p in rule["--deselect"]]
+def why_py(i,ps):
+    p=i.split("::")[0]
+    if any(p==g or p.startswith(g+"/") for g in IGN): return "--ignore"
+    if any(fnmatch.fnmatch(p,os.path.relpath(g)) for g in rule["--ignore-glob"]): return "--ignore-glob"
+    if any(i==d or i.startswith(d+"::") for d in DES if "[" not in d): return "--deselect"
+    if ps and all(f"{i}[{x}]" in DES for x in ps): return "--deselect"
+def named(n,pats): return any(n.startswith(p) or (any(c in p for c in "*?[") and fnmatch.fnmatch(n,p)) for p in pats)
+def kind(p):
+    if p.startswith(DATA): return None
+    d,b=p.split("/")[:-1],p.split("/")[-1]
+    if b.endswith(".py"):
+        return "py" if any(fnmatch.fnmatch(b,g) for g in FILES) and not any(fnmatch.fnmatch(x,n) for x in d for n in NOREC) else None
+    if b.endswith(".rs"): return "rs"
+    if re.search(r"\.(spec|test)\.[cm]?[jt]sx?$",b) and "node_modules" not in d: return "js"
+def mark(f):
+    v=getattr(f,"value",None)
+    return f.attr if isinstance(f,ast.Attribute) and (isinstance(v,ast.Attribute) and v.attr=="mark" or isinstance(v,ast.Name) and v.id=="mark") else None
+def skip(ds): return any(mark(d)=="skip" or isinstance(d,ast.Call) and mark(d.func)=="skip" for d in ds)
+def pids(n):
+    # The ids pytest gives the cases of one parametrize over literal values;
+    # None when they cannot be known for sure, and None exempts nothing.
+    ps=[d for d in n.decorator_list if isinstance(d,ast.Call) and mark(d.func)=="parametrize"]
+    if len(ps)!=1 or len(ps[0].args)!=2 or ps[0].keywords: return None
+    try: names,vals=ast.literal_eval(ps[0].args[0]),ast.literal_eval(ps[0].args[1])
+    except (ValueError,TypeError,SyntaxError,MemoryError,RecursionError): return None
+    names=[s.strip() for s in names.split(",")] if isinstance(names,str) else names
+    if not isinstance(names,(list,tuple)) or not isinstance(vals,(list,tuple)) or not vals: return None
+    one=lambda v:v if isinstance(v,str) and v and v.isascii() and v.isprintable() else str(v) if v is None or isinstance(v,(bool,int,float)) else None
+    out=[]
+    for v in vals:
+        v=[v] if len(names)==1 else v
+        if not isinstance(v,(list,tuple)) or len(v)!=len(names) or None in [one(x) for x in v]: return None
+        out.append("-".join(one(x) for x in v))
+    return out if len(set(out))==len(out) else None
+def py(src):
+    # What pytest collects: functions under the rule's names, in classes under
+    # its names or in any unittest case, through every block that is not itself
+    # a function; a skip mark on the function, its class or its module is kept.
+    tree,out=ast.parse(src),[]
+    mod=any(isinstance(n,ast.Assign) and any(getattr(t,"id","")=="pytestmark" for t in n.targets)
+            and skip(n.value.elts if isinstance(n.value,(ast.List,ast.Tuple)) else [n.value]) for n in tree.body)
+    def walk(body,pre,fn,sk):
+        for n in body:
+            if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)):
+                if fn(n.name): out.append((pre+n.name,sk or skip(n.decorator_list),pids(n)))
+            elif isinstance(n,ast.ClassDef):
+                tc=any((getattr(b,"attr","") or getattr(b,"id","")).endswith("TestCase") for b in n.bases)
+                if tc or named(n.name,CLASSES):
+                    walk(n.body,pre+n.name+"::",(lambda s:s.startswith("test")) if tc else (lambda s:named(s,FUNCS)),sk or skip(n.decorator_list))
+            else:
+                for _,v in ast.iter_fields(n):
+                    if isinstance(v,list):
+                        walk([x for x in v if isinstance(x,ast.stmt)],pre,fn,sk)
+                        for x in v:
+                            if isinstance(x,(ast.excepthandler,ast.match_case)): walk(x.body,pre,fn,sk)
+    walk(tree.body,"",lambda s:named(s,FUNCS),mod)
+    return out,[n.name for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))]
+RA=re.compile(r"#\[\s*(?:\w+\s*::\s*)*test\s*\]")
+RF=re.compile(r"((?:#\[[^\]]*\]\s*)+)(?:pub(?:\s*\([^)]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*(?:extern\s+\"[^\"]*\"\s+)?fn\s+(\w+)")
+def rs(src):
+    src=re.sub(r"//[^\n]*","",re.sub(r"/\*.*?\*/","",src,flags=re.S))
+    return [(m.group(2),bool(re.search(r"#\[\s*ignore\b",m.group(1)))) for m in RF.finditer(src) if RA.search(m.group(1))],len(RA.findall(src))
+JT=re.compile(r"(?<![\w.$])(?:test|it)(?:\.(only|skip|fixme|fail|todo))?\s*\(\s*(['\"`])((?:\\.|(?!\2)[^\\])*)\2")
+def ids(p,src):
+    k=kind(p)
+    if k=="py": c,d=py(src); return [(f"{p}::{n}","skip" if s else None,ps) for n,s,ps in c],d
+    if k=="rs": return [(f"{p}::{n}","#[ignore]" if g else None,None) for n,g in rs(src)[0]],[]
+    return [(f"{p}::{m.group(3)}","skip" if m.group(1) in ("skip","fixme","todo") else None,None) for m in JT.finditer(src)],[]
+try:
+    tree,bad,defs,raw,got={},[],set(),0,0
+    for p in git("ls-files","-z","--cached","--others","--exclude-standard").split("\0"):
+        k=p and kind(p)
+        if not k or not os.path.isfile(p): continue
+        try:
+            src=open(p,encoding="utf-8").read()
+            found,d=ids(p,src); defs.update(f"{p}::{n}" for n in d)
+            if k=="rs": raw+=rs(src)[1]
+        except (OSError,UnicodeDecodeError,SyntaxError,ValueError) as e:
+            bad.append(f"{p}: {type(e).__name__}"); continue
+        got+=len(found) if k=="rs" else 0
+        tree.update((i,(k,w,ps)) for i,w,ps in found)
+    head=set(git("ls-tree","-r","-z","--name-only","HEAD").split("\0"))
+    changed=set(git("diff","--name-only","--no-renames","-z","HEAD").split("\0"))|set(git("ls-files","-z","--others","--exclude-standard").split("\0"))
+    added=[]
+    for p in sorted(x for x in changed if x and kind(x)):
+        try: before={i for i,_,_ in ids(p,git("show",f"HEAD:{p}"))[0]} if p in head else set()
+        except (SyntaxError,ValueError) as e:
+            bad.append(f"HEAD:{p}: {type(e).__name__}"); continue
+        added+=sorted(i for i in tree if i.startswith(p+"::") and i not in before)
+    suf={}
+    for i in tree:
+        q=i.split("::")
+        for j in range(len(q)): s="::".join(q[j:]); suf[s]=suf.get(s,0)+1
+    known=suf.keys()|defs|{d.split("::")[-1] for d in defs}
+    covers,lost=set(),[]
+    for line in open(sys.argv[1],encoding="utf-8",errors="replace"):
+        m=re.match(r"\s*- \[[xX]\] (.*)",line)
+        if not m: continue
+        h=m.group(1).split(" - ")[0].strip()
+        c={h}|{h[:k] for k,ch in enumerate(h) if ch=="["}
+        covers|={x for x in c if suf.get(x)==1}
+        if not c&known: lost.append(h)
+    cov,exm,unc,owe=[],[],[],[]
+    for i in added:
+        k,why,ps=tree[i]
+        why=why or (why_py(i,ps) if k=="py" else None)
+        q=i.split("::")
+        if why: exm.append(f"exempt ({why}): {i}")
+        elif any("::".join(q[j:]) in covers for j in range(len(q))): cov.append(i)
+        elif k=="js": owe.append(i)
+        else: unc.append(i)
+    say(f"census: {len(tree)} contract(s) in the tree, {len(added)} added against HEAD; {len(lost)} checked line(s) name nothing in the tree ({len(set(lost))} name(s))")
+    rc=0
+    if bad: say(f"FAIL  the census could not read {len(bad)} file(s)"); show([f"unreadable: {b}" for b in bad]); rc=1
+    if not any(k=="py" for k,*_ in tree.values()): say("FAIL  the census is blind: no Python contract found in the tree"); rc=1
+    if got<raw: say(f"FAIL  the census is blind to Rust tests: {raw} test attribute(s), {got} test function(s) found"); rc=1
+    show(exm)
+    if unc: say(f"FAIL  {len(unc)} contract(s) added against HEAD have no checked blade line"); show([f"uncovered: {i}" for i in unc]); rc=1
+    if owe:
+        say(f"SKIP  OWED: {len(owe)} front-end test(s) added against HEAD run outside the ladder; their blades are owed to the machine")
+        show([f"owed: {i}" for i in owe])
+    if not rc: say("PASS  "+(f"every contract added against HEAD is accounted for ({len(added)} added: {len(cov)} covered, {len(exm)} exempt, {len(owe)} owed)" if added else "no contract added against HEAD"))
+    sys.exit(rc or (3 if owe else 0))
+except (subprocess.CalledProcessError,OSError) as e:
+    say(f"FAIL  the census could not run: {e}"); sys.exit(1)
+PY
+  case $? in
+    0) ;;
+    3) owed=1 ;;
+    *) rc_total=1 ;;
+  esac
 }
 
 t4() {
