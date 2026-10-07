@@ -17,6 +17,15 @@ receipt, and no dangling receipt key -- every key resolves to a Cellar span.
     the remainder fits.
   * RE5 -- append and resolve: a resolved receipt leaves the digest and stays
     in the ledger; the ledger never forgets.
+  * RE6 -- no receipt line carries a word of its span: its key, its turns,
+    its kind and its origins, nothing the span said.
+  * RE7 -- a receipt names its kind; an eviction that places no peel is
+    bare, and a kind outside the list is refused before anything leaves.
+  * RE8 -- over its cap the digest folds the oldest open receipts into one
+    line and keeps the newest whole, in order; the ledger never changes.
+  * RE9 -- the instrument reads non-zero: the digest counts the receipts it
+    folded, zero when it fits.
+  * RE10 -- a cap of zero shows no receipt and counts them all folded.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source.
@@ -163,6 +172,94 @@ def test_re5_a_resolved_receipt_leaves_the_digest_and_stays_in_the_ledger():
         assert first.key[:12] not in ledger.digest(cellar)
         for name in ("remove", "delete", "clear", "pop"):
             assert not hasattr(ledger, name), f"no {name}: append and resolve only"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# RE6-RE10 -- what a receipt line says, and how the digest keeps to its cap
+# ---------------------------------------------------------------------------
+def _bare_words(text):
+    return set(text.replace("(", " ").replace(")", " ").replace(";", " ").replace(",", " ").split())
+
+
+def test_re6_no_receipt_line_carries_a_word_of_its_span():
+    mod, restore = _open()
+    try:
+        cellar, ledger = mod.Cellar(), mod.ReceiptLedger()
+        flesh = mod.Flesh([_turn(i) for i in range(1, 5)])
+        receipt = flesh.evict_span(2, cellar, ledger)
+        line = ledger.digest(cellar)
+        assert receipt.key[:12] in line and "t01..t02" in line, "control: the line names its key and its turns"
+        span_words = {word for turn in cellar.get(receipt.key) for word in turn["text"].split()}
+        assert len(span_words) >= 8, "control: the span has words to leak"
+        for text in (line, receipt.stub):
+            assert not span_words & _bare_words(text), f"no word of the span in {text!r}"
+    finally:
+        restore()
+
+
+def test_re7_a_receipt_names_its_kind_and_an_eviction_that_places_no_peel_is_bare():
+    mod, restore = _open()
+    try:
+        cellar, ledger = mod.Cellar(), mod.ReceiptLedger()
+        flesh = mod.Flesh([_turn(i) for i in range(1, 7)])
+        plain = flesh.evict_span(2, cellar, ledger)
+        held = flesh.evict_span(2, cellar, ledger, kind="held")
+        assert plain.kind == "bare" and held.kind == "held"
+        lines = ledger.digest(cellar).splitlines()
+        assert "(bare;" in lines[0] and "(held;" in lines[1]
+        with pytest.raises(ValueError, match="receipt kind"):
+            flesh.evict_span(2, cellar, ledger, kind="kept")
+        assert len(flesh.turns()) == 2 and len(ledger.all()) == 2, "a refused kind evicts nothing"
+    finally:
+        restore()
+
+
+def test_re8_over_its_cap_the_digest_folds_the_oldest_and_keeps_the_newest_whole():
+    mod, restore = _open()
+    try:
+        cellar, ledger = mod.Cellar(), mod.ReceiptLedger()
+        flesh = mod.Flesh([_turn(i) for i in range(1, 41)])
+        made = [flesh.evict_span(2, cellar, ledger) for _ in range(20)]
+        whole = ledger.digest(cellar)
+        cap = _words(whole) // 3
+        folded = ledger.digest(cellar, cap=cap, estimate=_words)
+        assert _words(folded) <= cap
+        lines = folded.splitlines()
+        assert 1 < len(lines) < 20, "some receipts whole, the rest folded"
+        assert lines[1:] == whole.splitlines()[21 - len(lines):], "the newest stay whole, in order"
+        assert "t01.." in lines[0] and "folded" in lines[0], "one line for the oldest, from their first turn"
+        assert ledger.all() == made, "the ledger never changes"
+    finally:
+        restore()
+
+
+def test_re9_the_digest_counts_what_it_folded_and_zero_when_it_fits():
+    mod, restore = _open()
+    try:
+        cellar, ledger = mod.Cellar(), mod.ReceiptLedger()
+        flesh = mod.Flesh([_turn(i) for i in range(1, 41)])
+        for _ in range(20):
+            flesh.evict_span(2, cellar, ledger)
+        whole = ledger.digest(cellar)
+        assert ledger.render(cellar) == (whole, 0)
+        assert ledger.render(cellar, cap=_words(whole), estimate=_words) == (whole, 0)
+        text, folded = ledger.render(cellar, cap=_words(whole) // 3, estimate=_words)
+        assert folded >= 1
+        assert folded + len(text.splitlines()) - 1 == 20, "folded and whole account for every open receipt"
+    finally:
+        restore()
+
+
+def test_re10_a_cap_of_zero_shows_no_receipt_and_folds_them_all():
+    mod, restore = _open()
+    try:
+        cellar, ledger = mod.Cellar(), mod.ReceiptLedger()
+        flesh = mod.Flesh([_turn(i) for i in range(1, 7)])
+        for _ in range(3):
+            flesh.evict_span(2, cellar, ledger)
+        assert ledger.render(cellar, cap=0, estimate=_words) == ("", 3)
     finally:
         restore()
 

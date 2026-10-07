@@ -30,6 +30,11 @@ number means what it says.
   * DA7 -- the pair is tried in the run's order before the first turn: a
     model that cannot answer beside the other -- the governor refusing the
     load, say -- is reported by name with its reason, and no turn is asked.
+  * DA9 -- the onion arm hands the librarian each turn with the origin the
+    executor gives it -- the user's words typed, the answer the
+    assistant's -- so the measurement runs the queue production runs.
+  * DA10 -- after a failed call the onion arm's curation goes on without
+    the model, as a burst does: one failed call per turn, then none.
 
 Local-only (the public distribution ships no tests). The script is loaded
 from its path; the onion's modules come through the shared isolation
@@ -337,6 +342,54 @@ def test_da8_the_arms_differ_by_the_onion_block_in_front_of_the_turn_and_nothing
         with pytest.raises(ValueError):
             ab.onion_arm(recorder([]), librarian=lib, config=replace(config, persist_path=str(tmp_path / "onion.db")),
                          summarize=_faithful, wrap=wrap)
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da9_the_onion_arm_hands_each_turn_with_the_origin_the_executor_gives_it():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        peels, composer = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.composer"]
+        config = lib.LibrarianConfig(enabled=True, model="fake:1b", keep_alive="0", min_new_turns=1, temperature=0.1,
+                                     num_predict=64, persist_path="", require_encryption=False)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        roomy = composer.Budget(window=4000, reserve=200, core=300, receipts=300, peels=800, flesh=2000, turn=200)
+        onion = ab.onion_arm(lambda messages: "Noted.", librarian=lib, config=config, summarize=_faithful,
+                             wrap=lambda block: block, gate=gate, budget=roomy)
+        ab.run_arm(ab.TURNS[:3], onion)
+        turns = lib.state_for("drift-ab", config).flesh.turns()
+        assert len(turns) == 6, "control: every turn is still in the Flesh"
+        assert [t.get("origin") for t in turns] == ["typed", "assistant"] * 3, "typed, then the assistant's"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da10_after_a_failed_call_the_onion_arm_goes_on_without_the_model():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        peels, composer = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.composer"]
+        config = lib.LibrarianConfig(enabled=True, model="fake:1b", keep_alive="0", min_new_turns=1, temperature=0.1,
+                                     num_predict=64, persist_path="", require_encryption=False)
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=1)
+        tight = composer.Budget(window=4000, reserve=200, core=300, receipts=300, peels=800, flesh=1, turn=200)
+        calls = []
+
+        def down(turns):
+            calls.append(len(turns))
+            raise TimeoutError("no answer")
+
+        onion = ab.onion_arm(lambda messages: "Noted: Bob moved the build to Berlin on 2026-03-04.", librarian=lib,
+                             config=config, summarize=down, wrap=lambda block: block, gate=gate, budget=tight)
+        ab.run_arm(ab.TURNS[:6], onion)
+        steps = sum(lib.counters().get("eviction", {}).values())
+        assert steps > 6, "control: turns ran more than one step"
+        assert len(calls) == 6, "one failed call a turn, then the steps go on without the model"
     finally:
         lib.reset_librarian()
         restore()

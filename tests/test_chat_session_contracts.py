@@ -37,6 +37,17 @@ exception into the loop that prints.
     digest and adopts nothing; ``/adopt REF DIGEST`` adopts those bytes and
     no others, after which ``/skill`` runs the skill; a skill written here
     has nothing to adopt.
+  * CH13 -- a ``/close`` that ended without the model -- no backend, or a
+    call that failed on the way -- says so; one whose model answered does
+    not.
+  * CH12 -- CH4 as the queue now runs: every refusal is an event by name and
+    the session goes on; a ``/close`` whose summaries the gate refuses is no
+    refusal any more, it empties the Flesh, and its event carries no word of
+    the turns it closed.
+  * CH11 -- ``/proposals`` lists the decisions the queue offers the Core,
+    word for word with their turn and origin; ``/accept ID`` pins one, as
+    the user; a line naming more or less than one open proposal is refused
+    by name, and nothing is pinned.
 
 Local-only (the public distribution ships no tests). The executor window is
 the one of the onion wiring suite; the librarian, its stores and the skill
@@ -573,5 +584,126 @@ def test_ch10_recall_reads_a_code_block_by_the_key_its_marker_names(tmp_path):
         assert _CODE in recalled[0].text and "python" in recalled[0].text, "the block and its language"
         refused = _kinds(_run(session, "/recall code:ffffffffffff"), "refusal")
         assert len(refused) == 1 and "no code block behind code:ffffffffffff" in refused[0], "an unknown key, by name"
+    finally:
+        restore()
+
+
+def test_ch12_every_refusal_is_an_event_and_a_close_the_gate_refuses_still_empties_the_flesh(tmp_path):
+    # Replaces CH4: every assertion holds as it was but the close's. A span
+    # whose summary the gate refuses no longer stops a close; it leaves on a
+    # lower rung of the queue, and nothing is said of its words.
+    loaded, scripted, conversations, restore = _load()
+    try:
+        off, *_ = _onion_seam(loaded, tmp_path / "off", enabled=False)
+        session = _session(loaded, librarian=off)
+        _run(session, "Hello there.")
+        assert "switched off" in _kinds(_run(session, "/pin anything"), "refusal")[0]
+
+        blank = lambda turns: "nothing of note"  # noqa: E731
+        seam, lib, cfg, _ = _onion_seam(loaded, tmp_path / "on", summarize=blank)
+        session = _session(loaded, librarian=seam, new_conversation=lambda title, model: "conv-on")
+        cases = {
+            "/pin anything": "needs a conversation",
+            "/close": "needs a conversation",
+            "/recall abc": "needs a conversation",
+            "/open": "needs a conversation id",
+            "/open nobody": "nothing persisted",
+            "/frobnicate": "unknown command /frobnicate",
+        }
+        for line, reason in cases.items():
+            refusals = _kinds(_run(session, line), "refusal")
+            assert len(refusals) == 1 and reason in refusals[0], line
+
+        _run(session, "Alice runs service 1 on 2026-03-01.")
+        cid = session.conversation_id
+        _mirror(lib, cfg, conversations, cid)
+        assert "needs the text" in _kinds(_run(session, "/pin"), "refusal")[0]
+        assert "not in the ledger" in _kinds(_run(session, "/recall " + "0" * 64), "refusal")[0]
+        closed = _run(session, "/close")
+        assert _kinds(closed, "refusal") == [], "no span stops a close"
+        assert "1 span(s) evicted, 0 turn(s) left verbatim" in closed[0].text
+        assert lib.peek_state(cid, cfg).flesh.turns() == [], "the Flesh is empty"
+        assert not any("Alice" in e.text or "2026" in e.text for e in closed), "no word of the turns it closed"
+
+        assert "".join(_kinds(_run(session, "Still here?"), "token")) == "Hello world", "the session went on"
+        quit_events = _run(session, "/quit")
+        assert [e.kind for e in quit_events] == ["quit"]
+        assert "ended" in _kinds(_run(session, "Anyone?"), "refusal")[0]
+    finally:
+        restore()
+
+    loaded, scripted, conversations, restore = _load(fail=True)
+    try:
+        session = _session(loaded, executor=SimpleNamespace(execute=_raising))
+        refusals = _kinds(_run(session, "Hello?"), "refusal")
+        assert refusals == ["turn refused: RuntimeError: executor down"], "a failed turn is said by name"
+        assert "/help" in _kinds(_run(session, "/help"), "info")[0], "and the session goes on"
+    finally:
+        restore()
+
+
+_TYPED = [
+    {"role": "user", "origin": "typed", "segments": [],
+     "content": "Alice moved the build to Berlin on 2026-03-04. We keep Docker on the build server."},
+    {"role": "assistant", "origin": "assistant", "segments": [],
+     "content": "Noted: the Berlin build runs 12 jobs a day, a sensible load for that machine. "
+                "Bob checks the logs every morning."},
+]
+_DECISION = "We keep Docker on the build server."
+_LOSSY = "Alice moved the build to Berlin on 2026-03-04. The Berlin build runs 12 jobs a day. Bob checks the logs every morning."
+
+
+def test_ch11_proposals_are_listed_word_for_word_and_taken_one_at_a_time_from_the_terminal(tmp_path):
+    loaded, scripted, conversations, restore = _load()
+    try:
+        from dataclasses import replace
+
+        seam, lib, cfg, _ = _onion_seam(loaded, tmp_path / "on")
+        seam.proposals = lambda cid: lib.proposals(cid, config=cfg)
+        seam.accept_proposal = lambda cid, pid, actor: lib.accept_proposal(cid, pid, actor=actor, config=cfg)
+        seam.decline_proposal = lambda cid, pid, actor: lib.decline_proposal(cid, pid, actor=actor, config=cfg)
+        session = _session(loaded, librarian=seam, new_conversation=lambda title, model: "conv-on")
+        _run(session, "Hello there.")
+        cid = session.conversation_id
+        assert "no open proposal" in _kinds(_run(session, "/proposals"), "info")[0], "control: none yet"
+
+        peels, composer = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.composer"]
+        tiny = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+        state = lib.state_for(cid, cfg)
+        state.mirror(_TYPED)
+        held = lib.curate(state, lambda turns: _LOSSY, gate=replace(peels.load_gate(), span_turns=2), budget=tiny,
+                          ladder=replace(peels.load_ladder(), rho=0.5))
+        assert held.rung == "held", "control: the burst held the span with the decision"
+
+        listed = _kinds(_run(session, "/proposals"), "info")[0]
+        assert _DECISION in listed and "t0001" in listed and "typed" in listed, "word for word, turn and origin"
+        (offered,) = lib.proposals(cid, config=cfg)
+        prefix = offered["id"][:12]
+        refused = _kinds(_run(session, f"/accept {prefix} {prefix}"), "refusal")
+        assert len(refused) == 1 and "one is needed" in refused[0], "one at a time"
+        assert state.core.all() == [], "a refusal pins nothing"
+        accepted = _kinds(_run(session, f"/accept {prefix}"), "info")
+        assert len(accepted) == 1 and "pinned to the Core" in accepted[0]
+        assert [e.text for e in state.core.all()] == [_DECISION], "the exact words"
+        assert "no open proposal" in _kinds(_run(session, "/proposals"), "info")[0]
+        gone = _kinds(_run(session, f"/decline {prefix}"), "refusal")
+        assert len(gone) == 1 and "one is needed" in gone[0], "an accepted proposal is no longer open"
+    finally:
+        restore()
+
+
+def test_ch13_a_close_that_ended_without_the_model_says_so(tmp_path):
+    loaded, scripted, conversations, restore = _load()
+    try:
+        def down(turns, *missing):
+            raise TimeoutError("no answer")
+
+        for name, summarize, said in (("down", down, True), ("up", _faithful, False)):
+            seam, lib, cfg, _ = _onion_seam(loaded, tmp_path / name, summarize=summarize)
+            session = _session(loaded, librarian=seam, new_conversation=lambda title, model, name=name: f"conv-{name}")
+            _run(session, "Alice runs service 1 on 2026-03-01.")
+            _mirror(lib, cfg, conversations, session.conversation_id)
+            closed = _run(session, "/close")
+            assert ("without the model" in closed[0].text) is said, name
     finally:
         restore()

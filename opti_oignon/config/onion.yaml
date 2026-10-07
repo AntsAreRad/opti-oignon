@@ -14,7 +14,7 @@ reserve: 2048
 
 layers:
   core: 1024        # pinned invariants; never cut, refused if over
-  receipts: 512     # one line per evicted span, with its recall key
+  receipts: 512     # a line per evicted span (key, turns, kind, origins); the oldest fold into one
   peels: 3072       # retrieved episode summaries, cut to fit, whole items only
   flesh: 5120       # last turns verbatim; a turn leaves only with a receipt
   turn: 512         # the current turn; refused if over, never truncated
@@ -136,6 +136,12 @@ decisions:
 
 peels:
   span_turns: 4             # turns evicted together into one leaf peel
+queue:
+  rho: 0.5                  # a repaired peel longer than rho times its span saves too little: the span is held
+  exact_cover: 16           # verbatim units at or under which a cover is the fewest; above, greedy (at most 20)
+  anchors: 768              # tokens of the peels layer the anchors of held spans may take
+  proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day; the rest wait for a later day
+  copy_shared_words: 2      # content words a summary's sentence shares with a document, tool or web page to be dropped as a copy
 
 # The switch. Off, the chat path keeps the working-memory block it has today
 # and the librarian is never asked; on, the librarian mirrors each saved
@@ -147,7 +153,10 @@ librarian:
   model: "qwen3:4b"        # placeholder until the host measurement picks one
   keep_alive: "0"          # unloadable by default: released after every burst
   min_new_turns: 8         # turns of growth before a curation fires
-  temperature: 0.1
+  max_steps_per_burst: 16  # the most spans one burst evicts, so that no burst runs away with the machine
+  call_timeout_s: 120      # seconds one call may take, held by the librarian; past it the run goes on without the model
+  temperature: 0.0        # with the seed below, the same turns ask for the same summary
+  seed: 1                 # the sampling seed every librarian call carries
   num_predict: 256
 
 # Persistence. With a path, every conversation's Core, Cellar, receipts,

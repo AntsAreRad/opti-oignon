@@ -262,9 +262,16 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, history_tokens=HISTORY
         reply = str(ask(messages))
         history.extend([{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
         state = librarian.state_for(conversation_id, config)
-        state.mirror(history)
+        # The librarian reads each turn with the origin the executor gives
+        # it: the user's words typed, the answer the assistant's. The model's
+        # window above keeps the plain turns, so the arms differ by the block.
+        state.mirror([dict(m, origin="typed" if m["role"] == "user" else "assistant") for m in history])
+        model = summarize
         for _ in range(MAX_CURATION_STEPS):
-            if not librarian.curate(state, summarize, gate=gate, budget=budget).evicted:
+            outcome = librarian.curate(state, model, gate=gate, budget=budget)
+            # As a burst does: a model that failed is not asked again this turn.
+            model, _reask = librarian.broken(outcome, model, None)
+            if not outcome.evicted:
                 break
         return reply
 

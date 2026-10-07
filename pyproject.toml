@@ -790,6 +790,17 @@ fail_under = 0
 # way to q37, q35 (332 models) to q38, and the required-field census q36 to
 # q39. They stay in the tree word for word.
 #
+# The onion's queue no longer stops on a summary the gate refuses: the span
+# leaves on a lower rung of the ladder -- repaired with verbatim units of its
+# own, or held with anchors in the Cellar -- and a close needs no model to
+# empty the Flesh. Five contracts asserted the stop: gf20 (lb4's refused
+# summary leaving the Flesh as it was), gf24 (lb15's close refused without a
+# summariser), gf25 (lb16's refused span stopping the close), gf26 (lb17's
+# refused remainder saved) and ch4 (the close refusal as a session event).
+# They give way to oq14, oq15, oq16 and oq17 in
+# tests/test_onion_queue_contracts.py and to ch12 beside ch4, each holding
+# every other assertion as it was. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1011,4 +1022,9 @@ addopts = """
     --deselect=tests/test_api_schemas_contracts.py::test_q25_chat_request_surface_is_exactly_its_seventeen_fields
     --deselect=tests/test_api_schemas_contracts.py::test_q35_window_holds_and_the_module_is_import_pure_at_332_models
     --deselect=tests/test_api_schemas_contracts.py::test_q36_required_field_census_matches_the_snapshot_with_the_code_response
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf20_lb4_holds_on_turns_that_decide_nothing
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf24_lb15_holds_on_turns_that_decide_nothing
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf25_lb16_holds_on_turns_that_decide_nothing
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf26_lb17_holds_on_turns_that_decide_nothing
+    --deselect=tests/test_chat_session_contracts.py::test_ch4_every_refusal_is_an_event_by_name_and_the_session_goes_on
 """

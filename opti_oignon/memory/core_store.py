@@ -64,6 +64,33 @@ class CoreEntry:
         return "superseded" if self.superseded_by else "active"
 
 
+@dataclass(frozen=True)
+class Proposal:
+    """A decision the user typed, offered to the Core and never written there by itself.
+
+    The queue makes one from a held span's anchor; only the user's own
+    verb pins it, its exact words read from the Cellar, where ``span_key``,
+    ``turn_id``, ``start`` and ``stop`` place them; ``id`` is
+    ``proposal_id`` of that place. ``status`` is "open", "accepted",
+    "declined", or "deferred" while the day's cap had no room for it;
+    ``made_on`` the UTC day it counts against.
+    """
+
+    id: str
+    span_key: str
+    turn_id: str
+    start: int
+    stop: int
+    origin: str
+    made_on: str
+    status: str = "open"
+
+
+def proposal_id(span_key, turn_id, start, stop):
+    """The id of a proposal: the digest of its place, so a place moved in a file no longer answers to it."""
+    return hashlib.sha256(f"{span_key}:{turn_id}:{int(start)}:{int(stop)}".encode()).hexdigest()
+
+
 class CoreStore:
     """Content-addressed, supersession-only, self-verifying."""
 

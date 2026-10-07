@@ -20,11 +20,13 @@ librarian and nothing else does; a contract on the tree says so.
 
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 checkpoint_before_apply = True
 
-_STUB_HEAD = 48
+# What stands for an evicted span in the window, by name: a peel the gate
+# accepted, anchors kept verbatim where no peel could pass, or nothing.
+RECEIPT_KINDS = ("accepted", "held", "bare")
 
 
 def _canonical(span):
@@ -92,6 +94,18 @@ class Receipt:
     stub: str
     turn_ids: tuple
     resolved: bool = False
+    # What stands for the span in the window, one of ``RECEIPT_KINDS``. A
+    # receipt read back from a store that predates kinds was made by the
+    # gated eviction, then the only writer: its peel stands for it.
+    kind: str = "accepted"
+    # Where in its span the words kept verbatim for a held span lie, each
+    # ``(turn_id, start, stop)`` into that turn's text in the Cellar: the
+    # words are read from the Cellar, never copied here.
+    anchors: tuple = ()
+    # The origins its span's words declare, sorted: a cache of what the
+    # Cellar holds, so no part of what the receipt is. Empty for a receipt
+    # read back from a store, and read from the Cellar when its line is drawn.
+    origins: tuple = field(default=(), compare=False)
 
 
 def span_origins(span):
@@ -114,11 +128,37 @@ def span_origins(span):
     return tuple(sorted(found))
 
 
-def make_receipt(span, key):
+def _require_kind(kind):
+    if kind not in RECEIPT_KINDS:
+        raise ValueError(f"{kind!r} is not a receipt kind: one of {', '.join(RECEIPT_KINDS)}")
+
+
+def _turns(ids):
+    if not ids:
+        return "(none)"
+    return ids[0] if len(ids) == 1 else f"{ids[0]}..{ids[-1]}"
+
+
+def _line(key, ids, kind, origins):
+    """A receipt's line: its key, its turns, its kind and its origins; never a word its span said."""
+    return f"{key[:12]} turns {_turns(ids)} ({kind}; {', '.join(origins) or 'legacy'})"
+
+
+def _folded(receipts):
+    """One line for the oldest open receipts: how many spans, and the turns they ran over."""
+    first, last = receipts[0].turn_ids, receipts[-1].turn_ids
+    start = first[0] if first else "(none)"
+    end = last[-1] if last else "(none)"
+    return f"{len(receipts)} earlier spans folded: turns {start}..{end}"
+
+
+def make_receipt(span, key, kind="bare", anchors=()):
+    """The receipt of ``span`` stored under ``key``: no word of the span, only where and what it was."""
+    _require_kind(kind)
     ids = tuple(str(t.get("turn_id", "")) for t in span)
-    head = " ".join(str(span[0].get("text", "")).split())[:_STUB_HEAD] if span else ""
-    span_ids = ids[0] if len(ids) == 1 else f"{ids[0]}..{ids[-1]}"
-    return Receipt(key=key, stub=f"{key[:12]} turns {span_ids}: {head}", turn_ids=ids)
+    origins = span_origins(span)
+    return Receipt(key=key, stub=_line(key, ids, kind, origins), turn_ids=ids, kind=kind,
+                   anchors=tuple(tuple(anchor) for anchor in anchors), origins=origins)
 
 
 class ReceiptLedger:
@@ -160,10 +200,56 @@ class ReceiptLedger:
                 return cellar.get(key)
         raise DanglingReceiptError(f"receipt {key} is not in the ledger")
 
-    def digest(self, cellar):
-        """One line per open receipt, only once every key is known to resolve."""
+    def digest(self, cellar, cap=None, estimate=None):
+        """One line per open receipt, only once every key is known to resolve; within ``cap`` when given."""
+        return self.render(cellar, cap, estimate)[0]
+
+    def render(self, cellar, cap=None, estimate=None):
+        """The digest and how many open receipts it folded to keep within ``cap`` tokens.
+
+        Each line is drawn from the receipt's fields, never from a stored
+        stub, so no line carries a word of its span. Without a cap every
+        open receipt has its line. With one, counted by ``estimate`` -- the
+        composer's, so the cap is counted as the window counts it -- the
+        oldest open receipts fold into a single line naming how many spans
+        they were and the turns they ran over, and the newest keep a line
+        each, as many as fit beside it. A cap too small for the folded line
+        shows nothing and counts every open receipt folded. The ledger
+        itself never changes.
+        """
         self._check(cellar)
-        return "\n".join(r.stub for r in self.open())
+        opened = self.open()
+        lines = [self._line_of(r, cellar) for r in opened]
+        whole = "\n".join(lines)
+        if cap is None:
+            return whole, 0
+        if estimate is None:
+            raise ValueError("a digest held to a cap needs the estimator its cap is counted in")
+        if estimate(whole) <= cap:
+            return whole, 0
+
+        def held(kept):
+            text = "\n".join([_folded(opened[: len(opened) - kept])] + lines[len(lines) - kept:])
+            return text if estimate(text) <= cap else None
+
+        # The most newest receipts kept whole beside one folded line, by
+        # bisection: one line more never costs fewer tokens.
+        best, low, high = None, 0, len(lines) - 1
+        while low <= high:
+            middle = (low + high) // 2
+            text = held(middle)
+            if text is None:
+                high = middle - 1
+            else:
+                best, low = (middle, text), middle + 1
+        if best is None:
+            return "", len(opened)
+        kept, text = best
+        return text, len(opened) - kept
+
+    def _line_of(self, receipt, cellar):
+        origins = receipt.origins or span_origins(cellar.get(receipt.key))
+        return _line(receipt.key, receipt.turn_ids, receipt.kind, origins)
 
     def origins(self, key, cellar):
         """The origins the receipt's span declares, read from the Cellar now; no receipt changes."""
@@ -185,26 +271,35 @@ class Flesh:
     def tokens(self, estimate):
         return sum(estimate(str(t.get("text", ""))) for t in self._turns)
 
-    def evict_oldest(self, cellar, ledger):
+    def evict_oldest(self, cellar, ledger, kind="bare"):
         """Move the oldest turn to the Cellar and leave its receipt. One step."""
+        _require_kind(kind)
         if not self._turns:
             raise ValueError("nothing to evict: Flesh is empty")
         span = [self._turns.pop(0)]
         key = cellar.store(span)
-        return ledger.append(make_receipt(span, key))
+        return ledger.append(make_receipt(span, key, kind))
 
-    def evict_span(self, count, cellar, ledger):
-        """Move the oldest ``count`` turns to the Cellar as one span, under one receipt."""
+    def evict_span(self, count, cellar, ledger, kind="bare", anchors=()):
+        """Move the oldest ``count`` turns to the Cellar as one span, under one receipt of ``kind``.
+
+        The kind names what stands for the span in the window; this method
+        places nothing itself, so a caller that placed no peel leaves the
+        default, bare. A held span names its ``anchors``, places in its own
+        turns. A kind outside ``RECEIPT_KINDS`` is refused before anything
+        leaves.
+        """
+        _require_kind(kind)
         count = int(count)
         if count < 1 or not self._turns:
             raise ValueError("a span of at least one turn is evicted, from a Flesh that has one")
         span, self._turns = self._turns[:count], self._turns[count:]
         key = cellar.store(span)
-        return ledger.append(make_receipt(span, key))
+        return ledger.append(make_receipt(span, key, kind, anchors))
 
-    def evict_until_fits(self, cap, estimate, cellar, ledger):
+    def evict_until_fits(self, cap, estimate, cellar, ledger, kind="bare"):
         """Evict from the oldest until the remainder fits ``cap``. Receipts, in order."""
         receipts = []
         while self._turns and self.tokens(estimate) > cap:
-            receipts.append(self.evict_oldest(cellar, ledger))
+            receipts.append(self.evict_oldest(cellar, ledger, kind))
         return receipts

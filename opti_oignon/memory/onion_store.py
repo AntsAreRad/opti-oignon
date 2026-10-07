@@ -22,6 +22,12 @@ unreachable refuses too, and creates no file.
 The root over the four stores is a pure function of their canonical text,
 recomputed at every save and checked at every load. The drift ledger has
 its own table and its own root is a decision for another block.
+
+What the queue adds to a receipt -- its kind when no accepted peel stands
+for its span, the anchors it keeps in the Cellar -- lives in a table of
+marks beside the receipts, and enters the root only when a mark exists: a
+state with none has the root it always had, so a file written before marks
+existed still answers to its rows.
 """
 
 import hashlib
@@ -36,7 +42,13 @@ checkpoint_before_apply = True
 
 logger = logging.getLogger(__name__)
 
-TABLES = ("onion_core", "onion_cellar", "onion_receipts", "onion_peels", "onion_flesh", "onion_cursor")
+TABLES = (
+    "onion_core", "onion_cellar", "onion_receipts", "onion_peels", "onion_flesh", "onion_cursor",
+    "onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals",
+)
+_PROPOSAL_STATUSES = ("open", "accepted", "declined", "deferred")
+# The rungs a peel can be made on; a mark naming another is refused on load.
+_PEEL_RUNGS = ("accepted", "reasked", "repaired")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS onion_core (
@@ -88,6 +100,40 @@ CREATE TABLE IF NOT EXISTS onion_cursor (
     root TEXT NOT NULL,
     saved_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS onion_receipt_marks (
+    conversation TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    anchors TEXT NOT NULL,
+    PRIMARY KEY (conversation, seq)
+);
+CREATE TABLE IF NOT EXISTS onion_peel_marks (
+    conversation TEXT NOT NULL,
+    id TEXT NOT NULL,
+    rung TEXT NOT NULL,
+    stitched TEXT NOT NULL,
+    residual TEXT NOT NULL,
+    PRIMARY KEY (conversation, id)
+);
+CREATE TABLE IF NOT EXISTS onion_proposals (
+    conversation TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    id TEXT NOT NULL,
+    span_key TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    stop INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    made_on TEXT NOT NULL,
+    status TEXT NOT NULL,
+    PRIMARY KEY (conversation, seq)
+);
+CREATE TABLE IF NOT EXISTS onion_refusals (
+    conversation TEXT NOT NULL,
+    span_key TEXT NOT NULL,
+    mark TEXT NOT NULL,
+    PRIMARY KEY (conversation, span_key)
+);
 """
 
 
@@ -123,6 +169,20 @@ class Snapshot:
     peels: tuple     # (id, text, level, sources, children, source_digest, passed, total) in order
     flesh: tuple     # turns, oldest first
     seen: int
+    # (seq, kind, anchors) for each receipt that is not a plain accepted
+    # one, by its place in the ledger; anchors as (turn_id, start, stop).
+    receipt_marks: tuple = ()
+    # (id, rung, stitched, residual) for each peel the queue marked: one
+    # made on another rung than the summary's, with units stitched in, or
+    # with probes it still fails.
+    peel_marks: tuple = ()
+    # (id, span_key, turn_id, start, stop, origin, made_on, status) for each
+    # proposal to the Core, in the order made. Not in the root: a proposal
+    # tells the model nothing, and its words are shown before it is taken.
+    proposals: tuple = ()
+    # (span_key, mark) for each span whose second summary was refused, by
+    # key. Not in the root: a mark saves a call, it tells the model nothing.
+    refusals: tuple = ()
 
 
 def onion_root(snapshot):
@@ -131,15 +191,26 @@ def onion_root(snapshot):
     A pure function of what is saved, so two processes holding the same
     state compute the same root and one holding a moved byte does not.
     The Flesh and the cursor are not in it: they are the part that moves
-    every turn, and the root anchors what the model is told was kept.
+    every turn, and the root anchors what the model is told was kept. The
+    receipts' marks are in it when there is one, and absent otherwise, so
+    a state without marks keeps the root it had before marks existed.
     """
-    payload = _canonical({
+    rows = {
         "core": [list(row) for row in snapshot.core],
         "cellar": [[key, span] for key, span in snapshot.cellar],
         "receipts": [[key, stub, list(ids), bool(resolved)] for key, stub, ids, resolved in snapshot.receipts],
         "peels": [list(row) for row in snapshot.peels],
-    })
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    }
+    if snapshot.receipt_marks:
+        rows["receipt_marks"] = [
+            [int(seq), kind, [list(anchor) for anchor in anchors]] for seq, kind, anchors in snapshot.receipt_marks
+        ]
+    if snapshot.peel_marks:
+        rows["peel_marks"] = [
+            [p_id, rung, [list(unit) for unit in stitched], [list(probe) for probe in residual]]
+            for p_id, rung, stitched, residual in snapshot.peel_marks
+        ]
+    return hashlib.sha256(_canonical(rows).encode("utf-8")).hexdigest()
 
 
 def snapshot_of(state):
@@ -147,13 +218,29 @@ def snapshot_of(state):
     core = tuple((e.id, e.text, e.superseded_by) for e in state.core.all())
     cellar = tuple((key, state.cellar.get(key)) for key in state.cellar.keys())
     receipts = tuple((r.key, r.stub, tuple(r.turn_ids), bool(r.resolved)) for r in state.ledger.all())
+    marks = tuple(
+        (seq, r.kind, tuple(tuple(anchor) for anchor in r.anchors))
+        for seq, r in enumerate(state.ledger.all())
+        if r.kind != "accepted" or r.anchors
+    )
     peels = tuple(
         (p.id, p.text, int(p.level), tuple(p.sources), tuple(p.children), p.source_digest,
          int(p.probes_passed), int(p.probes_total))
         for p in state.tree.all()
     )
+    peel_marks = tuple(
+        (p.id, p.rung, tuple(tuple(unit) for unit in p.stitched), tuple(tuple(probe) for probe in p.residual))
+        for p in state.tree.all()
+        if p.rung != "accepted" or p.stitched or p.residual
+    )
+    proposals = tuple(
+        (q.id, q.span_key, q.turn_id, int(q.start), int(q.stop), q.origin, q.made_on, q.status)
+        for q in getattr(state, "proposals", ())
+    )
+    refusals = tuple(sorted((str(k), str(v)) for k, v in getattr(state, "refusals", {}).items()))
     return Snapshot(core=core, cellar=cellar, receipts=receipts, peels=peels,
-                    flesh=tuple(state.flesh.turns()), seen=int(state.seen))
+                    flesh=tuple(state.flesh.turns()), seen=int(state.seen), receipt_marks=marks,
+                    peel_marks=peel_marks, proposals=proposals, refusals=refusals)
 
 
 def _is_encrypted(conn):
@@ -198,9 +285,43 @@ class OnionStore:
         return closing(conn)
 
     def _init_db(self):
+        """Create the tables of a new file, or bring an older one to ``SCHEMA_VERSION`` through its migrations.
+
+        One write transaction from the first read of the version to the last
+        write: a second process opening the same file waits, then finds it
+        brought up, and migrates nothing twice.
+        """
         with self._lock, self._conn() as conn:
-            conn.executescript(_SCHEMA)
-            conn.commit()
+            # The transaction is this method's, named in SQL, whichever
+            # driver the connection comes from: none of them opens or closes
+            # one behind it.
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+                if version > SCHEMA_VERSION:
+                    raise OnionStoreError(
+                        f"the onion store at {self._path} is of schema {version}, newer than this build's "
+                        f"{SCHEMA_VERSION} ({_MIGRATIONS[-1][1]}): refused, left as it was"
+                    )
+                written = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'onion_cursor'"
+                ).fetchone() is not None
+                for statement in _SCHEMA_STATEMENTS:
+                    conn.execute(statement)
+                if written:
+                    for target, _name, step in _MIGRATIONS:
+                        if version < target:
+                            step(conn)
+                if version != SCHEMA_VERSION:
+                    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                conn.execute("COMMIT")
+            except BaseException:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 - the engine may have rolled back already: the first error is told
+                    pass
+                raise
 
     # -- save --------------------------------------------------------------
 
@@ -237,6 +358,26 @@ class OnionStore:
                 "INSERT INTO onion_flesh (conversation, seq, turn) VALUES (?, ?, ?)",
                 [(cid, i, _canonical(turn)) for i, turn in enumerate(snapshot.flesh)],
             )
+            conn.executemany(
+                "INSERT INTO onion_receipt_marks (conversation, seq, kind, anchors) VALUES (?, ?, ?, ?)",
+                [(cid, int(seq), kind, _canonical([list(anchor) for anchor in anchors]))
+                 for seq, kind, anchors in snapshot.receipt_marks],
+            )
+            conn.executemany(
+                "INSERT INTO onion_peel_marks (conversation, id, rung, stitched, residual) VALUES (?, ?, ?, ?, ?)",
+                [(cid, p_id, rung, _canonical([list(unit) for unit in stitched]),
+                  _canonical([list(probe) for probe in residual]))
+                 for p_id, rung, stitched, residual in snapshot.peel_marks],
+            )
+            conn.executemany(
+                "INSERT INTO onion_proposals (conversation, seq, id, span_key, turn_id, start, stop, origin, made_on, "
+                "status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(cid, i, *row) for i, row in enumerate(snapshot.proposals)],
+            )
+            conn.executemany(
+                "INSERT INTO onion_refusals (conversation, span_key, mark) VALUES (?, ?, ?)",
+                [(cid, key, mark) for key, mark in snapshot.refusals],
+            )
             conn.execute(
                 "INSERT INTO onion_cursor (conversation, seen, root, saved_at) VALUES (?, ?, ?, ?)",
                 (cid, snapshot.seen, root, _now()),
@@ -248,37 +389,8 @@ class OnionStore:
 
     def load_snapshot(self, conversation_id):
         """The saved rows of a conversation, or None when the file does not know it."""
-        cid = str(conversation_id)
         with self._lock, self._conn() as conn:
-            cursor = conn.execute("SELECT seen, root FROM onion_cursor WHERE conversation = ?", (cid,)).fetchone()
-            if cursor is None:
-                return None, None
-            core = conn.execute(
-                "SELECT id, text, superseded_by FROM onion_core WHERE conversation = ? ORDER BY seq", (cid,)
-            ).fetchall()
-            cellar = conn.execute(
-                "SELECT key, span FROM onion_cellar WHERE conversation = ? ORDER BY seq", (cid,)
-            ).fetchall()
-            receipts = conn.execute(
-                "SELECT key, stub, turn_ids, resolved FROM onion_receipts WHERE conversation = ? ORDER BY seq", (cid,)
-            ).fetchall()
-            peels = conn.execute(
-                "SELECT id, text, level, sources, children, source_digest, probes_passed, probes_total "
-                "FROM onion_peels WHERE conversation = ? ORDER BY seq", (cid,)
-            ).fetchall()
-            flesh = conn.execute(
-                "SELECT turn FROM onion_flesh WHERE conversation = ? ORDER BY seq", (cid,)
-            ).fetchall()
-        snapshot = Snapshot(
-            core=tuple((r[0], r[1], r[2]) for r in core),
-            cellar=tuple((r[0], json.loads(r[1])) for r in cellar),
-            receipts=tuple((r[0], r[1], tuple(json.loads(r[2])), bool(r[3])) for r in receipts),
-            peels=tuple((r[0], r[1], int(r[2]), tuple(json.loads(r[3])), tuple(json.loads(r[4])), r[5], int(r[6]), int(r[7]))
-                        for r in peels),
-            flesh=tuple(json.loads(r[0]) for r in flesh),
-            seen=int(cursor[0]),
-        )
-        return snapshot, cursor[1]
+            return _read_snapshot(conn, str(conversation_id))
 
     def load(self, conversation_id, state):
         """Rebuild ``state`` (an empty librarian state) from the file, proving every row.
@@ -305,11 +417,141 @@ class OnionStore:
             return [r[0] for r in conn.execute("SELECT conversation FROM onion_cursor ORDER BY conversation").fetchall()]
 
 
+def _read_snapshot(conn, cid):
+    """The rows of conversation ``cid`` on an open connection, and its saved root; ``(None, None)`` when unknown."""
+    cursor = conn.execute("SELECT seen, root FROM onion_cursor WHERE conversation = ?", (cid,)).fetchone()
+    if cursor is None:
+        return None, None
+    core = conn.execute(
+        "SELECT id, text, superseded_by FROM onion_core WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    cellar = conn.execute(
+        "SELECT key, span FROM onion_cellar WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    receipts = conn.execute(
+        "SELECT key, stub, turn_ids, resolved FROM onion_receipts WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    peels = conn.execute(
+        "SELECT id, text, level, sources, children, source_digest, probes_passed, probes_total "
+        "FROM onion_peels WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    flesh = conn.execute(
+        "SELECT turn FROM onion_flesh WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    marks = conn.execute(
+        "SELECT seq, kind, anchors FROM onion_receipt_marks WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    peel_marks = conn.execute(
+        "SELECT m.id, m.rung, m.stitched, m.residual FROM onion_peel_marks m "
+        "LEFT JOIN onion_peels p ON p.conversation = m.conversation AND p.id = m.id "
+        "WHERE m.conversation = ? ORDER BY p.seq, m.id", (cid,)
+    ).fetchall()
+    proposals = conn.execute(
+        "SELECT id, span_key, turn_id, start, stop, origin, made_on, status FROM onion_proposals "
+        "WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
+    refusals = conn.execute(
+        "SELECT span_key, mark FROM onion_refusals WHERE conversation = ? ORDER BY span_key", (cid,)
+    ).fetchall()
+    try:
+        snapshot = Snapshot(
+            core=tuple((r[0], r[1], r[2]) for r in core),
+            cellar=tuple((r[0], json.loads(r[1])) for r in cellar),
+            receipts=tuple((r[0], r[1], tuple(json.loads(r[2])), bool(r[3])) for r in receipts),
+            peels=tuple((r[0], r[1], int(r[2]), tuple(json.loads(r[3])), tuple(json.loads(r[4])), r[5], int(r[6]),
+                         int(r[7])) for r in peels),
+            flesh=tuple(json.loads(r[0]) for r in flesh),
+            seen=int(cursor[0]),
+            receipt_marks=tuple(
+                (int(r[0]), r[1], tuple(tuple(anchor) for anchor in json.loads(r[2]))) for r in marks
+            ),
+            peel_marks=tuple(
+                (r[0], r[1], tuple(tuple(unit) for unit in json.loads(r[2])),
+                 tuple(tuple(probe) for probe in json.loads(r[3])))
+                for r in peel_marks
+            ),
+            proposals=tuple((r[0], r[1], r[2], int(r[3]), int(r[4]), r[5], r[6], r[7]) for r in proposals),
+            refusals=tuple((r[0], r[1]) for r in refusals),
+        )
+    except _CONTENT_ERRORS as exc:
+        raise OnionIntegrityError(
+            f"onion state {cid}: a row does not decode ({type(exc).__name__}); refused, not repaired"
+        ) from exc
+    return snapshot, cursor[1]
+
+
+# What a row that does not read as the schema says raises while it is decoded
+# or written again: the content's failure, told as the conversation's
+# refusal. An error of the database itself is none of these, and is let
+# through as it was.
+_CONTENT_ERRORS = (ValueError, TypeError, AttributeError, KeyError, IndexError, OverflowError, RecursionError)
+
+
+def _typed_receipts(conn):
+    """Schema 1, "typed-receipts": each receipt's line says its key, turns, kind and origins, no word of its span.
+
+    A file written before it keeps, in each receipt, the first words of its
+    span. Each conversation's saved root is proved first, then every line is
+    written again from the Cellar and the root recomputed over the rows as
+    they now stand, under a savepoint of its own. A conversation that does
+    not prove -- its root does not answer to its rows, a receipt names a
+    span the file does not hold, a row does not read as the schema says --
+    is left as it was, never laundered, and refused by name when it is
+    loaded; the others migrate. An error of the database itself is no
+    conversation's: it rolls the whole migration back, and the file is
+    brought up at a later opening.
+    """
+    for (cid,) in conn.execute("SELECT conversation FROM onion_cursor ORDER BY conversation").fetchall():
+        conn.execute("SAVEPOINT conversation")
+        try:
+            _type_receipts_of(conn, cid)
+        except OnionStoreError:
+            conn.execute("ROLLBACK TO conversation")
+        conn.execute("RELEASE conversation")
+
+
+def _type_receipts_of(conn, cid):
+    """Write one proved conversation's receipt lines again; refused by name when its content does not prove."""
+    from dataclasses import replace
+
+    from .receipts import make_receipt
+
+    snapshot, saved_root = _read_snapshot(conn, cid)
+    spans = dict(snapshot.cellar)
+    if onion_root(snapshot) != saved_root or any(key not in spans for key, *_rest in snapshot.receipts):
+        raise OnionIntegrityError(f"onion state {cid}: does not prove; not migrated")
+    kinds = {int(seq): kind for seq, kind, _anchors in snapshot.receipt_marks}
+    receipts = []
+    for seq, (key, _stub, ids, resolved) in enumerate(snapshot.receipts):
+        try:
+            line = make_receipt(spans[key], key, kinds.get(seq, "accepted")).stub
+        except _CONTENT_ERRORS as exc:
+            raise OnionIntegrityError(
+                f"onion state {cid}: a span does not read as a span ({type(exc).__name__}); not migrated"
+            ) from exc
+        receipts.append((key, line, ids, resolved))
+        conn.execute("UPDATE onion_receipts SET stub = ? WHERE conversation = ? AND seq = ?", (line, cid, seq))
+    root = onion_root(replace(snapshot, receipts=tuple(receipts)))
+    conn.execute("UPDATE onion_cursor SET root = ? WHERE conversation = ?", (root, cid))
+
+
+# The schema a file was written with, in SQLite's ``user_version``: 0 for
+# every file written before versions existed. Each migration brings a file
+# to its version, in order and once, inside one transaction with the tables
+# it adds; a file of a newer version than the last one here is refused by
+# name, and left as it was.
+_MIGRATIONS = (
+    (1, "typed-receipts", _typed_receipts),
+)
+SCHEMA_VERSION = _MIGRATIONS[-1][0]
+_SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";") if statement.strip())
+
+
 def _rebuild(state, snapshot):
     """Fill an empty librarian state from a snapshot through each store's surface, re-hashing as it goes."""
     from .core_store import USER, entry_hash
     from .peels import Peel
-    from .receipts import Receipt, span_key
+    from .receipts import RECEIPT_KINDS, Receipt, span_key
 
     for entry_id, text, _sup in snapshot.core:
         if entry_hash(text) != entry_id:
@@ -328,16 +570,44 @@ def _rebuild(state, snapshot):
             raise OnionIntegrityError(f"Cellar span {key} no longer answers to its bytes: refused, not repaired")
         state.cellar.store(span)
 
-    for key, stub, ids, resolved in snapshot.receipts:
-        state.ledger.append(Receipt(key=key, stub=stub, turn_ids=tuple(ids), resolved=bool(resolved)))
+    marks = {int(seq): (kind, anchors) for seq, kind, anchors in snapshot.receipt_marks}
+    if any(seq < 0 or seq >= len(snapshot.receipts) for seq in marks):
+        raise OnionIntegrityError("a receipt mark names a receipt the file does not hold: refused, not repaired")
+    if any(kind not in RECEIPT_KINDS for kind, _anchors in marks.values()):
+        raise OnionIntegrityError("a receipt mark names a kind the ledger does not know: refused, not repaired")
+    for seq, (key, stub, ids, resolved) in enumerate(snapshot.receipts):
+        kind, anchors = marks.get(seq, ("accepted", ()))
+        state.ledger.append(Receipt(key=key, stub=stub, turn_ids=tuple(ids), resolved=bool(resolved), kind=kind,
+                                    anchors=tuple(tuple(anchor) for anchor in anchors)))
 
+    peel_marks = {p_id: (rung, stitched, residual) for p_id, rung, stitched, residual in snapshot.peel_marks}
+    if set(peel_marks) - {row[0] for row in snapshot.peels}:
+        raise OnionIntegrityError("a peel mark names a peel the file does not hold: refused, not repaired")
+    if any(rung not in _PEEL_RUNGS for rung, _stitched, _residual in peel_marks.values()):
+        raise OnionIntegrityError("a peel mark names a rung no peel is made on: refused, not repaired")
     for p_id, text, level, sources, children, digest, passed, total in snapshot.peels:
+        rung, stitched, residual = peel_marks.get(p_id, ("accepted", (), ()))
         state.tree.add(Peel(id=p_id, text=text, level=int(level), sources=tuple(sources), children=tuple(children),
-                            source_digest=digest, probes_passed=int(passed), probes_total=int(total)))
+                            source_digest=digest, probes_passed=int(passed), probes_total=int(total),
+                            rung=rung, stitched=tuple(stitched), residual=tuple(residual)))
     state.tree.verify(state.cellar)
     state.ledger.digest(state.cellar)
 
     for turn in snapshot.flesh:
         state.flesh.append(turn)
     state.seen = int(snapshot.seen)
+    state.refusals = {key: mark for key, mark in snapshot.refusals}
+
+    if snapshot.proposals:
+        from .core_store import Proposal, proposal_id
+
+        for p_id, span_key, turn_id, start, stop, origin, made_on, status in snapshot.proposals:
+            if status not in _PROPOSAL_STATUSES or not state.cellar.has(span_key):
+                raise OnionIntegrityError(f"proposal {p_id[:12]} names a status or a span the file does not hold")
+            if p_id != proposal_id(span_key, turn_id, start, stop):
+                raise OnionIntegrityError(f"proposal {p_id[:12]} no longer answers to its place: refused, not repaired")
+            text = {str(t.get("turn_id", "")): str(t.get("text", "")) for t in state.cellar.get(span_key)}.get(turn_id)
+            if text is None or not 0 <= int(start) < int(stop) <= len(text):
+                raise OnionIntegrityError(f"proposal {p_id[:12]} points outside its span: refused, not repaired")
+            state.proposals.append(Proposal(p_id, span_key, turn_id, int(start), int(stop), origin, made_on, status))
     return state

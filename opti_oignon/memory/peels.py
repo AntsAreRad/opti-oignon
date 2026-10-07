@@ -20,6 +20,16 @@ for, and its length -- each refused by name with its figure. Nor is a probe
 set taken on trust: the span's facts are read again, and a set that asks
 for less of them than the floor is refused with the facts it leaves unasked.
 
+The queue does not stop at a refusal. ``advance`` takes the oldest span down
+a ladder below the gate: a span no probe can judge leaves bare, with no
+peel; a refused summary is asked for once more, handed the probes it
+failed; then it is repaired in the user's own words -- the sentences of the
+summary its span holds, and the fewest typed units answering what they miss
+-- and kept while it saves enough; else the span is held, the places of its
+typed units kept as anchors in the Cellar. Only words the user typed are
+ever stitched or anchored, and the gate itself never yields: every peel the
+ladder makes has passed it.
+
 Selection at query time is deterministic and keyword-based, in any script:
 a term is a word as the probes read one, in lower case with its accents
 taken off, the function and question words of both languages aside. The vector
@@ -339,6 +349,15 @@ class Peel:
     source_digest: str
     probes_passed: int
     probes_total: int
+    # The rung of the queue that made it: "accepted" for the librarian's
+    # summary as the gate judged it, "reasked" for its second summary,
+    # "repaired" for one the queue stitched.
+    rung: str = "accepted"
+    # Each unit stitched in verbatim, ``(turn_id, start, stop)`` in its turn.
+    stitched: tuple = ()
+    # The probes it still fails, ``(kind, answer, turn_id)``: what it lost
+    # under the thresholds, kept with it and never logged.
+    residual: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -400,6 +419,14 @@ class Eviction:
     receipt: object = None
     peel: object = None
     decision: object = None
+    # How the step ended, by name: "bare", "accepted", "reasked",
+    # "repaired" or "held" for the rung its span left on, "stale" for a
+    # span that left the head of the Flesh while its summary was written;
+    # empty where nothing was attempted or the gate refused.
+    rung: str = ""
+    # Why the gate refused the summaries the step was given, by name from
+    # ``REFUSAL_MOTIVES``, one entry per refusal and motive.
+    refused: tuple = ()
 
 
 class PeelTree:
@@ -570,11 +597,11 @@ def _summarise(sources, cellar, summarize, gate):
     spans = [cellar.get(k) for k in sources]
     turns = [t for span in spans for t in span]
     probes = generate_probes(turns, gate.lexicon)
-    text = str(summarize(turns))
+    text = _unmarked(summarize(turns), turns)
     return spans, probes, text, decide(turns, probes, text, gate)
 
 
-def _make(text, sources, level, children, decision, cellar):
+def _make(text, sources, level, children, decision, cellar, *, rung="accepted", stitched=()):
     result = decision.result
     return Peel(
         id=peel_id(text, sources),
@@ -585,6 +612,9 @@ def _make(text, sources, level, children, decision, cellar):
         source_digest=source_digest(cellar, sources),
         probes_passed=result.passed,
         probes_total=result.passed + result.failed,
+        rung=rung,
+        stitched=tuple(stitched),
+        residual=tuple((p.kind, p.answer, p.turn_id) for p in result.failures),
     )
 
 
@@ -720,7 +750,11 @@ def select_peels(tree, query, cap, estimate=None):
 
 
 def evict_gated(*, flesh, cellar, ledger, tree, gate, summarize):
-    """One gated eviction step: the oldest span leaves only if its peel answers for it."""
+    """One gated eviction step: the oldest span leaves only if its peel answers for it.
+
+    A step for a Flesh no other writer shares: the queue's own step, read
+    and committed under the state's lock, is ``advance``.
+    """
     from .probes import generate_probes
 
     errors = gate.validate()
@@ -731,14 +765,493 @@ def evict_gated(*, flesh, cellar, ledger, tree, gate, summarize):
         return Eviction(False, "the Flesh is empty; nothing to evict")
     span = turns[: gate.span_turns]
     probes = generate_probes(span, gate.lexicon)
-    text = str(summarize([dict(t) for t in span]))
+    text = _unmarked(summarize([dict(t) for t in span]), span)
     decision = decide(span, probes, text, gate)
     if not decision.accepted:
         return Eviction(False, decision.reason, decision=decision)
-    receipt = flesh.evict_span(len(span), cellar, ledger)
+    receipt = flesh.evict_span(len(span), cellar, ledger, kind="accepted")
     peel = _make(text, (receipt.key,), 0, (), decision, cellar)
     tree.add(peel)
-    return Eviction(True, decision.reason, receipt=receipt, peel=peel, decision=decision)
+    return Eviction(True, decision.reason, receipt=receipt, peel=peel, decision=decision, rung="accepted")
+
+
+# ---------------------------------------------------------------------------
+# The queue's ladder: below the gate, a span always leaves
+# ---------------------------------------------------------------------------
+
+_LADDER_KEYS = ("rho", "exact_cover", "anchors", "proposals_per_day", "copy_shared_words")
+
+
+@dataclass(frozen=True)
+class Ladder:
+    """What the rungs below the gate are held to, read from the ``queue`` section of ``onion.yaml``.
+
+    ``rho``: a repaired peel longer than ``rho`` times its span saves too
+    little, and the span is held instead. ``exact_cover``: at or under this
+    many candidate units a cover is the fewest; above, greedy. ``anchors``:
+    the tokens of the peels layer the anchors of held spans may take.
+    ``proposals_per_day``: the most typed decisions offered to the Core per
+    conversation and per day. ``copy_shared_words``: the fewest content
+    words a summary's sentence shares with a document, a tool or the web
+    for the repair to drop it as their copy.
+    """
+
+    rho: float
+    exact_cover: int
+    anchors: int
+    proposals_per_day: int
+    copy_shared_words: int
+
+    def validate(self):
+        errors = []
+        shared = self.copy_shared_words
+        if isinstance(shared, bool) or not isinstance(shared, int) or shared < 1:
+            errors.append(f"copy_shared_words: {shared!r} is not a positive integer")
+        if isinstance(self.rho, bool) or not isinstance(self.rho, (int, float)) or not 0.0 < float(self.rho) <= 1.0:
+            errors.append(f"rho: {self.rho!r} is not a number in (0, 1]")
+        if isinstance(self.exact_cover, bool) or not isinstance(self.exact_cover, int) or not 0 <= self.exact_cover <= 20:
+            errors.append(f"exact_cover: {self.exact_cover!r} is not an integer in [0, 20]")
+        for name in ("anchors", "proposals_per_day"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(f"{name}: {value!r} is not a non-negative integer")
+        return errors
+
+
+def load_ladder(path=None):
+    """The ladder from ``onion.yaml``, refused by name when a key is missing, unknown or out of range."""
+    import yaml
+
+    raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
+    section = raw.get("queue")
+    if not isinstance(section, dict):
+        raise GateError("queue: the section is missing or not a mapping")
+    unknown = sorted(set(section) - set(_LADDER_KEYS))
+    missing = [key for key in _LADDER_KEYS if key not in section]
+    if unknown or missing:
+        raise GateError(f"queue: unknown {unknown or 'none'}, missing {missing or 'none'}")
+    ladder = Ladder(**{key: section[key] for key in _LADDER_KEYS})
+    errors = ladder.validate()
+    if errors:
+        raise GateError("queue: " + "; ".join(errors))
+    return ladder
+
+
+def cover(units, targets, limit):
+    """The fewest ``units`` answering every probe of ``targets``, as indices in order; None when one is answered by none.
+
+    Exact while at most ``limit`` units answer anything: the fewest units,
+    then the fewest characters, then the earliest. Above it, greedy and
+    deterministic: the unit answering most of what is left, the earliest
+    on a tie. A probe that no single unit answers leaves no cover.
+    """
+    from itertools import combinations
+
+    from .probes import answers
+
+    need = frozenset(range(len(targets)))
+    if not need:
+        return ()
+    candidates = []
+    for index, unit in enumerate(units):
+        hits = frozenset(i for i, probe in enumerate(targets) if answers(probe, unit.text))
+        if hits:
+            candidates.append((index, hits, len(unit.text)))
+    if frozenset().union(*(hits for _index, hits, _size in candidates)) != need:
+        return None
+    if len(candidates) <= limit:
+        for size in range(1, len(candidates) + 1):
+            best = None
+            for combo in combinations(candidates, size):
+                if frozenset().union(*(hits for _index, hits, _size in combo)) == need:
+                    cost = (sum(n for _index, _hits, n in combo), tuple(index for index, _hits, _n in combo))
+                    best = cost if best is None or cost < best else best
+            if best is not None:
+                return best[1]
+    chosen, covered = [], frozenset()
+    while covered != need:
+        index, hits, _size = max(candidates, key=lambda c: (len(c[1] - covered), -c[0]))
+        chosen.append(index)
+        covered |= hits
+    return tuple(sorted(chosen))
+
+
+def _span_tokens(span):
+    return sum(estimate_tokens(str(t.get("text", ""))) for t in span)
+
+
+def _saves_enough(tokens, span_tokens, rho):
+    """True when ``tokens`` are at most ``rho`` times ``span_tokens``, compared as the ratio ``rho`` is written.
+
+    A ratio, never a product: ``0.29 * 100`` is ``28.999...`` in floating
+    point, and a repair of exactly 29 tokens would be refused.
+    """
+    return span_tokens > 0 and tokens / span_tokens <= rho
+
+
+# Why a step refused a summary, by name: a class of probes under its
+# threshold, a claim its span does not hold, a bound overrun, too few of its
+# span's facts asked for, or a call that never answered. A span with no
+# probe is no refusal: it leaves bare, counted as such.
+REFUSAL_MOTIVES = ("decision", "episodic", "code", "unsupported", "novelty", "length", "coverage", "call_failed")
+
+
+def refusal_motives(decision, gate):
+    """Why ``gate`` refused ``decision``, by name from ``REFUSAL_MOTIVES``: never a word of the summary or its span."""
+    if decision is None or decision.accepted:
+        return ()
+    found = []
+    for motive, rate, floor in (("decision", decision.decision_rate, gate.decision_threshold),
+                                ("episodic", decision.episodic_rate, gate.episodic_threshold),
+                                ("code", decision.code_rate, gate.code_threshold),
+                                ("coverage", decision.probe_coverage, gate.probe_floor)):
+        if rate is not None and floor is not None and rate < floor:
+            found.append(motive)
+    if decision.unsupported:
+        found.append("unsupported")
+    for motive, value, ceiling in (("novelty", decision.novelty, gate.max_novelty),
+                                   ("length", decision.length_ratio, gate.max_length_ratio)):
+        if value is not None and ceiling is not None and value > ceiling:
+            found.append(motive)
+    return tuple(found)
+
+
+def refusal_fingerprint(failures, gate, asker=""):
+    """The mark of a refusal: the probes a summary failed, under the generator, the gate and the call refused.
+
+    Never an answer: each failed probe enters as the SHA-256 of its kind,
+    answer and turn, and the mark is the SHA-256 of their sorted list with
+    the generator's version, the lexicon's fingerprint, every threshold and
+    bound of the gate, its reporting verbs, and ``asker``, what names the
+    second asking (its model, temperature, seed and prompt), so a change of
+    any of them is another mark.
+    """
+    from .probes import GENERATOR_VERSION
+
+    failed = sorted(
+        hashlib.sha256(json.dumps([p.kind, p.answer, p.turn_id], ensure_ascii=False).encode("utf-8")).hexdigest()
+        for p in failures
+    )
+    bounds = [gate.decision_threshold, gate.episodic_threshold, gate.code_threshold, gate.max_novelty,
+              gate.max_length_ratio, gate.probe_floor, gate.span_turns]
+    payload = json.dumps({"generator": GENERATOR_VERSION, "lexicon": _fingerprint(gate.lexicon), "bounds": bounds,
+                          "reporters": sorted(gate.reporters or ()), "asker": str(asker), "failed": failed},
+                         sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _typed_units(span):
+    """The units of a span the user typed: the only words the queue may keep verbatim.
+
+    A document, a tool, the assistant or a turn of no origin is summarised,
+    judged and recallable like any other, but its text is never stitched
+    into a peel nor kept as an anchor: copied verbatim into what every turn
+    reads, an instruction it carries would persist.
+    """
+    from .probes import units
+
+    return [unit for unit in units(span) if unit.origin == "typed"]
+
+
+def _within_reach(targets, found):
+    """The probes of ``targets`` some unit of ``found`` answers."""
+    from .probes import answers
+
+    return [p for p in targets if any(answers(p, unit.text) for unit in found)]
+
+
+# The origins whose words are the conversation's own, for the repair's copy
+# filter: what the user typed or had refined, what the assistant answered,
+# and a legacy turn -- the least trusted origin, which decides nothing (see
+# probes), yet whose words the first face keeps too. A document, or a label
+# carrying a flag -- a tool, the web (``assistant+tool``) -- came from
+# outside it.
+_CONVERSATION = ("typed", "refined", "assistant", "legacy")
+
+
+# The innermost bracketed run of a text, by any opening and closing mark a
+# marker could be dressed in: every bracket and quotation mark Unicode names
+# (categories Ps, Pe, Pi, Pf) and the angle brackets of ASCII, built once on
+# first use.
+_BRACKETED = []
+
+
+def _bracketed():
+    if not _BRACKETED:
+        import unicodedata
+
+        opening = "<" + "".join(chr(c) for c in range(0x10000) if unicodedata.category(chr(c)) in ("Ps", "Pi"))
+        closing = ">" + "".join(chr(c) for c in range(0x10000) if unicodedata.category(chr(c)) in ("Pe", "Pf"))
+        _BRACKETED.append(re.compile(
+            r"[ \t]*[" + re.escape(opening) + r"]([^" + re.escape(opening + closing) + r"]*)["
+            + re.escape(closing) + r"][ \t]*"
+        ))
+    return _BRACKETED[0]
+
+
+def _unmarked(text, span):
+    """The model's ``text`` without a turn marker it wrote: in a peel, a marker is one the repair stitched.
+
+    A marker is a turn id in brackets, the form ``_repair`` writes: ``t``
+    and digits, or an id of ``span``, for any turn. It is read as a reader
+    would see it -- any bracket, any case, spacing or script, invisible
+    characters dropped, a trailing colon -- and taken out until none is
+    left, nested ones included. A bracket the user typed, as written, is
+    their own words and stays; one a document or the assistant wrote
+    protects nothing.
+    """
+    import unicodedata
+
+    from .probes import units
+
+    ids = {str(t.get("turn_id", "")).casefold() for t in span} - {""}
+    typed = "\n".join(unit.text for unit in units(span) if unit.origin == "typed")
+
+    def name(inner):
+        folded = unicodedata.normalize("NFKC", inner)
+        kept = "".join(ch for ch in folded if not ch.isspace() and unicodedata.category(ch) != "Cf")
+        return kept.casefold().rstrip(":")
+
+    def drop(match):
+        said = name(match.group(1))
+        marker = re.fullmatch(r"t\d+", said) is not None or said in ids
+        return " " if marker and match.group(0).strip() not in typed else match.group(0)
+
+    out, pattern = str(text), _bracketed()
+    while True:
+        again = pattern.sub(drop, out)
+        if again == out:
+            return out.strip()
+        out = again
+
+
+def _asked(model, span, refused, *extra):
+    """What ``model`` wrote for ``span``, unmarked; None when the call failed, counted in ``refused``, never raised."""
+    try:
+        return _unmarked(model([dict(t) for t in span], *extra), span)
+    except Exception as exc:  # noqa: BLE001 - a call that fails is a summary that never came
+        import logging
+
+        # By its class alone: a failure's message may carry the span's words.
+        logging.getLogger(__name__).warning("onion queue: a call failed (%s); the step goes on without the model",
+                                            type(exc).__name__)
+        refused.append("call_failed")
+        return None
+
+
+def _repair(span, probes, text, gate, ladder):
+    """The summary's sentences its span holds, then the fewest typed units answering what they miss.
+
+    Returns ``(text, stitched)``. Each unit is marked with its turn. A
+    sentence that copies a unit from outside the conversation -- a
+    document, an answer the assistant gave with a tool or the web -- is
+    dropped like one its span does not hold: a summary the gate refused
+    would otherwise come back as a peel that keeps those words verbatim, an
+    instruction among them. The words of the conversation itself -- typed,
+    refined, the assistant's, a turn written before origins -- are kept as
+    the first face keeps them. What only words of another origin than the
+    user's typing answer stays missed, and the gate judges the repair with
+    it missing.
+    """
+    from .probes import copies, holdings, score, sentences, units
+
+    held = holdings(span)
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
+    others = [texts.get(u.turn_id, "")[u.start:u.stop] for u in units(span) if u.origin not in _CONVERSATION]
+    kept = " ".join(
+        s for s in sentences(text)
+        if not _unheld(held, probes, s, gate) and not any(copies(s, other, ladder.copy_shared_words) for other in others)
+    )
+    found = _typed_units(span)
+    chosen = _choose(found, _within_reach(score(probes, kept).failures, found), ladder)
+    added = [f"[{found[i].turn_id}] {found[i].text}" for i in chosen]
+    stitched = tuple((found[i].turn_id, found[i].start, found[i].stop) for i in chosen)
+    return " ".join(([kept] if kept else []) + added), stitched
+
+
+def _choose(found, targets, ladder):
+    """The units of ``found`` kept for ``targets``: each decision's own sentence, then the fewest for the rest.
+
+    A decision is kept in its own words. Another sentence of its turn may
+    carry enough of its key to answer it -- the question that led to it, a
+    remark on it -- and the fewest units would keep that one in its place:
+    so a decision drawn from a sentence of ``found`` takes that sentence,
+    and the cover answers only what it leaves. Indices, in order.
+    """
+    from .probes import answers
+
+    own = set()
+    for probe in targets:
+        if probe.kind == "decision":
+            index = next((i for i, unit in enumerate(found)
+                          if unit.turn_id == probe.turn_id and unit.text == probe.answer), None)
+            if index is not None:
+                own.add(index)
+    rest = [probe for probe in targets if not any(answers(probe, found[i].text) for i in own)]
+    return tuple(sorted(own | set(cover(found, rest, ladder.exact_cover) or ())))
+
+
+def _anchors(span, probes, ladder):
+    """What a held span keeps: the places in the Cellar of each typed decision, then of the fewest typed units
+    answering what else typed words can."""
+    found = _typed_units(span)
+    chosen = _choose(found, _within_reach(probes, found), ladder)
+    return tuple((found[i].turn_id, found[i].start, found[i].stop) for i in chosen)
+
+
+def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anchors=(), made=None, refused=()):
+    """Evict ``span`` under ``guard`` only while it is still the head of the Flesh, with its receipt and its peel."""
+    read = [t.get("turn_id") for t in span]
+    decision = made[1] if made is not None else None
+    with guard:
+        if [t.get("turn_id") for t in flesh.turns()[: len(span)]] != read:
+            return Eviction(
+                False, "stale: the span left the head of the Flesh while its summary was written; nothing evicted",
+                decision=decision, rung="stale", refused=tuple(refused),
+            )
+        receipt = flesh.evict_span(len(span), cellar, ledger, kind=kind, anchors=anchors)
+        peel = None
+        if made is not None:
+            text, decision, stitched = made
+            peel = _make(text, (receipt.key,), 0, (), decision, cellar, rung=rung, stitched=stitched)
+            tree.add(peel)
+    return Eviction(True, reason, receipt=receipt, peel=peel, decision=decision, rung=rung, refused=tuple(refused))
+
+
+def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=None, refusals=None, lock=None):
+    """One step of the queue: the oldest span always leaves, under what best answers for it.
+
+    The rungs, each tried only when the one before it is refused:
+
+    * no probe: a span the probes draw nothing from leaves bare. No model is
+      asked and no peel placed: the gate cannot judge it, so nothing may
+      speak for it, and it stays recallable in the Cellar.
+    * the summary: the librarian's, judged by both faces of the gate. An
+      accepted peel keeps what it failed with it, its residual. A call that
+      fails -- the model absent, stopped, past its deadline -- is counted as
+      ``call_failed`` and the step goes on down the rungs that need no
+      model: no call stops the queue.
+    * the second asking: a summary the first face refused is asked for once
+      more through ``reask``, handed the probes it failed and no other. A
+      second refusal is marked in ``refusals`` under the span's key, and a
+      span that comes back with the same mark is not asked for again. A
+      refusal on the span's probe coverage is not asked for again at all:
+      no text can change it.
+    * the repair: the sentences its span holds of the better summary, then the fewest
+      verbatim units of the span answering what they miss, each marked with
+      its turn, judged again by both faces, and kept only while it is at
+      most ``rho`` times its span.
+    * the hold: no peel; the receipt keeps the places in the Cellar of the
+      fewest units answering every probe of the span, its anchors.
+
+    With no summariser the queue starts at the repair. The span is read
+    under ``lock``, the model is asked without it, and the step commits
+    under it only while the span is still the head of the Flesh: otherwise
+    nothing leaves and the step says it was stale. No reason given here
+    carries a word of the span. A turn marker the model writes is taken out
+    of its text before the gate reads it: in a peel, a marker is one the
+    repair stitched.
+    """
+    from contextlib import nullcontext
+    from functools import partial
+
+    from .probes import generate_probes
+
+    errors = gate.validate() + ladder.validate()
+    if errors:
+        raise GateError("; ".join(errors))
+    guard = nullcontext() if lock is None else lock
+    with guard:
+        turns = flesh.turns()
+    if not turns:
+        return Eviction(False, "the Flesh is empty; nothing to evict")
+    span = turns[: gate.span_turns]
+    commit = partial(_commit, guard, flesh, cellar, ledger, tree, span)
+    probes = generate_probes(span, gate.lexicon)
+    if not probes:
+        return commit(rung="bare", kind="bare", reason="no probe could be drawn from the span: it leaves bare, with no peel")
+    text, refused = "", []
+    first = None if summarize is None else _asked(summarize, span, refused)
+    if first is not None:
+        text = first
+        decision = decide(span, probes, text, gate)
+        if decision.accepted:
+            return commit(rung="accepted", kind="accepted", reason=decision.reason, made=(text, decision, ()))
+        motives = refusal_motives(decision, gate)
+        refused.extend(motives)
+        failed = decision.result.failures
+        if reask is not None and failed and "coverage" not in motives:
+            from .receipts import span_key
+
+            key, mark = span_key(span), refusal_fingerprint(failed, gate, getattr(reask, "identity", ""))
+            if refusals is None or refusals.get(key) != mark:
+                again = _asked(reask, span, refused, [(p.kind, p.answer, p.turn_id) for p in failed])
+                if again is not None:
+                    judged = decide(span, probes, again, gate)
+                    if judged.accepted:
+                        return commit(rung="reasked", kind="accepted", made=(again, judged, ()), refused=refused,
+                                      reason="accepted on the second asking, handed the probes the first one failed")
+                    refused.extend(refusal_motives(judged, gate))
+                    if refusals is not None:
+                        with guard:
+                            refusals[key] = mark
+                    if len(judged.result.failures) + len(judged.unsupported) < len(failed) + len(decision.unsupported):
+                        text = again
+    repaired, stitched = _repair(span, probes, text, gate, ladder)
+    if repaired:
+        judged = decide(span, probes, repaired, gate)
+        if judged.accepted and _saves_enough(estimate_tokens(repaired), _span_tokens(span), ladder.rho):
+            return commit(rung="repaired", kind="accepted", made=(repaired, judged, stitched), refused=refused,
+                          reason=f"repaired with {len(stitched)} verbatim unit(s) of the span")
+    return commit(rung="held", kind="held", anchors=_anchors(span, probes, ladder), refused=refused,
+                  reason="held: no peel answers for the span within the compression floor; its anchors stay")
+
+
+def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unplaced=None):
+    """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
+
+    An anchor ranks as a peel does, by the share of the query's terms its
+    words hold, then the newest receipt first, then its place in its span.
+    It shows what a peel would of its unit, re-read from its place: a
+    sentence as written, a code block by its marker, never its code. A place
+    that is no typed unit of its span shows nothing. ``dropped``, a list,
+    receives the provenance of each anchor the query reached that ``cap``
+    left out, and ``unplaced`` of each it reached whose place reads as no
+    typed unit any more.
+    """
+    from .probes import units
+
+    estimate = estimate or estimate_tokens
+    terms = _terms(query)
+    if not terms or cap <= 0:
+        return []
+    scored = []
+    held = [r for r in ledger.open() if r.kind == "held" and r.anchors]
+    for age, receipt in enumerate(reversed(held)):
+        span = cellar.get(receipt.key)
+        texts = {str(t.get("turn_id", "")): str(t.get("text", "")) for t in span}
+        placed = {(u.turn_id, u.start, u.stop): u.text for u in units(span) if u.origin == "typed"}
+        for place, (turn_id, start, stop) in enumerate(receipt.anchors):
+            shown = placed.get((turn_id, start, stop))
+            hit = len(terms & _terms(texts.get(turn_id, "")[start:stop])) / len(terms)
+            if hit <= 0:
+                continue
+            if not shown:
+                if unplaced is not None:
+                    unplaced.append(f"anchor:{receipt.key[:12]}:{turn_id}")
+                continue
+            scored.append((-hit, age, place, shown, f"anchor:{receipt.key[:12]}:{turn_id}"))
+    scored.sort()
+    chosen, used = [], 0
+    for neg, _age, _place, words, provenance in scored:
+        tokens = estimate(words)
+        if used + tokens > cap:
+            if dropped is not None:
+                dropped.append(provenance)
+            continue
+        used += tokens
+        chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4)))
+    return chosen
 
 
 def fidelity(tree, cellar, lexicon=None, probe_recall=None):

@@ -133,6 +133,9 @@ class Prompt:
     tokens: int
     core_root: str
     dropped_peels: int
+    # How many open receipts the digest folded into one line to keep the
+    # receipts layer within its cap.
+    folded_receipts: int = 0
 
     def render(self):
         """The window as text. Recalled segments are framed as quoted data with their tag.
@@ -183,11 +186,12 @@ def _compose_natively(assemble, core, ledger, cellar, retrieval, flesh, turn, bu
     core_text = core.text()
     core_root = core.root()
     turns = flesh.turns() if hasattr(flesh, "turns") else [dict(t) for t in flesh]
+    digest, folded = ledger.render(cellar, cap=budget.receipts, estimate=estimate_tokens)
     try:
         segments, total, dropped = assemble(
             core_text,
             core_root,
-            ledger.digest(cellar),
+            digest,
             [(str(p.text), str(p.provenance)) for p in retrieval],
             [(str(t.get("text", "")), str(t.get("turn_id", "")), str(t.get("role", ""))) for t in turns],
             turn,
@@ -200,6 +204,7 @@ def _compose_natively(assemble, core, ledger, cellar, retrieval, flesh, turn, bu
         tokens=total,
         core_root=core_root,
         dropped_peels=dropped,
+        folded_receipts=folded,
     )
 
 
@@ -225,7 +230,10 @@ def compose(*, core, ledger, cellar, retrieval, flesh, turn, budget, estimate=No
     _refuse_over("core", core_segment.tokens, budget.core, "the Core is never cut, it is the registry's bytes")
     segments.append(core_segment)
 
-    digest = ledger.digest(cellar)
+    # The digest folds its oldest lines to keep within its cap, so the
+    # receipts layer can no longer refuse the block; the check stays as the
+    # statement of the bound.
+    digest, folded = ledger.render(cellar, cap=budget.receipts, estimate=estimate)
     if digest:
         receipts_segment = _segment("receipts", digest, "receipts", estimate)
         _refuse_over("receipts", receipts_segment.tokens, budget.receipts, "resolve or archive receipts first")
@@ -257,4 +265,6 @@ def compose(*, core, ledger, cellar, retrieval, flesh, turn, budget, estimate=No
 
     total = sum(s.tokens for s in segments)
     _refuse_over("window", total, budget.window - budget.reserve, "the generation reserve is not assembled into")
-    return Prompt(segments=tuple(segments), tokens=total, core_root=core.root(), dropped_peels=dropped)
+    return Prompt(
+        segments=tuple(segments), tokens=total, core_root=core.root(), dropped_peels=dropped, folded_receipts=folded,
+    )

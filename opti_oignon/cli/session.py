@@ -47,11 +47,14 @@ QUIT = "quit"
 
 HELP = (
     "/open ID          find a persisted onion again and continue that conversation\n"
-    "/close            evict the whole Flesh through the gate, save, and end the conversation\n"
+    "/close            evict the whole Flesh through the queue, save, and end the conversation\n"
     "/pin TEXT         pin a statement to the conversation's Core, as the user\n"
     "/recall KEY       show the verbatim span behind a receipt (the receipt stays open)\n"
     "/recall code:KEY  show the code block behind a [code:KEY] marker\n"
     "/resolve KEY      close a receipt, as the user: it leaves the digest\n"
+    "/proposals        list the decisions you typed that the queue offers the Core, word for word\n"
+    "/accept ID        pin one proposal's exact words to the Core, as the user\n"
+    "/decline ID       set one proposal aside; the Core does not change\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
     "/help             list the commands\n"
@@ -165,6 +168,9 @@ class ChatSession:
             "pin": self._pin,
             "recall": self._recall,
             "resolve": self._resolve,
+            "proposals": self._proposals,
+            "accept": self._accept,
+            "decline": self._decline,
             "skill": self._skill,
             "adopt": self._adopt,
             "help": self._help,
@@ -231,9 +237,10 @@ class ChatSession:
         yield _info(
             f"closed {cid}: {closing.evicted} span(s) evicted, {closing.remaining} turn(s) left verbatim, "
             f"Core root {closing.core_root[:12]}, {'saved' if closing.saved else 'not saved: no persistence path'}"
+            + ("; ended without the model, on the rungs that need none" if closing.without_model else "")
         )
         if closing.refusal:
-            yield _refusal(f"the gate refused the next span, which stays verbatim: {closing.refusal}")
+            yield _refusal(f"the close stopped at a span it could not commit, which stays verbatim: {closing.refusal}")
         if closing.digest:
             yield _info("open receipts:\n" + closing.digest)
         self.conversation_id = None
@@ -263,6 +270,36 @@ class ChatSession:
             raise _Refused("/resolve needs a receipt key")
         self._onion().resolve_receipt(cid, rest, actor="user")
         yield _info(f"receipt {rest[:12]} closed: it leaves the digest and stays in the ledger")
+
+    def _proposals(self, rest):
+        cid = self._require_conversation("/proposals")
+        offered = self._onion().proposals(cid)
+        if not offered:
+            yield _info("no open proposal")
+            return
+        lines = [f"{p['id'][:12]} [{p['turn_id']}, {p['origin']}, {p['made_on']}] {p['text']}" for p in offered]
+        yield _info("open proposals (/accept ID pins one to the Core, /decline ID sets it aside):\n" + "\n".join(lines))
+
+    def _one_proposal(self, cid, command, rest):
+        """The one open proposal ``rest`` begins the id of; anything else is refused by name."""
+        if not rest:
+            raise _Refused(f"{command} needs a proposal id")
+        ids = [p["id"] for p in self._onion().proposals(cid) if p["id"].startswith(rest)]
+        if len(ids) != 1:
+            raise _Refused(f"{command}: {rest[:24]!r} names {len(ids)} open proposal(s); one is needed")
+        return ids[0]
+
+    def _accept(self, rest):
+        cid = self._require_conversation("/accept")
+        pid = self._one_proposal(cid, "/accept", rest)
+        entry_id = self._onion().accept_proposal(cid, pid, actor="user")
+        yield _info(f"proposal {pid[:12]} pinned to the Core as {entry_id[:12]}")
+
+    def _decline(self, rest):
+        cid = self._require_conversation("/decline")
+        pid = self._one_proposal(cid, "/decline", rest)
+        self._onion().decline_proposal(cid, pid, actor="user")
+        yield _info(f"proposal {pid[:12]} declined: the Core does not change")
 
     def _skill(self, rest):
         ref, _, args = rest.partition(" ")

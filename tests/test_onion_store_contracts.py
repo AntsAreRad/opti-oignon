@@ -30,6 +30,30 @@ is unreachable refuses and creates no file.
   * OS5 -- the root is a pure function of the four stores: equal on equal
     rows, different on a moved Core text, Cellar span, receipt flag or
     Peel, and unmoved by the Flesh and the cursor.
+  * OS6 -- a receipt's kind comes back from the store as it was saved, and
+    the loaded digest names it.
+  * OS7 -- the root covers the kinds: a kind moved in the file is refused by
+    name on the way back.
+  * OS8 -- what the queue adds comes back from the store as it was saved: a
+    peel's rung, its stitched units and its residual, a held receipt's
+    anchors.
+  * OS9 -- the root covers the peels' marks: a residual moved in the file is
+    refused by name on the way back.
+  * OS10 -- the refusal marks come back from the store as they were saved.
+  * OS11 -- a file written before schema versions is migrated once, by
+    name: no receipt's line keeps a word of its span, the root is
+    recomputed over the rows, and a second opening changes nothing.
+  * OS12 -- a file of a newer schema is refused by name and left as it was.
+  * OS13 -- a migration never launders a moved byte: a conversation whose
+    root does not answer to its rows is left as it was and refused by name
+    on its own load; the other conversations of the file migrate.
+  * OS14 -- the schema is read and brought up inside one write transaction,
+    so two processes opening an older file migrate it once.
+  * OS15 -- a conversation that fails after its first line was written again
+    is rolled back to its own savepoint: none of its lines change.
+  * OS16 -- an error of the database itself during a migration rolls the
+    whole file back and is told as it was, never masked by the rollback:
+    nothing migrated, nothing marked, and the next opening migrates.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the connection seam is blocked, so a
@@ -285,6 +309,374 @@ def test_os5_the_root_is_a_pure_function_of_the_four_stores(tmp_path):
         roots = {store_mod.onion_root(x) for x in (moved_core, moved_span, moved_receipt, moved_peel)}
         assert root not in roots and len(roots) == 4, "every store moves the root, each differently"
         assert store_mod.onion_root(rep(flesh=(), seen=0)) == root, "the Flesh and the cursor are not anchored"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS6-OS7 -- the kinds of receipts on disk
+# ---------------------------------------------------------------------------
+def _kinded_state(loaded):
+    """A state whose ledger holds one receipt of each kind, oldest first: accepted, held, bare."""
+    lib = loaded["opti_oignon.memory.librarian"]
+    state = lib.state_for("c1")
+    state.mirror(_messages(6))
+    for kind in ("accepted", "held", "bare"):
+        state.flesh.evict_span(2, state.cellar, state.ledger, kind=kind)
+    return state
+
+
+def test_os6_a_receipt_kind_comes_back_from_the_store_as_it_was_saved(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _kinded_state(loaded)
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        back = store.load("c1", lib.OnionState())
+        assert [r.kind for r in back.ledger.all()] == ["accepted", "held", "bare"]
+        assert back.ledger.all() == state.ledger.all()
+        assert back.ledger.digest(back.cellar) == state.ledger.digest(state.cellar)
+    finally:
+        restore()
+
+
+def test_os7_a_kind_moved_in_the_file_is_refused_by_name(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _kinded_state(loaded)
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        conn = sqlite3.connect(str(path))
+        moved = conn.execute("UPDATE onion_receipt_marks SET kind = 'bare' WHERE kind = 'held'").rowcount
+        conn.commit()
+        conn.close()
+        assert moved == 1, "control: one kind moved in the file"
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not answer to its rows"):
+            store.load("c1", lib.OnionState())
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS8-OS9 -- what the queue adds to peels and receipts, on disk
+# ---------------------------------------------------------------------------
+_TYPED = [
+    {"role": "user", "origin": "typed", "segments": [],
+     "content": "Alice moved the build to Berlin on 2026-03-04. We keep Docker on the build server."},
+    {"role": "assistant", "origin": "assistant", "segments": [],
+     "content": "Noted: the Berlin build runs 12 jobs a day, a sensible load for that machine. "
+                "Bob checks the logs every morning."},
+]
+_LOSSY = "Alice moved the build to Berlin on 2026-03-04. The Berlin build runs 12 jobs a day. Bob checks the logs every morning."
+
+
+def _laddered_state(loaded):
+    """A state with a repaired peel (stitched units), a held span (anchors) and an accepted peel with a residual."""
+    from dataclasses import replace
+
+    lib, peels = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.peels"]
+    composer = loaded["opti_oignon.memory.composer"]
+    tiny = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+    gate = replace(peels.load_gate(), span_turns=2)
+    state = lib.state_for("c1")
+    state.mirror(_TYPED * 2)
+    repaired = lib.curate(state, lambda turns: _LOSSY, gate=gate, budget=tiny,
+                          ladder=replace(peels.load_ladder(), rho=1.0))
+    held = lib.curate(state, lambda turns: _LOSSY, gate=gate, budget=tiny, ladder=replace(peels.load_ladder(), rho=0.5))
+    quiet = [dict(m, content=m["content"].replace("agreed", "stated").replace("stays", "lives")) for m in _messages(2)]
+    state.mirror(_TYPED * 2 + quiet)
+    simple = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+    lossy = lambda turns: _faithful(turns).replace("Turn 2:", "Turn:").replace("service 2 ", "service ")  # noqa: E731
+    accepted = lib.curate(state, lossy, gate=simple, budget=tiny)
+    assert (repaired.rung, held.rung, accepted.rung) == ("repaired", "held", "accepted"), "control: one of each"
+    assert repaired.peel.stitched and held.receipt.anchors and accepted.peel.residual, "control: each has its mark"
+    return state
+
+
+def test_os8_what_the_queue_adds_comes_back_from_the_store_as_it_was_saved(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _laddered_state(loaded)
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        back = store.load("c1", lib.OnionState())
+        assert back.tree.all() == state.tree.all(), "rung, stitched units and residual, as made"
+        assert back.ledger.all() == state.ledger.all(), "the held receipt's anchors too"
+    finally:
+        restore()
+
+
+def test_os9_a_residual_moved_in_the_file_is_refused_by_name(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _laddered_state(loaded)
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        conn = sqlite3.connect(str(path))
+        moved = conn.execute("UPDATE onion_peel_marks SET residual = '[]' WHERE residual != '[]'").rowcount
+        conn.commit()
+        conn.close()
+        assert moved == 1, "control: one residual moved in the file"
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not answer to its rows"):
+            store.load("c1", lib.OnionState())
+    finally:
+        restore()
+
+
+def test_os10_the_refusal_marks_come_back_from_the_store_as_they_were_saved(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _laddered_state(loaded)
+        state.refusals = {"a" * 64: "b" * 64, "c" * 64: "d" * 64}
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        back = store.load("c1", lib.OnionState())
+        assert back.refusals == state.refusals
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS11-OS13 -- the schema a file was written with
+# ---------------------------------------------------------------------------
+
+# The tables a build before schema versions did not have.
+_ADDED_SINCE = ("onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals")
+
+
+def _plain_state(loaded, cid):
+    """A state as a build before the ladder left it: accepted receipts and peels only, no mark of any kind."""
+    lib, peels = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.peels"]
+    composer = loaded["opti_oignon.memory.composer"]
+    tiny = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+    gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+    state = lib.state_for(cid)
+    state.mirror([dict(m, content=m["content"].replace("agreed", "stated").replace("stays", "lives"))
+                  for m in _messages(4)])
+    while lib.curate(state, _faithful, gate=gate, budget=tiny).evicted:
+        pass
+    assert len(state.tree.all()) == 2 and all(r.kind == "accepted" for r in state.ledger.all()), "control: plain"
+    return state
+
+
+def _pre_version_file(loaded, path, cids=("c1",), spans=None):
+    """A file as a build before schema versions left it: six tables, version 0, each receipt's line its span's words.
+
+    ``spans`` maps a conversation to {seq: span}: Cellar rows written in place
+    of the saved ones, the conversation's root computed over them.
+    """
+    from dataclasses import replace
+
+    store_mod = loaded["opti_oignon.memory.onion_store"]
+    store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+    heads, rows = [], {}
+    for cid in cids:
+        store.save(cid, _plain_state(loaded, cid))
+        snapshot, _root = store.load_snapshot(cid)
+        assert not (snapshot.receipt_marks or snapshot.peel_marks), "control: nothing a later build adds"
+        saved = dict(snapshot.cellar)
+        old = []
+        for key, _stub, ids, resolved in snapshot.receipts:
+            head = " ".join(str(saved[key][0].get("text", "")).split())[:48]
+            old.append((key, f"{key[:12]} turns {ids[0]}..{ids[-1]}: {head}", ids, resolved))
+            heads.append(head)
+        edits = (spans or {}).get(cid, {})
+        cellar = tuple((key, edits.get(seq, span)) for seq, (key, span) in enumerate(snapshot.cellar))
+        rows[cid] = (old, edits, store_mod.onion_root(replace(snapshot, receipts=tuple(old), cellar=cellar)))
+    conn = sqlite3.connect(str(path))
+    for table in _ADDED_SINCE:
+        conn.execute(f"DROP TABLE {table}")
+    for cid, (old, edits, root) in rows.items():
+        for seq, span in edits.items():
+            conn.execute("UPDATE onion_cellar SET span = ? WHERE conversation = ? AND seq = ?",
+                         (store_mod._canonical(span), cid, seq))
+        for seq, (_key, stub, _ids, _resolved) in enumerate(old):
+            conn.execute("UPDATE onion_receipts SET stub = ? WHERE conversation = ? AND seq = ?", (stub, cid, seq))
+        conn.execute("UPDATE onion_cursor SET root = ? WHERE conversation = ?", (root, cid))
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
+    return heads
+
+
+def _tables(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+    finally:
+        conn.close()
+
+
+def _version(path):
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_os11_a_file_written_before_schema_versions_is_migrated_once_by_name(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        heads = _pre_version_file(loaded, path)
+        assert heads and all(heads), "control: the old lines carry the first words of their spans"
+        assert not set(_ADDED_SINCE) & _tables(path), "control: the file has the tables of its time, no other"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert set(_ADDED_SINCE) <= _tables(path), "the migration adds the tables of its schema"
+        back = store.load("c1", lib.OnionState())
+        lines = [r.stub for r in back.ledger.all()]
+        assert not any(head in line for head in heads for line in lines), "no line keeps a word of its span"
+        assert _version(path) == store_mod.SCHEMA_VERSION, "the file says the schema it is now of"
+        before = path.read_bytes()
+        store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert path.read_bytes() == before, "a second opening changes nothing"
+    finally:
+        restore()
+
+
+def test_os12_a_file_of_a_newer_schema_is_refused_by_name_and_left_as_it_was(tmp_path):
+    loaded, restore = _open()
+    try:
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        store_mod.OnionStore(path, connect=_plain, require_encryption=False).save("c1", _laddered_state(loaded))
+        conn = sqlite3.connect(str(path))
+        conn.execute(f"PRAGMA user_version = {store_mod.SCHEMA_VERSION + 1}")
+        conn.commit()
+        conn.close()
+        before = path.read_bytes()
+        with pytest.raises(store_mod.OnionStoreError, match="newer than this build"):
+            store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert path.read_bytes() == before
+    finally:
+        restore()
+
+
+def test_os13_a_migration_never_launders_a_moved_byte(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        heads = _pre_version_file(loaded, path, cids=("c1", "c2", "c3"))
+        conn = sqlite3.connect(str(path))
+        conn.execute("UPDATE onion_peels SET text = text || ' moved' WHERE conversation = 'c2' AND seq = 0")
+        conn.execute("UPDATE onion_cellar SET span = '{not json' WHERE conversation = 'c3' AND seq = 0")
+        conn.commit()
+        query = "SELECT stub FROM onion_receipts WHERE conversation = ? ORDER BY seq"
+        moved = {cid: conn.execute(query, (cid,)).fetchall() for cid in ("c2", "c3")}
+        conn.close()
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        back = store.load("c1", lib.OnionState())
+        assert not any(head in r.stub for head in heads for r in back.ledger.all()), "the sound conversation migrates"
+        for cid in ("c2", "c3"):
+            with pytest.raises(store_mod.OnionIntegrityError, match=cid):
+                store.load(cid, lib.OnionState())
+        conn = sqlite3.connect(str(path))
+        kept = {cid: conn.execute(query, (cid,)).fetchall() for cid in ("c2", "c3")}
+        conn.close()
+        assert kept == moved, "a moved byte or a row that does not decode is left as it was, never laundered"
+        assert _version(path) == store_mod.SCHEMA_VERSION, "and the file is brought up for the others"
+    finally:
+        restore()
+
+
+def test_os14_the_schema_is_read_and_brought_up_inside_one_write_transaction(tmp_path):
+    loaded, restore = _open()
+    try:
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        _pre_version_file(loaded, path)
+        said = []
+
+        class Recording:
+            def __init__(self, conn):
+                object.__setattr__(self, "_conn", conn)
+
+            def execute(self, sql, *args):
+                said.append(" ".join(sql.split())[:40])
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def __setattr__(self, name, value):
+                said.append(f"set {name}={value!r}")
+                setattr(self._conn, name, value)
+
+        store_mod.OnionStore(path, connect=lambda p: Recording(sqlite3.connect(str(p))), require_encryption=False)
+        assert "BEGIN IMMEDIATE" in said, "a write transaction is taken first"
+        begin = said.index("BEGIN IMMEDIATE")
+        assert "set isolation_level=None" in said[:begin], "with the driver's own transactions off, whichever it is"
+        assert "COMMIT" in said[begin:], "and closed by name"
+        read = next(i for i, sql in enumerate(said) if sql.startswith("PRAGMA user_version") and "=" not in sql)
+        assert begin < read, "the version is read inside the transaction that brings the file up"
+    finally:
+        restore()
+
+
+def test_os15_a_conversation_that_fails_after_its_first_rewrite_keeps_every_line(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        heads = _pre_version_file(loaded, path, cids=("c1", "c4"), spans={"c4": {1: [1]}})
+        query = "SELECT stub FROM onion_receipts WHERE conversation = 'c4' ORDER BY seq"
+        conn = sqlite3.connect(str(path))
+        before = conn.execute(query).fetchall()
+        conn.close()
+        assert len(before) == 2, "control: its first line is written again before its second span fails"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        conn = sqlite3.connect(str(path))
+        after = conn.execute(query).fetchall()
+        conn.close()
+        assert after == before, "the conversation that failed mid-way keeps every line, its first rewrite undone"
+        back = store.load("c1", lib.OnionState())
+        assert not any(head in r.stub for head in heads for r in back.ledger.all()), "control: the other migrated"
+    finally:
+        restore()
+
+
+def test_os16_a_database_error_rolls_the_whole_migration_back_and_is_told_as_it_was(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        heads = _pre_version_file(loaded, path, cids=("c1", "c2"))
+
+        class Failing:
+            def __init__(self, conn):
+                object.__setattr__(self, "_conn", conn)
+
+            def execute(self, sql, *args):
+                if sql.startswith("UPDATE onion_receipts") and args and args[0][1] == "c2":
+                    raise sqlite3.OperationalError("injected: disk I/O error")
+                if sql == "ROLLBACK":
+                    self._conn.execute(sql)
+                    raise sqlite3.OperationalError("cannot rollback - no transaction is active")
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def __setattr__(self, name, value):
+                setattr(self._conn, name, value)
+
+        before = path.read_bytes()
+        with pytest.raises(sqlite3.OperationalError, match="injected"):
+            store_mod.OnionStore(path, connect=lambda p: Failing(sqlite3.connect(str(p))), require_encryption=False)
+        assert path.read_bytes() == before and _version(path) == 0, "nothing migrated, nothing marked"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        back = store.load("c2", lib.OnionState())
+        assert not any(head in r.stub for head in heads for r in back.ledger.all()), "the next opening migrates it"
     finally:
         restore()
 

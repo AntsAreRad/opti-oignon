@@ -1471,6 +1471,64 @@ def mask_turn(turn):
     return "".join(out)
 
 
+def sentences(text):
+    """The sentences of a text, as the probes split it."""
+    return _sentences(text)
+
+
+@dataclass(frozen=True)
+class Unit:
+    """One place a probe is answered in: a sentence of prose, or a fenced block as its marker.
+
+    ``start`` and ``stop`` bound it in its turn's text: a sentence's own
+    characters, a code block with its fences. ``text`` is what a peel or an
+    anchor shows of it: the sentence as written, or the block's marker,
+    never its code.
+    """
+
+    turn_id: str
+    origin: str
+    start: int
+    stop: int
+    text: str
+
+
+def units(span):
+    """The units of a span's turns, in order: each sentence of prose and each fenced block, with its place.
+
+    Read piece by piece and block by block as the probes read them, so a
+    unit is where a probe drawn from the span can be answered. A block
+    whose sentences the reader rebuilt from its lines, so that the turn does
+    not hold them as written, is one unit, the whole block.
+    """
+    found = []
+    for turn in span:
+        turn_id = str(turn.get("turn_id", ""))
+        text = str(turn.get("text", "") or "")
+        origin, segments, _defect = read_origin(turn)
+        parts = [(start, stop, label) for start, stop, label in segments] if segments else [(0, len(text), origin)]
+        for offset, end_of_piece, label in parts:
+            for block in segment(text[offset:end_of_piece]):
+                start, end = offset + block.start, offset + block.end
+                if block.kind == "code":
+                    found.append(Unit(turn_id, label, start, end, code_marker(block.text)))
+                    continue
+                placed, cursor = [], start
+                for sentence in _sentences(block.text):
+                    at = text.find(sentence, cursor, end)
+                    if at < 0:
+                        placed = None
+                        break
+                    placed.append(Unit(turn_id, label, at, at + len(sentence), sentence))
+                    cursor = at + len(sentence)
+                if placed is None:
+                    whole = text[start:end].strip()
+                    lead = start + len(text[start:end]) - len(text[start:end].lstrip())
+                    placed = [Unit(turn_id, label, lead, lead + len(whole), whole)] if whole else []
+                found.extend(placed)
+    return found
+
+
 def _read_pieces(pieces):
     """Each piece read block by block: ``(index, unit, reading)``, a code block's body with no reading, in order."""
     read = []
@@ -1608,6 +1666,25 @@ def answers(probe, text, reading=None):
     words = set(_tokens(text))
     parts = _tokens(probe.answer)
     return (bool(parts) and all(part in words for part in parts)) or any(alias in words for alias in probe.key)
+
+
+def copies(sentence, text, fewest):
+    """True when ``sentence`` repeats ``text``: most content words of either one are words of the other.
+
+    Read both ways at the share a decision is answered at, so a sentence
+    that copies part of a longer one is a copy, and so is one that copies a
+    short one whole; and through at least ``fewest`` shared content words
+    (the queue's ``copy_shared_words``), so one word in common -- a name,
+    "logs" -- need be no copy. A summary's sentence that copies words from
+    outside the conversation is those words kept verbatim, whatever the
+    model meant by it.
+    """
+    said = {_fold(word) for word in _tokens(sentence)} - _FOLDED_STOPWORDS
+    held = {_fold(word) for word in _tokens(text)} - _FOLDED_STOPWORDS
+    shared = len(said & held)
+    return shared >= fewest and shared > 0 and (
+        shared / len(said) >= DECISION_COVERAGE or shared / len(held) >= DECISION_COVERAGE
+    )
 
 
 def score(probes, text):

@@ -1133,6 +1133,77 @@ package costs.
 
 ### Changed
 
+- [SECURITY] The onion memory's queue never stops: not on a refusal, not on
+  a model that fails or never answers. One burst runs per conversation, and
+  a lock on each conversation's memory keeps the mirror, an eviction's
+  commit, a save and the user's own verbs from crossing; an eviction commits
+  only while its span is still the oldest, and takes no turn that arrived
+  while its summary was written. When the probe gate refuses a summary, the
+  span goes down a ladder below the gate instead of staying where it was: a
+  span no probe can judge leaves bare, with no summary; a refused summary
+  that failed probes is asked for once more, handed those probes, at the
+  temperature and seed `onion.yaml` sets for every librarian call (0 and 1
+  as shipped) -- unless no text could change the refusal, the span's probes
+  asking for too few of its facts; then it is repaired: the sentences its
+  span holds, then each typed decision it lost in its own sentence and the
+  fewest other units the user typed that answer what else it lost (a
+  sentence, or a code block by its marker; the fewest up to
+  `queue.exact_cover` candidates, a deterministic greedy choice beyond),
+  each marked with its turn, kept when the gate accepts it again and it
+  saves enough (`queue.rho`, compared as written); else the span is held,
+  the places of the typed units that answer its probes (each typed
+  decision's own sentence, then the fewest for the rest) kept in the
+  archive as anchors and shown to the model as data -- a code block by its
+  marker, never its code -- within their share of the summaries' layer. A
+  repair drops each sentence of the summary that shares at least
+  `queue.copy_shared_words` content words, and most of the words of either
+  one, with a sentence of a document or of an answer the assistant gave
+  with a tool or the web. A turn marker the model writes -- `t` and digits,
+  or a turn id of the span, in any bracket, angle bracket or quotation
+  mark, whatever its case, width, spacing or invisible characters, nested
+  or not -- is taken out before the gate reads its text, unless the user
+  typed it so. Only words the user typed are ever stitched into a summary
+  or kept as an anchor; the archive keeps every turn whole, for recall. A
+  refusal is marked by a hash of what failed and of the call refused, never
+  its words, and a span that comes back with the same mark is not asked for
+  again. A call that fails or outlives its deadline
+  (`librarian.call_timeout_s`, held by the librarian whatever the backend
+  does) is counted and logged by its class, and the burst or close that met
+  it goes on without the model; a close says when it ended so, and no call
+  to a model starts while an abandoned one of it still hangs. Receipts
+  carry no word of their span -- their key, turns, kind and origins -- and
+  the oldest fold into one line under the receipts' cap, so the memory
+  block never goes blank for having evicted too much. Closing a
+  conversation runs the same ladder and waits for a burst in flight. The
+  store names the schema a file was written with: an older file is
+  migrated once, conversation by conversation, each root proved first, the
+  receipts' lines written again without the words they held and the root
+  recomputed, each under a savepoint of its own; a conversation that does
+  not prove -- its root, a span its receipts name, a row that does not
+  decode -- is left as it was and refused by name on its own load; an
+  error of the database itself rolls the whole migration back, to be tried
+  again at the next opening; and a file of a newer schema is refused by
+  name and left as it was. The temperature of the librarian is read from
+  `onion.yaml` alone.
+- Proposals to the Core. A decision the user typed, as the probes read it,
+  that a held span keeps is offered to the Core in its own words and never
+  written there by itself: the terminal session lists them with
+  `/proposals`, and the user takes or sets aside one at a time (`/accept
+  ID`, `/decline ID`), its exact words shown with its turn and origin. At
+  most `queue.proposals_per_day` are offered per conversation and per day
+  (UTC); a decision past the cap is deferred with the conversation and
+  offered on a later day, when the proposals are listed or a step runs;
+  what a listing opens is saved. A proposal whose place no longer holds a
+  typed decision is neither shown nor accepted, a deferred one of them
+  takes none of a day's room, and one moved in the file is refused by
+  name. What the queue does is counted in the process -- bursts and their
+  breaks, evictions by rung, refusals by motive, failed calls, receipts
+  folded (each once), anchors left out or no longer placed (at each
+  composition), refused memory blocks, proposals -- without a word of a
+  conversation. The onion arm of `scripts/drift_ab.py` hands the librarian
+  each turn with the origin the executor gives it and stops asking a model
+  that failed, as a burst does; unlike the launcher, it curates at every
+  turn and without the second asking.
 - [SECURITY] Every conversation turn is saved with the origin of its words:
   typed by the user, the user's question as the model rewrote it (refined), a
   document the user attached, the assistant's answer -- flagged when tools or
