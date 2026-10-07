@@ -36,7 +36,33 @@ and add up to the window exactly; the composer refuses a file that does not.
   that decides with no typed decision of the span behind it; a sentence
   whose subject is a reporter -- the assistant, a document, a tool, from a
   closed list in `onion.yaml` -- tells another speaker's words and needs
-  none. Two bounds come last, each refused with its figure: the share of
+  none. Nor may a peel give an order, since every later turn reads it: a
+  clause that orders, in the forms the `directives` table of `onion.yaml`
+  names and on a text folded for them (compatibility forms, format,
+  combining and invisible characters, look-alike letters, hyphens, marks of
+  emphasis, words spelled letter by letter, lines broken before a word in
+  lower case, enumerators and tags) -- in the second person, as an
+  obligation of the assistant, under a label that addresses it, after
+  "Please", "Do not" or "Try to", as a lasting rule, with an injection's
+  signature, as a request told of the user, or with a verb before its
+  object -- is refused by name, the user's own restated or told included,
+  and the repair drops it wherever it stands. The user's orders reach a peel
+  only in the user's words: the queue stitches at the end of the peel each
+  run the user typed that orders, word for word and marked with its turn,
+  with the condition, the quote, the list's line or the retraction that
+  goes with it, and the gate holds such runs only as that final block,
+  each exactly the run of its turn, after a sentence the summary ended; a
+  marker anywhere else stitches nothing, and the model's own markers are
+  taken out first. A decision is
+  held clause by clause: a reporter at the head of a sentence exempts no
+  clause that opens on a deciding subject of its own after a semicolon, a
+  colon, a dash, a comma, an "and", a bracket or a subordinating word, a
+  predicate coordinated to a typed decision needs one of its own, and a
+  reporter that tells a decision as the user's needs one typed; a decision
+  written under a list or after a label that quotes, negates or conditions
+  it holds none. The table's comment names what it does not read: a bare
+  imperative, an order told as a plan or a permission, an obligation of a
+  model or an agent, among others. Two bounds come last, each refused with its figure: the share of
   the summary's content words its span holds no word for
   (`max_novelty`), and its words over its span's (`max_length_ratio`). A
   summary longer than its span saves nothing, and the verbatim turns stay.
@@ -120,6 +146,8 @@ The librarian asks its model for a summary in the language of the turns
 that attributes each decision to its source: a decision is the user's
 only if the user typed it, and what the assistant, a document or a tool
 said is told with them as the subject, the form the second face accepts.
+It asks the model to give no order and to restate none, whoever gave it:
+the user's orders are kept apart, in the user's own words.
 What the request changes in the share of refused summaries is a host
 measurement.
 

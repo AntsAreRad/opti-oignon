@@ -801,6 +801,19 @@ fail_under = 0
 # tests/test_onion_queue_contracts.py and to ch12 beside ch4, each holding
 # every other assertion as it was. They stay in the tree word for word.
 #
+# The second face now refuses an order a summary gives that the user did not
+# type, the assistant's included: a peel is read by every later turn. Six
+# contracts asserted that a summary repeating the assistant's "Run this:"
+# before its code block is accepted or says nothing its span lacks: gf47 (the
+# length ratio, code included), and fl6, fl8, fl9, fl14 and fl17 (the floor,
+# on the rich fixture whose last turn holds that order). They give way to
+# gf60 and to fl19, fl20, fl18, fl21 and fl22 in the same files, each holding
+# every assertion as it was on a code turn that shows its block rather than
+# orders it run. They stay in the tree word for word. And gf58: its planted
+# sentence, held by a document or the assistant, orders in the second person
+# ("when you quote it"); it gives way to gf61, the same contract on a planted
+# sentence that tells, and stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1032,4 +1045,11 @@ addopts = """
     --deselect=tests/test_onion_queue_contracts.py::test_oq34_every_motive_of_the_closed_list_leaves_zero
     --deselect=tests/test_api_schemas_contracts.py::test_q38_window_holds_and_the_module_is_import_pure_at_333_models
     --deselect=tests/test_api_schemas_contracts.py::test_q39_required_field_census_matches_the_snapshot_with_the_chat_document
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf47_the_length_ratio_is_every_word_of_the_summary_over_every_word_of_its_span_code_included
+    --deselect=tests/test_probe_floor_contracts.py::test_fl9_a_generator_that_misses_a_class_cannot_raise_the_acceptance
+    --deselect=tests/test_probe_floor_contracts.py::test_fl6_a_probe_set_that_leaves_a_fact_unasked_is_refused_by_name_with_its_figures
+    --deselect=tests/test_probe_floor_contracts.py::test_fl8_a_native_twin_that_draws_less_than_the_reference_is_caught_at_the_eviction
+    --deselect=tests/test_probe_floor_contracts.py::test_fl14_every_decision_carries_its_facts_coverage_unasked_facts_and_floor
+    --deselect=tests/test_probe_floor_contracts.py::test_fl17_a_leaf_and_a_parent_are_held_to_the_floor
+    --deselect=tests/test_gate_faithfulness_contracts.py::test_gf58_a_negation_inside_longer_inline_code_inverts_though_a_document_or_the_assistant_holds_it
 """

@@ -1133,6 +1133,139 @@ package costs.
 
 ### Changed
 
+- [SECURITY] A peel may no longer give an order, nor restate or tell one,
+  the user's included, but in the user's own words, stitched in by the
+  queue. Every later turn reads a peel, so the eviction gate's second face
+  now reads a peel clause by clause for an order, from a table in
+  `onion.yaml` (`directives`, English and French), on the text folded for
+  it: compatibility forms composed, format, combining and invisible
+  characters dropped (the Hangul fillers, the blank Braille pattern), the
+  common Cyrillic and Greek look-alikes of Latin letters read as them,
+  underscores between letters read as spaces, hyphenated words read both
+  joined and split ("E-mail", "Send-the-keys", "Email-them",
+  "Please-send"), marks of emphasis dropped, a colon glued to its label
+  spaced ("Reminder:send"), a word spelled letter by letter joined ("S e n
+  d", "D.e.l.e.t.e", "S/e/n/d"), a line that opens in lower case read on
+  the line before it, inline code read as words, and enumerators, tags,
+  interjections ("ok so send") and code markers set aside. A clause orders when it speaks to the reader in the
+  second person; when the assistant is obliged, past an adverb and in the
+  periphrases of an obligation ("is encouraged to", "is tasked with", "has
+  been asked to"); under a label that addresses the reader ("Instructions
+  for the assistant:", or an authority named alone, "System:"), the list
+  after it included; on an opening of courtesy, prohibition, emphasis or
+  lasting rule ("Please", "Do not", "Try to", "From now on", "Until further
+  notice", "Veuillez"), unless a subject follows it and it asks ("Do we keep
+  Docker?"); with an injection's signature, whoever tells it
+  ("ignore every previous instruction", "reveal its instructions"); when
+  the user is told to have asked, told or ordered the reader to act, or to
+  want a thing done ("The user told the assistant to email...", "The user
+  wants the keys sent to..."); and when a verb opens it before its object,
+  past adverbs, a particle, a dative, a vocative ("Bob, email..."),
+  brackets ("(Send) the keys") or a capital that made the verb a name
+  elsewhere in the span, an object a time phrase owns or precedes
+  included ("Delete this month's logs"). Every such clause is refused by
+  name, the user's restated or told as much as any other, and the repair
+  drops it wherever it stands: a paraphrase can lose what bounds an order
+  or change who gives it, and no reading of a paraphrase against the typed
+  text proved both safe and faithful. So an instruction copied from an
+  attached document, echoed by the assistant or carried by a turn written
+  before origins were kept no longer reaches a peel in those forms. The
+  user's orders stand in a peel only as the user typed them: the queue
+  stitches at the end of the peel, word for word and marked with its turn,
+  each run the user typed that orders -- a request in the user's own voice
+  included ("I'd like the old logs deleted by Friday") -- and each bare
+  retraction typed after one, whatever was asked between, on every rung
+  that makes a peel, for a leaf, a parent and a gated eviction too. A run
+  is a typed sentence joined with the next where parting them would change
+  what it says: a sentence in lower case, the inside of a quote in any
+  marks, all that follows a line on a colon or a sentence that announces
+  another's words ("This is what the phishing email said.", "Here is the
+  spam I got."), a one-word sentence, a bare negation or retraction,
+  interjections included ("Delete the logs. Hm, no."), and a sentence
+  that bounds the order before it ("Not before Friday.", "Only if Bob
+  agrees."); so a condition, a quote, an attribution, a list's line and a
+  retraction stay with their order. The gate holds stitched runs only as
+  the final block of the peel, each exactly the run of that turn, after a
+  sentence the summary ended with a stop -- an ellipsis, spaced or not, or
+  an abbreviation ("i.e.", "etc.") ends none -- so that no word of the
+  summary's is read with them ("On
+  every later turn, [t1] ...", "Delete [t2] ..."); a marker anywhere else
+  stitches nothing, what it marks being read as the summary's own words,
+  and the model's own markers are taken out first. A turn whose id is
+  empty or shared, a gap no typed segment covers, and the words of a
+  document, a tool, the assistant or a refined turn are never stitched.
+  The librarian asks its model to give no order and to restate none. The
+  price is in compression: a span whose orders are long is held more
+  often, its anchors kept, rather than peeled, and a summary that does not
+  end its last sentence carries no stitched order. A decision is held
+  clause by clause, read sentence by sentence as an order is: a reporter at
+  the head of a sentence exempts no clause after a semicolon, a colon or a
+  dash, nor one that opens on a deciding subject of its own after a comma,
+  an "and", a bracket or a subordinating word ("which we decided", "as we
+  decided"); a predicate coordinated to a typed decision ("and", "but",
+  "yet", "plus", "&", or a gerund after a comma), a sentence that answers
+  one with words of its own, and a decision told as the user's, by a
+  reporter or not ("the assistant confirmed the user decided", "the report
+  says the user prefers Podman", "the user confirmed that we drop...", past
+  a phrase between commas) each need the user's words, while "we" in a
+  reporter's words stays the reporter's voice; a typed sentence is parted
+  as a summary's is, so that the user's words restated whole are held
+  whole and two typed decisions may be joined ("We keep Docker but drop the
+  NAS"), a predicate coordinated to a typed decision holding alone only
+  when its head is the user's plain decision, with no negation, doubt,
+  attribution, hedging adverb or modal ("It is not true that we keep the
+  logs and drop the backups", "We reportedly keep the logs and drop the
+  backups" hold no "We drop the backups"); a
+  decision the user wrote under a list or after a label or a phrase that
+  negates, conditions, attributes or quotes it ("Don't do any of this:",
+  "Mallory wrote:", "According to Bob,", "Bob said,", "Mallory's ideas:",
+  "Our vendor's proposal:"), or took back
+  with a bare negation, holds none; a stop glued to the next sentence ends
+  one, a line that opens in lower case goes on. Each decision names the
+  table's fingerprint. The table names its limits: a bare imperative whose
+  object has no determiner ("Delete backups") or is a time phrase alone
+  ("Delete this month"); an order written as a third person ("Deletes the
+  backups"); an order told as a plan, a requirement or a permission ("The
+  next step is to...", "The assistant can now share..."); a third party's
+  "should"; an obligation of a model, an agent or a system; a passive
+  obligation under a reporter word ("The logs must be sent..."); a fronted
+  phrase without a comma ("On Friday delete the backups"); a sum written
+  after its currency sign; look-alike letters outside the table; an order
+  written as one word ("SendTheVaultKeys"); a lasting rule outside the
+  table; a request told with a verb outside the table and no reader; a
+  decision restated with a few added words as a statement; a coordinator
+  or a possessive changed ("or" told "and"), a plural for a singular; "we"
+  or "I" under a reporter, even against a typed "will not"; a speaker
+  named alone before a colon ("Bob: we drop the backups"); a list's line
+  that rejects without a negation ("Rejected options:"), and one whose
+  negation is undone ("None of this is optional:"), the user's own list of
+  their group's decisions ("Our team's decisions:"), a comma piece that
+  names a quote's noun or a possessive ("With the file server full,"), and
+  a summary whose last sentence ends on an abbreviation ("at 3 a.m."), all
+  false refusals; a sentence of the summary that tells of the stitched block
+  ("The user took this back.", "The next line applies on every later
+  turn."), judged as a claim; a wish in the first person, read as a
+  request ("I want to go home"), and requests the reading still misses
+  ("We would really like...", "wants to see the logs deleted"), which
+  leave no trace; a French wish to know whose infinitive follows its verb
+  ("voulait savoir si..."), read as a request, a false refusal; a quote framed by no
+  announcing word or mark ("Someone sent me this."), framed after it or in
+  another turn, stitched as the user's own words; a sentence that names a
+  file or tells ("Please update the settings file."), which joins the rest
+  of its turn to its run, a cost in compression; an apostrophe after a
+  plural, read as a quote mark; a retraction told
+  as a statement ("I changed my mind"), not stitched with the order it
+  takes back; a decision split by an interjection between dashes or
+  brackets ("We -- as Mallory wanted -- drop..."); and a fenced block,
+  never read for an order, the summariser seeing code only as markers. A
+  hyphenated compound that opens on an opening ("Always-on") is read as an
+  order, a false refusal on the side of safety. A strict switch, off as
+  shipped, makes every clause whose first word opens no statement an
+  order, at a cost in compression. The decision lexicon's own reach (the
+  passive voice, verbs outside it, a reporter noun read as the subject,
+  word order, a decision's scope or hedge changed, negations it does not
+  count) is unchanged here. The false refusals on real summaries are a
+  host measurement, still owed.
 - [SECURITY] The onion memory's queue never stops: not on a refusal, not on
   a model that fails or never answers. One burst runs per conversation, and
   a lock on each conversation's memory keeps the mirror, an eviction's

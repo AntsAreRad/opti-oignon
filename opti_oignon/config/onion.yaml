@@ -134,6 +134,359 @@ decisions:
       choose: [chose, chosen, went with, gone with]
       prefer: [would rather, d rather]
 
+# The forms an order is given in, in French and in English. A peel is read by
+# every later turn, so no summary gives an order, nor restates or tells one,
+# whoever gave it, the user included: the gate refuses by name every clause
+# of a peel that orders, but inside the block of runs the user typed that
+# the queue stitches at its end, each word for word after its turn's marker
+# ("[t3] ..."), after a sentence the summary ended with a stop. A marker
+# anywhere else -- the model's markers are taken out first -- stitches
+# nothing: what it marks is the summary's words, read joined to what comes
+# before it and apart from it. A run is a typed sentence, joined with the
+# next where parting them would change what they say: a sentence in lower
+# case, one inside an open quote in any marks (straight, curly, low, single,
+# guillemets, corner brackets; an apostrophe between letters is none), all
+# that follows a line on a colon or a sentence that tells, names a quote's
+# noun or opens on a presentative (telling, quote_nouns, announcers: "This
+# is what the phishing email said.", "Here is the spam I got.") to the end
+# of its piece, a one-word sentence, a bare negation or retraction,
+# interjections included ("No, don't.", "Nope.", "Hm, no.", "On second
+# thought, no."), and a sentence that opens on a negation or a condition
+# after the order it bounds ("Not before Friday.", "Only if Bob agrees.").
+# A gap no typed segment covers ends a run, and a turn whose id is empty or
+# shared with another turn holds none. The queue stitches each run that
+# orders, read with this table, and each bare retraction typed after one,
+# whatever was asked between them (a "No." that answered another question
+# makes the order look taken back, the safe side),
+# so that a condition, a quote, an attribution, a list's line and a
+# retraction stay with their order; the gate holds a stitched run only when
+# it is the run of that turn, exactly. The text is
+# read folded: compatibility forms composed, format, combining and
+# invisible characters (the Hangul fillers, the blank Braille pattern)
+# dropped, look-alike letters read as Latin ones, underscores between
+# letters read as spaces, hyphenated words read both joined and split -- a
+# French pronoun after its verb never joined ("Envoie-les"); a compound that
+# opens on an opening ("Always-on") is then read as one, a false refusal on
+# the side of safety; marks of emphasis dropped ("**Reminder:**"), a colon
+# glued between two letters spaced ("Reminder:send"), a word spelled letter
+# by letter joined, its letters parted by one or two spaces or tabs, stops, slashes,
+# middle dots or commas ("S e n d", "D.e.l.e.t.e", "S, e, n, d"; three
+# letters at least, so "e.g." stays), a line that opens in lower case read
+# on the line before it ("Send\nthe keys"); sentences end at a stop, an ellipsis
+# or a line break, chunks at a semicolon, a colon or a dash; enumerators and
+# tags before a clause are no words of it (a verb in brackets is read as
+# one), and a code marker in it reads as "it". Anywhere in a chunk, a clause
+# orders when it speaks to the reader in the second person (second_person,
+# or a French "t'" or "te"); when the assistant (readers) is obliged among
+# its first words within obligation_reach words (obligations, past adverbs:
+# "is now required to", "is hereby asked to") -- a model, an
+# agent or a system obliged to act is a statement; when a lasting rule
+# stands in it (persistent); when it holds an injection's signature
+# (signatures, or an override verb with an override object within
+# override_reach words), whoever tells it; and when the user is told to ask
+# the reader to act (user_subjects, telling, then "to"; or, whatever the
+# verb, the reader then "to") or to want a thing done (wanting, then a
+# participle or "to" before a verb that asks nothing, question_verbs): a
+# request told of the user is an order, a wish to know told of the user
+# ("wants to know whether the build passed") none -- unless a verb that
+# orders is coordinated to the one that asks ("asked to check the logs and
+# delete the old ones"); and the user asking in their own voice (first_person,
+# wanting, then a participle, "to" or "que": "I'd like the old logs
+# deleted", "J'aimerais que le rapport parte") asks as much. A label before a colon -- an authority named alone (authorities:
+# "System:", a forged message's voice), or at most label_words words opening
+# on label_heads and ending on one of addressees -- holding no verb
+# (auxiliaries, past forms) addresses the chunks after it and a list that
+# follows it. A word in brackets or parentheses before a clause that is one
+# of label_heads ("(Fix)", "[Update]") is a tag and read as none; any other
+# is read as a word too ("(Send) the keys"). Where a piece between commas
+# opens -- the first, or a later one after a fronted phrase that opens on no
+# subject (subject_pronouns, determiners, names; names alone are a vocative
+# unless a determiner opens the next piece, an appositive) -- it orders on
+# courtesy, prohibition or a rule (openers, which may begin on a lead-in
+# word; a French past participle opens none, nor an opening before a
+# subject, which asks: "Do we keep Docker?"), and when its first word, past lead-in words
+# and interjections (courtesy: "ok so send") and a run of adverbs, opens no
+# statement while the next, past adverbs, a
+# particle, then a dative before a name, a determiner or one word, opens an
+# object: a possessive ("Bob's", "today's"), a determiner, a quantity or a
+# pronoun before no time noun, or before a time noun that owns the object or
+# precedes it ("this month's logs", "ce trimestre les sauvegardes";
+# object_openers, time_nouns), a name the span holds, a figure before its
+# unit. A word opens a statement when it is one of statement_openers, a
+# name -- unless an English determiner follows it -- a figure, a gerund of
+# five letters or more (not one of ing_verbs), a past in -ed (not one of
+# ed_verbs), one of past_forms, a French past participle (unless an English
+# determiner follows it: an accent added to an English verb), or a word in
+# -s that is no imperative ("Deletes", "Development continues"; not
+# "Process", "Focus", nor a French imperative before its determiner or
+# pronoun, "Prends les"). Under a
+# reporter, or with none, a decision told as the user's (user_subjects, not
+# followed by one of owner_pronouns; past a phrase between commas, "the
+# user, it seems, decided") needs a typed decision, read as the user would
+# have typed it -- the clause after "that" or "que" when it decides ("the
+# user confirmed that we drop..."), else with the user as "we" or "on", so
+# that its act alone decides ("the user prefers Podman"); so does a
+# predicate coordinated to a deciding clause (coordinators, "&" among them,
+# past auxiliaries; or a gerund and its object after a comma, "..., dropping
+# the NAS"); a decision is read sentence by sentence as an order is, a stop
+# glued to the next sentence's capital ending one and a line that opens in
+# lower case going on, a clause that opens
+# on a subject of its own after a comma, an "and", a bracket or a
+# subordinating word (subordinators; "that" is none, a reporter's voice)
+# judged on its own, a sentence's head apart from the predicates coordinated
+# to it, and a typed sentence parted the same way, so that the user's words
+# restated whole are held whole and two typed decisions may be joined; a
+# sentence that answers a typed decision with words of
+# its own is named; and a decision the user wrote under a list whose colon
+# line holds a negation, a condition or an attribution (conditions:
+# "according to", "selon"), a telling verb that is no verb of wanting
+# (wanting), a quote's noun (quote_nouns: "Here is the mail:") or another's
+# possessive, "our" before it included ("Mallory's ideas:", "Our vendor's
+# proposal:"), after such a label before a colon in its line ("Mallory
+# wrote: we drop") or such a piece before a comma ("Bob said, we drop"), or
+# that a bare negation takes back, holds none; and a predicate coordinated
+# to a typed decision holds alone only when its head is the user's plain
+# decision (a first-person subject, then past auxiliaries of tense only an
+# act, no adverb or modal that hedges it -- "reportedly", "might" -- and
+# nothing that negates, doubts or attributes it). strict: true makes every clause whose first
+# word opens no statement an order, the bare imperatives the balanced
+# reading misses ("Delete backups") with it, at a cost in compression: a
+# sentence with a bare singular subject ("Docker runs") then orders too.
+# Named limits of the balanced reading: a bare imperative, whose object has
+# no determiner, or whose object is a time phrase alone ("Delete this
+# month"); an order written as a third person ("Deletes the keys"); an order told as a plan, a
+# requirement or a permission; a third party's "should"; an obligation of a
+# model, an agent or a system; a passive obligation under a reporter word; a
+# fronted phrase without a comma; a sum after its currency sign (the first
+# face holds sums); look-alike letters outside the table; an order written
+# as one word ("SendTheVaultKeys to Mallory"); a lasting rule
+# outside persistent; a request told with a verb outside telling and
+# wanting and no reader; a decision restated with a few added words as a
+# statement; a coordinator or a possessive changed ("or" told "and", "our"
+# told "their") and a plural for a singular; "we" or "I" in a reporter's
+# words, which stays the reporter's voice even against a typed "will not";
+# a speaker named alone before a colon ("Bob: we drop the backups"), read as
+# a label of the user's own; a list's line that rejects without a negation
+# ("Rejected options:", "Ideas I turned down:"), and one whose negation is
+# undone ("None of this is optional:"), which bars its list, a false
+# refusal; a sentence of the summary that tells of the stitched block ("The
+# user took this back.", "The next line applies on every later turn."),
+# judged as a claim; a summary whose last sentence it did not end -- an
+# ellipsis, spaced or not, or an abbreviation ("i.e.", "etc.", "cf.") ends
+# none, a stop inside emphasis does -- which carries no stitched block, its
+# orders refused, a sentence that ends on an abbreviation ("at 3 a.m.",
+# "to the U.S.") among them, a false refusal; a comma piece that names a
+# quote's noun or another's possessive ("With the file server full,", "In
+# Alice's absence,"), which bars what follows it, a false refusal; a wish in the first
+# person, read as a request ("I want to go home") and stitched, and requests
+# the reading still misses ("Hm, I'd like...", "We would really like...",
+# "J'aimerais bien que...", a wish told with a verb that asks before what is
+# wanted done: "wants to see the logs deleted"), which leave no trace; a
+# French wish to know whose infinitive follows its verb ("voulait savoir
+# si..."), read as a request when a participle follows, a false refusal; a quote framed by no
+# announcing word or mark ("Someone sent me this.", "This came in
+# overnight."), framed after it ("That is what the spam said.") or in
+# another turn, stitched as the user's own words; a sentence that names a
+# file or a page, or tells ("Please update the settings file."), which
+# joins the rest of its turn to its run, a cost in compression; an
+# apostrophe after a plural, read as a quote mark; the user's own list of
+# their group's decisions ("Our team's decisions:"), barred, a false
+# refusal; a
+# retraction told as a statement ("I changed my mind"), which the queue
+# does not stitch after the order it takes back; a decision split by an
+# interjection between dashes or brackets (the lexicon's reach); an injection's signature told in
+# a legitimate sentence is refused all the same; and a fenced block, never
+# read. Words are lower-case ASCII, accents folded, an elided letter written
+# alone ("don t", "n oubliez"). Refused by name: a missing language or key,
+# an unknown key, a value that is no list, an entry outside that alphabet, a
+# key with no entry in either language. "on", "off", "no" and "yes" are quoted:
+# bare, YAML reads them as booleans. PROPOSED defaults: the false refusals
+# on real summaries are a host measurement, still owed.
+directives:
+  strict: false
+  obligation_reach: 3
+  override_reach: 4
+  label_words: 6
+  fr:
+    lead_ins: [et, mais, ou, donc, alors, puis, ensuite, maintenant, aussi, enfin, bien, simplement, plutot, sinon,
+               important, urgent, attention, nb, ps, va, allez]
+    openers: [veuillez, merci de, priere de, ne jamais, ne pas, ne plus, jamais, assurez vous, assure toi,
+              pensez a, pense a, n oubliez pas, n oublie pas, surtout ne, en aucun cas, il faut, il ne faut, faites,
+              fais, n hesitez pas a, n hesite pas a, evitez de, evite de, arretez, arrete, essaie de, essayez de,
+              essayer de]
+    persistent: [desormais, dorenavant, a partir de maintenant, a l avenir, a partir de ce jour,
+                 jusqu a nouvel ordre, a partir d aujourd hui, a compter d aujourd hui]
+    second_person: [vous, tu, toi, votre, vos, ta, tes]
+    readers: [assistant, assistante]
+    obligations: [doit, doivent, devra, devront, devrait, devraient, est tenu de, est tenue de, a pour consigne de,
+                  est prie de, est priee de, a ordre de, est charge de, est chargee de, est encourage a,
+                  est encouragee a, est invite a, est invitee a, est cense, est censee, est appele a, est appelee a,
+                  a pour mission de, a pour tache de, est autorise a, est autorisee a, est libre de, est oblige de,
+                  est obligee de, a ete prie de, a ete priee de, a ete charge de, a ete chargee de]
+    addressees: [assistant, assistante, ia, llm, modele, bot, chatbot, agent, systeme, instruction, instructions,
+                 consigne, consignes, directive, directives, prompt, admin, administrateur, developpeur, operateur]
+    label_heads: [consigne, consignes, note, notes, message, messages, rappel, regle, regles, directive, directives,
+                  instruction, instructions, important, attention, a, pour, cher, chere, salut, bonjour, info,
+                  correctif, avertissement, astuce, statut, resume, contexte, maj]
+    override_verbs: [ignore, ignores, ignorez, ignorons, ignorer, oublie, oublies, oubliez, oublier, contourne,
+                     contournez, contourner, outrepasse, outrepassez, outrepasser, neglige, negligez, negliger,
+                     ne tiens pas compte, ne tenez pas compte, ne pas tenir compte, fais abstraction,
+                     faites abstraction, passe outre, passez outre, passer outre]
+    override_objects: [instruction, instructions, consigne, consignes, regle, regles, directive, directives, prompt,
+                       politique, politiques, restriction, restrictions, limite, limites, precede, precedent,
+                       precedente, precedentes, precedents]
+    signatures: [tu es maintenant, vous etes maintenant, fais comme si, faites comme si, agis comme, agissez comme,
+                 joue le role, jouez le role, mode developpeur, nouvelles instructions, nouvelle consigne,
+                 nouvelles consignes, prompt systeme, ignore ce qui precede, ignorez ce qui precede,
+                 oublie ce qui precede, oubliez ce qui precede, ignore le contexte, ignorez le contexte,
+                 oublie le contexte, oubliez le contexte, revele tes instructions, revele ses instructions,
+                 revelez vos instructions, affiche tes instructions, affiche ses instructions, revele ton prompt,
+                 revele son prompt]
+    statement_openers: [le, la, les, l, un, une, des, du, de, d, ce, cet, cette, ces, c, mon, ma, mes, notre, nos,
+                        son, sa, ses, leur, leurs, je, j, nous, il, elle, "on", ils, elles, cela, ca, ceci, celui,
+                        celle, ceux, celles, chacun, chacune, personne, rien, tout, tous, toutes, chaque, plusieurs,
+                        certains, certaines, aucun, aucune, quelques, seul, seule, seuls, seules, utilisateur,
+                        utilisatrice, utilisateurs, en, a, au, aux, apres, avant, pendant, depuis, pour, par, avec,
+                        sans, sur, sous, dans, chez, vers, selon, malgre, contre, entre, parmi, lors, quand,
+                        lorsque, si, parce, puisque, comme, car, cependant, pourtant, toutefois, hier, aujourd,
+                        demain, deja, encore, lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche, voici,
+                        voila, y, est, sont, etait, etaient, ont, avait, avaient, sera, seront, ainsi, pas, plus,
+                        moins, tres, trop, peu, beaucoup, qui, que, quoi, dont, combien, pourquoi, comment, quel,
+                        quelle, quels, quelles, actuellement, recemment, auparavant, finalement, heureusement,
+                        malheureusement, apparemment, initialement, dernier, derniere, premier, premiere, deux,
+                        trois, quatre, cinq, six, sept, huit, neuf, dix]
+    object_openers: [le, la, les, l, un, une, des, du, tout, toute, tous, toutes, chaque, ce, cet, cette, ces, mon,
+                     ma, mes, ton, ta, tes, son, sa, ses, notre, nos, votre, vos, leur, leurs, moi, lui, nous, en, y,
+                     deux, trois, quatre, cinq, six, sept, huit, neuf, dix, quelques, plusieurs, certains,
+                     certaines]
+    particles: []
+    time_nouns: [semaine, mois, annee, matin, soir, soiree, nuit, jour, fois, trimestre, heure, sprint]
+    auxiliaries: [est, sont, etait, etaient, ete, a, ont, avait, avaient, sera, seront, fut, peut, peuvent, doit,
+                  doivent, va, vont]
+    subject_pronouns: [je, j, nous, il, elle, "on", ils, elles, vous, tu]
+    owner_pronouns: []
+    datives: [a, avec, pour]
+    courtesy: [veuillez, svp, stp, ok, oui, merci, super, parfait, bon, ah, oh, salut, bonjour]
+    adverbs: [aussi, ensuite, maintenant, encore, alors, bien, simplement, plutot, vite, immediatement, directement,
+              demain, aujourd, toujours]
+    authorities: [systeme, assistant, assistante, ia, developpeur, administrateur, operateur, consignes, instructions]
+    ing_verbs: []
+    ed_verbs: []
+    past_forms: []
+    user_subjects: [utilisateur, utilisatrice, utilisateurs, utilisatrices, humain, humaine, humains, humaines]
+    telling: [veut, voulait, voudrait, veulent, demande, demandait, demandent, souhaite, souhaitait, prefere,
+              preferait, dit, disait, aime, aimerait, ordonne, ordonnait, commande, commandait, exige, exigeait,
+              prie, priait, charge, chargeait, conseille, recommande, impose, ecrit, ecrivait, repond, repondait,
+              affirme, mentionne, cite]
+    coordinators: [et, puis, et puis, ensuite, et ensuite, mais, ainsi que]
+    conditions: [si, s il, sauf, seulement, uniquement, quand, lorsque, lorsqu, des que, tant que, jusqu a, apres,
+                 avant, a condition, pourvu que, selon, d apres]
+    subordinators: [qui, dont, ou, comme, car, puisque, lorsque, quand, tandis]
+    quote_nouns: [mail, courriel, courriels, message, messages, lettre, document, documents, page, fichier, texte,
+                  commentaire, citation, capture, ticket, transcription, sms, texto, spam, arnaque, hameconnage]
+    wanting: [veut, voulait, voudrait, veulent, souhaite, souhaitait, prefere, preferait, aime, aimerait, exige,
+              exigeait, veux, voudrais, voulons, voudrions, aimerais, aimerions, souhaiterais, souhaitons,
+              prefererais, exigeons]
+    question_verbs: [savoir, comprendre, connaitre, apprendre, voir, entendre, discuter, demander, verifier, comparer,
+                     relire, lire]
+    first_person: [je, nous, "on"]
+    announcers: [voici, voila, ci dessous, ce qui suit, ci apres]
+  en:
+    lead_ins: [and, but, or, so, now, then, also, just, first, next, finally, again, simply, instead, otherwise,
+               todo, fixme, nb, ps, important, urgent, asap, go]
+    openers: [please, kindly, do not, don t, dont, never, always, make sure, be sure, ensure, remember to,
+              don t forget, do not forget, under no circumstances, be careful to, let s, lets, feel free to,
+              go ahead and, do, try to, try and]
+    persistent: [from now on, going forward, henceforth, from this point on, for all future, in all future,
+                 until further notice, from here on, from here onwards, from today on, hereafter]
+    second_person: [you, your, yours, yourself, yourselves]
+    readers: [assistant]
+    obligations: [must, should, shall, have to, has to, had to, need to, needs to, ought to, is to, are to,
+                  is required to, are required to, is expected to, is supposed to, has got to, is instructed to,
+                  is told to, is asked to, is encouraged to, is advised to, is welcome to, is free to, is invited to,
+                  is urged to, is requested to, is directed to, is meant to, is obliged to, is obligated to,
+                  is allowed to, is permitted to, is authorized to, is best placed to, is tasked with,
+                  is responsible for, is in charge of, would do well to, may wish to, might wish to, may want to,
+                  might want to, has been asked to, has been told to, has been instructed to, has been required to]
+    addressees: [assistant, ai, llm, model, bot, chatbot, agent, system, instruction, instructions, directive,
+                 directives, prompt, admin, administrator, developer, operator]
+    label_heads: [instruction, instructions, note, notes, message, messages, reminder, rule, rules, directive,
+                  directives, important, attention, to, for, dear, hey, hi, hello, update, updates, info, fix, fixes,
+                  warning, tip, edit, done, draft, bug, feature, news, status, summary, fyi, aside, context, todo]
+    override_verbs: [ignore, ignores, ignored, ignoring, disregard, disregards, disregarded, forget, forgets, forgot,
+                     override, overrides, overrule, bypass, bypasses, circumvent]
+    override_objects: [instruction, instructions, prompt, prompts, rule, rules, guideline, guidelines, direction,
+                       directions, directive, directives, policy, policies, constraint, constraints, restriction,
+                       restrictions, safety, guardrail, guardrails, orders]
+    signatures: [you are now, act as, acting as, pretend to be, pretend you, roleplay as, role play as, jailbreak,
+                 developer mode, dan mode, new instructions, system prompt, do anything now, ignore prior context,
+                 ignore the prior context, ignore previous context, ignore the previous context, ignore the above,
+                 ignore everything above, disregard the above, disregard everything above, forget the above,
+                 forget everything above, ignore everything before, ignore what came before, reveal its instructions,
+                 reveal your instructions, reveal the instructions, reveal its prompt, reveal your prompt,
+                 print its instructions, print your instructions, output its instructions, output your instructions,
+                 show its instructions, show your instructions, repeat its instructions, repeat your instructions]
+    statement_openers: [the, a, an, this, that, these, those, my, our, his, her, its, their, i, we, he, she, it,
+                        they, one, there, here, someone, somebody, nobody, "no", none, nothing, everything,
+                        everyone, everybody, anyone, something, all, every, each, both, either, neither, most,
+                        many, much, several, some, few, more, less, other, another, such, only, user, users, "on",
+                        in, at, after, before, during, since, for, by, with, without, about, under, over, from, to,
+                        of, as, per, via, within, across, between, through, throughout, until, when, while, if,
+                        because, although, though, once, whether, where, why, how, what, which, who, whom, whose,
+                        however, meanwhile, later, earlier, yesterday, today, tomorrow, overall, still, yet,
+                        already, afterwards, thus, hence, therefore, indeed, too, not, even, unfortunately,
+                        fortunately, apparently, initially, eventually, currently, recently, previously,
+                        originally, last, second, third, monday, tuesday, wednesday, thursday, friday, saturday,
+                        sunday, is, are, was, were, has, have, had, will, would, can, could, may, might, shall,
+                        should, must, does, did, two, three, four, five, six, seven, eight, nine, ten]
+    object_openers: [the, a, an, all, every, any, each, this, these, those, my, your, our, their, his, her, its, me,
+                     us, them, him, it, everything, anything, nothing, whatever, both, some, several, many, few, most,
+                     half, either, neither, another, other, one, two, three, four, five, six, seven, eight, nine,
+                     ten]
+    particles: ["off", "on", over, up, down, out, away, back, around, in]
+    time_nouns: [week, weekend, month, year, morning, afternoon, evening, night, day, time, sprint, quarter, season,
+                 hour]
+    auxiliaries: [is, are, was, were, be, been, being, has, have, had, will, would, can, could, may, might, shall,
+                  should, must, do, does, did]
+    subject_pronouns: [i, we, he, she, it, they, you]
+    owner_pronouns: [it]
+    datives: [to, with, for]
+    courtesy: [please, kindly, ok, okay, "yes", yeah, yep, sure, thanks, thank, great, cool, alright, hi, hello, hey,
+               oh, ah, well, pls, plz]
+    adverbs: [also, now, just, again, then, simply, instead, still, quickly, immediately, directly, soon, today,
+              tonight, tomorrow, hereby]
+    authorities: [system, assistant, ai, developer, admin, administrator, operator, instructions]
+    ing_verbs: [bring, sing, ring, string, swing, sting, fling, cling, wring, spring]
+    ed_verbs: [need, feed, seed, bleed, breed, speed, heed, shed, wed, embed, proceed, succeed, exceed, shred,
+               spread, read, proofread, misread, reseed]
+    past_forms: [sent, kept, ran, wrote, took, made, chose, gave, went, got, found, built, told, said, left, held,
+                 brought, bought, thought, caught, taught, began, broke, came, drew, drove, fell, felt, fought,
+                 flew, forgot, froze, grew, hid, hung, knew, laid, led, lent, lost, meant, met, paid, rode, rose,
+                 rang, saw, sold, shook, shot, sang, sank, sat, slept, slid, spent, spoke, stood, stole, stuck,
+                 struck, swore, swept, swam, tore, threw, understood, woke, wore, won, wound, did, was, were, had,
+                 became, chosen, done, gone, seen, taken, written]
+    user_subjects: [user, users, human, humans]
+    telling: [want, wants, wanted, ask, asks, asked, request, requests, requested, prefer, prefers, preferred, like,
+              likes, liked, wish, wishes, wished, say, says, said, tell, tells, told, instruct, instructs, instructed,
+              order, orders, ordered, command, commands, commanded, direct, directs, directed, demand, demands,
+              demanded, require, requires, required, urge, urges, urged, expect, expects, expected, need, needs,
+              needed, write, writes, wrote, reply, replies, replied, answer, answers, answered, claim, claims,
+              claimed, state, states, stated, mention, mentions, mentioned, quote, quotes, quoted]
+    coordinators: [and, then, and then, but, yet, plus, as well as]
+    conditions: [if, unless, only, when, whenever, once, until, till, after, before, provided, providing,
+                 as long as, except, in case, according to]
+    subordinators: [which, who, whom, whose, as, where, when, because, since, while, whereas, although, though,
+                    so]
+    quote_nouns: [mail, email, emails, message, messages, letter, document, documents, page, file, text, post,
+                  tweet, comment, attachment, chat, transcript, quote, pdf, screenshot, ticket, sms, spam, scam,
+                  phishing, voicemail]
+    wanting: [want, wants, wanted, wish, wishes, wished, like, likes, liked, prefer, prefers, preferred, need, needs,
+              needed, require, requires, required, expect, expects, expected]
+    question_verbs: [know, understand, learn, see, hear, find, figure, discuss, ask, wonder, check, compare, review,
+                     read]
+    first_person: [i, we]
+    announcers: [here is, here are, here s, below is, below are, the following]
+
 peels:
   span_turns: 4             # turns evicted together into one leaf peel
 queue:

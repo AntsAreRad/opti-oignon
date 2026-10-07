@@ -46,6 +46,23 @@ same classes, in either language, and any writing of its dates and
 numbers; it loses it with another act, a date moved or a number changed,
 however many of its words it keeps.
 
+A summary may give no order, nor restate or tell one, the user's included.
+A peel is read by every later turn, so a clause of a peel that orders -- by
+speaking to the reader in the second person, an obligation of the reader, a
+label that addresses it, an opening of courtesy or prohibition, a lasting
+rule, an injection's signature, a request told of the user, or a verb
+before its object -- stands only inside a run the user typed, stitched word
+for word after its turn's marker in the block that ends the peel, after a
+sentence the summary ended (``typed_ranges``, ``order_ranges``,
+``_unstitched``): the queue stitches the user's orders, and a marker
+anywhere else stitches nothing.
+The forms come from the ``directives`` table of ``onion.yaml``, both
+languages read as one; without a table no clause orders. A decision is held
+clause by clause: a predicate coordinated to a typed decision, a deciding
+clause after a semicolon or with a subject of its own, and a decision a
+reporter tells as the user's each need the user's words, and a decision the
+user quoted, negated, conditioned or took back holds none.
+
 A text is read as blocks before it is read as sentences: prose paragraphs,
 list items without their bullet or number, and fenced code. A fenced block
 is an artifact, not sentences: its key is a digest of its body, its one
@@ -865,6 +882,142 @@ def build_lexicon(section):
     return _make_lexicon(subjects, forms, reaches)
 
 
+class DirectivesError(ValueError):
+    """The table of the forms an order is given in cannot be built as written."""
+
+
+# The forms an order is given in come from the ``directives`` section of
+# ``onion.yaml``: its switches, then each language with every key below.
+# The keys read as single words hold one word an entry; the others hold
+# phrases. An elided letter is written alone and read as its word.
+_DIRECTIVE_KEYS = (
+    "lead_ins", "openers", "persistent", "second_person", "readers", "obligations", "addressees", "label_heads",
+    "override_verbs", "override_objects", "signatures", "statement_openers", "object_openers", "particles",
+    "time_nouns", "auxiliaries", "subject_pronouns", "owner_pronouns", "datives", "courtesy", "adverbs",
+    "authorities", "ing_verbs", "ed_verbs", "past_forms", "user_subjects", "telling", "coordinators",
+    "conditions", "subordinators", "quote_nouns", "wanting", "question_verbs", "first_person", "announcers",
+)
+_DIRECTIVE_WORDS = frozenset({
+    "lead_ins", "readers", "addressees", "label_heads", "override_objects", "statement_openers", "object_openers",
+    "particles", "time_nouns", "auxiliaries", "subject_pronouns", "owner_pronouns", "datives", "courtesy", "adverbs",
+    "authorities", "ing_verbs", "ed_verbs", "past_forms", "user_subjects", "telling", "subordinators", "quote_nouns",
+    "wanting", "question_verbs", "first_person",
+})
+_DIRECTIVE_COUNTS = ("obligation_reach", "override_reach", "label_words")
+
+
+@dataclass(frozen=True)
+class Directives:
+    """The forms an order is given in, built from ``onion.yaml``, both languages read as one.
+
+    Each key of ``_DIRECTIVE_KEYS`` holds a frozenset: of folded words for
+    the keys read as single words, of word tuples for the phrases, each
+    elided letter read as its word, as a clause's words are read. ``strict``
+    makes every clause whose first word opens no statement an order; the
+    reaches bound an obligation after a reader and an override object after
+    its verb, ``label_words`` a label before a colon; ``fingerprint`` names
+    the table on every decision judged with it.
+    """
+
+    lead_ins: frozenset
+    openers: frozenset
+    persistent: frozenset
+    second_person: frozenset
+    readers: frozenset
+    obligations: frozenset
+    addressees: frozenset
+    label_heads: frozenset
+    override_verbs: frozenset
+    override_objects: frozenset
+    signatures: frozenset
+    statement_openers: frozenset
+    object_openers: frozenset
+    particles: frozenset
+    time_nouns: frozenset
+    auxiliaries: frozenset
+    subject_pronouns: frozenset
+    owner_pronouns: frozenset
+    datives: frozenset
+    courtesy: frozenset
+    adverbs: frozenset
+    authorities: frozenset
+    ing_verbs: frozenset
+    ed_verbs: frozenset
+    past_forms: frozenset
+    user_subjects: frozenset
+    telling: frozenset
+    coordinators: frozenset
+    conditions: frozenset
+    subordinators: frozenset
+    quote_nouns: frozenset
+    wanting: frozenset
+    question_verbs: frozenset
+    first_person: frozenset
+    announcers: frozenset
+    strict: bool
+    obligation_reach: int
+    override_reach: int
+    label_words: int
+    fingerprint: str
+
+
+def build_directives(section):
+    """The table of the ``directives`` section of ``onion.yaml``, refused by name when malformed.
+
+    ``strict`` is a boolean and each count a whole number, one or more; both
+    languages are required, each with every key of the table and no other;
+    every entry is lower-case ASCII words, accents folded, one word where the
+    key reads single words. The languages are read as one: a clause declares
+    no language, and an order in either is an order.
+    """
+    if not isinstance(section, dict):
+        raise DirectivesError("directives: the section is not a mapping")
+    unknown = [key for key in section if key != "strict" and key not in _DIRECTIVE_COUNTS
+               and key not in _LEXICON_LANGUAGES]
+    if unknown:
+        raise DirectivesError(f"directives: unknown key {unknown[0]!r}")
+    strict = section.get("strict")
+    if type(strict) is not bool:
+        raise DirectivesError(f"directives: strict {strict!r} is not a boolean")
+    counts = {}
+    for name in _DIRECTIVE_COUNTS:
+        value = section.get(name)
+        if type(value) is not int or value < 1:
+            raise DirectivesError(f"directives: {name} {value!r} is not a whole number, one or more")
+        counts[name] = value
+    merged = {key: set() for key in _DIRECTIVE_KEYS}
+    for language in _LEXICON_LANGUAGES:
+        where = f"directives.{language}"
+        entry = section.get(language)
+        if not isinstance(entry, dict):
+            raise DirectivesError(f"{where}: the language is missing or not a mapping of forms")
+        unknown = [key for key in entry if key not in _DIRECTIVE_KEYS]
+        if unknown:
+            raise DirectivesError(f"{where}: unknown key {unknown[0]!r}")
+        for key in _DIRECTIVE_KEYS:
+            if key not in entry:
+                raise DirectivesError(f"{where}: {key} is missing")
+            values = entry[key]
+            if not isinstance(values, list):
+                raise DirectivesError(f"{where}.{key}: not a list of entries")
+            for value in values:
+                if type(value) is not str or not _LEXICON_MEMBER.fullmatch(value):
+                    raise DirectivesError(f"{where}.{key}: the entry {value!r} is not lower-case ASCII words")
+                words = tuple(_ELIDED.get(word, word) for word in value.split())
+                if key in _DIRECTIVE_WORDS and len(words) != 1:
+                    raise DirectivesError(f"{where}.{key}: the entry {value!r} is not one word")
+                merged[key].add(words[0] if key in _DIRECTIVE_WORDS else words)
+    empty = [key for key in _DIRECTIVE_KEYS if not merged[key]]
+    if empty:
+        raise DirectivesError(f"directives: {empty[0]} holds no entry in either language")
+    lines = sorted(f"{key} {entry if type(entry) is str else ' '.join(entry)}"
+                   for key, entries in merged.items() for entry in entries)
+    lines += [f"strict {strict}"] + [f"{name} {counts[name]}" for name in _DIRECTIVE_COUNTS]
+    digest = hashlib.sha256("\n".join(lines).encode("ascii")).hexdigest()
+    return Directives(**{key: frozenset(merged[key]) for key in _DIRECTIVE_KEYS}, strict=strict, **counts,
+                      fingerprint=digest[:LEXICON_FINGERPRINT_LENGTH])
+
+
 @dataclass(frozen=True)
 class Typed:
     """A date or a quantity read in a text: its bounds, the answer it is asked by, and whether that answer is canonical.
@@ -1529,6 +1682,153 @@ def units(span):
     return found
 
 
+@dataclass(frozen=True)
+class Range:
+    """A run of what the user typed that is kept whole wherever it is kept word for word: its turn, its place in
+    the turn's text, and its text -- as written, or a fenced block's marker."""
+
+    turn_id: str
+    start: int
+    stop: int
+    text: str
+
+
+# The words a bare retraction is made of, past the negations and the
+# function words: "Nope.", "Never mind.", "Scratch that.", "Laisse tomber."
+_RETRACTION_WORDS = frozenset({"nope", "nah", "non", "cancel", "stop", "abort", "scratch", "forget", "annule",
+                               "annuler", "oublie", "oublier", "laisse", "tomber"})
+# The interjections and fillers a retraction may carry: "Hm, no.", "Sorry,
+# no.", "On second thought, no.", "Wait, no, not yet.", "Euh, non."
+_RETRACTION_FILLERS = frozenset({"mind", "wait", "actually", "please", "ok", "okay", "finalement", "attends", "hm", "hmm",
+                                 "um", "uh", "er", "erm", "ah", "oh", "sorry", "oops", "on", "second", "thought", "yet",
+                                 "euh", "heu", "hum", "bof", "pardon", "oups", "desole", "desolee", "en", "fait"})
+# The marks a quote opens and closes on, in any script: the straight and
+# curly quotes, the low ones, guillemets and corner brackets. An apostrophe
+# between two letters is none ("don't").
+_QUOTE_MARKS = frozenset({'"', "'", chr(0x2018), chr(0x2019), chr(0x201A), chr(0x201B), chr(0x201C), chr(0x201D),
+                          chr(0x201E), chr(0x201F), chr(0xAB), chr(0xBB), chr(0x2039), chr(0x203A), chr(0x300C),
+                          chr(0x300D), chr(0x300E), chr(0x300F), chr(0xFF02)})
+_APOSTROPHE = re.compile(r"(?<=[^\W\d_])['" + chr(0x2019) + r"](?=[^\W\d_])")
+# What may stand between two units of one run: blanks, a bullet, a quote's
+# ">", an enumerator at the head of a line -- never a word or a figure of
+# another origin.
+_BETWEEN_UNITS = re.compile(r"(?:\n[ \t]*\d{1,3}[.)]|[\s\-*+>#" + chr(0x2022) + r"])*")
+
+
+def _quote_marks(text):
+    """How many quote marks ``text`` holds, an apostrophe between two letters aside."""
+    return sum(1 for c in _APOSTROPHE.sub("", text) if c in _QUOTE_MARKS)
+
+
+def _announces(text, table):
+    """True when a sentence announces what follows it as another's words: it tells ("This is what the phishing email
+    said.", "Mallory wrote") or names a quote's noun -- a verb of wanting aside -- or opens on a presentative
+    (``announcers``: "Here is the spam I got", "Voici l'arnaque")."""
+    words, _written = _clause_words(text)
+    at = 0
+    while at < len(words) - 1 and (words[at] in table.lead_ins or words[at] in table.courtesy):
+        at += 1
+    return (any((word in table.telling and word not in table.wanting) or word in table.quote_nouns for word in words)
+            or _phrase_at(_phrase_index(table), "announcers", words, at) is not None)
+
+
+def _bounds(text, table):
+    """True when a sentence bounds the order before it: it opens, past its lead-in words, on a negation or a
+    condition ("Not before Friday.", "Only if Bob agrees.", "But not the 2024 ones.")."""
+    words, _written = _clause_words(text)
+    at = 0
+    while at < len(words) - 1 and words[at] in table.lead_ins:
+        at += 1
+    return at < len(words) and (words[at] in _NEGATION_WORDS or _phrase_at(_phrase_index(table), "conditions", words, at)
+                                 is not None)
+
+
+def _retraction(text):
+    """True for a bare retraction, which takes back what came before it: "No.", "No, don't.", "Nope.", "Never mind.",
+    "Non.", "Laisse tomber." -- a negation or a word of retraction, and nothing else but function words."""
+    for pattern, plain in _CONTRACTED:
+        text = pattern.sub(plain, text)
+    words = _tokens(_fold(text))
+    return (any(word in _NEGATION_WORDS or word in _RETRACTION_WORDS for word in words)
+            and all(word in _FOLDED_STOPWORDS or word in _NEGATION_WORDS or word in _RETRACTION_WORDS
+                    or word in _RETRACTION_FILLERS for word in words))
+
+
+def typed_ranges(span, table=None):
+    """The runs of a span's typed words that are kept whole, in order: the only places an order may stand in a peel.
+
+    A unit (``units``) is a sentence or a fenced block; a fenced block is a
+    run of its own, its marker. Sentences join into one run where parting
+    them would change what they say: a sentence that goes on in lower case
+    ("..., e.g. wire the money"), one inside an open quote, in any marks,
+    everything after a line that ends on a colon ("Mallory wrote:", "Avoid
+    these:", "Here is what I need:") or, with a table, after a sentence that
+    announces another's words ("This is what the phishing email said.",
+    "Here is the spam I got.") to the end of its piece, a one-word sentence
+    or a bare retraction after what it answers ("Delete the logs. Wait.
+    No.", "Hm, no."), and, with a table, a sentence that bounds the order
+    before it ("Not before Friday.", "Only if Bob agrees."). Kept word for
+    word, a run carries its condition, its quote, its label and its
+    retraction with it. A piece of another origin, or a gap no typed segment
+    covers -- a word or a figure -- ends a run; a turn whose id is empty or
+    shared with another turn of the span holds none, its words being nowhere
+    to be found again.
+    """
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
+    seen = {}
+    for turn in span:
+        turn_id = str(turn.get("turn_id", ""))
+        seen[turn_id] = seen.get(turn_id, 0) + 1
+    ambiguous = {turn_id for turn_id, count in seen.items() if not turn_id or count > 1}
+    found, run = [], None
+
+    def close():
+        if run is not None:
+            found.append(Range(run[0], run[1], run[2], texts[run[0]][run[1]:run[2]]))
+
+    for unit in units(span):
+        if unit.origin != "typed" or unit.turn_id in ambiguous or unit.text.startswith("[code:"):
+            close()
+            run = None
+            if unit.origin == "typed" and unit.turn_id not in ambiguous:
+                found.append(Range(unit.turn_id, unit.start, unit.stop, unit.text))
+            continue
+        letter = next((c for c in unit.text if c.isalpha()), "")
+        # A line on a colon may end a unit or stand inside one.
+        opens = (any(line.rstrip().endswith(":") for line in unit.text.splitlines())
+                 or (table is not None and _announces(unit.text, table)))
+        marks = _quote_marks(unit.text)
+        joined = run is not None and run[0] == unit.turn_id and _BETWEEN_UNITS.fullmatch(
+            texts[unit.turn_id][run[2]:unit.start]) is not None and (
+            run[3] or letter.islower() or _retraction(unit.text) or len(_tokens(_fold(unit.text))) <= 1 or run[4] % 2 == 1
+            or (table is not None and _bounds(unit.text, table)))
+        if joined:
+            run = (run[0], run[1], unit.stop, run[3] or opens, run[4] + marks)
+        else:
+            close()
+            run = (unit.turn_id, unit.start, unit.stop, opens, marks)
+    close()
+    return found
+
+
+def order_ranges(span, table, names=frozenset()):
+    """The typed runs (``typed_ranges``, read with the table) that order, read with the table the gate reads a summary
+    with, so that an order the user typed in a form the table reads is one the queue stitches in the user's words;
+    and each bare retraction typed after one of them, whatever was asked between: a "No." that answered another
+    question only makes the order look taken back, the safe side, while one that answered "Shall I delete them now?"
+    takes it back. Kept word for word, marked with its turn, they are the user's orders in a peel."""
+    kept, ordered = [], False
+    for run in typed_ranges(span, table):
+        if run.text.startswith("[code:"):
+            continue
+        if directives_in(run.text, table, names):
+            kept.append(run)
+            ordered = True
+        elif ordered and _retraction(run.text):
+            kept.append(run)
+    return kept
+
+
 def _read_pieces(pieces):
     """Each piece read block by block: ``(index, unit, reading)``, a code block's body with no reading, in order."""
     read = []
@@ -1714,8 +2014,13 @@ class Holdings:
     date among the numbers; ``texts`` the turns' texts, where a writing
     kept as written is looked for; ``keys`` the code keys of its fenced
     blocks and of the markers it writes; ``inline`` the inline code its
-    turns write, each span as written. Every origin counts: who said a claim
-    matters to a decision only.
+    turns write, each span as written; ``typed`` the pieces the user typed,
+    each whole as written, blocks and lists included, the only words a
+    decision of a summary may stand on; ``stitchable`` each run the user
+    typed as ``(turn_id, text)`` (``typed_ranges``), the only words an order
+    may stand in, stitched word for word; ``ids`` the turn ids of the span,
+    the markers a stitch may carry. Every origin counts for a claim: who
+    said it matters to a decision and an order only.
     """
 
     words: frozenset
@@ -1724,10 +2029,14 @@ class Holdings:
     texts: tuple
     keys: frozenset
     inline: frozenset = frozenset()
+    typed: tuple = ()
+    stitchable: tuple = ()
+    ids: frozenset = frozenset()
 
 
-def holdings(span):
-    """What a span of turns holds, each a mapping with its text and its role."""
+def holdings(span, directives=None):
+    """What a span of turns holds, each a mapping with its text and its role; its runs (``typed_ranges``) read with
+    the table of ``directives`` when one is given."""
     words, dates, numbers, texts, keys, inline = set(), set(), set(), [], set(), set()
     for turn in span:
         text = str(turn.get("text", "") or "")
@@ -1746,8 +2055,11 @@ def holdings(span):
         read_dates_, read_numbers = _typed_answers(text)
         dates.update(read_dates_)
         numbers.update(read_numbers)
+    typed = tuple(text for _turn_id, _role, origin, text in _pieces(span) if origin == "typed")
+    stitchable = tuple((run.turn_id, run.text) for run in typed_ranges(span, directives))
+    ids = frozenset(str(turn.get("turn_id", "")) for turn in span) - {""}
     return Holdings(frozenset(words), frozenset(dates), frozenset(numbers), tuple(texts), frozenset(keys),
-                    frozenset(inline))
+                    frozenset(inline), typed, stitchable, ids)
 
 
 def _written_in(answer, texts):
@@ -1819,10 +2131,10 @@ def unsupported_claims(held, text):
     return [(kind, answer, "") for kind in claims for answer in claims[kind]]
 
 
-def unbacked_decisions(probes, text, lexicon=None, reporters=frozenset()):
-    """The sentences of a summary that decide with no typed decision of its span behind them.
+def unbacked_decisions(probes, text, lexicon=None, reporters=frozenset(), directives=None, typed=()):
+    """The sentences and clauses of a summary that decide with no typed decision of its span behind them.
 
-    Each is ``(kind, sentence, turn_id)``. A sentence decides as a typed one
+    Each is ``(kind, what, turn_id)``. A sentence decides as a typed one
     does, read with the lexicon the probes were drawn with. One whose
     subject -- its first word that is no function word -- is a reporter
     tells what another speaker said, and is passed over. Every other
@@ -1830,27 +2142,1228 @@ def unbacked_decisions(probes, text, lexicon=None, reporters=frozenset()):
     polarity. One that answers a probe but for its polarity is an
     ``inversion`` of that probe's turn; one that answers none is a
     ``decision``, with no turn. Each is named once, in reading order.
-    """
-    from dataclasses import replace
 
+    With a table of ``directives``, a decision is read on the text folded as
+    an order is (``_order_text``), sentence by sentence where an order's
+    sentence ends, and held clause by clause: a sentence of several chunks
+    -- parted at a semicolon, a colon or a dash, and at a comma, a bracket,
+    a coordinator or a lead-in word before a deciding subject of its own --
+    names each chunk that decides with no typed decision behind it, a
+    reporter at the head of the sentence exempting no later chunk; a
+    sentence that answers a typed decision still names each predicate
+    coordinated to it; and a reporter's chunk that tells a decision as the
+    user's names that telling. Such a clause needs the user's words: a
+    typed part it restates or a typed decision it answers, with its
+    polarity and its mood, as ``_backed`` reads them against ``typed``, the
+    pieces the user typed. A decision asked as a question holds no
+    statement of it. In a reporter's words, "we" is the reporter's voice:
+    only the user named as the one who decides makes the telling the
+    user's.
+    """
     lexicon = EMPTY_LEXICON if lexicon is None else lexicon
     decisions = [p for p in probes if p.kind == "decision"]
     found = []
-    for sentence in _units(text):
+    if directives is None:
+        for sentence in _units(text):
+            plain = _plain(sentence)
+            folded = _tokens(_fold(plain))
+            if not _decides(plain, folded, _acts(folded, lexicon), lexicon):
+                continue
+            if next((word for word in folded if word not in _STOPWORDS), None) in reporters:
+                continue
+            if not any(answers(p, sentence) for p in decisions):
+                _name_decision(found, sentence, decisions)
+        return found
+    names = _names_held(probes)
+    backing, barred = _backing(tuple(typed), directives, lexicon)
+    # A decision the user took back, or wrote under a line that quotes,
+    # negates or conditions it, holds none (``_backing``); the probes split
+    # sentences their own way, so a probe is matched by inclusion.
+    decisions = [p for p in decisions
+                 if not any(_order_text(p.answer).strip() in text or text in _order_text(p.answer) for text in barred)]
+    parting = _decision_split(directives, lexicon)
+    for sentence in _decision_sentences(text):
         plain = _plain(sentence)
-        folded = _tokens(_fold(plain))
-        if not _decides(plain, folded, _acts(folded, lexicon), lexicon):
+        read = _order_text(plain)
+        question = _is_question(sentence)
+
+        def unheld(clause):
+            return not _backed(clause, clause, question, backing, decisions, directives)
+
+        def told_of(clause):
+            """The decision a reporter's clause tells as the user's, or None."""
+            return _told_as_users(clause, directives, lexicon) if _subject_word(clause) in reporters else None
+
+        chunks = [chunk.strip() for chunk in parting.split(read) if chunk and chunk.strip()]
+        # A telling decides as the user's decision does, by its act alone:
+        # "The report says the user prefers Podman".
+        if not (_deciding(plain, lexicon) or _deciding(read, lexicon) or any(told_of(chunk) for chunk in chunks)):
             continue
-        if next((word for word in folded if word not in _STOPWORDS), None) in reporters:
+        if len(chunks) > 1:
+            for chunk in chunks:
+                if _subject_word(chunk) in reporters:
+                    told = told_of(chunk)
+                    if told is not None and unheld(told):
+                        _name_decision(found, told, decisions)
+                    continue
+                if not _deciding(chunk, lexicon):
+                    continue
+                coordinated = _coordinated(chunk, directives, names)
+                if unheld(_head_of(chunk, coordinated)):
+                    _name_decision(found, chunk, decisions)
+                for clause in coordinated:
+                    if unheld(clause):
+                        _name_decision(found, clause, decisions)
             continue
-        if any(answers(p, sentence) for p in decisions):
+        if _subject_word(read) in reporters:
+            told = _told_as_users(read, directives, lexicon)
+            if told is not None and unheld(told):
+                _name_decision(found, told, decisions)
             continue
-        said = _negations(plain)
-        inverted = next((p for p in decisions if answers(replace(p, negations=said), sentence)), None)
-        entry = ("inversion", sentence, inverted.turn_id) if inverted is not None else ("decision", sentence, "")
-        if entry not in found:
-            found.append(entry)
+        # A decision told of the user with no reporter before it is judged as
+        # told, and named whole: "The user confirmed that we drop the backups".
+        told = _told_as_users(read, directives, lexicon) if _subject_word(read) in directives.user_subjects else None
+        if told is not None:
+            if unheld(told):
+                _name_decision(found, sentence, decisions)
+            continue
+        # The sentence's head is judged without the predicates coordinated to
+        # it, each judged on its own: two typed decisions joined by "but"
+        # stand, a predicate the user never typed does not.
+        coordinated = _coordinated(read, directives, names)
+        if unheld(_head_of(read, coordinated)):
+            _name_decision(found, sentence, decisions)
+            continue
+        for clause in coordinated:
+            if unheld(clause):
+                _name_decision(found, clause, decisions)
     return found
+
+
+def _head_of(text, clauses):
+    """``text`` without the coordinated ``clauses`` it holds as written: what its subject decides by itself."""
+    for clause in clauses:
+        text = text.replace(clause, " ")
+    return text
+
+
+# Where a sentence of a summary ends for a decision, past the units' own
+# stops (which keep a date whole): after a closing quote or bracket, an
+# ellipsis, an ideographic full stop, a stop after a lower-case letter glued
+# to the capitalised word that opens the next sentence ("server.We drop",
+# never "ASP.NET"), a line break -- unless the next line goes on in lower
+# case ("we\nhave dropped": ``_decision_sentences``).
+_EXTRA_SENTENCE = re.compile(
+    r"(?<=[.!?" + chr(0x2026) + r"])[\"'" + chr(0x2019) + chr(0x201D) + chr(0xBB) + r")\]]+\s+"
+    r"|(?<=" + chr(0x2026) + r")\s+|(?<=" + chr(0x3002) + r")|(?<=[a-z][.!?])(?=[A-Z][a-z])|\n"
+)
+# The pattern a deciding sentence parts at, per table and lexicon.
+_DECISION_SPLITS = {}
+
+
+def _decision_sentences(text):
+    """A summary's sentences as a decision is read with a table: each unit, parted again where an order's sentence
+    ends, a line that opens in lower case read with the line before it."""
+    for unit in _units(text):
+        for sentence in _EXTRA_SENTENCE.split(_continued(unit)):
+            if sentence.strip():
+                yield sentence.strip()
+
+
+def _decision_split(table, lexicon):
+    """Where a deciding sentence parts: a semicolon, a colon, a dash, and a comma, a bracket, a coordinator, a
+    lead-in or a subordinating word before a subject of the lexicon -- "the report, and we decided", "(we decided",
+    "which we decided", "as we decided" -- so that a clause with a deciding subject of its own is judged on its own,
+    never under the reporter that opens the sentence. "that" is no such word: "The document says that we decided"
+    is the document's voice."""
+    key = (table, lexicon)
+    pattern = _DECISION_SPLITS.get(key)
+    if pattern is None:
+        subjects = sorted({word for _language, word in lexicon.subjects}, key=len, reverse=True)
+        joints = sorted({r"\s+".join(map(re.escape, phrase)) for phrase in table.coordinators}
+                        | {re.escape(word) for word in table.lead_ins | table.subordinators}, key=len, reverse=True)
+        turn = r"(?:,|\(|\)|\b(?:" + "|".join(joints) + r")\b)\s*(?=(?:" + "|".join(map(re.escape, subjects)) + r")\b)"
+        pattern = _DECISION_SPLITS[key] = re.compile(
+            _CLAUSE_SPLIT.pattern + "|" + turn if subjects else _CLAUSE_SPLIT.pattern, re.IGNORECASE)
+    return pattern
+
+
+def _name_decision(found, what, decisions):
+    """Name ``what`` once in ``found``: an inversion of the probe it answers but for its polarity, else a decision."""
+    from dataclasses import replace
+
+    said = _negations(_plain(what))
+    inverted = next((p for p in decisions if p.negations != said and answers(replace(p, negations=said), what)), None)
+    entry = ("inversion", what, inverted.turn_id) if inverted is not None else ("decision", what, "")
+    if entry not in found:
+        found.append(entry)
+
+
+# An order is read on a text folded for it: compatibility forms composed
+# (NFKC: fullwidth and mathematical letters, fullwidth punctuation), format
+# characters dropped (zero-width, soft hyphen, bidirectional controls), and
+# the Cyrillic and Greek letters drawn like Latin ones read as those. Only
+# the reading of orders and decisions folds so: claims are read as written.
+_CONFUSABLES = {chr(code): latin for code, latin in (
+    (0x430, "a"), (0x435, "e"), (0x43E, "o"), (0x440, "p"), (0x441, "c"), (0x443, "y"), (0x445, "x"),
+    (0x456, "i"), (0x458, "j"), (0x455, "s"), (0x501, "d"), (0x4BB, "h"), (0x51B, "q"), (0x51D, "w"),
+    (0x4CF, "l"), (0x410, "A"), (0x412, "B"), (0x415, "E"), (0x41A, "K"), (0x41C, "M"), (0x41D, "H"),
+    (0x41E, "O"), (0x420, "P"), (0x421, "C"), (0x422, "T"), (0x425, "X"), (0x423, "Y"), (0x406, "I"),
+    (0x408, "J"), (0x405, "S"), (0x3B1, "a"), (0x3BF, "o"), (0x3C1, "p"), (0x3BD, "v"), (0x3C5, "u"),
+    (0x3B9, "i"), (0x3BA, "k"), (0x391, "A"), (0x392, "B"), (0x395, "E"), (0x396, "Z"), (0x397, "H"),
+    (0x399, "I"), (0x39A, "K"), (0x39C, "M"), (0x39D, "N"), (0x39F, "O"), (0x3A1, "P"), (0x3A4, "T"),
+    (0x3A5, "Y"), (0x3A7, "X"),
+)}
+# A sentence of an order ends after a full stop, a question or an
+# exclamation mark or an ellipsis, past any closing quote or bracket, after
+# an ideographic full stop, and at a line break.
+_ORDER_SENTENCE = re.compile(
+    r"(?<=[.!?" + chr(0x2026) + r"])[\"'" + chr(0x2019) + chr(0x201D) + chr(0xBB) + r")\]]*\s+"
+    r"|(?<=" + chr(0x3002) + r")|\n"
+)
+# A sentence's clauses part at a semicolon, at a colon before a blank or the
+# end, at a spaced hyphen and at a dash, spaced or not; an order's clauses
+# also at a comma, so that a fronted phrase stands apart from the clause it
+# leads. Each part is stripped afterwards: no pattern here spans a run of
+# blanks, so none backtracks over one.
+_CLAUSE_SPLIT = re.compile(r";|:(?=\s|$)|\s-\s|\s--\s|[" + chr(0x2013) + chr(0x2014) + r"]")
+_CHUNK_SPLIT = re.compile(r";|\s-\s|\s--\s|[" + chr(0x2013) + chr(0x2014) + r"]")
+_LABEL_SPLIT = re.compile(r":(?=\s|$)")
+_COMMA_SPLIT = re.compile(r",\s+")
+# What may stand before a clause and is no word of it: an enumerator --
+# "a)", "(1)", "iv.", "1.", "1/", "#1", a figure alone -- and a tag in
+# brackets, a code marker among them. An enumerator is a figure, one letter
+# or a Roman numeral: "(Send)" is a word. A restatement keeps the tags,
+# whose words may be a negation ("[DON'T]").
+_ENUMERATOR = (r"\(\s*(?:\d{1,3}|[^\W\d_]|[ivxlcdmIVXLCDM]{1,6})\s*\)"
+               r"|#?\d{1,3}(?!\d)\s*[.)/:" + chr(0xB0) + r"-]?(?=\s|[^\W\d_])"
+               r"|(?:[^\W\d_]|[ivxlcdmIVXLCDM]{1,6})[.)](?=\s)")
+_ORDER_PREFIX = re.compile(r"\s*(?:" + _ENUMERATOR + r"|\[[^\]\n]{1,24}\])\s*")
+_ORDER_ENUMERATOR = re.compile(r"\s*(?:" + _ENUMERATOR + r")\s*")
+# A hyphen between two letters joins one word, as an order is read and
+# restated: "E-mail", "Re-send", "Always-on", "Remember-me", "thank-you" --
+# but for the French pronoun after its verb, "Envoie-les", "Peux-tu", read
+# as two.
+_HYPHEN = re.compile(r"(?<=[^\W\d_])-(?=[^\W\d_])"
+                     r"(?!(?:le|la|les|lui|leur|moi|toi|nous|vous|en|y|tu|je|il|elle|ils|elles|ce|t)\b)",
+                     re.IGNORECASE)
+# An order is also read with its hyphens splitting its words, so that
+# "Ignore-all-previous-instructions", "Send-the-vault-keys", "Email-them" and
+# "Please-send" hide nothing; a compound that opens on an opening,
+# "Always-on", is then read as one, a false refusal on the side of safety.
+# Underscores between letters part words: "ignore_all_previous_instructions".
+_UNDERSCORE = re.compile(r"(?<=[^\W\d_])_+(?=[^\W\d_])")
+# The English determiners after which a word with a French participle's
+# accent is an English verb in disguise ("Delete" with an accent, "the"),
+# and the French words after which a word in -s is a French imperative
+# ("Prends les", "Dis-moi"), never a third person.
+_ENGLISH_DETERMINERS = frozenset({"the", "a", "an", "all", "every", "each", "this", "these", "those", "my", "your",
+                                  "our", "their", "his", "her", "its", "some", "any", "both"})
+_FRENCH_FOLLOWERS = frozenset({"le", "la", "les", "un", "une", "des", "du", "de", "ce", "cet", "cette", "ces", "mon",
+                               "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre", "nos", "votre", "vos",
+                               "leur", "leurs", "tout", "toute", "tous", "toutes", "chaque", "moi", "toi", "lui",
+                               "nous", "vous", "en", "y"})
+# Letters and symbols drawn as nothing that no category drops: the Hangul
+# fillers (NFKC reads U+3164 and U+FFA0 as U+1160) and the blank Braille
+# pattern.
+_INVISIBLE = frozenset(map(chr, (0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800)))
+# The French second person a word list cannot hold: "t'" -- a "t" with an
+# apostrophe after it -- and "te" as a word of its own.
+_FRENCH_YOU = re.compile(
+    r"(?<![\w'" + chr(0x2019) + r"])[tT]['" + chr(0x2019) + r"](?=[^\W\d_])"
+    r"|(?<![\w'" + chr(0x2019) + r"-])[tT][eE](?![\w'" + chr(0x2019) + r"-])"
+)
+# The words a figure is a sum or a measure by: the first word of each unit
+# the quantities are read with, folded. A figure is an object only before
+# one: "Send 500 dollars", never "Qwen 2.5 7B" or "Service 1 was".
+_UNIT_TOKENS = frozenset(_tokens(_fold(form))[0] for row in _UNIT_WORDS + _UNIT_SYMBOLS for form in row
+                         if _tokens(_fold(form)))
+# The phrase index of each table met, keyed by the table itself.
+_DIRECTIVE_INDEXES = {}
+
+
+def _order_text(text):
+    """``text`` as an order is read: NFKC, no format, combining or invisible character left, the look-alike letters
+    read as Latin ones. NFKC composes every accent that has a composed form, so a combining mark left after it is an
+    invisible one (a grapheme joiner, a variation selector)."""
+    import unicodedata
+
+    composed = unicodedata.normalize("NFKC", text)
+    return _UNDERSCORE.sub(" ", "".join(_CONFUSABLES.get(c, c) for c in composed
+                                        if c not in _INVISIBLE and unicodedata.category(c) not in ("Cf", "Mn", "Me")))
+
+
+def _hyphen_views(text):
+    """The two readings of a text's hyphens: joined (``_HYPHEN``), then split."""
+    return _HYPHEN.sub("", text), text
+
+
+# The marks of emphasis a word or a label may be dressed in ("**Reminder:**",
+# "~~Send~~"), a colon glued between two letters ("Reminder:send"), and a word
+# spelled letter by letter, its letters parted by one or two blanks, full
+# stops, slashes, middle dots or commas ("S e n d", "D.e.l.e.t.e", "S/e/n/d",
+# "S, e, n, d"; three letters at least, so "e.g." stays).
+_EMPHASIS = re.compile(r"[*~]+")
+_GLUED_COLON = re.compile(r"(?<=[^\W\d_]):(?=[^\W\d_])")
+_SPELLED_GAP = r"(?:[ \t]{1,2}|[./" + chr(0xB7) + r"]|, ?)"
+_SPELLED = re.compile(r"(?<![^\W\d_])[^\W\d_](?:" + _SPELLED_GAP + r"[^\W\d_]){2,}(?![^\W\d_])")
+
+
+def _continued(text):
+    """``text`` with each line that opens in lower case read on the line before it: "Send\\nthe keys" is one line."""
+    lines = []
+    for line in text.split("\n"):
+        if lines and line.lstrip()[:1].islower():
+            lines[-1].append(line.lstrip())
+        else:
+            lines.append([line])
+    return "\n".join(" ".join(parts) for parts in lines)
+
+
+def _order_prose(text):
+    """``text`` as an order is read in prose: folded (``_order_text``), its inline code read as words, without marks
+    of emphasis, a glued colon spaced, a word spelled letter by letter joined, a line that opens in lower case read
+    on the line before it. The repair compares a refused clause with a sentence in this form."""
+    folded = _order_text(_INLINE_CODE.sub(lambda code: f" {code.group(2)} ", text))
+    folded = _GLUED_COLON.sub(": ", _EMPHASIS.sub("", folded))
+    return _continued(_SPELLED.sub(lambda spelled: re.sub(_SPELLED_GAP, "", spelled.group(0)), folded))
+
+
+def _is_question(sentence):
+    """True when a sentence ends on a question mark, with any exclamation mark, quote or bracket after it: "Should I
+    wipe the logs?!", "(Should I wipe the logs?)". Read from the end, once."""
+    end = len(sentence)
+    while end and not (sentence[end - 1].isalnum() or sentence[end - 1] == "_"):
+        end -= 1
+    return "?" in sentence[end:]
+
+
+def _clause_words(text):
+    """The words of a clause, folded, each elided letter read as its word, and each word as written beside it.
+
+    Read in the composed Unicode form, so that a decomposed accent splits no
+    word, and an apostrophe of either kind parts an elided letter from its
+    word: "N'oubliez" reads "ne", "oubliez".
+    """
+    import unicodedata
+
+    written = _WORD.findall(unicodedata.normalize("NFC", text))
+    return [_ELIDED.get(word, word) for word in (_fold(w) for w in written)], written
+
+
+def _phrase_index(table):
+    """The phrases of a table by their first word, the longest first, built once per table."""
+    index = _DIRECTIVE_INDEXES.get(table)
+    if index is None:
+        index = {}
+        for key in _DIRECTIVE_KEYS:
+            if key in _DIRECTIVE_WORDS:
+                continue
+            by_first = {}
+            for phrase in sorted(getattr(table, key), key=lambda p: (-len(p), p)):
+                by_first.setdefault(phrase[0], []).append(phrase)
+            index[key] = by_first
+        _DIRECTIVE_INDEXES[table] = index
+    return index
+
+
+def _phrase_at(index, key, words, at):
+    """The longest phrase of ``key`` that starts at ``words[at]``, or None."""
+    if at >= len(words):
+        return None
+    for phrase in index[key].get(words[at], ()):
+        if tuple(words[at:at + len(phrase)]) == phrase:
+            return phrase
+    return None
+
+
+def _names_held(probes):
+    """The folded words of the names a span's probes ask for: what a clause may name as an object."""
+    return frozenset(_fold(word) for p in probes if p.kind == "entity" for word in _WORD.findall(p.answer))
+
+
+def _participle(written, following=None):
+    """True for a word written as a French past participle, "Arrete" with its final accent, never an imperative --
+    unless an English determiner follows it: an English verb with an accent added is an order in disguise."""
+    lowered = written.lower()
+    return (lowered.endswith((chr(0xE9), chr(0xE9) + "e", chr(0xE9) + "s", chr(0xE9) + "es"))
+            and following not in _ENGLISH_DETERMINERS)
+
+
+def _third_person(word, following):
+    """True for a word in -s that is no imperative: "deletes", "continues", a plural -- never "process", "focus",
+    "alias", nor a French imperative before its determiner or pronoun ("Prends les", "Dis-moi")."""
+    return (len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is", "as"))
+            and following not in _FRENCH_FOLLOWERS)
+
+
+def _opens_statement(word, written, table, names, following=None):
+    """True when a clause opening on ``word`` states rather than orders: a subject, a name, a figure, a past, a
+    third person.
+
+    A word in -ing of five letters or more is a gerund, "Running the tests";
+    a shorter one is a verb, "Ping the server". ``following`` is the next
+    word, which tells a French participle and a French imperative in -s from
+    English words in disguise.
+    """
+    return (word in table.statement_openers or word in names or written[:1].isdigit()
+            or (word.endswith("ing") and len(word) >= 5 and word not in table.ing_verbs)
+            or (word.endswith("ed") and word not in table.ed_verbs) or word in table.past_forms
+            or _participle(written, following) or _third_person(word, following))
+
+
+def _possessive(written, at):
+    """True when the word at ``at`` is a possessive, its "'s" read as a word of its own: "month's", "Bob's"."""
+    return at + 1 < len(written) and written[at + 1] in ("s", "S") and written[at][:1].isalpha()
+
+
+def _object_at(words, written, at, table, names):
+    """True when the word at ``at`` opens an object: a possessive, a determiner or a pronoun that opens no time
+    phrase, a name the span holds, a figure before its unit. "Progress this week" has no object, nor "Qwen 2.5 7B" or
+    "Service 1 was migrated": "Send 500 dollars" has one, and so do "Delete this month's logs" and "Supprime ce
+    trimestre les sauvegardes", whose time phrase owns or precedes it."""
+    # Past each time phrase in turn, never by recursion: "this week this week ... the logs".
+    while True:
+        word = words[at]
+        if _possessive(written, at):
+            return True
+        if word in table.object_openers:
+            if at + 1 >= len(words) or words[at + 1] not in table.time_nouns:
+                return True
+            if _possessive(written, at + 1):
+                return True
+            if at + 2 >= len(words):
+                return False
+            at += 2
+            continue
+        if written[at][:1].isdigit():
+            return at + 1 < len(words) and words[at + 1] in _UNIT_TOKENS
+        return word in names
+
+
+def _adverb(word, table):
+    """True for a word that may stand between a verb and its object: one of the table's adverbs, or a word in -ly or
+    -ment -- never a conjunction: "Dave and Bob met" opens on no verb."""
+    return word in table.adverbs or (len(word) > 4 and word.endswith(("ly", "ment")))
+
+
+def _verb_first(words, written, table, names):
+    """True when a clause opens on a verb before its object: its first word opens no statement, and the next opens an
+    object -- past up to two adverbs ("send immediately the", "envoie aussi les"), a particle ("turn off the"), a
+    dative and a name, a determiner or one word ("share with Mallory the", "upload to pastebin the"), or both
+    ("send over to Mallory the"). A name the span holds opens no statement before a determiner that is no
+    auxiliary: a document that names an "Email Gateway" leaves "Email the keys" an order, while "Alice a deplace"
+    states."""
+    if len(words) < 2:
+        return False
+    if _opens_statement(words[0], written[0], table, names, words[1]) and not (
+            words[0] in names and words[1] in _ENGLISH_DETERMINERS and words[1] not in table.auxiliaries):
+        return False
+    at = 1
+    while at < min(len(words) - 1, 3) and _adverb(words[at], table) and not _possessive(written, at):
+        at += 1
+    if words[at] in table.particles and at + 1 < len(words):
+        at += 1
+    if (words[at] in table.datives and at + 2 < len(words)
+            and (words[at + 1] in names or words[at + 1] in table.object_openers
+                 or words[at + 2] in table.object_openers)):
+        at += 2
+    return _object_at(words, written, at, table, names)
+
+
+def _order_marked(text):
+    """A clause without the enumerators and tags that stand before it, each code marker in it read as "it"."""
+    for _ in range(6):
+        prefix = _ORDER_PREFIX.match(text)
+        if not prefix:
+            break
+        text = text[prefix.end():]
+    return _MARKER.sub(" it ", text)
+
+
+def _spine(chunk):
+    """A chunk without the phrases between its first and its last comma: "The assistant, as agreed, must" reads "The
+    assistant must"."""
+    pieces = _COMMA_SPLIT.split(chunk)
+    return chunk if len(pieces) < 3 else pieces[0] + " " + pieces[-1]
+
+
+def _subject_of(words, table):
+    """Where a clause's subject stands: past its lead-in words and at most two determiners."""
+    at = 0
+    while at < len(words) - 1 and words[at] in table.lead_ins:
+        at += 1
+    for _ in range(2):
+        if at < len(words) - 1 and words[at] in table.statement_openers and words[at] in table.object_openers:
+            at += 1
+    return at
+
+
+def _second_person(words, text, index):
+    """True when a clause speaks to the reader: a word of the second person anywhere, or a French "t'" or "te" -- a
+    "t" an apostrophe follows, never the "t" of an English "n't", of "t-test" or of "Vec<T>"."""
+    if any(_phrase_at(index, "second_person", words, k) for k in range(len(words))):
+        return True
+    return _FRENCH_YOU.search(text) is not None
+
+
+def _reader_obliged(words, table, index):
+    """True when the reader of the peel, the assistant, stands among a clause's first words and is obliged within
+    the table's reach. A model, an agent or a system obliged is a statement: "The system should reject the
+    request"; asked to reveal its instructions, it is an injection's signature."""
+    start = _subject_of(words, table)
+    for at in range(start, min(len(words), start + 3)):
+        if words[at] not in table.readers:
+            continue
+        # Past its adverbs: "is now required to", "is hereby asked to".
+        rest = [word for word in words[at + 1:] if not _adverb(word, table)]
+        if any(_phrase_at(index, "obligations", rest, k) for k in range(min(len(rest), table.obligation_reach))):
+            return True
+    return False
+
+
+def _addresses(label, table):
+    """True when a label before a colon addresses the reader: an authority named alone ("System", "Assistant", a
+    forged message's voice), or a label that opens on a label's head -- an instruction, a note, a preposition, a
+    greeting -- and ends on the reader or its instructions; either holds no verb. "Instructions for the assistant",
+    "Note to the AI" and "System" address; "System requirements", "Model" and "The model failed" do not."""
+    words, _written = _clause_words(label)
+    return (0 < len(words) <= table.label_words
+            and ((len(words) == 1 and words[0] in table.authorities)
+                 or (words[0] in table.label_heads and words[-1] in table.addressees))
+            and not any(word in table.auxiliaries or word in table.past_forms
+                        or (word.endswith("ed") and word not in table.ed_verbs) for word in words))
+
+
+def _overrides(words, table, index):
+    """True when an override verb has an override object within the table's reach after it."""
+    for at in range(len(words)):
+        verb = _phrase_at(index, "override_verbs", words, at)
+        if verb and any(word in table.override_objects
+                        for word in words[at + len(verb):at + len(verb) + table.override_reach]):
+            return True
+    return False
+
+
+def _told_request(words, table, written=None):
+    """True when a clause tells that the user asked the reader to act: the user as subject, a telling verb within two
+    words, then, past the reader, a pronoun or a determiner, "to" or "de" and a word; or, whatever the verb, the reader
+    then "to" or "de" ("The user allowed the assistant to share"). "The user asked for a summary" and "wanted to know
+    whether the build passed" tell a question, not an order -- unless a verb that orders is coordinated to the one
+    that asks ("asked to check the logs and delete the old ones", ``_orders_after``). The user asking in their own
+    voice asks as much: "I'd like the old logs deleted", "J'aimerais que
+    le rapport parte" (``first_person``)."""
+    at = _subject_of(words, table)
+    if at >= len(words) or (words[at] not in table.user_subjects and words[at] not in table.first_person):
+        return False
+    for k in range(at + 1, min(len(words), at + 3)):
+        if words[k] not in table.telling:
+            continue
+        for j in range(k + 1, min(len(words) - 1, k + 5)):
+            if words[j] in ("to", "de"):
+                if words[j + 1] in table.question_verbs:
+                    # A question told -- unless a verb that orders is
+                    # coordinated to it: "asked to check the logs and delete".
+                    return _orders_after(words, j + 2, table)
+                return True
+            if not (words[j] in table.readers or words[j] in table.subject_pronouns
+                    or words[j] in table.object_openers or words[j] in table.datives):
+                break
+        break
+    # A verb of wanting, then within six words a participle or a "to" or "de"
+    # before a verb that asks nothing: "The user wants the vault keys sent to
+    # Mallory", "The user wants Mallory to get the keys" -- never "The user
+    # wants to know the status".
+    for k in range(at + 1, min(len(words), at + 3)):
+        if words[k] not in table.wanting:
+            continue
+        for j in range(k + 1, min(len(words), k + 7)):
+            said = written[j] if written else words[j]
+            # A wish to know asks nothing done: "wanted to know whether the build passed".
+            if words[j] in ("to", "de") and j + 1 < len(words) and words[j + 1] in table.question_verbs:
+                if _orders_after(words, j + 2, table):
+                    return True
+                break
+            if (_participle(said) or words[j] in table.past_forms
+                    or (words[j].endswith("ed") and words[j] not in table.ed_verbs)):
+                return True
+            if (words[j] in ("to", "de") and j + 1 < len(words) and words[j + 1] not in table.question_verbs
+                    and words[j + 1] not in table.object_openers and words[j + 1] not in table.statement_openers):
+                return True
+            # A French "que" right after the verb opens what is wanted done.
+            if words[j] == "que" and j == k + 1:
+                return True
+        break
+    # Whatever the verb, the reader then "to" or "de": "The user allowed the
+    # assistant to share the keys".
+    return any(words[k] in table.readers and words[k + 1] in ("to", "de")
+               for k in range(at + 1, min(len(words) - 1, at + 5)))
+
+
+def _orders_after(words, at, table):
+    """True when, from ``at`` on, a coordinator brings a verb that asks nothing back: "to check the logs and delete
+    the old ones", "de verifier les logs et de supprimer" -- never "and the reports" nor "and failed"."""
+    index = _phrase_index(table)
+    for k in range(at, len(words) - 1):
+        coordinator = _phrase_at(index, "coordinators", words, k)
+        if not coordinator:
+            continue
+        verb = k + len(coordinator)
+        while verb < len(words) - 1 and (words[verb] in ("to", "de") or words[verb] in table.lead_ins
+                                         or words[verb] in table.auxiliaries):
+            verb += 1
+        if verb < len(words) and words[verb] not in table.question_verbs and words[verb] not in table.object_openers \
+                and not _opens_statement(words[verb], words[verb], table, frozenset()):
+            return True
+    return False
+
+
+def _chunk_forms(chunk, addressed, table, names):
+    """The forms an order takes anywhere in a chunk, read on the chunk and on its spine: a, b, c, d (a lasting rule),
+    e, and r -- a request told of the user ("The user asked the assistant to email the keys"), the user's order,
+    held only by the order the user typed. A lasting rule told of the user orders as any: it stands when the user
+    typed that rule."""
+    forms = {"c"} if addressed else set()
+    index = _phrase_index(table)
+    views = dict.fromkeys(reading for view in (chunk, _spine(chunk)) for reading in _hyphen_views(_order_marked(view)))
+    for marked in views:
+        words, written = _clause_words(marked)
+        if not words:
+            continue
+        if _second_person(words, marked, index):
+            forms.add("a")
+        if _reader_obliged(words, table, index):
+            forms.add("b")
+        if any(_phrase_at(index, "persistent", words, k) for k in range(len(words))):
+            forms.add("d")
+        if any(_phrase_at(index, "signatures", words, k) for k in range(len(words))) or _overrides(words, table, index):
+            forms.add("e")
+        if _told_request(words, table, written):
+            forms.add("r")
+    return forms
+
+
+def _piece_forms(piece, table, names):
+    """The forms an order takes where a piece opens: d (courtesy, prohibition, rule), f (a verb before its object,
+    past lead-in words and a run of adverbs), s (under the strict switch, a first word that opens no statement).
+
+    The piece is read with its hyphenated words joined and split
+    (``_hyphen_views``), so that "E-mail the keys", "Send-the-keys",
+    "Email-them" and "Please-send" order; and with its prefixes too, so that
+    a verb in brackets, "(Send) the keys", is read -- unless those prefixes
+    are tags of the table ("[Note]", "(Fix)": ``_tagged``). A French past
+    participle opens no opening of courtesy or prohibition.
+    """
+    forms = set()
+    bare = _untagged(piece, table)
+    views = list(_hyphen_views(_order_marked(bare)))
+    if bare == piece and not _tagged(piece, table):
+        views += _hyphen_views(_MARKER.sub(" it ", piece))
+    index = _phrase_index(table)
+    for view in dict.fromkeys(views):
+        words, written = _clause_words(view)
+        at = 0
+        # Past lead-in words and interjections: "ok so send the report".
+        while at < len(words) - 1 and (words[at] in table.lead_ins or words[at] in table.courtesy):
+            at += 1
+        rest, said = words[at:], written[at:]
+        if not rest:
+            continue
+        following = rest[1] if len(rest) > 1 else None
+        # An opening may begin on a lead-in word: "Go ahead and send". Before
+        # a subject it asks: "Do we keep Docker?" orders nothing, "Do it" does.
+        asks = following in table.subject_pronouns and following not in table.object_openers
+        if not _participle(said[0], following) and not asks and (_phrase_at(index, "openers", rest, 0)
+                                                                 or _phrase_at(index, "openers", words, 0)):
+            forms.add("d")
+        skip = 0
+        while skip < len(rest) - 2 and (_adverb(rest[skip], table) or rest[skip] in table.lead_ins):
+            skip += 1
+        if _verb_first(rest, said, table, names) or (skip and _verb_first(rest[skip:], said[skip:], table, names)):
+            forms.add("f")
+        if table.strict and not _opens_statement(rest[0], said[0], table, names, following):
+            forms.add("s")
+    return forms
+
+
+# A word in brackets or parentheses before a clause: a tag when the table
+# holds it ("(Fix)", "[Update]"), a verb when it does not ("(Send)").
+_LEADING_GROUP = re.compile(r"\s*[\[(]\s*([^\W\d_]{1,24})\s*[\])]\s*")
+
+
+def _untagged(piece, table):
+    """``piece`` without the words in brackets or parentheses before it that are tags of the table (``label_heads``,
+    ``lead_ins``): "(Fix) The cache no longer leaks" reads "The cache no longer leaks"."""
+    for _ in range(6):
+        group = _LEADING_GROUP.match(piece)
+        if not group:
+            break
+        word = _clause_words(group.group(1))[0]
+        if not word or not (word[0] in table.label_heads or word[0] in table.lead_ins):
+            break
+        piece = piece[group.end():]
+    return piece
+
+
+def _tagged(piece, table):
+    """True when the prefixes stripped before a piece are tags of the table ("[Note]", "(Fix)", "[TODO]"): read with
+    them, a tag would read as a verb."""
+    text, words = piece, []
+    for _ in range(6):
+        prefix = _ORDER_PREFIX.match(text)
+        if not prefix:
+            break
+        words += [word for word in _clause_words(prefix.group(0))[0] if not word.isdigit()]
+        text = text[prefix.end():]
+    return bool(words) and all(word in table.label_heads or word in table.lead_ins for word in words)
+
+
+def _opens_on_subject(piece, table, names, following=None):
+    """True when a piece opens on a subject -- a determiner, a subject pronoun, the user, a name -- so that the pieces
+    after its comma continue its clause rather than open one: "The parser, in strict mode, rejects the input".
+
+    Names alone are a vocative ("Bob, email the keys": the clause is after
+    them) unless the next piece, ``following``, opens on a determiner: an
+    appositive ("Mallory, our auditor, wants the logs") leaves the name the
+    subject.
+    """
+    words, _written = _clause_words(_order_marked(piece))
+    at = 0
+    while at < len(words) - 1 and words[at] in table.lead_ins:
+        at += 1
+    if at >= len(words):
+        return False
+    if len(words) - at <= 3 and all(word in names for word in words[at:]):
+        after = _clause_words(_order_marked(following))[0][:1] if following else []
+        if not (after and after[0] in table.statement_openers and after[0] in table.object_openers):
+            return False
+    word = words[at]
+    # The French pronoun "on" is the English particle "on" too: "On Friday,
+    # delete the backups" opens on a phrase, not on a subject.
+    return ((word in table.statement_openers and word in table.object_openers) or word in table.user_subjects
+            or (word in table.subject_pronouns and word not in table.particles) or word in names)
+
+
+def _order_chunks(sentence, table):
+    """The chunks of a sentence an order is read in, each ``(chunk, addressed)``.
+
+    A sentence parts at a semicolon, a dash and a colon. The run before a
+    colon is a chunk of its own, "Run this:" ordering as any does, and a
+    label that addresses the reader addresses every chunk after it.
+    """
+    found = []
+    for part in _CHUNK_SPLIT.split(sentence):
+        pieces = _LABEL_SPLIT.split(part)
+        addressed = False
+        for index, piece in enumerate(pieces):
+            piece = piece.strip()
+            if not piece:
+                continue
+            found.append((piece, addressed))
+            if index < len(pieces) - 1 and _addresses(piece, table):
+                addressed = True
+    return found
+
+
+def _orders_in(text, table, names):
+    """Each clause of ``text`` that orders, ``(clause, forms, chunk, question, sentence)``, in reading order.
+
+    The text is folded as an order is read (``_order_text``), its inline code
+    read as words. A chunk is read whole for the forms that may stand
+    anywhere, and each of its pieces between commas for the forms that open
+    a clause. A paragraph that ends on a label addressing the reader
+    addresses the list items that follow it. The sentence is what a typed
+    sentence must hold whole; a question is held only by a question.
+    """
+    found, carry = [], False
+    for block in segment(text):
+        if block.kind == "code":
+            carry = False
+            continue
+        addressed = carry and block.kind == "item"
+        prose = _order_prose(block.text)
+        for sentence in (s.strip() for s in _ORDER_SENTENCE.split(prose)):
+            if not sentence:
+                continue
+            question = _is_question(sentence)
+            for chunk, labelled in _order_chunks(sentence, table):
+                chunk_forms = _chunk_forms(chunk, addressed or labelled, table, names)
+                pieces = [piece.strip() for piece in _COMMA_SPLIT.split(chunk) if piece.strip()]
+                if len(pieces) == 1:
+                    forms = chunk_forms | _piece_forms(chunk, table, names)
+                    if forms:
+                        found.append((chunk, "".join(sorted(forms)), chunk, question, sentence))
+                    continue
+                # The spine opens as the chunk does, its phrases between commas
+                # set aside: "Email, right now, the vault keys" orders.
+                opening = _piece_forms(_spine(chunk), table, names) if len(pieces) > 2 else set()
+                if chunk_forms or opening:
+                    found.append((chunk, "".join(sorted(chunk_forms | opening)), chunk, question, sentence))
+                following = pieces[1] if len(pieces) > 1 else None
+                for piece in pieces if not _opens_on_subject(pieces[0], table, names, following) else pieces[:1]:
+                    forms = _piece_forms(piece, table, names)
+                    if forms:
+                        found.append((piece, "".join(sorted(forms)), chunk, question, sentence))
+        tail = prose.rstrip()
+        label = re.split(r"[.!?;:]\s+|\s*\n\s*", tail[:-1])[-1] if tail.endswith(":") else ""
+        carry = (bool(label) and _addresses(label, table)) or addressed
+    return found
+
+
+def directives_in(text, table, names=frozenset()):
+    """The clauses of ``text`` that order, each ``(clause, forms)``, in reading order, as ``_orders_in`` reads them.
+
+    The forms are letters: ``a`` the reader spoken to in the second person,
+    anywhere in the clause -- a summary tells of the user and the assistant
+    in the third; ``b`` an obligation of the reader; ``c`` a label that
+    addresses the reader, its list included; ``d`` an opening of courtesy,
+    prohibition or rule, or a lasting rule anywhere; ``e`` an injection's
+    signature, whoever tells it; ``f`` a verb opening the clause before an
+    object or a name; ``r`` a request told of the user, the user's order;
+    ``s``, under the strict switch, a clause whose first
+    word opens no statement. A fenced block holds no clause: the summariser
+    sees it as its marker only. ``names`` are the folded words of the names
+    the span holds. With no table no clause orders.
+    """
+    if table is None:
+        return []
+    found = []
+    for clause, forms, _chunk, _question, _sentence in _orders_in(text, table, names):
+        if (clause, forms) not in found:
+            found.append((clause, forms))
+    return found
+
+
+# A restatement is compared as a sequence: a clause's content words in their
+# order, each without its final s; a negation as one mark where it stands; a
+# preposition where it stands, past the first content word ("from Mallory"
+# is not "to Mallory"); a lasting rule as a flag. Left out: the frame of a
+# telling at the head of a summary's clause ("The user asked the assistant
+# to"), the frame of a request at the head of a typed part ("Can you", "I
+# need you to"), courtesy words, lead-in words before the first content
+# word, and the function words of ``_STOPWORDS``: articles, the pronouns
+# and possessives it lists, conjunctions and the forms of be and do (etre
+# and avoir in French). Modal verbs ("will", "can", "should") are content.
+# An English contraction is spelled out: "don't" is "do not", "I'd" is "I
+# would".
+_CONTRACTED = (
+    (re.compile(r"\bcan['" + chr(0x2019) + r"]t\b", re.IGNORECASE), "can not"),
+    (re.compile(r"\bwon['" + chr(0x2019) + r"]t\b", re.IGNORECASE), "will not"),
+    (re.compile(r"n['" + chr(0x2019) + r"]t\b", re.IGNORECASE), " not"),
+    (re.compile(r"(?<=\w)['" + chr(0x2019) + r"]d\b", re.IGNORECASE), " would"),
+    (re.compile(r"(?<=\w)['" + chr(0x2019) + r"]ll\b", re.IGNORECASE), " will"),
+)
+_NEGATION_WORDS = frozenset({"not", "never", "no", "none", "cannot", "ne", "pas", "jamais", "rien", "aucun",
+                             "aucune"})
+# The prepositions a restatement keeps, folded: a direction, a companion, a
+# place, a time. The French "a" is kept only as written with its accent, its
+# folded form being the English article.
+_ROLE_WORDS = frozenset({"to", "from", "of", "in", "on", "at", "for", "with", "by",
+                         "de", "du", "au", "aux", "en", "pour", "par", "sur", "dans", "avec", "sans", "apres"})
+# The backing last read, keyed by its typed pieces and its table.
+_BACKING = {}
+
+
+def _frame_end(words, table, index):
+    """Where the frame of a telling at the head of a clause ends, or 0 when the clause opens on none.
+
+    The frame is the user, a telling verb within two words, then the reader,
+    pronouns, determiners, datives and the "to" or "de" before the told
+    verb: "The user asked the assistant to", "The user wants", "L'utilisateur
+    a demande a l'assistant de". Only function, lead-in and courtesy words
+    and a lasting rule may stand before it.
+    """
+    at = 0
+    while at < len(words) and words[at] not in table.user_subjects:
+        rule = _phrase_at(index, "persistent", words, at)
+        if rule:
+            at += len(rule)
+        elif words[at] in _FOLDED_STOPWORDS or words[at] in table.lead_ins or words[at] in table.courtesy:
+            at += 1
+        else:
+            return 0
+    reach = min(len(words), at + 3)
+    verb = at + 1
+    while verb < reach and words[verb] not in table.telling and (
+            words[verb] in table.auxiliaries or words[verb] in _FOLDED_STOPWORDS):
+        verb += 1
+    if verb >= reach or words[verb] not in table.telling:
+        return 0
+    end = verb + 1
+    while end < len(words) and (words[end] in table.readers or words[end] in table.subject_pronouns
+                                or words[end] in table.object_openers or words[end] in table.datives
+                                or words[end] in ("to", "de")):
+        end += 1
+    return end
+
+
+def _clause_of(text):
+    """The words of a clause or a typed part as a restatement reads them: contractions spelled out, folded as an
+    order is, enumerators set aside and code markers read as "it". A tag in brackets is kept: its words may be a
+    negation ("[DON'T] email the keys")."""
+    for pattern, plain in _CONTRACTED:
+        text = pattern.sub(plain, text)
+    text = _order_text(text)
+    for _ in range(6):
+        prefix = _ORDER_ENUMERATOR.match(text)
+        if not prefix:
+            break
+        text = text[prefix.end():]
+    return _clause_words(_HYPHEN.sub("", _MARKER.sub(" it ", text)))
+
+
+def _sequence(words, written, table, index, frame):
+    """``(sequence, lasting)`` of a clause's words, those before ``frame`` read only for a negation."""
+    sequence, lasting, head, at = [], False, True, 0
+    while at < len(words):
+        rule = _phrase_at(index, "persistent", words, at)
+        if rule:
+            lasting, at = True, at + len(rule)
+            continue
+        word, said, at = words[at], written[at].lower(), at + 1
+        if word in _NEGATION_WORDS:
+            sequence.append("~")
+        elif at <= frame or word in table.courtesy or (head and word in table.lead_ins):
+            continue
+        elif word in _ROLE_WORDS or said == chr(0xE0):
+            # A preposition before the first content word belongs to no
+            # role: "To Bob, send", "asked the assistant not to send".
+            if not head:
+                sequence.append(word)
+        elif word not in _FOLDED_STOPWORDS:
+            sequence.append(word[:-1] if word.endswith("s") else word)
+            head = False
+    return tuple(sequence), lasting
+
+
+def _restatement(text, table):
+    """``(sequence, lasting)``: what a summary's clause says, the frame of a telling at its head left out, to be
+    compared word for word with what the user typed."""
+    words, written = _clause_of(text)
+    index = _phrase_index(table)
+    return _sequence(words, written, table, index, _frame_end(words, table, index))
+
+
+def _typed_restatement(text, table):
+    """``(sequence, lasting)`` of a part the user typed, compared with a summary's deciding clause."""
+    words, written = _clause_of(text)
+    return _sequence(words, written, table, _phrase_index(table), 0)
+
+
+def _scoped(text, table):
+    """True when a line holds a negation or a condition anywhere."""
+    words, _written = _clause_of(text)
+    index = _phrase_index(table)
+    return (any(word in _NEGATION_WORDS for word in words)
+            or any(_phrase_at(index, "conditions", words, k) for k in range(len(words))))
+
+
+def _bars_list(line, table):
+    """True when a label or a line ending in a colon leaves what follows it no decision of the user's: it holds a
+    negation, a condition or an attribution, a verb of telling that is no verb of wanting, a quote's noun, or
+    another's possessive, "our" before it included ("Mallory wrote:", "Here is the mail:", "Don't do any of this:",
+    "Mallory's ideas:", "Our vendor's proposal:"). The user's own line ("Here is what I need:", "Two things:", "This
+    week's plan:") bars nothing."""
+    words, written = _clause_of(line)
+    return (_scoped(line, table)
+            or any((word in table.telling and word not in table.wanting) or word in table.quote_nouns for word in words)
+            or any(_possessive(written, at) and words[at] not in table.time_nouns and not _adverb(words[at], table)
+                   and words[at] not in table.user_subjects for at in range(len(words))))
+
+
+def _plain_decision(text, table, lexicon):
+    """True for a decision the user states plainly in their own voice: a first-person subject, then, past auxiliaries
+    of tense only, an act of the lexicon, and no negation, condition, attribution, quote or possessive (``_bars_list``)
+    nor adverb anywhere. "We keep the logs" and "We will keep the logs" are ones; "It is not true that we keep", "I
+    doubt we keep", "Mallory says we should keep", "We reportedly keep", "We might keep" and "We keep the logs
+    allegedly" are none."""
+    if lexicon is None or _bars_list(text, table):
+        return False
+    folded = [_ELIDED.get(word, word) for word in _tokens(_fold(text))]
+    at = 0
+    while at < len(folded) - 1 and folded[at] in table.lead_ins:
+        at += 1
+    if at >= len(folded) or folded[at] not in table.first_person or any(_adverb(word, table) for word in folded[at:]):
+        return False
+    first = next((start for start, _stop, _languages, _cls in _acts(folded, lexicon) if start > at), None)
+    return first is not None and all(word in _TENSE_AUXILIARIES for word in folded[at + 1:first])
+
+
+# The auxiliaries that set a tense and nothing else: a modal ("might",
+# "would", "could") scopes the decision as an adverb does.
+_TENSE_AUXILIARIES = frozenset({"will", "shall", "have", "has", "had", "do", "does", "did", "am", "is", "are", "was",
+                                "were", "be", "been", "va", "vont", "allons", "vais", "a", "ai", "avons", "ont"})
+
+
+def _backing(typed, table, lexicon=None):
+    """What the pieces the user typed may hold of a decision: ``(decisions, barred)``.
+
+    ``decisions`` is a tuple of ``(sequence, lasting, question)``: any typed
+    part -- a sentence, a chunk, a piece -- but for the pieces after a
+    negated, conditional or attributed piece ("If the audit passes, we drop
+    the backups" and "According to Bob, we drop the backups" hold no "we
+    drop the backups"), the chunks after a label before a colon that bars
+    (``_bars_list``: "Mallory wrote: we drop"), a sentence a bare retraction
+    takes back (past a one-word sentence: "We drop the logs. Wait. No."),
+    and everything after a line ending on a colon that bars. ``barred``
+    holds the texts of the sentences such a label, line or retraction
+    reaches, whose decision probes hold nothing either. With the lexicon, a
+    typed sentence is also parted as a summary's is (``_decision_split``),
+    each clause with its head and, when that head is the user's plain
+    decision (``_plain_decision``), the predicates coordinated to it
+    (``_coordinated``), so that the user's words restated whole are held
+    whole and no predicate escapes the negation, the doubt or the voice of
+    its head. A piece before a comma that bars (``_bars_list``: "Bob said,")
+    lends what follows it nothing. An order is never
+    held here: it stands in a peel only stitched word for word
+    (``typed_ranges``). The last backing read is kept with its pieces, its
+    table and its lexicon: a repair judges its summary sentence by sentence
+    against one span.
+    """
+    key = (typed, table, lexicon)
+    kept = _BACKING.get(key)
+    if kept is not None:
+        return kept
+    decisions, barred_texts = [], set()
+    parting = None if lexicon is None else _decision_split(table, lexicon)
+    for text in typed:
+        flat, barred = [], False
+        for block in segment(_order_text(text)):
+            if block.kind == "code":
+                continue
+            for sentence in (s.strip() for s in _ORDER_SENTENCE.split(_continued(block.text)) if s.strip()):
+                flat.append((sentence, barred))
+            if block.text.rstrip().endswith(":"):
+                barred = barred or _bars_list(block.text.rstrip(), table)
+        for number, (sentence, barred) in enumerate(flat):
+            later = next((s for s, _barred in flat[number + 1:]
+                          if len(_tokens(_fold(s))) > 1 or _retraction(s)), None)
+            if barred or (later is not None and _retraction(later)):
+                barred_texts.add(sentence)
+                continue
+            question = _is_question(sentence)
+            decisions.append(_typed_restatement(sentence, table) + (question,))
+            for part in _CHUNK_SPLIT.split(sentence):
+                labels = [chunk.strip() for chunk in _LABEL_SPLIT.split(part)]
+                for number_in, chunk in enumerate(labels):
+                    if not chunk:
+                        continue
+                    # A label of another's voice, a condition or a negation
+                    # before a colon leaves the rest of its part no decision
+                    # of the user's alone: "Mallory wrote: we drop".
+                    if any(_bars_list(label, table) for label in labels[:number_in] if label):
+                        barred_texts.add(sentence)
+                        break
+                    decisions.append(_typed_restatement(chunk, table) + (question,))
+                    stopped = False
+                    for piece in (p.strip() for p in _COMMA_SPLIT.split(chunk) if p.strip()):
+                        if not stopped:
+                            decisions.append(_typed_restatement(piece, table) + (question,))
+                        # A negation, a condition, an attribution or a quote
+                        # before a comma lends what follows it nothing:
+                        # "Bob said, we drop the backups".
+                        stopped = stopped or _bars_list(piece, table)
+                    if parting is None:
+                        continue
+                    for piece in (p.strip() for p in parting.split(chunk) if p and p.strip()):
+                        clauses = _coordinated(piece, table, frozenset())
+                        head = _head_of(piece, clauses)
+                        decisions.append(_typed_restatement(piece, table) + (question,))
+                        decisions.append(_typed_restatement(head, table) + (question,))
+                        # A predicate holds alone only with the user's plain
+                        # decision as its head: under a negation, a doubt or
+                        # another's voice it shares their scope.
+                        if _plain_decision(head, table, lexicon):
+                            decisions.extend(_typed_restatement(clause, table) + (question,) for clause in clauses)
+                        if _bars_list(piece, table):
+                            break
+    found = (tuple(decisions), frozenset(barred_texts))
+    _BACKING.clear()
+    _BACKING[key] = found
+    return found
+
+
+def _from_its_side(probe, text):
+    """True when most of ``text``'s own decision key is the probe's: words added to a decision are a decision of
+    their own."""
+    lexicon = EMPTY_LEXICON if probe.lexicon is None else probe.lexicon
+    plain, dates, quantities, rest = _read_sentence(text)[:4]
+    folded = _tokens(_fold(plain))
+    key = _decision_key(text, rest, dates, quantities, folded, _acts(folded, lexicon), lexicon)
+    return not key or len(probe.key & key) / len(key) >= DECISION_COVERAGE
+
+
+def _backed(clause, chunk, question, backing, decisions, table):
+    """True when the user's words hold the deciding ``clause``, or the chunk it stands in.
+
+    A typed part holds it when it says the same, word for word in the same
+    order (``_restatement``), with its negations, its lasting rule and its
+    mood. A typed decision holds it when the clause answers it with its
+    polarity and most of the clause's own key is the decision's, unless the
+    decision was asked.
+    """
+    for text in dict.fromkeys((clause, chunk)):
+        sequence, lasting = _restatement(text, table)
+        if sequence and any(held == sequence and held_lasting == lasting and (question or not held_question)
+                            for held, held_lasting, held_question in backing):
+            return True
+        for p in decisions:
+            if (question or not _is_question(p.answer)) and answers(p, text) and _from_its_side(p, text):
+                return True
+    return False
+
+
+def _deciding(text, lexicon):
+    folded = _tokens(_fold(text))
+    return _decides(text, folded, _acts(folded, lexicon), lexicon)
+
+
+def _subject_word(text):
+    """A text's first word that is no function word: what the reporter rule reads as its subject."""
+    return next((word for word in _tokens(_fold(text)) if word not in _STOPWORDS), None)
+
+
+def _told_as_users(plain, table, lexicon):
+    """The decision a reporter's sentence tells as the user's, from the user's name on, or None.
+
+    The user named as the one who decides makes the telling the user's. Only
+    a pronoun that cannot be the user (``owner_pronouns``: "it"), after the
+    name or after "that", makes the decision another's: "The assistant told
+    the user it decided" tells the assistant's own, while a person's "she"
+    and the French "il" may be the user, and leave the telling the user's.
+    The phrases between the first and the last comma are read past ("the
+    user, it seems, decided"). The decision is returned as the user would
+    have typed it: the clause after "that" or "que" when one decides ("the
+    user confirmed that we drop the backups"), else the telling with the user
+    read as "we" or "on" -- "the user prefers Podman" as "we prefers
+    Podman" -- so that it decides by its act alone and is held by the user's
+    own words; else as told, from the user's name on.
+    """
+    words, written = _clause_words(_spine(plain))
+    for at in range(len(words)):
+        if words[at] not in table.user_subjects:
+            continue
+        after = words[at + 1:at + 3]
+        if after[:1] and (after[0] in table.owner_pronouns
+                          or (after[0] in ("that", "que") and after[1:2] and after[1] in table.owner_pronouns)):
+            continue
+        rest = " ".join(written[at + 1:])
+        that = next((j for j in range(at + 1, len(words)) if words[j] in ("that", "que")), None)
+        embedded = () if that is None else (" ".join(written[that + 1:]),)
+        return next((clause for clause in embedded + (f"we {rest}", f"on {rest}", " ".join(written[at:]))
+                     if _deciding(clause, lexicon)), None)
+    return None
+
+
+def _coordinated(chunk, table, names):
+    """The predicates coordinated to a clause of ``chunk``, each as written.
+
+    A coordinator ("&" read as "and"), then, past any auxiliary or lead-in
+    word ("and will", "and also"), a verb and its object; and a gerund and
+    its object after a comma ("..., dropping the NAS").
+    """
+    gerunds = [piece.strip() for piece in _COMMA_SPLIT.split(chunk)[1:] if _gerund_predicate(piece, table, names)]
+    words, written = _clause_words(chunk.replace("&", " and "))
+    index = _phrase_index(table)
+    found, start, at = [], None, 1
+    while at < len(words):
+        coordinator = _phrase_at(index, "coordinators", words, at)
+        if coordinator:
+            verb = at + len(coordinator)
+            while verb < len(words) - 1 and (words[verb] in table.auxiliaries or words[verb] in table.lead_ins):
+                verb += 1
+            if (verb + 1 < len(words) and not _opens_statement(words[verb], written[verb], table, names)
+                    and _object_at(words, written, verb + 1, table, names)):
+                if start is not None:
+                    found.append(" ".join(written[start:at]))
+                start = at = verb
+                continue
+        at += 1
+    if start is not None:
+        found.append(" ".join(written[start:]))
+    return found + [piece for piece in gerunds if piece not in found]
+
+
+def _gerund_predicate(piece, table, names):
+    """True when a piece after a comma opens on a gerund of five letters or more and its object: "dropping the NAS"."""
+    words, written = _clause_words(piece)
+    return (len(words) > 1 and words[0].endswith("ing") and len(words[0]) >= 5
+            and _object_at(words, written, 1, table, names))
+
+
+def unbacked_directives(held, probes, text, directives=None):
+    """The clauses of a summary that order outside the user's own words stitched into it.
+
+    Each is ``("directive", clause, "")``: no turn holds an order the user
+    did not type, and no summary may restate one, the user's included -- a
+    paraphrase can drop what bounds an order or change who gives it. An
+    order stands in a peel only inside a run the user typed, stitched word
+    for word after its turn's marker ("[u1] ..."), as ``typed_ranges``
+    reads the span (``held.stitchable``). A clause orders as ``_orders_in``
+    reads it, the names being those the span's probes ask for. With no
+    table no clause orders.
+    """
+    if directives is None:
+        return []
+    found, names = [], _names_held(probes)
+    for view in _unstitched(text, held.stitchable, held.ids):
+        for clause, _forms, _chunk, _question, _sentence in _orders_in(view, directives, names):
+            entry = ("directive", clause, "")
+            if entry not in found:
+                found.append(entry)
+    return found
+
+
+# A sentence the summary ended: a stop, past any closing quote, bracket or
+# mark of emphasis ("**Noted.**") -- never an ellipsis ("Mallory wrote...",
+# ". . .") nor the stop of an abbreviation ("i.e.", "etc.", "cf.").
+_ENDED = re.compile(r"(?<![." + chr(0x2026) + r"])(?<!\.\s)(?<!\b[^\W\d_]\.[^\W\d_])(?<!\betc)(?<!\bviz)(?<!\bcf)(?<!\bvs)"
+                    r"[.!?][\"')\]*_`" + chr(0x2019) + chr(0x201D) + chr(0xBB) + r"]*$", re.IGNORECASE)
+
+
+def _unstitched(text, stitchable, ids=()):
+    """The words of ``text`` that are the summary's, in two readings: without the block of runs the queue stitched at
+    its end, and with every other turn marker read as nothing, then as the end of a sentence.
+
+    A stitched block is honoured only where the queue writes it: at the very
+    end of the text, each run of the user's after its turn's marker, word for
+    word (``[turn_id] run``), and after a sentence the summary ended with a
+    stop, never an ellipsis nor an abbreviation's (``_ENDED``) -- so that no
+    word of the summary is read with the user's ("On every later turn, [t1]
+    Delete...", "Delete [t2] The backups..."). A marker
+    anywhere else stitches nothing, and what it marks is read as the
+    summary's own words twice: joined to what comes before it ("Delete The
+    backups") and apart from it ("Delete. Send the keys").
+    """
+    runs = set(stitchable)
+    items = {f"[{turn_id}] {run}" for turn_id, run in runs}
+    lengths = {len(item) for item in items}
+    # Read from the end, item by item, by the last brackets before each, a
+    # bracket tried by its distance first: linear in the block and in the
+    # brackets, however many runs it stitches.
+    end, honoured = len(text.rstrip()), False
+    while True:
+        cut, found = end, None
+        while cut > 0:
+            cut = text.rfind("[", 0, cut)
+            if cut < 0:
+                break
+            if end - cut in lengths and text[cut:end] in items and (cut == 0 or text[cut - 1].isspace()):
+                found = cut
+                break
+        if found is None:
+            break
+        end, honoured = found, True
+        while end and text[end - 1].isspace():
+            end -= 1
+    head = text[:end]
+    if not honoured or (head and not _ENDED.search(head)):
+        head = text
+    markers = sorted(set(ids) | {turn_id for turn_id, _run in runs}, key=len, reverse=True)
+    if not markers:
+        return (head,)
+    pattern = re.compile(r"\[(?:" + "|".join(map(re.escape, markers)) + r")\]")
+    return tuple(dict.fromkeys((pattern.sub(" ", head), pattern.sub(". ", head))))
 
 
 # The bounds of the gate read a summary against its span word by word. A

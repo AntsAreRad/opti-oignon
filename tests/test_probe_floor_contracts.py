@@ -57,6 +57,12 @@ turns stay, and the decision says why.
     spans it judged with how many fall under the floor, and the facts no
     probe asked for, kind by kind.
   * FL17 -- a leaf and a parent are held to the floor.
+  * FL18 -- FL9 held word for word on the rich fixture with its code turn
+    showing its block rather than ordering it run: the second face now
+    refuses a summary that repeats an order the user did not type, the
+    assistant's included.
+  * FL19 to FL22 -- FL6, FL8, FL14 and FL17 held word for word on the same
+    fixture, for the same reason.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source.
@@ -527,6 +533,124 @@ def test_fl17_a_leaf_and_a_parent_are_held_to_the_floor():
         evicted = peels.evict_gated(summarize=_verbatim, **s)
         assert evicted.evicted is True, evicted.reason
         reference = probes.generate_probes(_RICH, gate.lexicon)
+        probes._native_draw = lambda pieces, lexicon: [q for q in reference if q.kind != "entity"]
+        leaf, decision = peels.build_leaf(evicted.receipt.key, s["cellar"], _verbatim, s["gate"], s["tree"])
+        assert leaf is None and decision.unasked == _NAMES, decision.reason
+        parent, decision = peels.build_parent([evicted.peel.id], s["cellar"], _verbatim, s["gate"], s["tree"])
+        assert parent is None and decision.unasked == _NAMES, decision.reason
+        assert len(s["tree"].all()) == 1, "nothing was added"
+        probes._native_draw = lambda pieces, lexicon: None
+        leaf, decision = peels.build_leaf(evicted.receipt.key, s["cellar"], _verbatim, s["gate"], s["tree"])
+        assert leaf is not None, decision.reason
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# FL18 -- FL9 on the rich fixture whose code turn tells rather than orders
+# ---------------------------------------------------------------------------
+_TOLD_RICH = _RICH[:4] + [_turn("r5", "assistant", "assistant", "The code:\n\n```python\n" + _BLOCK + "\n```")]
+
+
+def test_fl18_a_generator_that_misses_a_class_cannot_raise_the_acceptance():
+    probes, peels, _receipts, restore = _window()
+    try:
+        shipped = peels.load_gate()
+        unfloored = dataclasses.replace(shipped, probe_floor=None)
+        reference = probes.generate_probes(_TOLD_RICH, shipped.lexicon)
+        for kind, turn_id in _LOST:
+            missing = [q for q in reference if q.kind != kind]
+            summary = _verbatim([t for t in _TOLD_RICH if t["turn_id"] != turn_id])
+            if kind in _RISES:
+                assert peels.decide(_TOLD_RICH, reference, summary, unfloored).accepted is False, (kind, "control")
+                assert peels.decide(_TOLD_RICH, missing, summary, unfloored).accepted is True, (kind, "the rate rises")
+            refused = peels.decide(_TOLD_RICH, missing, summary, shipped)
+            assert refused.accepted is False and refused.reason.startswith("probe coverage "), (kind, refused.reason)
+            assert {k for k, _what, _turn in refused.unasked} == {kind}, (kind, refused.unasked)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# FL19 -- FL6 on the rich fixture whose code turn tells rather than orders
+# ---------------------------------------------------------------------------
+def test_fl19_a_probe_set_that_leaves_a_fact_unasked_is_refused_by_name_with_its_figures():
+    probes, peels, _receipts, restore = _window()
+    try:
+        gate = peels.load_gate()
+        drawn = probes.generate_probes(_TOLD_RICH, gate.lexicon)
+        starved = [q for q in drawn if q.kind != "entity"]
+        text = _verbatim(_TOLD_RICH)
+        assert peels.judge(starved, text, gate).accepted is True, "control: the first face lets it through"
+        assert peels.faithfulness(_TOLD_RICH, starved, text, gate) == (), "control: it says nothing its span lacks"
+        refused = peels.decide(_TOLD_RICH, starved, text, gate)
+        assert refused.accepted is False
+        assert refused.facts == 6 and refused.probe_coverage == 4 / 6 and refused.probe_floor == 1.0
+        assert refused.unasked == _NAMES
+        assert refused.reason == (f"probe coverage {round(4 / 6, 4)} under 1.0 (4 of 6 facts asked, unasked: "
+                                  "entity:Alice Martin@r2, entity:Bob@r2)")
+        assert refused.unsupported == (), "the floor is said in the reason, never as a claim"
+        held = peels.decide(_TOLD_RICH, drawn, text, gate)
+        assert held.accepted is True and held.probe_coverage == 1.0 and held.unasked == (), held.reason
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# FL20 -- FL8 on the rich fixture whose code turn tells rather than orders
+# ---------------------------------------------------------------------------
+def test_fl20_a_native_twin_that_draws_less_than_the_reference_is_caught_at_the_eviction():
+    probes, peels, receipts, restore = _window()
+    try:
+        gate = peels.load_gate()
+        reference = probes.generate_probes(_TOLD_RICH, gate.lexicon)
+        probes._native_draw = lambda pieces, lexicon: [q for q in reference if q.kind != "entity"]
+        s = _setup(peels, receipts, gate, _TOLD_RICH)
+        outcome = peels.evict_gated(summarize=_verbatim, **s)
+        assert outcome.evicted is False and outcome.receipt is None and outcome.peel is None
+        assert len(s["flesh"].turns()) == len(_TOLD_RICH) + len(_TAIL), "the verbatim turns stay"
+        assert outcome.decision.result.failed == 0, "control: the summary answers every probe the twin drew"
+        assert outcome.decision.unasked == _NAMES
+        assert "4 of 6 facts asked, unasked: entity:Alice Martin@r2, entity:Bob@r2" in outcome.reason
+        probes._native_draw = lambda pieces, lexicon: list(reference)
+        s = _setup(peels, receipts, gate, _TOLD_RICH)
+        assert peels.evict_gated(summarize=_verbatim, **s).evicted is True, "control: a twin that draws the same evicts"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# FL21 -- FL14 on the rich fixture whose code turn tells rather than orders
+# ---------------------------------------------------------------------------
+def test_fl21_every_decision_carries_its_facts_coverage_unasked_facts_and_floor():
+    probes, peels, _receipts, restore = _window()
+    try:
+        gate = peels.load_gate()
+        drawn = probes.generate_probes(_TOLD_RICH, gate.lexicon)
+        accepted = peels.decide(_TOLD_RICH, drawn, _verbatim(_TOLD_RICH), gate)
+        assert accepted.accepted is True, accepted.reason
+        assert (accepted.facts, accepted.probe_coverage, accepted.unasked, accepted.probe_floor) == (6, 1.0, (), 1.0)
+        claimed = peels.decide(_TOLD_RICH, drawn, _verbatim(_TOLD_RICH) + " They met Dave.", gate)
+        assert claimed.accepted is False and claimed.unsupported, "control: refused by a claim"
+        assert (claimed.facts, claimed.probe_coverage, claimed.unasked, claimed.probe_floor) == (6, 1.0, (), 1.0)
+        quiet = peels.decide(_QUIET, probes.generate_probes(_QUIET, gate.lexicon), _verbatim(_QUIET), gate)
+        assert quiet.facts == 0 and quiet.probe_coverage is None and quiet.unasked == ()
+        assert quiet.accepted is False and "probe coverage" not in quiet.reason, "no fact: no coverage, no refusal for it"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# FL22 -- FL17 on the rich fixture whose code turn tells rather than orders
+# ---------------------------------------------------------------------------
+def test_fl22_a_leaf_and_a_parent_are_held_to_the_floor():
+    probes, peels, receipts, restore = _window()
+    try:
+        gate = peels.load_gate()
+        s = _setup(peels, receipts, gate, _TOLD_RICH)
+        evicted = peels.evict_gated(summarize=_verbatim, **s)
+        assert evicted.evicted is True, evicted.reason
+        reference = probes.generate_probes(_TOLD_RICH, gate.lexicon)
         probes._native_draw = lambda pieces, lexicon: [q for q in reference if q.kind != "entity"]
         leaf, decision = peels.build_leaf(evicted.receipt.key, s["cellar"], _verbatim, s["gate"], s["tree"])
         assert leaf is None and decision.unasked == _NAMES, decision.reason

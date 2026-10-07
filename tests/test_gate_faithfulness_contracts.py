@@ -120,6 +120,14 @@ figure, in the reason and never as a claim.
   * GF59 -- a negation fused into a flag reads as none in prose as in code: a
     summary that drops the flag's backticks is held, and one that also drops
     the decision's negation is refused.
+  * GF60 -- GF47 held on a code turn that shows its block rather than orders
+    it run: the second face now refuses a summary that repeats an order the
+    user did not type, the assistant's included, so GF47's fixture gives way
+    to one that tells; every figure is the one GF47 states.
+  * GF61 -- GF58 held on a planted sentence that tells rather than orders:
+    the planted imperative, held by a document or the assistant, is now an
+    order the user did not type; the negation each inline code carries is
+    the one GF58 holds to.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source.
@@ -1140,6 +1148,55 @@ def test_gf59_a_negation_fused_into_a_flag_reads_as_none_in_prose_as_in_code():
     assert drawn and control.accepted is False, "control: the inversion with the flag in code is refused"
     assert held.accepted is True, ("the flag without its backticks reads as no negation", held.reason)
     assert inverted.accepted is False, "the inversion with the flag's backticks dropped is refused"
+
+
+# ---------------------------------------------------------------------------
+# GF60 -- GF47 on a code turn that tells rather than orders
+# ---------------------------------------------------------------------------
+_TOLD_CODE = [_turn("c1", "assistant", "assistant", "The code:\n\n```python\n" + _BODY + "\n```")]
+
+
+def test_gf60_the_length_ratio_is_every_word_of_the_summary_over_every_word_of_its_span_code_included():
+    probes, peels, _receipts, restore = _window()
+    try:
+        gate = peels.load_gate()
+        assert probes.word_count(_TOLD_CODE[0]["text"]) == 5, "the, code, and the block: python, print, farm"
+        verbatim = _decide(probes, peels, _TOLD_CODE, _TOLD_CODE[0]["text"], gate)
+        assert verbatim.accepted is True and verbatim.length_ratio == 1.0, "the role is no word of the span"
+        marked = _decide(probes, peels, _TOLD_CODE, "The code: " + probes.code_marker(_BODY), gate)
+        assert marked.accepted is True and marked.length_ratio == 4 / 5, "a marker is two words, its block three"
+        silent = _decide(probes, peels, [dict(_TOLD_CODE[0], text="")], "The code.", gate)
+        assert silent.length_ratio is None, "a span with no word has no ratio"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# GF61 -- GF58 on a planted sentence that tells rather than orders
+# ---------------------------------------------------------------------------
+def test_gf61_a_negation_inside_longer_inline_code_inverts_though_a_document_or_the_assistant_holds_it():
+    probes, peels, _receipts, restore = _window()
+    try:
+        gate = dataclasses.replace(peels.load_gate(), max_length_ratio=None, max_novelty=None)
+        verdicts = {}
+        for code, holder in (("will not", "document"), ("won't", "assistant"), ("don't", "assistant"),
+                             ("not in", "assistant")):
+            planted = f"The guide writes `{code}` in backticks when quoting it."
+            span = [_turn("m1", "user", "typed", _STAGING),
+                    _turn("m2", "assistant" if holder == "assistant" else "user", holder, planted)]
+            drawn = probes.generate_probes(span, gate.lexicon)
+            told = _STAGING.replace("will delete", f"`{code}` delete") + " " + planted
+            verdicts[code] = (peels.decide(span, drawn, _STAGING + " " + planted, gate),
+                              peels.decide(span, drawn, told, gate))
+        billing = peels.decide(_BILLING, probes.generate_probes(_BILLING, gate.lexicon), _BILLING_TOLD, gate)
+    finally:
+        restore()
+    assert all(held.accepted for held, _told in verdicts.values()), "control: each span told as it is is held"
+    slipped = [code for code, (_held, told) in verdicts.items()
+               if told.accepted or not (any(claim[0] == "inversion" for claim in told.unsupported)
+                                        or "decision" in told.reason)]
+    assert not slipped, f"a negation inside inline code inverts the decision it is written into: {slipped}"
+    assert billing.accepted is True, ("a faithful copy of `--no-cache` is held", billing.reason)
 
 
 if __name__ == "__main__":

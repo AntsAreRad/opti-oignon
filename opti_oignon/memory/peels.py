@@ -28,7 +28,11 @@ summary its span holds, and the fewest typed units answering what they miss
 -- and kept while it saves enough; else the span is held, the places of its
 typed units kept as anchors in the Cellar. Only words the user typed are
 ever stitched or anchored, and the gate itself never yields: every peel the
-ladder makes has passed it.
+ladder makes has passed it. No summary gives an order, the user's restated
+included: each run the user typed that orders is stitched at the end of
+the peel, word for word and marked with its turn, wherever a peel is made,
+and the gate holds that block only there, after a sentence the summary
+ended.
 
 Selection at query time is deterministic and keyword-based, in any script:
 a term is a word as the probes read one, in lower case with its accents
@@ -135,6 +139,10 @@ class Gate:
     # must ask for, the facts read again by ``probes.held_facts``. None is no
     # floor: the share is measured and said, and refuses nothing.
     probe_floor: float = None
+    # The forms an order is given in, a ``probes.Directives`` as the gate's
+    # file states them. None reads no order: a gate built by hand judges a
+    # summary's claims and decisions only, each decision by its sentence.
+    directives: object = None
 
     def validate(self):
         errors = []
@@ -162,6 +170,11 @@ class Gate:
 
             if not isinstance(self.probe_recall, ProbeRecall):
                 errors.append(f"probe_recall: a {type(self.probe_recall).__name__} is not a stated probe recall")
+        if self.directives is not None:
+            from .probes import Directives
+
+            if not isinstance(self.directives, Directives):
+                errors.append(f"directives: a {type(self.directives).__name__} is not a table of directive forms")
         return errors
 
 
@@ -208,10 +221,10 @@ def _reporters(section):
 
 
 def load_gate(path=None):
-    """The gate of ``onion.yaml`` with its lexicon, code threshold, reporters and bounds, refused if out of range or malformed."""
+    """The gate of ``onion.yaml`` with its lexicon, code threshold, reporters, bounds and directives, refused if out of range or malformed."""
     import yaml
 
-    from .probes import LexiconError, build_lexicon
+    from .probes import DirectivesError, LexiconError, build_directives, build_lexicon
 
     raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
     try:
@@ -250,10 +263,16 @@ def load_gate(path=None):
         lexicon = build_lexicon(raw["decisions"])
     except LexiconError as exc:
         raise GateError(f"onion {exc}") from exc
+    if "directives" not in raw:
+        raise GateError("onion directives: the section is missing, and a gate needs the forms an order is given in")
+    try:
+        directives = build_directives(raw["directives"])
+    except DirectivesError as exc:
+        raise GateError(f"onion {exc}") from exc
     stated = _probe_recall(raw["gate"].get("probe_recall"))
     return Gate(
         gate.decision_threshold, gate.episodic_threshold, gate.span_turns, lexicon, float(code), reporters, *bounds,
-        probe_recall=stated, probe_floor=float(floor),
+        probe_recall=stated, probe_floor=float(floor), directives=directives,
     )
 
 
@@ -401,6 +420,9 @@ class GateDecision:
     probe_coverage: float = None
     unasked: tuple = ()
     probe_floor: float = None
+    # The fingerprint of the table of directive forms the second face read
+    # orders with; None when the gate holds none and reads no order.
+    directives: str = None
 
 
 @dataclass(frozen=True)
@@ -489,7 +511,8 @@ def judge(probes, text, gate):
     if foreign:
         raise GateError(f"probes drawn with lexicon {foreign[0]} cannot be judged by a gate holding lexicon {lexicon}")
     stated, note = stated_probe_recall(gate.probe_recall, gate.lexicon)
-    named = {"generator": GENERATOR_VERSION, "lexicon": lexicon, "probe_recall": stated, "probe_recall_note": note}
+    named = {"generator": GENERATOR_VERSION, "lexicon": lexicon, "probe_recall": stated, "probe_recall_note": note,
+             "directives": None if gate.directives is None else gate.directives.fingerprint}
     result = score(probes, text)
     if not probes:
         return GateDecision(
@@ -521,20 +544,26 @@ def faithfulness(span, probes, text, gate):
     """The second face of the gate: what ``text`` says that ``span`` does not hold, each ``(kind, what, turn)``.
 
     Names, dates, numbers and code come first, read by
-    ``probes.unsupported_claims``; then the sentences that decide with no
-    typed decision of the span behind them, read by
-    ``probes.unbacked_decisions`` with the gate's lexicon and reporters.
+    ``probes.unsupported_claims``; then the sentences and clauses that
+    decide with no typed decision of the span behind them, read by
+    ``probes.unbacked_decisions`` with the gate's lexicon, reporters and
+    directives; then the clauses that order with no typed sentence or typed
+    decision of the span behind them, read by ``probes.unbacked_directives``
+    with the gate's table: a peel is read by every later turn, and only the
+    user's words may order there.
     """
     from .probes import holdings
 
-    return _unheld(holdings(span), probes, text, gate)
+    return _unheld(holdings(span, gate.directives), probes, text, gate)
 
 
 def _unheld(held, probes, text, gate):
-    from .probes import unbacked_decisions, unsupported_claims
+    from .probes import unbacked_decisions, unbacked_directives, unsupported_claims
 
+    reporters = gate.reporters or frozenset()
     found = unsupported_claims(held, text)
-    found += unbacked_decisions(probes, text, gate.lexicon, gate.reporters or frozenset())
+    found += unbacked_decisions(probes, text, gate.lexicon, reporters, gate.directives, held.typed)
+    found += unbacked_directives(held, probes, text, gate.directives)
     return tuple(found)
 
 
@@ -556,7 +585,7 @@ def decide(span, probes, text, gate):
     from .probes import holdings, novel_words, probe_coverage, word_count
 
     first = judge(probes, text, gate)
-    held = holdings(span)
+    held = holdings(span, gate.directives)
     found = _unheld(held, probes, text, gate)
     content, new = novel_words(held, text, gate.lexicon, gate.reporters or frozenset())
     words, span_words = word_count(text), sum(word_count(t) for t in held.texts)
@@ -587,7 +616,7 @@ def decide(span, probes, text, gate):
     return GateDecision(
         False, "; ".join(reasons + over), first.result, first.decision_rate, first.episodic_rate,
         generator=first.generator, lexicon=first.lexicon, code_rate=first.code_rate, unsupported=found, **figures,
-        probe_recall=first.probe_recall, probe_recall_note=first.probe_recall_note,
+        probe_recall=first.probe_recall, probe_recall_note=first.probe_recall_note, directives=first.directives,
     )
 
 
@@ -597,8 +626,8 @@ def _summarise(sources, cellar, summarize, gate):
     spans = [cellar.get(k) for k in sources]
     turns = [t for span in spans for t in span]
     probes = generate_probes(turns, gate.lexicon)
-    text = _unmarked(summarize(turns), turns)
-    return spans, probes, text, decide(turns, probes, text, gate)
+    text, stitched = _with_orders(turns, probes, _unmarked(summarize(turns), turns), gate)
+    return spans, probes, text, decide(turns, probes, text, gate), stitched
 
 
 def _make(text, sources, level, children, decision, cellar, *, rung="accepted", stitched=()):
@@ -622,10 +651,10 @@ def build_leaf(key, cellar, summarize, gate, tree):
     """A level-0 peel over one Cellar span, added to the tree only if the gate accepts."""
     if not cellar.has(key):
         raise PeelIntegrityError(f"source {key} resolves to no Cellar span")
-    _spans, _probes, text, decision = _summarise((key,), cellar, summarize, gate)
+    _spans, _probes, text, decision, stitched = _summarise((key,), cellar, summarize, gate)
     if not decision.accepted:
         return None, decision
-    peel = _make(text, (key,), 0, (), decision, cellar)
+    peel = _make(text, (key,), 0, (), decision, cellar, stitched=stitched)
     tree.add(peel)
     return peel, decision
 
@@ -644,11 +673,11 @@ def build_parent(child_ids, cellar, summarize, gate, tree):
                 sources.append(key)
     if not sources:
         raise PeelIntegrityError("a parent needs at least one child with a source")
-    _spans, _probes, text, decision = _summarise(tuple(sources), cellar, summarize, gate)
+    _spans, _probes, text, decision, stitched = _summarise(tuple(sources), cellar, summarize, gate)
     if not decision.accepted:
         return None, decision
     level = max(c.level for c in children) + 1
-    peel = _make(text, tuple(sources), level, tuple(c.id for c in children), decision, cellar)
+    peel = _make(text, tuple(sources), level, tuple(c.id for c in children), decision, cellar, stitched=stitched)
     tree.add(peel)
     return peel, decision
 
@@ -765,12 +794,12 @@ def evict_gated(*, flesh, cellar, ledger, tree, gate, summarize):
         return Eviction(False, "the Flesh is empty; nothing to evict")
     span = turns[: gate.span_turns]
     probes = generate_probes(span, gate.lexicon)
-    text = _unmarked(summarize([dict(t) for t in span]), span)
+    text, stitched = _with_orders(span, probes, _unmarked(summarize([dict(t) for t in span]), span), gate)
     decision = decide(span, probes, text, gate)
     if not decision.accepted:
         return Eviction(False, decision.reason, decision=decision)
     receipt = flesh.evict_span(len(span), cellar, ledger, kind="accepted")
-    peel = _make(text, (receipt.key,), 0, (), decision, cellar)
+    peel = _make(text, (receipt.key,), 0, (), decision, cellar, stitched=stitched)
     tree.add(peel)
     return Eviction(True, decision.reason, receipt=receipt, peel=peel, decision=decision, rung="accepted")
 
@@ -1071,22 +1100,69 @@ def _repair(span, probes, text, gate, ladder):
     refined, the assistant's, a turn written before origins -- are kept as
     the first face keeps them. What only words of another origin than the
     user's typing answer stays missed, and the gate judges the repair with
-    it missing.
+    it missing. A unit is stitched with the run of the user's it stands in
+    (``typed_ranges``), so that its condition, its quote, its label and its
+    retraction stay with it; and every run of the user's that orders is
+    stitched too (``order_ranges``): an order stands in a peel only so. The
+    runs come last, after the sentences kept, of which none the summary did
+    not end: the gate holds the stitched block only after a sentence ended.
     """
-    from .probes import copies, holdings, score, sentences, units
+    from .probes import (
+        _ENDED,
+        _names_held,
+        _order_prose,
+        copies,
+        holdings,
+        order_ranges,
+        score,
+        sentences,
+        typed_ranges,
+        unbacked_directives,
+        units,
+    )
 
-    held = holdings(span)
+    held = holdings(span, gate.directives)
     texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
     others = [texts.get(u.turn_id, "")[u.start:u.stop] for u in units(span) if u.origin not in _CONVERSATION]
+    # An order the whole summary gives is dropped wherever it stands: a list
+    # item judged alone would lose the label that addressed it to the reader.
+    # The clause is compared in the prose it was read in, inline code as
+    # words; a sentence of the repair never ends inside a sentence an order
+    # is read in. A sentence the summary did not end ("On every later turn,"
+    # or a verb alone) is dropped too: no word of the summary's is read with
+    # a stitched run.
+    refused = [what for _kind, what, _turn in unbacked_directives(held, probes, text, gate.directives)]
     kept = " ".join(
         s for s in sentences(text)
         if not _unheld(held, probes, s, gate) and not any(copies(s, other, ladder.copy_shared_words) for other in others)
+        and not any(clause in _order_prose(s) for clause in refused) and _ENDED.search(s.rstrip())
     )
     found = _typed_units(span)
     chosen = _choose(found, _within_reach(score(probes, kept).failures, found), ladder)
-    added = [f"[{found[i].turn_id}] {found[i].text}" for i in chosen]
-    stitched = tuple((found[i].turn_id, found[i].start, found[i].stop) for i in chosen)
+    runs = typed_ranges(span, gate.directives)
+    wanted = {run for run in runs for i in chosen
+              if run.turn_id == found[i].turn_id and run.start <= found[i].start and found[i].stop <= run.stop}
+    if gate.directives is not None:
+        wanted.update(order_ranges(span, gate.directives, _names_held(probes)))
+    wanted = [run for run in runs if run in wanted]
+    added = [f"[{run.turn_id}] {run.text}" for run in wanted]
+    stitched = tuple((run.turn_id, run.start, run.stop) for run in wanted)
     return " ".join(([kept] if kept else []) + added), stitched
+
+
+def _with_orders(span, probes, text, gate):
+    """``text`` with each run of the user's that orders (``order_ranges``) after it, word for word and marked with
+    its turn, and the places of those runs: the user's orders stand in a peel only so, and no summary restates
+    them."""
+    if gate.directives is None:
+        return text, ()
+    from .probes import _names_held, order_ranges
+
+    runs = order_ranges(span, gate.directives, _names_held(probes))
+    if not runs:
+        return text, ()
+    added = " ".join(f"[{run.turn_id}] {run.text}" for run in runs)
+    return f"{text} {added}".strip(), tuple((run.turn_id, run.start, run.stop) for run in runs)
 
 
 def _choose(found, targets, ladder):
@@ -1146,8 +1222,10 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     * no probe: a span the probes draw nothing from leaves bare. No model is
       asked and no peel placed: the gate cannot judge it, so nothing may
       speak for it, and it stays recallable in the Cellar.
-    * the summary: the librarian's, judged by both faces of the gate. An
-      accepted peel keeps what it failed with it, its residual. A call that
+    * the summary: the librarian's, each run the user typed that orders
+      stitched after it word for word (``order_ranges``), judged by both
+      faces of the gate. An accepted peel keeps what it failed with it, its
+      residual. A call that
       fails -- the model absent, stopped, past its deadline -- is counted as
       ``call_failed`` and the step goes on down the rungs that need no
       model: no call stops the queue.
@@ -1194,9 +1272,11 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     first = None if summarize is None else _asked(summarize, span, refused)
     if first is not None:
         text = first
-        decision = decide(span, probes, text, gate)
+        ordered, kept_orders = _with_orders(span, probes, text, gate)
+        decision = decide(span, probes, ordered, gate)
         if decision.accepted:
-            return commit(rung="accepted", kind="accepted", reason=decision.reason, made=(text, decision, ()))
+            return commit(rung="accepted", kind="accepted", reason=decision.reason,
+                          made=(ordered, decision, kept_orders))
         motives = refusal_motives(decision, gate)
         refused.extend(motives)
         failed = decision.result.failures
@@ -1207,9 +1287,11 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
             if refusals is None or refusals.get(key) != mark:
                 again = _asked(reask, span, refused, [(p.kind, p.answer, p.turn_id) for p in failed])
                 if again is not None:
-                    judged = decide(span, probes, again, gate)
+                    ordered, kept_orders = _with_orders(span, probes, again, gate)
+                    judged = decide(span, probes, ordered, gate)
                     if judged.accepted:
-                        return commit(rung="reasked", kind="accepted", made=(again, judged, ()), refused=refused,
+                        return commit(rung="reasked", kind="accepted", made=(ordered, judged, kept_orders),
+                                      refused=refused,
                                       reason="accepted on the second asking, handed the probes the first one failed")
                     refused.extend(refusal_motives(judged, gate))
                     if refusals is not None:
