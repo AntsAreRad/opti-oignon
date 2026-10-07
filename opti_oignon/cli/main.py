@@ -326,6 +326,15 @@ def chat(ctx: click.Context, model: str | None, conversation_id: str | None) -> 
         click.echo("", err=True)
         echo_error("interrupted", color=cfg.color)
         sys.exit(130)
+    finally:
+        # What the session counted is written however it ends: /quit, the end
+        # of its input, an interruption.
+        end = getattr(session, "end", None)
+        if callable(end):
+            try:
+                end()
+            except Exception:  # noqa: BLE001 - ending never fails the command
+                pass
 
 
 # =========================================================================

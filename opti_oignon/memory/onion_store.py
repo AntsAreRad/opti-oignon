@@ -46,7 +46,7 @@ TABLES = (
     "onion_core", "onion_cellar", "onion_receipts", "onion_peels", "onion_flesh", "onion_cursor",
     "onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals",
 )
-_PROPOSAL_STATUSES = ("open", "accepted", "declined", "deferred")
+_PROPOSAL_STATUSES = ("open", "accepted", "declined", "deferred", "superseded")
 # The rungs a peel can be made on; a mark naming another is refused on load.
 _PEEL_RUNGS = ("accepted", "reasked", "repaired")
 

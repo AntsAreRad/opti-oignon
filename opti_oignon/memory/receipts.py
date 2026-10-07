@@ -13,9 +13,9 @@ name rather than show the model a key that leads nowhere.
 
 The Cellar is the sole legal source of every later compression: an
 in-memory, content-addressed archive whose rows the onion store writes to
-its encrypted table and re-hashes on the way back. The ledger appends and
-resolves; it never forgets. The executor reaches this module through the
-librarian and nothing else does; a contract on the tree says so.
+its encrypted table and re-hashes on the way back. The ledger appends,
+resolves and supersedes; it never forgets. The executor reaches this module
+through the librarian and nothing else does; a contract on the tree says so.
 """
 
 import hashlib
@@ -25,8 +25,10 @@ from dataclasses import dataclass, field, replace
 checkpoint_before_apply = True
 
 # What stands for an evicted span in the window, by name: a peel the gate
-# accepted, anchors kept verbatim where no peel could pass, or nothing.
-RECEIPT_KINDS = ("accepted", "held", "bare")
+# accepted, anchors kept verbatim where no peel could pass, or nothing. A
+# superseded span is one the conversation no longer holds as it was: nothing
+# stands for it in the window, and the Cellar keeps it as it was.
+RECEIPT_KINDS = ("accepted", "held", "bare", "superseded")
 
 
 def _canonical(span):
@@ -162,7 +164,7 @@ def make_receipt(span, key, kind="bare", anchors=()):
 
 
 class ReceiptLedger:
-    """Append and resolve. A receipt is never removed."""
+    """Append, resolve and supersede. A receipt is never removed."""
 
     def __init__(self):
         self._receipts = []
@@ -175,7 +177,21 @@ class ReceiptLedger:
         return list(self._receipts)
 
     def open(self):
-        return [r for r in self._receipts if not r.resolved]
+        """The receipts the window shows: neither resolved by the user nor superseded by the conversation."""
+        return [r for r in self._receipts if not r.resolved and r.kind != "superseded"]
+
+    def supersede(self, key):
+        """Mark the receipt of ``key`` superseded: the conversation no longer holds its span as it was.
+
+        The receipt stays in the ledger and its span in the Cellar, as they
+        were; only what the window shows changes. An unknown key is refused
+        by name.
+        """
+        for i, receipt in enumerate(self._receipts):
+            if receipt.key == key:
+                self._receipts[i] = replace(receipt, kind="superseded")
+                return self._receipts[i]
+        raise DanglingReceiptError(f"receipt {key} is not in the ledger")
 
     def _check(self, cellar):
         for receipt in self._receipts:
@@ -257,13 +273,26 @@ class ReceiptLedger:
 
 
 class Flesh:
-    """The last turns, verbatim. A turn leaves only through an eviction."""
+    """The last turns, verbatim. A turn leaves only through an eviction, or taken back by the mirror."""
 
     def __init__(self, turns=()):
         self._turns = [dict(t) for t in turns]
 
     def append(self, turn):
         self._turns.append(dict(turn))
+
+    def take_back(self, count):
+        """Take back the newest ``count`` turns, which the conversation no longer holds as they were; them, in order.
+
+        Only the mirror calls this. No turn here is under a receipt, so
+        nothing the window was told of leaves without one.
+        """
+        count = int(count)
+        if count < 0 or count > len(self._turns):
+            raise ValueError(f"{count} turns cannot be taken back from a Flesh of {len(self._turns)}")
+        taken = self._turns[len(self._turns) - count:]
+        del self._turns[len(self._turns) - count:]
+        return taken
 
     def turns(self):
         return [dict(t) for t in self._turns]

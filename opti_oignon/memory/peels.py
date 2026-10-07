@@ -791,9 +791,10 @@ class Ladder:
     many candidate units a cover is the fewest; above, greedy. ``anchors``:
     the tokens of the peels layer the anchors of held spans may take.
     ``proposals_per_day``: the most typed decisions offered to the Core per
-    conversation and per day. ``copy_shared_words``: the fewest content
-    words a summary's sentence shares with a document, a tool or the web
-    for the repair to drop it as their copy.
+    conversation and per day, those superseded since included.
+    ``copy_shared_words``: the fewest content words a summary's sentence
+    shares with a document, a tool or the web for the repair to drop it as
+    their copy.
     """
 
     rho: float
@@ -889,11 +890,22 @@ def _saves_enough(tokens, span_tokens, rho):
     return span_tokens > 0 and tokens / span_tokens <= rho
 
 
-# Why a step refused a summary, by name: a class of probes under its
+# Why a step went on without a summary, by name: a class of probes under its
 # threshold, a claim its span does not hold, a bound overrun, too few of its
-# span's facts asked for, or a call that never answered. A span with no
+# span's facts asked for, a call that never answered, and a call the queue
+# did not make -- the resource governor did not admit it, the span did not
+# fit the window, the run had spent its time on the model. A span with no
 # probe is no refusal: it leaves bare, counted as such.
-REFUSAL_MOTIVES = ("decision", "episodic", "code", "unsupported", "novelty", "length", "coverage", "call_failed")
+REFUSAL_MOTIVES = ("decision", "episodic", "code", "unsupported", "novelty", "length", "coverage", "call_failed",
+                   "not_admitted", "over_window", "spent")
+
+
+class CallRefused(Exception):
+    """A call to the model the queue did not make, and why, by a motive of ``REFUSAL_MOTIVES``; never a word of a span."""
+
+    def __init__(self, motive, detail=""):
+        super().__init__(f"{motive}: {detail}" if detail else motive)
+        self.motive = motive
 
 
 def refusal_motives(decision, gate):
@@ -1026,9 +1038,17 @@ def _unmarked(text, span):
 
 
 def _asked(model, span, refused, *extra):
-    """What ``model`` wrote for ``span``, unmarked; None when the call failed, counted in ``refused``, never raised."""
+    """What ``model`` wrote for ``span``, unmarked; None when the call failed or was not made, counted in ``refused``, never raised."""
     try:
         return _unmarked(model([dict(t) for t in span], *extra), span)
+    except CallRefused as exc:
+        import logging
+
+        motive = exc.motive if exc.motive in REFUSAL_MOTIVES else "call_failed"
+        logging.getLogger(__name__).info("onion queue: a call was not made (%s); the step goes on without the model",
+                                         motive)
+        refused.append(motive)
+        return None
     except Exception as exc:  # noqa: BLE001 - a call that fails is a summary that never came
         import logging
 

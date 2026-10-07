@@ -14,13 +14,30 @@ Core, receipts digest, the Peels selected for the turn -- wrapped as
 untrusted data with its composer's frames, in front of the user's turn, in
 the user role. So both arms send the same system prompt and the same
 history window to the same model, and the onion arm adds its block to the
-turn. The librarian runs in this process with persistence off
-and curates after every turn, not on a thread, so the reading never
-depends on timing, and none of the user's memories enters either arm: no
-memory store is read or written. The requests go through the inference
+turn. The librarian runs in this process with persistence off and its
+counts kept in the process, so none of the user's memories enters either
+arm and none of the bench's counts joins the user's: no memory store is
+read or written. It curates in one of two modes. ``launcher``, the
+default, is the chat path's rhythm: the librarian's launcher fires a burst
+once the conversation grew by ``min_new_turns``, on a thread of its own,
+while the next turns are answered, and the arm ends only once its bursts
+have. ``fast`` is the bench as it was: curation after every turn, on the
+answering thread, so the reading never depends on timing, though it
+engages the onion more than the chat path does. Both ask for the second
+summary, and the registry's summariser runs as on the chat path: each
+burst, or each measured turn in the fast mode, is a run of its own, with
+its budget of time on the model. The requests go through the inference
 registry as the application's do, so the resource governor admits each of
 them and records its decision in its own store, as it does for any
-request.
+request; the answering requests hold no interactive ticket, so the
+background gate does not hold a burst behind them as it would behind a
+chat turn, and a turn's latency during a burst is the machine's to
+measure.
+
+The report names the mode, and carries what the onion did -- bursts,
+evictions by rung, refusals by motive, the block's tokens at each turn --
+with the version of the probe generator and the fingerprint of the
+decision lexicon, so that two readings are compared only under the same.
 
 A sentence the deterministic templates cannot parse is counted undecided,
 never as agreement: the host's model judge is the remedy, and the report
@@ -30,6 +47,7 @@ conversation.
 Run on the host, never in CI::
 
     python3 scripts/drift_ab.py                                # both arms, one JSON report
+    python3 scripts/drift_ab.py --mode fast                    # curation after every turn, as before
     python3 scripts/drift_ab.py --model llama3:8b              # another answering model
     python3 scripts/drift_ab.py --librarian-model qwen3:4b     # another librarian
     python3 scripts/drift_ab.py --history-tokens 2048
@@ -51,6 +69,7 @@ import importlib.util
 import json
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -65,6 +84,8 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # the conversation has to outgrow it for the onion to have anything to do.
 HISTORY_TOKENS = 1024
 MAX_CURATION_STEPS = 16
+# How the onion arm curates: at the chat path's rhythm, or after every turn.
+MODES = ("launcher", "fast")
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant in a long working conversation. Answer briefly, "
@@ -242,45 +263,99 @@ def plain_arm(ask, *, history_tokens=HISTORY_TOKENS, system=SYSTEM_PROMPT):
     return answer
 
 
-def onion_arm(ask, *, librarian, config, summarize, wrap, history_tokens=HISTORY_TOKENS, system=SYSTEM_PROMPT,
-              conversation_id="drift-ab", gate=None, budget=None):
+def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast", resolve=None,
+              history_tokens=HISTORY_TOKENS, system=SYSTEM_PROMPT, conversation_id="drift-ab", gate=None, budget=None):
     """The chat with the onion: the same window, plus the onion's block in front of the turn.
 
     The librarian runs in this process and never writes a store: a
     configuration with a persistence path is refused, so a measurement can
-    never touch the user's onion.
+    never touch the user's onion, and so is one with a counters path, so
+    the bench's counts never join the user's. ``mode`` is one of ``MODES``:
+    the launcher's rhythm, or curation after every turn (the default here,
+    the bench as it was; the host command's default is the launcher's).
+    ``summarize`` and ``reask`` None are the registry's, through
+    ``resolve``, each burst or measured turn a run of its own. The arm
+    keeps the block's tokens at each turn in ``block_tokens``, and its
+    ``settle`` waits for the bursts it launched.
     """
     if getattr(config, "persist_path", ""):
         raise ValueError("the drift A/B runs the librarian in process: a persistence path would write the user's store")
-    history = []
+    if getattr(config, "counters_path", ""):
+        raise ValueError("the drift A/B keeps its counts in the process: a counters path would add them to the user's")
+    if mode not in MODES:
+        raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
+    history, launched, tokens = [], [], []
+
+    def callers():
+        """The summariser and the second asking for one run: those handed in, or the registry's under a run of their own."""
+        if summarize is not None:
+            return summarize, reask, None
+        run = librarian._Run(config)
+        return (librarian.registry_summarizer(config, resolve=resolve, run=run),
+                librarian.registry_reasker(config, resolve=resolve, run=run), run)
+
+    def burst(cid):
+        model, again, run = callers()
+        librarian._curation_burst(cid, config=config, summarize=model, reask=again, gate=gate, budget=budget, run=run)
+
+    def runner(cid):
+        # The launcher's own way: a burst on a thread of its own, while the
+        # next turns are answered.
+        thread = threading.Thread(target=burst, args=(cid,), name="oo-drift-burst", daemon=True)
+        launched.append(thread)
+        thread.start()
+
+    def curate_now(state):
+        model, again, run = callers()
+        if run is not None:
+            run.hold()
+        try:
+            for _ in range(MAX_CURATION_STEPS):
+                outcome = librarian.curate(state, model, gate=gate, budget=budget, reask=again)
+                # As a burst does: a model that failed is not asked again this turn.
+                model, again = librarian.broken(outcome, model, again)
+                if not outcome.evicted:
+                    break
+        finally:
+            if run is not None:
+                run.release()
 
     def answer(text):
         block = librarian.memory_block(conversation_id, text, budget=budget, config=config)
+        tokens.append(librarian.estimate_tokens(block) if block else 0)
         turn = wrap(block) + "\n\n" + text if block else text
         messages = [{"role": "system", "content": system}, *history_window(history, history_tokens),
                     {"role": "user", "content": turn}]
         reply = str(ask(messages))
         history.extend([{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
-        state = librarian.state_for(conversation_id, config)
         # The librarian reads each turn with the origin the executor gives
         # it: the user's words typed, the answer the assistant's. The model's
         # window above keeps the plain turns, so the arms differ by the block.
-        state.mirror([dict(m, origin="typed" if m["role"] == "user" else "assistant") for m in history])
-        model = summarize
-        for _ in range(MAX_CURATION_STEPS):
-            outcome = librarian.curate(state, model, gate=gate, budget=budget)
-            # As a burst does: a model that failed is not asked again this turn.
-            model, _reask = librarian.broken(outcome, model, None)
-            if not outcome.evicted:
-                break
+        mirrored = [dict(m, origin="typed" if m["role"] == "user" else "assistant") for m in history]
+        if mode == "launcher":
+            librarian.maybe_curate(conversation_id, mirrored, config=config, runner=runner)
+        else:
+            state = librarian.state_for(conversation_id, config)
+            state.mirror(mirrored)
+            curate_now(state)
         return reply
 
+    def settle():
+        for thread in launched:
+            thread.join()
+
+    answer.block_tokens = tokens
+    answer.settle = settle
     return answer
 
 
 def run_arm(turns, answer):
-    """Every turn through one arm, in order; the answers."""
-    return [answer(turn.text) for turn in turns]
+    """Every turn through one arm, in order, and the bursts it launched ended; the answers."""
+    answers = [answer(turn.text) for turn in turns]
+    settle = getattr(answer, "settle", None)
+    if settle is not None:
+        settle()
+    return answers
 
 
 def compare(onion, plain):
@@ -358,6 +433,9 @@ def main(argv=None, *, resolve=None):
     parser.add_argument("--model", default=None, help="the answering model (default: the general route's)")
     parser.add_argument("--librarian-model", default=None, help="the librarian's model (default: onion.yaml's)")
     parser.add_argument("--history-tokens", type=int, default=HISTORY_TOKENS, help="the history window both arms share")
+    parser.add_argument("--mode", choices=MODES, default="launcher",
+                        help="launcher: bursts at the chat path's rhythm, off the answering thread (default); "
+                             "fast: curation after every turn, on the answering thread")
     args = parser.parse_args(argv)
     if resolve is None:
         sys.path.insert(0, str(_REPO))
@@ -370,7 +448,7 @@ def main(argv=None, *, resolve=None):
     from opti_oignon.agent import untrusted_context
     from opti_oignon.memory import librarian
 
-    config = replace(librarian.load_config(), enabled=True, persist_path="")
+    config = replace(librarian.load_config(), enabled=True, persist_path="", counters_path="")
     if args.librarian_model:
         config = replace(config, model=args.librarian_model)
     summarize = librarian.registry_summarizer(config, resolve=resolve)
@@ -401,24 +479,37 @@ def main(argv=None, *, resolve=None):
         # The onion's window keeps the frames its composer wrote, as on the chat path.
         return untrusted_context.wrap(block, source=untrusted_context.SOURCE_MEMORY, frames=True)
 
+    from opti_oignon.memory import peels, probes
+
     started = time.perf_counter()
+    onion_answer = onion_arm(ask, librarian=librarian, config=config, summarize=None, resolve=resolve, wrap=wrap,
+                             history_tokens=args.history_tokens, mode=args.mode)
     try:
         plain_answers = run_arm(TURNS, plain_arm(ask, history_tokens=args.history_tokens))
-        onion_answers = run_arm(TURNS, onion_arm(ask, librarian=librarian, config=config, summarize=summarize,
-                                                 wrap=wrap, history_tokens=args.history_tokens))
+        onion_answers = run_arm(TURNS, onion_answer)
     except Exception as exc:  # noqa: BLE001 - a half-run is not a measurement
         print(f"the run broke before its end ({exc!r}): nothing measured", file=sys.stderr)
         return 2
     plain = reading(TURNS, plain_answers, arm="plain", source="measured")
     onion = reading(TURNS, onion_answers, arm="onion", source="measured")
+    tokens = onion_answer.block_tokens
     report = {
         "source": "measured",
+        "mode": args.mode,
         "model": model,
         "librarian_model": config.model,
+        "generator": probes.GENERATOR_VERSION,
+        "lexicon": peels.load_gate().lexicon.fingerprint,
         "taken_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "history_tokens": args.history_tokens,
         "turns": len(TURNS),
         "seconds": round(time.perf_counter() - started, 1),
+        # What the onion did, so a rate reads with the engagement behind it.
+        "engagement": {
+            "counts": librarian.counters(),
+            "block_tokens": {"per_turn": tokens, "mean": round(sum(tokens) / len(tokens), 1) if tokens else 0,
+                             "max": max(tokens, default=0)},
+        },
         **compare(onion, plain),
     }
     print(json.dumps(report, indent=2))

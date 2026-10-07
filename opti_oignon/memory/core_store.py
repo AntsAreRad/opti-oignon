@@ -72,8 +72,11 @@ class Proposal:
     verb pins it, its exact words read from the Cellar, where ``span_key``,
     ``turn_id``, ``start`` and ``stop`` place them; ``id`` is
     ``proposal_id`` of that place. ``status`` is "open", "accepted",
-    "declined", or "deferred" while the day's cap had no room for it;
-    ``made_on`` the UTC day it counts against.
+    "declined", "deferred" while the day's cap had no room for it, or
+    "superseded" once the conversation no longer holds its span as it was;
+    ``made_on`` the UTC day it was offered -- for one still deferred, the
+    day it was made -- and empty for one superseded while deferred, or whose
+    offer passed to the same words made again after its supersession.
     """
 
     id: str

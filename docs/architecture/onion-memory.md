@@ -61,10 +61,60 @@ Off by default (`enabled: false`). Switched on, the executor offers each
 saved conversation to the librarian beside the auto-capture; the librarian
 mirrors it, and when it has grown by `min_new_turns` it evicts through the
 gate off the interactive path, using the configured model through the
-inference registry with `keep_alive: "0"`, so the model holds nothing while
-idle. On the next turn, the librarian's block -- Core, receipts digest and
-the peels selected for the question -- replaces today's working-memory
-block when it has one, and today's block stands when it does not.
+inference registry. On the next turn, the librarian's block -- Core,
+receipts digest and the peels selected for the question -- replaces today's
+working-memory block when it has one, and today's block stands when it does
+not.
+
+The mirror knows each turn by what it is -- its role, its words, its origin
+and its segments -- and never by a count. A retry, a synchronisation from
+another device or a deletion leaves the conversation with as many turns as
+before, or fewer, and other words in them: where the conversation first
+differs from what the librarian holds, the turns that follow are taken back
+from the Flesh, and a span already in the Cellar is superseded with every
+later one. A superseded span keeps its receipt in the ledger and its turns
+in the Cellar, unchanged and recallable, but its peel, its anchors and its
+receipt line leave the block, and a proposal made from it is closed. One
+the user was offered still counts in that day's cap, so edits never offer
+more in a day than the cap; made again in the same words from the turns
+mirrored again, it takes the place of the offer the user already had, and
+no more room. A decision the user accepted or declined is not offered
+again from the same turn, word for word, when that turn is mirrored or sent
+again: a copy deferred before the verdict is never offered, and one already
+offered stays an offer of its own, decided one at a time. The
+conversation is mirrored again from there, under turn ids never given
+before, so a step that read a span before it was taken back evicts nothing.
+A synchronisation makes every received turn legacy, so it supersedes the
+whole Cellar and the conversation is summarised again, a burst at a time.
+
+Each call to the model asks the resource governor for a ticket of its own,
+as `librarian`, a background caller, for the context `librarian.num_ctx`
+names; between two calls a burst holds none, and the governor's background
+gate keeps the next call waiting while a chat turn is in flight. A span
+whose prompt and answer do not fit the window it was admitted at, less
+`librarian.window_margin` for the token estimate, is not sent; neither is a
+call the governor does not admit, nor one past the run's budget of time on
+the model (`librarian.run_budget_s`; with the call in flight, a run spends
+its budget and one call at most): the step goes on down the rungs that need
+no model. An admission whose call can no longer start is handed back to the
+governor. The model stays resident for a burst or a close
+(`librarian.keep_alive`) and is let go at its end through the governor,
+which unloads it only when the background alone loaded it and no call is in
+flight on it. The librarian's shipped model is none of the models the
+shipped routes answer with.
+
+What the queue counts -- bursts, evictions by rung, refusals by motive, the
+block's events, proposals, the mirror, the residence, and the native core's
+share of the probes -- is kept across processes in a file of aggregates
+(`counters.path`), names and numbers only, written whole under a lock and
+never written over when it does not read as counts: at the end of each
+burst and close, after each decision on a proposal and each listing that
+opens deferred ones, when the terminal session ends by `/quit`, the end of
+its input or an interruption, and from the chat path at a turn once
+`counters.flush_every_s` has passed. What a process counted since its last
+write is lost if it stops before the next, a hang-up or a kill included.
+`GET /api/memory/onion/status` and the terminal's `/status` show it, each
+count once.
 
 The librarian asks its model for a summary in the language of the turns
 that attributes each decision to its source: a decision is the user's
@@ -79,7 +129,10 @@ Core entries and the open receipts, `POST .../pin` pins a statement as the
 user, `POST .../supersede` pins a successor and links the old entry to it,
 `POST .../recall/{key}` hands the verbatim span back and leaves the receipt
 open, and `POST .../resolve/{key}` closes it as the user. Reading is not
-closing: no tool a model can reach imports either verb. The route imports
+closing: no tool a model can reach imports either verb.
+`GET .../proposals` lists the decisions the user typed that the queue
+offers the Core, word for word, and `POST .../proposals/{id}/accept` and
+`.../decline` decide one at a time, as the user. The route imports
 the librarian inside its handlers and passes
 the user as actor; the store refuses any other actor, and a pin that would
 push the Core over its cap is refused before it lands, because the

@@ -247,6 +247,7 @@ _DEFAULT_CALLER_CLASSES = {
     "index": "background",
     "tuner": "background",
     "reverie": "background",
+    "librarian": "background",
 }
 
 _BYTES_PER_GIB = 1024.0 ** 3
@@ -5522,6 +5523,24 @@ class ResourceGovernor:
                     exc,
                 )
         return False
+
+    def release_guest(self, model: str, trigger: str = "guest_release") -> bool:
+        """Unload ``model`` when the background alone loaded it and no call
+        is in flight on it; True when it left.
+
+        A background caller that kept a model resident for a run of calls
+        lets it go at the run's end through here. A model a higher class
+        has held a ticket on since is that class's own and stays, and so
+        does one with a call in flight on it, whoever made it; the eviction
+        itself is evict_model's.
+        """
+        with self._queue_cond:
+            busy = {d.model for d in self._live_in_flight(self._clock())}
+            owner = self._owners.get(model)
+            guest = owner is not None and owner[0] == _BACKGROUND and model not in busy
+        if not guest:
+            return False
+        return self.evict_model(model, trigger=trigger)
 
     def _honour_conditional_eviction(
         self, decision: AdmissionDecision

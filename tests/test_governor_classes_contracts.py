@@ -34,6 +34,9 @@ These contracts pin what the class changes:
     keep the gate's CPU marks in order, the class tables staying read-only.
   * The warm-up is the first background caller: it asks as the background
     and sends nothing while held; its keepalive ping never waits.
+  * A background caller that kept a model resident for a run lets it go at
+    the run's end: the governor unloads a guest only the background loaded,
+    with no call in flight on it, and keeps one a higher class has used.
 
 Isolation follows the governor suites: each contract opens the shared window
 of ``tests/_isolation.py`` on the on-disk source, with a seeded ``db_utils``
@@ -2079,6 +2082,55 @@ def test_gc79_what_the_pressure_readings_leave_is_read_and_written_under_the_sha
     assert warmup.keep_alive == "10m"
     assert {name for name, _ in seen} == fields
     assert [entry for entry in seen if not entry[1]] == []
+
+
+# ---------------------------------------------------------------------------
+# GC80-GC81 -- a background guest released at the end of its run
+# ---------------------------------------------------------------------------
+
+
+def test_gc80_a_guest_only_the_background_loaded_is_released_at_the_end_of_its_run():
+    """GC80 -- a model the background alone loaded, with no call in flight
+    on it, goes through the governor's eviction when the run that kept it
+    resident lets it go; a model the governor never saw loaded is not
+    touched. Releasing without asking who loaded it -> RED."""
+    rg = _rg()
+    gov, clk = _governor(rg, _config(rg, capacity=24.0, weights={"lib": 3.0}))
+    evicted = []
+    gov.evict_model = lambda name, **kw: evicted.append(name) or True
+    assert gov.release_guest("never-loaded") is False and evicted == []
+    gov.note_loaded_by("lib", "background")
+    assert gov.release_guest("lib") is True
+    assert evicted == ["lib"]
+
+
+def test_gc81_a_model_a_higher_class_used_or_one_with_a_call_in_flight_is_not_released():
+    """GC81 -- once a chat ticket on the model has been held, it is the
+    chat's own and stays; a guest with the librarian's call in flight on it
+    stays while the call runs, and goes once it returned. Ignoring the
+    owner's class or the calls in flight -> RED."""
+    rg = _rg()
+    cfg = _config(rg, capacity=24.0, weights={"lib": 3.0, "shared": 3.0})
+    gov, clk = _governor(rg, cfg, warmup=_warmup())
+    rg._governor = gov
+    gov._snapshot = _snapshot(rg, clk, capacity=24.0)
+    evicted = []
+    gov.evict_model = lambda name, **kw: evicted.append(name) or True
+    gov.note_loaded_by("shared", "background")
+    chat = gov.admit("shared", None, caller="chat")
+    rg.set_active_ticket(chat)
+    rg.clear_active_ticket()
+    assert gov.release_guest("shared") is False, "the chat's own now"
+    ticket = gov.admit("lib", None, caller="librarian")
+    assert ticket.admitted and ticket.admission_class == "background", "control: the librarian asks as the background"
+    gov.note_loaded_by("lib", "background")
+    rg.set_active_ticket(ticket)
+    try:
+        assert gov.release_guest("lib") is False, "a call in flight on it"
+    finally:
+        rg.clear_active_ticket()
+    assert gov.release_guest("lib") is True
+    assert evicted == ["lib"]
 
 
 # ---------------------------------------------------------------------------

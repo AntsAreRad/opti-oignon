@@ -3,10 +3,15 @@
 
 Everything the contracts prove runs over injected summarisers and says so.
 This script asks the real one -- the librarian's model through the inference
-registry, released after every call -- over the two corpora the baseline
-was taken on, and prints what it finds with ``source: measured``, the model
-name and the time. It refuses to print a number it did not measure: with no
-backend it exits non-zero and prints nothing that looks like a result.
+registry, each call asking the resource governor as the librarian's calls
+do, and each call a run of its own, since a measurement's length is set by
+its corpora and no budget of a run may stop it part way -- over the two
+corpora the baseline was taken on, and prints what it finds with ``source:
+measured``, the model name and the time. A call the governor does not admit,
+or one whose span does not fit the window, is counted by its name in the
+report, and a corpus it stops is measured up to there. It refuses to print
+a number it did not measure: with no backend it exits non-zero and prints
+nothing that looks like a result.
 
 Run on the host, never in CI::
 
@@ -59,16 +64,32 @@ def _corpus_turns(corpus):
     ]
 
 
+def _each_call_a_run(config, resolve=None):
+    """A summariser whose every call is a run of its own -- its own ticket, its own budget -- or None without a backend."""
+    from opti_oignon.memory.librarian import registry_summarizer
+
+    if registry_summarizer(config, resolve=resolve) is None:
+        return None
+
+    def summarize(turns):
+        fresh = registry_summarizer(config, resolve=resolve)
+        if fresh is None:
+            raise RuntimeError(f"no backend resolves {config.model!r} any more")
+        return fresh(turns)
+
+    return summarize
+
+
 def _summariser():
     from opti_oignon.inference_backend import init_backends_from_config
-    from opti_oignon.memory.librarian import load_config, registry_summarizer
+    from opti_oignon.memory.librarian import load_config
 
     try:
         init_backends_from_config()
     except Exception as exc:  # noqa: BLE001 - reported below as absence
         print(f"backend configuration not applied: {exc!r}", file=sys.stderr)
     config = load_config()
-    summarize = registry_summarizer(config)
+    summarize = _each_call_a_run(config)
     if summarize is None:
         print(f"no backend resolves {config.model!r}: nothing measured", file=sys.stderr)
         return None, config
@@ -174,18 +195,22 @@ def _measure(summarize, config):
     from dataclasses import replace
 
     from opti_oignon.memory.baseline import CORPORA
-    from opti_oignon.memory.peels import PeelTree, evict_gated, load_gate
+    from opti_oignon.memory.peels import CallRefused, PeelTree, evict_gated, load_gate
     from opti_oignon.memory.receipts import Cellar, Flesh, ReceiptLedger
 
     gate = load_gate()
-    timings = []
+    timings, refused = [], {}
 
     def timed(turns):
         start = time.perf_counter()
         try:
-            return summarize(turns)
-        finally:
-            timings.append(time.perf_counter() - start)
+            text = summarize(turns)
+        except CallRefused as exc:
+            # Refused before the model was asked: counted by its name, never timed.
+            refused[exc.motive] = refused.get(exc.motive, 0) + 1
+            raise
+        timings.append(time.perf_counter() - start)
+        return text
 
     report = {
         "source": "measured",
@@ -200,15 +225,21 @@ def _measure(summarize, config):
         entry = {"turns": len(turns), "at_configured_gate": {}, "sweep": {}}
         cellar, ledger, tree = Cellar(), ReceiptLedger(), PeelTree()
         flesh = Flesh(turns)
-        accepted = refused = 0
+        accepted = rejected = 0
         while len(flesh.turns()) >= gate.span_turns:
-            outcome = evict_gated(flesh=flesh, cellar=cellar, ledger=ledger, tree=tree, gate=gate, summarize=timed)
+            try:
+                outcome = evict_gated(flesh=flesh, cellar=cellar, ledger=ledger, tree=tree, gate=gate,
+                                      summarize=timed)
+            except CallRefused as exc:
+                # No summary, no measurement: the corpus is measured up to here.
+                entry["stopped_by"] = exc.motive
+                break
             if outcome.evicted:
                 accepted += 1
             else:
-                refused += 1
+                rejected += 1
                 break
-        entry["at_configured_gate"] = _at_gate(accepted, refused, tree, cellar, gate)
+        entry["at_configured_gate"] = _at_gate(accepted, rejected, tree, cellar, gate)
         # The sweep re-summarises each span once and judges the same text at
         # every threshold, with both faces, so the table compares thresholds,
         # not samples. What the second face refuses does not move with the
@@ -221,7 +252,10 @@ def _measure(summarize, config):
         spans = [turns[i:i + gate.span_turns] for i in range(0, len(turns), gate.span_turns)]
         judged = []
         for span in spans:
-            text = timed(span)
+            try:
+                text = timed(span)
+            except CallRefused:
+                continue  # counted by its name; the span is not judged
             judged.append((span, generate_probes(span, gate.lexicon), text))
         entry["second_face"] = _second_face(judged, gate)
         for threshold in SWEEP:
@@ -230,6 +264,7 @@ def _measure(summarize, config):
             entry["sweep"][str(threshold)] = _sweep_row(len(judged), passed, gate)
         report["corpora"][name] = entry
     report["native"] = _native_entry()
+    report["refused_calls"] = dict(sorted(refused.items()))
     if timings:
         report["summariser_seconds"] = {
             "calls": len(timings), "mean": round(sum(timings) / len(timings), 3),

@@ -20,6 +20,15 @@ executor's guarded import.
   * OR3 -- the route module imports the onion only inside its handlers,
     the handlers never name an actor other than the user, and the route
     module itself is importable with the onion unreachable.
+  * OR6 -- the proposals route lists the decisions the user typed that the
+    queue offers the Core, word for word, with their id, turn, origin and
+    day, and nothing else.
+  * OR7 -- one proposal accepted pins its exact words to the Core as the
+    user and answers the entry; one declined leaves the Core as it was.
+  * OR8 -- an unknown or decided proposal is refused by name, the onion
+    switched off is 503 on each proposals route, and nothing changes.
+  * OR9 -- the status route is declared before the conversation's, so that
+    "status" is never read as a conversation id.
 
 Local-only (the public distribution ships no tests). The route module is
 loaded through the shared isolation window with the real schemas, the
@@ -272,6 +281,93 @@ def test_or5_the_code_route_reads_a_block_by_its_key_and_refuses_an_unknown_one_
         assert _status(routes, lambda: routes.onion_code("c1", "f" * 12)) == (404, "no code block behind code:" + "f" * 12)
         assert _status(routes, lambda: routes.onion_code("nobody", digest))[0] == 404
         assert _status(routes, lambda: routes.onion_code("c1", "XYZ"))[0] == 404
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OR6-OR9 -- the proposals, decided by the user; the status route's place
+# ---------------------------------------------------------------------------
+_DECIDED = "We keep Docker on the build server."
+_LOSSY = "Alice moved the build to Berlin on 2026-03-04. The Berlin build runs 12 jobs a day. Bob checks the logs every morning."
+
+
+def _held_decision(lib, loaded, cid):
+    """A typed decision the queue holds in the Cellar and offers the Core, in conversation ``cid``."""
+    from dataclasses import replace
+
+    peels, composer = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.composer"]
+    state = lib.state_for(cid)
+    state.mirror([
+        {"role": "user", "origin": "typed", "segments": [],
+         "content": "Alice moved the build to Berlin on 2026-03-04. " + _DECIDED},
+        {"role": "assistant", "origin": "assistant", "segments": [],
+         "content": "Noted: the Berlin build runs 12 jobs a day. Bob checks the logs every morning."},
+    ])
+    budget = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+    outcome = lib.curate(state, lambda turns: _LOSSY, gate=replace(peels.load_gate(), span_turns=2), budget=budget,
+                         ladder=replace(peels.load_ladder(), rho=0.1))
+    assert outcome.rung == "held", "control: held, and offered"
+    return state
+
+
+def test_or6_the_proposals_route_lists_the_decisions_word_for_word():
+    routes, lib, loaded, restore = _open()
+    try:
+        _held_decision(lib, loaded, "c1")
+        listed = routes.onion_proposals("c1")
+        assert set(listed) == {"conversation_id", "proposals"} and listed["conversation_id"] == "c1"
+        (offered,) = listed["proposals"]
+        assert set(offered) == {"id", "text", "turn_id", "origin", "made_on"}
+        assert (offered["text"], offered["turn_id"], offered["origin"]) == (_DECIDED, "t0001", "typed")
+        assert len(offered["id"]) == 64 and offered["made_on"] == lib._today()
+        assert routes.onion_proposals("nobody") == {"conversation_id": "nobody", "proposals": []}
+    finally:
+        restore()
+
+
+def test_or7_one_proposal_accepted_pins_its_words_and_one_declined_leaves_the_core():
+    routes, lib, loaded, restore = _open()
+    try:
+        _held_decision(lib, loaded, "c1")
+        _held_decision(lib, loaded, "c2")
+        first = routes.onion_proposals("c1")["proposals"][0]["id"]
+        accepted = routes.onion_accept_proposal("c1", first)
+        assert accepted["decision"] == "accepted" and accepted["id"] == first
+        assert [(e["id"], e["text"]) for e in routes.onion_state("c1")["core"]] == [(accepted["entry_id"], _DECIDED)]
+        second = routes.onion_proposals("c2")["proposals"][0]["id"]
+        declined = routes.onion_decline_proposal("c2", second)
+        assert declined == {"conversation_id": "c2", "id": second, "decision": "declined", "entry_id": None}
+        assert routes.onion_state("c2")["core"] == [] and routes.onion_proposals("c2")["proposals"] == []
+    finally:
+        restore()
+
+
+def test_or8_an_unknown_or_decided_proposal_is_refused_by_name_and_the_onion_off_is_503():
+    routes, lib, loaded, restore = _open()
+    try:
+        _held_decision(lib, loaded, "c1")
+        pid = routes.onion_proposals("c1")["proposals"][0]["id"]
+        code, detail = _status(routes, lambda: routes.onion_accept_proposal("c1", "f" * 64))
+        assert code == 404 and "no proposal" in detail
+        routes.onion_decline_proposal("c1", pid)
+        code, detail = _status(routes, lambda: routes.onion_accept_proposal("c1", pid))
+        assert code == 404 and "not open" in detail
+        assert routes.onion_state("c1")["core"] == [], "nothing pinned"
+        lib.onion_enabled = lambda path=None: False
+        for call in (lambda: routes.onion_proposals("c1"), lambda: routes.onion_accept_proposal("c1", pid),
+                     lambda: routes.onion_decline_proposal("c1", pid)):
+            assert _status(routes, call)[0] == 503
+    finally:
+        restore()
+
+
+def test_or9_the_status_route_is_declared_before_the_conversation_s():
+    routes, lib, loaded, restore = _open()
+    try:
+        paths = [getattr(route, "path", "") for route in routes.router.routes]
+        assert "/api/memory/onion/status" in paths and "/api/memory/onion/{conv_id}" in paths, "control"
+        assert paths.index("/api/memory/onion/status") < paths.index("/api/memory/onion/{conv_id}")
     finally:
         restore()
 

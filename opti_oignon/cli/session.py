@@ -14,6 +14,7 @@ A line that starts with a slash is a user action:
   /recall KEY       show the verbatim span behind a receipt; the receipt stays open
   /recall code:KEY  show the code block behind a [code:KEY] marker
   /resolve KEY      close a receipt, as the user: it leaves the digest
+  /status           show what the onion's queue counted, by event and motive
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
   /adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes
   /help             list the commands
@@ -55,6 +56,7 @@ HELP = (
     "/proposals        list the decisions you typed that the queue offers the Core, word for word\n"
     "/accept ID        pin one proposal's exact words to the Core, as the user\n"
     "/decline ID       set one proposal aside; the Core does not change\n"
+    "/status           show what the onion's queue counted, by event and motive; no word of a conversation\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
     "/help             list the commands\n"
@@ -171,6 +173,7 @@ class ChatSession:
             "proposals": self._proposals,
             "accept": self._accept,
             "decline": self._decline,
+            "status": self._status,
             "skill": self._skill,
             "adopt": self._adopt,
             "help": self._help,
@@ -301,6 +304,22 @@ class ChatSession:
         self._onion().decline_proposal(cid, pid, actor="user")
         yield _info(f"proposal {pid[:12]} declined: the Core does not change")
 
+    def _status(self, rest):
+        """What the onion's queue counted, by event and motive, and whether the onion is on; shown with it off too."""
+        librarian = self._librarian_seam()
+        totals = librarian.counter_totals()
+        switch = "on" if librarian.onion_enabled() else "off (onion.yaml: enabled)"
+        kept = f"kept across sessions since {totals['since']}" if totals["persisted"] else "kept in this process only"
+        if totals["refused"]:
+            kept += f" ({totals['refused']})"
+        lines = [f"the onion memory is {switch}; its counts, {kept}:"]
+        for event in sorted(totals["counts"]):
+            motives = totals["counts"][event]
+            lines.append(f"  {event}: " + ", ".join(f"{motive}={n}" for motive, n in sorted(motives.items())))
+        if len(lines) == 1:
+            lines.append("  nothing counted yet")
+        yield _info("\n".join(lines))
+
     def _skill(self, rest):
         ref, _, args = rest.partition(" ")
         args = args.strip()
@@ -373,7 +392,15 @@ class ChatSession:
 
     def _quit(self, rest):
         self.closed = True
+        self.end()
         yield Event(QUIT, "bye")
+
+    def end(self):
+        """Write what the onion counted in this session; the front end calls it at /quit, at the end of its input and on an interruption. Never raises."""
+        try:
+            self._librarian_seam().flush_counters()
+        except Exception:  # noqa: BLE001 - the counts stay unwritten, the session still ends
+            pass
 
 
 class _Refused(Exception):

@@ -976,3 +976,65 @@ def test_q39_required_field_census_matches_the_snapshot_with_the_chat_document()
         }
     finally:
         restore()
+
+
+def test_q40_window_holds_and_the_module_is_import_pure_at_337_models():
+    """q38 word for word, at the count the onion's proposals and status
+    brought the module to: four schemas, the proposals listed, one decided,
+    and the queue's counts (q38 is deselected by name; its literal was 333,
+    and its onion surface held nine schemas).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 337
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCodeResponse", "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse",
+            "OnionProposalDecisionResponse", "OnionProposalSchema", "OnionProposalsResponse",
+            "OnionRecallResponse", "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse",
+            "OnionStatusResponse", "OnionSupersedeRequest",
+        }, "the thirteen are the onion's user surface and nothing else"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q41_required_field_census_matches_the_snapshot_with_the_onion_s_proposals_and_status():
+    """q39 word for word, with the fields the four onion schemas refuse to go
+    without: a proposal's words and place, the conversation of a list, a
+    decision's proposal and verdict, the status's switch (q39 is deselected
+    by name; its snapshot stays REQUIRED with the code response and the chat
+    document, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            req = tuple(n for n, f in cls.model_fields.items() if f.is_required())
+            if req:
+                actual[name] = req
+        assert actual == {
+            **REQUIRED,
+            "OnionCodeResponse": ("conversation_id", "key"),
+            "ChatDocument": ("filename", "content"),
+            "OnionProposalSchema": ("id", "text", "turn_id", "origin", "made_on"),
+            "OnionProposalsResponse": ("conversation_id",),
+            "OnionProposalDecisionResponse": ("conversation_id", "id", "decision"),
+            "OnionStatusResponse": ("enabled",),
+        }
+    finally:
+        restore()

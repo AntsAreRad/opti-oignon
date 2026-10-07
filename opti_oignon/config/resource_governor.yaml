@@ -121,6 +121,7 @@ classes:
     index: background
     tuner: background
     reverie: background
+    librarian: background
   interactive:
     queued: false
   user:

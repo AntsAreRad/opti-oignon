@@ -36,6 +36,25 @@ number means what it says.
   * DA10 -- after a failed call the onion arm's curation goes on without
     the model, as a burst does: one failed call per turn, then none.
 
+The rhythm of the chat path: the librarian's launcher fires a burst once
+the conversation grew by ``min_new_turns``, on a thread of its own, while
+the next turns are answered.
+
+  * DA11 -- in the launcher's mode a burst fires only after the configured
+    growth, as the chat path's launcher fires it, and runs off the
+    answering thread.
+  * DA12 -- the fast mode is the one the bench had: it curates after every
+    turn, on the answering thread, before the next turn is asked.
+  * DA13 -- both modes ask for the second summary, as the chat path does.
+  * DA14 -- the report names its mode and carries the engagement counts --
+    bursts, evictions by rung, refusals by motive, the block's tokens per
+    turn -- with the generator's version and the lexicon's fingerprint.
+  * DA15 -- an arm ends only once the bursts it launched have ended.
+  * DA16 -- the onion arm refuses a counters path: the bench never adds
+    its counts to the user's.
+  * DA17 -- with the registry's summariser, each measured turn's curation
+    in the fast mode is a run of its own, whose budget is the turn's.
+
 Local-only (the public distribution ships no tests). The script is loaded
 from its path; the onion's modules come through the shared isolation
 window, and the model is a recording seam.
@@ -43,7 +62,10 @@ window, and the model is a recording seam.
 
 import collections
 import importlib.util
+import json
 import sys
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -390,6 +412,196 @@ def test_da10_after_a_failed_call_the_onion_arm_goes_on_without_the_model():
         steps = sum(lib.counters().get("eviction", {}).values())
         assert steps > 6, "control: turns ran more than one step"
         assert len(calls) == 6, "one failed call a turn, then the steps go on without the model"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# DA11-DA17 -- the chat path's rhythm, the second asking, the report
+# ---------------------------------------------------------------------------
+_LOSSY = "Something happened in this conversation."
+
+
+def _rhythm(lib, loaded, *, min_new_turns=1, flesh=1, span_turns=2):
+    peels, composer = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.composer"]
+    config = lib.LibrarianConfig(enabled=True, model="fake:1b", keep_alive="5m", min_new_turns=min_new_turns,
+                                 temperature=0.0, num_predict=64, persist_path="", require_encryption=False)
+    gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=span_turns)
+    budget = composer.Budget(window=4000, reserve=200, core=300, receipts=300, peels=800, flesh=flesh, turn=200)
+    return config, gate, budget
+
+
+def _bursts_on(lib):
+    """The threads the bursts ran on, by wrapping the librarian's burst."""
+    threads, real = [], lib._curation_burst
+
+    def burst(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return real(*args, **kwargs)
+
+    lib._curation_burst = burst
+    return threads
+
+
+def test_da11_in_the_launcher_s_mode_a_burst_fires_after_the_configured_growth_off_the_answering_thread():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded, min_new_turns=6, flesh=4000)
+        answering, bursts = set(), _bursts_on(lib)
+
+        def ask(messages):
+            answering.add(threading.get_ident())
+            return "Noted."
+
+        onion = ab.onion_arm(ask, librarian=lib, config=config, summarize=_faithful, wrap=lambda block: block,
+                             gate=gate, budget=budget, mode="launcher")
+        ab.run_arm(ab.TURNS[:9], onion)
+        assert len(bursts) == 3, "eighteen turns of growth, six at a time"
+        counted = lib.counters()["burst"]
+        assert counted.get("ran", 0) + counted.get("in_flight", 0) == 3, "each ran, or found the one before still in flight"
+        assert not {t.ident for t in bursts} & answering, "off the answering thread"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da12_the_fast_mode_curates_after_every_turn_on_the_answering_thread():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded)
+        answering, summarised = set(), set()
+
+        def ask(messages):
+            answering.add(threading.get_ident())
+            return "Noted."
+
+        def summarize(turns):
+            summarised.add(threading.get_ident())
+            return _faithful(turns)
+
+        onion = ab.onion_arm(ask, librarian=lib, config=config, summarize=summarize, wrap=lambda block: block,
+                             gate=gate, budget=budget, mode="fast")
+        for turn in ab.TURNS[:4]:
+            onion(turn.text)
+            state = lib.state_for("drift-ab", config)
+            assert state.flesh.tokens(lib.estimate_tokens) <= budget.flesh, "curated before the next turn"
+        assert summarised == answering, "on the answering thread"
+        assert "burst" not in lib.counters(), "no launcher in the fast mode"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+@pytest.mark.parametrize("mode", ["fast", "launcher"])
+def test_da13_both_modes_ask_for_the_second_summary(mode):
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded, min_new_turns=2)
+        asked = []
+
+        def reask(turns, missing):
+            asked.append(missing)
+            return _LOSSY
+
+        onion = ab.onion_arm(lambda messages: "Noted: Bob moved the build to Berlin on 2026-03-04.", librarian=lib,
+                             config=config, summarize=lambda turns: _LOSSY, reask=reask, wrap=lambda block: block,
+                             gate=gate, budget=budget, mode=mode)
+        ab.run_arm(ab.TURNS[:6], onion)
+        assert sum(lib.counters().get("eviction", {}).values()) >= 2, "control: spans left"
+        assert asked, "the second asking was made"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da14_the_report_names_its_mode_and_carries_the_engagement_and_the_generator(capsys):
+    loaded, restore = _window()
+    try:
+        ab = _script()
+        lib = loaded["opti_oignon.memory.librarian"]
+        probes = loaded["opti_oignon.memory.probes"]
+        backend = _Backend(None)
+        code = ab.main(["--model", "llama3", "--mode", "fast"], resolve=lambda model: backend)
+        out = capsys.readouterr()
+        assert code == 0, out.err
+        report = json.loads(out.out)
+        assert report["mode"] == "fast"
+        assert report["generator"] == probes.GENERATOR_VERSION
+        assert report["lexicon"] == loaded["opti_oignon.memory.peels"].load_gate().lexicon.fingerprint
+        engagement = report["engagement"]
+        assert engagement["counts"]["eviction"] and "refusal" in engagement["counts"]
+        tokens = engagement["block_tokens"]
+        assert len(tokens["per_turn"]) == report["turns"] and tokens["max"] >= tokens["mean"] > 0
+        lib.reset_librarian()
+    finally:
+        restore()
+
+
+def test_da15_an_arm_ends_only_once_the_bursts_it_launched_have_ended():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded, min_new_turns=2)
+        bursts = _bursts_on(lib)
+
+        def slow(turns):
+            time.sleep(0.05)
+            return _faithful(turns)
+
+        onion = ab.onion_arm(lambda messages: "Noted.", librarian=lib, config=config, summarize=slow,
+                             wrap=lambda block: block, gate=gate, budget=budget, mode="launcher")
+        ab.run_arm(ab.TURNS[:6], onion)
+        assert bursts, "control: bursts were launched"
+        assert not [t for t in bursts if t.is_alive()], "every burst ended before the arm did"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da16_the_onion_arm_refuses_a_counters_path(tmp_path):
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded)
+        with pytest.raises(ValueError, match="counters"):
+            ab.onion_arm(lambda messages: "Noted.", librarian=lib,
+                         config=replace(config, counters_path=str(tmp_path / "counts.json")), summarize=_faithful,
+                         wrap=lambda block: block)
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+def test_da17_with_the_registry_s_summariser_each_fast_turn_is_a_run_of_its_own():
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded)
+        runs, real = [], lib._Run
+
+        class Counted(real):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                runs.append(self)
+
+        lib._Run = Counted
+        backend = _Backend(None)
+        onion = ab.onion_arm(lambda messages: "Noted.", librarian=lib, config=config, summarize=None,
+                             resolve=lambda model: backend, wrap=lambda block: block, gate=gate, budget=budget,
+                             mode="fast")
+        ab.run_arm(ab.TURNS[:4], onion)
+        assert backend.calls >= 4, "control: the registry's summariser was asked"
+        assert len(runs) == 4, "one run per measured turn"
     finally:
         lib.reset_librarian()
         restore()

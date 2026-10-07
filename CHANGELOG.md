@@ -1202,8 +1202,83 @@ package costs.
   composition), refused memory blocks, proposals -- without a word of a
   conversation. The onion arm of `scripts/drift_ab.py` hands the librarian
   each turn with the origin the executor gives it and stops asking a model
-  that failed, as a burst does; unlike the launcher, it curates at every
-  turn and without the second asking.
+  that failed, as a burst does.
+- [SECURITY] The onion's mirror knows each turn by what it is -- its role,
+  its words, its origin and its segments -- and no longer by a count. A
+  retry that replaces an answer, a synchronisation that writes the
+  conversation again from another device (every turn legacy there), and
+  turns deleted from the end leave as many turns as before, or fewer, with
+  other words in them: the mirror now follows them. Where the conversation
+  first differs from what the onion holds, the turns that follow are taken
+  back from the window, and a span already in the archive is superseded
+  with every later one: its receipt stays in the ledger and its span in the
+  archive, byte for byte, recallable by the user, but its summary, its
+  anchors and its receipt line leave the memory block, and a proposal
+  made from it is superseded too and can no longer be accepted. One the
+  user was offered still counts in that day's cap, so edits never offer
+  more in a day than the cap; made again in the same words from the turns
+  mirrored again, it takes the place of the offer the user already had,
+  and no more room. A decision the user accepted or declined is not
+  offered again from the same turn, word for word, when that turn is
+  mirrored or sent again: a copy deferred before the verdict is never
+  offered, and one already offered stays an offer of its own, decided one
+  at a time. The conversation is then mirrored again from there under turn
+  ids never given before, across a save and a load as well, so a step whose
+  span was taken back while its summary was written evicts nothing; a Flesh
+  row the mirror cannot read as a turn is taken back the same way. A
+  synchronisation makes every received turn legacy, so it supersedes the
+  whole archive and the conversation is summarised again, a burst at a
+  time. A refusal mark is kept only while its span is the next one asked:
+  a conversation holds one at most.
+- [SECURITY] The librarian's calls are governed. Each call asks the resource
+  governor for a ticket of its own, as `librarian`, a background caller, for
+  the context `librarian.num_ctx` names, and holds it while the backend
+  answers; between two calls it holds none, and the governor's background
+  gate keeps the next one waiting while a chat turn is in flight. A span
+  whose prompt and answer do not fit the window -- the context asked, then
+  the context admitted, less `librarian.window_margin` for the token
+  estimate -- is not sent, and the step goes on without the model; so does
+  one the governor does not admit, and the burst or close then asks no
+  more. Once the calls of a burst or a close have taken
+  `librarian.run_budget_s` seconds (300 as shipped), no other call starts:
+  a run spends its budget and one call at most, so a model that answers
+  just under its deadline no longer costs a close two deadlines per span.
+  A call that cannot start, an earlier one to its model still hanging,
+  asks the governor for nothing, and one admitted that can no longer start
+  hands its admission back. The model stays resident for a burst or a
+  close (`librarian.keep_alive`, now `5m`) and is let go at its end
+  through the governor, which unloads it only when the background alone
+  loaded it and no call is in flight on it. The shipped librarian model is
+  none of the models the shipped routes answer with, and `onion.yaml` says
+  so.
+- What the onion's queue counts is kept across processes in a file of
+  aggregates (`counters.path` in `onion.yaml`, under the data directory):
+  names and numbers, never a word of a conversation nor its id, with the
+  native core's share of the probes; written whole or not at all, merged
+  under a lock with what other processes wrote, one write at a time within
+  a process, and never written over when it does not read as counts. They
+  are written at the end of each burst and close, after each decision on a
+  proposal and each listing that opens deferred ones, when the terminal
+  session ends -- `/quit`, the end of its input or an interruption -- and
+  from the chat path at a turn once
+  `counters.flush_every_s` has passed (60 as shipped); what a process
+  counted since its last write is lost if it stops before the next. The
+  host runbook asks each of its calls as a run of its own and reports a
+  call the governor does not admit, or one that does not fit, by its name,
+  never timed as a call of the model.
+  `GET /api/memory/onion/status` and the terminal's `/status` show the
+  counts and whether the onion is on. The
+  proposals have their routes: `GET /api/memory/onion/{conversation_id}/proposals`
+  lists them word for word, and `POST .../proposals/{id}/accept` and
+  `.../decline` decide one, as the user.
+- `scripts/drift_ab.py` curates at the chat path's rhythm by default: the
+  librarian's launcher fires a burst once the conversation grew by
+  `min_new_turns`, on a thread of its own, while the next turns are
+  answered, and the arm ends once its bursts have. `--mode fast` keeps the
+  curation after every turn. Both ask for the second summary, and the
+  report names its mode and carries the engagement -- bursts, evictions by
+  rung, refusals by motive, the block's tokens at each turn -- with the
+  probe generator's version and the decision lexicon's fingerprint.
 - [SECURITY] Every conversation turn is saved with the origin of its words:
   typed by the user, the user's question as the model rewrote it (refined), a
   document the user attached, the assistant's answer -- flagged when tools or

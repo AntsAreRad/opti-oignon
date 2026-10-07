@@ -20,9 +20,12 @@ from .schemas import (
     OnionCodeResponse,
     OnionPinRequest,
     OnionPinResponse,
+    OnionProposalDecisionResponse,
+    OnionProposalsResponse,
     OnionRecallResponse,
     OnionResolveResponse,
     OnionStateResponse,
+    OnionStatusResponse,
     OnionSupersedeRequest,
 )
 
@@ -203,6 +206,26 @@ def _entry_schema(entry):
     return {"id": entry.id, "text": entry.text, "status": entry.status, "superseded_by": entry.superseded_by}
 
 
+# Declared before the conversation's routes, so that "status" is never read
+# as a conversation id.
+@router.get("/onion/status", response_model=OnionStatusResponse)
+def onion_status() -> dict:
+    """What the onion's queue counted, by event and motive, kept across sessions, and whether the onion is on.
+
+    Answered with the onion off as well; no word of a conversation, no id.
+    """
+    try:
+        from ..memory import librarian
+    except Exception as exc:  # noqa: BLE001 - absence is an answer
+        raise HTTPException(status_code=503, detail=f"Onion memory not available: {exc}")
+    try:
+        totals = librarian.counter_totals()
+        return OnionStatusResponse(enabled=librarian.onion_enabled(), counts=totals["counts"], since=totals["since"],
+                                   persisted=totals["persisted"], refused=totals["refused"]).model_dump()
+    except Exception as exc:  # noqa: BLE001 - a refusing store is an answer, by name
+        raise _refused(exc)
+
+
 @router.get("/onion/{conv_id}", response_model=OnionStateResponse)
 def onion_state(conv_id: str) -> dict:
     """The conversation's Core entries and open receipts."""
@@ -268,6 +291,40 @@ def onion_resolve(conv_id: str, key: str) -> dict:
     except Exception as exc:  # noqa: BLE001 - every refusal travels by name
         raise _refused(exc)
     return OnionResolveResponse(conversation_id=conv_id, key=key, resolved=bool(resolved)).model_dump()
+
+
+@router.get("/onion/{conv_id}/proposals", response_model=OnionProposalsResponse)
+def onion_proposals(conv_id: str) -> dict:
+    """The decisions the user typed that the queue offers the Core, word for word, oldest first."""
+    librarian = _onion()
+    try:
+        offered = librarian.proposals(conv_id)
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionProposalsResponse(conversation_id=conv_id, proposals=offered).model_dump()
+
+
+@router.post("/onion/{conv_id}/proposals/{proposal_id}/accept", response_model=OnionProposalDecisionResponse)
+def onion_accept_proposal(conv_id: str, proposal_id: str) -> dict:
+    """Pin one proposal's exact words to the Core, as the user; one proposal per call."""
+    librarian = _onion()
+    try:
+        entry_id = librarian.accept_proposal(conv_id, proposal_id, actor="user")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionProposalDecisionResponse(conversation_id=conv_id, id=proposal_id, decision="accepted",
+                                         entry_id=entry_id).model_dump()
+
+
+@router.post("/onion/{conv_id}/proposals/{proposal_id}/decline", response_model=OnionProposalDecisionResponse)
+def onion_decline_proposal(conv_id: str, proposal_id: str) -> dict:
+    """Set one proposal aside, as the user: the Core does not change."""
+    librarian = _onion()
+    try:
+        librarian.decline_proposal(conv_id, proposal_id, actor="user")
+    except Exception as exc:  # noqa: BLE001 - every refusal travels by name
+        raise _refused(exc)
+    return OnionProposalDecisionResponse(conversation_id=conv_id, id=proposal_id, decision="declined").model_dump()
 
 
 @router.post("/migrate")

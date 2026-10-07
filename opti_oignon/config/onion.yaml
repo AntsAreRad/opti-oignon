@@ -140,7 +140,7 @@ queue:
   rho: 0.5                  # a repaired peel longer than rho times its span saves too little: the span is held
   exact_cover: 16           # verbatim units at or under which a cover is the fewest; above, greedy (at most 20)
   anchors: 768              # tokens of the peels layer the anchors of held spans may take
-  proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day; the rest wait for a later day
+  proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day, superseded ones included; the rest wait for a later day
   copy_shared_words: 2      # content words a summary's sentence shares with a document, tool or web page to be dropped as a copy
 
 # The switch. Off, the chat path keeps the working-memory block it has today
@@ -149,12 +149,23 @@ queue:
 # block replaces today's when it has one. The maintainer turns it on.
 enabled: false
 
+# The librarian. Its model is its own, never one that answers the chat: a
+# summary is written by a model the user did not talk to, and a contract
+# holds this default apart from every model the shipped routes answer with;
+# any model can be named here. Each call asks the resource governor for a
+# ticket of its own, as a background caller, and is not sent when its span,
+# its prompt and the answer's room do not fit the window it was admitted at,
+# less the margin below. A run -- a burst, a close -- keeps the model
+# resident between its calls and lets it go when it ends.
 librarian:
   model: "qwen3:4b"        # placeholder until the host measurement picks one
-  keep_alive: "0"          # unloadable by default: released after every burst
+  keep_alive: "5m"         # residence between the calls of a run; the run lets the model go when it ends
   min_new_turns: 8         # turns of growth before a curation fires
   max_steps_per_burst: 16  # the most spans one burst evicts, so that no burst runs away with the machine
   call_timeout_s: 120      # seconds one call may take, held by the librarian; past it the run goes on without the model
+  run_budget_s: 300        # seconds of model calls after which a run starts no other: its budget and one call at most
+  num_ctx: 8192            # the context each call asks the governor for, in tokens
+  window_margin: 0.25      # the share of the window kept back for the token estimate's error (words x 1.3)
   temperature: 0.0        # with the seed below, the same turns ask for the same summary
   seed: 1                 # the sampling seed every librarian call carries
   num_predict: 256
@@ -169,3 +180,19 @@ librarian:
 persistence:
   path: ""
   require_encryption: true
+
+# What the queue counted -- bursts, evictions by rung, refusals by motive,
+# the memory block, proposals, the mirror, the residence -- and the native
+# core's share, kept across processes in a file of aggregates: names and
+# numbers, never a word of a conversation nor its id. The status route and
+# the terminal's /status show them. They are written at the end of each
+# burst and close, after each decision on a proposal and each listing that
+# opens deferred ones, when the terminal session ends by /quit, the end of
+# its input or an interruption (a hang-up or a kill writes nothing), and
+# from the chat path at a turn once flush_every_s has passed since the last
+# write; what a process counted since its last write is lost if it stops
+# before the next. A relative path lies under the data directory; an empty
+# one keeps the counts in the process alone.
+counters:
+  path: "onion_counters.json"
+  flush_every_s: 60

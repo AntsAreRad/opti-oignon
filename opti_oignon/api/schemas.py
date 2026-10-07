@@ -331,6 +331,38 @@ class OnionResolveResponse(BaseModel):
     resolved: bool
 
 
+class OnionProposalSchema(BaseModel):
+    """A decision the user typed that the queue offers the Core: its exact words, turn, origin and day."""
+    id: str
+    text: str
+    turn_id: str
+    origin: str
+    made_on: str
+
+
+class OnionProposalsResponse(BaseModel):
+    """The open proposals of a conversation, oldest first."""
+    conversation_id: str
+    proposals: list[OnionProposalSchema] = []
+
+
+class OnionProposalDecisionResponse(BaseModel):
+    """One proposal the user decided: accepted, with the Core entry its words became, or declined."""
+    conversation_id: str
+    id: str
+    decision: str
+    entry_id: str | None = None
+
+
+class OnionStatusResponse(BaseModel):
+    """What the onion's queue counted, by event and motive, and whether the onion is on; no word of a conversation."""
+    enabled: bool
+    counts: dict[str, dict[str, int]] = {}
+    since: str | None = None
+    persisted: bool = False
+    refused: str | None = None
+
+
 # -- Memory store (two-tier MemoryStore) --
 
 class MemoryRecordSchema(BaseModel):
