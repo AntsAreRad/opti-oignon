@@ -19,6 +19,13 @@ Design:
 * FIRE-AND-FORGET. The extraction runs in a daemon thread and
   ``extract_and_store`` never raises, so the conversation path is never blocked
   or broken. A failure is swallowed.
+* TYPED ONLY. The facts it writes come back in every later memory block, so
+  the default runner hands the extraction the user's own typed words alone
+  (:func:`typed_turns`): never an attached document, the assistant's reply, a
+  question the model reworded, or a turn of no known origin. The executor
+  offers it the conversation as the mirror reads it, each turn with its
+  origin; a read without origins gives nothing, and with nothing typed the
+  extraction is not called.
 
 The dispatch is injectable (``runner``) so the gate/throttle logic is unit
 tested without spawning a thread or loading the model.
@@ -54,24 +61,72 @@ def _auto_capture_enabled() -> bool:
     return raw not in ("0", "false", "off", "no", "")
 
 
+def typed_turns(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """The user's own typed words in ``messages``, as user turns for the extraction.
+
+    A user turn gives its typed segments, or its whole content when it is
+    typed and carries no segment. A document's segment, the words the
+    executor writes between parts, a turn the model reworded (refined), a
+    turn of no known origin (legacy), an assistant reply and any turn whose
+    origin or segments cannot be read give nothing -- segments the store could
+    not decode arrive as None, and such a turn is held legacy, as the mirror
+    holds it.
+    """
+    turns = []
+    for message in messages or ():
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content, origin = message.get("content"), message.get("origin")
+        if not isinstance(content, str) or not isinstance(origin, str):
+            continue
+        segments = message.get("segments")
+        if not isinstance(segments, (list, tuple)):
+            continue
+        if not segments:
+            parts = [content] if origin == "typed" else []
+        else:
+            # Segments as the grammar writes them: [start, end, base], sorted
+            # and disjoint, inside the content; one out of it and the turn
+            # gives nothing.
+            parts, end = [], 0
+            for segment in segments:
+                if not isinstance(segment, (list, tuple)) or len(segment) != 3:
+                    parts = []
+                    break
+                start, stop, label = segment
+                if type(start) is not int or type(stop) is not int or not end <= start < stop <= len(content):
+                    parts = []
+                    break
+                end = stop
+                if label == "typed":
+                    parts.append(content[start:stop])
+        text = "\n".join(part.strip() for part in parts if part.strip())
+        if text:
+            turns.append({"role": "user", "content": text})
+    return turns
+
+
 def _default_runner(
     messages: list[dict[str, Any]],
     *,
     user_id: str | None = None,
     model: str | None = None,
 ) -> None:
-    """Run the extraction in a daemon thread; swallow any failure.
+    """Run the extraction over the typed words in a daemon thread; swallow any failure.
 
     The extractor is imported lazily so importing this module stays light and
-    free of the model/store import chain.
+    free of the model/store import chain. With no typed word, nothing runs.
     """
+    typed = typed_turns(messages)
+    if not typed:
+        return
 
     def _job() -> None:
         try:
             from .extraction import extract_and_store
 
             extract_and_store(
-                messages, source="auto-capture", user_id=user_id, model=model
+                typed, source="auto-capture", user_id=user_id, model=model
             )
         except Exception:  # noqa: BLE001
             logger.debug("auto-capture extraction failed", exc_info=True)

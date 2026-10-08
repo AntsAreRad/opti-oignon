@@ -3264,11 +3264,14 @@ class Executor:
 
             # M2: auto-capture durable facts from the conversation (gated,
             # throttled, fire-and-forget; never blocks or breaks the turn).
+            # It is offered the mirror's read, each turn with its origin, and
+            # keeps only what the user typed: a document or the assistant's
+            # reply never becomes a remembered fact.
             if _maybe_capture is not None:
                 try:
                     _maybe_capture(
                         conversation_id,
-                        conversation_manager.get_context_messages(conversation_id),
+                        conversation_manager.get_mirror_messages(conversation_id),
                     )
                 except Exception as _cap_err:
                     logger.debug(f"Auto-capture skipped: {_cap_err}")

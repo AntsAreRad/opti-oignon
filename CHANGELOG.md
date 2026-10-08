@@ -2187,6 +2187,18 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The automatic memory capture keeps only what the user typed.
+  After a turn it handed the extraction the whole conversation as the model
+  reads it: the text of an attached document, folded into the user's turn,
+  and the assistant's replies, web results included. A model then took
+  "durable facts" from all of it into the memory every later turn reads
+  back, so a document that told the assistant the user prefers something
+  became a remembered preference within a few turns, with no tool call and
+  no approval. The capture is now offered the conversation with who wrote
+  each turn, and the extraction is handed the user's typed words alone: no
+  document, no assistant reply, no question the model reworded, no turn of
+  unknown origin; with nothing typed it is not called. The manual extraction
+  route, which the user starts, is unchanged.
 - [SECURITY] An agent run can no longer leave Bulbe through its request. The
   run entry took its mode from the request body, Daily when the body named
   none, and passed it on as given, so on a machine in Bulbe a request with no

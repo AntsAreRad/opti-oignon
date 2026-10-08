@@ -1159,10 +1159,11 @@ class ConversationManager:
         """The turns of :meth:`get_context_messages`, with who wrote them.
 
         Same turns, same order, each as role, content, origin and segments.
-        This read feeds the onion's mirror and nothing else: the model's
-        context is built by the read above, which leaves the origin out on
-        purpose. Segments that no longer decode are handed on as None, and
-        the mirror then holds the turn legacy.
+        This read feeds the onion's mirror and the automatic capture, which
+        keep only what the user typed, and nothing else: the model's context
+        is built by the read above, which leaves the origin out on purpose.
+        Segments that no longer decode are handed on as None, and the mirror
+        and the capture then hold the turn legacy.
 
         Args:
             conv_id: Conversation UUID
