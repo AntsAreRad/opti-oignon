@@ -43,7 +43,10 @@ fail-secure: an unanswered request is denied. The approval surface is the same
 
 The running agent is controlled over `/api/agent/*`:
 
-- `POST /api/agent/run` starts a run.
+- `POST /api/agent/run` starts a run, in the machine's security mode. A request
+  may name the stricter Bulbe, never a looser mode than the machine's: leaving
+  Bulbe for Daily takes the degradation ceremony, not a request field. A mode
+  that does not exist, or a machine mode that cannot be read, runs in Bulbe.
 - `GET /api/agent/status` returns `{running, rounds, stop_reason}`.
 - `POST /api/agent/cancel` requests cooperative cancellation.
 - `WS /api/agent/stream` emits the live `AgentEvent` stream (`round_start`,

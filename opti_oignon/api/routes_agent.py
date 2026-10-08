@@ -563,6 +563,21 @@ def _resolve_memory_provider() -> Callable[..., str] | None:
         return None
 
 
+def _run_mode(requested: str | None) -> str:
+    """The mode a run gets: the machine's security mode when the request
+    names none, and never a looser one. Leaving Bulbe for Daily takes the
+    degradation ceremony of ``security_mode``, never a field of a request.
+    An unknown mode, or a machine mode that cannot be read, is Bulbe."""
+    try:
+        from opti_oignon.agent import allowlists
+    except Exception:
+        return "bulbe"
+    current = allowlists.current_mode()
+    if requested is None or current == allowlists.MODE_BULBE:
+        return current
+    return requested if requested in allowlists.VALID_MODES else allowlists.MODE_BULBE
+
+
 def _resolve_approval_fn() -> Callable[[str, str, dict], bool] | None:
     """Reuse the existing tool-call approval gate as the loop's approval_fn."""
     try:
@@ -655,7 +670,7 @@ try:
 
     class AgentRunRequest(BaseModel):
         task: str
-        mode: str = "daily"
+        mode: str | None = None
         model: str = ""
         conversation_id: str = ""
         verify: bool = False
@@ -692,7 +707,7 @@ try:
         result = get_run_manager().start(
             request.task,
             model_client=model_client,
-            mode=request.mode,
+            mode=_run_mode(request.mode),
             conversation_id=request.conversation_id,
             approval_fn=_resolve_approval_fn(),
             memory_provider=_resolve_memory_provider(),

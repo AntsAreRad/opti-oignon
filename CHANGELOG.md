@@ -2187,6 +2187,16 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] An agent run can no longer leave Bulbe through its request. The
+  run entry took its mode from the request body, Daily when the body named
+  none, and passed it on as given, so on a machine in Bulbe a request with no
+  mode, or one naming Daily, started the agent with the Daily tool set: the
+  network and autonomous writes to memory and skills, without the per-call
+  approval, and without the degradation ceremony that leaving Bulbe takes.
+  A machine mode that could not be read gave Daily too. A run now starts in
+  the machine's security mode when the request names none, never in a looser
+  one, and in Bulbe when the mode is unknown or the machine's cannot be read.
+  The internal callers that name a mode themselves are unchanged.
 - Five merge guards no longer pass over what they cannot read. A file that
   is not UTF-8 text was read with its bad bytes dropped or skipped, a module
   that does not parse counted no network sink or inference call, and a
