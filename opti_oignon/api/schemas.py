@@ -266,6 +266,8 @@ class MemoryExtractResponse(BaseModel):
     """Result d'extraction de faits."""
     conversation_id: str
     facts_added: int = 0
+    # Facts drawn from what the user did not type: proposed for review, not written.
+    facts_proposed: int = 0
 
 
 # -- Onion memory: the user's surface on the Core and the receipts --

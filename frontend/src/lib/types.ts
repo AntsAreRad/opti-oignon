@@ -630,6 +630,8 @@ export interface MemoryAddRequest {
 export interface MemoryExtractResponse {
 	conversation_id: string;
 	facts_added: number;
+	/** Facts drawn from what the user did not type: waiting for review, not written. */
+	facts_proposed?: number;
 }
 
 // -- Search --

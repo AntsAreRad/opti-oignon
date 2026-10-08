@@ -18,6 +18,12 @@ path:
   ``dispatch``'s injected non-sandbox path. Each handler returns an
   observation string and never raises. ``task`` carries a schema but
   no handler: the loop runs the bounded child itself (AGT_SPEC 5.4).
+- The writes of ``manage_memory`` and ``manage_notes`` persist into stores
+  every later turn reads back, so each passes the pending-write gate
+  (``opti_oignon.pending_writes``): words the user typed whole in the turn
+  write directly, anything else is proposed to the user. A handler with no
+  gate bound endorses nothing; a run binds a gate of its own
+  (``bind_write_gate``).
 
 Every tool carries a schema usable both for native function-calling
 (``to_native``) and for the system-prompt description (``to_prompt``). A
@@ -39,6 +45,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -638,46 +645,74 @@ def _memory_get(store: Any, arguments: dict[str, Any]) -> str:
     return _format_record(record)
 
 
-def _memory_add(store: Any, arguments: dict[str, Any]) -> str:
+class _GateSlot:
+    """The gate a handler's writes pass: the run's when one is bound, else the handler's own.
+
+    The handler's own gate endorses nothing and is built once, on its first
+    write, so its bound on proposals holds over the handler's whole life.
+    """
+
+    def __init__(self, gate: Any = None) -> None:
+        self._gate = gate
+        self._lock = threading.Lock()
+
+    def get(self) -> Any:
+        with self._lock:
+            if self._gate is None:
+                from opti_oignon import pending_writes
+
+                self._gate = pending_writes.WriteGate()
+            return self._gate
+
+
+def _gated_write(store_name: str, action: str, arguments: dict[str, Any], target: Any, slot: Any) -> str:
+    """Hand one persistent write to the gate of ``slot``.
+
+    A gate that cannot be loaded writes nothing: the write is refused, never
+    let through ungated.
+    """
+    try:
+        gate = (slot if slot is not None else _GateSlot()).get()
+    except Exception:
+        logger.warning("pending-write gate unavailable; %s '%s' refused", store_name, action, exc_info=True)
+        return "Not saved: the review gate is unavailable, so nothing was written or proposed."
+    return gate.write(store_name, action, arguments, target=target)
+
+
+def _memory_add(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     text = _as_str(arguments.get("text")).strip()
     if not text:
         return "manage_memory 'add' requires non-empty 'text'."
     category = _as_str(arguments.get("category")).strip() or "fact"
-    record, decision = store.add(text, category, source="agent")
-    action = getattr(decision, "action", "")
-    if action == "merge":
-        return f"Memory merged into existing fact {_format_record(record)}."
-    return f"Memory added {_format_record(record)}."
+    return _gated_write("memory", "add", {"text": text, "category": category}, store, slot)
 
 
-def _memory_update(store: Any, arguments: dict[str, Any]) -> str:
+def _memory_update(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     fact_id = _as_str(arguments.get("fact_id")).strip()
     if not fact_id:
         return "manage_memory 'update' requires a 'fact_id'."
     text = arguments.get("text")
     category = arguments.get("category")
-    record = store.update(
-        fact_id,
-        text=_as_str(text) if text is not None else None,
-        category=_as_str(category) if category is not None else None,
-    )
-    if record is None:
-        return f"No memory with id '{fact_id}' to update."
-    return f"Memory updated {_format_record(record)}."
+    return _gated_write("memory", "update", {
+        "fact_id": fact_id,
+        "text": _as_str(text) if text is not None else None,
+        "category": _as_str(category) if category is not None else None,
+    }, store, slot)
 
 
-def _memory_delete(store: Any, arguments: dict[str, Any]) -> str:
+def _memory_delete(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     fact_id = _as_str(arguments.get("fact_id")).strip()
     if not fact_id:
         return "manage_memory 'delete' requires a 'fact_id'."
-    # Soft delete only: the row is retained for restore via the panel.
-    ok = store.soft_delete(fact_id)
-    return f"Memory '{fact_id}' archived." if ok else f"No memory with id '{fact_id}'."
+    # Soft delete only, once accepted: the row is retained for restore via the panel.
+    return _gated_write("memory", "delete", {"fact_id": fact_id}, store, slot)
 
 
 _MEMORY_ACTIONS: dict[str, Callable[[Any, dict[str, Any]], str]] = {
     "list": _memory_list,
     "get": _memory_get,
+}
+_MEMORY_WRITES: dict[str, Callable[[Any, dict[str, Any], Any], str]] = {
     "add": _memory_add,
     "update": _memory_update,
     "delete": _memory_delete,
@@ -686,25 +721,33 @@ _MEMORY_ACTIONS: dict[str, Callable[[Any, dict[str, Any]], str]] = {
 
 def make_manage_memory_handler(
     store: Any = None,
+    *,
+    gate: Any = None,
 ) -> Callable[[dict[str, Any]], str]:
-    """Build the ``manage_memory`` handler, injecting the store for tests.
+    """Build the ``manage_memory`` handler, injecting the store and the gate for tests and runs.
 
     When ``store`` is None the coordinated ``MemoryStore`` singleton is resolved
     lazily and guarded. Reachability is gated by the allowlists (Daily only;
-    excluded from Bulbe), so this handler runs only where the broader Daily
-    copy-out review applies. It returns an observation string and never raises.
+    excluded from Bulbe). Every write passes ``gate``, the pending-write gate a
+    run binds to its turn; with none bound, nothing the agent writes is
+    endorsed and every write is proposed to the user, under the bound of a
+    gate of the handler's own. It returns an observation string and never
+    raises.
     """
+    slot = _GateSlot(gate)
 
     def handler(arguments: dict[str, Any]) -> str:
         args = arguments or {}
         action = _as_str(args.get("action")).strip().lower()
-        if action not in _MEMORY_ACTIONS:
-            allowed = ", ".join(sorted(_MEMORY_ACTIONS))
+        if action not in _MEMORY_ACTIONS and action not in _MEMORY_WRITES:
+            allowed = ", ".join(sorted({*_MEMORY_ACTIONS, *_MEMORY_WRITES}))
             return f"manage_memory 'action' must be one of: {allowed}."
         st = store if store is not None else _default_memory_store()
         if st is None:
             return "Memory store is unavailable."
         try:
+            if action in _MEMORY_WRITES:
+                return _MEMORY_WRITES[action](st, args, slot)
             return _MEMORY_ACTIONS[action](st, args)
         except Exception as exc:
             return f"manage_memory '{action}' failed: {exc}"
@@ -771,21 +814,19 @@ def _notes_get(store: Any, arguments: dict[str, Any]) -> str:
     return f"{_format_note(record)}\n{_truncate(body)}"
 
 
-def _notes_make(store: Any, arguments: dict[str, Any]) -> str:
+def _notes_make(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     title = _as_str(arguments.get("title")).strip()
     if not title:
         return "manage_notes 'make' requires a non-empty 'title'."
-    body = _as_str(arguments.get("body"))
-    record = store.add_note(
-        title,
-        body_crdt=body.encode("utf-8"),
-        tags=_notes_tags_value(arguments),
-        pinned=bool(arguments.get("pinned", False)),
-    )
-    return f"Note created [{record.id}] {record.title}."
+    return _gated_write("notes", "make", {
+        "title": title,
+        "body": _as_str(arguments.get("body")),
+        "tags": _notes_tags_value(arguments),
+        "pinned": bool(arguments.get("pinned", False)),
+    }, store, slot)
 
 
-def _notes_update(store: Any, arguments: dict[str, Any]) -> str:
+def _notes_update(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     note_id = _as_str(arguments.get("note_id")).strip()
     if not note_id:
         return "manage_notes 'update' requires a 'note_id'."
@@ -799,24 +840,22 @@ def _notes_update(store: Any, arguments: dict[str, Any]) -> str:
         fields["pinned"] = bool(arguments.get("pinned"))
     if not fields:
         return "manage_notes 'update' needs at least one of: title, tags, pinned."
-    record = store.update_note(note_id, **fields)
-    if record is None:
-        return f"No note with id '{note_id}' to update."
-    return f"Note updated {_format_note(record)}."
+    return _gated_write("notes", "update", {"note_id": note_id, **fields}, store, slot)
 
 
-def _notes_delete(store: Any, arguments: dict[str, Any]) -> str:
+def _notes_delete(store: Any, arguments: dict[str, Any], slot: Any = None) -> str:
     note_id = _as_str(arguments.get("note_id")).strip()
     if not note_id:
         return "manage_notes 'delete' requires a 'note_id'."
-    # Soft delete only: a tombstone, so the deletion syncs (CRDT-safe).
-    ok = store.delete_note(note_id)
-    return f"Note '{note_id}' deleted." if ok else f"No note with id '{note_id}'."
+    # Soft delete only, once accepted: a tombstone, so the deletion syncs (CRDT-safe).
+    return _gated_write("notes", "delete", {"note_id": note_id}, store, slot)
 
 
 _NOTES_ACTIONS: dict[str, Callable[[Any, dict[str, Any]], str]] = {
     "list": _notes_list,
     "get": _notes_get,
+}
+_NOTES_WRITES: dict[str, Callable[[Any, dict[str, Any], Any], str]] = {
     "make": _notes_make,
     "update": _notes_update,
     "delete": _notes_delete,
@@ -825,29 +864,35 @@ _NOTES_ACTIONS: dict[str, Callable[[Any, dict[str, Any]], str]] = {
 
 def make_manage_notes_handler(
     store: Any = None,
+    *,
+    gate: Any = None,
 ) -> Callable[[dict[str, Any]], str]:
-    """Build the ``manage_notes`` handler, injecting the store for tests.
+    """Build the ``manage_notes`` handler, injecting the store and the gate for tests and runs.
 
     When ``store`` is None the coordinated ``NotesStore`` singleton is resolved
     lazily and guarded. Reachability is gated by the allowlists (Daily only;
-    excluded from Bulbe by the STATE_MUTATION derivation), so this handler runs
-    only where the broader Daily copy-out review applies. Per-user isolation is
-    the store's (``effective_user_id``); the body is stored opaque, so the tool
-    seeds and replaces whole notes but never merges text into a body -- the
-    in-body CRDT insertion is an N.8 concern. It returns an observation string
-    and never raises.
+    excluded from Bulbe by the STATE_MUTATION derivation). Every write passes
+    ``gate``, the pending-write gate a run binds to its turn; with none bound,
+    every write is proposed to the user, under the bound of a gate of the
+    handler's own. Per-user isolation is the store's (``effective_user_id``);
+    the body is stored opaque, so the tool seeds and replaces whole notes but
+    never merges text into a body -- the in-body CRDT insertion is an N.8
+    concern. It returns an observation string and never raises.
     """
+    slot = _GateSlot(gate)
 
     def handler(arguments: dict[str, Any]) -> str:
         args = arguments or {}
         action = _as_str(args.get("action")).strip().lower()
-        if action not in _NOTES_ACTIONS:
-            allowed = ", ".join(sorted(_NOTES_ACTIONS))
+        if action not in _NOTES_ACTIONS and action not in _NOTES_WRITES:
+            allowed = ", ".join(sorted({*_NOTES_ACTIONS, *_NOTES_WRITES}))
             return f"manage_notes 'action' must be one of: {allowed}."
         st = store if store is not None else _default_notes_store()
         if st is None:
             return "Notes store is unavailable."
         try:
+            if action in _NOTES_WRITES:
+                return _NOTES_WRITES[action](st, args, slot)
             return _NOTES_ACTIONS[action](st, args)
         except Exception as exc:
             return f"manage_notes '{action}' failed: {exc}"
@@ -1031,6 +1076,10 @@ class ToolRegistry:
         notes_store: Any = None,
     ) -> None:
         self._schemas: dict[str, ToolSchema] = {s.name: s for s in ALL_SCHEMAS}
+        self._memory_store = memory_store
+        self._notes_store = notes_store
+        # The process-level write handlers have no gate bound: every write
+        # they make is proposed. A run binds its own (write_handlers).
         self._handlers: dict[str, Callable[[dict[str, Any]], str]] = {
             TOOL_WEB_SEARCH: make_web_search_handler(web_search_fn),
             TOOL_MANAGE_MEMORY: make_manage_memory_handler(memory_store),
@@ -1048,6 +1097,13 @@ class ToolRegistry:
 
     def schema(self, name: str) -> ToolSchema | None:
         return self._schemas.get(name)
+
+    def write_handlers(self, gate: Any) -> dict[str, Callable[[dict[str, Any]], str]]:
+        """Fresh persistent-write handlers bound to ``gate``, over this registry's stores."""
+        return {
+            TOOL_MANAGE_MEMORY: make_manage_memory_handler(self._memory_store, gate=gate),
+            TOOL_MANAGE_NOTES: make_manage_notes_handler(self._notes_store, gate=gate),
+        }
 
     def all_schemas(self) -> list[ToolSchema]:
         return list(self._schemas.values())
@@ -1102,6 +1158,23 @@ def reset_tool_registry() -> None:
 def build_tool_set(mode: str | None = None, *, include_handlers: bool = True) -> ToolSet:
     """Assemble the tool set for ``mode`` from the process-level registry."""
     return get_tool_registry().build(mode, include_handlers=include_handlers)
+
+
+# The tools whose writes persist into stores later turns read back.
+PERSISTENT_WRITE_TOOLS = frozenset({TOOL_MANAGE_MEMORY, TOOL_MANAGE_NOTES})
+
+
+def bind_write_gate(handlers: dict[str, Callable[[dict[str, Any]], str]], gate: Any) -> dict[str, Callable]:
+    """``handlers`` with each persistent-write tool they hold bound to ``gate``, over the registry's stores.
+
+    A tool the mode does not expose stays absent: binding never adds one.
+    """
+    bound = dict(handlers)
+    fresh = get_tool_registry().write_handlers(gate)
+    for name in PERSISTENT_WRITE_TOOLS:
+        if name in bound:
+            bound[name] = fresh[name]
+    return bound
 
 
 def native_tools_for(mode: str | None = None) -> list[dict[str, Any]]:

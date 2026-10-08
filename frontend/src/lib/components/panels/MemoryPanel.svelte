@@ -10,8 +10,11 @@
 	import { toastError, toastSuccess } from '$lib/stores/notifications';
 	import { listFacts, createFact, deleteFact, clearAllFacts, extractFacts } from '$lib/api/memory';
 	import type { MemoryFact } from '$lib/types';
+	import PendingWritesReview from './PendingWritesReview.svelte';
 
 	let facts: MemoryFact[] = [];
+	// The review section: the writes waiting for the user, reread after an extraction.
+	let review: PendingWritesReview | undefined;
 	let loading = false;
 	let newFactText = '';
 	let newFactCategory = 'context';
@@ -81,8 +84,14 @@
 		extracting = true;
 		try {
 			const result = await extractFacts($activeConversationId);
-			toastSuccess(`Extracted ${result.facts_added} facts`);
+			const proposed = result.facts_proposed ?? 0;
+			toastSuccess(
+				proposed > 0
+					? `Extracted ${result.facts_added} facts; ${proposed} to review`
+					: `Extracted ${result.facts_added} facts`,
+			);
 			await loadFacts();
+			await review?.reload();
 		} catch {
 			toastError('Failed to extract facts');
 		} finally {
@@ -228,8 +237,9 @@
 		</div>
 	</div>
 
-	<!-- Facts list -->
+	<!-- Facts list, after the writes waiting for review -->
 	<div class="flex-1 overflow-y-auto">
+		<PendingWritesReview bind:this={review} on:decided={loadFacts} />
 		{#if loading}
 			<div class="flex items-center justify-center py-8">
 				<svg class="w-5 h-5 animate-spin text-surface-500" fill="none" viewBox="0 0 24 24">

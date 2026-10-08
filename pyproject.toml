@@ -814,6 +814,17 @@ fail_under = 0
 # ("when you quote it"); it gives way to gf61, the same contract on a planted
 # sentence that tells, and stays in the tree word for word.
 #
+# A user turn saved with no claim is no one's: the agentic pipelines and the
+# coding agent save it as legacy, never typed, so only a claim makes words
+# typed, and only typed words endorse an agent's memory or notes write. Six
+# contracts pinned the opposite: ot17 to ot21 give way to uo1 to uo5, and ut7
+# to uo6, in tests/test_unclaimed_turn_origin_contracts.py, each holding
+# every other assertion as it was. The manual extraction now reads the
+# mirror, writes the facts drawn from the user's typed words and proposes the
+# rest: test_extract_routes_to_new_extraction, whose stand-in conversation
+# reads no origin, gives way to pw8 in tests/test_pending_writes_contracts.py.
+# They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1052,4 +1063,11 @@ addopts = """
     --deselect=tests/test_probe_floor_contracts.py::test_fl14_every_decision_carries_its_facts_coverage_unasked_facts_and_floor
     --deselect=tests/test_probe_floor_contracts.py::test_fl17_a_leaf_and_a_parent_are_held_to_the_floor
     --deselect=tests/test_gate_faithfulness_contracts.py::test_gf58_a_negation_inside_longer_inline_code_inverts_though_a_document_or_the_assistant_holds_it
+    --deselect=tests/test_turn_origin_contracts.py::test_ot17_the_cascading_pipeline_saves_a_typed_question_and_a_tool_flagged_answer
+    --deselect=tests/test_turn_origin_contracts.py::test_ot18_the_speculative_pipeline_saves_a_typed_question_and_a_tool_flagged_answer
+    --deselect=tests/test_turn_origin_contracts.py::test_ot19_the_think_and_tools_pipeline_saves_a_typed_question_and_a_tool_flagged_answer
+    --deselect=tests/test_turn_origin_contracts.py::test_ot20_the_tools_pipeline_saves_a_typed_question_and_a_tool_flagged_answer
+    --deselect=tests/test_turn_origin_contracts.py::test_ot21_the_coding_agent_saves_a_typed_question_and_a_tool_flagged_answer
+    --deselect=tests/test_user_turn_contracts.py::test_ut7_the_agentic_executor_saves_the_user_turn_by_its_runs_claim
+    --deselect=tests/test_memory_routes.py::test_extract_routes_to_new_extraction
 """

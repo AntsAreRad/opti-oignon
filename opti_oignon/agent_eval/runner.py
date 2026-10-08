@@ -29,9 +29,10 @@ deliberately NOT also passed explicitly: one seam.
 
 State and egress neutralization: the model sees the production
 Daily tool surface verbatim (all twelve schemas), but the manage_skills,
-manage_memory and web_search handlers are replaced with honest refusal
-stubs -- an eval run never mutates user state and never reaches the
-network through the tool surface. The eval path runs Daily semantics with
+manage_memory, manage_notes and web_search handlers are replaced with
+honest refusal stubs -- an eval run never mutates user state (nor queues
+a proposal for the user to review) and never reaches the network through
+the tool surface. The eval path runs Daily semantics with
 no approval_fn, so the doom-loop corrective/abort branch is the live one
 and "doom_loop" is a first-class failure class.
 
@@ -105,8 +106,9 @@ FEATURE_AVAILABLE = _AGENT_OK
 # micro check.
 CHECK_TIMEOUT_S = 60
 
-# Tools whose handlers are neutralized on the eval path.
-_DISABLED_TOOLS = ("manage_skills", "manage_memory", "web_search")
+# Tools whose handlers are neutralized on the eval path: every tool that
+# writes the user's state, and the network.
+_DISABLED_TOOLS = ("manage_skills", "manage_memory", "manage_notes", "web_search")
 
 # Spill references live in the transcript as workspace-relative paths
 # (the 6.1 truncation stubs and the 6.2 prune stubs both carry them).
@@ -286,7 +288,7 @@ def _build_eval_surface() -> tuple[Any, dict[str, Any], str]:
     """(native_tools, handlers, system_prompt) for one eval run.
 
     The Daily schemas verbatim (the production surface the model sees);
-    the three stateful/egress handlers replaced with honest refusal stubs.
+    the four stateful/egress handlers replaced with honest refusal stubs.
     """
     tool_set = agent_tools.build_tool_set("daily")
     handlers = dict(tool_set.tool_handlers)

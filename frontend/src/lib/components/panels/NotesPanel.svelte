@@ -16,6 +16,7 @@
 	import NotesVoiceCapture from './NotesVoiceCapture.svelte';
 	import NotesMediaGallery from './NotesMediaGallery.svelte';
 	import NotesDrawingCanvas from './NotesDrawingCanvas.svelte';
+	import PendingWritesReview from './PendingWritesReview.svelte';
 	import {
 		notes,
 		activeNote,
@@ -284,6 +285,8 @@
 				placeholder="Search notes..."
 				bind:value={$search}
 			/>
+
+			<PendingWritesReview store="notes" on:decided={loadNotes} />
 
 			{#if $error}
 				<InlineError message={$error} onRetry={loadNotes} retrying={$loading} />

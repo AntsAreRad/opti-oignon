@@ -125,8 +125,9 @@ def _default_runner(
         try:
             from .extraction import extract_and_store
 
+            # Typed words alone: a single turn of them is worth the model pass.
             extract_and_store(
-                typed, source="auto-capture", user_id=user_id, model=model
+                typed, source="auto-capture", user_id=user_id, model=model, min_messages=1
             )
         except Exception:  # noqa: BLE001
             logger.debug("auto-capture extraction failed", exc_info=True)

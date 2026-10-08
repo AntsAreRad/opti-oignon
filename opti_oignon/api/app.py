@@ -64,6 +64,7 @@ from .routes_notes import notes_router
 from .routes_notes_attachments import notes_attachments_router
 from .routes_notes_caption import notes_caption_router
 from .routes_notes_transcription import notes_transcription_router
+from .routes_pending_writes import pending_writes_router
 from .routes_performance import router as performance_router
 from .routes_pipelines import router as pipelines_router
 from .routes_plugin_marketplace import router as plugin_marketplace_router
@@ -364,6 +365,7 @@ app.include_router(notes_attachments_router)
 app.include_router(notes_transcription_router)
 app.include_router(notes_caption_router)
 app.include_router(note_updates_router)
+app.include_router(pending_writes_router)
 app.include_router(cache_router)
 app.include_router(health_router)
 app.include_router(files_router)

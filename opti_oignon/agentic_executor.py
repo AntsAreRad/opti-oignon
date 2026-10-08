@@ -2300,7 +2300,8 @@ class AgenticExecutor:
         the claim the turn carries, when it carries one: the claimed text
         keeps the claim's origin and segments, any other text -- a prompt a
         pipeline composed from the turn -- is saved as legacy. With no
-        claim the message is the words the user typed.
+        claim no one vouches for the message, and it is saved as legacy:
+        only a claim makes words typed.
         """
         if not conversation_id or not assistant_response:
             return
@@ -2311,7 +2312,7 @@ class AgenticExecutor:
                 return
 
             claim = getattr(turn, "user_turn", None)
-            origin, segments = claim.parts_for(user_message) if claim is not None else ("typed", [])
+            origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
             conversation_manager.add_message(
                 conv_id=conversation_id,
                 role="user",

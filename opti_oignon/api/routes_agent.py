@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import uuid
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -104,12 +105,30 @@ def _teacher_failure_observations(result: Any) -> str:
 
 # The run engine (no web dependency)
 
+# The tools whose writes persist into stores later turns read back. A run
+# binds them to a pending-write gate of its own (opti_oignon.pending_writes).
+_PERSISTENT_WRITES = frozenset({"manage_memory", "manage_notes"})
+
+# The tools whose results bring the run something to read: the web, files,
+# a command's output, a subtask's answer. A write tool's own result is only
+# its confirmation, so it is never named as read before a proposal.
+_READING_TOOLS = frozenset({"web_search", "view", "grep", "glob", "ls", "bash", "task"})
+
+# The read actions of the state tools: what they return (facts, note bodies,
+# skill bodies) is read as surely as a web page, so each counts as read.
+_READ_ACTIONS = {
+    "manage_memory": frozenset({"list", "get"}),
+    "manage_notes": frozenset({"list", "get"}),
+    "manage_skills": frozenset({"list", "index", "view", "view_ref", "search"}),
+}
+
 
 class AgentRunManager:
     """Drives one agent run at a time and fans its events out to subscribers.
 
     A run executes ``agent.loop.run`` on a background thread with a context-bound
-    ``manage_skills`` handler and, optionally, the skills most relevant to the
+    ``manage_skills`` handler, memory and notes writes bound to a pending-write
+    gate of the run's own, and, optionally, the skills most relevant to the
     task prepended as untrusted context. ``status`` / ``cancel`` are safe to call
     concurrently. Cancellation is cooperative: it sets a flag the loop checks
     between rounds (``should_continue``), so the run stops cleanly. Subscribers
@@ -133,6 +152,9 @@ class AgentRunManager:
         # teacher hook forwards these to the gated publish entry so a
         # draft is judged by the run's own human gate, never a substitute.
         self._teacher_ctx: dict[str, Any] = {}
+        # The tools whose results the active run has read, each once, in
+        # the order first read: what a proposal says the agent had seen.
+        self._read: list[str] = []
 
     # status / control
 
@@ -187,6 +209,8 @@ class AgentRunManager:
             with self._lock:
                 if rnd > self._rounds:
                     self._rounds = rnd
+            if getattr(event, "kind", "") == "tool_result":
+                self._note_read(getattr(event, "data", {}) or {})
             payload = json.dumps(
                 {
                     "kind": getattr(event, "kind", ""),
@@ -197,6 +221,74 @@ class AgentRunManager:
         except Exception:  # pragma: no cover - defensive
             return
         self._broadcast(payload)
+
+    def _note_read(self, data: dict) -> None:
+        """Record a reading tool whose result the run read; one that did not run returned nothing to read."""
+        name = data.get("tool_name")
+        if not data.get("executed") or not isinstance(name, str) or not name:
+            return
+        if name not in _READING_TOOLS:
+            return
+        self._record_read(name)
+
+    def _record_read(self, name: str) -> None:
+        with self._lock:
+            if name not in self._read:
+                self._read.append(name)
+
+    def _reading(self, name: str, handler: Callable[[dict], str]) -> Callable[[dict], str]:
+        """``handler`` that records ``name`` as read each time it serves one of its read actions."""
+        actions = _READ_ACTIONS.get(name, frozenset())
+
+        def wrapped(arguments: dict) -> str:
+            out = handler(arguments)
+            if str((arguments or {}).get("action", "")).strip().lower() in actions:
+                self._record_read(name)
+            return out
+
+        return wrapped
+
+    def _read_so_far(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._read)
+
+    def _gate_persistent_writes(
+        self,
+        handlers: dict[str, Any],
+        *,
+        task: str,
+        turn_origin: str,
+        conversation_id: str,
+        run_id: str,
+        user_id: str | None,
+    ) -> dict[str, Any]:
+        """Bind the run's persistent-write tools to a pending-write gate of the run's own.
+
+        The task's typed units endorse a write when the caller vouches that
+        the task is the words the user typed (``turn_origin`` typed, as the
+        agent route does); a run no caller vouches for endorses nothing.
+        Every other write is proposed to the user, naming the tools the run
+        had read before it. A gate that cannot be built withdraws the write
+        tools from the run rather than leave them writing.
+        """
+        if not any(name in handlers for name in _PERSISTENT_WRITES):
+            return handlers
+        try:
+            from opti_oignon import pending_writes
+
+            gate = pending_writes.WriteGate(
+                pending_writes.Endorsers.for_turn(task, turn_origin),
+                conversation_id=conversation_id,
+                run_id=run_id,
+                read=self._read_so_far,
+                user_id=user_id,
+            )
+            bound = agent_tools.bind_write_gate(handlers, gate)
+            return {name: self._reading(name, handler) if name in _PERSISTENT_WRITES else handler
+                    for name, handler in bound.items()}
+        except Exception:
+            logger.warning("pending-write gate unavailable; the run's write tools are withdrawn", exc_info=True)
+            return {name: handler for name, handler in handlers.items() if name not in _PERSISTENT_WRITES}
 
     # run lifecycle
 
@@ -219,8 +311,15 @@ class AgentRunManager:
         approval_manager: Any = None,
         consult: bool = True,
         max_rounds: int | None = None,
+        turn_origin: str = "legacy",
     ) -> dict[str, Any]:
-        """Assemble and launch a run; refuse if one is already running."""
+        """Assemble and launch a run; refuse if one is already running.
+
+        ``turn_origin`` is who wrote ``task``, in the turn-origin grammar: the
+        caller that received the user's own typed words says typed, and the
+        task's typed units then endorse the run's memory and notes writes.
+        Any other caller leaves it legacy, and every such write is proposed.
+        """
         if not _AGENT_OK:
             return {"started": False, "reason": "agent_unavailable"}
         with self._lock:
@@ -260,13 +359,26 @@ class AgentRunManager:
             # Bind manage_skills (Daily only) to this run's conversation, sandbox,
             # and gate so its writes go through the right human approval.
             if agent_tools.TOOL_MANAGE_SKILLS in handlers:
-                handlers[agent_tools.TOOL_MANAGE_SKILLS] = agent_skills.make_manage_skills_handler(
-                    registry=registry,
-                    approval_fn=approval_fn,
-                    sandbox=sandbox,
-                    conversation_id=conversation_id,
-                    manager=approval_manager,
+                handlers[agent_tools.TOOL_MANAGE_SKILLS] = self._reading(
+                    agent_tools.TOOL_MANAGE_SKILLS,
+                    agent_skills.make_manage_skills_handler(
+                        registry=registry,
+                        approval_fn=approval_fn,
+                        sandbox=sandbox,
+                        conversation_id=conversation_id,
+                        manager=approval_manager,
+                    ),
                 )
+            with self._lock:
+                self._read = []
+            handlers = self._gate_persistent_writes(
+                handlers,
+                task=task,
+                turn_origin=turn_origin,
+                conversation_id=conversation_id,
+                run_id=uuid.uuid4().hex[:12],
+                user_id=user_id,
+            )
             native = tool_set.native_tools()
             prompt = system_prompt or agent_tools.system_prompt_section_for(mode)
             # Consult learned procedures relevant to the task; wrapped as untrusted.
@@ -704,6 +816,9 @@ try:
         refusal = _model_capability_refusal(request.model)
         if refusal is not None:
             raise HTTPException(status_code=422, detail=refusal)
+        # The task is the words the client sent as the user's own, as the
+        # chat route holds its message: this route vouches for them as
+        # typed, so the task's own sentences endorse the run's writes.
         result = get_run_manager().start(
             request.task,
             model_client=model_client,
@@ -713,6 +828,7 @@ try:
             memory_provider=_resolve_memory_provider(),
             verify=request.verify,
             consult=request.consult,
+            turn_origin="typed",
         )
         if not result.get("started"):
             raise HTTPException(status_code=409, detail=result.get("reason", "run_not_started"))

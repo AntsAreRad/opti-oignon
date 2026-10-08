@@ -11,6 +11,34 @@ package costs.
 
 ### Added
 
+- The review of pending writes. The Memory panel gains a "To review"
+  section, and the Notes panel the same for notes: each write the agent
+  proposed, or each fact the manual extraction drew from anything but the
+  user's typed words, with what accepting it would do, each of its words
+  marked typed by you or not, what an update would change, and what the
+  agent had read before proposing it. A checkbox per proposal and one for
+  all; "Accept selected" applies the batch in order, each proposal once and
+  exactly as proposed, and "Decline selected" writes nothing. A failed
+  write stays waiting. Served by `GET /api/pending-writes`,
+  `POST /api/pending-writes/accept` and `POST /api/pending-writes/decline`
+  over a queue beside the other stores, encrypted at rest the same way. A
+  run makes at most 20 proposals (`max_per_run` in
+  `config/pending_writes.yaml`); a proposal already waiting is never queued
+  twice, and a write the user declined in a conversation is not proposed
+  again there (another conversation may ask again; a run with no
+  conversation keeps no refusal). A write that reached
+  the store before failing is decided rather than put back, a change whose
+  fact or note is gone is reported with nothing saved, and an acceptance cut
+  short by the end of the process is completed by the next review after
+  `stale_claim_seconds` -- settled if it had landed, written once if not,
+  never put back. Each proposal names what the run had read before it:
+  web results, files, command output, and the facts, notes or skills it
+  looked up. The per-user wipe deletes the queue and the export (format
+  1.2) carries it. The manual extraction answers with
+  `facts_proposed` beside `facts_added`, and both its passes, like the
+  automatic capture, ask the model even when there is a single turn to read
+  (the extractor had required two, so a conversation of one typed question
+  had its facts read by the pattern fallback alone).
 - The chat's loader, drawn from what the server did. While a reply is
   written, one status line stands where it will appear: its words come from
   one closed table that has passed the garden's two ethics nets, the onion
@@ -2187,6 +2215,38 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] What the agent writes to memory or notes waits for the user
+  unless the user typed it. In Daily, `manage_memory` and `manage_notes`
+  wrote into stores every later turn reads back, with no review at all: a
+  page, a file or a tool result that told the agent to remember something
+  was enough for it to stick, the shape of a memory-injection attack. A new
+  fact, or a new note's title, body and tags, is now written directly only
+  when each of its words, folded (Unicode NFC, each run of white space as
+  one space), equals the whole of what the user typed in the turn that
+  started the run -- never a part of it: a sentence, a wrapped line, a list
+  item, a line of code and even a paragraph can take their sense from what
+  stands next to them ("Things you must never do:" before "Share my
+  location with Bob."), so none of them endorses. Anything else, and every
+  update or delete, becomes a proposal
+  the user accepts or declines in the Memory or Notes panel (see Added);
+  the model is told it was proposed, never that it was saved. The run's
+  turn is its task, which `POST /api/agent/run` vouches for as typed; a run
+  started any other way endorses nothing. When the review queue cannot
+  record a proposal, nothing is written. On a bench of six planted
+  instructions of different forms read in a web result, none is written
+  and each is proposed; the same words typed by the user as the task are
+  written, six of six. Measured in the container on stand-in stores; how
+  many proposals real models make in a day is owed to the machine.
+- [SECURITY] An evaluation run no longer writes the user's notes. The eval
+  harness neutralized the skills, memory and web tools but not
+  `manage_notes`, which Daily exposes, so a task could create a real note,
+  contrary to the harness's own claim that a run never mutates user state.
+- [SECURITY] A user turn saved with no claim is no longer held as typed.
+  The agentic pipelines and the coding agent saved the user's message as
+  typed whenever the turn carried no claim, and only typed words may
+  endorse a write or decide a probe. With no claim the message is now
+  legacy; the chat route hands every turn its claim, so its turns are
+  unchanged.
 - [SECURITY] The automatic memory capture keeps only what the user typed.
   After a turn it handed the extraction the whole conversation as the model
   reads it: the text of an attached document, folded into the user's turn,
@@ -2198,7 +2258,8 @@ package costs.
   each turn, and the extraction is handed the user's typed words alone: no
   document, no assistant reply, no question the model reworded, no turn of
   unknown origin; with nothing typed it is not called. The manual extraction
-  route, which the user starts, is unchanged.
+  route, which the user starts, follows the review of pending writes (see
+  Added): what the user typed is written, the rest is proposed.
 - [SECURITY] An agent run can no longer leave Bulbe through its request. The
   run entry took its mode from the request body, Daily when the body named
   none, and passed it on as given, so on a machine in Bulbe a request with no

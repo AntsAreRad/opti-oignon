@@ -349,10 +349,17 @@ class FactExtractor:
 
     # Extraction (LLM path, then fallback). Both never raise.
 
-    def extract(self, messages: list[dict[str, Any]], *, model: str | None = None) -> list[ExtractedFact]:
-        """Run the model extraction. Returns [] on any failure (never raises)."""
+    def extract(
+        self, messages: list[dict[str, Any]], *, model: str | None = None, min_messages: int = 2
+    ) -> list[ExtractedFact]:
+        """Run the model extraction. Returns [] on any failure (never raises).
+
+        ``min_messages`` is the fewest turns worth a model pass: two for a
+        conversation, one for the user's typed words alone, where a single
+        turn can hold a fact.
+        """
         try:
-            if not messages or len(messages) < 2:
+            if not messages or len(messages) < max(1, min_messages):
                 return []
             chat_fn = self._get_chat_fn()
             if chat_fn is None:
@@ -381,9 +388,11 @@ class FactExtractor:
             logger.warning("extraction failed, swallowed: %s", exc)
             return []
 
-    def extract_with_fallback(self, messages: list[dict[str, Any]], *, model: str | None = None) -> list[ExtractedFact]:
+    def extract_with_fallback(
+        self, messages: list[dict[str, Any]], *, model: str | None = None, min_messages: int = 2
+    ) -> list[ExtractedFact]:
         """Model extraction first; the regex fallback only when it yields nothing."""
-        facts = self.extract(messages, model=model)
+        facts = self.extract(messages, model=model, min_messages=min_messages)
         if facts:
             return facts
         try:
@@ -402,11 +411,12 @@ class FactExtractor:
         source: str = "",
         user_id: str | None = None,
         model: str | None = None,
+        min_messages: int = 2,
     ) -> list[tuple[Any, Any]]:
         """Extract and persist; return the (record, decision) pairs that succeeded."""
         results: list[tuple[Any, Any]] = []
         try:
-            facts = self.extract_with_fallback(messages, model=model)
+            facts = self.extract_with_fallback(messages, model=model, min_messages=min_messages)
             if not facts:
                 return results
             store = self._get_store()
@@ -430,9 +440,11 @@ class FactExtractor:
         source: str = "",
         user_id: str | None = None,
         model: str | None = None,
+        min_messages: int = 2,
     ) -> list[tuple[Any, Any]]:
         """Awaitable wrapper so the conversation path can create_task this."""
-        return self.extract_and_store(messages, source=source, user_id=user_id, model=model)
+        return self.extract_and_store(messages, source=source, user_id=user_id, model=model,
+                                      min_messages=min_messages)
 
 
 def _reply_text(response: Any) -> str:
@@ -475,10 +487,11 @@ def extract_and_store(
     source: str = "",
     user_id: str | None = None,
     model: str | None = None,
+    min_messages: int = 2,
 ) -> list[tuple[Any, Any]]:
     """Module-level convenience over the singleton extractor (never raises)."""
     return get_extractor().extract_and_store(
-        messages, source=source, user_id=user_id, model=model
+        messages, source=source, user_id=user_id, model=model, min_messages=min_messages
     )
 
 

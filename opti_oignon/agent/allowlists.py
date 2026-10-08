@@ -10,8 +10,10 @@ Tool availability is gated per security context by Daily and Bulbe through
 - In Bulbe every allowed tool call additionally passes through the existing
   ``tool_call_approval`` human gate, fail-secure: anything other than an
   explicit human approval (timeout, denial, no gate available, or any error)
-  denies the call. Daily reviews at the copy-out gate instead, so it does not
-  require per-call approval.
+  denies the call. Daily requires no per-call approval: sandbox files are
+  reviewed at the copy-out gate, skills at their own human gate, and a
+  memory or notes write the user's typed words do not endorse waits for the
+  user's review (``opti_oignon.pending_writes``).
 
 Bulbe is structurally tighter than Daily: it is derived from the Daily set by
 removing the network tool and the persistent-state mutation tools, so the
@@ -82,8 +84,9 @@ SESSION_STATE_TOOLS = frozenset({"todo"})
 SUBAGENT_TOOLS = frozenset({"task"})
 
 # Daily: frictionless. The sandboxed tools plus the network and state tools;
-# the sandbox plus the copy-out review carry the safety. The session-state
-# and subagent tools join the base set and survive the Bulbe
+# the sandbox and the copy-out review carry the safety of files, the skills
+# gate and the pending-write review that of persistent state. The
+# session-state and subagent tools join the base set and survive the Bulbe
 # derivation by construction.
 DAILY_ALLOWLIST = frozenset(
     SANDBOX_TOOL_NAMES

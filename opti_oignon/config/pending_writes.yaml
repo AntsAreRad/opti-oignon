@@ -1,0 +1,15 @@
+# Pending writes: the agent's memory and notes writes that the user's typed
+# words did not endorse wait here for the user's review (see
+# opti_oignon/pending_writes.py).
+
+# The most proposals one agent run may make. Each further write of that run
+# is refused, with nothing saved, so a page that tells the agent to write
+# again and again cannot flood the review. A whole number from 1 to 1000; any
+# other value keeps the default below.
+max_per_run: 20
+
+# Seconds after which an acceptance that never finished (the process ended
+# between taking the proposal and recording what it wrote) is completed by
+# the next review: settled if its write landed, written once otherwise. A
+# whole number from 60 to 86400; any other value keeps the default below.
+stale_claim_seconds: 300

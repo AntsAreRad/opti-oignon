@@ -2,7 +2,7 @@
 
 ## Overview
 
-Opti-Oignon exposes a REST API via FastAPI with 537 endpoints. All
+Opti-Oignon exposes a REST API via FastAPI with 540 endpoints. All
 endpoints require JWT cookie authentication unless noted otherwise.
 Admin-only endpoints require `role: admin`.
 
@@ -30,6 +30,7 @@ the backend is running.
 | `/api/shortcuts/*` | Keyboard shortcut bindings | User |
 | `/api/theme/*` | Theme engine, accent colors | User |
 | `/api/allium/*` | The componion: its served status, read only | User |
+| `/api/pending-writes/*` | Memory and notes writes waiting for the user: list, accept or decline a batch | User |
 
 
 ## Common patterns

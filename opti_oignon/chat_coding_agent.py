@@ -821,10 +821,11 @@ class ChatCodingSession:
             return
         try:
             # The user's words are judged by the turn's claim when the turn
-            # carries one (any other text is no one's), typed otherwise; the
-            # answer is flagged, the agent stands on its tools.
+            # carries one (any other text is no one's); with no claim no one
+            # vouches for them and they are legacy. The answer is flagged,
+            # the agent stands on its tools.
             claim = getattr(self, "_turn_user_turn", None)
-            origin, segments = claim.parts_for(user_message) if claim is not None else ("typed", [])
+            origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
             _conversation_manager.add_message(
                 self._conversation_id, "user", user_message, origin=origin, segments=segments
             )

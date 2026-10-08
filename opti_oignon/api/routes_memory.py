@@ -153,18 +153,42 @@ def extract_facts(conv_id: str) -> dict:
     """Extract facts from a conversation into the unified store.
 
     Necessite un modele Ollama disponible pour l'extraction LLM.
+
+    The facts drawn from the words the user typed are written. The facts
+    drawn from anything else -- an attached document, the assistant's
+    replies, a turn of unknown origin -- are proposed for the user's review
+    and written only once accepted.
     """
     _require_store()
     if _extract_and_store is None or _conv_manager is None:
         raise HTTPException(status_code=503, detail="Extraction not available")
 
     try:
-        messages = _conv_manager.get_context_messages(conv_id)
-        results = _extract_and_store(messages, source=f"extract:{conv_id}")
+        # Imported here: the module-scope imports above stay the ones every
+        # other memory route needs.
+        from .. import pending_writes
+        from ..memory.auto_capture import typed_turns
+        from ..memory.extraction import get_extractor
+
+        mirror = _conv_manager.get_mirror_messages(conv_id)
+        typed = typed_turns(mirror)
+        # The user's typed words alone: one turn of them is enough to ask the model.
+        results = _extract_and_store(typed, source=f"extract:{conv_id}", min_messages=1) if typed else []
         added = sum(
             1 for _r, d in results if getattr(d, "action", "add") != "merge"
         )
-        return MemoryExtractResponse(conversation_id=conv_id, facts_added=added)
+        rest = pending_writes.rest_turns(mirror)
+        try:
+            proposed = pending_writes.propose_facts(
+                get_extractor().extract_with_fallback(rest, min_messages=1) if rest else [],
+                conversation_id=conv_id,
+                known=[getattr(r, "text", "") for r, _d in results],
+            )
+        except Exception as e:
+            # The typed facts are written; the rest is never written instead.
+            logger.warning(f"Extraction proposals not recorded for {conv_id}: {e}")
+            proposed = 0
+        return MemoryExtractResponse(conversation_id=conv_id, facts_added=added, facts_proposed=proposed)
     except Exception as e:
         logger.error(f"Extraction error for {conv_id}: {e}")
         raise HTTPException(

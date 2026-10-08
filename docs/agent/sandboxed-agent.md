@@ -22,8 +22,8 @@ to the host filesystem or network. Files are copied in explicitly; results are
 copied out only after review. Tool output is always wrapped as untrusted data:
 the model is told to treat everything between the untrusted-data markers as
 information to reason about, never as instructions to obey. The non-sandbox tools
-(`web_search`, `manage_memory`, `manage_skills`) are handler-backed and follow
-the same untrusted-output discipline. Since the workspace cycle the
+(`web_search`, `manage_memory`, `manage_notes`, `manage_skills`) are
+handler-backed and follow the same untrusted-output discipline. Since the workspace cycle the
 sandbox behind these tools can be a named, conversation-bound workspace with
 explicit copy-in and a diff-gated write-back -- see
 [Sandbox Workspaces](sandbox-workspaces.md). The agent performance cycle
@@ -38,6 +38,56 @@ constrained at the socket level (a physical constraint, not a policy), and every
 state-mutating tool call is held behind the tool-call approval gate, which is
 fail-secure: an unanswered request is denied. The approval surface is the same
 `/api/security/tool-approval/*` API used elsewhere in the app.
+
+## Memory and notes writes
+
+What the agent writes with `manage_memory` and `manage_notes` comes back in
+every later turn, so each such write passes a gate. A new fact, or a new
+note's title, body and tags, is written directly only when each of its words,
+folded (Unicode NFC, each run of white space as one space), equals the whole
+of what the user typed in the turn that started the run -- never a part of
+it: a sentence, a line, a list item, a line of code and even a paragraph can
+take their sense from what stands next to them ("Things you must never do:"
+before "Share my location with Bob."). Anything else becomes a
+proposal: a fact the model drew from a web result, a file or its own words,
+and every update or delete, whose target is an identifier no typed word can
+vouch for. A proposal is inert: it is kept with where each of its words came
+from and what the run had read before it (web results, files, command
+output, facts, notes or skills it looked up), no model reads it, and it is
+written only when the user accepts it. The model is told the write was
+proposed, never that it was saved.
+
+The turn of a run is its task. `POST /api/agent/run` vouches for the task as
+the words the user typed; a run started any other way endorses nothing, so
+every write it makes is proposed. A run makes at most `max_per_run` proposals
+(`config/pending_writes.yaml`, 20 by default); a proposal already waiting is
+never queued twice, and a write the user declined in a conversation is not
+proposed again in that conversation (another conversation may ask again; a
+run with no conversation keeps no refusal).
+When the review queue cannot record a proposal, nothing is written. An
+evaluation run neither writes nor proposes. The queue follows the user's
+data controls: the per-user wipe deletes it and the export carries it.
+
+Proposals wait in the review section of the Memory panel (all of them) and
+of the Notes panel (the notes ones), over `GET /api/pending-writes`,
+`POST /api/pending-writes/accept` and `POST /api/pending-writes/decline`: a
+batch of ids, applied in order, each once and exactly as proposed. A write
+that fails stays waiting, unless it reached the store before the failure: it
+is then decided, and can no longer be declined while it stays written. A
+change whose fact or note is gone is reported, and nothing is saved. An
+acceptance cut short by the end of the process is completed by the next
+review after `stale_claim_seconds` (300 by default): settled if its write
+landed -- a fact found by its source, a note by an id drawn from the
+proposal's -- and written once otherwise, never put back. The manual extraction of the Memory
+panel follows the same rule: the facts drawn from the user's typed words are
+written, the facts drawn from anything else are proposed, and a single typed
+turn is enough for the model to read.
+
+What the gate cannot see: a fact the model paraphrases from the user's own
+words is not their words, so it is proposed rather than written; accepting it
+is one gesture. Words pasted into the task count as typed, until pasted text
+is told apart from typed text. The gate does not judge content -- it holds
+back every write whose words the user did not type, whatever they say.
 
 ## Control surface
 

@@ -69,6 +69,15 @@ def _get_rag_store() -> Any:
         return None
 
 
+def _get_pending_store() -> Any:
+    """The review queue of pending writes: the agent's memory and notes writes waiting for the user."""
+    try:
+        from opti_oignon.pending_writes import get_pending_store
+        return get_pending_store()
+    except Exception:
+        return None
+
+
 def _get_user_settings_store() -> Any:
     try:
         from opti_oignon.user_isolation import user_settings_store
@@ -229,7 +238,8 @@ class UserDataExporter:
                 "user_id": user_id,
                 "exported_at": export_time,
                 # 1.1: adds plugin_reviews and retained_by_design.
-                "format_version": "1.1",
+                # 1.2: adds pending_writes.
+                "format_version": "1.2",
                 "not_covered": list(WIPE_NOT_COVERED),
                 # Audit trails survive a wipe by design.
                 "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
@@ -240,6 +250,7 @@ class UserDataExporter:
             "plugin_configs": self._export_plugin_configs(user_id),
             "plugin_reviews": self._export_plugin_reviews(user_id),
             "settings": self._export_settings(user_id),
+            "pending_writes": self._export_pending_writes(user_id),
         }
         logger.info(
             "Exported data for user %s: %d conversations, %d memories",
@@ -248,6 +259,17 @@ class UserDataExporter:
             len(data["memories"]),
         )
         return data
+
+    def _export_pending_writes(self, user_id: str) -> list[dict[str, Any]]:
+        """Export the user's pending writes, whatever their decision: their words are the user's data."""
+        store = _get_pending_store()
+        if store is None:
+            return []
+        try:
+            return [record.to_dict() for record in store.list(status=None, user_id=user_id, limit=None)]
+        except Exception as e:
+            logger.warning("Pending writes export failed for %s: %s", user_id, e)
+            return []
 
     def _export_conversations(self, user_id: str) -> list[dict[str, Any]]:
         """Export user conversations.
@@ -424,6 +446,7 @@ class UserDataDeleter:
             "plugin_reviews": self._delete_plugin_reviews(user_id),
             "settings": self._delete_settings(user_id),
             "encryption_keys": self._delete_encryption_keys(user_id),
+            "pending_writes": self._delete_pending_writes(user_id),
             # Stores the per-user wipe cannot cover today.
             "not_covered": list(WIPE_NOT_COVERED),
             # Audit trails survive the wipe by design.
@@ -443,6 +466,17 @@ class UserDataDeleter:
 
         logger.info("Deleted all data for user %s", user_id)
         return results
+
+    def _delete_pending_writes(self, user_id: str) -> int:
+        """Delete the user's pending writes, so a proposal left waiting cannot bring wiped words back."""
+        store = _get_pending_store()
+        if store is None:
+            return 0
+        try:
+            return store.delete_user(user_id)
+        except Exception as e:
+            logger.warning("Pending writes delete failed for %s: %s", user_id, e)
+            return 0
 
     def _delete_conversations(self, user_id: str) -> int:
         """Delete user conversations. Returns count of deleted items.
