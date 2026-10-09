@@ -102,7 +102,6 @@ from .teacher import (
     TeacherEscalator,
     TeacherSkillDraft,
     escalate,
-    request_skill_approval,
     should_escalate,
 )
 from .config_loader import (
@@ -200,7 +199,6 @@ __all__ = [
     "TeacherEscalator",
     "should_escalate",
     "escalate",
-    "request_skill_approval",
     "SOURCE_TEACHER",
     # config
     "AgentConfig",

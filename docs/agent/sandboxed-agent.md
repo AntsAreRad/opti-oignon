@@ -121,6 +121,11 @@ When the review queue cannot record a proposal, nothing is written. An
 evaluation run neither writes nor proposes. The queue follows the user's
 data controls: the per-user wipe deletes it and the export carries it.
 
+A skill write of `manage_skills`, and a draft of the teacher model, is
+always a proposal in the same queue, whatever the user typed: a skill's
+text reaches a system prompt. It is accepted only by the digest of its
+text, shown whole -- see [Evolving Skills](evolving-skills.md).
+
 Proposals wait in the review section of the Memory panel (all of them) and
 of the Notes panel (the notes ones), over `GET /api/pending-writes`,
 `POST /api/pending-writes/accept` and `POST /api/pending-writes/decline`: a

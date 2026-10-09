@@ -113,7 +113,8 @@ command, and every command is a user action:
 | `/recall KEY` | Show the verbatim span behind a receipt; the receipt stays open |
 | `/resolve KEY` | Close a receipt, as the user: it leaves the digest and stays in the ledger |
 | `/skill NAME ARGS` | Run `ARGS` as a turn with a published skill as the system suffix |
-| `/adopt NAME [DIGEST]` | Show a skill received from a paired device with its digest; with the digest, adopt exactly those bytes |
+| `/adopt NAME [DIGEST]` | Show a skill's bytes not adopted here with their digest; with the digest, adopt exactly those bytes |
+| `/review [ID [DIGEST\|decline]]` | List the agent's writes waiting for you; show one whole with its digest; accept it by that digest, or decline it |
 | `/help` | List the commands |
 | `/quit` | End the session |
 
@@ -124,18 +125,30 @@ the conversation was never saved. `/close` never overrides the gate: a
 span it refuses stays verbatim in the Flesh and the refusal names the
 probes that failed. `/skill` takes `name` or `category/name`; a draft, an
 unknown name, or a name published in two categories is refused, and only
-a published skill -- human-approved, and named by the user on purpose --
-reaches the system prompt.
+a published skill whose bytes are yours on this device reaches the system
+prompt: written here by hand, or named by their digest here. It judges the
+bytes on the same read it runs them from.
 
 A skill received from a paired device is published once this device's
 sync gate lets the record through, and that gate shows its provenance,
 not its text. So `/skill` refuses the bytes of a received skill until they
-are adopted here: `/adopt NAME` prints the text exactly as it is on disk
-with its digest, and `/adopt NAME DIGEST` (twelve hex characters or more)
-adopts those bytes and no others. A new version received later is refused
-again until it is adopted; writing the whole skill on this device adopts
-what it writes, while an edit of bytes never adopted leaves them
-unadopted.
+are adopted here: `/adopt NAME` prints the text exactly as it is on disk,
+every character a screen would hide written as its escape, with its
+digest, and `/adopt NAME DIGEST` (twelve hex characters or more) adopts
+those bytes and no others. A new version received later is refused again
+until it is adopted; writing the whole skill on this device adopts what it
+writes, while an edit of bytes never adopted leaves them unadopted. A
+skill the agent wrote before its writes became proposals is refused the
+same way, and adopted the same way.
+
+The agent's memory, notes and skill writes that wait for you are listed by
+`/review`; `/review ID` shows one whole, every character a screen would
+hide written as its escape, with what it would change and its digest, and
+`/review ID DIGEST` (twelve hex characters or more) accepts exactly that,
+while `/review ID decline` writes nothing. A skill is accepted only by the
+digest of its text, and nothing is written when the skill it would change
+changed since it was proposed. Like every command, `/review` is refused on
+a line read from a pipe or a file.
 
 While you wait, one line of ASCII art on stderr shows it: an onion that
 breathes from Enter until the first answer, sprouts once the executor

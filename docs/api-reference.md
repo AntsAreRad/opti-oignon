@@ -2,7 +2,7 @@
 
 ## Overview
 
-Opti-Oignon exposes a REST API via FastAPI with 540 endpoints. All
+Opti-Oignon exposes a REST API via FastAPI with 541 endpoints. All
 endpoints require JWT cookie authentication unless noted otherwise.
 Admin-only endpoints require `role: admin`.
 

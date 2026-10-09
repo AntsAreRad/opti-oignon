@@ -11,6 +11,43 @@ package costs.
 
 ### Added
 
+- [SECURITY] An approval shows what it approves, for the skills the agent
+  writes. A skill's text reaches a system prompt (`/skill` in `oo chat`)
+  and the agent's consultation, yet the agent's skill writes and the
+  teacher model's drafts were approved on a name, a category and an action
+  alone: the request never carried the text, and publication read the
+  draft again at the moment of writing, so a text changed while the person
+  decided was published unverified; deleting a draft from the skills panel
+  deleted the published skill of the same name. Every skill write of the
+  agent and every teacher draft is now a proposal in the review queue
+  (`manage_skills` joins the class of writes held for review; no one is
+  asked during a run): it carries the slug it would be written under, the
+  text that would be written -- a patch as the text it results in -- its
+  SHA-256, and the digest of the published text it would replace or
+  delete. The person reads it whole, never cut and with every character a
+  screen would hide written as the approval drawer writes it, in the skills
+  panel or with the new `/review` command of `oo chat`, and accepts it by
+  naming that digest. The registry hashes the text again as it writes the
+  bytes, holds a lock from its check to its write, and writes nothing when
+  the skill changed since the proposal; the digest of the file written is
+  recorded as adopted on this device -- and the bytes it replaces stay
+  admitted until the write lands; a later approval, a deletion or a
+  peer's landing retires it. Only bytes written here by hand or
+  named by their digest here enter a prompt -- `/skill` and the
+  consultation share that rule, as do the agent's own search and view, and
+  judge the bytes on the read they use -- so a skill the agent wrote or
+  rewrote before this change (a rewrite kept the source it replaced) is
+  adopted once, by its digest (`/adopt`, or the panel), before it runs or
+  is consulted again. A skill is named by where it lies, never by what its
+  text claims. The skills panel
+  keys each row by its status and every button names its target;
+  publishing a draft, deleting, and adopting each send the digest of what
+  was shown. The memory and notes proposals now show their values with the
+  same rendering. The review queue's file is migrated in place, every row
+  kept, to take the new store. Twenty contracts that pinned the
+  approval by name, or the writes the census knew, are superseded by named
+  replacements.
+
 - [SECURITY] Pasted text is a document, never the user's typed words. A
   page, a mail or a log the user pastes carries whatever its author wrote,
   orders included, and it was sent and saved as typed: its words could

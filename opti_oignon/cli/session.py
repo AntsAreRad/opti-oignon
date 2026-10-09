@@ -16,19 +16,26 @@ A line that starts with a slash is a user action:
   /resolve KEY      close a receipt, as the user: it leaves the digest
   /status           show what the onion's queue counted, by event and motive
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
-  /adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes
+  /adopt NAME [DIGEST]  show a skill's bytes not adopted here, then adopt those bytes
+  /review [ID [DIGEST|decline]]  the agent's writes waiting for you: list, show one, accept it by its digest
   /help             list the commands
   /quit             end the session
 
 Every refusal is an event carrying its reason by name; nothing here
 raises into the loop that prints. The onion commands are refused while
 the onion is switched off. A draft or an unknown skill is refused. A
-published skill written on this device is text the user names on purpose,
-so its body rides the turn's system prompt, where the skills the agent
-consults on its own stay wrapped as untrusted data. A skill received from
-a paired device is different: the sync gate let it through on its
-provenance, without showing its text, so ``/skill`` refuses its bytes
-until ``/adopt`` has shown them here and the user has named their digest.
+published skill's body rides the turn's system prompt only when its bytes
+are the user's on this device -- written here by hand, or named by their
+digest here: a proposal of the agent or its teacher accepted with the
+digest of its text, or bytes adopted -- the very bytes read once to judge
+and to run them. The skills the agent consults on its own are admitted by
+the same rule and stay wrapped as untrusted data. A skill received from a
+paired device, which the sync gate let through on its provenance without
+showing its text, and the agent's text approved on its name alone before
+proposals, are refused until ``/adopt`` has shown their bytes here and the
+user has named their digest. ``/review`` is where the user reads the
+agent's waiting writes whole, every character a screen hides written as
+its escape, and accepts one by naming its digest.
 
 Executor, router, analyser, librarian, skill registry and the
 conversation factory are seams, resolved lazily when not injected; the
@@ -60,7 +67,8 @@ HELP = (
     "/decline ID       set one proposal aside; the Core does not change\n"
     "/status           show what the onion's queue counted, by event and motive; no word of a conversation\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
-    "/adopt NAME [DIGEST]  show a skill received from a paired device, then adopt those bytes\n"
+    "/adopt NAME [DIGEST]  show a skill's bytes not adopted here, then adopt those bytes\n"
+    "/review [ID [DIGEST|decline]]  the agent's writes waiting for you: list, show one, accept it by its digest\n"
     "/help             list the commands\n"
     "/quit             end the session"
 )
@@ -115,6 +123,33 @@ def _default_skills():
     return get_skill_registry()
 
 
+def _default_pending():
+    from opti_oignon.pending_writes import get_pending_store
+
+    return get_pending_store()
+
+
+def _visible(text):
+    """``text`` as the approval drawer shows it: every character a screen hides written as its escape."""
+    try:
+        from opti_oignon.tool_call_approval import _visible as drawn
+    except Exception:  # noqa: BLE001 - no drawer to agree with: escape all but printable ASCII and newlines
+        return "".join("\\\\" if ch == "\\" else ch if ch == "\n" or " " <= ch <= "~" else ascii(ch)[1:-1]
+                       for ch in str(text))
+    return drawn(str(text))
+
+
+_WRITERS = {"agent": "the agent", "teacher-escalation": "the teacher model"}
+
+
+def _unadopted(registry, skill):
+    """Why a published skill's bytes are not admitted here, in a few words, for one not received by sync."""
+    if registry.rewritten(skill):
+        return "was rewritten through the registry before its text was shown, and never adopted here"
+    writer = _WRITERS.get(skill.source, f"the source '{skill.source}'")
+    return f"was written by {writer} and its text was never adopted here"
+
+
 def _default_new_conversation(title, model):
     from opti_oignon.conversation import create_conversation
 
@@ -126,7 +161,7 @@ class ChatSession:
 
     def __init__(self, *, conversation_id=None, model=None, priority="balanced", refine=False,
                  executor=None, analyze=None, route=None, librarian=None, skills=None,
-                 new_conversation=None):
+                 new_conversation=None, pending=None):
         self.conversation_id = conversation_id
         self.model = model
         self.priority = priority
@@ -136,6 +171,7 @@ class ChatSession:
         self._route = route or _default_route
         self._librarian = librarian
         self._skills = skills
+        self._pending = pending
         self._new_conversation = new_conversation or _default_new_conversation
         self.closed = False
 
@@ -155,6 +191,11 @@ class ChatSession:
         if self._skills is None:
             self._skills = _default_skills()
         return self._skills
+
+    def _pending_seam(self):
+        if self._pending is None:
+            self._pending = _default_pending()
+        return self._pending
 
     # -- entry point --------------------------------------------------------
 
@@ -191,6 +232,7 @@ class ChatSession:
             "status": self._status,
             "skill": self._skill,
             "adopt": self._adopt,
+            "review": self._review,
             "help": self._help,
             "quit": self._quit,
         }.get(name)
@@ -349,14 +391,17 @@ class ChatSession:
         args = args.strip()
         if not ref:
             raise _Refused("/skill needs a skill name and a request")
+        # One read: the bytes judged here are the bytes that ride the prompt.
         skill = self._published_skill(ref)
-        state = self._skills_seam().sync_state(skill.name, skill.category)
-        if state not in ("local", "adopted"):
+        registry = self._skills_seam()
+        if not registry.admits(skill):
             where = f"{skill.category}/{skill.name}"
-            raise _Refused(
-                f"skill {where} arrived from a paired device and these bytes were never adopted here: "
-                f"/adopt {where} shows them"
-            )
+            if registry.received(skill):
+                raise _Refused(
+                    f"skill {where} arrived from a paired device and these bytes were never adopted here: "
+                    f"/adopt {where} shows them"
+                )
+            raise _Refused(f"skill {where} {_unadopted(registry, skill)}: /adopt {where} shows it")
         if not args:
             raise _Refused(f"/skill {ref} needs a request to run the skill on")
         suffix = f"\n\nApply the skill {skill.name} ({skill.category}) v{skill.version}:\n{skill.body.strip()}"
@@ -371,25 +416,101 @@ class ChatSession:
         skill = self._published_skill(ref)
         registry = self._skills_seam()
         where = f"{skill.category}/{skill.name}"
-        state = registry.sync_state(skill.name, skill.category)
-        if state == "local":
-            yield _info(f"skill {where} was written on this device: there is nothing to adopt")
-            return
-        if state == "adopted":
-            yield _info(f"skill {where}: these bytes are already adopted on this device")
+        received = registry.received(skill)
+        if registry.admits(skill):
+            if not received and skill.source == "manual":
+                yield _info(f"skill {where} was written on this device: there is nothing to adopt")
+            else:
+                yield _info(f"skill {where}: these bytes are already adopted on this device")
             return
         if not digest:
-            current = registry.current_digest(skill.name, skill.category)
-            if current is None:
-                raise _Refused(f"skill {where} cannot be read from disk")
-            yield _info(f"skill {where} arrived from a paired device; its text, as it is on disk:\n"
-                        f"{registry.raw_text(skill.name, skill.category)}")
-            yield _info(f"digest {current[:16]}: /adopt {where} {current[:16]} adopts exactly these bytes")
+            origin = "arrived from a paired device" if received else _unadopted(registry, skill)
+            yield _info(f"skill {where} {origin}; its text, as it is on disk, every character a screen hides "
+                        f"written as its escape:\n{_visible(skill.raw)}")
+            yield _info(f"digest {skill.file_digest[:16]}: /adopt {where} {skill.file_digest[:16]} adopts exactly "
+                        "these bytes")
             return
-        adopted = registry.adopt_synced(skill.name, skill.category, digest)
+        adopted = registry.adopt(skill.name, skill.category, digest)
         if adopted is None:
             raise _Refused(f"the digest {digest} does not name the bytes of {where} on disk now: /adopt {where} shows them again")
         yield _info(f"adopted {where} ({adopted[:16]}): /skill runs it now")
+
+    def _review(self, rest):
+        """The agent's writes waiting for the user: list them, show one whole, accept it by its digest, or decline."""
+        from opti_oignon import pending_writes
+
+        pid, _, word = rest.partition(" ")
+        pid, word = pid.strip(), word.strip()
+        queue = self._pending_seam()
+        if not pid:
+            records = queue.list(status="pending")
+            if not records:
+                yield _info("nothing waits for your review")
+                return
+            lines = [f"{len(records)} waiting for your review; /review ID shows one whole:"]
+            for record in records:
+                lines.append(f"  {record.id}  {_review_summary(record)}  "
+                             f"digest {pending_writes.shown_digest(record)[:16]}")
+            yield _info("\n".join(lines))
+            return
+        record = queue.get(pid)
+        if record is None or record.status != "pending":
+            raise _Refused(f"no proposal {pid} waits for your review: /review lists them")
+        if not word:
+            yield _info(self._review_text(record, pending_writes.shown_digest(record)))
+            return
+        if word == "decline":
+            result = pending_writes.decline([pid], pending=queue)[0]
+            if not result.get("declined"):
+                raise _Refused(f"proposal {pid} not declined: {result.get('reason', '')}")
+            yield _info(f"declined {pid}: nothing was written")
+            return
+        result = pending_writes.accept([pid], pending=queue, digests={pid: word},
+                                       skills_registry=self._skills_seam())[0]
+        if not result.get("applied"):
+            reason = str(result.get("reason", ""))
+            if "digest" in reason:
+                raise _Refused(f"the digest {word} does not name what proposal {pid} shows: /review {pid} shows it "
+                               "again")
+            raise _Refused(f"proposal {pid} not applied: {reason}")
+        yield _info(f"accepted {pid}: {result.get('outcome', '')}")
+
+    def _review_text(self, record, digest):
+        """One proposal whole: what it would do, each word as the drawer shows it, and the digest that accepts it."""
+        arguments = record.arguments
+        who = {"agent": "the agent", "teacher": "the teacher model", "extraction": "the extraction"}.get(
+            str(record.provenance.get("source", "")), "the agent")
+        lines = [f"proposal {record.id}: {_review_summary(record)}, proposed by {who}"]
+        if record.store == "skills":
+            lines.append("risk: high -- a skill's text reaches a system prompt")
+            base = arguments.get("base_sha256")
+            target = self._skills_seam().get(arguments.get("name", ""), arguments.get("category", ""),
+                                             draft=bool(arguments.get("draft")))
+            if record.action == "delete":
+                kind = "draft" if arguments.get("draft") else "published skill"
+                now = _visible(target.canonical()) if target is not None else "(no longer there)"
+                lines.append(f"it deletes the {kind} whose text, as it is now, every character a screen hides "
+                             f"written as its escape, is:\n{now}")
+            else:
+                lines.append("its whole text, every character a screen hides written as its escape:")
+                lines.append(_visible(arguments.get("text", "")))
+                if base:
+                    lines.append(f"it replaces the published text whose digest is {base}")
+            if (target.digest() if target is not None else None) != base:
+                lines.append("what it changes changed since it was proposed: accepting it will be refused")
+        else:
+            for key, value in arguments.items():
+                if value is not None:
+                    lines.append(f"{key}: {_visible(value) if isinstance(value, str) else value}")
+        untyped = record.provenance.get("untyped") or []
+        if untyped:
+            lines.append("not typed by you: " + ", ".join(str(name) for name in untyped))
+        read = record.provenance.get("read") or []
+        if read:
+            lines.append("read before proposing: " + ", ".join(str(name) for name in read))
+        lines.append(f"digest {digest}: /review {record.id} {digest[:16]} accepts exactly this; "
+                     f"/review {record.id} decline declines it")
+        return "\n".join(lines)
 
     def _published_skill(self, ref):
         registry = self._skills_seam()
@@ -429,6 +550,17 @@ class ChatSession:
 
 class _Refused(Exception):
     """A command refused by the session itself; its message is the whole reason."""
+
+
+def _review_summary(record):
+    """What accepting a proposal would do, on one line."""
+    arguments = record.arguments
+    if record.store == "skills":
+        what = {"add": "add the skill", "edit": "change the skill", "delete": "delete the skill"}.get(
+            record.action, f"{record.action} the skill")
+        draft = " (its draft)" if arguments.get("draft") else ""
+        return f"{what} {arguments.get('category', '')}/{arguments.get('name', '')}{draft}"
+    return f"{record.action} in {record.store}"
 
 
 def _named(exc):

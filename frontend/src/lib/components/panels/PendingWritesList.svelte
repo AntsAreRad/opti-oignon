@@ -3,9 +3,12 @@
 
   Each proposal says what accepting it would do, shows each of its words
   with where they came from (typed by you, or not), what the agent had read
-  before proposing it and, for a change, what it changes. One checkbox per
-  proposal and one for all; the two buttons act on the selection only and
-  nothing here is saved until the user accepts it. The list holds no state:
+  before proposing it and, for a change, what it changes -- every value
+  whole, every character a screen hides written as its escape. A skill
+  shows where it would be written, its high risk, its whole text, the text
+  it replaces or deletes, and the digest an acceptance names. One checkbox
+  per proposal and one for all; the two buttons act on the selection only
+  and nothing here is saved until the user accepts it. The list holds no state:
   the review container (PendingWritesReview) does, and it is rendered empty
   of markup when nothing waits.
 -->
@@ -18,6 +21,7 @@
 		argumentRows,
 		describeWrite,
 		readBefore,
+		skillView,
 		sourceLabel,
 		targetLine,
 		type PendingWrite,
@@ -53,6 +57,7 @@
 		<p class="oo-pending-hint">Nothing here is saved until you accept it.</p>
 		<ul class="oo-pending-list">
 			{#each items as item (item.id)}
+				{@const skill = skillView(item)}
 				<li class="oo-pending-item" data-pending-id={item.id}>
 					<Checkbox
 						label={describeWrite(item)}
@@ -61,19 +66,38 @@
 						disabled={busy}
 						on:change={() => dispatch('toggle', item.id)}
 					/>
-					<dl class="oo-pending-args">
-						{#each argumentRows(item) as row}
-							<div class="oo-pending-arg">
-								<dt>{row.name}</dt>
-								<dd>
-									<span class="oo-pending-value">{row.value}</span>
-									<span class="oo-pending-origin" data-origin={row.origin}>{ORIGIN_LABELS[row.origin]}</span>
-								</dd>
-							</div>
-						{/each}
-					</dl>
-					{#if targetLine(item)}
-						<p class="oo-pending-note">{targetLine(item)}</p>
+					{#if skill}
+						<p class="oo-pending-note" data-risk="high">High risk: a skill's text reaches a system prompt.</p>
+						<p class="oo-pending-where">{skill.where}{skill.draft ? ' (its draft)' : ''}</p>
+						{#if skill.text}
+							<pre class="oo-pending-text" data-pending-text="proposed">{skill.text}</pre>
+						{/if}
+						{#if skill.replaces}
+							<p class="oo-pending-note">{item.action === 'delete' ? 'It deletes this text:' : 'It replaces this text:'}</p>
+							<pre class="oo-pending-text" data-pending-text="current">{skill.replaces}</pre>
+						{/if}
+						{#if skill.tested}
+							<p class="oo-pending-note">Its verification steps ran in the sandbox.</p>
+						{/if}
+						{#if skill.changed}
+							<p class="oo-pending-note" data-risk="high">What it changes changed since it was proposed: accepting it will be refused.</p>
+						{/if}
+						<p class="oo-pending-note">Digest <code class="oo-pending-digest">{skill.digest}</code>: accepting names exactly this text.</p>
+					{:else}
+						<dl class="oo-pending-args">
+							{#each argumentRows(item) as row}
+								<div class="oo-pending-arg">
+									<dt>{row.name}</dt>
+									<dd>
+										<span class="oo-pending-value">{row.value}</span>
+										<span class="oo-pending-origin" data-origin={row.origin}>{ORIGIN_LABELS[row.origin]}</span>
+									</dd>
+								</div>
+							{/each}
+						</dl>
+						{#if targetLine(item)}
+							<p class="oo-pending-note">{targetLine(item)}</p>
+						{/if}
 					{/if}
 					{#if readBefore(item)}
 						<p class="oo-pending-note">{readBefore(item)}</p>
@@ -202,6 +226,38 @@
 		margin: 0;
 		font-size: var(--oo-text-2xs);
 		color: var(--oo-fg-tertiary);
+	}
+
+	/* A skill's risk is said in the status ink alone: washes belong to the primitives. */
+	.oo-pending-note[data-risk='high'] {
+		color: var(--oo-fg-warning);
+	}
+
+	.oo-pending-where {
+		margin: 0;
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-secondary);
+		overflow-wrap: anywhere;
+	}
+
+	/* The whole text, never cut: it scrolls where it is long. */
+	.oo-pending-text {
+		margin: 0;
+		max-height: 24rem;
+		overflow: auto;
+		padding: var(--oo-space-2);
+		border-radius: var(--oo-radius-sm);
+		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-2xs);
+		color: var(--oo-fg-secondary);
+		background: var(--oo-bg-subtle);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.oo-pending-digest {
+		font-family: var(--oo-font-mono);
+		overflow-wrap: anywhere;
 	}
 
 	.oo-pending-actions {

@@ -2,10 +2,11 @@
 """Live API route for the sandboxed agent loop (Theme 3 / Odysseus Core).
 
 Wires the agent half of Odysseus into a running agent: the streaming loop
-(``agent.loop``), the per-mode tool set (``agent.tools``), the approval-gated
-SKILL.md registry and its ``manage_skills`` tool (``agent.skills``), the
-teacher-draft publish path, and the working-memory block. It exposes the
-contract the agent panel consumes (frontend api/agent.ts):
+(``agent.loop``), the per-mode tool set (``agent.tools``), the SKILL.md
+registry and its ``manage_skills`` tool (``agent.skills``), whose writes
+are proposals in the review queue, the teacher's draft entry, and the
+working-memory block. It exposes the contract the agent panel consumes
+(frontend api/agent.ts):
 
 - ``GET  /api/agent/status``  -> ``{running, rounds, stop_reason}``
 - ``POST /api/agent/cancel``  -> ``{cancelled}``
@@ -16,17 +17,23 @@ It also mounts the SKILL.md registry surface that the skills-manager panel
 consumes (frontend api/skills.ts, Goal 0, closing the carry-over):
 
 - ``GET    /api/agent/skills``                       -> ``{skills: [...]}``
-- ``GET    /api/agent/skills/{category}/{name}``     -> one skill, with its body
+- ``GET    /api/agent/skills/{category}/{name}?status=`` -> the draft or the
+  published skill named, its text whole and shown, with its digest
 - ``POST   /api/agent/skills/{category}/{name}/publish`` -> publish a draft
-- ``DELETE /api/agent/skills/{category}/{name}``     -> ``{deleted}``
+  named by the digest of the text shown
+- ``DELETE /api/agent/skills/{category}/{name}?status=&sha256=`` -> delete
+  the draft or the published skill named, by that digest
+- ``POST   /api/agent/skills/{category}/{name}/adopt`` -> adopt the bytes of
+  a published skill, named by their digest
 
 The skills routes read the on-disk ``SkillRegistry``; the path segments are
 sanitised and contained inside the registry itself, and the handlers map errors
-to HTTP codes rather than raising into the response path.
+to HTTP codes rather than raising into the response path. A digest that names
+other bytes than the ones there now is refused (409): nothing is done.
 
 Bulbe approvals are NOT duplicated here: the tool-call approval surface is
 reused verbatim from the existing ``/api/security/tool-approval/*`` API, which
-the loop's ``approval_fn`` and the ``manage_skills`` gate already drive.
+the loop's ``approval_fn`` drives.
 
 Design for testability and isolation: the run engine, ``AgentRunManager``, is a
 plain object (threading plus an event broadcast) with no web dependency, so the
@@ -70,7 +77,7 @@ except Exception:  # pragma: no cover - constrained environments only
 
 # Teacher escalation wiring (driver-side). The chokepoints themselves live
 # in ``agent.teacher`` (decision + escalation, never raising) and
-# ``agent.skills.publish_teacher_draft`` (human gate first, sandbox-tested)
+# ``agent.skills.publish_teacher_draft`` (sandbox-tested, then proposed)
 # and keep their own contracts; the driver only decides WHEN to consult
 # them. Event kinds are stable strings: clients key on them.
 EVENT_TEACHER_GUIDANCE = "teacher_guidance"
@@ -106,8 +113,9 @@ def _teacher_failure_observations(result: Any) -> str:
 # The run engine (no web dependency)
 
 # The tools whose writes persist into stores later turns read back. A run
-# binds them to a pending-write gate of its own (opti_oignon.pending_writes).
-_PERSISTENT_WRITES = frozenset({"manage_memory", "manage_notes"})
+# binds them to a pending-write gate of its own (opti_oignon.pending_writes);
+# a skill write is always proposed there.
+_PERSISTENT_WRITES = frozenset({"manage_memory", "manage_notes", "manage_skills"})
 
 # The tools whose results bring the run something to read: the web, files,
 # a command's output, a subtask's answer. A write tool's own result is only
@@ -261,15 +269,18 @@ class AgentRunManager:
         conversation_id: str,
         run_id: str,
         user_id: str | None,
+        skills_factory: Callable[[Any], Any] | None = None,
     ) -> dict[str, Any]:
         """Bind the run's persistent-write tools to a pending-write gate of the run's own.
 
-        The task's typed units endorse a write when the caller vouches that
-        the task is the words the user typed (``turn_origin`` typed, as the
-        agent route does); a run no caller vouches for endorses nothing.
+        The task's typed units endorse a memory or notes write when the
+        caller vouches that the task is the words the user typed
+        (``turn_origin`` typed, as the agent route does); a run no caller
+        vouches for endorses nothing, and a skill write is always proposed.
         Every other write is proposed to the user, naming the tools the run
-        had read before it. A gate that cannot be built withdraws the write
-        tools from the run rather than leave them writing.
+        had read before it. ``skills_factory`` builds the run's skills
+        handler over the gate. A gate that cannot be built withdraws the
+        write tools from the run rather than leave them writing.
         """
         if not any(name in handlers for name in _PERSISTENT_WRITES):
             return handlers
@@ -284,6 +295,12 @@ class AgentRunManager:
                 user_id=user_id,
             )
             bound = agent_tools.bind_write_gate(handlers, gate)
+            if agent_tools.TOOL_MANAGE_SKILLS in bound:
+                if skills_factory is None:
+                    # No skills handler over the run's gate: withdrawn, never left writing.
+                    bound.pop(agent_tools.TOOL_MANAGE_SKILLS)
+                else:
+                    bound[agent_tools.TOOL_MANAGE_SKILLS] = skills_factory(gate)
             return {name: self._reading(name, handler) if name in _PERSISTENT_WRITES else handler
                     for name, handler in bound.items()}
         except Exception:
@@ -360,22 +377,14 @@ class AgentRunManager:
                     sandbox = owned_sandbox
             with self._lock:
                 self._owned_sandbox = owned_sandbox
-            # Bind manage_skills (Daily only) to this run's conversation, sandbox,
-            # and gate so its writes go through the right human approval.
-            # The person decides inside the handler, which may take the
-            # approval's whole timeout: a yes counts only if the machine is
-            # still Daily once they answered.
+            # manage_skills (Daily only) proposes into this run's own review
+            # gate, with the run's sandbox for verification steps: no one is
+            # asked during the run, the person reviews the whole text later.
+            skills_factory = None
             if agent_tools.TOOL_MANAGE_SKILLS in handlers:
-                handlers[agent_tools.TOOL_MANAGE_SKILLS] = self._reading(
-                    agent_tools.TOOL_MANAGE_SKILLS,
-                    agent_skills.make_manage_skills_handler(
-                        registry=registry,
-                        approval_fn=_still_daily(approval_fn, mode, approval_manager),
-                        sandbox=sandbox,
-                        conversation_id=conversation_id,
-                        manager=approval_manager,
-                    ),
-                )
+                def skills_factory(gate: Any) -> Any:
+                    return agent_skills.make_manage_skills_handler(
+                        registry=registry, sandbox=sandbox, conversation_id=conversation_id, gate=gate)
             with self._lock:
                 self._read = []
             handlers = self._gate_persistent_writes(
@@ -385,6 +394,7 @@ class AgentRunManager:
                 conversation_id=conversation_id,
                 run_id=uuid.uuid4().hex[:12],
                 user_id=user_id,
+                skills_factory=skills_factory,
             )
             native = tool_set.native_tools()
             prompt = system_prompt or agent_tools.system_prompt_section_for(mode)
@@ -406,8 +416,7 @@ class AgentRunManager:
                 "task": task,
                 "mode": mode,
                 "conversation_id": conversation_id,
-                "approval_fn": approval_fn,
-                "approval_manager": approval_manager,
+                "user_id": user_id,
                 "sandbox": sandbox,
             }
         kwargs: dict[str, Any] = dict(
@@ -499,8 +508,8 @@ class AgentRunManager:
     def _teacher_estop_blocked() -> bool:
         """True when the emergency stop is engaged or indeterminable.
 
-        The hook calls a model and may submit a draft to the approval
-        gate, so an engaged stop skips it -- and an unavailable stop
+        The hook calls a model and may propose a draft to the user, so an
+        engaged stop skips it -- and an unavailable stop
         module skips it too: an indeterminable stop state never wakes
         the path (fail closed).
         """
@@ -516,11 +525,12 @@ class AgentRunManager:
 
         Armed only by the explicit configuration opt-in; skipped for a
         cancelled run and under an engaged (or indeterminable) emergency
-        stop. The guidance surfaces as a run event; a proposed draft is
-        submitted only through the gated publish entry, carrying the
-        run's own approval gate, sandbox, conversation and approval
-        manager, and only in the daily mode (mirroring the skill tool's
-        exposure). Never raises into the run thread.
+        stop. The guidance surfaces as a run event; a draft is submitted
+        only through the teacher's draft entry, which proposes it to the
+        user, carrying the run's own sandbox and conversation and no
+        approval gate -- no one is asked as the run ends -- and only in the
+        daily mode (mirroring the skill tool's exposure). Never raises into
+        the run thread.
         """
         try:
             with self._lock:
@@ -564,18 +574,17 @@ class AgentRunManager:
             draft = getattr(outcome, "draft", None)
             if draft is None or not bool(getattr(outcome, "escalated", False)):
                 return
-            # The machine's mode at publication, never looser than the run's:
-            # a machine that escalated during the run publishes nothing, and
-            # neither does one that escalated while a person decided.
+            # The machine's mode when the draft is submitted, never looser than
+            # the run's: a machine that escalated during the run submits
+            # nothing. The draft is proposed: no one is asked as the run ends.
             run_mode = str(ctx.get("mode", "")).strip().lower() or None
             if run_mode is None or _run_mode(run_mode) != "daily":
                 return
             publication = agent_skills.publish_teacher_draft(
                 draft,
-                approval_fn=_still_daily(ctx.get("approval_fn"), run_mode, ctx.get("approval_manager")),
                 sandbox=ctx.get("sandbox"),
                 conversation_id=str(ctx.get("conversation_id", "")),
-                manager=ctx.get("approval_manager"),
+                user_id=ctx.get("user_id"),
             )
             self._on_event(agent_loop.AgentEvent(
                 kind=EVENT_TEACHER_DRAFT,
@@ -584,8 +593,10 @@ class AgentRunManager:
                     "published": bool(
                         getattr(publication, "published", False)
                     ),
+                    "proposed": bool(getattr(publication, "proposed", False)),
                     "reason": str(getattr(publication, "reason", "")),
                     "name": str(getattr(draft, "name", "")),
+                    "id": str(getattr(publication, "proposal_id", "")),
                 },
             ))
         except Exception:  # the hook never breaks the run
@@ -699,32 +710,6 @@ def _run_mode(requested: str | None) -> str:
     return allowlists.floor_mode(requested)
 
 
-def _still_daily(approval_fn: Any, run_mode: str | None, manager: Any = None) -> Any:
-    """The run's approval gate, read again once a person has answered: a yes counts only if the machine is still Daily.
-
-    A person may take up to the approval's timeout to decide, and the machine
-    may escalate meanwhile. A run with no gate of its own asks the approval
-    queue (``manager``, or the default one), the entry's own default, and
-    its answer is read the same way.
-    """
-    if not callable(approval_fn):
-
-        def approval_fn(conversation_id: str, tool_name: str, arguments: dict | None = None, **kwargs: Any) -> bool:
-            try:
-                from opti_oignon.agent import allowlists
-            except Exception:
-                return False
-            return allowlists.request_approval(conversation_id, tool_name, arguments, manager=manager, **kwargs)
-
-    def gate(*args: Any, **kwargs: Any) -> bool:
-        if not run_mode:
-            return False
-        return bool(approval_fn(*args, **kwargs)) and _run_mode(run_mode) == "daily"
-
-    gate.__wrapped__ = approval_fn  # type: ignore[attr-defined]
-    return gate
-
-
 def _run_provenance(task: str, turn_origin: str, approval_fn: Any, conversation_id: str) -> Any:
     """The run's provenance: the task, whole, when its caller vouches it is typed, and its way to ask the user.
 
@@ -780,23 +765,63 @@ class SkillNotFound(Exception):
     """A requested skill (published or draft) does not exist in the registry."""
 
 
-def _skill_payload(skill: Any, *, with_body: bool = False, registry: Any = None) -> dict[str, Any]:
-    """Serialise a skill for the wire: metadata, plus the body on a single view.
+class SkillDigestRefused(Exception):
+    """A publication, deletion or adoption whose digest does not name the text there now: nothing was done."""
 
-    A published skill also says what its bytes are to this device --
+
+_STATUSES = ("published", "draft")
+
+
+def _shown(text: str) -> str:
+    """``text`` as the approval drawer shows it, never cut: every character a screen hides written as its escape."""
+    try:
+        from opti_oignon.tool_call_approval import _visible
+    except Exception:  # noqa: BLE001 - no drawer to agree with: escape everything past ASCII, hide nothing
+        return ascii(text)[1:-1]
+    return _visible(text)
+
+
+def _skill_payload(skill: Any, *, with_body: bool = False, registry: Any = None) -> dict[str, Any]:
+    """Serialise a skill for the wire: metadata, its key and its digest, plus its text shown on a single view.
+
+    The key tells a draft from the published skill of the same name. The
+    text is the canonical body, the one the digest names, with its rendering
+    as the approval drawer shows it; a published skill on a single view also
+    carries its file's bytes as shown and their digest, the ones an adoption
+    names. A published skill also says what its bytes are to this device --
     ``local``, ``adopted``, or ``unadopted`` when it arrived from a paired
-    device and was never shown and adopted here -- when the registry can say.
+    device and was never shown and adopted here -- and whether they may enter
+    a prompt (``prompt_state``), when the registry can say.
     """
     data = dict(skill.to_dict())
+    data["key"] = f"{skill.status}:{skill.category}/{skill.name}"
+    data["sha256"] = skill.digest()
     if with_body:
-        data["body"] = skill.body
-    sync_state = getattr(registry, "sync_state", None)
-    if sync_state is not None and data.get("status") == "published":
-        try:
-            data["sync_state"] = sync_state(skill.name, skill.category)
-        except Exception:  # noqa: BLE001 - a state that cannot be read is left out
-            logger.debug("skill sync state unreadable for %s/%s", skill.category, skill.name, exc_info=True)
+        text = skill.canonical()
+        data["body"] = text
+        data["shown"] = _shown(text)
+        if skill.status == "published" and getattr(skill, "raw", ""):
+            data["raw_shown"] = _shown(skill.raw)
+            data["file_sha256"] = skill.file_digest
+    if data.get("status") == "published":
+        # Each state read by its own name: the write census reads a literal name, never a variable one.
+        states = (("sync_state", getattr(registry, "sync_state", None)),
+                  ("prompt_state", getattr(registry, "prompt_state", None)))
+        for field_name, state in states:
+            if state is None:
+                continue
+            try:
+                data[field_name] = state(skill.name, skill.category)
+            except Exception:  # noqa: BLE001 - a state that cannot be read is left out
+                logger.debug("skill %s unreadable for %s/%s", field_name, skill.category, skill.name, exc_info=True)
     return data
+
+
+def _refused(refused: LookupError, where: str) -> Exception:
+    """The route's answer to a registry refusal: nothing there, or a digest that names other bytes."""
+    if getattr(refused, "reason", "") == "missing":
+        return SkillNotFound(where)
+    return SkillDigestRefused(str(refused))
 
 
 def skills_list_payload(registry: Any, *, include_drafts: bool = True) -> dict[str, Any]:
@@ -805,31 +830,52 @@ def skills_list_payload(registry: Any, *, include_drafts: bool = True) -> dict[s
     return {"skills": [_skill_payload(s, registry=registry) for s in skills]}
 
 
-def skill_view_payload(registry: Any, category: str, name: str) -> dict[str, Any]:
-    """One skill with its full body; the published one if present, else its draft."""
-    skill = registry.get(name, category, draft=False)
-    if skill is None:
-        skill = registry.get(name, category, draft=True)
+def skill_view_payload(registry: Any, category: str, name: str, status: str | None = None) -> dict[str, Any]:
+    """One skill with its full text shown: the one ``status`` names, published or draft.
+
+    A draft's view is never the published skill, nor the reverse. Without a
+    status, the published skill if present, else its draft, the payload's
+    status saying which.
+    """
+    if status:
+        if status not in _STATUSES:
+            raise ValueError("status must be published or draft")
+        skill = registry.get(name, category, draft=(status == "draft"))
+    else:
+        skill = registry.get(name, category, draft=False) or registry.get(name, category, draft=True)
     if skill is None:
         raise SkillNotFound(f"{category}/{name}")
     return _skill_payload(skill, with_body=True, registry=registry)
 
 
-def skill_publish_payload(registry: Any, category: str, name: str) -> dict[str, Any]:
-    """Promote a draft to published; raise SkillNotFound when no draft exists."""
-    published = registry.publish(name, category)
-    if published is None:
-        raise SkillNotFound(f"{category}/{name}")
-    return _skill_payload(published, with_body=True)
+def skill_publish_payload(registry: Any, category: str, name: str, sha256: str) -> dict[str, Any]:
+    """Publish a draft as the text the person was shown, named by its digest; a draft changed since is refused."""
+    try:
+        published = registry.publish_draft(name, category, sha256)
+    except LookupError as refused:
+        raise _refused(refused, f"{category}/{name}") from refused
+    return _skill_payload(published, with_body=True, registry=registry)
 
 
-def skill_delete_payload(registry: Any, category: str, name: str) -> dict[str, bool]:
-    """Delete a skill: the published one if present, else the draft. Always returns."""
-    if registry.exists(name, category, draft=False):
-        deleted = registry.delete(name, category, draft=False)
-    else:
-        deleted = registry.delete(name, category, draft=True)
+def skill_delete_payload(registry: Any, category: str, name: str, *, status: str, sha256: str) -> dict[str, bool]:
+    """Delete the draft or the published skill ``status`` names, only when ``sha256`` names the text shown."""
+    if status not in _STATUSES:
+        raise ValueError("status must name the target: published or draft")
+    try:
+        deleted = registry.delete_named(name, category, draft=(status == "draft"), sha256=sha256)
+    except LookupError as refused:
+        raise _refused(refused, f"{category}/{name}") from refused
     return {"deleted": bool(deleted)}
+
+
+def skill_adopt_payload(registry: Any, category: str, name: str, sha256: str) -> dict[str, Any]:
+    """Adopt the bytes of a published skill not admitted to a prompt here, named by their whole digest."""
+    digest = str(sha256 or "").strip().lower()
+    if registry.get(name, category) is None:
+        raise SkillNotFound(f"{category}/{name}")
+    if len(digest) != 64 or registry.adopt(name, category, digest) != digest:
+        raise SkillDigestRefused(f"the digest does not name the bytes of {category}/{name} on disk now")
+    return skill_view_payload(registry, category, name, status="published")
 
 
 # FastAPI surface (guarded; thin wrappers over the engine)
@@ -946,39 +992,72 @@ try:
             logger.exception("skills list failed")
             raise HTTPException(status_code=500, detail="Failed to list skills")
 
+    class SkillDigest(BaseModel):
+        """The digest of the text the person was shown, whole."""
+
+        sha256: str
+
     @router.get("/skills/{category}/{name}")
-    def get_skill(category: str, name: str) -> dict[str, Any]:
-        """One skill with its full body; the published one if present, else its draft."""
+    def get_skill(category: str, name: str, status: str = "") -> dict[str, Any]:
+        """One skill with its full text shown: the draft or the published one its status names.
+
+        Without a status, the published one if present, else its draft, the
+        payload's status saying which.
+        """
         registry = _resolve_skill_registry()
         try:
-            return skill_view_payload(registry, category, name)
+            return skill_view_payload(registry, category, name, status=status or None)
         except SkillNotFound:
             raise HTTPException(status_code=404, detail="Skill not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         except Exception:  # pragma: no cover - registry read is defensive
             logger.exception("skill fetch failed")
             raise HTTPException(status_code=500, detail="Failed to read skill")
 
     @router.post("/skills/{category}/{name}/publish")
-    def publish_skill(category: str, name: str) -> dict[str, Any]:
-        """Promote a draft to published: the human approval of an agent proposal."""
+    def publish_skill(category: str, name: str, request: SkillDigest) -> dict[str, Any]:
+        """Publish a draft as the text the person was shown, named by its digest; a draft changed since is refused."""
         registry = _resolve_skill_registry()
         try:
-            return skill_publish_payload(registry, category, name)
+            return skill_publish_payload(registry, category, name, request.sha256)
         except SkillNotFound:
             raise HTTPException(status_code=404, detail="No draft to publish")
+        except SkillDigestRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         except Exception:  # pragma: no cover - registry write is defensive
             logger.exception("skill publish failed")
             raise HTTPException(status_code=500, detail="Failed to publish skill")
 
     @router.delete("/skills/{category}/{name}")
-    def delete_skill(category: str, name: str) -> dict[str, bool]:
-        """Delete a skill: the published one if present, else the draft."""
+    def delete_skill(category: str, name: str, status: str, sha256: str) -> dict[str, bool]:
+        """Delete the draft or the published skill its status names, only when the digest names the text shown."""
         registry = _resolve_skill_registry()
         try:
-            return skill_delete_payload(registry, category, name)
+            return skill_delete_payload(registry, category, name, status=status, sha256=sha256)
+        except SkillNotFound:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        except SkillDigestRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         except Exception:  # pragma: no cover - registry write is defensive
             logger.exception("skill delete failed")
             raise HTTPException(status_code=500, detail="Failed to delete skill")
+
+    @router.post("/skills/{category}/{name}/adopt")
+    def adopt_skill(category: str, name: str, request: SkillDigest) -> dict[str, Any]:
+        """Adopt the bytes of a published skill not admitted to a prompt here, named by their whole digest."""
+        registry = _resolve_skill_registry()
+        try:
+            return skill_adopt_payload(registry, category, name, request.sha256)
+        except SkillNotFound:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        except SkillDigestRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except Exception:  # pragma: no cover - registry write is defensive
+            logger.exception("skill adoption failed")
+            raise HTTPException(status_code=500, detail="Failed to adopt skill")
 
 except Exception:  # pragma: no cover - FastAPI absent (e.g. isolated tests)
     router = None  # type: ignore[assignment]

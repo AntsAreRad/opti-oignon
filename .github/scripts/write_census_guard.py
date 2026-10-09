@@ -422,9 +422,11 @@ STORES = {
     ),
     "skills": _store(
         "opti_oignon/agent/skills.py", classes=("SkillRegistry",), accesses=("get_skill_registry",),
-        writes=("add", "update", "patch", "publish", "delete", "apply_synced_skill", "adopt_synced"),
-        quiet=("delete",),
-        reason="the skills, whose text re-enters the prompt when relevant (a synced skill only once adopted)",
+        writes=("add", "update", "patch", "publish", "delete", "apply_synced_skill", "adopt_synced",
+                "write_accepted", "publish_draft", "delete_named", "adopt"),
+        quiet=("delete", "delete_named"),
+        reason="the skills, whose text re-enters the prompt once admitted: written here by hand, or its bytes "
+               "named by their digest on this device",
     ),
     "core": _store(
         "opti_oignon/memory/core_store.py", classes=("CoreStore",), writes=("add", "supersede"),
@@ -539,15 +541,6 @@ STORES = {
 # The gates. A kind, the module that defines it, the name it is called or
 # defined by there, and the contracts that prove it.
 GATES = {
-    "skill.approval": Gate(
-        "verdict", "opti_oignon/agent/skills.py", "_gate", ("wg1",),
-        "the user approves each skill action the agent asks for -- its name, category and action; the request "
-        "does not carry the body -- and a refusal leaves nothing written",
-    ),
-    "teacher.approval": Gate(
-        "verdict", "opti_oignon/agent/teacher.py", "request_skill_approval", ("tp1",),
-        "the user approves a teacher draft, by its name, category and source, before it is published",
-    ),
     "typed.turns": Gate(
         "filter", "opti_oignon/memory/auto_capture.py", "typed_turns", ("ac1", "pw8"),
         "facts are drawn from the words the user typed, and from nothing else",
@@ -557,8 +550,10 @@ GATES = {
         "an agent write goes through only when the user typed its words whole; anything else is proposed",
     ),
     "review.acceptance": Gate(
-        "acceptance", "opti_oignon/pending_writes.py", "accept", ("pw5", "pw14"),
-        "a proposal is written only once the user accepts it",
+        "acceptance", "opti_oignon/pending_writes.py", "accept", ("pw5", "pw14", "ap11", "ap18"),
+        "a proposal is written only once the user accepts it, in a route or at the terminal; a skill only by the "
+        "digest of the text shown, its bytes hashed again as they are written",
+        ("opti_oignon/cli/session.py",),
     ),
     "review.recovery": Gate(
         "decision", "opti_oignon/pending_writes.py", "recover", ("pw27",),
@@ -591,7 +586,6 @@ GATES = {
 
 # (module, store) -> the gates its sites pass.
 GATED = {
-    ("opti_oignon/agent/skills.py", "skills"): ("skill.approval", "teacher.approval"),
     ("opti_oignon/api/routes_memory.py", "extraction"): ("typed.turns",),
     ("opti_oignon/memory/auto_capture.py", "extraction"): ("typed.turns",),
     ("opti_oignon/memory/librarian.py", "core"): ("core.user",),
@@ -599,6 +593,7 @@ GATED = {
     ("opti_oignon/memory/peels.py", "peels"): ("peel.eviction", "peel.ladder", "peel.leaf", "peel.parent"),
     ("opti_oignon/pending_writes.py", "facts"): ("review.endorsement", "review.acceptance", "review.recovery"),
     ("opti_oignon/pending_writes.py", "notes"): ("review.endorsement", "review.acceptance", "review.recovery"),
+    ("opti_oignon/pending_writes.py", "skills"): ("review.endorsement", "review.acceptance", "review.recovery"),
 }
 
 _TRANSCRIPT = "the conversation's own messages, written as they happen and read back by role, each with its origin"
@@ -612,7 +607,9 @@ EXEMPT = {
         "evaluation", "the needle evaluation plants its haystacks in a conversation store at the path its caller "
                       "gives, with sync publishing off; the user's own store is never its default"),
     ("opti_oignon/agentic_executor.py", "conversation"): ("transcript", _TRANSCRIPT),
-    ("opti_oignon/api/routes_agent.py", "skills"): ("route", "the user publishes or deletes a skill they reviewed"),
+    ("opti_oignon/api/routes_agent.py", "skills"): (
+        "route", "the user publishes a draft, deletes a draft or a skill, or adopts a skill's bytes, each named by "
+                 "the digest of what they were shown"),
     ("opti_oignon/api/routes_branches.py", "branches"): ("route", _ROUTE),
     ("opti_oignon/api/routes_cache.py", "semantic_cache"): (
         "route", "the user turns the cache on or off from its settings route; the switch adds no content"),
@@ -631,7 +628,8 @@ EXEMPT = {
     ("opti_oignon/cli/session.py", "conversation"): (
         "gesture", "the terminal client opens a conversation when its user starts one"),
     ("opti_oignon/cli/session.py", "skills"): (
-        "gesture", "the user adopts a synced skill, named by its digest, on the command line"),
+        "gesture", "the user adopts a skill's bytes not admitted here, named by their digest, on the command "
+                   "line"),
     ("opti_oignon/conversation.py", "conversation"): ("script", "the module's self-test, run only as a program"),
     ("opti_oignon/conversation_wipe.py", "conversation"): ("quiet", "the wipe deletes conversations"),
     ("opti_oignon/executor.py", "conversation"): (
@@ -696,7 +694,7 @@ ARGUED_SITES = {
     ("opti_oignon/cli/session.py", "conversation"): (
         ("_default_new_conversation", "create_conversation"),),
     ("opti_oignon/cli/session.py", "skills"): (
-        ("ChatSession._adopt", "adopt_synced"),),
+        ("ChatSession._adopt", "adopt"),),
     ("opti_oignon/executor.py", "semantic_cache"): (
         ("Executor.execute_cascade", "put"), ("Executor.execute_speculative", "put"),),
     ("opti_oignon/executor.py", "conversation"): (

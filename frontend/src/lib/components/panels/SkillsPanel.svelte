@@ -1,14 +1,18 @@
 <!--
   SkillsPanel.svelte (Theme 3 / Odysseus Core)
   The skills-manager panel for the evolving-skills SKILL.md registry, built on
-  the lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). It
-  browses the registry over $lib/api/skills -- published skills and the drafts
-  the agent proposes -- lets you expand a skill to read its procedure, and
-  surfaces the approval-gated write actions: publishing a draft (the human
-  approval that turns an agent proposal into a published skill) and deleting one.
-  Drafts are clearly marked as awaiting approval. Updates announce through an
-  aria-live region. Design-system tokens only (--oo-*); lucide icons through
-  Icon.
+  the lib/ds primitives (Card, Button, Icon, EmptyState, InlineError). The
+  skills the agent and its teacher write wait at the top as proposals, in the
+  review the Memory and Notes panels share: each one whole, every character a
+  screen hides written as its escape, accepted by the digest of its text.
+  Below, the registry over $lib/api/skills: published skills and the drafts
+  left from before proposals, one row each, keyed by its status so a draft
+  and the published skill of the same name never share a row. Expanding a row
+  shows exactly that item's text; publishing a draft, deleting a draft or a
+  published skill, and adopting a published skill's bytes each send the
+  digest of what was shown, and every button names its target. Updates
+  announce through an aria-live region. Design-system tokens only (--oo-*);
+  lucide icons through Icon.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -19,11 +23,14 @@
 		getSkill,
 		publishSkill,
 		deleteSkill,
+		adoptSkill,
+		deleteLabel,
 		isDraft,
 		type Skill,
 		type SkillStatus
 	} from '$lib/api/skills';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import PendingWritesReview from './PendingWritesReview.svelte';
 
 	type Filter = 'all' | 'published' | 'drafts';
 
@@ -32,17 +39,13 @@
 	let error: string | null = null;
 	let filter: Filter = 'all';
 	let selectedKey: string | null = null;
-	let bodyByKey: Record<string, string> = {};
+	let viewed: Record<string, Skill> = {};
 	let busyKey: string | null = null;
 
 	const STATUS_ICON: Record<SkillStatus, IconName> = {
 		draft: 'file-clock',
 		published: 'badge-check'
 	};
-
-	function keyOf(skill: Skill): string {
-		return `${skill.category}/${skill.name}`;
-	}
 
 	$: filtered = skills.filter((s) => {
 		if (filter === 'published') return s.status === 'published';
@@ -57,6 +60,7 @@
 		error = null;
 		try {
 			skills = await listSkills(true);
+			viewed = {};
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load skills';
 		} finally {
@@ -65,52 +69,53 @@
 	}
 
 	async function toggleBody(skill: Skill) {
-		const key = keyOf(skill);
-		if (selectedKey === key) {
+		if (selectedKey === skill.key) {
 			selectedKey = null;
 			return;
 		}
-		selectedKey = key;
-		if (bodyByKey[key] === undefined) {
-			try {
-				const full = await getSkill(skill.category, skill.name);
-				bodyByKey = { ...bodyByKey, [key]: full.body ?? '' };
-			} catch (e) {
-				toastError(e instanceof Error ? e.message : 'Failed to load skill');
-			}
+		selectedKey = skill.key;
+		try {
+			const full = await getSkill(skill.category, skill.name, skill.status);
+			viewed = { ...viewed, [skill.key]: full };
+		} catch (e) {
+			toastError(e instanceof Error ? e.message : 'Failed to load skill');
 		}
 	}
 
-	async function handlePublish(skill: Skill) {
-		busyKey = keyOf(skill);
+	async function act(skill: Skill, run: () => Promise<unknown>, done: string, failed: string) {
+		busyKey = skill.key;
 		try {
-			await publishSkill(skill.category, skill.name);
-			toastSuccess(`Published ${skill.name}`);
+			await run();
+			toastSuccess(done);
 			await load();
 		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to publish skill');
+			toastError(e instanceof Error ? e.message : failed);
 		} finally {
 			busyKey = null;
 		}
 	}
 
-	async function handleDelete(skill: Skill) {
-		busyKey = keyOf(skill);
-		try {
-			await deleteSkill(skill.category, skill.name);
-			toastSuccess(`Deleted ${skill.name}`);
-			await load();
-		} catch (e) {
-			toastError(e instanceof Error ? e.message : 'Failed to delete skill');
-		} finally {
-			busyKey = null;
-		}
+	function handlePublish(skill: Skill, shown: Skill) {
+		act(skill, () => publishSkill(skill.category, skill.name, shown.sha256), `Published ${skill.name}`,
+			'Failed to publish skill');
+	}
+
+	function handleAdopt(skill: Skill, shown: Skill) {
+		act(skill, () => adoptSkill(skill.category, skill.name, shown.file_sha256 ?? ''), `Adopted ${skill.name}`,
+			'Failed to adopt skill');
+	}
+
+	function handleDelete(skill: Skill, shown: Skill) {
+		act(skill, () => deleteSkill(skill.category, skill.name, skill.status, shown.sha256), `Deleted ${skill.name}`,
+			'Failed to delete skill');
 	}
 
 	onMount(load);
 </script>
 
 <section class="skills-panel">
+	<PendingWritesReview store="skills" on:decided={load} />
+
 	<header class="skills-header">
 		<Button variant="ghost" on:click={load} disabled={loading}>
 			<Icon name="refresh-cw" />
@@ -139,7 +144,7 @@
 	{#if draftCount > 0}
 		<p class="skills-approval-note" role="note">
 			<Icon name="shield-alert" />
-			Drafts are agent-proposed and stay unpublished until you approve them below.
+			A draft stays unpublished until you read it below and publish that very text.
 		</p>
 	{/if}
 
@@ -154,19 +159,19 @@
 			<EmptyState
 				icon="book-marked"
 				title="No skills yet"
-				description="Skills the agent learns and you approve will appear here."
+				description="Skills the agent learns and you accept will appear here."
 			/>
 		{:else}
-			{#each filtered as skill (keyOf(skill))}
+			{#each filtered as skill (skill.key)}
 				<Card>
-					<div class="skill-row">
+					<div class="skill-row" data-skill-key={skill.key}>
 						<div class="skill-main">
 							<Icon name={STATUS_ICON[skill.status]} />
 							<div class="skill-meta">
 								<button
 									type="button"
 									class="skill-name"
-									aria-expanded={selectedKey === keyOf(skill)}
+									aria-expanded={selectedKey === skill.key}
 									on:click={() => toggleBody(skill)}
 								>
 									{skill.name}
@@ -174,37 +179,57 @@
 								<span class="skill-sub">{skill.category} · v{skill.version} · {skill.source}</span>
 							</div>
 							<span class="skill-badge skill-badge-{skill.status}">
-								{skill.status === 'draft' ? 'Draft - awaiting approval' : 'Published'}
+								{skill.status === 'draft' ? 'Draft - not published' : 'Published'}
 							</span>
-							{#if skill.sync_state === 'unadopted'}
+							{#if skill.prompt_state === 'unadopted'}
 								<span class="skill-badge skill-badge-received">
-									From a paired device - not adopted here
+									{skill.sync_state === 'unadopted'
+										? 'From a paired device - not adopted here'
+										: 'Never adopted here - runs nowhere'}
 								</span>
 							{/if}
 						</div>
-						<div class="skill-actions">
-							{#if isDraft(skill)}
+					</div>
+					{#if selectedKey === skill.key}
+						{@const shown = viewed[skill.key]}
+						{#if !shown}
+							<p class="skills-loading">Loading...</p>
+						{:else}
+							<pre class="skill-body" data-skill-text={shown.key}>{shown.shown ?? ''}</pre>
+							<p class="skill-sub">Digest {shown.sha256}</p>
+							<div class="skill-actions">
+								<Button
+									variant="danger"
+									on:click={() => handleDelete(skill, shown)}
+									disabled={busyKey === skill.key}
+								>
+									<Icon name="trash-2" />
+									{deleteLabel(skill)}
+								</Button>
+							</div>
+							{#if isDraft(shown)}
 								<Button
 									variant="primary"
-									on:click={() => handlePublish(skill)}
-									disabled={busyKey === keyOf(skill)}
+									on:click={() => handlePublish(skill, shown)}
+									disabled={busyKey === skill.key}
 								>
 									<Icon name="check" />
-									Approve &amp; publish
+									Publish this text
+								</Button>
+							{:else if shown.prompt_state === 'unadopted' && shown.raw_shown}
+								<p class="skill-sub">Its bytes as they are on disk, every hidden character written out:</p>
+								<pre class="skill-body" data-skill-raw={shown.key}>{shown.raw_shown}</pre>
+								<p class="skill-sub">File digest {shown.file_sha256}</p>
+								<Button
+									variant="primary"
+									on:click={() => handleAdopt(skill, shown)}
+									disabled={busyKey === skill.key}
+								>
+									<Icon name="check" />
+									Adopt these bytes
 								</Button>
 							{/if}
-							<Button
-								variant="danger"
-								on:click={() => handleDelete(skill)}
-								disabled={busyKey === keyOf(skill)}
-							>
-								<Icon name="trash-2" />
-								Delete
-							</Button>
-						</div>
-					</div>
-					{#if selectedKey === keyOf(skill)}
-						<pre class="skill-body">{bodyByKey[keyOf(skill)] ?? 'Loading...'}</pre>
+						{/if}
 					{/if}
 				</Card>
 			{/each}
@@ -282,6 +307,7 @@
 	.skill-sub {
 		font-size: var(--oo-text-xs);
 		color: var(--oo-fg-muted);
+		overflow-wrap: anywhere;
 	}
 	.skill-badge {
 		white-space: nowrap;
@@ -316,5 +342,6 @@
 		border-radius: var(--oo-radius-md);
 		white-space: pre-wrap;
 		overflow-x: auto;
+		overflow-wrap: anywhere;
 	}
 </style>

@@ -104,8 +104,8 @@ EFFECTS = (NONE, SESSION, SANDBOX, DEFERRED, NETWORK, APPROVED)
 
 # The closed table: every tool the agent and the chat declare, with its class.
 TOOL_EFFECTS: Mapping[str, str] = MappingProxyType({
-    # The agent: the sandboxed seven, the network search, the two writes held
-    # for review, the skills behind their own approval, and the run's own two.
+    # The agent: the sandboxed seven, the network search, the three writes
+    # held for review (a skill is always proposed), and the run's own two.
     "bash": SANDBOX,
     "view": SANDBOX,
     "create_file": SANDBOX,
@@ -116,7 +116,7 @@ TOOL_EFFECTS: Mapping[str, str] = MappingProxyType({
     "web_search": NETWORK,
     "manage_memory": DEFERRED,
     "manage_notes": DEFERRED,
-    "manage_skills": APPROVED,
+    "manage_skills": DEFERRED,
     "todo": SESSION,
     "task": SESSION,
     # The chat: the four built-ins that run only in a sandbox session, and

@@ -8,10 +8,10 @@ authoritative SKILL.md draft. Two rules shape this module:
 
 - Guidance, not authority. A teacher-produced SKILL.md draft is tagged with a
   ``teacher-escalation`` source and treated as guidance. It is NOT published
-  here: it still passes the human-approval gate before publication. This module
-  produces the draft and the gate hook (``request_skill_approval``); the publish
-  path itself lives in ``skills``. The draft's ``approved`` flag stays False until a human
-  approves it, and nothing is written to disk in this module.
+  here: ``skills.publish_teacher_draft`` proposes it to the user, who reads its
+  whole text and publishes it by accepting it with that text's digest. The
+  draft's ``approved`` flag stays False, and nothing is written to disk in
+  this module.
 - Never raise into the conversation path. A missing teacher client, a teacher
   error, or a teacher timeout becomes an ``EscalationResult`` with a reason, not
   an exception, exactly like the loop and the tools.
@@ -33,7 +33,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from opti_oignon.agent import allowlists, untrusted_context
+from opti_oignon.agent import untrusted_context
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +125,9 @@ class EscalationDecision:
 class TeacherSkillDraft:
     """A SKILL.md draft proposed by the teacher.
 
-    Guidance only: ``approved`` stays False until a human approves it through
-    the gate hook, and this object is never written to disk here (publish is
-    elsewhere). ``source`` records the teacher-escalation provenance.
+    Guidance only: ``approved`` stays False, and this object is never written
+    to disk here; ``skills.publish_teacher_draft`` proposes it to the user.
+    ``source`` records the teacher-escalation provenance.
     """
 
     name: str
@@ -394,34 +394,6 @@ def escalate(
         guidance=text,
         draft=draft,
         teacher_model=pol.teacher_model,
-    )
-
-
-# The human-approval gate hook for a teacher draft (publish lives elsewhere)
-
-
-def request_skill_approval(
-    draft: TeacherSkillDraft,
-    *,
-    approval_fn: Callable[[str, str, dict[str, Any]], bool] | None = None,
-    conversation_id: str = "",
-    manager: Any = None,
-) -> bool:
-    """Submit a teacher draft to the human gate, fail-secure.
-
-    Returns True only on an explicit human approval. This is the gate a draft
-    must pass before publication; this module provides the hook, ``skills`` performs the
-    publish. Nothing is written to disk here. A missing gate, a denial, a
-    timeout, or any error returns False.
-    """
-    args = {"name": draft.name, "category": draft.category, "source": draft.source}
-    if approval_fn is not None:
-        try:
-            return bool(approval_fn(conversation_id, "publish_skill", args))
-        except Exception:
-            return False
-    return allowlists.request_approval(
-        conversation_id, "publish_skill", args, manager=manager
     )
 
 

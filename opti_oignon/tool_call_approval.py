@@ -129,7 +129,7 @@ _HIGH_RISK_TOOLS = frozenset({
     # Actual names: arbitrary execution, host/sandbox writes, state mutation.
     "bash", "sandbox_bash", "execute_code",
     "create_file", "write_file", "str_replace",
-    "manage_memory", "manage_skills",
+    "manage_memory", "manage_skills", "publish_skill",
 })
 
 _MEDIUM_RISK_TOOLS = frozenset({
@@ -143,9 +143,11 @@ _MEDIUM_RISK_TOOLS = frozenset({
 def assess_risk(tool_name: str) -> str:
     """Assess the risk level of a tool call.
 
-    Returns 'low', 'medium', or 'high'.
+    Returns 'low', 'medium', or 'high'. A label of the form ``tool:action``
+    is judged by its tool: the action narrows what the tool does, never what
+    it can reach.
     """
-    name_lower = tool_name.lower()
+    name_lower = tool_name.lower().partition(":")[0]
     if name_lower in _HIGH_RISK_TOOLS:
         return "high"
     if name_lower in _MEDIUM_RISK_TOOLS:

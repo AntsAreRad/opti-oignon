@@ -38,6 +38,18 @@ encrypted at rest the same way (SQLCipher through ``db_encryption`` when
 available), with the same rule for users as theirs: one local user in
 single-user mode, the default; each user's own proposals in multi-user mode.
 
+SKILLS. The agent's and the teacher's skill writes join the queue as a
+third store and are always proposed, whatever the user typed: a skill's
+text reaches a system prompt. A proposal holds the slug it would write, the
+canonical text, its SHA-256 and the digest of the published text it would
+change. Accepting one names, with its id, the digest of the text shown --
+the text's own, or its target's for a delete, at least twelve hexadecimal
+characters of it from its start; without it, or with one that names other
+bytes, nothing is applied and the proposal waits. The registry then hashes
+the bytes again as it writes them and refuses a target changed since. Any
+other proposal may be accepted naming its own digest, and is refused when
+the digest named is not it.
+
 What this cannot see: a fact the model paraphrases from the user's own
 words is not their words, so it is proposed, not written; the user accepts
 it in one gesture. The cost of the gate is that gesture, never a silent
@@ -93,7 +105,7 @@ except Exception:
         return user_id
 
 
-STORES = ("memory", "notes")
+STORES = ("memory", "notes", "skills")
 STATUSES = ("pending", "accepted", "declined")
 
 # The arguments that carry words a later turn reads back, per write. For a
@@ -108,6 +120,8 @@ _WORDS: dict[tuple[str, str], tuple[str, ...]] = {
     **_CONTENT,
     ("memory", "update"): ("text",),
     ("notes", "update"): ("title", "tags"),
+    ("skills", "add"): ("text",),
+    ("skills", "edit"): ("text",),
 }
 
 # The identifier an update or a delete aims at. No typed word vouches for an
@@ -117,7 +131,17 @@ _TARGET: dict[tuple[str, str], str] = {
     ("memory", "delete"): "fact_id",
     ("notes", "update"): "note_id",
     ("notes", "delete"): "note_id",
+    ("skills", "edit"): "name",
+    ("skills", "delete"): "name",
 }
+
+# Writes always proposed that aim at no existing target: a new skill. A skill
+# is never endorsed by typed words, since its text reaches a system prompt.
+_PROPOSED: frozenset[tuple[str, str]] = frozenset({("skills", "add")})
+
+# The fewest hexadecimal characters of a digest that name it, from its start.
+DIGEST_MIN = 12
+_HEX = frozenset("0123456789abcdef")
 
 # A fact's category is a label from a closed set, not words: it is brought
 # into the set before it is proposed, so a proposal shows what accepting it
@@ -267,11 +291,10 @@ class PendingWrite:
 _COLUMNS = ("id", "store", "action", "arguments", "provenance", "conversation_id", "run_id", "status",
             "created_at", "decided_at", "outcome")
 
-_SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS pending_writes (
+_TABLE = """CREATE TABLE IF NOT EXISTS pending_writes (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
-        store TEXT NOT NULL CHECK (store IN ('memory', 'notes')),
+        store TEXT NOT NULL CHECK (store IN ('memory', 'notes', 'skills')),
         action TEXT NOT NULL,
         arguments TEXT NOT NULL,
         provenance TEXT NOT NULL,
@@ -282,10 +305,24 @@ _SCHEMA = (
         created_at TEXT NOT NULL,
         decided_at TEXT,
         outcome TEXT
-    )""",
+    )"""
+_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_pending_writes_status ON pending_writes (user_id, status, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_pending_writes_digest ON pending_writes (user_id, digest, status)",
 )
+_SCHEMA = (_TABLE,) + _INDEXES
+_ALL_COLUMNS = ("id, user_id, store, action, arguments, provenance, digest, conversation_id, run_id, status, "
+                "created_at, decided_at, outcome")
+
+# A queue file made before skills joined the stores holds the table under the
+# check of two stores: it is rebuilt under the new one, every row kept, in the
+# transaction that opens it -- whole or not at all.
+_MIGRATION = (
+    _TABLE.replace("CREATE TABLE IF NOT EXISTS pending_writes", "CREATE TABLE pending_writes_next", 1),
+    f"INSERT INTO pending_writes_next ({_ALL_COLUMNS}) SELECT {_ALL_COLUMNS} FROM pending_writes",
+    "DROP TABLE pending_writes",
+    "ALTER TABLE pending_writes_next RENAME TO pending_writes",
+) + _INDEXES
 
 
 def _digest(store: str, action: str, arguments: dict) -> str:
@@ -314,8 +351,14 @@ class PendingWriteStore:
         self._single_user_mode = bool(single_user_mode)
         self._lock = threading.RLock()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             for statement in _SCHEMA:
                 conn.execute(statement)
+            table = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pending_writes'").fetchone()
+            if table is not None and "'skills'" not in str(table[0]):
+                for statement in _MIGRATION:
+                    conn.execute(statement)
 
     def _uid(self, user_id: str | None) -> str:
         return effective_user_id(user_id, self._single_user_mode)
@@ -350,7 +393,7 @@ class PendingWriteStore:
         conversation has nothing to scope a refusal to, so another run may
         propose the same write again, and the user declines it again.
         """
-        if (store, action) not in _CONTENT and (store, action) not in _TARGET:
+        if (store, action) not in _CONTENT and (store, action) not in _TARGET and (store, action) not in _PROPOSED:
             raise ValueError(f"no write '{action}' in store '{store}'")
         uid = self._uid(user_id)
         digest = _digest(store, action, arguments)
@@ -523,19 +566,87 @@ class TargetMissing(LookupError):
     """An update or a delete whose fact or note no longer exists: nothing to apply."""
 
 
+class TargetChanged(TargetMissing):
+    """A skill change, add or delete whose target changed since it was proposed: never applied as proposed."""
+
+
+class TextCorrupt(TargetMissing):
+    """A skill proposal whose text is no longer the one its digest names: never applied."""
+
+
+def _default_skills_registry() -> Any:
+    from .agent.skills import get_skill_registry
+
+    return get_skill_registry()
+
+
+def shown_digest(record: PendingWrite) -> str:
+    """The digest an acceptance of ``record`` names: a skill's text, or its target's for a delete; else its own."""
+    if record.store == "skills":
+        arguments = record.arguments
+        return str(arguments.get("sha256") or arguments.get("base_sha256") or "")
+    return _digest(record.store, record.action, record.arguments)
+
+
+def names_digest(named: Any, digest: str) -> bool:
+    """Whether ``named`` names ``digest``: at least ``DIGEST_MIN`` of its hexadecimal characters, from its start."""
+    text = str(named or "").strip().lower()
+    return (len(digest) == 64 and DIGEST_MIN <= len(text) <= 64 and set(text) <= _HEX
+            and digest.startswith(text))
+
+
+def _refusal_reason(gone: TargetMissing) -> str:
+    if isinstance(gone, TargetChanged):
+        return "target changed"
+    if isinstance(gone, TextCorrupt):
+        return "digest mismatch"
+    return "target not found"
+
+
 def accepted_note_id(pid: str) -> str:
     """The id a note created by accepting proposal ``pid`` takes: the same for every attempt, so it can be found."""
     return uuid.uuid5(uuid.NAMESPACE_URL, f"opti-oignon:pending-write:{pid}").hex
 
 
+def _apply_skill(action: str, arguments: dict, registry: Any) -> str:
+    """Write an accepted skill proposal through the registry's writes named by a digest."""
+    if registry is None:
+        raise RuntimeError("skills registry unavailable")
+    category, name = str(arguments.get("category") or ""), str(arguments.get("name") or "")
+    try:
+        if action in ("add", "edit"):
+            skill = registry.write_accepted(category, name, arguments.get("text"),
+                                            sha256=str(arguments.get("sha256") or ""),
+                                            base_sha256=arguments.get("base_sha256"),
+                                            source=str(arguments.get("source") or ""))
+            return f"Skill '{category}/{name}' published as v{skill.version} (sha256 {skill.digest()[:16]})."
+        if action == "delete":
+            draft = bool(arguments.get("draft"))
+            registry.delete_named(name, category, draft=draft, sha256=str(arguments.get("base_sha256") or ""))
+            return f"{'Draft' if draft else 'Skill'} '{category}/{name}' deleted."
+    except LookupError as refused:
+        reason = getattr(refused, "reason", "missing")
+        if reason == "changed":
+            raise TargetChanged(str(refused)) from refused
+        if reason == "corrupt":
+            raise TextCorrupt(str(refused)) from refused
+        raise TargetMissing(str(refused)) from refused
+    raise ValueError(f"no write '{action}' in store 'skills'")
+
+
 def apply_write(store: str, action: str, arguments: dict, *, source: str, memory_store: Any = None,
-                notes_store: Any = None, new_note_id: str | None = None) -> str:
+                notes_store: Any = None, new_note_id: str | None = None, skills_registry: Any = None) -> str:
     """Write ``arguments`` through the store's own calls; what was done, as the tools always said it.
 
     The one write path: a direct write of the agent and an accepted proposal
     both come through here. Raises when the store is unavailable or refuses,
-    and ``TargetMissing`` when an update or a delete finds nothing to change.
+    and ``TargetMissing`` when an update or a delete finds nothing to change
+    -- for a skill, ``TargetChanged`` when its target changed since it was
+    proposed and ``TextCorrupt`` when its text is not the one its digest names.
     """
+    if store == "skills":
+        return _apply_skill(action, arguments,
+                            skills_registry if skills_registry is not None else _default_skills_registry())
     if store == "memory":
         target = memory_store if memory_store is not None else _default_memory_store()
         if target is None:
@@ -581,15 +692,25 @@ def apply_write(store: str, action: str, arguments: dict, *, source: str, memory
     raise ValueError(f"no write '{action}' in store '{store}'")
 
 
-def _landed(record: PendingWrite, memory_store: Any = None, notes_store: Any = None) -> bool | None:
+def _landed(record: PendingWrite, memory_store: Any = None, notes_store: Any = None,
+            skills_registry: Any = None) -> bool | None:
     """Whether an accepted proposal's write is in the store: True, False, or None when it cannot be told.
 
     A new fact carries the source ``accepted:<id>`` and a new note the id
     drawn from the proposal's, both unique to it; a change is there when the
-    store shows it. A lookup that fails says nothing (None), never "absent".
+    store shows it, a skill when its published text is the one its digest
+    names. A lookup that fails says nothing (None), never "absent".
     """
     arguments = record.arguments
     try:
+        if record.store == "skills":
+            registry = skills_registry if skills_registry is not None else _default_skills_registry()
+            name, category = str(arguments.get("name") or ""), str(arguments.get("category") or "")
+            if record.action == "delete":
+                # A skill absent may have been deleted by another hand: that cannot be told from here.
+                return None if registry.get(name, category, draft=bool(arguments.get("draft"))) is None else False
+            now = registry.get(name, category)
+            return now is not None and now.digest() == arguments.get("sha256")
         if record.store == "memory":
             target = memory_store if memory_store is not None else _default_memory_store()
             if record.action == "add":
@@ -759,10 +880,11 @@ def _untyped_parts(content: str, origin: Any, segments: Any) -> list[str]:
     return [content[start:stop] for start, stop, label in probes.beside_documents(segments) if label != "typed"]
 
 
-def _apply(record: PendingWrite, memory_store: Any, notes_store: Any) -> str:
+def _apply(record: PendingWrite, memory_store: Any, notes_store: Any, skills_registry: Any = None) -> str:
     """Apply an accepted proposal's write, under its source and its note id."""
     return apply_write(record.store, record.action, record.arguments, source=f"accepted:{record.id}",
-                       memory_store=memory_store, notes_store=notes_store, new_note_id=accepted_note_id(record.id))
+                       memory_store=memory_store, notes_store=notes_store, new_note_id=accepted_note_id(record.id),
+                       skills_registry=skills_registry)
 
 
 def _settle(queue: Any, pid: str, outcome: str, user_id: str | None) -> None:
@@ -775,7 +897,7 @@ def _settle(queue: Any, pid: str, outcome: str, user_id: str | None) -> None:
 
 
 def recover(*, pending: Any = None, memory_store: Any = None, notes_store: Any = None,
-            user_id: str | None = None) -> list[dict[str, Any]]:
+            user_id: str | None = None, skills_registry: Any = None) -> list[dict[str, Any]]:
     """Complete the acceptances a process never finished; one result per proposal it took up.
 
     An acceptance claimed longer than ``stale_claim_seconds`` ago without an
@@ -793,52 +915,68 @@ def recover(*, pending: Any = None, memory_store: Any = None, notes_store: Any =
     for record in queue.unfinished(cutoff, user_id=user_id):
         if not queue.retake(record.id, record.decided_at, user_id=user_id):
             continue  # another review took it up first
-        landed = _landed(record, memory_store, notes_store)
-        applied = True
+        landed = _landed(record, memory_store, notes_store, skills_registry)
+        applied, reason = True, ""
         try:
-            outcome = ("Completed after an interruption: the write had landed." if landed
-                       else f"Completed after an interruption: {_apply(record, memory_store, notes_store)}")
+            outcome = ("Completed after an interruption: the write had landed." if landed else
+                       f"Completed after an interruption: {_apply(record, memory_store, notes_store, skills_registry)}")
         except TargetMissing as gone:
-            outcome, applied = str(gone), False
+            outcome, applied, reason = str(gone), False, _refusal_reason(gone)
         except Exception as exc:
             logger.warning("pending write %s: interrupted acceptance not completed yet (%s)", record.id, exc)
             continue
         _settle(queue, record.id, outcome, user_id)
         result = {"id": record.id, "applied": applied, "outcome": outcome}
-        results.append(result if applied else dict(result, reason="target not found"))
+        results.append(result if applied else dict(result, reason=reason))
     return results
 
 
 def accept(ids: Iterable[str], *, pending: Any = None, memory_store: Any = None, notes_store: Any = None,
-           user_id: str | None = None) -> list[dict[str, Any]]:
+           user_id: str | None = None, digests: dict[str, str] | None = None,
+           skills_registry: Any = None) -> list[dict[str, Any]]:
     """Apply each proposal of ``ids``, in order, once and exactly as proposed; one result per id.
 
-    Acceptances an earlier process left unfinished are completed first.
+    ``digests`` maps an id to the digest of what the user was shown: a skill
+    proposal is applied only when it names the text's (its target's, for a
+    delete), and any other proposal given one only when it names its own; a
+    proposal refused so stays pending. Acceptances an earlier process left
+    unfinished are completed first.
     """
     queue = pending if pending is not None else get_pending_store()
+    named = dict(digests or {})
     try:
-        recover(pending=queue, memory_store=memory_store, notes_store=notes_store, user_id=user_id)
+        recover(pending=queue, memory_store=memory_store, notes_store=notes_store, user_id=user_id,
+                skills_registry=skills_registry)
     except Exception as exc:
         logger.warning("pending writes: completing unfinished acceptances failed (%s)", exc)
     results = []
     for pid in ids:
         pid = str(pid)
-        if queue.get(pid, user_id=user_id) is None:
+        record = queue.get(pid, user_id=user_id)
+        if record is None:
             results.append({"id": pid, "applied": False, "reason": "not found"})
+            continue
+        if (record.store == "skills" or pid in named) and not names_digest(named.get(pid), shown_digest(record)):
+            results.append({"id": pid, "applied": False, "reason": "the digest does not name the text shown"})
             continue
         claimed = queue.claim(pid, user_id=user_id)
         if claimed is None:
             results.append({"id": pid, "applied": False, "reason": "not pending"})
             continue
+        if claimed.arguments != record.arguments:
+            # The row changed between the digest's check and the claim: the text shown is not this one.
+            _settle(queue, pid, "Not applied: the proposal changed after the digest named it.", user_id)
+            results.append({"id": pid, "applied": False, "reason": "digest mismatch"})
+            continue
         try:
-            outcome = _apply(claimed, memory_store, notes_store)
+            outcome = _apply(claimed, memory_store, notes_store, skills_registry)
         except TargetMissing as gone:
-            # Nothing left to change: the proposal is decided, and said not applied.
+            # Nothing left to change as proposed: the proposal is decided, and said not applied.
             _settle(queue, pid, str(gone), user_id)
-            results.append({"id": pid, "applied": False, "reason": "target not found", "outcome": str(gone)})
+            results.append({"id": pid, "applied": False, "reason": _refusal_reason(gone), "outcome": str(gone)})
             continue
         except Exception as exc:
-            landed = _landed(claimed, memory_store, notes_store)
+            landed = _landed(claimed, memory_store, notes_store, skills_registry)
             if landed:
                 # The write is in the store; what failed came after. Decided,
                 # so it can no longer be declined while it stays written.
