@@ -11,6 +11,67 @@ package costs.
 
 ### Added
 
+- The write census guard (`.github/scripts/write_census_guard.py`). A gate
+  on a store's writes protects only the writes that go through it, so the
+  guard finds every write into a store a model reads back -- the facts with
+  their rows and vectors, the frozen legacy memory, the extractor, the
+  notes, the skills, the Core, the onion's peels, receipts, cellar and live
+  turns, the transcript and its branches, the two response caches, the
+  projects and their index, the ingested documents and their index, the
+  prompt templates, the coding agent's working memory and checkpoints --
+  and holds each one housed in its own store, gated, exempt with its reason,
+  or owed. It reads the package's own code, statically, and catches its
+  drift in any form ordinary code takes; code written to hide a write from
+  a static reader (a class rebuilt by a metaclass, a name assembled from
+  strings) is beyond it, and the guard lists those forms rather than claim
+  them. It follows a store object through a module's bindings and across
+  modules: what a module exports or re-exports, by name or by a star, a
+  package's lazy export table, a module looked up by its name or relayed by
+  another module, an argument handed to another module's function, class or
+  method or to a dispatch table, or handed with a function to a task, a
+  thread or a pool, an object of any class that keeps a store on itself or
+  hands one back, a dataclass or a named tuple that holds one, a dependency
+  or a context manager that yields one, a subclass, a property, a container
+  of stores; and a private member of a store reached outside its house is a
+  site too. A gate counts by dominance on the syntax
+  tree, never by line order: an early exit on a refused verdict, a guarding
+  condition, a raising check, the user's approval, a filter whose result is
+  all that is written, or the gate's own body -- never a function, a lambda
+  or a generator nested in it, nor a writer it hands out; a function is
+  gated by its callers only when every reference to it, anywhere in the
+  package -- through re-exports, star imports, decorators and ``getattr``
+  -- is a call from a gated position; and a gate whose authority is its caller's (an
+  approval, the Core's actor, an acceptance) holds only when a route or the
+  terminal client reaches it. Six kinds of exemption are checked by a
+  predicate (only a route handler reaches the write; nothing reads the
+  store back; the write binds its whole context; it adds no content; it
+  runs only as a program; its receiver is a store the module built in a
+  temporary place); the others argue their reason in prose, cover the
+  sites they name by function and method and no other, and the green line
+  counts them apart. Every module that opens a database is a store's house
+  or is named outside the census with the reason, and every method of a
+  store that spells an SQL write -- in its own strings or in a constant --
+  or reaches one of its writes, through a private helper too, is in the
+  table or set aside with its reason; two were not, and now are: the
+  conversation store's import of the legacy JSON history, a write its
+  module's self-test alone runs, and the semantic cache's lookup, which
+  counts its hit as the response cache's does. On this tree: 198 write
+  sites in 22 stores -- 41 housed, 23 gated behind 11 gates each proven by
+  contracts the selection rule runs, 119 exempt (84 by a checked
+  predicate), and 15 owed in 6 modules: the pre-cache stores answers with
+  no context fingerprint; a
+  synced fact, note, skill or conversation lands without the gate that
+  admitted it on its peer; the documents' auto-refresh re-ingests a changed
+  file with no gate; a coding checkpoint's plan, written by the model, comes
+  back to the agent when the user resumes the task; and a caption or a
+  transcript is written back on a request that carries the user's approval
+  but runs the model again, so the text written is not the text the user
+  approved. Each owed module is sealed by its digest: the debt may only
+  shrink, and a module that changes while it owes must pay. The guard runs
+  in CI and in the ladder's guard tier.
+- Two contracts prove what nothing tested: a caption or a transcript drawn
+  from a note's attachment is written back to the note only on a request
+  that carries the user's approval.
 - The review of pending writes. The Memory panel gains a "To review"
   section, and the Notes panel the same for notes: each write the agent
   proposed, or each fact the manual extraction drew from anything but the

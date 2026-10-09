@@ -173,6 +173,16 @@ jobs:
 
       - name: Registry-funnel guard (inference stays inside the registry)
         run: python .github/scripts/registry_funnel_guard.py
+
+      # A gate on a store's writes protects only the writes that go through
+      # it. The census finds every write into a store a model reads back,
+      # follows a store object across modules, and holds each site housed,
+      # gated by dominance, exempt with its reason (checked wherever a
+      # predicate can), or owed in a sealed ledger that may only shrink; and a
+      # module that opens a database is a store's house or is outside the
+      # census by name.
+      - name: Write census guard (every write a model reads back is gated, exempt or owed)
+        run: python .github/scripts/write_census_guard.py
       - name: Run core-boundary guard (the resident core pulls nothing new)
         run: python .github/scripts/core_boundary_guard.py
 
