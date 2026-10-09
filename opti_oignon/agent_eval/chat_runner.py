@@ -818,10 +818,13 @@ def _run_task(
 
     final_text = ""
     with scripted_chat_backend(client):
+        # An evaluation task is nobody's typed turn: no argument of it is
+        # endorsed, and the gate judges its calls so.
         if front == "stream":
             generator = executor.stream_with_tools(
                 message=task.spec.prompt,
                 on_tool_call=on_tool_call,
+                provenance=None,
             )
             result = None
             try:
@@ -838,6 +841,7 @@ def _run_task(
             result = executor.execute_with_tools(
                 message=task.spec.prompt,
                 on_tool_call=on_tool_call,
+                provenance=None,
             )
             final_text = getattr(result, "response", "") or ""
 

@@ -572,6 +572,15 @@ def _default_web_search_fn() -> Callable[..., str] | None:
         return None
 
 
+def web_search_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
+    """What a web search sends, as it sends it: the query without its outer spaces, the count a whole number."""
+    given = arguments or {}
+    return {
+        "query": _as_str(given.get("query")).strip(),
+        "max_results": _as_int(given.get("max_results"), _DEFAULT_WEB_RESULTS),
+    }
+
+
 def make_web_search_handler(
     search_fn: Callable[..., str] | None = None,
 ) -> Callable[[dict[str, Any]], str]:
@@ -580,14 +589,16 @@ def make_web_search_handler(
     When ``search_fn`` is None the default (``web_search.search_and_format``) is
     resolved lazily on each call and guarded, so the handler is safe even with
     no backend present. The handler returns an observation string and never
-    raises.
+    raises. It says how it reads its arguments (``canonical_arguments``,
+    ``argument_defaults``), so the dispatch labels exactly what it sends.
     """
 
     def handler(arguments: dict[str, Any]) -> str:
-        query = _as_str((arguments or {}).get("query")).strip()
+        sent = web_search_arguments(arguments)
+        query = sent["query"]
         if not query:
             return "web_search requires a non-empty 'query'."
-        max_results = _as_int((arguments or {}).get("max_results"), _DEFAULT_WEB_RESULTS)
+        max_results = sent["max_results"]
         fn = search_fn if search_fn is not None else _default_web_search_fn()
         if fn is None:
             return "web_search is unavailable (no search backend)."
@@ -603,6 +614,8 @@ def make_web_search_handler(
         text = _as_str(output).strip()
         return _truncate(text) if text else "web_search returned no results."
 
+    handler.canonical_arguments = web_search_arguments  # type: ignore[attr-defined]
+    handler.argument_defaults = {"max_results": _DEFAULT_WEB_RESULTS}  # type: ignore[attr-defined]
     return handler
 
 

@@ -136,6 +136,8 @@ class OOClient:
         on_token: Callable[[str], None] | None = None,
         on_thinking: Callable[[str], None] | None = None,
         on_metadata: Callable[[dict], None] | None = None,
+        on_approval: Callable[[dict], bool | None] | None = None,
+        on_resolved: Callable[[dict], None] | None = None,
     ) -> str:
         """Send a chat message and stream tokens back.
 
@@ -155,6 +157,15 @@ class OOClient:
             Called with each thinking token.
         on_metadata : callable, optional
             Called with the metadata dict on the ``done`` frame.
+        on_approval : callable, optional
+            Called with a tool call the backend holds for the user's
+            answer: its id, tool, arguments, the label of each argument and
+            its class. True approves it, False denies it, None leaves it
+            waiting for an answer from elsewhere. An answer that comes too
+            late (the call already decided) is dropped; the stream goes on.
+        on_resolved : callable, optional
+            Called with how a held call ended: its id, tool, and whether it
+            was approved, whoever answered.
 
         Returns
         -------
@@ -162,8 +173,13 @@ class OOClient:
             The full accumulated response text.
         """
         return asyncio.run(
-            self._ws_stream(message, model, on_token, on_thinking, on_metadata)
+            self._ws_stream(message, model, on_token, on_thinking, on_metadata, on_approval, on_resolved)
         )
+
+    def answer_approval(self, approval_id: str, allowed: bool) -> Any:
+        """Approve or deny a tool call the backend holds for the user's answer."""
+        verdict = "approve" if allowed else "deny"
+        return self.post(f"/api/security/tool-approval/{approval_id}/{verdict}")
 
     async def _ws_stream(
         self,
@@ -172,6 +188,8 @@ class OOClient:
         on_token: Callable[[str], None] | None,
         on_thinking: Callable[[str], None] | None,
         on_metadata: Callable[[dict], None] | None,
+        on_approval: Callable[[dict], bool | None] | None = None,
+        on_resolved: Callable[[dict], None] | None = None,
     ) -> str:
         try:
             import websockets
@@ -209,6 +227,24 @@ class OOClient:
                     elif frame_type == "metadata":
                         if on_metadata and metadata:
                             on_metadata(metadata)
+                    elif frame_type == "tool_call_pending":
+                        # Asked off the event loop: the answer may wait on a
+                        # person at the keyboard while frames keep arriving.
+                        if on_approval and metadata and metadata.get("approval_id"):
+                            allowed = await asyncio.to_thread(on_approval, metadata)
+                            if allowed is not None:
+                                try:
+                                    await asyncio.to_thread(
+                                        self.answer_approval, str(metadata["approval_id"]), bool(allowed)
+                                    )
+                                except CLIClientError:
+                                    # Too late: the call was already decided
+                                    # (its time ran out, or another surface
+                                    # answered). How it ended comes next.
+                                    pass
+                    elif frame_type == "tool_call_resolved":
+                        if on_resolved and metadata:
+                            on_resolved(metadata)
                     elif frame_type == "done":
                         if on_metadata and metadata:
                             on_metadata(metadata)

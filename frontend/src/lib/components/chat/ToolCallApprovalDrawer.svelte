@@ -17,6 +17,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Modal, Button } from '$lib/ds';
 	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import ApprovalArguments from './ApprovalArguments.svelte';
 	import { isPhone } from '$lib/stores/ui';
 	import { pendingApprovals, approvalsOpen, closeApprovals } from '$lib/stores/approvals';
 	import {
@@ -114,9 +115,7 @@
 						{/if}
 					</div>
 
-					{#if req.arguments_summary}
-						<pre class="text-xs mb-3 p-2 rounded whitespace-pre-wrap" style="background-color: var(--oo-bg-subtle); color: var(--oo-fg-muted); word-break: break-all;">{req.arguments_summary}</pre>
-					{/if}
+					<ApprovalArguments request={req} />
 
 					<div class="flex gap-2">
 						<Button variant="primary" size="sm" block loading={actioningId === req.approval_id} on:click={() => handleApprove(req.approval_id)}>

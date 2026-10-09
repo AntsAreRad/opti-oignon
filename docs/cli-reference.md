@@ -39,6 +39,32 @@ oo ask -f prompt.txt
 | `-f, --file PATH` | Read prompt from file |
 | `--pipe` | Read stdin as additional context |
 
+When the backend holds a tool call for your answer -- in Bulbe, a call it
+permits that acts outside the run; in Daily, when the policy asks, a network
+call carrying an argument that is neither what you typed nor the tool's own
+default -- `oo ask` shows it on stderr with the label of each argument
+(typed by you, the tool's own default, or chosen by the model) and asks at
+the keyboard. Each argument's name, label and length come on a row of their
+own, at two spaces; every row of a value, of a name that is not a plain
+identifier, or of the summary an older backend sends, starts behind a bar
+(`    | `, or `    name | `), and every row is cut to the narrowest width
+`oo` can learn (`COLUMNS`, and every terminal the process is attached to, so
+`2>&1 | tee` still prints to the screen's width; 80 when it can learn none),
+so that, on a screen at least that wide, nothing a value carries can pass
+for a row of the terminal's. With `--pipe` or `--json-out`, or when standard
+input is not a terminal, no keyboard answers: it shows the call and how to
+answer it from another terminal. An unanswered call is refused when its time
+runs out.
+
+### oo approve, oo deny
+
+Answer a tool call the backend holds for you.
+
+```bash
+oo approve <id>
+oo deny <id>
+```
+
 ### oo chat
 
 An interactive session, one line per turn, run in this process: the

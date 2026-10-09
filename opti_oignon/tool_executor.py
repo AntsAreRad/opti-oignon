@@ -99,6 +99,35 @@ except ImportError:
 # Response hygiene helpers (matching normalization, echoed-marker stripping).
 # Stdlib-only, but guarded like the other seams so the loop degrades to the
 # previous behavior when the module is absent.
+_GATE_MISSING_SAID: list[bool] = []
+
+
+def _gate():
+    """The provenance gate, imported where a call needs it; None in a window that does not carry it.
+
+    The package always carries it. Imported inside the function, it stays
+    out of the resident core's module-scope imports; a window that loads
+    this module alone without it runs each tool as before the gate existed,
+    and says so once.
+    """
+    try:
+        from . import provenance
+    except Exception as exc:  # noqa: BLE001 - absence is said, not raised
+        if not _GATE_MISSING_SAID:
+            _GATE_MISSING_SAID.append(True)
+            logger.warning("the provenance gate cannot be loaded (%s): the chat's tool calls run ungated", exc)
+        return None
+    return provenance
+
+
+def _gate_kwargs(**kwargs: Any) -> dict[str, Any]:
+    """The gate's arguments for a call inside the loop, or none when the gate is not loaded.
+
+    Without the gate there is nothing to pass, so a stand-in for one of the
+    loop's own methods keeps its historical shape.
+    """
+    return kwargs if _gate() is not None else {}
+
 try:
     from .response_hygiene import (
         StreamMarkerFilter,
@@ -354,6 +383,10 @@ class ToolCallResult(BaseModel):
     # argument, handler error). Hard failures (approval denied, tool not found
     # or disabled) leave this False so the loop stops instead of retrying.
     retryable: bool = False
+    # What the provenance gate found for this call: its class, the label of
+    # each argument as it ran (or would have), the decision, and whether a
+    # person was asked. None when the call never reached the gate.
+    provenance: dict[str, Any] | None = None
 
 
 class ToolExecutionResult(BaseModel):
@@ -552,6 +585,7 @@ class ToolExecutor:
         on_tool_call: Callable[["ToolCallResult"], None] | None = None,
         manifest=None,
         should_stop: Callable[[], bool] | None = None,
+        provenance=None,
     ) -> ToolExecutionResult:
         """Execute a ReAct loop: plan -> tool -> observe -> respond.
 
@@ -576,6 +610,10 @@ class ToolExecutor:
                 salvage's candidate and the final generation) and before
                 each tool, salvaged ones included. A stopped turn returns
                 the calls made so far with an empty response.
+            provenance: The turn's provenance (``provenance.TurnProvenance``):
+                the parts of it the user typed, whole, and its way to ask
+                the user. Every call of the turn, salvaged ones included, is
+                judged by it; None endorses nothing.
 
         Returns:
             ToolExecutionResult with final response and call history
@@ -587,6 +625,7 @@ class ToolExecutor:
         _manifest_block = (
             getattr(manifest, "prompt_block", "") if manifest is not None else ""
         )
+        offered = self._offered_names(manifest)
 
         (
             tool_calls, tool_results_context, native_transcript,
@@ -596,6 +635,7 @@ class ToolExecutor:
             approval_fn, on_tool_call,
             **({"manifest": manifest} if manifest is not None else {}),
             **({"should_stop": should_stop} if should_stop is not None else {}),
+            **_gate_kwargs(provenance=provenance, offered=offered),
         )
         if fatal is not None:
             return ToolExecutionResult(
@@ -625,6 +665,7 @@ class ToolExecutor:
                 tool_results_context, approval_fn, on_tool_call,
                 **({"candidate": _candidate} if _candidate is not None else {}),
                 **({"should_stop": should_stop} if should_stop is not None else {}),
+                **_gate_kwargs(provenance=provenance, offered=offered),
             )
         if should_stop is not None and should_stop():
             # Stopped during the salvage: no final generation.
@@ -669,6 +710,7 @@ class ToolExecutor:
         on_tool_call: Callable[["ToolCallResult"], None] | None = None,
         manifest=None,
         should_stop: Callable[[], bool] | None = None,
+        provenance=None,
     ):
         """Streaming variant of ``execute_with_tools``.
 
@@ -678,7 +720,8 @@ class ToolExecutor:
         markers are filtered incrementally, so the user never sees them even
         transiently. The generator's return value is the ToolExecutionResult;
         its ``response`` equals exactly the emitted text. A stopped turn
-        yields nothing more once its loop ends.
+        yields nothing more once its loop ends. Every call is judged by
+        ``provenance``, as in ``execute_with_tools``.
         """
         start_time = time.time()
         _model = model or self.default_model
@@ -687,6 +730,7 @@ class ToolExecutor:
         _manifest_block = (
             getattr(manifest, "prompt_block", "") if manifest is not None else ""
         )
+        offered = self._offered_names(manifest)
 
         (
             tool_calls, tool_results_context, native_transcript,
@@ -696,6 +740,7 @@ class ToolExecutor:
             approval_fn, on_tool_call,
             **({"manifest": manifest} if manifest is not None else {}),
             **({"should_stop": should_stop} if should_stop is not None else {}),
+            **_gate_kwargs(provenance=provenance, offered=offered),
         )
         if fatal is not None:
             yield fatal
@@ -726,6 +771,7 @@ class ToolExecutor:
                 tool_results_context, approval_fn, on_tool_call,
                 **({"candidate": _candidate} if _candidate is not None else {}),
                 **({"should_stop": should_stop} if should_stop is not None else {}),
+                **_gate_kwargs(provenance=provenance, offered=offered),
             )
         if should_stop is not None and should_stop():
             # Stopped during the salvage: nothing is streamed.
@@ -791,11 +837,16 @@ class ToolExecutor:
         on_tool_call: Callable[["ToolCallResult"], None] | None,
         manifest=None,
         should_stop: Callable[[], bool] | None = None,
+        provenance=None,
+        offered=None,
     ) -> tuple[
         list["ToolCallResult"], list[str], list[dict], list[dict],
         str | None, int,
     ]:
         """The shared ReAct loop behind both execution fronts.
+
+        Each call is judged by ``provenance`` and refused when its tool is
+        outside ``offered``, the names the turn offered.
 
         Returns ``(tool_calls, tool_results_context, native_transcript,
         context_messages, fatal, verification_hints)`` where ``fatal`` is a
@@ -928,6 +979,7 @@ class ToolExecutor:
                     break
                 call_result = self._execute_tool(
                     tool_name, arguments, "", approval_fn=approval_fn,
+                    **_gate_kwargs(provenance=provenance, offered=offered),
                 )
                 tool_calls.append(call_result)
                 self._notify_tool_call(on_tool_call, call_result)
@@ -1012,8 +1064,13 @@ class ToolExecutor:
         on_tool_call: Callable[["ToolCallResult"], None] | None,
         candidate: str | None = None,
         should_stop: Callable[[], bool] | None = None,
+        provenance=None,
+        offered=None,
     ) -> str | None:
         """Layer 2b -- deterministic salvage when no tool fired.
+
+        A salvaged call meets the same gate as a decided one: it is judged
+        by ``provenance`` and refused when its tool is outside ``offered``.
 
         The model may have narrated code/commands in prose instead of calling
         a tool. A candidate answer is generated; when tool calls can be
@@ -1059,6 +1116,7 @@ class ToolExecutor:
             call_result = self._execute_tool(
                 tool_name, arguments, "intent-transpiled",
                 approval_fn=approval_fn,
+                **_gate_kwargs(provenance=provenance, offered=offered),
             )
             tool_calls.append(call_result)
             self._notify_tool_call(on_tool_call, call_result)
@@ -1352,12 +1410,36 @@ class ToolExecutor:
             logger.warning("Enum-force tool selection failed: %s", e)
         return None
 
+    def _offered_names(self, manifest) -> frozenset[str] | None:
+        """The names of the tools a turn offered: its manifest's, or the live availability view."""
+        if manifest is not None:
+            return frozenset(t.name for t in (getattr(manifest, "tools", ()) or ()))
+        if not self.registry:
+            return None
+        return frozenset(t.name for t in self.registry.list_available())
+
     def _execute_tool(
         self, tool_name: str, arguments: dict[str, Any],
         reasoning: str = "",
         approval_fn: Callable[[str, dict], bool] | None = None,
+        *,
+        provenance=None,
+        offered=None,
     ) -> ToolCallResult:
-        """Execute a single tool call."""
+        """Execute a single tool call.
+
+        The call is resolved first -- its tool found, its near-miss argument
+        names repaired, its defaults filled, its values checked -- and then
+        meets the provenance gate on exactly the arguments the handler would
+        receive: refused when its tool is outside ``offered`` or its class is
+        not permitted in the machine's mode, read now; put to the approval
+        hook, with the label of each argument, when one is armed or the mode
+        asks for it (to the turn's own way to ask when no hook is armed), and
+        refused when it must be asked and the turn has no way to ask; held to
+        the network policy when it reaches the network. ``provenance`` is the
+        turn's (None endorses nothing). The handler receives exactly the
+        arguments the gate judged.
+        """
         start_time = time.time()
 
         # Pre-execution approval hook (Bulbe mode tool call approval).
@@ -1365,9 +1447,11 @@ class ToolExecutor:
         # over the legacy process-wide pre_tool_call_hook attribute. Binding the
         # gate to the call (not a shared attribute) means two concurrent Bulbe
         # generation threads cannot clobber each other's hook or drop the gate
-        # when one of them finishes.
+        # when one of them finishes. With the provenance gate loaded the hook
+        # is asked by the gate, after resolution; without it, first, as before.
         hook = approval_fn if approval_fn is not None else self.pre_tool_call_hook
-        if hook is not None:
+        gate = _gate()
+        if hook is not None and gate is None:
             try:
                 approved = hook(tool_name, arguments)
                 if not approved:
@@ -1470,6 +1554,31 @@ class ToolExecutor:
                     reasoning=reasoning,
                 )
 
+        # The provenance gate, on the arguments the handler would receive.
+        gate_record = None
+        if gate is not None:
+            defaults = {
+                name: param.default for name, param in tool.parameters.items()
+                if not param.required and param.default is not None
+            }
+            verdict = gate.check(
+                tool_name, resolved_args, provenance, defaults=defaults,
+                network=bool(getattr(tool, "network", False)), offered=offered,
+                approval=hook,
+            )
+            gate_record = verdict.metadata()
+            if not verdict.allowed:
+                return ToolCallResult(
+                    tool_name=tool_name,
+                    arguments=verdict.arguments,
+                    result=verdict.message,
+                    success=False,
+                    execution_time=time.time() - start_time,
+                    reasoning=reasoning,
+                    provenance=gate_record,
+                )
+            resolved_args = verdict.arguments
+
         # Execute the handler
         try:
             result_str = tool.handler(**resolved_args)
@@ -1482,6 +1591,7 @@ class ToolExecutor:
                 success=True,
                 execution_time=execution_time,
                 reasoning=reasoning,
+                provenance=gate_record,
             )
 
         except Exception as e:
@@ -1497,6 +1607,7 @@ class ToolExecutor:
                 retryable=True,
                 execution_time=time.time() - start_time,
                 reasoning=reasoning,
+                provenance=gate_record,
             )
 
     def _final_messages(

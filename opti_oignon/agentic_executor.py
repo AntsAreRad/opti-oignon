@@ -93,6 +93,13 @@ except ImportError:
     def _normalize_for_match(text: str) -> str:
         return (text or "").lower()
 
+# The provenance gate's turn record. The package always carries it; loaded
+# alone without it, the tool loop is handed no provenance and runs as before.
+try:
+    from . import provenance as _provenance
+except Exception:
+    _provenance = None
+
 # Conditional import of the StructuredOutputEngine
 try:
     from .structured_output import (
@@ -679,13 +686,15 @@ class _Turn:
     Built from the caller's run when it brings one (its ``stop`` when that
     is a ``threading.Event``, its ``results`` when that is a dict, its
     ``steps`` recorder when it has one, its ``user_turn`` when it carries
-    the turn's claim), fresh otherwise. It satisfies the executor's run
-    protocol, so the executor's stop is the turn's, its per-call results
-    land in the turn's dict, and the user turn it saves is judged by the
-    same claim. Nothing of a turn is ever stored on the shared instance.
+    the turn's claim, its ``demand`` when it has a way to ask the user),
+    fresh otherwise. It satisfies the executor's run protocol, so the
+    executor's stop is the turn's, its per-call results land in the turn's
+    dict, the user turn it saves is judged by the same claim, and its tool
+    calls by the words that claim says the user typed. Nothing of a turn is
+    ever stored on the shared instance.
     """
 
-    __slots__ = ("stop", "results", "steps", "user_turn", "on_tool_call", "on_reasoning_step",
+    __slots__ = ("stop", "results", "steps", "user_turn", "demand", "on_tool_call", "on_reasoning_step",
                  "on_consensus_model", "on_correction_step")
 
     def __init__(
@@ -704,6 +713,8 @@ class _Turn:
         self.steps = getattr(run, "steps", None)
         claim = getattr(run, "user_turn", None)
         self.user_turn = claim if callable(getattr(claim, "parts_for", None)) else None
+        demand = getattr(run, "demand", None)
+        self.demand = demand if callable(demand) else None
         self.on_tool_call = on_tool_call
         self.on_reasoning_step = on_reasoning_step
         self.on_consensus_model = on_consensus_model
@@ -744,6 +755,22 @@ class _Turn:
                 self.on_correction_step(step_info)
             except Exception as e:
                 logger.debug(f"correction_step callback failed: {e}")
+
+
+def _tool_provenance(turn: _Turn):
+    """The provenance the tool loop judges this turn's calls by.
+
+    The parts of the turn's claim its user typed, whole, and the turn's way
+    to ask the user; a turn with no claim, or one whose parts cannot be
+    read, endorses nothing. None when the gate is not loaded.
+    """
+    if _provenance is None:
+        return None
+    try:
+        return _provenance.TurnProvenance.of_user_turn(turn.user_turn, demand=turn.demand)
+    except Exception as exc:
+        logger.warning(f"the turn's typed parts cannot be read ({exc}); none of its arguments is endorsed")
+        return _provenance.TurnProvenance(demand=turn.demand)
 
 
 class AgenticExecutor:
@@ -1705,6 +1732,7 @@ class AgenticExecutor:
                     on_tool_call=_on_call,
                     manifest=manifest,
                     should_stop=turn.stopped,
+                    provenance=_tool_provenance(turn),
                 )
                 full_response = ""
                 result = None
@@ -1757,6 +1785,7 @@ class AgenticExecutor:
                 on_tool_call=turn.emit_tool_call,
                 manifest=manifest,
                 should_stop=turn.stopped,
+                provenance=_tool_provenance(turn),
             )
 
             # Store the tool calls
@@ -1882,6 +1911,7 @@ class AgenticExecutor:
                     on_tool_call=turn.emit_tool_call,
                     manifest=manifest,
                     should_stop=turn.stopped,
+                    provenance=_tool_provenance(turn),
                 )
                 calls = list(result.tool_calls)
                 hints = getattr(result, "verification_hints", 0)

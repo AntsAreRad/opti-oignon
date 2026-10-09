@@ -4,7 +4,8 @@
   primitives (Card, Button, Icon, EmptyState, InlineError). It shows the live
   tool-call stream (consuming the loop's AgentEvents over $lib/api/agent), a
   round / step display, a cancel control, and the Bulbe approval prompts
-  (approve / deny) wired to the existing tool-call approval API. Streaming
+  (approve / deny) wired to the existing tool-call approval API, each showing
+  every value the call would run with (ApprovalArguments). Streaming
   updates use aria-live regions. Design-system tokens only (--oo-*); lucide
   icons through Icon.
 -->
@@ -24,6 +25,7 @@
 	} from '$lib/api/agent';
 	import type { ReconnectingWebSocket } from '$lib/api/client';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import ApprovalArguments from '$lib/components/chat/ApprovalArguments.svelte';
 
 	const MAX_EVENTS = 200;
 
@@ -224,7 +226,7 @@
 									{approval.risk_level}
 								</span>
 							</div>
-							<p class="approval-args">{approval.arguments_summary}</p>
+							<ApprovalArguments request={approval} />
 						</div>
 						<div class="approval-actions">
 							<Button
@@ -354,6 +356,7 @@
 
 	.approval-info {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		gap: var(--oo-space-1);
 		min-width: 0;
@@ -386,13 +389,6 @@
 	.approval-risk-medium {
 		background: var(--oo-warning-bg);
 		color: var(--oo-warning);
-	}
-
-	.approval-args {
-		margin: 0;
-		font-size: var(--oo-text-sm);
-		color: var(--oo-fg-secondary);
-		overflow-wrap: anywhere;
 	}
 
 	.approval-actions {

@@ -1,0 +1,23 @@
+# What a network call may carry, in Daily mode: a tool call's, and the chat's
+# own web search.
+#
+# Each argument of a call is labelled where it runs: typed (the user typed
+# it in this turn, whole), default (the tool's own value), or unendorsed
+# (anything else: words the model chose, wherever it read them).
+#
+#   free               every tool call goes out, whatever its arguments; the
+#                      chat's own search sends only the user's own words
+#                      (typed, or a hook's rewrite of them) when the turn
+#                      says which they are, and a turn with none of them is
+#                      not searched
+#   ask_unendorsed     a call with an unendorsed argument waits for the user,
+#                      who sees each value whole and its label; a value too
+#                      long to be shown whole is refused instead
+#   refuse_unendorsed  a call with an unendorsed argument is refused
+#
+# The setting can only tighten Daily. Bulbe has no network at all and asks
+# the user before every call that acts outside the run; nothing here changes
+# that. Only a missing file, or one that says free, is free: a file that is
+# present but cannot be read, names no policy, or gives a value outside
+# these three reads as refuse_unendorsed.
+network_daily: free

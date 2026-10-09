@@ -10,9 +10,11 @@ status dashboards, and error messages.  Respects ``NO_COLOR`` /
 
 import itertools
 import os
+import re
 import sys
 import threading
 import time
+import unicodedata
 from typing import Any
 
 # -- ANSI colour helpers ---------------------------------------------------
@@ -401,6 +403,200 @@ def format_models_table(models: list[dict[str, Any]], *, color: bool = True) -> 
 
     lines.append(f"\n{_col(str(len(models)), _C.CYAN, bold=True, enabled=color)} model(s) available.")
     return "\n".join(lines)
+
+
+# What each label says of an argument, for the person deciding.
+_LABEL_MEANING = {
+    "typed": "you typed it in this turn",
+    "default": "the tool's own default",
+    "unendorsed": "not typed by you: the model chose it",
+}
+
+
+# Characters a terminal does not print as themselves: a carriage return or an
+# escape sequence can rewrite the line, a direction override can reorder it,
+# and the code points Unicode lets a screen draw as nothing (variation
+# selectors, tags, fillers, the symbols drawn blank) can carry bytes unseen.
+# The approval queue has already written each of them as its escape and
+# doubled every backslash; the terminal escapes any it is still sent, and
+# leaves the queue's own writing as it is (a contract holds both).
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Co", "Cs", "Cn"})
+_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+              (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x2800, 0x2800),
+              (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+              (0x16FE4, 0x16FE4), (0x1BCA0, 0x1BCA3), (0x1D159, 0x1D159), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+
+
+def _hidden(ch: str) -> bool:
+    if ch == "\n":
+        return False
+    category = unicodedata.category(ch)
+    if category in _HIDDEN_CATEGORIES or (category == "Zs" and ch != " "):
+        return True
+    point = ord(ch)
+    return any(low <= point <= high for low, high in _IGNORABLE)
+
+
+def _plain(text: Any) -> str:
+    """``text`` as a terminal prints it as itself: every character that would hide what follows written as its escape.
+
+    Applied here whatever the backend sent, so a value cannot rewrite the
+    line the person reads before deciding; what the approval queue already
+    wrote (its escapes, its doubled backslashes) is printed unchanged.
+    """
+    return "".join(ascii(ch)[1:-1] if _hidden(ch) else ch for ch in str(text))
+
+
+def _line(text: Any) -> str:
+    """``text`` printed as itself on one row: a line break written as its escape too."""
+    return _plain(text).replace("\n", "\\n")
+
+
+# A name printed on a row of the terminal's own: a plain identifier. Any
+# other name is printed behind a bar, as a value is.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+
+
+def _units(line: str) -> list[str]:
+    """``line`` in the pieces a row keeps whole: an escape (a backslash, then
+    ``x`` and two digits, ``u`` and four, ``U`` and eight, or one character),
+    or a single character."""
+    units, start = [], 0
+    while start < len(line):
+        step = 1 if line[start] != "\\" else {"x": 4, "u": 6, "U": 10}.get(line[start + 1:start + 2], 2)
+        units.append(line[start:start + step])
+        start += step
+    return units
+
+
+def _cells(text: str) -> int:
+    """The most cells any terminal gives ``text``: one for printable ASCII, two for anything else."""
+    return sum(1 if " " <= ch <= "~" else 2 for ch in text)
+
+
+def _rows(first: str, text: str, width: int, rest: str | None = None) -> list[str]:
+    """``text`` on rows no wider than ``width``: behind ``first``, then behind ``rest`` (``first`` when None).
+
+    A row wider than the terminal wraps to its left edge, where the rest of
+    a value could pass for a row of the terminal's own; so each line is cut
+    here, between the pieces ``_units`` keeps whole, and every row carries
+    its prefix.
+    """
+    rest = first if rest is None else rest
+    rows: list[str] = []
+    for line in text.split("\n"):
+        prefix = first if not rows else rest
+        row, used = "", _cells(prefix)
+        for unit in _units(line):
+            cells = _cells(unit)
+            if row and used + cells > width:
+                rows.append(prefix + row)
+                prefix = rest
+                row, used = "", _cells(prefix)
+            row += unit
+            used += cells
+        rows.append(prefix + row)
+    return rows
+
+
+def _size(size: Any) -> str:
+    """A value's own length and lines as the queue counted them, or nothing when the backend sent no count."""
+    try:
+        chars, count = int(size["chars"]), int(size["lines"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return ""
+    return f"{chars} characters" + (f", {count} lines" if count > 1 else "")
+
+
+def terminal_width(stream: Any = None) -> int:
+    """The narrowest width in cells the rows may land on: ``COLUMNS``, and every terminal the process is attached to
+    -- ``stream`` (standard error by default), standard output, standard input and the controlling terminal, since a
+    piped stream (``2>&1 | tee``) still lands on one of them; else 80. A width wider than the terminal would let a
+    row wrap at its left edge."""
+    widths = []
+    try:
+        widths.append(int(os.environ.get("COLUMNS", "")))
+    except ValueError:
+        pass
+    for attached in (stream or sys.stderr, sys.stdout, sys.stdin):
+        try:
+            widths.append(os.get_terminal_size(attached.fileno()).columns)
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+    try:
+        # Read-only, never taken as this process's controlling terminal, and
+        # never waited on (a serial line can hold an open for its carrier).
+        tty = os.open("/dev/tty", os.O_RDONLY | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_NONBLOCK", 0))
+    except (AttributeError, OSError):
+        tty = None
+    if tty is not None:
+        try:
+            widths.append(os.get_terminal_size(tty).columns)
+        except (OSError, ValueError):
+            pass
+        finally:
+            os.close(tty)
+    widths = [width for width in widths if width > 0]
+    return min(widths) if widths else 80
+
+
+def format_approval(meta: dict[str, Any], *, color: bool = True, width: int | None = None) -> str:
+    """Format a tool call held for the user's answer: each value, where it came from, how to answer.
+
+    Each argument's own row comes first -- its name and where it came from
+    -- then its value, every line of it behind a bar. A name that is not a
+    plain identifier is printed behind a bar of its own, and the summary an
+    older backend sends behind the value's bar: no text the model chose is
+    printed on a row that could pass for the terminal's own. No row is wider
+    than ``width`` (the terminal's, by default).
+    """
+    width = int(width or terminal_width())
+    aid = _line(meta.get("approval_id", "?"))
+    tool = _line(meta.get("tool_name", "?"))
+    effect = _line(meta.get("effect") or "")
+    labels = meta.get("labels") or {}
+    arguments = meta.get("arguments") or {}
+    sizes = meta.get("sizes") if isinstance(meta.get("sizes"), dict) else {}
+    head = f"Tool call waiting for your answer: {tool}" + (f" ({effect})" if effect else "")
+    # A row of the terminal's own goes on behind four spaces: two, then text,
+    # is an argument's place, and no field's text may take it.
+    lines = [_col(row, _C.YELLOW, bold=True, enabled=color) for row in _rows("", head, width, "    ")]
+    if not arguments:
+        summary = _plain(meta.get("arguments_summary") or "")
+        if summary:
+            lines.extend(_rows("    | ", summary, width))
+    names = list(arguments) + [n for n in labels if n not in arguments]
+    for index, name in enumerate(names, start=1):
+        tag = _line(labels.get(name, ""))
+        plain = isinstance(name, str) and bool(_NAME.match(name))
+        header = name if plain else f"argument {index}"
+        if tag:
+            header += f"   [{tag}: {_LABEL_MEANING.get(tag, tag)}]"
+        size = _size(sizes.get(name))
+        if size:
+            header += f"   ({size})"
+        rows = _rows("  ", header, width, "    ")
+        # Green only for a label the terminal knows as the user's or the
+        # tool's own; one it does not know is left uncoloured, never safe.
+        shade = _C.RED if tag == "unendorsed" else _C.GREEN if tag in ("typed", "default") else ""
+        if tag and color and shade:
+            rows = [row.replace(f"[{tag}:", f"[{_col(tag, shade, enabled=True)}:", 1) for row in rows]
+        lines.extend(rows)
+        if not plain:
+            lines.extend(_rows("    name | ", _plain(name), width))
+        if name in arguments:
+            value = arguments[name]
+            text = _plain(value) if isinstance(value, str) else _plain(repr(value))
+            lines.extend(_rows("    | ", text, width))
+    lines.extend(_rows("  ", f"Answer with: oo approve {aid}   or   oo deny {aid}", width, "    "))
+    return "\n".join(lines)
+
+
+def format_resolution(meta: dict[str, Any], *, color: bool = True) -> str:
+    """Format how a held tool call ended, whoever answered it."""
+    allowed = bool(meta.get("approved"))
+    verdict = _col("Allowed" if allowed else "Refused", _C.GREEN if allowed else _C.RED, bold=True, enabled=color)
+    return f"{verdict}: {_line(meta.get('tool_name', '?'))}"
 
 
 def format_status(data: dict[str, Any], *, color: bool = True) -> str:

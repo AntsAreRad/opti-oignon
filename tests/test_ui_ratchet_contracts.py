@@ -1444,7 +1444,7 @@ UR3_LEDGER = {
     'frontend/src/lib/components/chat/ProjectLinker.svelte': 9,
     'frontend/src/lib/components/chat/ReasoningDisplay.svelte': 1,
     'frontend/src/lib/components/chat/SandboxIsolationBadge.svelte': 1,
-    'frontend/src/lib/components/chat/ToolCallApprovalDrawer.svelte': 8,
+    'frontend/src/lib/components/chat/ToolCallApprovalDrawer.svelte': 7,
     'frontend/src/lib/components/health/CacheManager.svelte': 33,
     'frontend/src/lib/components/health/HealthDashboard.svelte': 52,
     'frontend/src/lib/components/panels/AnalyticsDashboard.svelte': 61,

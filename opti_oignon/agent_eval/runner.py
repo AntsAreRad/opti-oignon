@@ -101,6 +101,29 @@ except Exception:  # pragma: no cover - governor module absent
 
 FEATURE_AVAILABLE = _AGENT_OK
 
+def _evaluation_gate() -> tuple[str, Any, Any]:
+    """The mode, approval function and provenance of an evaluation run.
+
+    The run takes the machine's mode, never a looser one. No person watches
+    an evaluation, so a call that needs one is refused at once, with that
+    reason, instead of waiting on an approval queue nobody reads; and its
+    prompt is nobody's typed words, so it endorses no argument. Without the
+    mode lists the agent loop cannot load either, so no run starts; the
+    answer is Bulbe all the same.
+    """
+    reason = "an evaluation run has no person to ask"
+    try:
+        from opti_oignon.agent import allowlists
+    except Exception:
+        return "bulbe", None, None
+    try:
+        from opti_oignon import provenance
+    except Exception:
+        provenance = None
+    return (allowlists.floor_mode("daily"), allowlists.NoApprovalChannel(reason),
+            provenance.NO_PROVENANCE if provenance is not None else None)
+
+
 # Per-check command timeout inside the sandbox. Micro tasks
 # are small by construction; a check that needs more than this is not a
 # micro check.
@@ -675,6 +698,7 @@ class EvalRunner:
                     )
 
             native, handlers, system_prompt = self._surface_factory()
+            mode, approval_fn, provenance = _evaluation_gate()
 
             cancel_event = self._cancel
 
@@ -689,16 +713,17 @@ class EvalRunner:
                     task.prompt,
                     model_client=client,
                     sandbox=session,
-                    mode="daily",
+                    mode=mode,
                     conversation_id="",
                     system_prompt=system_prompt,
                     tools=native,
-                    approval_fn=None,
+                    approval_fn=approval_fn,
                     tool_handlers=handlers,
                     max_rounds=task.max_rounds,
                     include_memory=False,
                     should_continue=_should_continue,
                     verify=False,
+                    provenance=provenance,
                 )
 
             if cancel_event.is_set():

@@ -825,6 +825,19 @@ fail_under = 0
 # reads no origin, gives way to pw8 in tests/test_pending_writes_contracts.py.
 # They stay in the tree word for word.
 #
+# An agent run starts from the machine's security mode, never a looser one.
+# test_t5_daily_draft_publishes_only_through_the_gated_entry runs the driver
+# in a window that does not seed the machine's mode, so under that floor its
+# run was Bulbe or Daily depending on which modules an earlier suite had left
+# in the cache: red alone, green in the sweep. Its gate is also no longer
+# handed over as itself: the publication now asks through the run's gate
+# wrapped so that a yes counts only if the machine is still Daily once the
+# person answered. It gives way to pv34 in
+# tests/test_provenance_gate_contracts.py, the same publication through the
+# gated entry with the run's own bindings (the run's gate behind the wrapper),
+# in a window that seeds the mode, a no that publishes nothing, and nothing
+# published on a Bulbe machine. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1070,4 +1083,5 @@ addopts = """
     --deselect=tests/test_turn_origin_contracts.py::test_ot21_the_coding_agent_saves_a_typed_question_and_a_tool_flagged_answer
     --deselect=tests/test_user_turn_contracts.py::test_ut7_the_agentic_executor_saves_the_user_turn_by_its_runs_claim
     --deselect=tests/test_memory_routes.py::test_extract_routes_to_new_extraction
+    --deselect=tests/test_agent_run_teacher_wiring_contracts.py::test_t5_daily_draft_publishes_only_through_the_gated_entry
 """

@@ -16,6 +16,8 @@ Usage examples::
     oo ask -m llama3 "Explain PCA"
     cat data.csv | oo ask --pipe "Analyse this"
     oo ask -f prompt.txt
+    oo approve <id>
+    oo deny <id>
     oo models
     oo status
     oo backup export backup.json
@@ -56,7 +58,9 @@ from .output import (
     Spinner,
     echo_error,
     echo_success,
+    format_approval,
     format_models_table,
+    format_resolution,
     format_status,
     make_wait_line,
 )
@@ -141,9 +145,19 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
 
     effective_model = model or cfg.default_model
 
+    def _shown(meta: dict) -> None:
+        """A tool call held for the user's answer, on stderr: never mixed with the reply."""
+        click.echo(format_approval(meta, color=cfg.color), err=True)
+
+    def _ended(meta: dict) -> None:
+        """How a held call ended, whoever answered it."""
+        click.echo(format_resolution(meta, color=cfg.color), err=True)
+
     if json_out:
-        # Non-streaming: the spinner is on stderr, the JSON alone on stdout
-        full = _waiting(ctx, "Generating", lambda: client.stream_chat(text, model=effective_model))
+        # Non-streaming: the spinner is on stderr, the JSON alone on stdout;
+        # a held call is shown there too and answered from another terminal.
+        full = _waiting(ctx, "Generating", lambda: client.stream_chat(
+            text, model=effective_model, on_approval=lambda meta: _shown(meta), on_resolved=_ended))
         click.echo(json.dumps({"model": effective_model or "router",
                                 "prompt": text, "response": full}, indent=2))
         return
@@ -157,12 +171,22 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
     def _on_metadata(meta: dict) -> None:
         metadata_store.update(meta)
 
+    def _on_approval(meta: dict) -> bool | None:
+        """Ask at the keyboard when there is one; otherwise leave the call to ``oo approve`` or ``oo deny``."""
+        click.echo()
+        _shown(meta)
+        if pipe or not sys.stdin.isatty():
+            return None
+        return click.confirm("Allow this call?", default=False, err=True)
+
     try:
         client.stream_chat(
             text,
             model=effective_model,
             on_token=_on_token,
             on_metadata=_on_metadata,
+            on_approval=_on_approval,
+            on_resolved=_ended,
         )
         # Ensure trailing newline
         click.echo()
@@ -170,6 +194,33 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
         click.echo()  # newline after partial output
         echo_error(str(exc))
         ctx.exit(1)
+
+
+def _answer_approval(ctx: click.Context, approval_id: str, allowed: bool) -> None:
+    client = _get_client(ctx)
+    try:
+        client.answer_approval(approval_id, allowed)
+    except CLIClientError as exc:
+        echo_error(str(exc))
+        ctx.exit(1)
+        return
+    echo_success(f"{'Allowed' if allowed else 'Refused'}: {approval_id}")
+
+
+@cli.command()
+@click.argument("approval_id")
+@click.pass_context
+def approve(ctx: click.Context, approval_id: str) -> None:
+    """Allow a tool call that waits for your answer."""
+    _answer_approval(ctx, approval_id, True)
+
+
+@cli.command()
+@click.argument("approval_id")
+@click.pass_context
+def deny(ctx: click.Context, approval_id: str) -> None:
+    """Refuse a tool call that waits for your answer."""
+    _answer_approval(ctx, approval_id, False)
 
 
 def _resolve_prompt(prompt: str | None, input_file: str | None, pipe: bool) -> str:

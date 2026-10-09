@@ -297,7 +297,7 @@ class AgentRunManager:
         task: str,
         *,
         model_client: Any,
-        mode: str = "daily",
+        mode: str | None = None,
         conversation_id: str = "",
         sandbox: Any = None,
         system_prompt: str = "",
@@ -315,13 +315,17 @@ class AgentRunManager:
     ) -> dict[str, Any]:
         """Assemble and launch a run; refuse if one is already running.
 
-        ``turn_origin`` is who wrote ``task``, in the turn-origin grammar: the
-        caller that received the user's own typed words says typed, and the
-        task's typed units then endorse the run's memory and notes writes.
-        Any other caller leaves it legacy, and every such write is proposed.
+        ``mode`` is what the caller asks for; the run gets the machine's mode
+        when none is asked, and never a looser one. ``turn_origin`` is who
+        wrote ``task``, in the turn-origin grammar: the caller that received
+        the user's own typed words says typed, and the task, whole, then
+        endorses the run's memory and notes writes and the arguments of its
+        tool calls. Any other caller leaves it legacy: every such write is
+        proposed, and no argument of the run is endorsed.
         """
         if not _AGENT_OK:
             return {"started": False, "reason": "agent_unavailable"}
+        mode = _run_mode(mode)
         with self._lock:
             if self._running:
                 return {"started": False, "reason": "already_running"}
@@ -358,12 +362,15 @@ class AgentRunManager:
                 self._owned_sandbox = owned_sandbox
             # Bind manage_skills (Daily only) to this run's conversation, sandbox,
             # and gate so its writes go through the right human approval.
+            # The person decides inside the handler, which may take the
+            # approval's whole timeout: a yes counts only if the machine is
+            # still Daily once they answered.
             if agent_tools.TOOL_MANAGE_SKILLS in handlers:
                 handlers[agent_tools.TOOL_MANAGE_SKILLS] = self._reading(
                     agent_tools.TOOL_MANAGE_SKILLS,
                     agent_skills.make_manage_skills_handler(
                         registry=registry,
-                        approval_fn=approval_fn,
+                        approval_fn=_still_daily(approval_fn, mode, approval_manager),
                         sandbox=sandbox,
                         conversation_id=conversation_id,
                         manager=approval_manager,
@@ -418,6 +425,7 @@ class AgentRunManager:
             memory_query=memory_query if memory_query is not None else task,
             user_id=user_id,
             verify=verify,
+            provenance=_run_provenance(task, turn_origin, approval_fn, conversation_id),
         )
         if max_rounds is not None:
             kwargs["max_rounds"] = max_rounds
@@ -556,11 +564,15 @@ class AgentRunManager:
             draft = getattr(outcome, "draft", None)
             if draft is None or not bool(getattr(outcome, "escalated", False)):
                 return
-            if str(ctx.get("mode", "")).strip().lower() != "daily":
+            # The machine's mode at publication, never looser than the run's:
+            # a machine that escalated during the run publishes nothing, and
+            # neither does one that escalated while a person decided.
+            run_mode = str(ctx.get("mode", "")).strip().lower() or None
+            if run_mode is None or _run_mode(run_mode) != "daily":
                 return
             publication = agent_skills.publish_teacher_draft(
                 draft,
-                approval_fn=ctx.get("approval_fn"),
+                approval_fn=_still_daily(ctx.get("approval_fn"), run_mode, ctx.get("approval_manager")),
                 sandbox=ctx.get("sandbox"),
                 conversation_id=str(ctx.get("conversation_id", "")),
                 manager=ctx.get("approval_manager"),
@@ -684,10 +696,59 @@ def _run_mode(requested: str | None) -> str:
         from opti_oignon.agent import allowlists
     except Exception:
         return "bulbe"
-    current = allowlists.current_mode()
-    if requested is None or current == allowlists.MODE_BULBE:
-        return current
-    return requested if requested in allowlists.VALID_MODES else allowlists.MODE_BULBE
+    return allowlists.floor_mode(requested)
+
+
+def _still_daily(approval_fn: Any, run_mode: str | None, manager: Any = None) -> Any:
+    """The run's approval gate, read again once a person has answered: a yes counts only if the machine is still Daily.
+
+    A person may take up to the approval's timeout to decide, and the machine
+    may escalate meanwhile. A run with no gate of its own asks the approval
+    queue (``manager``, or the default one), the entry's own default, and
+    its answer is read the same way.
+    """
+    if not callable(approval_fn):
+
+        def approval_fn(conversation_id: str, tool_name: str, arguments: dict | None = None, **kwargs: Any) -> bool:
+            try:
+                from opti_oignon.agent import allowlists
+            except Exception:
+                return False
+            return allowlists.request_approval(conversation_id, tool_name, arguments, manager=manager, **kwargs)
+
+    def gate(*args: Any, **kwargs: Any) -> bool:
+        if not run_mode:
+            return False
+        return bool(approval_fn(*args, **kwargs)) and _run_mode(run_mode) == "daily"
+
+    gate.__wrapped__ = approval_fn  # type: ignore[attr-defined]
+    return gate
+
+
+def _run_provenance(task: str, turn_origin: str, approval_fn: Any, conversation_id: str) -> Any:
+    """The run's provenance: the task, whole, when its caller vouches it is typed, and its way to ask the user.
+
+    The way to ask is the run's approval function, shown the label of each
+    argument and the call's class. None when the gate is not loaded or the
+    provenance cannot be built; the dispatch then endorses nothing.
+    """
+    try:
+        from opti_oignon import provenance
+    except Exception:
+        return None
+    demand = None
+    if callable(approval_fn):
+
+        def demand(tool_name: str, arguments: dict, labels: dict | None = None, effect: str | None = None) -> bool:
+            if provenance.accepts_labels(approval_fn):
+                return bool(approval_fn(conversation_id, tool_name, arguments, labels=labels, effect=effect))
+            return bool(approval_fn(conversation_id, tool_name, arguments))
+
+    try:
+        return provenance.TurnProvenance.of_turn(task, turn_origin, demand=demand)
+    except Exception:
+        logger.warning("the run's provenance cannot be built; no argument of the run is endorsed", exc_info=True)
+        return None
 
 
 def _resolve_approval_fn() -> Callable[[str, str, dict], bool] | None:
@@ -695,8 +756,9 @@ def _resolve_approval_fn() -> Callable[[str, str, dict], bool] | None:
     try:
         from opti_oignon.agent import allowlists
 
-        def _gate(conversation_id: str, tool_name: str, arguments: dict) -> bool:
-            return allowlists.request_approval(conversation_id, tool_name, arguments)
+        def _gate(conversation_id: str, tool_name: str, arguments: dict, labels: dict | None = None,
+                  effect: str | None = None) -> bool:
+            return allowlists.request_approval(conversation_id, tool_name, arguments, labels=labels, effect=effect)
 
         return _gate
     except Exception:  # pragma: no cover - defensive
@@ -818,7 +880,8 @@ try:
             raise HTTPException(status_code=422, detail=refusal)
         # The task is the words the client sent as the user's own, as the
         # chat route holds its message: this route vouches for them as
-        # typed, so the task's own sentences endorse the run's writes.
+        # typed, so the task, whole, endorses the run's writes and the
+        # arguments of its calls -- never a sentence of it.
         result = get_run_manager().start(
             request.task,
             model_client=model_client,

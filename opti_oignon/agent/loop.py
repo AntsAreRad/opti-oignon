@@ -849,11 +849,14 @@ def _run_task_child(
     hardening_cfg: dict[str, Any] | None = None,
     round_budget: int | None = None,
     spill_counter: dict[str, int] | None = None,
+    provenance: Any = None,
 ) -> tuple[str, int]:
     """Run one bounded child task; returns (final_text, rounds_used).
 
-    The child shares the parent's SandboxToolSession, mode and approval_fn
-    (every child sandbox call rides the same Bulbe per-call approval), and
+    The child shares the parent's SandboxToolSession, mode, approval_fn
+    (every child sandbox call rides the same Bulbe per-call approval) and
+    provenance (its calls are judged by the run's own typed words, never by
+    the prompt the parent's model wrote it), and
     its events are re-emitted with a ``task`` marker so the panel can nest
     them. The child's observations ride the same 6.1 caps and spill
     (the spill counter is shared with the parent, so paths never collide);
@@ -898,6 +901,7 @@ def _run_task_child(
                 sandbox=sandbox,
                 approval_fn=approval_fn,
                 tool_handlers={},
+                provenance=provenance,
             )
         except Exception:  # dispatch is built not to raise; defensive
             results = []
@@ -945,6 +949,7 @@ def _dispatch_with_tasks(
     hardening_cfg: dict[str, Any] | None = None,
     round_budget: int | None = None,
     spill_counter: dict[str, int] | None = None,
+    provenance: Any = None,
 ) -> tuple[list[dispatch.DispatchResult], int]:
     """Dispatch a round that contains task calls; returns (results, new_cap).
 
@@ -953,7 +958,8 @@ def _dispatch_with_tasks(
     bound of AGT_SPEC 5.4 is enforced here: depth 1 via the child's empty
     handler map, child_cap = min(requested, TASK_CHILD_CAP,
     parent_rounds_remaining - 1), and the child's rounds debited from the
-    parent budget through the returned cap.
+    parent budget through the returned cap. A task call carries its labels
+    like any other, and its child is judged by the run's ``provenance``.
     """
     resolved_mode = _resolved_mode(mode)
     results: list[dispatch.DispatchResult] = []
@@ -967,6 +973,7 @@ def _dispatch_with_tasks(
                     sandbox=sandbox,
                     approval_fn=approval_fn,
                     tool_handlers=tool_handlers,
+                    provenance=provenance,
                 )
             )
             continue
@@ -979,6 +986,7 @@ def _dispatch_with_tasks(
                     reason=allowlists.REASON_NOT_ALLOWED,
                     source=call.source,
                     mode=resolved_mode,
+                    provenance=_task_provenance(call, provenance, allowlists.REASON_NOT_ALLOWED),
                 )
             )
             continue
@@ -993,6 +1001,7 @@ def _dispatch_with_tasks(
                     reason=dispatch.REASON_ERROR,
                     source=call.source,
                     mode=resolved_mode,
+                    provenance=_task_provenance(call, provenance, dispatch.REASON_ERROR),
                 )
             )
             continue
@@ -1013,6 +1022,7 @@ def _dispatch_with_tasks(
                     reason="task_budget_exhausted",
                     source=call.source,
                     mode=resolved_mode,
+                    provenance=_task_provenance(call, provenance, "task_budget_exhausted"),
                 )
             )
             continue
@@ -1030,6 +1040,7 @@ def _dispatch_with_tasks(
             hardening_cfg=hardening_cfg,
             round_budget=round_budget,
             spill_counter=spill_counter,
+            provenance=provenance,
         )
         cap -= used  # the debit: child rounds come out of the parent budget
         bound_report = f"task used {used} rounds of {child_cap}"
@@ -1042,9 +1053,19 @@ def _dispatch_with_tasks(
                 reason=dispatch.REASON_EXECUTED,
                 source=call.source,
                 mode=resolved_mode,
+                provenance=_task_provenance(call, provenance, "allowed"),
             )
         )
     return results, cap
+
+
+def _task_provenance(call: dispatch.ToolCall, provenance: Any, decision: str) -> dict[str, Any]:
+    """The labels a task call carries, as any call does; empty when the gate is not loaded."""
+    gate = dispatch._provenance
+    if gate is None:
+        return {}
+    assessment = gate.assess(call.name, call.arguments, provenance)
+    return {"effect": assessment.effect, "labels": dict(assessment.labels), "decision": decision, "asked": False}
 
 
 # Verdict patterns, compiled once. Failure tokens are matched first and with
@@ -1074,11 +1095,13 @@ def _run_verifier(
     approval_fn: Callable[[str, str, dict], bool] | None = None,
     tool_handlers: dict[str, Callable[[dict], Any]] | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
+    provenance: Any = None,
 ) -> VerifierResult:
     """A bounded verifier subagent that never exceeds the reference cap.
 
     The cap is the minimum of the requested ``max_rounds`` and
     ``_VERIFIER_MAX_ROUNDS``, so even a larger request cannot loop forever.
+    Its calls are judged by the run's ``provenance``.
     """
     cap = max(1, min(_clamp_rounds(max_rounds), _VERIFIER_MAX_ROUNDS))
     msgs = list(base_messages) + [{"role": "user", "content": VERIFIER_PROMPT}]
@@ -1103,6 +1126,7 @@ def _run_verifier(
                 sandbox=sandbox,
                 approval_fn=approval_fn,
                 tool_handlers=tool_handlers,
+                provenance=provenance,
             )
         except Exception:
             results = []
@@ -1135,8 +1159,14 @@ def run(
     should_continue: Callable[[], bool] | None = None,
     verify: bool = False,
     admitted_num_ctx: int | None = None,
+    provenance: Any = None,
 ) -> AgentRunResult:
     """Run the multi-turn streaming agent loop.
+
+    ``provenance`` is the run's turn: the parts of the task its user typed,
+    whole, and the run's way to ask the user. Every call the run makes -- its
+    own, a subtask's, the verifier's -- is judged by it; None endorses
+    nothing.
 
     Streams a model response each round, dispatches any tool calls through the
     sandbox seam, feeds the results back as untrusted observations, and stops
@@ -1251,6 +1281,7 @@ def run(
                     hardening_cfg=hardening_cfg,
                     round_budget=round_budget,
                     spill_counter=spill_counter,
+                    provenance=provenance,
                 )
             else:
                 results, _path = dispatch.dispatch_round(
@@ -1260,6 +1291,7 @@ def run(
                     sandbox=sandbox,
                     approval_fn=approval_fn,
                     tool_handlers=effective_handlers,
+                    provenance=provenance,
                 )
         except Exception as exc:  # dispatch is built not to raise; defensive
             results = []
@@ -1338,6 +1370,7 @@ def run(
             approval_fn=approval_fn,
             tool_handlers=effective_handlers,
             on_event=on_event,
+            provenance=provenance,
         )
 
     return AgentRunResult(

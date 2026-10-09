@@ -546,6 +546,64 @@ def user_turn(typed: str, sent: str, documents: Sequence[tuple[str | None, str]]
     return UserTurn(content, origin, tuple(tuple(segment) for segment in segments))
 
 
+def _claim_words(claim: Any) -> str:
+    """The words of a composed turn that are the user's -- typed, or a hook's rewrite of them -- never its files."""
+    content = str(getattr(claim, "content", "") or "")
+    segments = getattr(claim, "segments", ()) or ()
+    if not segments:
+        return content if getattr(claim, "origin", "") in ("typed", "refined") else ""
+    parts = [content[start:stop] for start, stop, label in segments if label in ("typed", "refined")]
+    return "\n\n".join(part.strip() for part in parts if part.strip())
+
+
+def _search_words(question: str, claim: Any) -> str:
+    """The words the executor's own web search would send.
+
+    With a turn its caller composed (``claim``), the user's own words --
+    typed, or a hook's rewrite of them -- and nothing else, whatever the
+    question has become on the way: never an attached file's words, a vision
+    model's description of an image, or a later pipeline step's prompt with
+    the model's analysis; none when the turn holds no words of the user's (a
+    turn from before origins, a file alone). Without a claim, the question as
+    it is, which the provenance gate judges as words the user did not type.
+    """
+    if claim is None:
+        return question
+    return _claim_words(claim)
+
+
+_SEARCH_GATE_MISSING_SAID: list[bool] = []
+
+
+def _gated_search_query(question: str, claim: Any, run: Any) -> tuple[str, str | None]:
+    """The query the executor's own web search may send, or the reason it may not.
+
+    The query meets the provenance gate as a ``web_search`` tool call would,
+    judged by the parts of the turn the user typed and asking, when the
+    policy says so, through the turn's own way to ask (``run.demand``). A
+    window that loads this module without the gate searches as before.
+    """
+    words = _search_words(question, claim)
+    if not words.strip():
+        return words, "the turn holds no words of the user's, and its files are never searched"
+    try:
+        from . import provenance
+    except Exception as exc:  # noqa: BLE001 - a window without the gate searches as before, and says so once
+        if not _SEARCH_GATE_MISSING_SAID:
+            _SEARCH_GATE_MISSING_SAID.append(True)
+            logger.warning("the provenance gate cannot be loaded (%s): the chat's own web search runs ungated", exc)
+        return words, None
+    try:
+        turn = provenance.TurnProvenance.of_user_turn(claim, demand=getattr(run, "demand", None))
+    except Exception:  # noqa: BLE001 - parts that cannot be read endorse nothing
+        turn = provenance.TurnProvenance(demand=getattr(run, "demand", None))
+    verdict = provenance.check("web_search", {"query": words, "max_results": 5}, turn,
+                               defaults={"max_results": 5}, network=True)
+    if not verdict.allowed:
+        return words, verdict.message
+    return str(verdict.arguments["query"]), None
+
+
 def _user_turn_origin(
     question: str,
     sent: str,
@@ -2422,12 +2480,22 @@ class Executor:
                 web_search_engine = None
                 SEARCH_AVAILABLE = False
 
+            # The words the search sends are the user's typed question, never
+            # an attached file's, and they meet the provenance gate as a tool
+            # call's would: the network policy, the machine's mode, the turn's
+            # way to ask.
+            _search_query, _search_refusal = (
+                _gated_search_query(question, _claim, run) if SEARCH_AVAILABLE and not _search_killed
+                else (question, None)
+            )
             if _search_killed:
                 status("[!] Web search skipped (kill switch engaged)")
+            elif SEARCH_AVAILABLE and _search_refusal:
+                status(f"[!] Web search refused: {_search_refusal}")
             elif SEARCH_AVAILABLE:
-                status(f"[>] Web search for: {question[:80]}...")
+                status(f"[>] Web search for: {_search_query[:80]}...")
                 try:
-                    results = web_search_engine.search(question, max_results=5)
+                    results = web_search_engine.search(_search_query, max_results=5)
                     if results:
                         # Format results as untrusted data
                         listing = "--- Web Search Results ---\n"

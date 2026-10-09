@@ -14,11 +14,14 @@ Architecture:
 All decisions are audit-logged.
 """
 
+import json
 import logging
+import math
 import secrets
 import threading
 import time
-from dataclasses import asdict, dataclass
+import unicodedata
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -58,6 +61,14 @@ class ApprovalRequest:
     created_at: float = 0.0
     resolved_at: float = 0.0
     resolved_by: str = ""  # "user" or "timeout"
+    # Where each argument came from (typed by the user in the turn, the
+    # tool's default, or unendorsed), and the call's effect class; empty when
+    # the caller did not say.
+    labels: dict[str, str] = field(default_factory=dict)
+    effect: str = ""
+    # Each value's own length in characters and its count of lines, keyed as
+    # ``arguments``: a shown value is longer than the value by its escapes.
+    sizes: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for API response."""
@@ -68,6 +79,9 @@ class ApprovalRequest:
             "arguments": self.arguments,
             "arguments_summary": self.arguments_summary,
             "risk_level": self.risk_level,
+            "labels": dict(self.labels),
+            "effect": self.effect,
+            "sizes": {name: dict(size) for name, size in self.sizes.items()},
             "status": self.status.value,
             "created_at": self.created_at,
             "resolved_at": self.resolved_at if self.resolved_at else None,
@@ -139,41 +153,133 @@ def assess_risk(tool_name: str) -> str:
     return "low"
 
 
-def sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Sanitize tool call arguments for display.
+# The longest value, in characters, the approval surfaces show whole: the
+# drawer, the socket event and the terminal. A longer value is cut there and
+# says how long it is. The provenance gate refuses to ask about a network
+# value longer than this (``provenance.SHOWN_LIMIT``, held equal by a
+# contract): the person could not see all that would leave.
+SHOWN_CHARS = 2000
 
-    Truncates long strings to prevent UI overflow and redacts
-    potentially sensitive values.
+# Characters a screen does not show as themselves: controls (a line break
+# excepted), formats such as a direction override or a zero-width space, line
+# and paragraph separators, private and unassigned code points; every blank but
+# the plain space (a tab, a no-break space, an em space draw like spaces of
+# other widths); and every code point Unicode says may be ignored when drawn
+# (Default_Ignorable_Code_Point: variation selectors, tag characters, the Hangul
+# fillers), with the symbols drawn blank (the Braille pattern, the Khitan
+# filler, the null notehead). Each one could carry bits the person never sees.
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Co", "Cs", "Cn"})
+_IGNORABLE = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+              (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x2800, 0x2800),
+              (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+              (0x16FE4, 0x16FE4), (0x1BCA0, 0x1BCA3), (0x1D159, 0x1D159), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+
+
+def _hidden(ch: str) -> bool:
+    if ch == "\n":
+        return False
+    category = unicodedata.category(ch)
+    if category in _HIDDEN_CATEGORIES or (category == "Zs" and ch != " "):
+        return True
+    point = ord(ch)
+    return any(low <= point <= high for low, high in _IGNORABLE)
+
+
+def _visible(text: str) -> str:
+    """``text`` with every character a screen would hide written as its escape.
+
+    A backslash is doubled, so an escape the text itself contains never
+    reads as a hidden character, and what is shown determines the bytes.
     """
-    sanitized: dict[str, Any] = {}
+    return "".join("\\\\" if ch == "\\" else ascii(ch)[1:-1] if _hidden(ch) else ch for ch in text)
+
+
+def _name(key: Any) -> str:
+    """An argument's name as every surface shows it, and keys its value, label and size by: on one line, nothing
+    hidden."""
+    return _visible(str(key)).replace("\n", "\\n")
+
+
+def _prefix(text: str, limit: int) -> str:
+    """The longest start of a shown ``text`` within ``limit`` characters that never ends inside an escape.
+
+    Every escape the surfaces write starts with a backslash, and the letter
+    after it gives its length: ``x`` four, ``u`` six, ``U`` ten, any other
+    two (a doubled backslash, a quote, a JSON ``n``).
+    """
+    end = 0
+    while end < len(text):
+        step = 1 if text[end] != "\\" else {"x": 4, "u": 6, "U": 10}.get(text[end + 1:end + 2], 2)
+        if end + step > limit:
+            break
+        end += step
+    return text[:end]
+
+
+def _shown(value: Any) -> Any:
+    """A value as a person is shown it before deciding.
+
+    Text whole up to ``SHOWN_CHARS``, every hidden character written as its
+    escape and a backslash doubled; a longer text cut there, saying how long
+    it is; numbers and booleans as they are, but a number JSON cannot carry
+    (NaN, an infinity), a browser would print otherwise (a negative zero) or
+    cannot read exactly (a whole number past 2**53) as its text, under the
+    same bound; anything else as its JSON with every character past ASCII
+    escaped, read by JSON's own rule (never escaped a second time, so it
+    reads one way only), under the same bound on what is shown. A cut value
+    says the length ``argument_sizes`` says, and, for JSON, how long it is
+    as shown.
+    """
+    if isinstance(value, float) and (not math.isfinite(value) or (value == 0 and math.copysign(1.0, value) < 0)):
+        return json.dumps(value)
+    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > 2 ** 53:
+        digits = str(value)
+        if len(digits) > SHOWN_CHARS:
+            return digits[:SHOWN_CHARS] + f"... [{len(digits)} characters in all; the rest is not shown]"
+        return digits
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if len(value) > SHOWN_CHARS:
+            return _visible(value[:SHOWN_CHARS]) + f"... [{len(value)} characters in all; the rest is not shown]"
+        return _visible(value)
+    text = json.dumps(value, ensure_ascii=True, default=str)
+    if len(text) > SHOWN_CHARS:
+        whole = len(json.dumps(value, ensure_ascii=False, default=str))
+        return (_prefix(text, SHOWN_CHARS)
+                + f"... [{whole} characters in all, {len(text)} as shown; the rest is not shown]")
+    return text
+
+
+def sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """The arguments as the approval surfaces show them: each name and value whole up to its bound, nothing hidden."""
+    return {_name(key): _shown(value) for key, value in arguments.items()}
+
+
+def argument_sizes(arguments: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Each value's own length in characters and its count of lines, keyed as the shown arguments are.
+
+    A text is counted as it is; anything else as its JSON. The surfaces say
+    these, so neither an escape nor a cut changes what the person is told.
+    """
+    sizes = {}
     for key, value in arguments.items():
-        if isinstance(value, str):
-            if len(value) > 200:
-                sanitized[key] = value[:200] + "..."
-            else:
-                sanitized[key] = value
-        elif isinstance(value, (int, float, bool)):
-            sanitized[key] = value
-        elif isinstance(value, list):
-            sanitized[key] = f"[list of {len(value)} items]"
-        elif isinstance(value, dict):
-            sanitized[key] = f"{{dict with {len(value)} keys}}"
-        else:
-            sanitized[key] = str(value)[:100]
-    return sanitized
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        sizes[_name(key)] = {"chars": len(text), "lines": text.count("\n") + 1}
+    return sizes
 
 
 def summarize_arguments(tool_name: str, arguments: dict[str, Any]) -> str:
-    """Generate a human-readable summary of tool call arguments."""
+    """A one-line summary of the arguments, read as the values themselves are shown, a line break as its escape."""
     parts = []
     for key, value in arguments.items():
-        val_str = str(value)
+        val_str = str(_shown(value)).replace("\n", "\\n")
         if len(val_str) > 60:
-            val_str = val_str[:60] + "..."
-        parts.append(f"{key}={val_str}")
+            val_str = _prefix(val_str, 60) + "..."
+        parts.append(f"{_name(key)}={val_str}")
     summary = ", ".join(parts)
     if len(summary) > 200:
-        summary = summary[:200] + "..."
+        summary = _prefix(summary, 200) + "..."
     return summary
 
 
@@ -207,15 +313,21 @@ class ToolCallApprovalManager:
         conversation_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
+        labels: dict[str, str] | None = None,
+        effect: str | None = None,
     ) -> tuple[str, threading.Event]:
         """Submit a tool call for approval.
 
         Returns (approval_id, event). The caller should wait on the
         event with a timeout. After the event fires, check get_status()
-        to determine if the call was approved.
+        to determine if the call was approved. ``labels`` (where each
+        argument came from) and ``effect`` (the call's class) are shown
+        with the request when the caller gives them.
         """
         approval_id = secrets.token_urlsafe(12)
         sanitized = sanitize_arguments(arguments)
+        sizes = argument_sizes(arguments)
         summary = summarize_arguments(tool_name, arguments)
         risk = assess_risk(tool_name)
 
@@ -227,6 +339,9 @@ class ToolCallApprovalManager:
             arguments_summary=summary,
             risk_level=risk,
             created_at=time.time(),
+            labels={_name(k): str(v) for k, v in (labels or {}).items()},
+            effect=str(effect or ""),
+            sizes=sizes,
         )
 
         event = threading.Event()

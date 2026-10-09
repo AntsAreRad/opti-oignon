@@ -11,6 +11,62 @@ package costs.
 
 ### Added
 
+- [SECURITY] The provenance gate (`opti_oignon/provenance.py`,
+  `config/provenance.yaml`). A tool call is the model's choice, and so is
+  every argument it carries: words the model read in a page, a document, a
+  tool result or the memory reach an argument as easily as the user's own,
+  and a call that reaches the network can carry them out of the machine.
+  Both passage points -- the chat's tool executor and the agent's dispatch
+  -- now label each argument of every call as it will run, after its name is
+  repaired, its default filled and its value coerced: `typed` when, folded,
+  it equals a part the user typed in the current turn, whole (for an agent
+  run, its task); `default` when it equals the tool's own declared value,
+  type and all; `unendorsed` otherwise. Every tool has an effect class from
+  a closed table (none, session, sandbox, deferred, network, approved), and
+  a tool the table does not know is held as networked. In Daily, the
+  network policy says what a network call carrying an unendorsed argument
+  does: `free`, the default, sends it as before; `ask_unendorsed` holds it
+  for the user, who sees each value whole with its label (a value too long
+  to be shown whole is refused instead of asked); `refuse_unendorsed`
+  refuses it. Only a missing file, or one that says `free`, is free: a file
+  that is present but cannot be read, names no policy, or gives a value
+  outside the three reads as `refuse_unendorsed`, and a policy given with a
+  turn can only tighten the file's. An endorsed network argument is handed
+  to its sink as the typed part's own characters, never the model's
+  spelling, so a planted instruction cannot hide a few bits of its own in
+  spacing or a Unicode form (the search may still scrub personal data from
+  it). An argument that stays on the machine is labelled `typed` only when
+  it already is the typed part, character for character. Each result
+  carries its labels, its class and the decision. The provenance of a turn
+  travels with each call, never on the shared executor. Not measured here:
+  how often real models make the gate ask or refuse, and what a demand costs
+  in time; both are owed by the machine.
+- `oo approve <id>` and `oo deny <id>`, and `oo ask` shows a tool call held
+  for the user's answer -- each value whole, with its label, every
+  character that could rewrite the line written as its escape -- asks at
+  the keyboard when there is one, and says how the call ended; an answer
+  that comes too late no longer ends the reply. The approval drawer, the
+  agent panel (which used to show a one-line summary only) and the approval
+  queue show each value whole up to 2,000 characters, labelled or not, with
+  the value's own length and lines as the queue counted them, and say how
+  long a longer one is, never cutting inside an escape. Every character a
+  screen would hide is written as its escape -- controls, direction
+  overrides, zero-width spaces, every blank but the plain space (a tab, a
+  no-break space), and every code point Unicode lets a screen draw as
+  nothing (variation selectors, tag characters, fillers), each of which
+  could carry bits unseen -- with a backslash doubled, so what is shown
+  determines what is sent. A list or a mapping is shown as its JSON, read
+  by JSON's own rule, up to 2,000 characters as shown, and its cut says
+  both lengths; a number JSON cannot carry (NaN, an infinity), a browser
+  would print otherwise (a negative zero) or cannot read exactly (a whole
+  number past 2**53) is shown as its text. An argument's name is shown the
+  same way, on one line. The terminal prints each argument's name, label
+  and length before its value, every line of the value behind a bar, a
+  name that is not a plain identifier behind a bar of its own, and cuts
+  every row to the narrowest width it can learn (`COLUMNS`, and every
+  terminal the process is attached to, standard error piped or not; 80 when
+  it can learn none), so that, on a screen at least that wide, no value,
+  name or summary can print a row that passes for the terminal's own.
 - The write census guard (`.github/scripts/write_census_guard.py`). A gate
   on a store's writes protects only the writes that go through it, so the
   guard finds every write into a store a model reads back -- the facts with
@@ -1222,6 +1278,39 @@ package costs.
 
 ### Changed
 
+- [SECURITY] The chat refuses a tool its turn did not offer, whether the
+  model decided on it or it was rebuilt from the model's prose, and a tool
+  whose class the machine's mode does not permit, the mode read at each
+  call. A person is asked about a call once it is resolved, so they approve
+  the arguments that will run, with their labels.
+- [SECURITY] A chat turn in Bulbe whose approval hook cannot be set up
+  refuses every tool call and says so; it used to run them unasked. A call
+  that must be asked and has no way to reach the user is refused, with the
+  reason.
+- [SECURITY] The agent's run manager runs in the machine's security mode
+  when none is asked, and never in a looser one; it defaulted to Daily. The
+  dispatch reads the machine's mode again at each call, so a running agent
+  is held to Bulbe from its next call once the machine escalates, and the
+  teacher publishes a draft, and the run's own skill tool writes a skill,
+  only if the machine is still in Daily once the person has answered --
+  through the run's own gate, or the run's approval queue when it has none.
+  A call that cannot run (no handler, no sandbox) is refused
+  before anyone is asked about it. An evaluation run takes the machine's
+  mode too, and a call that needs a person is refused at once with that
+  reason, instead of waiting on an approval queue nobody reads.
+- [SECURITY] On every turn the chat composes, its own web search (the web
+  search switch, the search step of a pipeline) sends the user's own words
+  -- typed, or a hook's rewrite of them -- and nothing else: never the words
+  of a file attached to the turn, which it used to send with the question,
+  nor a vision model's description of an image, nor a later pipeline step's
+  prompt with the model's analysis. A turn with no words of the user's (one
+  stored before turns had origins, a file alone) is not searched. It meets
+  the network policy like a tool call: a hook's rewrite, or the question of
+  a caller that vouches for no turn (sent as it is under free), is asked
+  about or refused under the strict settings, and Bulbe sends none.
+- The chat evaluation harness runs its scripted tools under the same gate:
+  on a Bulbe machine a scripted call that needs a person is refused, and
+  under a strict network policy its scripted search is held to it.
 - [SECURITY] A peel may no longer give an order, nor restate or tell one,
   the user's included, but in the user's own words, stitched in by the
   queue. Every later turn reads a peel, so the eviction gate's second face

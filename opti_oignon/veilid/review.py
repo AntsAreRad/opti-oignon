@@ -4,8 +4,9 @@
 A skill received from a paired device lands only once this device's human
 lets it through. The gate names it -- the record id is the category and
 name it lands under -- but never showed what it says: the live prompt
-cuts every value to 60 characters and gives up after 30 seconds, and the
-pending list carries provenance alone.
+shows a value whole only up to ``tool_call_approval.SHOWN_CHARS`` and its
+one-line summary cuts each to 60 characters, it gives up after 30
+seconds, and the pending list carries provenance alone.
 
 ``describe`` answers what may be shown anywhere, in a prompt or a list:
 the category and name the skill will land under, and the SHA-256 of its

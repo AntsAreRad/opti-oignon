@@ -7,6 +7,7 @@ endpoints for the SvelteKit frontend.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -273,9 +274,10 @@ class ChatTurn:
     the turn as the route composed it -- the words sent, who wrote them,
     the files after them -- and every path that saves the user's words
     reads it from the turn; a retry sets it first, to the stored turn it
-    regenerates."""
+    regenerates. ``demand`` is the turn's way to ask the user about one tool
+    call, the same hook in every mode; None when it could not be set up."""
 
-    __slots__ = ("conversation_id", "stop", "results", "steps", "user_turn")
+    __slots__ = ("conversation_id", "stop", "results", "steps", "user_turn", "demand")
 
     def __init__(self, conversation_id: str) -> None:
         self.conversation_id = conversation_id
@@ -283,6 +285,7 @@ class ChatTurn:
         self.results: dict = {}
         self.steps = None
         self.user_turn = None
+        self.demand = None
 
 
 # What a chat turn may carry beside the typed words.
@@ -464,6 +467,41 @@ def _await_approval(done: threading.Event, stop: threading.Event, timeout: float
     return done.is_set()
 
 
+def _submit_takes_labels(manager) -> bool:
+    """Whether the approval queue's ``submit`` takes the labels and the class by keyword."""
+    try:
+        parameters = list(inspect.signature(manager.submit).parameters.values())
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return True
+    return {"labels", "effect"} <= {p.name for p in parameters}
+
+
+def _labels_as_shown(pending, arguments: dict, labels: dict, takes_labels: bool) -> dict:
+    """``labels`` keyed as the queue keys the values it shows, so each label sits beside its own value.
+
+    A queue that took the labels keyed them itself; for one that did not,
+    each raw name is written by the approval queue's rule for names, and the
+    labels are sent only when the queue shows its values under exactly those
+    names -- never by position, which a queue that keeps another order would
+    turn into a label beside another value, nor by a rule the queue does not
+    follow. A request the queue no longer holds is sent with no labels, as
+    with no values.
+    """
+    if pending is None:
+        return {}
+    if takes_labels and getattr(pending, "labels", None):
+        return dict(pending.labels)
+    try:
+        from opti_oignon.tool_call_approval import _name as shown_name
+    except Exception:
+        return {}
+    if set(getattr(pending, "arguments", {}) or {}) != {shown_name(name) for name in arguments}:
+        return {}
+    return {shown_name(name): label for name, label in labels.items() if name in arguments}
+
+
 def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, timeout: float):
     """The Bulbe approval gate of one turn, bound to that turn's stop.
 
@@ -473,14 +511,20 @@ def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, tim
     stopped, or the deadline passes (an auto-deny). A stopped turn's pending
     request is withdrawn on its behalf, so it leaves the queue and no person
     is named, and a decision that lands after the stop never runs the tool.
+    The request and its socket event carry the label of each argument and
+    the call's class when the gate gives them.
     """
+    takes_labels = _submit_takes_labels(manager)
 
-    def _approval_hook(tool_name: str, arguments: dict) -> bool:
+    def _approval_hook(tool_name: str, arguments: dict, labels: dict | None = None,
+                       effect: str | None = None) -> bool:
         """Block until a person decides, the turn stops, or the deadline."""
+        shown = {str(k): str(v) for k, v in (labels or {}).items()}
         aid, event = manager.submit(
             conversation_id=conversation_id,
             tool_name=tool_name,
             arguments=arguments,
+            **({"labels": shown, "effect": str(effect or "")} if takes_labels else {}),
         )
         pending = manager._pending.get(aid, None)
         emit(("tool_call_pending", {
@@ -488,6 +532,13 @@ def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, tim
             "tool_name": tool_name,
             "arguments_summary": pending and pending.arguments_summary or "",
             "risk_level": pending and pending.risk_level or "low",
+            # The values themselves, as the queue shows them: whole up to its
+            # bound, every hidden character made visible, keyed by the names
+            # as it shows them, with each value's own length and lines.
+            "arguments": dict(pending.arguments) if pending is not None else {},
+            "labels": _labels_as_shown(pending, arguments, shown, takes_labels),
+            "effect": str(effect or ""),
+            "sizes": dict(getattr(pending, "sizes", None) or {}) if pending is not None else {},
         }))
         _await_approval(event, turn.stop, timeout)
         status = manager.get_status(aid)
@@ -1074,35 +1125,44 @@ async def _stream_turn(
 
     gen_thread = threading.Thread(target=_generate, daemon=True)
 
-    # In Bulbe mode, arm a pre-execution approval gate so every tool
-    # call blocks until human approval.
-    # EX-02: the gate is bound to this request (assigned to _approval_fn
-    # and passed into the executor call above) instead of mutated onto the
-    # shared ToolExecutor singleton, so overlapping Bulbe sessions cannot
-    # clobber or drop each other's gate.
-    if (
-        TOOL_CALL_APPROVAL_AVAILABLE
-        and _tool_call_approval is not None
-        and SECURITY_POLICY_AVAILABLE
-        and _get_security_policy is not None
-    ):
+    # Every turn gets its way to ask the user about one tool call: the
+    # approval hook, bound to this turn's stop, emitting its events through
+    # the chunks. The provenance gate asks through it when the machine's
+    # mode or the network policy says so. In Bulbe the same hook is also the
+    # per-call gate (EX-02: bound to this request and passed into the
+    # executor call above, never mutated onto the shared ToolExecutor
+    # singleton, so overlapping Bulbe sessions cannot clobber or drop each
+    # other's gate). A hook that cannot be set up leaves the turn with no way
+    # to ask, and the gate then refuses every call that needs one.
+    _turn_hook = None
+    if TOOL_CALL_APPROVAL_AVAILABLE and _tool_call_approval is not None:
         try:
-            policy = _get_security_policy()
-            if getattr(policy, "tool_call_approval_required", False):
-                from opti_oignon.tool_call_approval import DEFAULT_TIMEOUT_SECONDS
+            from opti_oignon.tool_call_approval import DEFAULT_TIMEOUT_SECONDS
 
-                # EX-02: bind the gate to this request instead of
-                # mutating the shared singleton. _approval_fn is forwarded to
-                # the executor call, which threads it down to _execute_tool.
-                # The gate blocks the generation thread until a decision or
-                # this turn's stop, and emits its events through the chunks.
-                _approval_fn = _make_approval_hook(
-                    _tool_call_approval, turn, conversation_id or "",
-                    chunks.append, DEFAULT_TIMEOUT_SECONDS + 2,
-                )
-                logger.info("Tool call approval gate armed (Bulbe mode)")
+            _turn_hook = _make_approval_hook(
+                _tool_call_approval, turn, conversation_id or "",
+                chunks.append, DEFAULT_TIMEOUT_SECONDS + 2,
+            )
         except Exception as exc:
-            logger.warning("Failed to install tool call approval hook: %s", exc)
+            logger.warning("Failed to set up the turn's tool approval hook: %s", exc)
+    turn.demand = _turn_hook
+    if SECURITY_POLICY_AVAILABLE and _get_security_policy is not None:
+        try:
+            approval_required = bool(getattr(_get_security_policy(), "tool_call_approval_required", False))
+        except Exception as exc:
+            # The gate reads the machine's mode itself, failing secure, and
+            # asks through the turn's hook when the mode wants it.
+            logger.warning("Security policy unreadable for this turn: %s", exc)
+            approval_required = False
+        if approval_required:
+            _approval_fn = _turn_hook
+            if _turn_hook is None:
+                chunks.append(("status", {"message": (
+                    "Tool approval is unavailable: every tool call of this turn is refused."
+                )}))
+                logger.warning("No tool approval hook in Bulbe: every tool call of this turn is refused")
+            else:
+                logger.info("Tool call approval gate armed (Bulbe mode)")
 
     gen_thread.start()
 

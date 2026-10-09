@@ -31,6 +31,7 @@ function in the runtime tests. There is no module-level singleton to reset.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -112,15 +113,32 @@ APPROVAL_TIMEOUT = 30.0
 REASON_ALLOWED = "allowed"
 REASON_NOT_ALLOWED = "not_in_allowlist"
 REASON_DENIED = "denied_by_human"
+REASON_NO_CHANNEL = "no_approval_channel"
 
 
 @dataclass
 class GateDecision:
-    """The outcome of gating one tool call for the active mode."""
+    """The outcome of gating one tool call for the active mode; ``detail`` says why when a refusal has more to say."""
 
     allowed: bool
     reason: str
     mode: str
+    detail: str = ""
+
+
+class NoApprovalChannel:
+    """The approval function of a run no person can answer: each call it is asked about is refused at once.
+
+    ``reason`` says why there is no one to ask; ``evaluate`` reports it with
+    the refusal instead of waiting on an approval queue nobody watches.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = str(reason)
+
+    def __call__(self, conversation_id: str, tool_name: str, arguments: dict[str, Any], **_ignored: Any) -> bool:
+        logger.info("%s refused with no one to ask: %s", tool_name, self.reason)
+        return False
 
 
 # Mode resolution
@@ -172,6 +190,20 @@ def _resolve_arg_mode(mode: str | None) -> str:
     return mode if mode in VALID_MODES else MODE_BULBE
 
 
+def floor_mode(requested: str | None) -> str:
+    """The mode a run gets: the machine's when none is asked, and never a looser one.
+
+    Bulbe on the machine is Bulbe for every run; on a Daily machine a run may
+    ask for Bulbe. An unknown request, or a machine mode that cannot be read,
+    is Bulbe. Leaving Bulbe takes the degradation ceremony of
+    ``security_mode``, never an argument.
+    """
+    current = current_mode()
+    if requested is None or current == MODE_BULBE:
+        return current
+    return requested if requested in VALID_MODES else MODE_BULBE
+
+
 # Allowlist gate
 
 
@@ -214,6 +246,17 @@ def _approval_manager():
         return None
 
 
+def _takes_labels(fn: Any) -> bool:
+    """Whether a queue's ``submit`` takes the labels and the class by keyword (an older queue does not)."""
+    try:
+        parameters = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return True
+    return {"labels", "effect"} <= {p.name for p in parameters}
+
+
 def _is_approved(status: Any) -> bool:
     """True only for an explicit approved status (enum or string); else False."""
     if status is None:
@@ -229,19 +272,25 @@ def request_approval(
     *,
     manager: Any = None,
     timeout: float | None = None,
+    labels: dict[str, str] | None = None,
+    effect: str | None = None,
 ) -> bool:
     """Submit a tool call to the human gate and wait, fail-secure.
 
     Returns True only when the human explicitly approves before the timeout.
     A missing gate, a submit failure, a timeout, a denial, or any error all
     return False, so the absence of a positive signal denies the call.
+    ``labels`` and ``effect`` -- where each argument came from, and the
+    call's class -- travel with the request when given.
     """
     mgr = manager if manager is not None else _approval_manager()
     if mgr is None:
         logger.warning("Bulbe approval gate unavailable; denying %s", tool_name)
         return False
+    extra = ({"labels": dict(labels), "effect": str(effect or "")}
+             if labels is not None and _takes_labels(getattr(mgr, "submit", None)) else {})
     try:
-        approval_id, event = mgr.submit(conversation_id, tool_name, dict(arguments or {}))
+        approval_id, event = mgr.submit(conversation_id, tool_name, dict(arguments or {}), **extra)
     except Exception:
         logger.warning("Approval submit failed for %s; denying", tool_name)
         return False
@@ -287,6 +336,8 @@ def evaluate(
         SESSION_STATE_TOOLS | SUBAGENT_TOOLS
     ):
         fn = approval_fn if approval_fn is not None else _default_approval_fn
+        if isinstance(fn, NoApprovalChannel):
+            return GateDecision(False, REASON_NO_CHANNEL, resolved, fn.reason)
         try:
             ok = bool(fn(conversation_id, tool_name, args))
         except Exception:

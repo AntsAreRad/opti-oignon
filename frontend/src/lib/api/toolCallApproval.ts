@@ -19,6 +19,12 @@ export interface PendingApproval {
   arguments: Record<string, unknown>;
   arguments_summary: string;
   risk_level: 'low' | 'medium' | 'high';
+  /** Where each argument came from: typed by the user in the turn, the tool's default, or unendorsed. */
+  labels?: Record<string, 'typed' | 'default' | 'unendorsed' | string>;
+  /** The call's effect class (network, sandbox, ...); empty when the caller did not say. */
+  effect?: string;
+  /** Each value's own length in characters and its count of lines, keyed as `arguments`. */
+  sizes?: Record<string, { chars: number; lines: number }>;
   status: 'pending' | 'approved' | 'denied' | 'timeout';
   created_at: number;
   resolved_at: number | null;
