@@ -420,7 +420,10 @@ def read_origin(turn):
     legacy: it predates origins. A declaration outside the grammar -- a base
     or flag it does not know, a role that cannot carry it, a segment out of
     bounds -- is legacy with no segment, and ``defect`` names the rule it
-    broke; the declaration is never guessed at.
+    broke; the declaration is never guessed at. Words typed or rewritten
+    beside a document -- in one run of parts with no gap between them, as
+    pasted text lies among the words -- take their sense from it, and are
+    read as a document too (``beside_documents``).
     """
     text = str(turn.get("text", "") or "")
     origin = turn.get("origin", "legacy")
@@ -428,7 +431,30 @@ def read_origin(turn):
     defect = _origin_defect(turn.get("role"), origin, segments, len(text))
     if defect is not None:
         return "legacy", [], defect
-    return origin, [[start, stop, label] for start, stop, label in segments], None
+    return origin, beside_documents([[start, stop, label] for start, stop, label in segments]), None
+
+
+def beside_documents(segments):
+    """``segments`` with every typed or rewritten part read as a document when its run holds a document.
+
+    A run is parts that follow one another with no character between them.
+    Pasted text lies in the words' own run, so the words typed around it
+    become a document; a file attached after the words starts a run of its
+    own past the line the executor writes before it, and leaves the words as
+    they are.
+    """
+    held = [list(segment) for segment in segments]
+    start = 0
+    while start < len(held):
+        end = start + 1
+        while end < len(held) and held[end][0] == held[end - 1][1]:
+            end += 1
+        if any(segment[2] == "document" for segment in held[start:end]):
+            for segment in held[start:end]:
+                if segment[2] in ("typed", "refined"):
+                    segment[2] = "document"
+        start = end
+    return held
 
 
 def _tokens(text):

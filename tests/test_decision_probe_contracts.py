@@ -940,5 +940,72 @@ def test_dp28_a_decision_decides_however_its_text_is_written():
     assert not missed, f"a decision decides however its text is written: {missed}"
 
 
+# ---------------------------------------------------------------------------
+# DP29 and DP30 -- dp1 and dp2 with the file where the executor puts it
+# ---------------------------------------------------------------------------
+# The executor writes a line of its own before each file a turn carries; a
+# document that touches typed words, with no such line between them, is text
+# the user pasted among the words, and the words typed beside it take their
+# sense from it (tests/test_pasted_text_contracts.py, PA1 and PA4).
+_FILE_LINE = "\n\n---\nDocument provided: notes.txt\n"
+
+
+def test_dp29_a_decision_is_drawn_from_typed_text_and_from_nothing_else():
+    """dp1 word for word, with the document a line of its own after the typed
+    words, as the executor composes a file (dp1 is deselected by name); and the
+    same words with the document touching them, pasted text, draw no decision.
+    """
+    mod, restore = _probes()
+    try:
+        typed = mod.generate_probes([_turn("user", "typed", _DECISION)])
+        decisions = [p for p in typed if p.kind == "decision"]
+        assert [(p.answer, p.origin, p.role) for p in decisions] == [(_DECISION, "typed", "user")], typed
+        episodic = sorted((p.kind, p.answer) for p in typed if p.kind != "decision")
+        for role, origin in (("assistant", "assistant"), ("assistant", "assistant+tool"), ("assistant", "assistant+web"),
+                             ("user", "document"), ("user", "refined"), ("user", "legacy"), ("user", None),
+                             ("assistant", None)):
+            drawn = mod.generate_probes([_turn(role, origin, _DECISION)])
+            assert "decision" not in _kinds(drawn), f"{role} {origin} draws no decision"
+            assert sorted((p.kind, p.answer) for p in drawn) == episodic, f"{role} {origin} keeps its episodic probes"
+        mixed = _DECISION + _FILE_LINE + _DOCUMENT
+        at = len(_DECISION) + len(_FILE_LINE)
+        drawn = mod.generate_probes([_turn("user", "typed", mixed, [[0, len(_DECISION), "typed"],
+                                                                     [at, len(mixed), "document"]])])
+        assert [(p.answer, p.origin) for p in drawn if p.kind == "decision"] == [(_DECISION, "typed")], drawn
+        assert "Contoso" in [p.answer for p in drawn if p.kind == "entity"], "the document's names are still asked"
+        pasted = _DECISION + " " + _DOCUMENT
+        cut = len(_DECISION) + 1
+        touching = mod.generate_probes([_turn("user", "typed", pasted, [[0, cut, "typed"], [cut, len(pasted), "document"]])])
+        assert "decision" not in _kinds(touching), "words typed beside pasted text draw a decision"
+    finally:
+        restore()
+
+
+def test_dp30_a_decision_a_twin_draws_from_a_piece_that_is_not_typed_is_dropped():
+    """dp2 word for word, with the document a line of its own after the typed
+    words (dp2 is deselected by name); and the twin's decision drawn from words
+    typed beside pasted text is dropped too.
+    """
+    mod, restore = _probes()
+    try:
+        twin = _Twin(mod.GENERATOR_VERSION)
+        mod._native = lambda: twin
+        mixed = _DECISION + _FILE_LINE + _DOCUMENT
+        at = len(_DECISION) + len(_FILE_LINE)
+        span = [
+            _turn("user", "typed", mixed, [[0, len(_DECISION), "typed"], [at, len(mixed), "document"]]),
+            _turn("assistant", "assistant", _DECISION),
+            _turn("user", None, _DECISION),
+        ]
+        drawn = mod.generate_probes(span)
+        assert [(p.answer, p.origin) for p in drawn] == [(_DECISION, "typed")], drawn
+        pasted = _DECISION + " " + _DOCUMENT
+        cut = len(_DECISION) + 1
+        touching = mod.generate_probes([_turn("user", "typed", pasted, [[0, cut, "typed"], [cut, len(pasted), "document"]])])
+        assert touching == [], f"a twin's decision drawn beside pasted text is kept: {touching}"
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

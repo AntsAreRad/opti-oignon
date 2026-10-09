@@ -707,3 +707,62 @@ def test_ch13_a_close_that_ended_without_the_model_says_so(tmp_path):
             assert ("without the model" in closed[0].text) is said, name
     finally:
         restore()
+
+
+class _Keyboard:
+    """Standard input as a terminal gives it: the lines the runner feeds, read from a keyboard."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def isatty(self):
+        return True
+
+    def readline(self):
+        return self.stream.readline()
+
+
+def test_ch14_oo_chat_drives_the_session_at_the_keyboard_and_refuses_a_command_read_from_a_pipe(tmp_path, monkeypatch):
+    """ch6 word for word with the lines typed at a keyboard (ch6 is deselected
+    by name): a line read from a pipe or a file is pasted text, and a command
+    read that way, which would act as the user, is refused; /quit, which acts
+    as no one, still ends the session.
+    """
+    from click.testing import CliRunner
+
+    # The CLI reads its configuration from the test's own directory, never
+    # from the user's: the config module resolves its path when it loads.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    loaded, scripted, conversations, restore = _load(cli=True)
+    try:
+        off, *_ = _onion_seam(loaded, tmp_path, enabled=False)
+        made = []
+
+        def factory(model, conversation_id):
+            made.append((model, conversation_id))
+            return _session(loaded, librarian=off, conversation_id=conversation_id)
+
+        main = loaded["opti_oignon.cli.main"]
+        real = main.click.get_text_stream
+        runner = CliRunner(mix_stderr=False)
+        lines = "What is an onion?\n/pin The user is called Alice.\n/quit\nNever read.\n"
+        with monkeypatch.context() as keyboard:
+            keyboard.setattr(main.click, "get_text_stream",
+                             lambda name, *a, **k: _Keyboard(real(name, *a, **k)) if name == "stdin" else real(name, *a, **k))
+            result = runner.invoke(main.cli, ["--no-color", "chat", "-m", "test-model:1b", "--conversation", "conv-9"],
+                                   input=lines, obj={"chat_session": factory})
+        assert result.exit_code == 0, result.output
+        assert made == [("test-model:1b", "conv-9")], "the options reach the session"
+        assert "Hello world\n" in result.stdout, "the stream, then a line break"
+        assert "Error: /pin refused" not in result.stdout
+        assert "switched off" in result.stderr and "Error:" in result.stderr, "a refusal goes to stderr by name"
+        assert len(scripted.calls) == 1, "the line after /quit was never sent"
+        assert [m["content"] for m in conversations.messages["conv-9"] if m["role"] == "user"][0].startswith("What is an onion?")
+        # The same lines from a pipe: the /pin is refused as read from it, /quit still ends the session.
+        piped = runner.invoke(main.cli, ["--no-color", "chat", "-m", "test-model:1b", "--conversation", "conv-10"],
+                              input=lines, obj={"chat_session": factory})
+        assert piped.exit_code == 0 and len(scripted.calls) == 2, f"control: the piped session sent its one turn: {piped.output}"
+        assert "typed at the keyboard" in piped.stderr and "switched off" not in piped.stderr, (
+            "a command read from a pipe ran as the user")
+    finally:
+        restore()

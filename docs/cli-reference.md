@@ -30,14 +30,26 @@ Send a prompt to the backend and display the response.
 oo ask "Summarize this dataset"
 oo ask -m llama3 "Explain PCA"
 cat data.csv | oo ask --pipe "Analyze this"
-oo ask -f prompt.txt
+oo ask "Review this file" -f notes.txt
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-m, --model MODEL` | Force a specific model |
-| `-f, --file PATH` | Read prompt from file |
-| `--pipe` | Read stdin as additional context |
+| `-f, --file PATH` | Read a file and send it after the prompt |
+| `--pipe` | Read stdin and send it after the prompt (and the file) |
+
+The prompt on the command line is what you typed. What `oo ask` reads -- the
+file, standard input -- is sent beside it as a document, as a file attached
+in the web chat (`notes.txt`, `standard input`): the server saves it as a
+document part of the turn, a line of its own away from the prompt, so its
+words never endorse a memory write, a tool call's argument or a decision,
+whatever they say, and the prompt keeps its standing. A pipe with neither
+prompt nor file makes a turn of that document alone. A document is held to
+the bounds `config/chat.yaml` sets for attached files; a server older than
+attached files drops it, so `oo ask` and its server go together. With
+`--json-out`, `prompt` is the prompt you typed, and `documents`, present
+when `oo ask` read any, lists their names.
 
 When the backend holds a tool call for your answer -- in Bulbe, a call it
 permits that acts outside the run; in Daily, when the policy asks, a network
@@ -72,7 +84,12 @@ executor, the conversation store, the onion memory and the skill registry
 are the local ones, and inference goes through the inference registry
 configured from `backends.yaml` -- the core daemon when `core.yaml`
 enables it, never a client of the session's own. It does not need the API
-server.
+server. A line read from a pipe or a file rather than typed at the keyboard
+is saved as pasted text, a document whose words endorse nothing, and a
+command read that way is refused, but for `/help` and `/quit`, which act as
+no one: commands are typed at the keyboard. Text
+pasted at the interactive prompt reaches the session as typed lines, since
+the terminal's own paste marking is not read yet.
 
 ```bash
 oo chat

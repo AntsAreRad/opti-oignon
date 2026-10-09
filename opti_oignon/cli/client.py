@@ -138,6 +138,8 @@ class OOClient:
         on_metadata: Callable[[dict], None] | None = None,
         on_approval: Callable[[dict], bool | None] | None = None,
         on_resolved: Callable[[dict], None] | None = None,
+        pasted: list | None = None,
+        documents: list | None = None,
     ) -> str:
         """Send a chat message and stream tokens back.
 
@@ -166,14 +168,23 @@ class OOClient:
         on_resolved : callable, optional
             Called with how a held call ended: its id, tool, and whether it
             was approved, whoever answered.
+        pasted : list, optional
+            The ranges of ``message`` the user pasted rather than typed, as
+            [start, end] in code points; the server saves each as a document
+            part of the words.
+        documents : list, optional
+            What was read rather than typed -- a file, standard input -- as
+            ``{"filename", "content"}`` objects sent beside the message; the
+            server saves each as a document part of the turn.
 
         Returns
         -------
         str
             The full accumulated response text.
         """
+        extra = {key: value for key, value in (("pasted", pasted), ("documents", documents)) if value}
         return asyncio.run(
-            self._ws_stream(message, model, on_token, on_thinking, on_metadata, on_approval, on_resolved)
+            self._ws_stream(message, model, on_token, on_thinking, on_metadata, on_approval, on_resolved, **extra)
         )
 
     def answer_approval(self, approval_id: str, allowed: bool) -> Any:
@@ -190,6 +201,8 @@ class OOClient:
         on_metadata: Callable[[dict], None] | None,
         on_approval: Callable[[dict], bool | None] | None = None,
         on_resolved: Callable[[dict], None] | None = None,
+        pasted: list | None = None,
+        documents: list | None = None,
     ) -> str:
         try:
             import websockets
@@ -204,6 +217,10 @@ class OOClient:
         effective_model = model or self.config.default_model
         if effective_model:
             request_payload["model"] = effective_model
+        if pasted:
+            request_payload["pasted"] = [list(item) for item in pasted]
+        if documents:
+            request_payload["documents"] = [{"filename": d["filename"], "content": d["content"]} for d in documents]
 
         full_text = ""
         try:

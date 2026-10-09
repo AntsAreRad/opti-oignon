@@ -10,3 +10,10 @@ attachments:
   max_documents: 10           # files one turn may carry
   max_document_bytes: 500000  # bytes of one file's text, encoded as UTF-8
   max_filename_chars: 255     # characters of one file's name
+
+# The ranges of a message the user pasted or dropped rather than typed. Each
+# is saved as a document part of the words, never as typed words. A request
+# with more ranges, or one out of shape, is refused by name and nothing is run
+# or written; when this file cannot be read, every pasted range is refused.
+pasted:
+  max_ranges: 512             # pasted ranges one message may carry

@@ -339,6 +339,56 @@ def _attachment_refusal(documents: list[tuple[str, str]]) -> str | None:
     return None
 
 
+def _pasted_of(request) -> list:
+    """The pasted ranges a request carries, as lists; none when it carries none."""
+    return [list(item) for item in (getattr(request, "pasted", None) or ())]
+
+
+def _pasted_bound() -> int | None:
+    """How many pasted ranges config/chat.yaml lets one message carry, or None when it sets no such bound."""
+    try:
+        bound = yaml.safe_load(_CHAT_CONFIG.read_text(encoding="utf-8"))["pasted"]["max_ranges"]
+    except Exception as exc:
+        logger.warning("the pasted ranges' bound is unreadable in %s: %s", _CHAT_CONFIG.name, exc)
+        return None
+    if type(bound) is not int or bound <= 0:
+        logger.warning("the pasted ranges' bound in %s is not a positive integer", _CHAT_CONFIG.name)
+        return None
+    return bound
+
+
+def _pasted_refusal(message: str, pasted) -> str | None:
+    """Why a message's pasted ranges are refused, naming the field and the rule; None when they are not.
+
+    Each range is [start, end], two whole numbers in code points of the
+    message as sent, non-empty and inside it; the ranges come sorted, none
+    starting before the previous one ends (touching ones are merged); there
+    are no more of them than config/chat.yaml allows, and every range is
+    refused when that file sets no bound. A range out of shape is never
+    guessed at.
+    """
+    if not pasted:
+        return None
+    if not isinstance(pasted, (list, tuple)):
+        return "pasted is not a list of ranges"
+    bound = _pasted_bound()
+    if bound is None:
+        return "pasted ranges are refused: config/chat.yaml does not set their bound (pasted: max_ranges)"
+    if len(pasted) > bound:
+        return f"pasted holds {len(pasted)} ranges, over the limit of {bound} set in config/chat.yaml"
+    end = 0
+    for index, item in enumerate(pasted, start=1):
+        if not isinstance(item, (list, tuple)) or len(item) != 2 or not all(type(v) is int for v in item):
+            return f"pasted range {index} is not two whole numbers"
+        start, stop = item
+        if not 0 <= start < stop <= len(message):
+            return f"pasted range {index} [{start}, {stop}] is empty, reversed or outside the message"
+        if start < end:
+            return f"pasted range {index} starts before the previous one ends: ranges come sorted and apart"
+        end = stop
+    return None
+
+
 def _rewritten_documents(documents: list[tuple[str, str]], rewritten) -> list[tuple[str, str]]:
     """The attached files once the hooks have read them.
 
@@ -772,10 +822,11 @@ async def _stream_turn(
         and _chat_coding_manager is not None
     ):
         cc_requested = getattr(request, 'chat_coding', None)
-        # Detect /code slash command
+        # Detect /code slash command, typed: a /code the user pasted is the
+        # pasted text's, and starts nothing.
         _msg_stripped = message.strip()
         _code_prefix = False
-        if _msg_stripped.startswith("/code ") or _msg_stripped == "/code":
+        if _typed_command(message, _pasted_of(request), prior):
             _code_prefix = True
             _cc_message = _msg_stripped[5:].strip() or _msg_stripped
 
@@ -1120,7 +1171,8 @@ async def _stream_turn(
     # that saves it; a retry's stored turn is kept, or demoted if a hook
     # rewrote it. The paths that take one message are handed its text.
     if _user_turn is not None:
-        turn.user_turn = prior.rewritten(message) if prior is not None else _user_turn(typed, message, documents)
+        turn.user_turn = (prior.rewritten(message) if prior is not None
+                          else _user_turn(typed, message, documents, _pasted_of(request)))
     _turn_message = turn.user_turn.content if turn.user_turn is not None else message
 
     gen_thread = threading.Thread(target=_generate, daemon=True)
@@ -1724,10 +1776,18 @@ async def _stream_chat_coding(
     # Parse directives from the words typed, never from a file. A retry sends
     # the stored turn again as it was, and reads its directives from the
     # words the user typed in it.
-    directives = (
-        _parse_coding_directives(message if prior is None else _typed_words(prior))
-        if _parse_coding_directives else None
-    )
+    # A directive is an order: a turn with pasted text in its words gives
+    # none, its words read whole. The session is handed directives that set
+    # nothing, never None: handed None, it reads them itself from the whole
+    # task, pasted words and files included.
+    if _parse_coding_directives and prior is None and _pasted_of(request):
+        directives = _parse_coding_directives("")
+        directives.raw_message = message
+    else:
+        directives = (
+            _parse_coding_directives(message if prior is None else _typed_words(prior))
+            if _parse_coding_directives else None
+        )
     if prior is not None:
         turn.user_turn = prior
         task = prior.content
@@ -1737,7 +1797,13 @@ async def _stream_chat_coding(
         # directives, and the files after them. The session saves the turn
         # by it, and the agent's model calls carry it on the turn.
         if _user_turn is not None:
-            turn.user_turn = _user_turn(words, words, documents)
+            # A /code prefix or directives cleared from the words move what
+            # they leave: pasted ranges, measured on the message as sent, no
+            # longer point at it, and the words are then held pasted, whole.
+            pasted = _pasted_of(request)
+            if pasted and words != getattr(request, "message", words):
+                pasted = [[0, len(words)]] if words else []
+            turn.user_turn = _user_turn(words, words, documents, pasted)
         task = turn.user_turn.content if turn.user_turn is not None else words
     # Every phase that reads the directives' message reads the whole turn,
     # files included.
@@ -1906,7 +1972,7 @@ async def chat_stream(websocket: WebSocket) -> None:
         # Attached files are held to config/chat.yaml before anything runs
         # or is written; files with no typed words still make a turn.
         documents = [(d.filename, d.content) for d in request.documents or ()]
-        refusal = _attachment_refusal(documents)
+        refusal = _attachment_refusal(documents) or _pasted_refusal(request.message, request.pasted)
         if refusal:
             await _send_token(websocket, "error", f"Invalid request: {refusal}")
             await websocket.close()
@@ -1986,11 +2052,56 @@ def _stored_user_turn(conversation_id: str, content: str):
 
 
 def _typed_words(claim) -> str:
-    """The words of a stored turn that its user typed, or a hook rewrote: its first part, when that part is theirs."""
+    """The words of a stored turn that its user typed: its first part, when that part is typed.
+
+    A stored turn with pasted text among its words -- a document part in the
+    run of parts that starts it -- has no words of the user's alone: none.
+    Nor has a hook's rewrite (refined): a fresh turn reads its directives
+    before the hooks run.
+    """
     if not claim.segments:
-        return claim.content if claim.origin in ("typed", "refined") else ""
+        return claim.content if claim.origin == "typed" else ""
+    end = 0
+    for start, stop, label in claim.segments:
+        if start != end:
+            break
+        if label == "document":
+            return ""
+        end = stop
     start, stop, label = claim.segments[0]
-    return claim.content[start:stop] if start == 0 and label in ("typed", "refined") else ""
+    return claim.content[start:stop] if start == 0 and label == "typed" else ""
+
+
+def _typed_command(message: str, pasted, prior=None, command: str = "/code") -> bool:
+    """Whether ``message`` starts with ``command`` as the user typed it.
+
+    Stripped, the message is the command alone or the command and a space,
+    and no pasted range covers a character of it; on a retry, which sends no
+    ranges, every character of it lies in a part the stored turn (``prior``)
+    says its user typed. A command pasted is the pasted text's, and starts
+    nothing; nor does one a hook wrote, since a fresh turn reads the command
+    before the hooks run.
+    """
+    stripped = message.strip()
+    if stripped != command and not stripped.startswith(command + " "):
+        return False
+    lead = len(message) - len(message.lstrip())
+    end = lead + len(command)
+    if prior is not None:
+        return _typed_at(prior, lead, end)
+    return not any(start < end and stop > lead for start, stop in pasted)
+
+
+def _typed_at(claim, start: int, stop: int) -> bool:
+    """Whether every character of a stored turn from ``start`` to ``stop`` lies in a part its user typed.
+
+    A turn saved without parts is its origin's: a legacy one is no one's, and
+    a hook's rewrite (refined) is not the user's typing.
+    """
+    if not claim.segments:
+        return claim.origin == "typed"
+    return all(any(begin <= at < end and label == "typed" for begin, end, label in claim.segments)
+               for at in range(start, stop))
 
 
 # ---------------------------------------------------------------------------

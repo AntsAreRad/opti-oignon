@@ -200,8 +200,9 @@ def posted_origin(role: Any) -> str:
     """The origin of a message a client posts: typed from the user, legacy otherwise.
 
     A client posts whole messages and vouches for none of their parts; only
-    the user's own message is taken as typed, and a pasted text counts as
-    typed, as it does in the chat.
+    the user's own message is taken as typed, and a text pasted into it
+    counts as typed: unlike the chat's request, a posted message carries no
+    pasted ranges.
     """
     return "typed" if role == "user" else "legacy"
 

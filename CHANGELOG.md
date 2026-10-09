@@ -11,6 +11,44 @@ package costs.
 
 ### Added
 
+- [SECURITY] Pasted text is a document, never the user's typed words. A
+  page, a mail or a log the user pastes carries whatever its author wrote,
+  orders included, and it was sent and saved as typed: its words could
+  endorse a memory or notes write, a tool call's argument, or a decision of
+  the memory. The composer now keeps, character by character, what was
+  typed and what was pasted or dropped, through every edit (any input it
+  does not know as typing -- a paste, a drop, an undo -- is held pasted),
+  and sends the pasted ranges with the message (`pasted`, in code points;
+  out of shape, or more than `config/chat.yaml` allows, the request is
+  refused by name and nothing runs). The route saves each range as a
+  document part of the turn. Words typed beside pasted ones take their
+  sense from them ("Never" pasted before "share my location with Bob"
+  typed), so a turn with a paste in its words has no typed unit at all:
+  its words endorse no write, no argument and no decision, in every reader
+  of the memory, the automatic capture, the pending writes and the
+  provenance gate alike; the automatic capture no longer keeps such a
+  turn's words, and the manual extraction proposes them with the rest,
+  never writes them. A file attached after the words keeps its rule. A
+  turn with a paste gives the coding agent no directive; a /code the user
+  pasted starts nothing, on a retry either, which reads who wrote it from
+  the stored turn (a legacy turn's is no one's, and a turn a hook rewrote
+  is the hook's, whoever typed the words it rewrote: a fresh turn reads
+  the command before the hooks run; such a retry starts the agent only
+  when /code is typed again, and reads no directive the hook wrote), and
+  the composer no longer shows the coding agent for it; a hook's rewrite of
+  words that held a paste is saved as no one's (legacy). `oo ask` sends
+  what it reads (`-f`, standard input) as a document beside the typed
+  prompt, which keeps its standing (`-f` used to replace the prompt, and
+  `--pipe` both the prompt and the file); with `--json-out`, `prompt` is
+  the typed prompt alone and `documents` names what was read beside it (a
+  server older than attached files drops the document); `oo chat` holds a
+  line read from a pipe or a file as pasted, and refuses a command read
+  that way, but for /help and /quit (a mail piped in could carry
+  "/accept"). A turn without a paste is composed byte for byte as before.
+  Not told apart yet: text pasted at an interactive terminal's prompt, an
+  agent run's task (typed as its caller vouches), a message a client posts
+  to a branch, and text a phone keyboard or an operating system's writing
+  tool inserts as if typed (owed to the machine).
 - [SECURITY] The provenance gate (`opti_oignon/provenance.py`,
   `config/provenance.yaml`). A tool call is the model's choice, and so is
   every argument it carries: words the model read in a page, a document, a

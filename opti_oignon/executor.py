@@ -489,16 +489,62 @@ def compose_user_turn(question: str, documents: Sequence[tuple[str | None, str]]
     return content, bounds
 
 
-def _turn_parts(base: str, sent: str, documents: Sequence[tuple[str | None, str]]) -> tuple[str, str, list]:
-    """The content, origin and segments of a turn whose words, of ``base``, carry ``documents`` after them."""
+def _pasted_parts(sent: str, pasted: Sequence) -> list:
+    """The parts of the words ``sent``: a document for each pasted range, ``None`` (the words' own base) between.
+
+    Ranges are [start, end] in code points; the route has refused any out of
+    shape, and one handed by another caller is held to the words, merged
+    where ranges touch or overlap, and never shrunk inside the words.
+    """
+    held = []
+    for item in pasted or ():
+        try:
+            start, end = int(item[0]), int(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        start, end = max(start, 0), min(end, len(sent))
+        if start < end:
+            held.append([start, end])
+    held.sort()
+    merged = []
+    for start, end in held:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    parts, cursor = [], 0
+    for start, end in merged:
+        if cursor < start:
+            parts.append([cursor, start, None])
+        parts.append([start, end, "document"])
+        cursor = end
+    if merged and cursor < len(sent):
+        parts.append([cursor, len(sent), None])
+    return parts
+
+
+def _turn_parts(base: str, sent: str, documents: Sequence[tuple[str | None, str]],
+                pasted: Sequence = ()) -> tuple[str, str, list]:
+    """The content, origin and segments of a turn whose words, of ``base``, carry ``documents`` after them.
+
+    ``pasted`` are the ranges of the words the user pasted or dropped rather
+    than typed: each is a document part in the words, and the words around
+    it keep ``base``. Words all pasted make a document turn. With no pasted
+    range the turn is composed as it always was.
+    """
     content, bounds = compose_user_turn(sent, documents)
-    if content == sent:
+    parts = _pasted_parts(sent, pasted) if sent else []
+    if content == sent and not parts:
         return content, base, []
-    segments = [[0, len(sent), base]] if sent else []
-    segments += [[start, end, "document"] for start, end in bounds]
+    if parts:
+        words = [[start, end, label or base] for start, end, label in parts]
+    else:
+        words = [[0, len(sent), base]] if sent else []
+    segments = words + [[start, end, "document"] for start, end in bounds]
     if not segments:
         return content, "legacy", []
-    return content, (base if sent else "document"), segments
+    typed_words = any(label == base for _start, _end, label in words)
+    return content, (base if typed_words else "document"), segments
 
 
 @dataclass(frozen=True)
@@ -536,36 +582,59 @@ class UserTurn:
         return UserTurn(text, "legacy")
 
 
-def user_turn(typed: str, sent: str, documents: Sequence[tuple[str | None, str]] = ()) -> UserTurn:
+def user_turn(typed: str, sent: str, documents: Sequence[tuple[str | None, str]] = (),
+              pasted: Sequence = ()) -> UserTurn:
     """The turn the words a user typed make once sent, with the documents attached after them.
 
     ``typed`` is what the user typed and ``sent`` what the turn carries:
-    the same words, or a hook's rewrite of them.
+    the same words, or a hook's rewrite of them. ``pasted`` are the ranges
+    of ``typed`` the user pasted or dropped, each a document part of the
+    words. A hook's rewrite is the hook's words, whole: refined when the
+    words were all typed, legacy when they held a paste, since no part of
+    the rewrite can be located.
     """
-    content, origin, segments = _turn_parts("typed" if sent == typed else "refined", sent, documents)
+    base = "typed" if sent == typed else "refined"
+    if base == "refined" and _pasted_parts(typed, pasted):
+        # A rewrite of words that held a paste: no part of it can be located,
+        # and none is the user's alone.
+        return UserTurn(compose_user_turn(sent, documents)[0], "legacy")
+    content, origin, segments = _turn_parts(base, sent, documents, pasted)
     return UserTurn(content, origin, tuple(tuple(segment) for segment in segments))
 
 
 def _claim_words(claim: Any) -> str:
-    """The words of a composed turn that are the user's -- typed, or a hook's rewrite of them -- never its files."""
+    """The words of a composed turn's message -- typed, pasted, or a hook's rewrite of typed ones -- never its files.
+
+    The message is the run of parts that starts the turn with no character
+    between them; a file follows it past the line the executor writes before
+    it, and is never part of it. A legacy turn -- from before origins, or a
+    hook's rewrite of words that held a paste -- has none.
+    """
     content = str(getattr(claim, "content", "") or "")
     segments = getattr(claim, "segments", ()) or ()
     if not segments:
         return content if getattr(claim, "origin", "") in ("typed", "refined") else ""
-    parts = [content[start:stop] for start, stop, label in segments if label in ("typed", "refined")]
-    return "\n\n".join(part.strip() for part in parts if part.strip())
+    end = 0
+    for start, stop, _label in segments:
+        if start != end:
+            break
+        end = stop
+    return content[:end].strip()
 
 
 def _search_words(question: str, claim: Any) -> str:
     """The words the executor's own web search would send.
 
-    With a turn its caller composed (``claim``), the user's own words --
-    typed, or a hook's rewrite of them -- and nothing else, whatever the
-    question has become on the way: never an attached file's words, a vision
-    model's description of an image, or a later pipeline step's prompt with
-    the model's analysis; none when the turn holds no words of the user's (a
-    turn from before origins, a file alone). Without a claim, the question as
-    it is, which the provenance gate judges as words the user did not type.
+    With a turn its caller composed (``claim``), the words of the user's
+    message -- typed, pasted, or a hook's rewrite of typed ones -- and
+    nothing else, whatever the question has become on the way: never an
+    attached file's words, a vision model's description of an image, or a
+    later pipeline step's prompt with the model's analysis; none when the
+    turn holds no message it can place (a turn from before origins, a
+    hook's rewrite of words that held a paste, a file alone). The gate
+    judges them: a message with a paste in it has no typed unit, so its
+    words are unendorsed. Without a claim, the question as it is, which the
+    provenance gate judges as words the user did not type.
     """
     if claim is None:
         return question

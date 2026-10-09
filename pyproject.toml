@@ -838,6 +838,23 @@ fail_under = 0
 # in a window that seeds the mode, a no that publishes nothing, and nothing
 # published on a Bulbe machine. It stays in the tree word for word.
 #
+# Pasted text is a document, never typed words: a chat request may carry the
+# ranges of its message the user pasted (pasted), so q37 (the request's
+# eighteen fields) gives way to q42 in tests/test_api_schemas_contracts.py,
+# word for word with nineteen. And words typed beside a document, in one run
+# of parts with no line between them, take their sense from it, so they are
+# read as a document too: dp1 and dp2 drew a decision from typed words that
+# touch a document, the very layout a paste makes and no composition made
+# before. They give way to dp29 and dp30 in
+# tests/test_decision_probe_contracts.py, word for word with the document a
+# line of its own away, as the executor composes a file, and the touching
+# layout drawing no decision. They stay in the tree word for word. A line
+# oo chat reads from a pipe or a file is pasted too, and a command read that
+# way, which would act as the user, is refused: ch6 drove /pin over a pipe and
+# gives way to ch14 in tests/test_chat_session_contracts.py, word for word with
+# the lines typed at a keyboard, and the same lines from a pipe refusing /pin
+# while /quit still ends the session. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1084,4 +1101,8 @@ addopts = """
     --deselect=tests/test_user_turn_contracts.py::test_ut7_the_agentic_executor_saves_the_user_turn_by_its_runs_claim
     --deselect=tests/test_memory_routes.py::test_extract_routes_to_new_extraction
     --deselect=tests/test_agent_run_teacher_wiring_contracts.py::test_t5_daily_draft_publishes_only_through_the_gated_entry
+    --deselect=tests/test_api_schemas_contracts.py::test_q37_chat_request_surface_is_exactly_its_eighteen_fields
+    --deselect=tests/test_decision_probe_contracts.py::test_dp1_a_decision_is_drawn_from_typed_text_and_from_nothing_else
+    --deselect=tests/test_decision_probe_contracts.py::test_dp2_a_decision_a_twin_draws_from_a_piece_that_is_not_typed_is_dropped
+    --deselect=tests/test_chat_session_contracts.py::test_ch6_oo_chat_drives_the_session_over_stdin_and_prints_refusals_to_stderr
 """

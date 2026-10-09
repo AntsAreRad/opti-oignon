@@ -1038,3 +1038,50 @@ def test_q41_required_field_census_matches_the_snapshot_with_the_onion_s_proposa
         }
     finally:
         restore()
+
+
+def test_q42_chat_request_surface_is_exactly_its_nineteen_fields():
+    """q37 word for word, with the ranges of the message the user pasted
+    rather than typed (q37 is deselected by name). No field of the request
+    names an origin: a client never declares who wrote a turn, and the
+    pasted ranges can only mark words as not typed.
+    """
+    S, restore = _load()
+    try:
+        fields = list(S.ChatRequest.model_fields)
+        assert len(fields) == 19
+        assert set(fields) == {
+            "conversation_id",
+            "message",
+            "model",
+            "preset",
+            "temperature",
+            "use_presets",
+            "think",
+            "web_search",
+            "images",
+            "documents",
+            "pasted",
+            "consensus",
+            "consensus_models",
+            "consensus_strategy",
+            "self_correct",
+            "optimize",
+            "quick_sandbox",
+            "chat_coding",
+            "exec_pipeline",
+        }
+        assert not {"origin", "segments", "user_turn"} & set(fields), "a client declares no origin"
+        assert not S.ChatRequest.model_fields["pasted"].is_required(), "a message with no paste carries no ranges"
+        _rejects(S.ChatRequest)  # message is the single required field
+        m = S.ChatRequest(message="x")
+        assert m.use_presets is True and m.exec_pipeline is None and m.documents is None and m.pasted is None
+        carried = S.ChatRequest(message="", documents=[{"filename": "a.txt", "content": "A"}])
+        assert [(d.filename, d.content) for d in carried.documents] == [("a.txt", "A")]
+        _rejects(S.ChatDocument, filename="a.txt")
+        _rejects(S.ChatDocument, content="A")
+        _rejects(S.ChatRetryRequest)
+        assert S.ChatRetryRequest(conversation_id="c").model is None
+        _rejects(S.ChatCancelRequest)
+    finally:
+        restore()

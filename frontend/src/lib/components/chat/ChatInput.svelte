@@ -7,6 +7,9 @@
   Mobile responsive -- full-width, 44px touch targets, enterkeyhint, safe-area.
   The textarea stays usable while a reply streams: the next message can be
   written meanwhile, and sending it waits for the reply's end (canSend).
+  Every edit is tracked through $lib/pasteRanges: what the user pasted or
+  dropped, rather than typed, is sent as pasted ranges beside the text, and
+  the server saves it as a document part of the turn.
 -->
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
@@ -15,24 +18,30 @@
 	import { toastError } from '$lib/stores/notifications';
 	import Icon from '$lib/ds/Icon.svelte';
 	import type { AttachedImage } from '$lib/types';
+	import { applyEdit, editBetween, isTypedInput, sendable, typedCommand, type Range } from '$lib/pasteRanges';
 
 	export let disabled: boolean = false;
 	export let isStreaming: boolean = false;
 	export let canRetry: boolean = false;
 
 	const dispatch = createEventDispatcher<{
-		send: { text: string; images: string[] };
+		send: { text: string; images: string[]; pasted: Range[] };
 		cancel: void;
 		retry: void;
 	}>();
 
 	let inputText = '';
+	// What the user pasted or dropped in the text, the text as last tracked,
+	// and the selection the next edit is made in.
+	let pastedRanges: Range[] = [];
+	let tracked = '';
+	let selection: { start: number; end: number } | null = null;
 	let textarea: HTMLTextAreaElement;
 	let imageInput: HTMLInputElement;
 
-	// Detect /code slash command for visual feedback
-	$: isCodeCommand = inputText.trimStart().startsWith('/code ')
-		|| inputText.trimStart() === '/code';
+	// Detect /code slash command for visual feedback: typed, since a /code
+	// the user pasted starts nothing.
+	$: isCodeCommand = typedCommand(inputText, pastedRanges, '/code');
 
 	// Attached images
 	let attachedImages: AttachedImage[] = [];
@@ -52,7 +61,29 @@
 		textarea.style.height = `${newHeight}px`;
 	}
 
-	async function handleInput() {
+	// The selection an edit is made in, read before the edit; a change the
+	// composer was not told of (the text set from elsewhere) is held pasted.
+	function handleBeforeInput() {
+		if (!textarea) return;
+		if (textarea.value !== tracked) {
+			pastedRanges = applyEdit(pastedRanges, { ...editBetween(tracked, textarea.value), pasted: true },
+				textarea.value.length);
+			tracked = textarea.value;
+		}
+		selection = { start: textarea.selectionStart, end: textarea.selectionEnd };
+	}
+
+	function trackEdit(event: Event) {
+		const after = textarea ? textarea.value : inputText;
+		const edit = editBetween(tracked, after, selection ?? undefined);
+		pastedRanges = applyEdit(pastedRanges, { ...edit, pasted: !isTypedInput((event as InputEvent).inputType) },
+			after.length);
+		tracked = after;
+		selection = null;
+	}
+
+	async function handleInput(event: Event) {
+		trackEdit(event);
 		await tick();
 		autoResize();
 	}
@@ -74,12 +105,14 @@
 
 	function handleSend() {
 		if (!canSend) return;
-		const text = inputText.trim();
+		const { text, pasted } = sendable(inputText, pastedRanges);
 		const images = attachedImages.map((img) => img.base64_data);
 		inputText = '';
+		tracked = '';
+		pastedRanges = [];
 		clearAttachedImages();
 		if (textarea) textarea.style.height = 'auto';
-		dispatch('send', { text, images });
+		dispatch('send', { text, images, pasted });
 	}
 
 	function handleCancel() {
@@ -326,6 +359,7 @@
 			<textarea
 				bind:this={textarea}
 				bind:value={inputText}
+				on:beforeinput={handleBeforeInput}
 				on:input={handleInput}
 				on:keydown={handleKeydown}
 				on:paste={handlePaste}

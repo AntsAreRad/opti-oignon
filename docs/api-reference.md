@@ -77,7 +77,21 @@ bounds them: files per turn, bytes of text per file, and characters per
 name, which must be printable. A request over a bound is answered with an
 `error` frame that names the file and the bound, and nothing runs or is
 saved. A turn may carry files and no typed words. The request has no field
-for who wrote a turn: the server says so itself.
+that makes words typed: the server says who wrote a turn, and `pasted`
+(below) can only mark words as not typed.
+
+#### Chat request: pasted text
+
+A chat request may carry `pasted`, the ranges of `message` the user pasted
+or dropped rather than typed: `[[start, end], ...]`, whole numbers in code
+points of the message as sent, sorted, apart and non-empty; touching ranges
+are merged. Each is saved as a document part of the turn's words, and a
+turn with a paste in its words has no typed part: its words endorse no
+memory or notes write, no tool call's argument and no decision. Ranges out
+of shape, or more of them than `config/chat.yaml` allows
+(`pasted: max_ranges`), are answered with an `error` frame naming the field
+and the rule, and nothing runs or is saved. A request without `pasted` is
+read as before.
 
 #### Chat stream frames
 

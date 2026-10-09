@@ -56,10 +56,12 @@ What this cannot see: the user's own words, sent whole to the network by a
 planted instruction, still go -- they are the user's, and the turn's. A
 search the user asked for in other words than its query is unendorsed, so
 the asking and refusing policies ask or refuse it: the cost of the strict
-settings is that gesture or that refusal. Words pasted into a turn count as
-typed until pasted text is told apart. How many calls a turn makes, and
-when, can still signal a little. The gate holds what a call can carry, not
-what the model says.
+settings is that gesture or that refusal. Words a user pasted into the web
+chat are told apart and endorse nothing, nor do the words typed beside them;
+words pasted into a terminal's prompt, an agent run's task and a message a
+client posts whole count as typed as their caller vouches. How many calls a
+turn makes, and when, can still signal a little. The gate holds what a call
+can carry, not what the model says.
 """
 
 from __future__ import annotations

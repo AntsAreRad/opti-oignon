@@ -24,6 +24,7 @@ export const REQUEST_FIELDS = [
 	'web_search',
 	'images',
 	'documents',
+	'pasted',
 	'quick_sandbox',
 	'chat_coding',
 	'exec_pipeline',
@@ -67,6 +68,8 @@ export interface ChatOptions {
 	images?: string[];
 	/** The files attached to the message, each sent beside the typed words. */
 	documents?: { filename: string; content: string }[];
+	/** The ranges of the message the user pasted or dropped, [start, end) in code points. */
+	pasted?: [number, number][];
 }
 
 /** The options the selections send: a field only when it carries a choice. */
@@ -95,7 +98,8 @@ const CARRIED: ReadonlySet<string> = new Set(REQUEST_FIELDS);
 /**
  * The request for one message: the conversation and the message from the
  * arguments, then every option that is a request field and holds a value.
- * Any other key is dropped; an empty image or document list is not sent.
+ * Any other key is dropped; an empty image, document or pasted-range list is
+ * not sent.
  */
 export function chatRequest(
 	conversationId: string,
@@ -106,7 +110,9 @@ export function chatRequest(
 	for (const [key, value] of Object.entries(options)) {
 		if (key === 'conversation_id' || key === 'message') continue;
 		if (!CARRIED.has(key) || value === undefined || value === null) continue;
-		if ((key === 'images' || key === 'documents') && (!Array.isArray(value) || value.length === 0)) continue;
+		if ((key === 'images' || key === 'documents' || key === 'pasted') && (!Array.isArray(value) || value.length === 0)) {
+			continue;
+		}
 		request[key] = value;
 	}
 	return request as unknown as ChatRequestBody;

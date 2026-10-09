@@ -57,7 +57,11 @@ the current turn, whole (for an agent run, the task it was started with);
 `default` when it equals the tool's own declared value, in type and in value;
 `unendorsed` otherwise -- words the model chose, wherever it read them. An
 argument that stays on the machine is `typed` only when it is the typed part
-character for character. Each tool has an effect class from a closed table
+character for character. A chat turn with pasted text in its words has no
+typed part at all: what the user pasted is a document, and the words typed
+beside it take their sense from it. An agent run's task is typed as its
+caller vouches: the run cannot tell what was pasted into it. Each tool has
+an effect class from a closed table
 (none, session, sandbox, deferred, network, approved); a tool the table does
 not know is held as networked.
 

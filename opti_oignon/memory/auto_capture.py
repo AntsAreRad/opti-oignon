@@ -98,8 +98,20 @@ def typed_turns(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
                     parts = []
                     break
                 end = stop
-                if label == "typed":
-                    parts.append(content[start:stop])
+            else:
+                # Words typed beside a document in one run of parts (pasted
+                # text among the words) take their sense from it: none of
+                # them is the user's alone. The memory's reader holds the
+                # same rule (probes.beside_documents).
+                run_start = 0
+                while run_start < len(segments):
+                    run_end = run_start + 1
+                    while run_end < len(segments) and segments[run_end][0] == segments[run_end - 1][1]:
+                        run_end += 1
+                    run = segments[run_start:run_end]
+                    if not any(label == "document" for _start, _stop, label in run):
+                        parts.extend(content[start:stop] for start, stop, label in run if label == "typed")
+                    run_start = run_end
         text = "\n".join(part.strip() for part in parts if part.strip())
         if text:
             turns.append({"role": "user", "content": text})

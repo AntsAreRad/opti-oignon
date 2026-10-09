@@ -36,7 +36,9 @@ module imports nothing from the package at load. Inference goes through
 the registry the executor asks: this module holds no client of its own.
 """
 
+import threading
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 checkpoint_before_apply = True
 
@@ -62,6 +64,11 @@ HELP = (
     "/help             list the commands\n"
     "/quit             end the session"
 )
+
+# The commands a line read from a pipe or a file may give: they act as no
+# one and change nothing. Every other command acts as the user, and is
+# typed at the keyboard.
+_PIPED_COMMANDS = frozenset({"help", "quit"})
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,14 @@ class ChatSession:
         if not text.startswith("/"):
             yield from self._turn(text)
             return
+        name = text[1:].partition(" ")[0]
+        if getattr(self, "pasted_input", False) and name not in _PIPED_COMMANDS:
+            # A command acts as the user -- it pins, accepts, declines,
+            # closes -- and a line read from a pipe or a file is not the
+            # user's typing: a mail piped in could carry "/accept".
+            yield _refusal("command refused: commands are typed at the keyboard, and this line was read from a pipe "
+                           "or a file")
+            return
         name, _, rest = text[1:].partition(" ")
         rest = rest.strip()
         handler = {
@@ -196,10 +211,19 @@ class ChatSession:
             if self.conversation_id is None:
                 self.conversation_id = self._new_conversation(question[:60], getattr(routing, "model", None))
                 yield _info(f"conversation {self.conversation_id}")
+            # A line that did not come from a keyboard (a pipe, a file) is
+            # pasted: its turn is a document, whose words endorse nothing.
+            pasted_run = None
+            if getattr(self, "pasted_input", False):
+                from opti_oignon.executor import user_turn
+
+                pasted_run = SimpleNamespace(stop=threading.Event(), results={}, steps=None,
+                                             user_turn=user_turn(question, question, (), pasted=[[0, len(question)]]))
             stream = self._executor_seam().execute(
                 question, routing, None, self.refine,
                 conversation_id=self.conversation_id,
                 system_prompt_suffix=suffix,
+                **({"run": pasted_run} if pasted_run is not None else {}),
             )
             for chunk in stream:
                 if isinstance(chunk, tuple) and len(chunk) == 2 and chunk[0] == THINKING:

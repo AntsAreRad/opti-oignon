@@ -214,6 +214,8 @@ export interface ChatRequest {
 	web_search?: boolean;
 	images?: string[];
 	documents?: ChatDocument[];
+	/** The ranges of the message the user pasted or dropped, [start, end) in code points. */
+	pasted?: [number, number][];
 	quick_sandbox?: boolean;
 	chat_coding?: boolean;
 	exec_pipeline?: string;

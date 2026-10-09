@@ -106,13 +106,16 @@
 		scrollToBottom();
 	}
 
-	async function handleSend(event: CustomEvent<{ text: string; images: string[] }>) {
+	async function handleSend(event: CustomEvent<{ text: string; images: string[]; pasted: [number, number][] }>) {
 		if (!convId) return;
 		shouldAutoScroll = true;
 		const options = getChatOptions();
 
 		// Images travel with the options; an empty list is not sent.
 		options.images = event.detail.images;
+		// What the user pasted or dropped rather than typed: the server saves
+		// it as a document part of the turn. An empty list is not sent.
+		options.pasted = event.detail.pasted;
 		// Attached files travel beside the typed words, never inside them: the
 		// server saves each as a document of its own, and an empty list is not
 		// sent.

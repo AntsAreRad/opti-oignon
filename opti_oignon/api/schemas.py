@@ -127,6 +127,12 @@ class ChatRequest(BaseModel):
     # Files attached to the turn: each is saved as a document of its own,
     # within the bounds config/chat.yaml sets
     documents: list[ChatDocument] | None = None
+    # The ranges of the message the user pasted or dropped rather than typed,
+    # [start, end] in code points of the message as sent: each is saved as a
+    # document part of the words, never as typed words. Read as sent: the
+    # route refuses by name any range that is not two whole numbers, never
+    # coerced (routes_chat._pasted_refusal)
+    pasted: list[list[Any]] | None = None
     # Consensus multi-model
     consensus: bool | None = None             # None = auto, True = force
     consensus_models: list[str] | None = None  # Models specifiques

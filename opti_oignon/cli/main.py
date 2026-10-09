@@ -15,7 +15,7 @@ Usage examples::
     oo ask "Summarise this dataset"
     oo ask -m llama3 "Explain PCA"
     cat data.csv | oo ask --pipe "Analyse this"
-    oo ask -f prompt.txt
+    oo ask "Review this file" -f notes.txt
     oo approve <id>
     oo deny <id>
     oo models
@@ -124,9 +124,9 @@ def cli(ctx: click.Context, api_url: str | None, no_color: bool) -> None:
 @click.argument("prompt", required=False)
 @click.option("-m", "--model", default=None, help="Target a specific model.")
 @click.option("-f", "--file", "input_file", type=click.Path(exists=True),
-              help="Read prompt from a file.")
+              help="Read a file and send it as a document beside the prompt.")
 @click.option("--pipe", is_flag=True, default=False,
-              help="Read prompt from stdin (pipe mode).")
+              help="Read standard input and send it as a document beside the prompt.")
 @click.option("--json-out", "json_out", is_flag=True, default=False,
               help="Output full response as JSON.")
 @click.pass_context
@@ -137,8 +137,11 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
     cfg = _get_config(ctx)
 
     # Resolve prompt source
-    text = _resolve_prompt(prompt, input_file, pipe)
-    if not text:
+    text, documents = _resolve_turn(prompt, input_file, pipe)
+    # What was read rather than typed travels as documents beside the typed
+    # prompt, and only when there is some.
+    sent_documents = {"documents": documents} if documents else {}
+    if not text and not documents:
         echo_error("No prompt provided. Pass a string, use -f <file>, or --pipe.")
         ctx.exit(1)
         return
@@ -157,9 +160,13 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
         # Non-streaming: the spinner is on stderr, the JSON alone on stdout;
         # a held call is shown there too and answered from another terminal.
         full = _waiting(ctx, "Generating", lambda: client.stream_chat(
-            text, model=effective_model, on_approval=lambda meta: _shown(meta), on_resolved=_ended))
-        click.echo(json.dumps({"model": effective_model or "router",
-                                "prompt": text, "response": full}, indent=2))
+            text, model=effective_model, on_approval=lambda meta: _shown(meta), on_resolved=_ended,
+            **sent_documents))
+        answer = {"model": effective_model or "router", "prompt": text, "response": full}
+        if documents:
+            answer = {"model": answer["model"], "prompt": text,
+                      "documents": [d["filename"] for d in documents], "response": full}
+        click.echo(json.dumps(answer, indent=2))
         return
 
     # Streaming mode: print tokens as they arrive
@@ -187,6 +194,7 @@ def ask(ctx: click.Context, prompt: str | None, model: str | None,
             on_metadata=_on_metadata,
             on_approval=_on_approval,
             on_resolved=_ended,
+            **sent_documents,
         )
         # Ensure trailing newline
         click.echo()
@@ -223,13 +231,29 @@ def deny(ctx: click.Context, approval_id: str) -> None:
     _answer_approval(ctx, approval_id, False)
 
 
-def _resolve_prompt(prompt: str | None, input_file: str | None, pipe: bool) -> str:
-    """Determine the final prompt string from the various input sources."""
-    if pipe or (not sys.stdin.isatty() and not prompt and not input_file):
-        return sys.stdin.read().strip()
+def _resolve_turn(prompt: str | None, input_file: str | None, pipe: bool) -> tuple[str, list[dict[str, str]]]:
+    """The words ``oo ask`` sends as typed, and the documents it read.
+
+    The prompt on the command line is what the user typed. A file (``-f``)
+    and standard input (``--pipe``, or a pipe with neither prompt nor file)
+    are read, not typed: each travels as a document beside the prompt, as a
+    file attached in the web chat, so the server saves it as a document part
+    of the turn a line of its own away from the prompt, which keeps its
+    standing.
+    """
+    text = prompt.strip() if prompt else ""
+    documents = []
     if input_file:
-        return Path(input_file).read_text(encoding="utf-8").strip()
-    return (prompt or "").strip()
+        read = Path(input_file).read_text(encoding="utf-8").strip()
+        if read:
+            # The file's own name: the server holds it to the bounds
+            # config/chat.yaml sets, and refuses one out of them by name.
+            documents.append({"filename": Path(input_file).name, "content": read})
+    if pipe or (not sys.stdin.isatty() and not prompt and not input_file):
+        read = sys.stdin.read().strip()
+        if read:
+            documents.append({"filename": "standard input", "content": read})
+    return text, documents
 
 
 # =========================================================================
@@ -314,6 +338,12 @@ def chat(ctx: click.Context, model: str | None, conversation_id: str | None) -> 
         sys.exit(2)
     stdin = click.get_text_stream("stdin")
     interactive = stdin.isatty()
+    # A line read from a pipe or a file was not typed at this keyboard: the
+    # session saves it as pasted, never as typed words.
+    try:
+        session.pasted_input = not interactive
+    except AttributeError:
+        pass
     # The wait animation: stderr only, erased before any output, None when
     # any switch says no. The seams are the contracts' way in.
     waiter = make_wait_line(cfg, **((ctx.obj or {}).get("wait_seams") or {}))

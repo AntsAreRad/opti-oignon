@@ -740,21 +740,23 @@ def rest_turns(messages: Iterable[Any] | None) -> list[dict[str, str]]:
 
 
 def _untyped_parts(content: str, origin: Any, segments: Any) -> list[str]:
+    """The parts of a user turn its typed words are not: read as the memory's reader reads them, so words typed
+    beside pasted text, which the capture does not keep, are proposed rather than lost."""
     if not isinstance(origin, str) or not isinstance(segments, (list, tuple)):
         return [content]
     if not segments:
         return [] if origin == "typed" else [content]
-    parts, end = [], 0
+    end = 0
     for segment in segments:
         if not isinstance(segment, (list, tuple)) or len(segment) != 3:
             return [content]
-        start, stop, label = segment
+        start, stop, _label = segment
         if type(start) is not int or type(stop) is not int or not end <= start < stop <= len(content):
             return [content]
         end = stop
-        if label != "typed":
-            parts.append(content[start:stop])
-    return parts
+    from .memory import probes
+
+    return [content[start:stop] for start, stop, label in probes.beside_documents(segments) if label != "typed"]
 
 
 def _apply(record: PendingWrite, memory_store: Any, notes_store: Any) -> str:
