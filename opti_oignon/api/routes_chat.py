@@ -1685,6 +1685,12 @@ def _build_rich_llm_callback(
 
         result.text = full_text
         result.tool_calls = tool_calls_meta
+        # The request the executor composed and sent, as it reported it to
+        # the run: the coding agent's answer carries it, the agent's own
+        # messages being only what this call was handed.
+        reported = turn.results.get("context_label") if turn is not None else None
+        if reported is not None:
+            result.context_label = reported
 
         # 5. Plugin post_inference hooks
         # redact_sensitive=True applies per-plugin data redaction

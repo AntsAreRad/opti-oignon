@@ -140,6 +140,12 @@ except Exception:
     DUAL_LAYER_MEMORY_AVAILABLE = False
     _working_memory_block = None
     _build_memory_block = None
+# The same block with the facts it places, so its label can say which the user
+# endorsed. Without it the block is labelled memory as a whole.
+try:
+    from .memory.retrieval import compose_memory_block as _compose_memory_block
+except Exception:
+    _compose_memory_block = None
 
 # M2: automatic memory capture. After a turn is saved, fire the extraction so
 # the memory store grows without the manual /extract route. The helper is gated
@@ -215,6 +221,40 @@ except ImportError:
     _UNTRUSTED_SOURCE_WEB = "web"
     _UNTRUSTED_SOURCE_FILE = "file"
     _UNTRUSTED_SOURCE_RETRIEVED = "retrieved"
+
+# The label each message carries to the point where the request is sent (see
+# ``untrusted_context.labelled``). With no label helpers no message carries a
+# label, and every request reads legacy: the closed position, never a clean
+# one by default.
+try:
+    from .agent.untrusted_context import join_labels as _join_labels
+    from .agent.untrusted_context import labelled as _labelled
+    from .agent.untrusted_context import message_label as _message_label
+    from .agent.untrusted_context import request_label as _request_label
+    from .agent.untrusted_context import strip_labels as _strip_labels
+    from .agent.untrusted_context import user_turn_label as _user_turn_label
+except ImportError:
+    def _join_labels(labels):
+        context, lineage = set(), set()
+        for part_context, part_lineage in labels:
+            context.update(part_context)
+            lineage.update(part_lineage)
+        return sorted(context), sorted(lineage)
+
+    def _labelled(message, context=(), lineage=()):
+        return dict(message)
+
+    def _message_label(message):
+        return ["legacy"], []
+
+    def _request_label(messages):
+        return ["legacy"], []
+
+    def _strip_labels(messages):
+        return [{k: v for k, v in m.items() if k != "label"} if isinstance(m, dict) else m for m in messages]
+
+    def _user_turn_label(content, origin, segments):
+        return ["legacy"], []
 
 # Per-conversation slot affinity for the external llama-server. Unavailable
 # means no slot is ever named and the server keeps choosing, which is the
@@ -679,6 +719,7 @@ def _user_turn_origin(
     documents: Sequence[tuple[str | None, str]],
     content: str,
     claim: Any = None,
+    described: bool = False,
 ) -> tuple[str, list]:
     """The origin and segments of the user turn the executor saves.
 
@@ -687,7 +728,9 @@ def _user_turn_origin(
     those words, or the model's rewrite of them -- and ``documents`` the
     attachments the executor joins after it, each a (name, text) pair. The
     question is typed when it is the user's own words and refined when the
-    model rewrote it; each attachment is a segment of its own, and the words
+    model rewrote it; when a vision model ``described`` images into it, the
+    words carry the images' content and are a document part, neither the
+    user's words nor a rewrite of them; each attachment is a segment of its own, and the words
     the executor writes between them belong to no one. ``claim`` is the turn
     as its caller composed it, when one did: it says who wrote the question
     it was composed from and vouches for nothing else, so a text composed
@@ -696,7 +739,8 @@ def _user_turn_origin(
     where they are claimed to be is saved as legacy, the least trusted
     origin, and said, never mislabelled and never lost.
     """
-    expected, origin, segments = _turn_parts("typed" if sent == question else "refined", sent, documents)
+    base = "document" if described else ("typed" if sent == question else "refined")
+    expected, origin, segments = _turn_parts(base, sent, documents)
     if content != expected:
         logger.warning("the saved turn does not carry its parts where claimed: saved as legacy")
         return "legacy", []
@@ -708,7 +752,8 @@ def _user_turn_origin(
     if sent == question:
         return claim.origin, [list(segment) for segment in claim.segments]
     # Rewritten here, by the vision step: the claimed words are no longer
-    # the words sent, and only words of one origin can become refined.
+    # the words sent, and only words of one origin become the document part
+    # a description makes of them.
     head = [list(segment) for segment in claim.segments if segment[0] < len(question)]
     if documents:
         plain = len(head) == 1 and head[0][:2] == [0, len(question)] and head[0][2] in ("typed", "refined")
@@ -1515,9 +1560,12 @@ class Executor:
                 logger.warning("Summary failed -- falling back to deletion")
                 return False
 
+            # The summary may draw on the archive beyond the evicted turns:
+            # it inherits the joint label of every turn it was handed.
             summary_msg = _summary_message(summary)
             if summary_msg is None:
                 return False
+            summary_msg = _labelled(summary_msg, *_request_label(history))
             summary_tokens = self._estimate_tokens(summary_msg["content"], model)
 
             # Rebuild history: [kept summary blocks] + [summary] + remaining
@@ -1693,10 +1741,29 @@ class Executor:
         ]
         return archive if aligned else None
 
-    def _compose_memory_context(
+    @staticmethod
+    def _labelled_history(conversation_id: str | None) -> list[dict[str, Any]]:
+        """The conversation's turns, each with the label it was stored with.
+
+        A store that keeps no labels hands its turns bare, and a bare turn is
+        read legacy where the request is sent.
+        """
+        if not conversation_id or not CONVERSATION_AVAILABLE or conversation_manager is None:
+            return []
+        reader = getattr(conversation_manager, "get_labelled_context_messages", None)
+        if callable(reader):
+            return reader(conversation_id)
+        return conversation_manager.get_context_messages(conversation_id)
+
+    def _compose_memory_context_labelled(
         self, question: str | None = None, conversation_id: str | None = None
-    ) -> str:
-        """The wrapped working-memory block, or an empty string.
+    ) -> tuple[str, tuple[list[str], list[str]]]:
+        """The wrapped working-memory block and its label, or an empty string and the clean label.
+
+        The label says what the block may carry that the user never
+        endorsed: a block of the onion's or of the frozen legacy store is
+        memory as a whole; the working block is memory unless every fact it
+        places is endorsed, and its lineage names each fact it places.
 
         Builds the unified working block: the salient durable facts (always
         present, ranked by use_count x recency) plus query-relevant facts,
@@ -1715,7 +1782,7 @@ class Executor:
             safe to place
         """
         if not self._memory_enabled:
-            return ""
+            return "", ([], [])
 
         # M3: the memory store is now the single source of truth (the legacy
         # store has been migrated into it and the write paths are unified), so
@@ -1735,18 +1802,32 @@ class Executor:
             except Exception as e:
                 logger.debug(f"Onion memory block skipped: {e}")
                 memory_block = ""
+        # The label of the block: memory as a whole, unless the working block
+        # says fact by fact that the user endorsed every one it placed.
+        label = (["memory"], [])
         if not memory_block and DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
             try:
-                memory_block = _build_memory_block(
-                    question, max_tokens=500, mark_used=True
-                ) or ""
+                if _compose_memory_block is not None:
+                    memory_block, placed = _compose_memory_block(question, max_tokens=500, mark_used=True)
+                    memory_block = memory_block or ""
+                    lineage = sorted(
+                        {f"memory:{fact_id}" for fact_id, _endorsed in placed if not fact_id.startswith("legacy:")}
+                    )
+                    lowered = not placed or any(not endorsed for _fact_id, endorsed in placed)
+                    label = (["memory"] if lowered else [], lineage)
+                else:
+                    memory_block = _build_memory_block(
+                        question, max_tokens=500, mark_used=True
+                    ) or ""
             except Exception as e:
                 logger.debug(f"Unified memory block skipped: {e}")
                 memory_block = ""
+                label = (["memory"], [])
 
         # Belt-and-suspenders: if the unified composer is entirely unavailable,
         # fall back to the (frozen, migrated) legacy flat block.
         if not memory_block and MEMORY_AVAILABLE and _memory_manager is not None:
+            label = (["memory"], [])
             try:
                 memory_block = _memory_manager.format_for_prompt(max_tokens=500) or ""
             except Exception as e:
@@ -1759,13 +1840,13 @@ class Executor:
                     "Untrusted-context wrapper unavailable; memory block "
                     "dropped rather than injected unwrapped."
                 )
-                return ""
+                return "", ([], [])
             wrapped = _wrap_untrusted(
                 memory_block, source=_UNTRUSTED_SOURCE_MEMORY, frames=from_onion
             )
             if wrapped:
-                return wrapped
-        return ""
+                return wrapped, label
+        return "", ([], [])
 
     def _compose_project_context(
         self,
@@ -1857,8 +1938,17 @@ class Executor:
         model: str,
         volatile_block: str | None = None,
         prompt_budget: Any = _UNSET,
+        volatile_label: tuple | None = None,
+        current_label: tuple | None = None,
     ) -> tuple[list[dict[str, str]], int, dict[str, Any]]:
         """Build the full messages array with conversation history.
+
+        Every message carries its label (see ``labelled``): the system
+        message the clean one, each turn the one it was stored with, a
+        summary the union of the turns it was handed, the tail
+        ``volatile_label`` and the turn ``current_label``; a part with no
+        label given goes out unlabelled and is read legacy where the
+        request is sent.
 
         Loads conversation history from the conversation backend,
         applies intelligent sliding window if context limits are approached,
@@ -1919,7 +2009,7 @@ class Executor:
             # The history is the whole archive of the conversation, so no
             # stored summary is restored beside it: a summary only ever
             # stands in for turns the window lets go, below.
-            history = conversation_manager.get_context_messages(conversation_id)
+            history = self._labelled_history(conversation_id)
 
             # Estimate the history tokens
             for msg in history:
@@ -1948,12 +2038,15 @@ class Executor:
                         model=model,
                     )
                     # The summary block is memory data in the user role; with
-                    # no wrapper to write it, the history is left whole.
+                    # no wrapper to write it, the history is left whole. It
+                    # inherits the joint label of every turn it was handed.
                     summary_block = (
                         _summary_message(compressed.summary)
                         if _summary_message is not None
                         else None
                     )
+                    if summary_block is not None:
+                        summary_block = _labelled(summary_block, *_request_label(history))
                     if compressed.compressed_count > 0 and summary_block is not None:
                         # Rebuild history: summary block + verbatim recent messages
                         history = [summary_block] + list(compressed.recent_messages)
@@ -2083,12 +2176,14 @@ class Executor:
         # Build the final messages array. The system message carries the
         # instruction head alone: the per-turn data rides the user role in
         # front of the turn, and runs of user messages are joined.
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        messages: list[dict[str, str]] = [_labelled({"role": "system", "content": system_prompt})]
         if history:
             messages.extend(history)
         if volatile_block and volatile_block.strip():
-            messages.append({"role": "user", "content": volatile_block.strip()})
-        messages.append({"role": "user", "content": current_message})
+            tail = {"role": "user", "content": volatile_block.strip()}
+            messages.append(_labelled(tail, *volatile_label) if volatile_label is not None else tail)
+        turn = {"role": "user", "content": current_message}
+        messages.append(_labelled(turn, *current_label) if current_label is not None else turn)
         if _coalesce_user_turns is not None:
             messages = _coalesce_user_turns(messages)
 
@@ -2200,6 +2295,9 @@ class Executor:
         # The question as this call received it: the vision step may rewrite
         # it, and the saved turn is measured against these words.
         _entry_question = question
+        # The images as this call received them: the vision step may consume
+        # them into a description of their content.
+        _entry_images = list(images or [])
         # The turn as its caller composed it, when one did: it rides the run.
         _claim = getattr(run, "user_turn", None)
         # Every attachment as (name, text): a document of no name first, then
@@ -2229,6 +2327,10 @@ class Executor:
         _ledger_sent = [False]
 
         def _emit_ledger(outcome: str, **extra) -> None:
+            if outcome == "cancelled":
+                # Told to the run as well: a caller that drafts through this
+                # call keeps no answer from a cancelled one.
+                _run_results["cancelled"] = True
             fields = dict(_ledger_base)
             fields["outcome"] = outcome
             fields["duration_ms"] = (time.time() - _ledger_t0) * 1000.0
@@ -2367,6 +2469,18 @@ class Executor:
             )
             images = None
 
+        # An image the model sees, or a description a vision model wrote of
+        # one into the question, brings the image's content to the turn: the
+        # turn carries a document, each image named by its digest. A
+        # description makes the words sent no longer the user's alone.
+        _vision_rewrote = question != _entry_question
+        _seen_images = _entry_images if _vision_rewrote else list(images or getattr(routing, "images", None) or [])
+        _image_label = (
+            (["document"], sorted({"document:" + hashlib.sha256(str(i).encode("utf-8")).hexdigest()
+                                   for i in _seen_images}))
+            if _seen_images else None
+        )
+
         # Step 1: Refinement (optional)
         refined_question = question
         if refine:
@@ -2478,14 +2592,17 @@ class Executor:
             except Exception:
                 _slot_affinity_active = False
         _volatile_parts: list[str] = []
+        # The label of each part the tail takes, joined into the tail's own.
+        _volatile_labels: list[tuple] = []
 
         # Step 2c: Inject memory facts (dual-layer memory). Every per-turn
         # block joins the tail, whatever the stable-prefix flag says: the
         # tail rides the user role, never the system message, and the flag
         # only asks a llama-server engine to reuse its prompt cache.
-        _mem_wrapped = self._compose_memory_context(refined_question, conversation_id)
+        _mem_wrapped, _mem_label = self._compose_memory_context_labelled(refined_question, conversation_id)
         if _mem_wrapped:
             _volatile_parts.append("\n\n" + _mem_wrapped)
+            _volatile_labels.append(_mem_label)
 
         # Check if context optimizer handles project injection
         _optimizer_active = (
@@ -2510,6 +2627,9 @@ class Executor:
             )
             if _proj_wrapped:
                 _volatile_parts.append("\n\n" + _proj_wrapped)
+                _volatile_labels.append(
+                    (["file"], ["file:" + hashlib.sha256(_proj_text.encode("utf-8")).hexdigest()])
+                )
             elif _proj_text:
                 logger.warning(
                     "Project context withheld: the untrusted-data wrapper is unavailable"
@@ -2568,11 +2688,17 @@ class Executor:
                     if results:
                         # Format results as untrusted data
                         listing = "--- Web Search Results ---\n"
+                        # Each page by the digest of its address, never the
+                        # address itself: the lineage is not encrypted.
+                        _web_lineage = []
                         for i, r in enumerate(results, 1):
                             title = getattr(r, 'title', r.get('title', '')) if isinstance(r, dict) else getattr(r, 'title', str(r))
                             snippet = getattr(r, 'snippet', r.get('snippet', '')) if isinstance(r, dict) else getattr(r, 'snippet', str(r))
                             url = getattr(r, 'url', r.get('url', '')) if isinstance(r, dict) else getattr(r, 'url', '')
                             listing += f"\n[{i}] {title}\n{snippet}\nSource: {url}\n"
+                            _web_lineage.append(
+                                "web:" + hashlib.sha256(str(url or title or snippet).encode("utf-8")).hexdigest()
+                            )
                         listing += "\n--- End of Search Results ---"
                         wrapped = (
                             _wrap_untrusted(listing, source=_UNTRUSTED_SOURCE_WEB)
@@ -2593,6 +2719,7 @@ class Executor:
                                 "information only. Cite sources when relevant."
                             )
                             _volatile_parts.append(search_context)
+                            _volatile_labels.append((["web"], _web_lineage))
                             _web_injected = True
                             status(f"[OK] {len(results)} search results injected")
                     else:
@@ -2607,6 +2734,14 @@ class Executor:
         # Step 3: Build messages (multi-turn ou single-turn)
         # Final user content (refined question + possible documents)
         user_content = compose_user_turn(refined_question, _attachments)[0]
+        # Who wrote the turn's parts, judged once: the label it is sent with
+        # and the origin it is saved with come from the same reading.
+        _turn_origin, _turn_segments = _user_turn_origin(
+            _entry_question, refined_question, _attachments, user_content, _claim, described=_vision_rewrote
+        )
+        _user_label = _user_turn_label(user_content, _turn_origin, _turn_segments)
+        if _image_label is not None:
+            _user_label = _join_labels([_user_label, _image_label])
 
         # Multi-turn mode: load the conversation history
         use_conversation = (
@@ -2674,6 +2809,11 @@ class Executor:
                     )
                     if archive_wrapped:
                         _volatile_parts.append("\n\n" + archive_wrapped)
+                        # Snippets of this conversation's own turns: they
+                        # carry what the conversation's turns carry.
+                        _volatile_labels.append(
+                            _join_labels(_message_label(m) for m in self._labelled_history(conversation_id))
+                        )
                     else:
                         archive_results = []
                         logger.warning(
@@ -2705,6 +2845,10 @@ class Executor:
         # been rebound (the optimizer reports it itself) is tracked so the
         # fallback paths rebind exactly once.
         _volatile_tail = "".join(_volatile_parts)
+        _volatile_label = _join_labels(_volatile_labels)
+        # The optimizer is the point its own request leaves from: it hands
+        # back the label it read there, with its messages already bare.
+        _path_label = None
         _identity_from_optimizer = False
         # This call's own window figures, for its ledger row: the instance
         # mirrors below are the last call's, which may be another turn's.
@@ -2718,11 +2862,7 @@ class Executor:
                 optimizer = _get_context_optimizer()
 
                 # Load conversation history for optimizer
-                _conv_history = []
-                if CONVERSATION_AVAILABLE and conversation_manager:
-                    _conv_history = conversation_manager.get_context_messages(
-                        conversation_id
-                    )
+                _conv_history = self._labelled_history(conversation_id)
 
                 try:
                     opt_result = optimizer.optimize(
@@ -2740,8 +2880,11 @@ class Executor:
                         volatile_block=(
                             _volatile_tail
                         ),
+                        volatile_label=_volatile_label,
+                        user_label=_user_label,
                     )
                     messages = opt_result.messages
+                    _path_label = getattr(opt_result, "context_label", None)
                     context_tokens = opt_result.total_tokens
                     self._last_optimization_report = opt_result.report
                     _turn_opt_report = opt_result.report
@@ -2770,6 +2913,9 @@ class Executor:
                         f"{rpt.duration_ms:.0f}ms)"
                     )
                 except Exception as e:
+                    # The optimizer's request is given up: its label leaves
+                    # with it, and the fallback's is read where it is sent.
+                    _path_label = None
                     logger.warning(
                         "Optimizer failed, falling back to manual pipeline: %s", e
                     )
@@ -2783,6 +2929,8 @@ class Executor:
                             _volatile_tail
                         ),
                         prompt_budget=_turn_budget,
+                        volatile_label=_volatile_label,
+                        current_label=_user_label,
                     )
                     self._last_window_stats = window_stats
                     _turn_window_stats = window_stats
@@ -2796,6 +2944,8 @@ class Executor:
                         _volatile_tail
                     ),
                     prompt_budget=_turn_budget,
+                    volatile_label=_volatile_label,
+                    current_label=_user_label,
                 )
                 # Store the stats for external access (context bar UI)
                 self._last_window_stats = window_stats
@@ -2818,14 +2968,27 @@ class Executor:
         else:
             # Mode single-turn classique (backward compatible); the tail
             # rides the user role in front of the turn, joined to it.
-            messages = [{"role": "system", "content": system_prompt}]
+            messages = [_labelled({"role": "system", "content": system_prompt})]
             if _volatile_tail and _volatile_tail.strip():
-                messages.append({"role": "user", "content": _volatile_tail.strip()})
-            messages.append({"role": "user", "content": user_content})
+                messages.append(_labelled({"role": "user", "content": _volatile_tail.strip()}, *_volatile_label))
+            messages.append(_labelled({"role": "user", "content": user_content}, *_user_label))
             if _coalesce_user_turns is not None:
                 messages = _coalesce_user_turns(messages)
             self._last_window_stats = {}
             _turn_window_stats = {}
+
+        # The point where the request leaves for the model: its label is the
+        # union of what every message it sends vouches for, read before the
+        # labels are left behind. A message that lost its label on the way,
+        # or was rewritten after it was labelled, is read legacy here.
+        _turn_label = _path_label if _path_label is not None else _request_label(messages)
+        messages = _strip_labels(messages)
+        _run_results["context_label"] = _join_labels(
+            [_run_results.get("context_label") or ([], []), _turn_label]
+        )
+        # An answer flagged web carries the web kind even when the window
+        # let the results go: adding a kind only ever lowers.
+        _answer_context = sorted({*_turn_label[0], *(["web"] if _web_injected else [])})
 
         # From here on, ``system_prompt`` is the identity view again: the
         # head plus the relocated tail, the composed context every cache
@@ -2918,6 +3081,11 @@ class Executor:
                     self._last_cache_hit = True
                     self._semcache_hit = True
                     self._semcache_key = semcache_entry.query_hash
+                    # A similar question's answer was written for another
+                    # request, whose label no one kept: legacy.
+                    _run_results["context_label"] = _join_labels(
+                        [_run_results["context_label"], (["legacy"], [])]
+                    )
                     hit_label = "CACHE-" + semcache_entry.match_type.upper()
                     status(
                         f"[{hit_label}] Hit for {routing.model} "
@@ -2980,6 +3148,10 @@ class Executor:
                     if sem_entry is not None and match_type == "semantic":
                         cached = sem_entry
                         semantic_hit = True
+                        _run_results["context_label"] = _join_labels(
+                            [_run_results["context_label"], (["legacy"], [])]
+                        )
+                        _answer_context = sorted({*_answer_context, "legacy"})
                         logger.info(
                             f"Semantic cache hit: sim={sim:.4f}, "
                             f"key={sem_entry.cache_key[:12]}..."
@@ -2997,17 +3169,17 @@ class Executor:
                 # Save multi-turn even on cache hit
                 if use_conversation and persist and cached.response:
                     try:
-                        _turn_origin, _turn_segments = _user_turn_origin(
-                            _entry_question, refined_question, _attachments, user_content, _claim
-                        )
                         conversation_manager.add_message(
                             conversation_id, "user", user_content,
                             origin=_turn_origin, segments=_turn_segments,
                         )
+                        # The cache answers the request whose key it was
+                        # filed under: the same context, the same label.
                         conversation_manager.add_message(
                             conversation_id, "assistant", cached.response,
                             model=routing.model,
                             origin="assistant+web" if _web_injected else "assistant",
+                            context=_answer_context, lineage=_turn_label[1],
                         )
                     except Exception as e:
                         logger.error(f"Conversation save error (cache hit): {e}")
@@ -3375,9 +3547,6 @@ class Executor:
         # Save messages to conversation after full reception
         if use_conversation and persist and full_response and not _thread_error and _answered:
             try:
-                _turn_origin, _turn_segments = _user_turn_origin(
-                    _entry_question, refined_question, _attachments, user_content, _claim
-                )
                 conversation_manager.add_message(
                     conversation_id, "user", user_content,
                     origin=_turn_origin, segments=_turn_segments,
@@ -3386,6 +3555,7 @@ class Executor:
                     conversation_id, "assistant", full_response,
                     model=routing.model,
                     origin="assistant+web" if _web_injected else "assistant",
+                    context=_answer_context, lineage=_turn_label[1],
                 )
                 conversation_manager.update_conversation_metadata(
                     conversation_id,

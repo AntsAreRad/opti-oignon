@@ -413,6 +413,105 @@ def _origin_defect(role, origin, segments, length):
     return None
 
 
+# What else a turn was written in sight of. Its context names the kinds of
+# source the request that wrote it held beyond the user's own words -- a
+# document, a file, a web page, a tool's output, a memory the user never
+# endorsed, a peer's copy, a source the user withdrew, or words no one can
+# vouch for -- and the empty context is the clean one. Its lineage names
+# those sources as kind:identifier, a digest or an id, never a text or an
+# address, so that withdrawing one finds every turn it reached. A kind is
+# added by what a turn saw and taken away by the user alone. A user turn's
+# context is its own parts; an answer's is handed by the request that wrote
+# it, and an answer no request vouches for is legacy. Like the origin, the
+# context stands as one text in the four modules that carry the grammar.
+_CONTEXT_KINDS = (
+    "document", "external", "file", "legacy", "memory", "received", "retrieved", "tool", "web", "withdrawn",
+)
+_LINEAGE_KINDS = ("document", "external", "file", "lineage", "memory", "peer", "retrieved", "skill", "tool", "web")
+_LINEAGE_LIMIT = 512
+
+
+def _context_defect(role, origin, context, lineage):
+    """Why a turn's context or lineage lies outside the grammar, or None when both lie inside."""
+    if not isinstance(context, (list, tuple)) or not isinstance(lineage, (list, tuple)):
+        return "context and lineage are lists"
+    if any(not isinstance(kind, str) or kind not in _CONTEXT_KINDS for kind in context):
+        return "a context kind is one the grammar names"
+    if list(context) != sorted(set(context)):
+        return "context kinds are written once each, in order"
+    if len(lineage) > _LINEAGE_LIMIT:
+        return f"a lineage holds at most {_LINEAGE_LIMIT} entries"
+    for entry in lineage:
+        kind, _colon, ident = entry.partition(":") if isinstance(entry, str) else ("", "", "")
+        if kind not in _LINEAGE_KINDS or not 0 < len(ident) <= 128:
+            return "a lineage entry is a kind and an identifier"
+        if not all(char.isascii() and (char.isalnum() or char in "._-") for char in ident):
+            return "a lineage identifier is a digest or an id, never a text or an address"
+    if list(lineage) != sorted(set(lineage)):
+        return "lineage entries are written once each, in order"
+    if role == "assistant" and isinstance(origin, str):
+        for flag in origin.split("+")[1:]:
+            if flag not in context:
+                return f"an answer flagged {flag[:24]} carries {flag[:24]} in its context"
+    return None
+
+
+def _user_context(origin, segments):
+    """The kinds a user turn's own parts give its context: a document part, or words no one vouched for."""
+    bases = {segment[2] for segment in segments}
+    bases.add(origin)
+    return [kind for kind in ("document", "legacy") if kind in bases]
+
+
+def _user_lineage(content, segments):
+    """The documents among a user turn's parts, each named by the digest of its text."""
+    entries = set()
+    for start, stop, base in segments:
+        if base == "document":
+            entries.add("document:" + hashlib.sha256(content[start:stop].encode("utf-8")).hexdigest())
+    return sorted(entries)
+
+
+def _turn_context(role, origin, segments, content, context, lineage):
+    """A turn's context and lineage as they will be written, and why they cannot be, or None.
+
+    A user turn's are its own parts, and no caller hands them; an answer's
+    are handed by the request that wrote it, and when they are left out the
+    answer is legacy with the kinds its flags name.
+    """
+    if role == "user":
+        if context is not None or lineage is not None:
+            return [], [], "a user turn's context is its own parts, and no caller hands it one"
+        return _user_context(origin, segments), _user_lineage(content, segments), None
+    if context is None:
+        flags = origin.split("+")[1:] if role == "assistant" and isinstance(origin, str) else []
+        context = sorted({"legacy", *flags})
+    if lineage is None:
+        lineage = []
+    return list(context), list(lineage), _context_defect(role, origin, context, lineage)
+
+
+def _stored_context(role, origin, context, lineage):
+    """A stored turn's context and lineage, decoded; what lies outside the grammar reads legacy."""
+    try:
+        context = json.loads(context) if isinstance(context, str) else context
+        lineage = json.loads(lineage) if isinstance(lineage, str) else lineage
+    except ValueError:
+        return ["legacy"], []
+    if _context_defect(role, origin, context, lineage) is not None:
+        return ["legacy"], []
+    return list(context), list(lineage)
+
+
+def _label_for(content, context, lineage):
+    """A message's label: its context and lineage, bound to the digest of the content they describe."""
+    return {
+        "context": list(context),
+        "lineage": list(lineage),
+        "sha256": hashlib.sha256(str(content).encode("utf-8")).hexdigest(),
+    }
+
+
 def read_origin(turn):
     """A turn's origin and segments as the grammar admits them, with the defect that set them aside.
 

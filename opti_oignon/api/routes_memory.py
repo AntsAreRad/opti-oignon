@@ -6,6 +6,7 @@ Endpoints to list, add and delete memory facts, and to extract
 facts from a conversation automatically.
 """
 
+import hashlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,10 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from .deps import MEMORY_AVAILABLE, memory_manager
 from .schemas import (
     MemoryAddRequest,
+    MemoryAdoptRequest,
+    MemoryAdoptResponse,
     MemoryEditRequest,
     MemoryExtractResponse,
     MemoryFactSchema,
     MemoryRecordSchema,
+    MemoryUnendorsedSchema,
     OnionCodeResponse,
     OnionPinRequest,
     OnionPinResponse,
@@ -120,6 +124,8 @@ def add_fact(request: MemoryAddRequest) -> dict:
     )
     if record is None:
         raise HTTPException(status_code=500, detail="Failed to add fact")
+    # Written by hand: the user's own words, adopted by the digest of the text.
+    _endorse_written(store, record, request.fact)
     return _store_to_fact_schema(record)
 
 
@@ -173,7 +179,9 @@ def extract_facts(conv_id: str) -> dict:
         mirror = _conv_manager.get_mirror_messages(conv_id)
         typed = typed_turns(mirror)
         # The user's typed words alone: one turn of them is enough to ask the model.
-        results = _extract_and_store(typed, source=f"extract:{conv_id}", min_messages=1) if typed else []
+        results = (
+            _extract_and_store(typed, source=f"extract:{conv_id}", min_messages=1, endorsed=True) if typed else []
+        )
         added = sum(
             1 for _r, d in results if getattr(d, "action", "add") != "merge"
         )
@@ -484,6 +492,9 @@ def edit_memory(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Memory not found")
+    # The user's own edit: the text as it then reads is theirs.
+    if request.text is not None:
+        _endorse_written(store, record, request.text, user_id=user_id)
     return _record_to_schema(record)
 
 
@@ -502,6 +513,50 @@ def soft_delete_memory(
             status_code=404, detail="Memory not found or already inactive"
         )
     return {"soft_deleted": True, "id": fact_id}
+
+
+def _endorse_written(store, record, text, *, user_id=None) -> None:
+    """Adopt, as the user's act, the fact a write of theirs landed as -- by the digest of the very text written.
+
+    A store that offers no adoption, or a record whose text is not those bytes
+    (a merge into a fact of other text), endorses nothing: the fact stays
+    unendorsed. A merge into a fact of the very text written adopts it.
+    """
+    adopt = getattr(store, "adopt", None)
+    fact_id = getattr(record, "id", None)
+    if callable(adopt) and fact_id and getattr(record, "text", None) == text:
+        adopt(fact_id, hashlib.sha256(str(text).encode("utf-8")).hexdigest(), user_id=user_id)
+
+
+@memories_router.get("/unendorsed", response_model=list[MemoryUnendorsedSchema])
+def list_unendorsed_memories(current_user: dict = Depends(_get_current_user)) -> list:
+    """The active facts the user has not endorsed as they read now, each whole with the digest of its text.
+
+    A fact the user did not write by hand, type, or accept from a proposal --
+    a fact kept from before endorsements, or received from a peer -- lowers
+    every turn it is placed in until the user adopts it by that digest.
+    """
+    _check_store()
+    store = get_memory_store()
+    records = store.unendorsed(user_id=current_user.get("sub"))
+    # The digest an endorsement binds a fact's text by (canonical_store.fact_digest).
+    return [
+        MemoryUnendorsedSchema(id=r.id, text=r.text, category=r.category,
+                               digest=hashlib.sha256(str(r.text).encode("utf-8")).hexdigest())
+        for r in records
+    ]
+
+
+@memories_router.post("/adopt", response_model=MemoryAdoptResponse)
+def adopt_memories(request: MemoryAdoptRequest, current_user: dict = Depends(_get_current_user)) -> dict:
+    """Adopt facts by the digest of the text the user was shown; a fact whose text changed since is refused."""
+    _check_store()
+    store = get_memory_store()
+    user_id = current_user.get("sub")
+    adopted, refused = [], []
+    for item in request.items:
+        (adopted if store.adopt(item.id, item.digest, user_id=user_id) else refused).append(item.id)
+    return {"adopted": adopted, "refused": refused}
 
 
 @memories_router.post("/{fact_id}/restore", response_model=MemoryRecordSchema)

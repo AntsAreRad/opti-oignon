@@ -42,6 +42,7 @@ SQLite schema:
 Author: Leon
 """
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -185,11 +186,149 @@ def _origin_defect(role, origin, segments, length):
     return None
 
 
+# What else a turn was written in sight of. Its context names the kinds of
+# source the request that wrote it held beyond the user's own words -- a
+# document, a file, a web page, a tool's output, a memory the user never
+# endorsed, a peer's copy, a source the user withdrew, or words no one can
+# vouch for -- and the empty context is the clean one. Its lineage names
+# those sources as kind:identifier, a digest or an id, never a text or an
+# address, so that withdrawing one finds every turn it reached. A kind is
+# added by what a turn saw and taken away by the user alone. A user turn's
+# context is its own parts; an answer's is handed by the request that wrote
+# it, and an answer no request vouches for is legacy. Like the origin, the
+# context stands as one text in the four modules that carry the grammar.
+_CONTEXT_KINDS = (
+    "document", "external", "file", "legacy", "memory", "received", "retrieved", "tool", "web", "withdrawn",
+)
+_LINEAGE_KINDS = ("document", "external", "file", "lineage", "memory", "peer", "retrieved", "skill", "tool", "web")
+_LINEAGE_LIMIT = 512
+
+
+def _context_defect(role, origin, context, lineage):
+    """Why a turn's context or lineage lies outside the grammar, or None when both lie inside."""
+    if not isinstance(context, (list, tuple)) or not isinstance(lineage, (list, tuple)):
+        return "context and lineage are lists"
+    if any(not isinstance(kind, str) or kind not in _CONTEXT_KINDS for kind in context):
+        return "a context kind is one the grammar names"
+    if list(context) != sorted(set(context)):
+        return "context kinds are written once each, in order"
+    if len(lineage) > _LINEAGE_LIMIT:
+        return f"a lineage holds at most {_LINEAGE_LIMIT} entries"
+    for entry in lineage:
+        kind, _colon, ident = entry.partition(":") if isinstance(entry, str) else ("", "", "")
+        if kind not in _LINEAGE_KINDS or not 0 < len(ident) <= 128:
+            return "a lineage entry is a kind and an identifier"
+        if not all(char.isascii() and (char.isalnum() or char in "._-") for char in ident):
+            return "a lineage identifier is a digest or an id, never a text or an address"
+    if list(lineage) != sorted(set(lineage)):
+        return "lineage entries are written once each, in order"
+    if role == "assistant" and isinstance(origin, str):
+        for flag in origin.split("+")[1:]:
+            if flag not in context:
+                return f"an answer flagged {flag[:24]} carries {flag[:24]} in its context"
+    return None
+
+
+def _user_context(origin, segments):
+    """The kinds a user turn's own parts give its context: a document part, or words no one vouched for."""
+    bases = {segment[2] for segment in segments}
+    bases.add(origin)
+    return [kind for kind in ("document", "legacy") if kind in bases]
+
+
+def _user_lineage(content, segments):
+    """The documents among a user turn's parts, each named by the digest of its text."""
+    entries = set()
+    for start, stop, base in segments:
+        if base == "document":
+            entries.add("document:" + hashlib.sha256(content[start:stop].encode("utf-8")).hexdigest())
+    return sorted(entries)
+
+
+def _turn_context(role, origin, segments, content, context, lineage):
+    """A turn's context and lineage as they will be written, and why they cannot be, or None.
+
+    A user turn's are its own parts, and no caller hands them; an answer's
+    are handed by the request that wrote it, and when they are left out the
+    answer is legacy with the kinds its flags name.
+    """
+    if role == "user":
+        if context is not None or lineage is not None:
+            return [], [], "a user turn's context is its own parts, and no caller hands it one"
+        return _user_context(origin, segments), _user_lineage(content, segments), None
+    if context is None:
+        flags = origin.split("+")[1:] if role == "assistant" and isinstance(origin, str) else []
+        context = sorted({"legacy", *flags})
+    if lineage is None:
+        lineage = []
+    return list(context), list(lineage), _context_defect(role, origin, context, lineage)
+
+
+def _stored_context(role, origin, context, lineage):
+    """A stored turn's context and lineage, decoded; what lies outside the grammar reads legacy."""
+    try:
+        context = json.loads(context) if isinstance(context, str) else context
+        lineage = json.loads(lineage) if isinstance(lineage, str) else lineage
+    except ValueError:
+        return ["legacy"], []
+    if _context_defect(role, origin, context, lineage) is not None:
+        return ["legacy"], []
+    return list(context), list(lineage)
+
+
+def _label_for(content, context, lineage):
+    """A message's label: its context and lineage, bound to the digest of the content they describe."""
+    return {
+        "context": list(context),
+        "lineage": list(lineage),
+        "sha256": hashlib.sha256(str(content).encode("utf-8")).hexdigest(),
+    }
+
+
 # The two columns that carry a message's origin, as an older file gains them.
 _BRANCH_ORIGIN_COLUMNS = (
     ("origin", "TEXT NOT NULL DEFAULT 'legacy'"),
     ("segments", "TEXT NOT NULL DEFAULT '[]'"),
 )
+
+# The two columns that carry a message's context, as an older file gains them.
+_BRANCH_CONTEXT_COLUMNS = (
+    ("context", "TEXT NOT NULL DEFAULT '[\"legacy\"]'"),
+    ("lineage", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
+
+def _migrate_contexts(conn, table):
+    """Write the context of each row an older file holds: a user turn's own parts, any other legacy.
+
+    An answer keeps the kinds its flags name. A user row whose origin or
+    segments no longer decode is legacy, the closed position.
+    """
+    updates = []
+    for row_id, role, origin, segments in conn.execute(f"SELECT id, role, origin, segments FROM {table}").fetchall():
+        context = None
+        if role == "user" and origin in _ORIGIN_ROLES["user"]:
+            try:
+                context = _user_context(origin, json.loads(segments or "[]"))
+            except (TypeError, ValueError, IndexError, KeyError):
+                context = None
+        if context is None:
+            flags = origin.split("+")[1:] if role == "assistant" and isinstance(origin, str) else []
+            context = sorted({"legacy", *(flag for flag in flags if flag in _ORIGIN_FLAGS)})
+        updates.append((json.dumps(context), row_id))
+    conn.executemany(f"UPDATE {table} SET context = ? WHERE id = ?", updates)
+
+
+def _withdrawn_in(conn, lineage):
+    """Whether ``lineage`` holds a source the user withdrew, or was cut while any source is withdrawn."""
+    if not lineage:
+        return False
+    if "lineage:truncated" in lineage:
+        return conn.execute("SELECT 1 FROM withdrawn_sources LIMIT 1").fetchone() is not None
+    marks = ", ".join("?" for _entry in lineage)
+    return conn.execute(
+        f"SELECT 1 FROM withdrawn_sources WHERE source IN ({marks}) LIMIT 1", list(lineage)
+    ).fetchone() is not None
 
 
 class OriginError(ValueError):
@@ -402,6 +541,8 @@ class ConversationBranchManager:
                         metadata TEXT DEFAULT '{}',
                         origin TEXT NOT NULL DEFAULT 'legacy',
                         segments TEXT NOT NULL DEFAULT '[]',
+                        context TEXT NOT NULL DEFAULT '["legacy"]',
+                        lineage TEXT NOT NULL DEFAULT '[]',
                         FOREIGN KEY (branch_id)
                             REFERENCES branches(branch_id) ON DELETE CASCADE
                     );
@@ -412,14 +553,33 @@ class ConversationBranchManager:
                         ON branch_messages(branch_id);
                     CREATE INDEX IF NOT EXISTS idx_branch_messages_conv
                         ON branch_messages(conversation_id);
+
+                    CREATE TABLE IF NOT EXISTS withdrawn_sources (
+                        source TEXT PRIMARY KEY,
+                        withdrawn_at TEXT NOT NULL
+                    );
                 """)
-                # Origins arrived after the table: an older file gains the
-                # columns here, and every row it already holds reads legacy.
+                # Origins, then contexts, arrived after the table: an older
+                # file gains the columns here in one transaction, which a
+                # failure leaves undone. Every row it already holds reads
+                # legacy, but a user turn's context is its own parts.
                 present = {row[1] for row in conn.execute("PRAGMA table_info(branch_messages)")}
-                for column, definition in _BRANCH_ORIGIN_COLUMNS:
-                    if column not in present:
-                        conn.execute(f"ALTER TABLE branch_messages ADD COLUMN {column} {definition}")
-                conn.commit()
+                missing = [
+                    (column, definition)
+                    for column, definition in _BRANCH_ORIGIN_COLUMNS + _BRANCH_CONTEXT_COLUMNS
+                    if column not in present
+                ]
+                if missing:
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        for column, definition in missing:
+                            conn.execute(f"ALTER TABLE branch_messages ADD COLUMN {column} {definition}")
+                        if "context" not in present:
+                            _migrate_contexts(conn, "branch_messages")
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
             except Exception as e:
                 logger.error("Failed to initialize branches DB: %s", e)
                 raise
@@ -769,6 +929,8 @@ class ConversationBranchManager:
         *,
         origin: str = "legacy",
         segments: list | tuple = (),
+        context: list | tuple | None = None,
+        lineage: list | tuple | None = None,
     ) -> BranchMessage | None:
         """Add a message to a branch.
 
@@ -783,17 +945,26 @@ class ConversationBranchManager:
                 legacy when the writer cannot vouch for one.
             segments: [start, end, base] bounds of the parts that came
                 from elsewhere.
+            context: for an answer, the kinds of source the request that
+                wrote it held; left out, legacy with the kinds its flags
+                name. A user message's context is derived from its own
+                parts and never handed.
+            lineage: for an answer, those sources as kind:identifier.
 
         Returns:
             The created BranchMessage, or None on error.
 
         Raises:
-            OriginError: the origin or segments lie outside the grammar;
+            OriginError: the origin, segments, context or lineage lie
+                outside the grammar, or a user message is handed a context;
                 nothing is written.
         """
         defect = _origin_defect(role, origin, segments, len(content or ""))
         if defect is not None:
             raise OriginError(f"branch message refused, its origin lies outside the grammar: {defect}")
+        context, lineage, defect = _turn_context(role, origin, segments, content or "", context, lineage)
+        if defect is not None:
+            raise OriginError(f"branch message refused, its context lies outside the grammar: {defect}")
         segments_json = json.dumps([list(s) for s in segments])
         now = datetime.now().isoformat()
         token_estimate = _estimate_tokens(content, model)
@@ -811,13 +982,21 @@ class ConversationBranchManager:
                     logger.error("Branch not found: %s", branch_id)
                     return None
 
+                # A source the user withdrew stays withdrawn: a message that
+                # carries it again -- a merge's copy, a post -- is written
+                # lowered.
+                if "withdrawn" not in context and _withdrawn_in(conn, lineage):
+                    context = sorted({*context, "withdrawn"})
+
                 cursor = conn.execute(
                     """INSERT INTO branch_messages
                        (branch_id, conversation_id, role, content,
-                        timestamp, token_estimate, model, metadata, origin, segments)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        timestamp, token_estimate, model, metadata, origin, segments,
+                        context, lineage)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (branch_id, conversation_id, role, content,
-                     now, token_estimate, model, meta_json, origin, segments_json),
+                     now, token_estimate, model, meta_json, origin, segments_json,
+                     json.dumps(context), json.dumps(lineage)),
                 )
 
                 # Update branch updated_at
@@ -904,6 +1083,76 @@ class ConversationBranchManager:
                 logger.warning("branch message %s: stored origin outside the grammar, read as legacy", row["id"])
                 found[row["id"]] = ("legacy", [])
         return found
+
+    def _contexts_of(self, branch_id: str) -> dict[int, tuple[list, list]]:
+        """Each branch message's context and lineage, by id; what lies outside the grammar reads legacy."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, role, origin, context, lineage FROM branch_messages WHERE branch_id = ?",
+                    (branch_id,),
+                ).fetchall()
+            except Exception as e:
+                logger.error("Failed to read branch message contexts: %s", e)
+                return {}
+            finally:
+                conn.close()
+        return {
+            row["id"]: _stored_context(row["role"], row["origin"], row["context"], row["lineage"])
+            for row in rows
+        }
+
+    def withdraw_source(self, source: str) -> int:
+        """Lower every branch message whose lineage holds ``source``, and every one whose lineage was cut.
+
+        The branch side of the user's act of withdrawing a source, named as
+        kind:identifier: each such message gains the withdrawn kind in one
+        transaction, no kind is taken away, and the withdrawal is recorded.
+
+        Returns:
+            How many messages it lowered.
+
+        Raises:
+            OriginError: ``source`` is not a lineage entry of the grammar.
+        """
+        defect = (
+            _context_defect("assistant", "assistant", [], [source])
+            if isinstance(source, str) else "a source is a lineage entry"
+        )
+        if defect is not None:
+            raise OriginError(f"withdrawal refused, the source lies outside the grammar: {defect}")
+        lowered = 0
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    rows = conn.execute(
+                        "SELECT id, role, origin, context, lineage FROM branch_messages "
+                        "WHERE lineage LIKE ? OR lineage LIKE ?",
+                        (f'%"{source}"%', '%"lineage:truncated"%'),
+                    ).fetchall()
+                    for row in rows:
+                        context, lineage = _stored_context(row["role"], row["origin"], row["context"], row["lineage"])
+                        if (source not in lineage and "lineage:truncated" not in lineage) or "withdrawn" in context:
+                            continue
+                        conn.execute(
+                            "UPDATE branch_messages SET context = ? WHERE id = ?",
+                            (json.dumps(sorted({*context, "withdrawn"})), row["id"]),
+                        )
+                        lowered += 1
+                    conn.execute(
+                        "INSERT OR IGNORE INTO withdrawn_sources (source, withdrawn_at) VALUES (?, ?)",
+                        (source, datetime.now().isoformat()),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+            finally:
+                conn.close()
+        return lowered
 
     def get_branch_messages_full(
         self,
@@ -1298,8 +1547,10 @@ class ConversationBranchManager:
             logger.error("Target branch not found: %s", target_branch_id)
             return []
 
-        # A copy keeps the origin and segments of the message it copies.
+        # A copy keeps the origin and segments of the message it copies, and
+        # an answer's context and lineage; a user message derives its own.
         origins = self._origins_of(source_branch_id)
+        contexts = self._contexts_of(source_branch_id)
         merged: list[BranchMessage] = []
         for msg in source_msgs:
             meta = dict(msg.metadata)
@@ -1307,6 +1558,13 @@ class ConversationBranchManager:
                 meta["merged_from"] = source_branch_id
                 meta["original_message_id"] = msg.id
             origin, segments = origins.get(msg.id, ("legacy", []))
+            context = lineage = None
+            if msg.role != "user":
+                context, lineage = contexts.get(msg.id, (["legacy"], []))
+                # A context read back legacy still carries the kinds the
+                # origin's flags name: adding a kind only ever lowers.
+                flags = origin.split("+")[1:] if msg.role == "assistant" else []
+                context = sorted({*context, *flags})
 
             new_msg = self.add_branch_message(
                 branch_id=target_branch_id,
@@ -1317,6 +1575,8 @@ class ConversationBranchManager:
                 metadata=meta,
                 origin=origin,
                 segments=segments,
+                context=context,
+                lineage=lineage,
             )
             if new_msg:
                 merged.append(new_msg)

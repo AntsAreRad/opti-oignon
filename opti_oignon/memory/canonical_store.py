@@ -25,6 +25,7 @@ telemetry and publish nothing.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 import threading
@@ -120,6 +121,10 @@ class MemoryRecord:
         updated_at: ISO-8601 last-update timestamp.
         active: False once soft-deleted.
         use_count: Number of times the fact was surfaced/used.
+        endorsed: The digest of the text the user endorsed -- by typing it,
+            writing it by hand, accepting a proposal of it, or adopting it
+            -- or None. The fact is endorsed while its text is still those
+            bytes (see ``is_endorsed``). Device-local: never published.
     """
 
     id: str
@@ -131,9 +136,21 @@ class MemoryRecord:
     updated_at: str = ""
     active: bool = True
     use_count: int = 0
+    endorsed: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def fact_digest(text: str) -> str:
+    """The digest an endorsement binds a fact's text by."""
+    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()
+
+
+def is_endorsed(record: Any) -> bool:
+    """Whether the user endorsed this fact's text as it reads now: a text changed since is no longer theirs."""
+    endorsed = getattr(record, "endorsed", None)
+    return bool(endorsed) and endorsed == fact_digest(getattr(record, "text", ""))
 
 
 def _now() -> str:
@@ -172,6 +189,7 @@ def _row_to_record(row: sqlite3.Row) -> MemoryRecord:
         updated_at=row["updated_at"],
         active=bool(row["active"]),
         use_count=int(row["use_count"]),
+        endorsed=row["endorsed"] if "endorsed" in row.keys() else None,
     )
 
 
@@ -194,6 +212,8 @@ def _fact_payload(record: MemoryRecord) -> dict[str, Any]:
     """
     fact = record.to_dict()
     fact.pop("use_count", None)
+    # An endorsement is this device's user's act: no peer receives it.
+    fact.pop("endorsed", None)
     uid = fact.pop("user_id", DEFAULT_LOCAL_USER)
     return {"user_id": uid, "fact": fact}
 
@@ -328,7 +348,8 @@ class CanonicalMemoryStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     active INTEGER NOT NULL DEFAULT 1,
-                    use_count INTEGER NOT NULL DEFAULT 0
+                    use_count INTEGER NOT NULL DEFAULT 0,
+                    endorsed TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_memory_facts_category
                     ON memory_facts(category);
@@ -338,6 +359,12 @@ class CanonicalMemoryStore:
                     ON memory_facts(user_id);
                 """
             )
+            # Endorsements arrived after the table: an older file gains the
+            # column, and every fact it already holds waits for the user to
+            # adopt it by the digest of the text shown.
+            present = {row[1] for row in conn.execute("PRAGMA table_info(memory_facts)")}
+            if "endorsed" not in present:
+                conn.execute("ALTER TABLE memory_facts ADD COLUMN endorsed TEXT")
 
     @property
     def db_path(self) -> Path:
@@ -368,7 +395,12 @@ class CanonicalMemoryStore:
         user_id: str | None = None,
         fact_id: str | None = None,
     ) -> MemoryRecord:
-        """Insert a fact and return its record. Unknown categories are coerced."""
+        """Insert a fact and return its record. Unknown categories are coerced.
+
+        The fact is written unendorsed: a writer that is the user's own act --
+        their typing, their hand, a proposal they accepted -- adopts it next,
+        by the digest of the very text it wrote (see ``adopt``).
+        """
         category = category if category in CATEGORIES else DEFAULT_CATEGORY
         uid = effective_user_id(user_id, self._single_user_mode)
         rid = fact_id or uuid.uuid4().hex
@@ -465,7 +497,12 @@ class CanonicalMemoryStore:
         user_id: str | None = None,
         **fields: Any,
     ) -> MemoryRecord | None:
-        """Update one or more allowlisted columns; refreshes updated_at."""
+        """Update one or more allowlisted columns; refreshes updated_at.
+
+        An endorsement names the text in service: a change of the text, or the
+        fact leaving service, clears it, and the fact is no longer the user's
+        until a writer that is their act adopts it again (see ``adopt``).
+        """
         if "category" in fields and fields["category"] not in CATEGORIES:
             raise ValueError("Invalid category: " + repr(fields["category"]))
 
@@ -486,6 +523,18 @@ class CanonicalMemoryStore:
         # columns are drawn from _UPDATABLE_COLUMNS only; the assembled clause
         # therefore contains allowlisted identifiers plus "?" placeholders.
         set_clause = ", ".join(f"{col} = ?" for col in columns)
+        # The endorsement is kept only while the text stays the same and the
+        # fact stays in service (each expression reads the row as it was).
+        keep: list[str] = []
+        if "text" in fields:
+            keep.append("text = ?")
+            values.append(_coerce("text", fields["text"]))
+        if "active" in fields:
+            # In service before this update and after it.
+            keep.append("active = 1 AND ? = 1")
+            values.append(1 if fields["active"] else 0)
+        if keep:
+            set_clause += f", endorsed = CASE WHEN {' AND '.join(keep)} THEN endorsed ELSE NULL END"
         uid = effective_user_id(user_id, self._single_user_mode)
         sql = f"UPDATE memory_facts SET {set_clause} WHERE id = ? AND user_id = ?"
         values.extend([fact_id, uid])
@@ -506,6 +555,40 @@ class CanonicalMemoryStore:
                     updated_at=record.updated_at,
                 )
             return record
+
+    def adopt(self, fact_id: str, digest: str, *, user_id: str | None = None) -> bool:
+        """The user's endorsement of a fact's text, named by its digest; whether it took.
+
+        The one way an endorsement is written: the user adopting the text they
+        were shown, or a writer that is their act -- their typing, their hand,
+        a proposal they accepted -- adopting the very text it just wrote. It
+        takes only while the fact is active and its text is still the bytes
+        that digest names: a text changed since is refused, never endorsed in
+        its place. It writes the endorsement alone -- no text, no timestamp --
+        and publishes nothing: an endorsement is this device's.
+        """
+        if not isinstance(digest, str) or not digest:
+            return False
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock:
+            record = self.get(fact_id, user_id=uid)
+            if record is None or not record.active or fact_digest(record.text) != digest:
+                return False
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE memory_facts SET endorsed = ? WHERE id = ? AND user_id = ? AND text = ?",
+                    (digest, fact_id, uid, record.text),
+                )
+                return cur.rowcount == 1
+
+    def unendorsed(self, *, user_id: str | None = None) -> list[MemoryRecord]:
+        """The active facts the user has not endorsed as they read now, oldest first."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memory_facts WHERE user_id = ? AND active = 1 ORDER BY created_at, id", (uid,)
+            ).fetchall()
+        return [record for record in map(_row_to_record, rows) if not is_endorsed(record)]
 
     def touch(self, fact_id: str, *, user_id: str | None = None) -> bool:
         """Increment the use counter and refresh updated_at."""
@@ -534,8 +617,10 @@ class CanonicalMemoryStore:
         ts = _now()
         with self._lock:
             with self._conn() as conn:
+                # A fact out of service loses its endorsement: brought back, it
+                # waits for an adoption again.
                 cur = conn.execute(
-                    "UPDATE memory_facts SET active = 0, updated_at = ? "
+                    "UPDATE memory_facts SET active = 0, updated_at = ?, endorsed = NULL "
                     "WHERE id = ? AND user_id = ? AND active = 1",
                     (ts, fact_id, uid),
                 )
@@ -557,8 +642,10 @@ class CanonicalMemoryStore:
         ts = _now()
         with self._lock:
             with self._conn() as conn:
+                # Back in service, a fact waits for an adoption: no
+                # endorsement comes back with it.
                 cur = conn.execute(
-                    "UPDATE memory_facts SET active = 1, updated_at = ? "
+                    "UPDATE memory_facts SET active = 1, updated_at = ?, endorsed = NULL "
                     "WHERE id = ? AND user_id = ? AND active = 0",
                     (ts, fact_id, uid),
                 )
@@ -692,7 +779,13 @@ class CanonicalMemoryStore:
                     "text=excluded.text, category=excluded.category, "
                     "source=excluded.source, user_id=excluded.user_id, "
                     "created_at=excluded.created_at, "
-                    "updated_at=excluded.updated_at, active=excluded.active",
+                    "updated_at=excluded.updated_at, active=excluded.active, "
+                    # A peer never brings an endorsement: this device's stays
+                    # only while the fact stays in service, its text and its
+                    # owner unchanged.
+                    "endorsed=CASE WHEN memory_facts.active = 1 AND excluded.active = 1 "
+                    "AND memory_facts.text = excluded.text AND memory_facts.user_id = excluded.user_id "
+                    "THEN memory_facts.endorsed ELSE NULL END",
                     (fid, text, category, source, uid, created_at, upd, active),
                 )
             return True

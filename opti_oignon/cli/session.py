@@ -68,6 +68,9 @@ HELP = (
     "/status           show what the onion's queue counted, by event and motive; no word of a conversation\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill's bytes not adopted here, then adopt those bytes\n"
+    "/adopt-memory [ID DIGEST]  the facts of memory you have not endorsed: list them whole, adopt one by its digest\n"
+    "/withdraw KIND VALUE  withdraw a source (a web address, a document's text, a fact's id, or kind:digest):\n"
+    "                  every turn it reached is lowered\n"
     "/review [ID [DIGEST|decline]]  the agent's writes waiting for you: list, show one, accept it by its digest\n"
     "/help             list the commands\n"
     "/quit             end the session"
@@ -129,6 +132,24 @@ def _default_pending():
     return get_pending_store()
 
 
+def _default_memory():
+    from opti_oignon.memory.dedup import get_memory_store
+
+    return get_memory_store()
+
+
+def _default_withdraw(source):
+    from opti_oignon.source_withdrawal import withdraw
+
+    return withdraw(source)
+
+
+def _default_mirror(conversation_id):
+    from opti_oignon.conversation import conversation_manager
+
+    return conversation_manager.get_mirror_messages(conversation_id)
+
+
 def _visible(text):
     """``text`` as the approval drawer shows it: every character a screen hides written as its escape."""
     try:
@@ -161,7 +182,7 @@ class ChatSession:
 
     def __init__(self, *, conversation_id=None, model=None, priority="balanced", refine=False,
                  executor=None, analyze=None, route=None, librarian=None, skills=None,
-                 new_conversation=None, pending=None):
+                 new_conversation=None, pending=None, memory=None, withdraw=None, mirror=None):
         self.conversation_id = conversation_id
         self.model = model
         self.priority = priority
@@ -172,6 +193,9 @@ class ChatSession:
         self._librarian = librarian
         self._skills = skills
         self._pending = pending
+        self._memory = memory
+        self._withdraw = withdraw or _default_withdraw
+        self._mirror = mirror or _default_mirror
         self._new_conversation = new_conversation or _default_new_conversation
         self.closed = False
 
@@ -196,6 +220,11 @@ class ChatSession:
         if self._pending is None:
             self._pending = _default_pending()
         return self._pending
+
+    def _memory_seam(self):
+        if self._memory is None:
+            self._memory = _default_memory()
+        return self._memory
 
     # -- entry point --------------------------------------------------------
 
@@ -232,6 +261,8 @@ class ChatSession:
             "status": self._status,
             "skill": self._skill,
             "adopt": self._adopt,
+            "adopt-memory": self._adopt_memory,
+            "withdraw": self._withdraw_source,
             "review": self._review,
             "help": self._help,
             "quit": self._quit,
@@ -302,7 +333,14 @@ class ChatSession:
 
     def _close(self, rest):
         cid = self._require_conversation("/close")
-        closing = self._onion().close_onion(cid)
+        onion = self._onion()
+        # The conversation as the store reads it, so each turn leaves with
+        # the context it declares; a read that fails closes as before.
+        try:
+            messages = self._mirror(cid)
+        except Exception:  # noqa: BLE001 - the close is never stopped by its read
+            messages = None
+        closing = onion.close_onion(cid, **({"messages": messages} if isinstance(messages, list) and messages else {}))
         yield _info(
             f"closed {cid}: {closing.evicted} span(s) evicted, {closing.remaining} turn(s) left verbatim, "
             f"Core root {closing.core_root[:12]}, {'saved' if closing.saved else 'not saved: no persistence path'}"
@@ -434,6 +472,71 @@ class ChatSession:
         if adopted is None:
             raise _Refused(f"the digest {digest} does not name the bytes of {where} on disk now: /adopt {where} shows them again")
         yield _info(f"adopted {where} ({adopted[:16]}): /skill runs it now")
+
+    def _adopt_memory(self, rest):
+        """The facts of memory the user has not endorsed: list them whole, or adopt one by the digest shown.
+
+        A fact kept from before endorsements, or received from a peer, lowers
+        every turn it is placed in until it is adopted. The digest shown is
+        the first sixteen characters of the digest of the fact's text; an
+        adoption whose digest no longer names that text is refused.
+        """
+        from opti_oignon.memory.canonical_store import fact_digest
+
+        fact_id, _, digest = rest.partition(" ")
+        fact_id, digest = fact_id.strip(), digest.strip()
+        store = self._memory_seam()
+        records = store.unendorsed()
+        if not fact_id:
+            if not records:
+                yield _info("every fact of memory is endorsed: there is nothing to adopt")
+                return
+            lines = [f"{len(records)} fact(s) of memory you have not endorsed; each lowers the turns it is placed "
+                     "in until you adopt it. Every character a screen hides is written as its escape:"]
+            for record in records:
+                lines.append(f"  {record.id}  digest {fact_digest(record.text)[:16]}  [{record.category}]  "
+                             f"{_visible(record.text)}")
+            lines.append("/adopt-memory ID DIGEST adopts one fact's text exactly as shown")
+            yield _info("\n".join(lines))
+            return
+        record = next((r for r in records if r.id == fact_id), None)
+        if record is None:
+            raise _Refused(f"no fact {fact_id} waits for your adoption: /adopt-memory lists them")
+        full = fact_digest(record.text)
+        if len(digest) < 16 or not full.startswith(digest):
+            raise _Refused(f"the digest {digest or '(none)'} does not name the text of fact {fact_id} as it reads now: "
+                           "/adopt-memory shows it again")
+        if not store.adopt(fact_id, full):
+            raise _Refused(f"fact {fact_id} changed before it could be adopted: /adopt-memory shows it again")
+        yield _info(f"adopted fact {fact_id} ({full[:16]}): it no longer lowers the turns it is placed in")
+
+    def _withdraw_source(self, rest):
+        """Withdraw a source: every turn and branch message it reached is lowered; a fact of memory is set aside."""
+        from opti_oignon.source_withdrawal import source_for
+
+        kind, _, value = rest.partition(" ")
+        kind, value = kind.strip(), value.strip()
+        if not kind:
+            raise _Refused("/withdraw needs a kind and a value (web URL, document TEXT, memory ID) or kind:digest")
+        if value:
+            try:
+                source = source_for(kind, value)
+            except ValueError as exc:
+                raise _Refused(str(exc)) from None
+        else:
+            source = kind
+        try:
+            outcome = self._withdraw(source)
+        except ValueError as exc:
+            raise _Refused(f"withdrawal refused: {exc}") from None
+        aside = "; the fact is set aside (restorable)" if outcome.get("fact_set_aside") else ""
+        yield _info(f"withdrew {source}: {outcome.get('turns', 0)} turn(s) and "
+                    f"{outcome.get('branch_messages', 0)} branch message(s) lowered{aside}")
+        if value and kind not in ("web", "memory") and not outcome.get("turns") and not outcome.get("branch_messages"):
+            # A text is named by its exact bytes, which one typed line may
+            # not hold (a line break, a space at an edge): a miss is said.
+            yield _info("no turn carried that text: a document's text is named by its exact bytes; "
+                        "name it as kind:digest (the SHA-256 of the exact text) to be sure")
 
     def _review(self, rest):
         """The agent's writes waiting for the user: list them, show one whole, accept it by its digest, or decline."""

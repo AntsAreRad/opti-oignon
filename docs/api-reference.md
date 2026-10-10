@@ -2,7 +2,7 @@
 
 ## Overview
 
-Opti-Oignon exposes a REST API via FastAPI with 541 endpoints. All
+Opti-Oignon exposes a REST API via FastAPI with 544 endpoints. All
 endpoints require JWT cookie authentication unless noted otherwise.
 Admin-only endpoints require `role: admin`.
 
@@ -169,6 +169,25 @@ Prefix: `/api/security/redteam`
 |--------|----------|-------------|
 | GET | `/api/security/scheduler/status` | Scheduler status |
 | POST | `/api/security/scheduler/trigger` | Manual trigger |
+
+
+## Turn labels API
+
+Each saved turn carries the context it was written in sight of (`context`:
+kinds such as `document`, `web`, `tool`, `memory`, `legacy`, `received`,
+`withdrawn`; an empty list is a turn whose request held nothing beyond the
+user's own words, the platform's instructions and memory the user adopted)
+and its lineage (`lineage`: `kind:digest` or `kind:id` entries, never a
+text or an address; the digests are plain SHA-256, so whoever holds a
+candidate text or address can test it against an entry). The JSON export and the sync snapshot carry both with each
+turn's origin and segments. A turn received from a peer is stored
+`legacy` and `received` whatever it claims.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/memories/unendorsed` | Facts the user has not endorsed as they read now, each whole with the sha256 digest of its text |
+| POST | `/api/memories/adopt` | `{"items": [{"id", "digest"}]}`: adopt each fact whose text still has that digest; answers `adopted` and `refused` |
+| POST | `/api/conversations/withdraw` | `{"source": "kind:digest"}` or `{"kind", "value"}`: lower every turn whose lineage holds the source, set aside a memory fact named |
 
 
 ## Streaming API

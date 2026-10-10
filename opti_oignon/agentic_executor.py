@@ -230,6 +230,27 @@ except ImportError:
     TOOL_REGISTRY_AVAILABLE = False
     _default_tool_registry = None
 
+# The label of what a turn was written in sight of (see
+# ``untrusted_context.labelled``). With no label helpers every answer a
+# pipeline saves is legacy: the closed position, never a clean one.
+try:
+    from .agent.untrusted_context import join_labels as _join_labels
+    from .agent.untrusted_context import message_label as _message_label
+    from .agent.untrusted_context import user_turn_label as _user_turn_label
+except ImportError:
+    def _join_labels(labels):
+        context, lineage = set(), set()
+        for part_context, part_lineage in labels:
+            context.update(part_context)
+            lineage.update(part_lineage)
+        return sorted(context), sorted(lineage)
+
+    def _message_label(message):
+        return ["legacy"], []
+
+    def _user_turn_label(content, origin, segments):
+        return ["legacy"], []
+
 # Conditional import of the capability manifest (per-request tool truth)
 try:
     from .capability_manifest import build_manifest
@@ -2150,6 +2171,9 @@ class AgenticExecutor:
 
         initial_response = ""
         try:
+            # persist=False: the draft is this pipeline's to save -- once,
+            # with the corrected reply, or alone when the turn stops after
+            # it (a stopped self-correction has saved its first draft).
             gen = self._executor.execute(
                 question=message,
                 routing=routing,
@@ -2160,6 +2184,7 @@ class AgenticExecutor:
                 web_search=False,
                 on_status=on_status,
                 run=turn,
+                persist=False,
             )
             for chunk in gen:
                 if chunk:
@@ -2176,6 +2201,10 @@ class AgenticExecutor:
             return
 
         if turn.stopped():
+            # A draft the Stop cut short is no answer, as the executor's own
+            # rule has it; a whole draft stopped before its correction is kept.
+            if initial_response and not turn.results.get("cancelled"):
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
             return
 
         if not initial_response:
@@ -2215,8 +2244,9 @@ class AgenticExecutor:
                     full_response += chunk
                     yield chunk
 
-            # Save the corrected reply (skipped on a stopped turn)
+            # Save the corrected reply; a stopped turn keeps its first draft
             if turn.stopped():
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
                 return
             step("end", 1, "done")
             self._save_to_conversation(
@@ -2225,8 +2255,9 @@ class AgenticExecutor:
 
         except Exception as e:
             logger.error(f"self_correct pipeline error: {e}")
-            # A stopped turn gets no fallback reply and saves nothing.
+            # A stopped turn gets no fallback reply; it keeps its first draft.
             if turn.stopped():
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
                 return
             step("end", 1, "failed", reason=str(e))
             # Fallback: stream the initial response
@@ -2302,9 +2333,13 @@ class AgenticExecutor:
             if not messages:
                 return []
 
-            # Convert to Ollama format (role + content)
+            # Convert to Ollama format (role + content). Only the user's
+            # turns and the answers enter the context: a row of any other
+            # role -- a system message a peer's copy carried -- is no turn
+            # of the conversation and never reaches the model.
             ollama_messages = []
-            for msg in messages[-10:]:  # Keep the last 10 messages
+            turns = [msg for msg in messages if msg.role in ("user", "assistant")]
+            for msg in turns[-10:]:  # Keep the last 10 messages
                 ollama_messages.append({
                     "role": msg.role,
                     "content": msg.content,
@@ -2314,6 +2349,35 @@ class AgenticExecutor:
         except Exception as e:
             logger.debug(f"Could not load the conversation context: {e}")
             return []
+
+    @staticmethod
+    def _answer_label(store, conversation_id, user_message, origin, segments, turn) -> tuple[list, list]:
+        """The label of an answer a pipeline saves: everything the turn's requests could have held.
+
+        The engines are not followed call by call, so the union is taken of
+        what a pipeline may hand them: the question's own parts, the last ten
+        turns the context read hands, any request the executor reported to
+        the run, and the tool kind the answer's flag already names. A store
+        that keeps no labels hands bare turns, read legacy.
+        """
+        parts = [_user_turn_label(user_message, origin, segments), (["tool"], [])]
+        try:
+            reader = getattr(store, "get_labelled_context_messages", None)
+            if not callable(reader):
+                reader = getattr(store, "get_context_messages", None)
+            rows = reader(conversation_id) if callable(reader) else None
+        except Exception:
+            rows = None
+        if rows is None:
+            # A store that cannot hand its turns back vouches for none.
+            parts.append((["legacy"], []))
+        else:
+            parts.extend(_message_label(row) for row in rows[-10:])
+        results = getattr(turn, "results", None)
+        reported = results.get("context_label") if isinstance(results, dict) else None
+        if reported:
+            parts.append(reported)
+        return _join_labels(parts)
 
     def _save_to_conversation(
         self,
@@ -2343,6 +2407,8 @@ class AgenticExecutor:
 
             claim = getattr(turn, "user_turn", None)
             origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
+            context, lineage = self._answer_label(conversation_manager, conversation_id, user_message,
+                                                  origin, segments, turn)
             conversation_manager.add_message(
                 conv_id=conversation_id,
                 role="user",
@@ -2359,6 +2425,8 @@ class AgenticExecutor:
                 model=model,
                 metadata={"model": model},
                 origin="assistant+tool",
+                context=context,
+                lineage=lineage,
             )
 
         except Exception as e:

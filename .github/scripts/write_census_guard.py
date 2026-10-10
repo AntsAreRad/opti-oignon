@@ -376,13 +376,17 @@ def _store(house, *, classes=(), accesses=(), instances=(), writes=(), functions
 # ---------------------------------------------------------------------------
 _PURGE = "it removes entries and adds nothing"
 _BOOKKEEPING = "a run's bookkeeping for the history panel and its analytics; no model reads it back"
+_WITHDRAWAL = ("the user's withdrawal of a source: it adds the withdrawn kind to the context of each turn the "
+               "source reached and records the source; it writes no text, and a context never reaches a model")
 
 # Every store a model reads back. A write method that adds no content is
-# also named under ``quiet``.
+# also named under ``quiet``. An adoption writes no text, yet it raises how
+# every turn a fact is placed in is labelled: it is never quiet, so a module
+# exempt as quiet cannot adopt.
 STORES = {
     "facts": _store(
         "opti_oignon/memory/dedup.py", classes=("MemoryStore",), accesses=("get_memory_store",),
-        writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete"),
+        writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete", "adopt"),
         quiet=("touch", "soft_delete", "hard_delete"), backs=("facts_canonical", "facts_vectors"),
         reason="the user's facts, composed into the memory block of every turn",
     ),
@@ -390,7 +394,7 @@ STORES = {
         "opti_oignon/memory/canonical_store.py", classes=("CanonicalMemoryStore",),
         accesses=("get_canonical_store",),
         writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete", "clear",
-                "apply_synced_memory_canonical"),
+                "apply_synced_memory_canonical", "adopt"),
         quiet=("touch", "soft_delete", "hard_delete", "clear"),
         reason="the rows behind the facts, which the retriever reads",
     ),
@@ -459,7 +463,10 @@ STORES = {
                 "delete_last_message", "delete_conversation", "migrate_json_history"),
         functions=("add_message", "create_conversation", "delete_last_message"),
         quiet=("delete_last_message", "delete_conversation"), place="db_path",
-        aside={"rename_conversation": "the title, shown in the lists and the exports; no model reads it back"},
+        aside={
+            "rename_conversation": "the title, shown in the lists and the exports; no model reads it back",
+            "withdraw_source": _WITHDRAWAL,
+        },
         reason="the transcript and its metadata, the summary of its older messages included, read back as "
                "each turn's history",
     ),
@@ -468,6 +475,7 @@ STORES = {
         writes=("fork", "add_branch_message", "update_branch", "merge_messages", "delete_branch",
                 "delete_all_branches"),
         quiet=("delete_branch", "delete_all_branches"), place="db_path",
+        aside={"withdraw_source": _WITHDRAWAL},
         reason="the conversation's branches, read back as the history of the branch the user is on",
     ),
     "response_cache": _store(
@@ -630,6 +638,8 @@ EXEMPT = {
     ("opti_oignon/cli/session.py", "skills"): (
         "gesture", "the user adopts a skill's bytes not admitted here, named by their digest, on the command "
                    "line"),
+    ("opti_oignon/cli/session.py", "facts"): (
+        "gesture", "the user adopts a fact of memory, its text named by its digest, on the command line"),
     ("opti_oignon/conversation.py", "conversation"): ("script", "the module's self-test, run only as a program"),
     ("opti_oignon/conversation_wipe.py", "conversation"): ("quiet", "the wipe deletes conversations"),
     ("opti_oignon/executor.py", "conversation"): (
@@ -642,6 +652,8 @@ EXEMPT = {
                  "the speculative paths, argued apart, key theirs to the no-context sentinel: they hand the model "
                  "the question alone (cascade(query=question, task_type=...), generate(query=question, ...))"),
     ("opti_oignon/memory/curation.py", "facts"): ("quiet", "curation touches and retires facts; it never adds one"),
+    ("opti_oignon/source_withdrawal.py", "facts"): (
+        "quiet", "the user's withdrawal of a fact sets it aside, restorable; it never adds one"),
     ("opti_oignon/memory/migration.py", "facts"): (
         "migration", "it moves the legacy rows into the store, at start-up or when the user asks again: nothing new"),
     ("opti_oignon/memory/librarian.py", "flesh"): (
@@ -695,6 +707,8 @@ ARGUED_SITES = {
         ("_default_new_conversation", "create_conversation"),),
     ("opti_oignon/cli/session.py", "skills"): (
         ("ChatSession._adopt", "adopt"),),
+    ("opti_oignon/cli/session.py", "facts"): (
+        ("ChatSession._adopt_memory", "adopt"),),
     ("opti_oignon/executor.py", "semantic_cache"): (
         ("Executor.execute_cascade", "put"), ("Executor.execute_speculative", "put"),),
     ("opti_oignon/executor.py", "conversation"): (

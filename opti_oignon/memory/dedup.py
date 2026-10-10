@@ -165,7 +165,10 @@ class MemoryStore:
     ) -> tuple[Any, DedupDecision]:
         """Add a fact unless it duplicates an existing one, in which case merge.
 
-        Returns the resulting record and the dedup decision.
+        Returns the resulting record and the dedup decision. A merge keeps the
+        existing fact's text, and so its endorsement or the lack of one: a
+        writer that adopts what it wrote adopts the bytes it wrote, never the
+        existing fact's.
         """
         uid = self._uid(user_id)
         emb = self._embed(text, embedding)
@@ -255,6 +258,14 @@ class MemoryStore:
 
     def touch(self, fact_id: str, *, user_id: str | None = None) -> bool:
         return self._canonical.touch(fact_id, user_id=self._uid(user_id))
+
+    def adopt(self, fact_id: str, digest: str, *, user_id: str | None = None) -> bool:
+        """The user's endorsement of a fact's text, named by its digest (see the canonical store)."""
+        return self._canonical.adopt(fact_id, digest, user_id=self._uid(user_id))
+
+    def unendorsed(self, *, user_id: str | None = None) -> list:
+        """The active facts the user has not endorsed as they read now."""
+        return self._canonical.unendorsed(user_id=self._uid(user_id))
 
     # Delete (mirrored); soft delete drops the vector entry, keeps the row
 

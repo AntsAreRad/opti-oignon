@@ -75,6 +75,13 @@ saved with.
     valid text, is set aside.
   * UT26 -- on the coding path too, the hook of each model call hides the
     words and the files from a plugin without the permission.
+  * UT27 -- supersedes UT5, which saved a question the vision step rewrote as
+    refined: the description a vision model writes of an image carries the
+    image's content, so the rewritten words are a document part; the
+    attached documents keep their segments.
+  * UT28 -- the coding path's rich call hands back the label its executor
+    reported to the run, so the coding agent's answer carries the request
+    actually sent.
 
 Local-only (the public distribution ships no tests). The node halves need
 Node >= 22.6.
@@ -134,6 +141,8 @@ BUDGET_S = {
         3.0,
     "test_ut26_on_the_coding_path_the_hook_of_each_model_call_hides_the_files_from_a_plugin_without_the_permission":
         2.0,
+    "test_ut27_a_question_the_vision_step_rewrote_is_a_document_part_and_its_documents_keep_their_segments": 1.0,
+    "test_ut28_the_coding_paths_rich_call_hands_back_the_label_its_executor_reported_to_the_run": 2.0,
 }
 
 _QUESTION = "Where does Alice meet Bob on 2024-03-15?"
@@ -1346,3 +1355,61 @@ def test_ut26_on_the_coding_path_the_hook_of_each_model_call_hides_the_files_fro
     assert seen, "control: the model call's hook ran"
     assert all("alice,92000" not in data for data in seen), "no file's text reaches the plugin"
     assert all(json.loads(data)["message"] == placeholder for data in seen), "nor do the words"
+
+
+# ---------------------------------------------------------------------------
+# UT27 -- a question the vision step rewrote is a document part (supersedes UT5)
+# ---------------------------------------------------------------------------
+def test_ut27_a_question_the_vision_step_rewrote_is_a_document_part_and_its_documents_keep_their_segments():
+    """UT5 word for word, but for the origin of the rewritten words: a document, not refined (UT5 is deselected by
+    name; the description it saved as the user's rewritten words is the image's content)."""
+    for documents in (_DOCS, []):
+        mod, scripted, store, restore = _executor()
+        try:
+            mod.VISION_PIPELINE_AVAILABLE = True
+            mod._vision_pipeline = _Vision()
+            _drive(mod.Executor().execute(_QUESTION, _routing(), refine=False, conversation_id="conv-1",
+                                          images=["aW1n"], documents=documents))
+            users = _saved_users(store)
+            assert len(users) == 1, f"control: the turn was saved: {store.saved}"
+            user = users[0]
+            assert user["content"].startswith(_SEEN + _QUESTION), "control: the vision step rewrote the question"
+            assert user["origin"] == "document", f"the model's description is not the user's ({len(documents)} files)"
+            if documents:
+                assert _parts(user["content"], user["segments"]) == [
+                    (_SEEN + _QUESTION, "document"), (_DOCS[0][1], "document"), (_DOCS[1][1], "document")]
+            else:
+                assert user["segments"] == []
+        finally:
+            restore()
+
+
+# ---------------------------------------------------------------------------
+# UT28 -- the coding path's rich call hands back what its executor sent
+# ---------------------------------------------------------------------------
+class _ReportingSession(_CodingSession):
+    """The same session, keeping what each call of its callback handed back."""
+
+    def __init__(self):
+        super().__init__()
+        self.results = []
+
+    def execute_task(self, **kwargs):
+        self.calls.append(kwargs)
+        prompt = [{"role": "user", "content": "Plan the change:\n" + kwargs["message"]}]
+        self.results.append(kwargs["llm_call"](prompt, "test-model:1b", None))
+        yield SimpleNamespace(event_type="coding_done", data={"turn": 1}, content="Fixed.")
+
+
+def test_ut28_the_coding_paths_rich_call_hands_back_the_label_its_executor_reported_to_the_run():
+    world, restore = _world()
+    try:
+        session = _ReportingSession()
+        _coding(world, session, lambda message: SimpleNamespace(cleaned_message=message, raw_message=message))
+        _stream(world, "Fix the payroll export.", documents=_documents(_PAYROLL), chat_coding=True)
+    finally:
+        restore()
+    assert session.results and getattr(session.results[0], "text", None) is not None, "control: the rich call ran"
+    label = getattr(session.results[0], "context_label", None)
+    assert label is not None, "the rich call hands back what its executor reported of the request it sent"
+    assert "legacy" in label[0], f"a prompt the session composed is no one's turn: {label}"

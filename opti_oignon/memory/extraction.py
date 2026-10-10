@@ -24,6 +24,7 @@ and tests in isolation via ``spec_from_file_location``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -412,8 +413,15 @@ class FactExtractor:
         user_id: str | None = None,
         model: str | None = None,
         min_messages: int = 2,
+        endorsed: bool = False,
     ) -> list[tuple[Any, Any]]:
-        """Extract and persist; return the (record, decision) pairs that succeeded."""
+        """Extract and persist; return the (record, decision) pairs that succeeded.
+
+        ``endorsed`` says ``messages`` are the user's typed words alone, so the
+        facts drawn from them are the user's own: the fact each lands as is
+        adopted by the digest of the text written, when its text is those
+        very bytes (a merge into a fact of other text adopts nothing).
+        """
         results: list[tuple[Any, Any]] = []
         try:
             facts = self.extract_with_fallback(messages, model=model, min_messages=min_messages)
@@ -426,6 +434,10 @@ class FactExtractor:
                     record, decision = store.add(
                         fact.text, fact.category, source=provenance, user_id=user_id
                     )
+                    adopt = getattr(store, "adopt", None)
+                    if endorsed and callable(adopt) and getattr(record, "text", None) == fact.text:
+                        adopt(record.id, hashlib.sha256(str(fact.text).encode("utf-8")).hexdigest(),
+                              user_id=user_id)
                     results.append((record, decision))
                 except Exception as exc:
                     logger.warning("extraction store.add failed, skipped: %s", exc)
@@ -488,10 +500,11 @@ def extract_and_store(
     user_id: str | None = None,
     model: str | None = None,
     min_messages: int = 2,
+    endorsed: bool = False,
 ) -> list[tuple[Any, Any]]:
     """Module-level convenience over the singleton extractor (never raises)."""
     return get_extractor().extract_and_store(
-        messages, source=source, user_id=user_id, model=model, min_messages=min_messages
+        messages, source=source, user_id=user_id, model=model, min_messages=min_messages, endorsed=endorsed
     )
 
 

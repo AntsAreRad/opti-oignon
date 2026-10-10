@@ -634,6 +634,18 @@ def _apply_skill(action: str, arguments: dict, registry: Any) -> str:
     raise ValueError(f"no write '{action}' in store 'skills'")
 
 
+def _endorse_written(memory_store: Any, record: Any, text: str) -> None:
+    """Adopt, as the user's act, the fact a write of theirs landed as -- by the digest of the very text written.
+
+    A store that offers no adoption, or a record whose text is not those bytes,
+    endorses nothing: the fact stays unendorsed, the closed position.
+    """
+    adopt = getattr(memory_store, "adopt", None)
+    fact_id = getattr(record, "id", None)
+    if callable(adopt) and fact_id and getattr(record, "text", None) == text:
+        adopt(fact_id, hashlib.sha256(str(text).encode("utf-8")).hexdigest())
+
+
 def apply_write(store: str, action: str, arguments: dict, *, source: str, memory_store: Any = None,
                 notes_store: Any = None, new_note_id: str | None = None, skills_registry: Any = None) -> str:
     """Write ``arguments`` through the store's own calls; what was done, as the tools always said it.
@@ -652,14 +664,19 @@ def apply_write(store: str, action: str, arguments: dict, *, source: str, memory
         if target is None:
             raise RuntimeError("memory store unavailable")
         fact_id = str(arguments.get("fact_id", ""))
+        # Both ways here are the user's act -- words they typed whole, or a
+        # proposal they accepted -- so the text written is adopted as theirs.
         if action == "add":
             record, decision = target.add(arguments["text"], arguments.get("category") or _DEFAULT_CATEGORY,
                                           source=source)
+            _endorse_written(target, record, arguments["text"])
             if getattr(decision, "action", "") == "merge":
                 return f"Memory merged into existing fact {_fact_line(record)}."
             return f"Memory added {_fact_line(record)}."
         if action == "update":
             record = target.update(fact_id, text=arguments.get("text"), category=arguments.get("category"))
+            if record is not None and arguments.get("text") is not None:
+                _endorse_written(target, record, arguments["text"])
             if record is None:
                 raise TargetMissing(f"No memory with id '{fact_id}' to update.")
             return f"Memory updated {_fact_line(record)}."

@@ -21,6 +21,7 @@ is disabled (config key ``enabled``), executor keeps its manual pipeline.
 from __future__ import annotations
 
 import collections
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -46,6 +47,20 @@ except ImportError:
     _is_summary_block = None
     _summary_message = None
     _wrap_untrusted = None
+
+# The labels the messages carry to the point where the request is sent, which
+# for this pipeline is its own result. Without them the result carries no
+# label, and the caller reads the request legacy.
+try:
+    from .agent.untrusted_context import join_labels as _join_labels
+    from .agent.untrusted_context import labelled as _labelled
+    from .agent.untrusted_context import request_label as _request_label
+    from .agent.untrusted_context import strip_labels as _strip_labels
+except ImportError:
+    _join_labels = None
+    _labelled = None
+    _request_label = None
+    _strip_labels = None
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +224,16 @@ class OptimizedContext:
         messages: Final Ollama-ready messages list.
         total_tokens: Estimated total token count.
         report: Detailed optimization report.
+        context_label: The (context, lineage) of the request ``messages``
+            make, read where the labels were left behind; None when no
+            label could be read, and the caller then reads the request
+            legacy.
     """
     system_prompt: str = ""
     messages: list[dict[str, str]] = field(default_factory=list)
     total_tokens: int = 0
     report: OptimizationReport = field(default_factory=OptimizationReport)
+    context_label: tuple | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize for API responses."""
@@ -492,6 +512,8 @@ class ContextOptimizer:
         context_window_override: int = 0,
         manifest_block: str | None = None,
         volatile_block: str | None = None,
+        volatile_label: tuple | None = None,
+        user_label: tuple | None = None,
     ) -> OptimizedContext:
         """Run the full optimization pipeline.
 
@@ -528,6 +550,13 @@ class ContextOptimizer:
                 The ``system_prompt`` reported on the result is always the
                 head-plus-block concatenation: cache identity never moves
                 with the placement.
+            volatile_label: The (context, lineage) of ``volatile_block``.
+                The messages this pipeline makes carry labels: the system
+                and capability messages the clean one, the per-turn tail
+                this label joined with its project retrieval's, the turn
+                ``user_label``. A part the caller gives no label goes out
+                unlabelled and is read legacy where the request is sent.
+            user_label: The (context, lineage) of ``user_message``.
 
         Returns:
             OptimizedContext with final messages and report.
@@ -584,7 +613,14 @@ class ContextOptimizer:
         # withheld when nothing can wrap it.
         volatile_tail = volatile_block or ""
         final_system = system_prompt
+        # What the tail holds, each part under its own label: the caller's
+        # block under the one the caller gave it, legacy when it gave none;
+        # the retrieval added below under its source and digest.
+        tail_labels = []
+        if volatile_tail.strip():
+            tail_labels.append(volatile_label if volatile_label is not None else (["legacy"], []))
         if project_text:
+            project_kind = _SOURCE_RETRIEVED if project_zone.strategy == "unified" else _SOURCE_FILE
             if _wrap_untrusted is None:
                 wrapped_project = ""
             elif project_zone.strategy == "unified":
@@ -594,6 +630,8 @@ class ContextOptimizer:
                 wrapped_project = _wrap_untrusted(project_text, source=_SOURCE_FILE)
             if wrapped_project:
                 volatile_tail = volatile_tail + "\n\n" + wrapped_project
+                digest = hashlib.sha256(project_text.encode("utf-8")).hexdigest()
+                tail_labels.append(([project_kind], [f"{project_kind}:{digest}"]))
             else:
                 logger.warning(
                     "Retrieved context withheld: the untrusted-data wrapper is unavailable"
@@ -711,15 +749,30 @@ class ContextOptimizer:
         # present), then the compressed history, then the per-turn tail in
         # the user role (when non-empty), then the current turn, joined to
         # the tail. No system message carries data or conversation text.
-        messages: list[dict[str, str]] = [{"role": "system", "content": final_system}]
+        # Each message this pipeline makes carries its label: the system and
+        # capability messages are instructions, the clean label; the tail
+        # and the turn carry what the caller said of them.
+        def _label(message, label):
+            if _labelled is None or label is None:
+                return message
+            return _labelled(message, *label)
+
+        messages: list[dict[str, str]] = [_label({"role": "system", "content": final_system}, ((), ()))]
         if manifest_block:
-            messages.append({"role": "system", "content": manifest_block})
+            messages.append(_label({"role": "system", "content": manifest_block}, ((), ())))
         messages.extend(history)
         if volatile_tail and volatile_tail.strip():
-            messages.append({"role": "user", "content": volatile_tail.strip()})
-        messages.append({"role": "user", "content": user_message})
+            tail_label = _join_labels(tail_labels) if _join_labels is not None else None
+            messages.append(_label({"role": "user", "content": volatile_tail.strip()}, tail_label))
+        messages.append(_label({"role": "user", "content": user_message}, user_label))
         if _coalesce_user_turns is not None:
             messages = _coalesce_user_turns(messages)
+        # The result is the request: its label is read here, from the
+        # messages as they are, and the messages leave without labels.
+        context_label = None
+        if _request_label is not None and _strip_labels is not None:
+            context_label = _request_label(messages)
+            messages = _strip_labels(messages)
 
         total_tokens = self._estimate_messages_tokens(messages, model)
 
@@ -748,6 +801,7 @@ class ContextOptimizer:
             messages=messages,
             total_tokens=total_tokens,
             report=report,
+            context_label=context_label,
         )
 
     # ------------------------------------------------------------------
@@ -987,6 +1041,9 @@ class ContextOptimizer:
                 if _summary_message is not None and result.summary
                 else None
             )
+            # It inherits the joint label of every turn it was handed.
+            if summary_block is not None and _labelled is not None and _request_label is not None:
+                summary_block = _labelled(summary_block, *_request_label(history))
             if result.compressed_count > 0 and summary_block is not None:
                 compressed_history: list[dict[str, str]] = [summary_block]
                 compressed_history.extend(result.recent_messages)

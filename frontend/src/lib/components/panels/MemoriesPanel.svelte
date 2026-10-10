@@ -16,10 +16,19 @@
 		editMemory,
 		softDeleteMemory,
 		restoreMemory,
+		listUnendorsedMemories,
+		adoptMemories,
 		MEMORY_CATEGORIES,
-		type MemoryRecord
+		type MemoryRecord,
+		type UnendorsedMemory
 	} from '$lib/api/memories';
+	import { escapeAll } from '$lib/pendingWrites';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
+
+	// The facts the user has not endorsed as they read now: each lowers the
+	// answers it reaches until adopted by the digest of the text shown here.
+	let awaiting: UnendorsedMemory[] = [];
+	let adopting: string | null = null;
 
 	let memories: MemoryRecord[] = [];
 	let loading = false;
@@ -149,7 +158,37 @@
 		}
 	}
 
-	onMount(loadMemories);
+	async function loadAwaiting() {
+		try {
+			awaiting = await listUnendorsedMemories();
+		} catch {
+			awaiting = [];
+		}
+	}
+
+	async function doAdopt(fact: UnendorsedMemory) {
+		if (adopting) return;
+		adopting = fact.id;
+		try {
+			const outcome = await adoptMemories([{ id: fact.id, digest: fact.digest }]);
+			if (outcome.adopted.includes(fact.id)) {
+				awaiting = awaiting.filter((f) => f.id !== fact.id);
+				toastSuccess('Memory adopted');
+			} else {
+				toastError('This memory changed since it was shown; it was not adopted');
+				await loadAwaiting();
+			}
+		} catch {
+			toastError('Failed to adopt memory');
+		} finally {
+			adopting = null;
+		}
+	}
+
+	onMount(() => {
+		loadMemories();
+		loadAwaiting();
+	});
 </script>
 
 <section class="memories-panel">
@@ -163,6 +202,36 @@
 			on:click={loadMemories}
 		/>
 	</header>
+
+	{#if awaiting.length > 0}
+		<div class="memories-awaiting" aria-label="Memories awaiting your adoption">
+			<p class="memories-awaiting-note">
+				{awaiting.length === 1 ? 'One memory was' : `${awaiting.length} memories were`} not written or
+				accepted by you. Until you adopt it, every answer it reaches is marked as written in sight of a
+				source you have not vouched for: such answers are left out of your training data, and their words
+				are not read as yours when a summary is repaired.
+			</p>
+			{#each awaiting as fact (fact.id)}
+				<Card variant="flat" padding="sm">
+					<div class="memory-row">
+						<p class="memory-text memory-shown">{escapeAll(fact.text)}</p>
+						<div class="memory-actions">
+							<span class="memory-digest" title="Digest of the text shown">{fact.digest.slice(0, 16)}</span>
+							<Button
+								variant="secondary"
+								size="sm"
+								iconLeft="check"
+								loading={adopting === fact.id}
+								on:click={() => doAdopt(fact)}
+							>
+								Adopt
+							</Button>
+						</div>
+					</div>
+				</Card>
+			{/each}
+		</div>
+	{/if}
 
 	<Tabs bind:value={statusTab} {tabs} />
 
@@ -319,6 +388,30 @@
 		align-items: center;
 		gap: var(--oo-space-1);
 		flex-shrink: 0;
+	}
+
+	.memories-awaiting {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-2);
+	}
+
+	.memories-awaiting-note {
+		margin: 0;
+		color: var(--oo-fg-muted);
+		font-size: var(--oo-text-sm);
+		line-height: 1.4;
+	}
+
+	.memory-shown {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.memory-digest {
+		font-family: var(--oo-font-mono);
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-faint);
 	}
 
 	.memory-edit {

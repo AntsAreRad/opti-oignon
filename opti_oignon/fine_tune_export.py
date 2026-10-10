@@ -296,6 +296,47 @@ class FineTuneExporter:
         """Whether to strip whitespace from messages."""
         return self._config.get("export", {}).get("strip_whitespace", True)
 
+    @property
+    def include_lowered_turns(self) -> bool:
+        """Whether turns a source besides the user's words reached, and the turns they pair with, are exported."""
+        return bool(self._config.get("export", {}).get("include_lowered_turns", False))
+
+    def _without_lowered_turns(self, conv_id: str, msg_list: list[dict]) -> list[dict]:
+        """``msg_list`` less each turn whose context is not the clean one, and the turn it pairs with.
+
+        A lowered answer takes its question with it, a lowered question its
+        answer: training data holds no turn an outside source could have
+        planted, a peer's included.
+
+        The labels are the store's labelled read, matched turn by turn to the
+        user's turns and the answers; a store that hands no labels, fails to,
+        or whose turns do not match, leaves nothing out of training but its
+        system messages -- every turn it holds is read lowered.
+        """
+        reader = getattr(self._conversation_manager, "get_labelled_context_messages", None)
+        try:
+            labelled = reader(conv_id) if callable(reader) else None
+        except Exception as exc:
+            logger.debug("Failed to get labelled messages for %s: %s", conv_id, exc)
+            labelled = None
+        turns = [m for m in msg_list if m.get("role") in ("user", "assistant")]
+        if not isinstance(labelled, list) or len(labelled) != len(turns) or any(
+            a.get("content") != b.get("content") for a, b in zip(turns, labelled)
+        ):
+            return [m for m in msg_list if m.get("role") not in ("user", "assistant")]
+        dropped: set[int] = set()
+        for index, (turn, entry) in enumerate(zip(turns, labelled)):
+            label = entry.get("label") if isinstance(entry, dict) else None
+            context = label.get("context") if isinstance(label, dict) else None
+            if context == []:
+                continue
+            dropped.add(id(turn))
+            if turn.get("role") == "assistant" and index > 0 and turns[index - 1].get("role") == "user":
+                dropped.add(id(turns[index - 1]))
+            if turn.get("role") == "user" and index + 1 < len(turns) and turns[index + 1].get("role") == "assistant":
+                dropped.add(id(turns[index + 1]))
+        return [m for m in msg_list if id(m) not in dropped]
+
     def export(
         self,
         fmt: str | None = None,
@@ -617,6 +658,11 @@ class FineTuneExporter:
             except Exception as exc:
                 logger.debug("Failed to get messages for %s: %s", conv_id, exc)
                 continue
+
+            # Leave out what an outside source could have planted, unless
+            # the configuration asks for it.
+            if not self.include_lowered_turns:
+                msg_list = self._without_lowered_turns(conv_id, msg_list)
 
             # Filter by minimum turns
             user_count = sum(1 for m in msg_list if m.get("role") == "user")

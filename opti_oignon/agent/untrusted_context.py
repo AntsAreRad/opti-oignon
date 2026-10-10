@@ -21,10 +21,14 @@ loads and is exercised without the backend.
 Module note: there is intentionally no API here to put untrusted content in
 the system role. ``untrusted_message`` always returns role ``user``; for this
 module's helpers the system-role exclusion is a property of the code, not a
-convention. The chat builders hold to it too: every block they wrap here,
-summaries of earlier turns included, rides a user-role message, and their
-system messages carry the instruction head alone. ``coalesce_user_turns``
-joins the user messages that placement leaves side by side.
+convention. The chat builders and the coding agent's hold to it too: every
+block they wrap here -- summaries of earlier turns, archive snippets, the
+sandbox's state -- rides a user-role message, and their system messages carry
+the instruction head alone. ``coalesce_user_turns`` joins the user messages
+that placement leaves side by side. One block rides a system prompt: the
+agent loop appends the skills it consults, wrapped, and only skills the user
+admitted by the digest of their bytes reach it (see ``agent/skills.py``) --
+procedures the user approved byte for byte, which do not lower a turn.
 
 A wrapped block also loses any frame marker of the onion's composer it
 carries: only the composer writes ``[data ...]`` and ``[/data]``, and only
@@ -33,6 +37,8 @@ the window it renders is wrapped with its frames kept.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from typing import Any, Callable, Iterable
@@ -59,6 +65,105 @@ UNTRUSTED_SOURCES = frozenset(
 )
 
 # Explicit untrusted-data delimiters carrying the trusted=false metadata.
+# What else a turn was written in sight of. Its context names the kinds of
+# source the request that wrote it held beyond the user's own words -- a
+# document, a file, a web page, a tool's output, a memory the user never
+# endorsed, a peer's copy, a source the user withdrew, or words no one can
+# vouch for -- and the empty context is the clean one. Its lineage names
+# those sources as kind:identifier, a digest or an id, never a text or an
+# address, so that withdrawing one finds every turn it reached. A kind is
+# added by what a turn saw and taken away by the user alone. A user turn's
+# context is its own parts; an answer's is handed by the request that wrote
+# it, and an answer no request vouches for is legacy. Like the origin, the
+# context stands as one text in the four modules that carry the grammar.
+_CONTEXT_KINDS = (
+    "document", "external", "file", "legacy", "memory", "received", "retrieved", "tool", "web", "withdrawn",
+)
+_LINEAGE_KINDS = ("document", "external", "file", "lineage", "memory", "peer", "retrieved", "skill", "tool", "web")
+_LINEAGE_LIMIT = 512
+
+
+def _context_defect(role, origin, context, lineage):
+    """Why a turn's context or lineage lies outside the grammar, or None when both lie inside."""
+    if not isinstance(context, (list, tuple)) or not isinstance(lineage, (list, tuple)):
+        return "context and lineage are lists"
+    if any(not isinstance(kind, str) or kind not in _CONTEXT_KINDS for kind in context):
+        return "a context kind is one the grammar names"
+    if list(context) != sorted(set(context)):
+        return "context kinds are written once each, in order"
+    if len(lineage) > _LINEAGE_LIMIT:
+        return f"a lineage holds at most {_LINEAGE_LIMIT} entries"
+    for entry in lineage:
+        kind, _colon, ident = entry.partition(":") if isinstance(entry, str) else ("", "", "")
+        if kind not in _LINEAGE_KINDS or not 0 < len(ident) <= 128:
+            return "a lineage entry is a kind and an identifier"
+        if not all(char.isascii() and (char.isalnum() or char in "._-") for char in ident):
+            return "a lineage identifier is a digest or an id, never a text or an address"
+    if list(lineage) != sorted(set(lineage)):
+        return "lineage entries are written once each, in order"
+    if role == "assistant" and isinstance(origin, str):
+        for flag in origin.split("+")[1:]:
+            if flag not in context:
+                return f"an answer flagged {flag[:24]} carries {flag[:24]} in its context"
+    return None
+
+
+def _user_context(origin, segments):
+    """The kinds a user turn's own parts give its context: a document part, or words no one vouched for."""
+    bases = {segment[2] for segment in segments}
+    bases.add(origin)
+    return [kind for kind in ("document", "legacy") if kind in bases]
+
+
+def _user_lineage(content, segments):
+    """The documents among a user turn's parts, each named by the digest of its text."""
+    entries = set()
+    for start, stop, base in segments:
+        if base == "document":
+            entries.add("document:" + hashlib.sha256(content[start:stop].encode("utf-8")).hexdigest())
+    return sorted(entries)
+
+
+def _turn_context(role, origin, segments, content, context, lineage):
+    """A turn's context and lineage as they will be written, and why they cannot be, or None.
+
+    A user turn's are its own parts, and no caller hands them; an answer's
+    are handed by the request that wrote it, and when they are left out the
+    answer is legacy with the kinds its flags name.
+    """
+    if role == "user":
+        if context is not None or lineage is not None:
+            return [], [], "a user turn's context is its own parts, and no caller hands it one"
+        return _user_context(origin, segments), _user_lineage(content, segments), None
+    if context is None:
+        flags = origin.split("+")[1:] if role == "assistant" and isinstance(origin, str) else []
+        context = sorted({"legacy", *flags})
+    if lineage is None:
+        lineage = []
+    return list(context), list(lineage), _context_defect(role, origin, context, lineage)
+
+
+def _stored_context(role, origin, context, lineage):
+    """A stored turn's context and lineage, decoded; what lies outside the grammar reads legacy."""
+    try:
+        context = json.loads(context) if isinstance(context, str) else context
+        lineage = json.loads(lineage) if isinstance(lineage, str) else lineage
+    except ValueError:
+        return ["legacy"], []
+    if _context_defect(role, origin, context, lineage) is not None:
+        return ["legacy"], []
+    return list(context), list(lineage)
+
+
+def _label_for(content, context, lineage):
+    """A message's label: its context and lineage, bound to the digest of the content they describe."""
+    return {
+        "context": list(context),
+        "lineage": list(lineage),
+        "sha256": hashlib.sha256(str(content).encode("utf-8")).hexdigest(),
+    }
+
+
 OPEN_FMT = '<untrusted_data source="{source}" trusted="false">'
 CLOSE = "</untrusted_data>"
 
@@ -186,6 +291,8 @@ def summary_message(text: Any) -> dict[str, str] | None:
     A summary is what a model wrote about turns that may have carried anything
     a page or a tool put there: it is data, quoted under the memory label,
     never an instruction. Empty text gives None: there is nothing to place.
+    It carries no label of its own: the builder that places it labels it
+    with the union of the turns it was handed (see ``request_label``).
     """
     body = str(text or "").strip()
     if not body:
@@ -214,16 +321,90 @@ def coalesce_user_turns(messages: Iterable[dict[str, Any]]) -> list[dict[str, An
     user messages in a row, and data blocks ride the user role beside the
     turn they belong to. Each run is joined with a blank line between its
     parts, every byte kept; any other message passes through as it is. The
-    caller's list and dicts are left untouched.
+    caller's list and dicts are left untouched. A run that carries a label
+    is joined under the union of its parts' labels, bound to the joined
+    text; a part with no label brings legacy into the union.
     """
     out: list[dict[str, Any]] = []
     for message in messages:
         if out and message.get("role") == ROLE and out[-1].get("role") == ROLE:
             joined = f"{out[-1].get('content', '')}\n\n{message.get('content', '')}"
-            out[-1] = {**out[-1], "content": joined}
+            merged = {**out[-1], "content": joined}
+            if LABEL_KEY in out[-1] or LABEL_KEY in message:
+                context, lineage = join_labels([message_label(out[-1]), message_label(message)])
+                merged[LABEL_KEY] = _label_for(joined, context, lineage)
+            out[-1] = merged
         else:
             out.append(dict(message))
     return out
+
+
+# The label a request builder carries on each message, from the point the
+# message is made to the point the request is sent. A label vouches only for
+# the content it was bound to: a message made or rewritten without one is
+# read legacy where the request is sent, so a builder that forgets a label
+# lowers a turn and can never raise one.
+LABEL_KEY = "label"
+LEGACY_LABEL = (("legacy",), ())
+
+
+def labelled(message: dict[str, Any], context: Iterable[str] = (), lineage: Iterable[str] = ()) -> dict[str, Any]:
+    """A copy of ``message`` carrying ``context`` and ``lineage``, bound to its content."""
+    out = dict(message)
+    out[LABEL_KEY] = _label_for(out.get("content", ""), sorted(set(context)), sorted(set(lineage)))
+    return out
+
+
+def message_label(message: Any) -> tuple[list[str], list[str]]:
+    """The context and lineage a message's label vouches for, or legacy when it vouches for nothing.
+
+    A label vouches only when it is well formed, lies inside the grammar and
+    is bound to the digest of the content the message carries now.
+    """
+    label = message.get(LABEL_KEY) if isinstance(message, dict) else None
+    if not isinstance(label, dict):
+        return ["legacy"], []
+    context, lineage = label.get("context"), label.get("lineage")
+    if _context_defect("assistant", "assistant", context, lineage) is not None:
+        return ["legacy"], []
+    if label.get("sha256") != _label_for(message.get("content", ""), (), ())["sha256"]:
+        return ["legacy"], []
+    return list(context), list(lineage)
+
+
+def join_labels(labels: Iterable[tuple[Iterable[str], Iterable[str]]]) -> tuple[list[str], list[str]]:
+    """The union of several (context, lineage) pairs; past the grammar's limit the lineage says it was cut."""
+    context: set[str] = set()
+    lineage: set[str] = set()
+    for part_context, part_lineage in labels:
+        context.update(part_context)
+        lineage.update(part_lineage)
+    entries = sorted(lineage)
+    if len(entries) > _LINEAGE_LIMIT:
+        entries = sorted(entries[: _LINEAGE_LIMIT - 1] + ["lineage:truncated"])
+    return sorted(context), entries
+
+
+def request_label(messages: Iterable[Any]) -> tuple[list[str], list[str]]:
+    """The label of a request: the union of what each message it sends vouches for."""
+    return join_labels(message_label(message) for message in messages)
+
+
+def strip_labels(messages: Iterable[Any]) -> list[Any]:
+    """The messages as the model receives them, every label left behind."""
+    return [
+        {key: value for key, value in message.items() if key != LABEL_KEY} if isinstance(message, dict) else message
+        for message in messages
+    ]
+
+
+def user_turn_label(content: str, origin: str, segments: Iterable[Any]) -> tuple[list[str], list[str]]:
+    """The label a user turn's own parts give it: what the store derives when the turn is saved."""
+    parts = [list(segment) for segment in segments or ()]
+    try:
+        return _user_context(origin, parts), _user_lineage(content, parts)
+    except (TypeError, ValueError, IndexError):
+        return ["legacy"], []
 
 
 def untrusted_message_many(items: Iterable[tuple[str, str]]) -> dict[str, str] | None:

@@ -492,18 +492,22 @@ def estimate_tokens(text):
     return _estimate(text)
 
 
-def _turn_digest(role, text, origin, segments):
-    """What one turn is, as a digest: its role, its words, its origin and its segments; never its id nor its place.
+def _turn_digest(role, text, origin, segments, context=None):
+    """What one turn is, as a digest: its role, its words, its origin, its segments and its context; never its id nor its place.
 
     Total: a row the probe reader would not admit -- a file's Flesh row with
     segments of another shape, ``null`` or empty of another kind included --
     still has a digest, which no turn of the conversation shares, so the
-    mirror takes it back instead of raising.
+    mirror takes it back instead of raising. A turn that declares no context
+    has the digest it had before contexts were kept; one whose context
+    changes -- a source withdrawn -- is a different turn, mirrored again.
     """
     import hashlib
 
-    payload = json.dumps([str(role), str(text), str(origin), segments],
-                         ensure_ascii=False, separators=(",", ":"), default=repr)
+    parts = [str(role), str(text), str(origin), segments]
+    if context is not None:
+        parts.append(context)
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"), default=repr)
     return hashlib.sha256(payload.encode("utf-8", "surrogatepass")).hexdigest()
 
 
@@ -564,9 +568,12 @@ class OnionState:
         that bound its parts, read through the probe reader: a message that
         declares nothing is legacy, and one whose declaration lies outside
         the grammar is legacy with no segment, said by its turn id and the
-        rule it broke -- never by its text.
+        rule it broke -- never by its text. A turn also keeps the context its
+        message declares, read through the same grammar (outside it, legacy);
+        a message that declares none keeps none, and the repair reads such an
+        answer as one a source outside the conversation reached.
         """
-        from .probes import read_origin
+        from .probes import _stored_context, read_origin
 
         valid = [
             m for m in (messages or [])
@@ -580,7 +587,10 @@ class OnionState:
             origin, segments, defect = read_origin(
                 {"role": role, "text": text, "origin": m.get("origin", "legacy"), "segments": m.get("segments", [])}
             )
-            incoming.append((role, text, origin, segments, defect, _turn_digest(role, text, origin, segments)))
+            declared = m.get("context")
+            context = None if declared is None else _stored_context(role, origin, declared, [])[0]
+            incoming.append((role, text, origin, segments, defect, context,
+                             _turn_digest(role, text, origin, segments, context)))
         with self.lock:
             standing, ids, known, held = self._standing()
             same = 0
@@ -592,10 +602,12 @@ class OnionState:
             if same < len(known):
                 start, taken, superseded = self._take_back(same, standing, held, ids)
             added = []
-            for role, text, origin, segments, defect, _digest in incoming[start:]:
+            for role, text, origin, segments, defect, context, _digest in incoming[start:]:
                 self.seen += 1
                 turn = {"turn_id": f"t{self.seen:04d}", "role": role, "text": text, "origin": origin,
                         "segments": segments}
+                if context is not None:
+                    turn["context"] = context
                 if defect is not None:
                     logger.warning("turn %s mirrored as legacy: %s", turn["turn_id"], defect)
                 self.flesh.append(turn)
@@ -1205,9 +1217,13 @@ def _propose(state, receipt, gate, ladder):
 
 
 def _digest_of(turn):
-    """What a mirrored turn is, as the mirror knows it: a row written before segments has none, an empty list."""
+    """What a mirrored turn is, as the mirror knows it: a row written before segments has none, an empty list.
+
+    A row mirrored before contexts were kept has no context, and its digest
+    is the one it always had.
+    """
     return _turn_digest(turn.get("role", ""), turn.get("text", ""), turn.get("origin") or "legacy",
-                        turn["segments"] if "segments" in turn else [])
+                        turn["segments"] if "segments" in turn else [], turn.get("context"))
 
 
 def _turn_of(state, proposal):
@@ -1817,8 +1833,14 @@ class Opening:
     peels: int
 
 
-def close_onion(conversation_id, *, config=None, summarize=None, gate=None, ladder=None, reask=None, run=None):
+def close_onion(conversation_id, *, config=None, summarize=None, gate=None, ladder=None, reask=None, run=None,
+                messages=None):
     """Evict the whole Flesh through the queue's ladder, synchronously, then save.
+
+    ``messages`` is the conversation as the store reads it now, when the
+    caller hands it: it is mirrored first, so each turn leaves the Flesh
+    with the context it declares, a turn mirrored before contexts were kept
+    included.
 
     Unlike a curation burst this ignores the Flesh cap: it runs until the
     Flesh is empty, each span leaving under the rung that answers for it,
@@ -1844,6 +1866,8 @@ def close_onion(conversation_id, *, config=None, summarize=None, gate=None, ladd
     evicted = 0
     refusal = None
     with state.slot:
+        if isinstance(messages, list) and messages:
+            state.mirror(messages)
         try:
             if run is not None:
                 run.hold()

@@ -29,6 +29,7 @@ Security:
 Author: Leon
 """
 
+import hashlib
 import logging
 import re
 import threading
@@ -95,6 +96,53 @@ except ImportError:
     _conversation_compressor = None
     CompressedContext = None
     check_retrieval_trigger = None
+
+# The data blocks a coding turn carries -- a summary of earlier turns, archive
+# snippets, the sandbox's state -- ride the user role, wrapped as untrusted
+# data, and every message carries its label to the point where the request
+# is sent (see ``untrusted_context.labelled``). With no wrapper a block rides
+# the user role bare; with no label helpers every request reads legacy.
+try:
+    from opti_oignon.agent.untrusted_context import SOURCE_RETRIEVED as _SOURCE_RETRIEVED
+    from opti_oignon.agent.untrusted_context import SOURCE_TOOL as _SOURCE_TOOL
+    from opti_oignon.agent.untrusted_context import coalesce_user_turns as _coalesce_user_turns
+    from opti_oignon.agent.untrusted_context import summary_message as _summary_message
+    from opti_oignon.agent.untrusted_context import wrap as _wrap_untrusted
+except ImportError:
+    _SOURCE_RETRIEVED = "retrieved"
+    _SOURCE_TOOL = "tool"
+    _coalesce_user_turns = None
+    _summary_message = None
+    _wrap_untrusted = None
+try:
+    from opti_oignon.agent.untrusted_context import join_labels as _join_labels
+    from opti_oignon.agent.untrusted_context import labelled as _labelled
+    from opti_oignon.agent.untrusted_context import message_label as _message_label
+    from opti_oignon.agent.untrusted_context import request_label as _request_label
+    from opti_oignon.agent.untrusted_context import strip_labels as _strip_labels
+    from opti_oignon.agent.untrusted_context import user_turn_label as _user_turn_label
+except ImportError:
+    def _join_labels(labels):
+        context, lineage = set(), set()
+        for part_context, part_lineage in labels:
+            context.update(part_context)
+            lineage.update(part_lineage)
+        return sorted(context), sorted(lineage)
+
+    def _labelled(message, context=(), lineage=()):
+        return dict(message)
+
+    def _message_label(message):
+        return ["legacy"], []
+
+    def _request_label(messages):
+        return ["legacy"], []
+
+    def _strip_labels(messages):
+        return [{k: v for k, v in m.items() if k != "label"} if isinstance(m, dict) else m for m in messages]
+
+    def _user_turn_label(content, origin, segments):
+        return ["legacy"], []
 
 try:
     from opti_oignon.context_manager import (
@@ -251,7 +299,9 @@ class LLMCallResult:
     """Result from a rich LLM call.
 
     Contains the text response plus metadata from the full pipeline
-    (tool calls made, vision delegation info, plugin annotations).
+    (tool calls made, vision delegation info, plugin annotations), and the
+    label of the request that pipeline sent, as its executor reported it
+    (None when it reported none).
     """
     text: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -259,6 +309,7 @@ class LLMCallResult:
     plugin_annotations: list[dict[str, Any]] = field(default_factory=list)
     thinking: str = ""
     error: str = ""
+    context_label: tuple | None = None
 
 
 # Type alias for the rich LLM callback.
@@ -491,6 +542,9 @@ class ChatCodingSession:
         self._turn_rich: bool | None = None
         # The turn as the chat route composed it: the user turn is saved by it.
         self._turn_user_turn: Any = None
+        # The union of the labels of the requests this turn sent; None until
+        # one is sent.
+        self._turn_context_label: tuple | None = None
 
         # Last call metadata (tool calls, vision, plugins from last LLM call)
         self._last_tool_calls: list[dict[str, Any]] = []
@@ -665,8 +719,12 @@ class ChatCodingSession:
         the sandbox state as context. Also supports archive retrieval
         for follow-up questions that reference older context.
 
-        This mirrors the same logic as executor._build_conversation_messages
-        to provide equally robust conversation memory.
+        As in the executor's builder, the system message carries the
+        instruction head alone: the summary, the archive snippets and the
+        sandbox state ride the user role, wrapped as untrusted data, and
+        runs of user messages are joined. This builder is the point where
+        the request leaves: the union of what its messages' labels vouch
+        for joins the turn's label, and the messages are returned bare.
 
         Args:
             system_prompt: The system prompt for this coding turn.
@@ -677,10 +735,12 @@ class ChatCodingSession:
             Ollama-format messages list.
         """
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": system_prompt},
+            _labelled({"role": "system", "content": system_prompt}),
         ]
 
         # -- Load conversation history from backend --------------------------
+        # Each turn with the label it was stored with; a store that keeps no
+        # labels hands bare turns, read legacy where the request is sent.
         history: list[dict[str, str]] = []
         if (
             CONVERSATION_AVAILABLE
@@ -688,8 +748,11 @@ class ChatCodingSession:
             and self._conversation_id
         ):
             try:
-                history = _conversation_manager.get_context_messages(
-                    self._conversation_id
+                reader = getattr(_conversation_manager, "get_labelled_context_messages", None)
+                history = (
+                    reader(self._conversation_id)
+                    if callable(reader)
+                    else _conversation_manager.get_context_messages(self._conversation_id)
                 )
             except Exception as exc:
                 logger.warning(
@@ -718,16 +781,18 @@ class ChatCodingSession:
                         budget_tokens=history_budget,
                         model=model,
                     )
-                    if compressed.compressed_count > 0 and compressed.summary:
+                    # The summary is what a model wrote about turns that may
+                    # have carried anything: memory data in the user role,
+                    # inheriting the joint label of every turn it was handed.
+                    # With no wrapper to write it, the history is left whole.
+                    summary_block = (
+                        _summary_message(compressed.summary)
+                        if _summary_message is not None and compressed.summary
+                        else None
+                    )
+                    if compressed.compressed_count > 0 and summary_block is not None:
                         # Rebuild history: summary + recent messages
-                        summary_block = {
-                            "role": "system",
-                            "content": (
-                                "[CONVERSATION SUMMARY]\n"
-                                + compressed.summary
-                                + "\n[/CONVERSATION SUMMARY]"
-                            ),
-                        }
+                        summary_block = _labelled(summary_block, *_request_label(history))
                         history = (
                             [summary_block]
                             + list(compressed.recent_messages)
@@ -773,10 +838,16 @@ class ChatCodingSession:
                                     f"- [{r.role}] {r.snippet}\n"
                                 )
                             retrieval_block += "[/RETRIEVED FROM ARCHIVE]"
-                            history.append({
-                                "role": "system",
-                                "content": retrieval_block,
-                            })
+                            # Snippets of this conversation's own turns: data
+                            # in the user role, carrying what its turns carry.
+                            if _wrap_untrusted is not None:
+                                retrieval_block = (
+                                    _wrap_untrusted(retrieval_block, source=_SOURCE_RETRIEVED) or retrieval_block
+                                )
+                            history.append(_labelled(
+                                {"role": "user", "content": retrieval_block},
+                                *_join_labels(_message_label(m) for m in all_history),
+                            ))
                             logger.info(
                                 "Archive retrieval: %d results for coding turn",
                                 len(results),
@@ -785,25 +856,38 @@ class ChatCodingSession:
                     logger.debug("Archive retrieval failed: %s", exc)
 
         # -- Inject sandbox state as context ---------------------------------
+        # What the sandbox holds is what its tools wrote: data in the user
+        # role, labelled tool by the digest of the block.
         sandbox_context = self._sandbox_state.as_context_block()
         if sandbox_context:
-            history.append({
-                "role": "system",
-                "content": sandbox_context,
-            })
+            digest = hashlib.sha256(sandbox_context.encode("utf-8")).hexdigest()
+            if _wrap_untrusted is not None:
+                sandbox_context = _wrap_untrusted(sandbox_context, source=_SOURCE_TOOL) or sandbox_context
+            history.append(_labelled(
+                {"role": "user", "content": sandbox_context},
+                ["tool"], [f"tool:{digest}"],
+            ))
 
         # -- Assemble final messages list ------------------------------------
-        # Filter out system messages from history (they are context blocks)
+        # Every message keeps its label; no system message carries data.
         for msg in history:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if content:
-                messages.append({"role": role, "content": content})
+            if msg.get("content", ""):
+                messages.append(dict(msg, role=msg.get("role", "user")))
 
-        # Add current user message
-        messages.append({"role": "user", "content": user_message})
+        # Add current user message, judged by the turn's claim: the claimed
+        # text keeps its parts, any other text is no one's.
+        claim = getattr(self, "_turn_user_turn", None)
+        origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
+        messages.append(_labelled({"role": "user", "content": user_message},
+                                  *_user_turn_label(user_message, origin, segments)))
+        if _coalesce_user_turns is not None:
+            messages = _coalesce_user_turns(messages)
 
-        return messages
+        # The point where this request leaves: its label joins the turn's,
+        # and the messages leave bare.
+        previous = getattr(self, "_turn_context_label", None) or ([], [])
+        self._turn_context_label = _join_labels([previous, _request_label(messages)])
+        return _strip_labels(messages)
 
     def _save_turn_to_conversation(
         self,
@@ -826,12 +910,17 @@ class ChatCodingSession:
             # the agent stands on its tools.
             claim = getattr(self, "_turn_user_turn", None)
             origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
+            # The answer carries the union of every request the turn sent,
+            # and the tool kind its flag names; a turn that sent none
+            # through the builder is legacy.
+            sent = getattr(self, "_turn_context_label", None)
+            context, lineage = _join_labels([sent if sent is not None else (["legacy"], []), (["tool"], [])])
             _conversation_manager.add_message(
                 self._conversation_id, "user", user_message, origin=origin, segments=segments
             )
             _conversation_manager.add_message(
                 self._conversation_id, "assistant", assistant_response,
-                model=model, origin="assistant+tool",
+                model=model, origin="assistant+tool", context=context, lineage=lineage,
             )
         except Exception as exc:
             logger.warning(
@@ -961,6 +1050,18 @@ class ChatCodingSession:
             )
             try:
                 result = fn(messages, model, ctx)
+                # The pipeline behind the call composes the request it sends
+                # from these messages: the answer carries what it reported of
+                # that request, and the images this call handed it.
+                parts = [self._turn_context_label if self._turn_context_label is not None else (["legacy"], [])]
+                reported = getattr(result, "context_label", None)
+                if isinstance(reported, (tuple, list)) and len(reported) == 2:
+                    parts.append((list(reported[0]), list(reported[1])))
+                if ctx.images:
+                    parts.append((["document"], sorted(
+                        {"document:" + hashlib.sha256(str(i).encode("utf-8")).hexdigest() for i in ctx.images})))
+                if len(parts) > 1:
+                    self._turn_context_label = _join_labels(parts)
                 # Capture metadata from the pipeline
                 if hasattr(result, "tool_calls"):
                     self._last_tool_calls = result.tool_calls or []
@@ -1403,6 +1504,7 @@ class ChatCodingSession:
             self._turn_llm_call = llm_call
             self._turn_rich = None
             self._turn_user_turn = user_turn
+            self._turn_context_label = None
             return (yield from self._execute_task_locked(
                 message, model, directives, images, web_search, think,
             ))
@@ -1411,6 +1513,7 @@ class ChatCodingSession:
             self._turn_llm_call = None
             self._turn_rich = None
             self._turn_user_turn = None
+            self._turn_context_label = None
             self._turn_images = None
             self._turn_web_search = False
             self._turn_think = False

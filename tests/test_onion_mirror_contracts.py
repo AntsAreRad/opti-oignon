@@ -97,6 +97,12 @@ keeps:
     nor takes the room of the day it is made again on.
   * MI33 -- a listing on a full day draws the probes of what it shows, and
     of no deferred proposal it cannot open.
+  * MI34 to MI37 -- supersede MI3, MI4, MI12 and MI21, whose base was written
+    here: once every turn a peer's copy brings is received, a synchronisation
+    changes every turn of a conversation written here, and the divergence
+    those four aimed at moved to the first turn. Each keeps everything its
+    predecessor held, over a conversation received from a peer before the
+    edit, so that the edited turn alone diverges.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source, the conversation store over plain
@@ -816,6 +822,81 @@ def test_mi20_no_proposal_is_made_from_a_receipt_superseded_between_its_step_and
 
 def test_mi21_a_superseded_receipt_leaves_the_digest_and_the_user_s_open_receipts(tmp_path):
     conv, lib, loaded, restore, mgr, cid, state = _cellar_divergence(tmp_path)
+    try:
+        gone = state.ledger.all()[1]
+        assert gone.key in [r.key for r in lib.open_receipts(cid)], "control: open"
+        assert gone.key[:12] in lib.memory_block(cid, "service", budget=_budget(loaded)), "control: in the digest"
+        assert mgr.apply_synced_conversation(_payload(mgr, cid, edit={3: _EDITED}))
+        state.mirror(mgr.get_mirror_messages(cid))
+        assert [r.key for r in lib.open_receipts(cid)] == [state.ledger.all()[0].key]
+        block = lib.memory_block(cid, "service", budget=_budget(loaded))
+        assert gone.key[:12] not in block and state.ledger.all()[0].key[:12] in block
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# MI34-MI37 -- the divergence in the Cellar, over a conversation received from
+# a peer (supersede MI3, MI4, MI12, MI21)
+# ---------------------------------------------------------------------------
+def _received_cellar_divergence(tmp_path):
+    """Eight legacy turns as a peer's copy brought them, three spans of two evicted with their peels; two in the Flesh."""
+    conv, lib, loaded, restore = _window(tmp_path)
+    mgr, cid = _conversation(conv, tmp_path)
+    _say(mgr, cid, 1, 8)
+    assert mgr.apply_synced_conversation(_payload(mgr, cid)), "control: the conversation is a peer's copy"
+    state = lib.state_for(cid)
+    state.mirror(mgr.get_mirror_messages(cid))
+    _evict(lib, loaded, state, 3)
+    return conv, lib, loaded, restore, mgr, cid, state
+
+
+def test_mi34_a_divergence_in_the_cellar_of_a_received_conversation_supersedes_its_span_and_rewrites_nothing(tmp_path):
+    conv, lib, loaded, restore, mgr, cid, state = _received_cellar_divergence(tmp_path)
+    try:
+        assert [r.turn_ids for r in state.ledger.all()] == [("t0001", "t0002"), ("t0003", "t0004"),
+                                                            ("t0005", "t0006")], "control"
+        kinds = [r.kind for r in state.ledger.all()]
+        before = _cellar_bytes(state)
+        assert mgr.apply_synced_conversation(_payload(mgr, cid, edit={3: _EDITED}))
+        state.mirror(mgr.get_mirror_messages(cid))
+        assert [r.kind for r in state.ledger.all()] == [kinds[0], "superseded", "superseded"]
+        assert _cellar_bytes(state) == before, "every span of the Cellar as it was, byte for byte"
+    finally:
+        restore()
+
+
+def test_mi35_after_a_divergence_in_the_cellar_of_a_received_conversation_the_state_mirrors_it_again(tmp_path):
+    conv, lib, loaded, restore, mgr, cid, state = _received_cellar_divergence(tmp_path)
+    try:
+        assert mgr.apply_synced_conversation(_payload(mgr, cid, edit={3: _EDITED}))
+        state.mirror(mgr.get_mirror_messages(cid))
+        assert _live(state) == _base(mgr, cid)
+        flesh = state.flesh.turns()
+        assert [t["text"] for t in flesh[:2]] == [_line(3), _EDITED], "written again from the span's first turn"
+        assert all(int(t["turn_id"][1:]) > 8 for t in flesh), "under turn ids never given before"
+    finally:
+        restore()
+
+
+def test_mi36_what_the_mirror_logs_of_a_divergence_in_a_received_conversation_names_turns_never_a_word(
+        tmp_path, caplog):
+    conv, lib, loaded, restore, mgr, cid, state = _received_cellar_divergence(tmp_path)
+    try:
+        canary = "Wolframite-Quokka-7731"
+        assert mgr.apply_synced_conversation(_payload(mgr, cid, edit={2: f"The {canary} turn."}))
+        with caplog.at_level(logging.DEBUG, logger="opti_oignon.memory.librarian"):
+            state.mirror(mgr.get_mirror_messages(cid))
+        said = [r.getMessage() for r in caplog.records if r.name == "opti_oignon.memory.librarian"]
+        assert any("t0003" in s for s in said), "the divergence is said, by its turn"
+        words = {w for t in _base(mgr, cid) for w in t[1].split() if len(w) > 3} | {canary}
+        assert not [s for s in said for w in words if w in s], "no word of a turn"
+    finally:
+        restore()
+
+
+def test_mi37_a_superseded_receipt_of_a_received_conversation_leaves_the_digest_and_the_open_receipts(tmp_path):
+    conv, lib, loaded, restore, mgr, cid, state = _received_cellar_divergence(tmp_path)
     try:
         gone = state.ledger.all()[1]
         assert gone.key in [r.key for r in lib.open_receipts(cid)], "control: open"

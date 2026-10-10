@@ -1006,8 +1006,29 @@ def _within_reach(targets, found):
 # and a legacy turn -- the least trusted origin, which decides nothing (see
 # probes), yet whose words the first face keeps too. A document, or a label
 # carrying a flag -- a tool, the web (``assistant+tool``) -- came from
-# outside it.
+# outside it, and so did an answer whose context says a source outside the
+# conversation reached it, or a turn a peer sent (see ``_lowered_turns``).
 _CONVERSATION = ("typed", "refined", "assistant", "legacy")
+
+
+def _lowered_turns(span):
+    """The turns of a span whose declared context says their words are not the conversation's own.
+
+    An answer whose context is not the clean one: a document, a page, a tool
+    reached it; an answer read from the store before contexts were kept
+    declares ``legacy``, and is one of them. A turn of either role a peer
+    sent (``received``): no peer vouches for who typed it, so a planted
+    question is no more the user's than a planted answer. A turn that declares
+    no context at all is judged by its origin alone, as before contexts were
+    kept: the store's mirror read declares one for every turn it hands.
+    """
+    return {
+        str(t.get("turn_id", "")) for t in span
+        if "context" in t and (
+            (t.get("role") == "assistant" and t.get("context") != [])
+            or "received" in (t.get("context") or ())
+        )
+    }
 
 
 # The innermost bracketed run of a text, by any opening and closing mark a
@@ -1093,12 +1114,13 @@ def _repair(span, probes, text, gate, ladder):
 
     Returns ``(text, stitched)``. Each unit is marked with its turn. A
     sentence that copies a unit from outside the conversation -- a
-    document, an answer the assistant gave with a tool or the web -- is
-    dropped like one its span does not hold: a summary the gate refused
-    would otherwise come back as a peel that keeps those words verbatim, an
-    instruction among them. The words of the conversation itself -- typed,
-    refined, the assistant's, a turn written before origins -- are kept as
-    the first face keeps them. What only words of another origin than the
+    document, an answer the assistant gave with a tool or the web or in
+    sight of anything but the user's words -- is dropped like one its span
+    does not hold: a summary the gate refused would otherwise come back as a
+    peel that keeps those words verbatim, an instruction among them. The
+    words of the conversation itself -- typed, refined, the assistant's
+    clean answers, a turn written before origins -- are kept as the first
+    face keeps them. What only words of another origin than the
     user's typing answer stays missed, and the gate judges the repair with
     it missing. A unit is stitched with the run of the user's it stands in
     (``typed_ranges``), so that its condition, its quote, its label and its
@@ -1123,7 +1145,9 @@ def _repair(span, probes, text, gate, ladder):
 
     held = holdings(span, gate.directives)
     texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
-    others = [texts.get(u.turn_id, "")[u.start:u.stop] for u in units(span) if u.origin not in _CONVERSATION]
+    lowered = _lowered_turns(span)
+    others = [texts.get(u.turn_id, "")[u.start:u.stop] for u in units(span)
+              if u.origin not in _CONVERSATION or u.turn_id in lowered]
     # An order the whole summary gives is dropped wherever it stands: a list
     # item judged alone would lose the label that addressed it to the reader.
     # The clause is compared in the prose it was read in, inline code as

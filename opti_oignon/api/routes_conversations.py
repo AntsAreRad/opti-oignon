@@ -17,6 +17,8 @@ from .schemas import (
     ConversationRename,
     ConversationSummary,
     MessageItem,
+    SourceWithdrawRequest,
+    SourceWithdrawResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,32 @@ def list_conversations(
     except Exception as e:
         logger.error(f"Erreur listing conversations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/withdraw", response_model=SourceWithdrawResponse)
+def withdraw_source(request: SourceWithdrawRequest) -> dict:
+    """The user's withdrawal of a source: every turn and branch message it reached is lowered.
+
+    The source is a lineage entry (kind:identifier), or a kind and the value
+    it is named by -- a page's address, a document's text, a fact's id. A
+    fact of memory withdrawn is also set aside, restorable. A withdrawal only
+    ever lowers; an entry outside the grammar is refused before anything is
+    written.
+    """
+    if not CONVERSATION_AVAILABLE or conversation_manager is None:
+        raise HTTPException(status_code=503, detail="Conversation store not available")
+    from ..source_withdrawal import source_for, withdraw
+
+    try:
+        if request.kind and request.value is not None:
+            source = source_for(request.kind, request.value)
+        elif request.source:
+            source = request.source
+        else:
+            raise ValueError("a source, or a kind and a value, is required")
+        return withdraw(source, conversations=conversation_manager)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"withdrawal refused: {exc}") from None
 
 
 @router.post("", response_model=ConversationSummary, status_code=201)

@@ -1085,3 +1085,107 @@ def test_q42_chat_request_surface_is_exactly_its_nineteen_fields():
         _rejects(S.ChatCancelRequest)
     finally:
         restore()
+
+
+def test_q43_window_holds_and_the_module_is_import_pure_at_343_models():
+    """q40 word for word, at the count the memory adoption and the source
+    withdrawal brought the module to: six schemas, a fact awaiting adoption,
+    an adoption's item, request and response, a withdrawal's request and
+    response (q40 is deselected by name; its literal was 337).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 343
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCodeResponse", "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse",
+            "OnionProposalDecisionResponse", "OnionProposalSchema", "OnionProposalsResponse",
+            "OnionRecallResponse", "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse",
+            "OnionStatusResponse", "OnionSupersedeRequest",
+        }, "the thirteen are the onion's user surface and nothing else"
+        assert {
+            "MemoryUnendorsedSchema", "MemoryAdoptItem", "MemoryAdoptRequest", "MemoryAdoptResponse",
+            "SourceWithdrawRequest", "SourceWithdrawResponse",
+        } <= set(classes), "the six schemas the count grew by"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q44_required_field_census_matches_the_snapshot_with_the_adoption_and_the_withdrawal():
+    """q41 word for word, with the fields the new schemas refuse to go
+    without: a fact awaiting adoption whole with its digest, an adoption's
+    fact and digest, its items, its verdicts, and a withdrawal's account; a
+    withdrawal's request requires nothing, the route judges its fields (q41
+    is deselected by name; its snapshot stays REQUIRED with its six
+    additions, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            req = tuple(n for n, f in cls.model_fields.items() if f.is_required())
+            if req:
+                actual[name] = req
+        assert actual == {
+            **REQUIRED,
+            "OnionCodeResponse": ("conversation_id", "key"),
+            "ChatDocument": ("filename", "content"),
+            "OnionProposalSchema": ("id", "text", "turn_id", "origin", "made_on"),
+            "OnionProposalsResponse": ("conversation_id",),
+            "OnionProposalDecisionResponse": ("conversation_id", "id", "decision"),
+            "OnionStatusResponse": ("enabled",),
+            "MemoryUnendorsedSchema": ("id", "text", "category", "digest"),
+            "MemoryAdoptItem": ("id", "digest"),
+            "MemoryAdoptRequest": ("items",),
+            "MemoryAdoptResponse": ("adopted", "refused"),
+            "SourceWithdrawResponse": ("source", "turns", "branch_messages", "fact_set_aside"),
+        }
+    finally:
+        restore()
+
+
+def test_q45_constraint_census_matches_the_snapshot_with_the_adoption_and_the_withdrawal():
+    """q27 word for word, with the bounds of the new requests: an adoption
+    names a fact by an id of one to 128 characters and a digest of exactly
+    64, in one to 500 items; a withdrawal's source, kind and value are capped
+    (q27 is deselected by name; its snapshot stays CONSTRAINED, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            for fname, f in cls.model_fields.items():
+                found = []
+                for m in f.metadata:
+                    for attr in ("ge", "le", "gt", "lt", "max_length", "min_length", "pattern"):
+                        v = getattr(m, attr, None)
+                        if v is not None:
+                            found.append(f"{attr}={v!r}")
+                if found:
+                    actual[(name, fname)] = tuple(found)
+        assert actual == {
+            **CONSTRAINED,
+            ("MemoryAdoptItem", "id"): ("min_length=1", "max_length=128"),
+            ("MemoryAdoptItem", "digest"): ("min_length=64", "max_length=64"),
+            ("MemoryAdoptRequest", "items"): ("min_length=1", "max_length=500"),
+            ("SourceWithdrawRequest", "source"): ("max_length=200",),
+            ("SourceWithdrawRequest", "kind"): ("max_length=24",),
+            ("SourceWithdrawRequest", "value"): ("max_length=200000",),
+        }
+    finally:
+        restore()

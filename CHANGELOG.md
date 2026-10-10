@@ -11,6 +11,61 @@ package costs.
 
 ### Added
 
+- [SECURITY] Every assistant turn is saved with the context it was
+  written in sight of. An answer written after a document, an image, a
+  web page, a tool's output, a memory fact the user never endorsed, or an
+  older turn no one vouches for was saved as the assistant's, like an
+  answer to the user's own words, so the memory repair, the fine-tune
+  export and a peer read it back as clean. Each message a request builder
+  makes now carries a label -- the kinds of context it holds (document,
+  file, legacy, memory, received, retrieved, tool, web, withdrawn; none
+  for the user's own words) and its lineage, each source named by a
+  digest or an id, never by its text or its address -- bound to the
+  SHA-256 of its content, from the point it is made to the point the
+  request is sent; a message without one, or with one bound to other
+  content, reads legacy. The request's label is the union of what its
+  messages vouch for; the labels never reach the model; every write of an
+  answer stores it: the chat executor's three ways of building a request
+  and its cache, the agentic pipelines (their answers carry tool), the
+  self-correction, the coding agent (its answer carries the request its
+  pipeline actually sent). An image the model sees, or a description a
+  vision model wrote of one into the question, is a document of the turn,
+  named by the image's digest, and the described words are saved as a
+  document part, no longer as the user's rewritten words. A summary
+  carries the union of every turn it stands for, so a compression cannot
+  launder a document's echo, and no system message carries data: the
+  coding agent's summary, archive and sandbox state ride the user role. A
+  user turn's context is derived from its own parts. The readers honour
+  it: the memory repair drops the words of an answer whose context is not
+  clean and of any turn a peer sent; the onion's mirror carries it, and
+  `/close` in `oo chat` mirrors the conversation again before it closes;
+  the JSON export and the sync snapshot carry each turn's origin,
+  segments, context and lineage; a turn received from a peer is stored
+  legacy and received whatever it claims, and a row of any role but user
+  or assistant is refused; the fine-tune export leaves out every lowered
+  turn, a question as an answer, and the turn it pairs with
+  (`include_lowered_turns`, off by default), and exports no turn from a
+  source whose labels it cannot read. Answers saved before this change
+  read legacy. Only a user act raises: a memory fact carries an
+  endorsement, the digest of the text the user endorsed, written only by
+  an adoption -- right after a write that is the user's own act (typed
+  words captured or extracted, a proposal accepted, a fact added or
+  edited by hand) when the fact it lands as holds the very bytes written,
+  or by the digest of the text shown (`GET /api/memories/unendorsed`,
+  `POST /api/memories/adopt`, the memories panel, `/adopt-memory` in `oo
+  chat`). An endorsement names the text in service: a change of the text,
+  the fact's leaving service, or a peer's change of its text, state or
+  owner clears it, and no peer ever brings one. A memory block lowers the
+  turn it is placed in unless every fact it places is endorsed as it
+  reads now; facts written before this change wait for their adoption.
+  Withdrawing a source (`POST /api/conversations/withdraw`, `/withdraw` in
+  `oo chat`) lowers every turn and branch message whose lineage holds it,
+  and every one written after that carries it again -- a copy, a retry,
+  the same document pasted anew -- and sets aside a memory fact it names;
+  a withdrawal only ever lowers. A self-correction stopped during its
+  correction keeps its whole draft; a draft the Stop cut short is no
+  answer and is not saved.
+
 - [SECURITY] An approval shows what it approves, for the skills the agent
   writes. A skill's text reaches a system prompt (`/skill` in `oo chat`)
   and the agent's consultation, yet the agent's skill writes and the

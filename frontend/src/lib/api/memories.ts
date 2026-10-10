@@ -74,3 +74,23 @@ export async function softDeleteMemory(
 export async function restoreMemory(id: string): Promise<MemoryRecord> {
 	return apiPost<MemoryRecord>(`/api/memories/${id}/restore`);
 }
+
+/** A fact the user has not endorsed as it reads now: its whole text and the digest of it. */
+export interface UnendorsedMemory {
+	id: string;
+	text: string;
+	category: string;
+	digest: string;
+}
+
+/** The facts awaiting the user's adoption; each lowers the turns it is placed in until adopted. */
+export async function listUnendorsedMemories(): Promise<UnendorsedMemory[]> {
+	return apiGet<UnendorsedMemory[]>('/api/memories/unendorsed');
+}
+
+/** Adopt facts by the digest of the text shown; a fact whose text changed since is refused. */
+export async function adoptMemories(
+	items: { id: string; digest: string }[]
+): Promise<{ adopted: string[]; refused: string[] }> {
+	return apiPost<{ adopted: string[]; refused: string[] }>('/api/memories/adopt', { items });
+}

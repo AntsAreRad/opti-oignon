@@ -20,6 +20,7 @@ estimator, so it loads and tests in isolation.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -534,6 +535,29 @@ def build_memory_block(
     canonical (SQL) facts still rank and inject. The block is unwrapped (the
     agent wraps it as untrusted context). Returns "" when nothing fits.
     """
+    return compose_memory_block(
+        query, user_id=user_id, max_tokens=max_tokens, legacy_facts=legacy_facts, mark_used=mark_used,
+        header=header, retriever=retriever,
+    )[0]
+
+
+def compose_memory_block(
+    query: str | None = None,
+    *,
+    user_id: str | None = None,
+    max_tokens: int = MEMORY_TOKEN_BUDGET,
+    legacy_facts: Any = None,
+    mark_used: bool = False,
+    header: str = "Relevant memories:",
+    retriever: MemoryRetriever | None = None,
+) -> tuple[str, list[tuple[str, bool]]]:
+    """The block of :func:`build_memory_block`, and each fact it places: its id, and whether the user endorsed it.
+
+    A fact is endorsed while its text is still the bytes the user typed,
+    wrote by hand, accepted or adopted (see the canonical store); a fact of
+    the legacy bridge has no record and is not. What the block places is what
+    fits its budget, in the order it is written.
+    """
     r = retriever if retriever is not None else get_retriever()
     try:
         memories = list(
@@ -567,7 +591,18 @@ def build_memory_block(
             )
         )
 
-    return r.format_for_prompt(memories, max_tokens=max_tokens, header=header)
+    block = r.format_for_prompt(memories, max_tokens=max_tokens, header=header)
+    placed = r.fit_to_budget(memories, max_tokens=max_tokens, header=header) if block else []
+    return block, [(str(m.id), _endorsed(m)) for m in placed]
+
+
+def _endorsed(memory: ScoredMemory) -> bool:
+    """Whether a placed fact's record carries the user's endorsement of the text it reads now."""
+    record = getattr(memory, "record", None)
+    endorsed = getattr(record, "endorsed", None)
+    if not endorsed or record is None:
+        return False
+    return endorsed == hashlib.sha256(str(getattr(record, "text", "")).encode("utf-8")).hexdigest()
 
 
 def recover_memories(

@@ -390,6 +390,46 @@ class MemoryEditRequest(BaseModel):
     category: str | None = None
 
 
+class MemoryUnendorsedSchema(BaseModel):
+    """A fact the user has not endorsed as it reads now: its whole text and the digest of it."""
+    id: str
+    text: str
+    category: str
+    digest: str
+
+
+class MemoryAdoptItem(BaseModel):
+    """One fact the user adopts, named by the digest of the text they were shown."""
+    id: str = Field(..., min_length=1, max_length=128)
+    digest: str = Field(..., min_length=64, max_length=64)
+
+
+class MemoryAdoptRequest(BaseModel):
+    """The facts the user adopts in one decision."""
+    items: list[MemoryAdoptItem] = Field(..., min_length=1, max_length=500)
+
+
+class MemoryAdoptResponse(BaseModel):
+    """The facts adopted, and those refused because their text changed since it was shown or is gone."""
+    adopted: list[str]
+    refused: list[str]
+
+
+class SourceWithdrawRequest(BaseModel):
+    """A source to withdraw: its lineage entry, or a kind and the value it is named by (a URL, a text, an id)."""
+    source: str | None = Field(default=None, max_length=200)
+    kind: str | None = Field(default=None, max_length=24)
+    value: str | None = Field(default=None, max_length=200_000)
+
+
+class SourceWithdrawResponse(BaseModel):
+    """What withdrawing a source lowered."""
+    source: str
+    turns: int
+    branch_messages: int
+    fact_set_aside: bool
+
+
 # -- Notes (N.2) --
 
 class NoteSchema(BaseModel):
