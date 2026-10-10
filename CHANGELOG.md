@@ -11,6 +11,54 @@ package costs.
 
 ### Added
 
+- [SECURITY] A peel of the onion no longer copies the user's words into
+  its text. It holds the librarian's summary and references: each whole
+  segment the user typed that it keeps, by its turn, its place and the
+  SHA-256 of its bytes, read from the stored span each time the peel is
+  shown, and shown only while it still answers to that digest; one that no
+  longer does is left out, said and counted. The user's words reach the
+  model as they typed them -- a fenced block by its marker, as everywhere
+  in the onion -- or, when they held a frame or envelope marker the window
+  defangs, the reference says how many markers were defanged; each part of
+  a peel is defanged on its own, so nothing downstream changes a byte of
+  what it shows. No block in a summary is honoured any more: the user's
+  own words written into a summary, after their turn's marker or not, are
+  refused like any order, and a sentence of a summary the references
+  already show as written is said once. A sentence the repair drops is
+  kept by its motive (order, unheld, copy, unended) and its digest, never
+  its words; the peel says how many it lost and why, and `oo chat` lists
+  them with `/dropped`. The onion's block carries the label of what it
+  places once the composer has cut: the Core, the receipts and the user's
+  typed words are clean, a summary is memory with the context and lineage
+  of every turn it stands on, so an answer written in sight of the user's
+  own words alone is no longer lowered, and one written in sight of a
+  summary carries its sources' lineage. The mirror keeps each turn's
+  lineage beside it, outside what the turn is, so no state is taken back
+  on upgrade; a lineage never recorded reads cut. A source the user
+  withdraws hides, from the next request and with no mirror on the
+  interactive path, every part of the onion that stands on it -- a
+  summary, a reference, an anchor -- and the block says so. A turn a peer
+  sent is never referenced nor anchored, whatever origin it declares. The
+  onion store is brought to schema 2 in one transaction: references and
+  dropped sentences in a peel's mark, each turn's lineage in a table
+  beside the turns; every root of a file written before stays as it was,
+  its peels read as they were saved, memory, and legacy when a run they
+  copied no longer reads. The table of directive forms is pinned by its
+  fingerprint, and the forms it is known to miss are listed and counted:
+  the user's words reach a peel by reference whatever the table reads.
+  A summary can write no reference's marker -- a bracket that opens on a
+  turn id, whatever follows it, however it is spaced, punctuated or
+  accented -- nor a peel's note: both are taken out before the gate reads
+  it, and so is every control that would make a summary display in
+  another order than it reads; the forms this reading is known to miss
+  are listed and counted. A marker the window defangs costs the reader
+  its head alone: the words after one left open stay, and no segment of
+  the onion's block, its Core included, holds the name of the envelope's
+  tag any more, which the wrapper read a marker from up to its next `>`,
+  taking every later byte with it. A file's lineages are in its root; the
+  load proves a reference's bytes, the reader whether it is still a whole
+  typed segment, so a later change of the grammar of origins refuses no
+  stored conversation.
 - [SECURITY] Every assistant turn is saved with the context it was
   written in sight of. An answer written after a document, an image, a
   web page, a tool's output, a memory fact the user never endorsed, or an

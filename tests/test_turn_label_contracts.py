@@ -97,6 +97,10 @@ added by what a turn saw and taken away by the user alone.
     so each turn leaves the Flesh with the context it declares.
   * TL76 -- an answer the optimizer's request wrote carries the label the
     optimizer read where that request left, its messages already bare.
+  * TL77 -- the onion's block labels a turn by the label it carries, and
+    a plain string by memory as a whole.
+  * TL78 -- the executor hands the onion the sources the user withdrew,
+    and nothing when there is none.
 
 Local-only (the public distribution ships no tests).
 """
@@ -1852,5 +1856,64 @@ def test_tl57_the_optimizers_tail_names_the_project_retrieval_whatever_label_the
             kinds, lineage = result.context_label
             assert ("file:" + _sha(notes)) in lineage, f"the project's notes are named, a file ({volatile_block!r})"
             assert set(kinds) == kinds_wanted | {"file"}, (volatile_block, kinds)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TL77 -- the onion's block labels a turn by what it places
+# ---------------------------------------------------------------------------
+class _Carrying(str):
+    """A block as the onion hands it: the text, with the label of what it places."""
+
+
+def test_tl77_the_onion_s_block_labels_a_turn_by_the_label_it_carries_and_a_plain_string_by_memory():
+    import threading
+
+    for carried, expected in (((["web"], ["web:abc"]), (["web"], ["web:abc"])), (([], []), ([], [])),
+                              ("memory", (["memory"], [])), (None, (["memory"], [])),
+                              ((["web"], [1]), (["memory"], [])), (([1], []), (["memory"], [])),
+                              (("memory", []), (["memory"], [])), (([], "web:abc"), (["memory"], []))):
+        block = _Carrying("Core: the user prefers tea.")
+        if carried is not None:
+            block.label = carried
+        mod, wrapper, scripted, store, librarian, restore = _executor(onion_block=block)
+        try:
+            ex = mod.Executor()
+            ex._memory_enabled = True
+            run = SimpleNamespace(stop=threading.Event(), results={})
+            _drive(ex.execute(_QUESTION, _routing(), refine=False, conversation_id=None, run=run))
+            assert any("prefers tea" in m["content"] for m in _sent(scripted)), "control: the onion's block was placed"
+            assert run.results["context_label"] == expected, carried
+        finally:
+            restore()
+
+
+# ---------------------------------------------------------------------------
+# TL78 -- the executor hands the onion the withdrawn sources, only when there is one
+# ---------------------------------------------------------------------------
+def test_tl78_the_executor_hands_the_onion_the_sources_the_user_withdrew_and_nothing_when_there_is_none():
+    import threading
+
+    mod, wrapper, scripted, store, librarian, restore = _executor(onion_block="Core: the user prefers tea.")
+    try:
+        asked = []
+
+        def block(conversation_id, question=None, **kwargs):
+            asked.append(kwargs)
+            return "Core: the user prefers tea."
+
+        mod._onion_memory_block = block
+        for register, expected in ((["web:abc", "document:" + "d" * 64], {"withdrawn": ("web:abc", "document:" + "d" * 64)}),
+                                   ([], {}), (None, {})):
+            if register is None:
+                store.__dict__.pop("withdrawn_sources", None)
+            else:
+                store.withdrawn_sources = lambda register=register: list(register)
+            ex = mod.Executor()
+            ex._memory_enabled = True
+            run = SimpleNamespace(stop=threading.Event(), results={})
+            _drive(ex.execute(_QUESTION, _routing(), refine=False, conversation_id=None, run=run))
+            assert asked and asked[-1] == expected, (register, asked[-1:])
     finally:
         restore()

@@ -15,6 +15,10 @@ back; the summariser drops sentences at random and sometimes invents one.
     a third summary.
   * QP4 -- through any interleaving of new turns and steps, every turn is in
     the Flesh or under exactly one receipt.
+  * QP5 -- every peel the queue makes passes both faces judged as it was
+    made, its summary with its references (supersedes QP1).
+  * QP6 -- every reference a peel makes is a whole turn the user typed, at
+    its place, with the digest of its bytes.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source.
@@ -212,5 +216,74 @@ def test_qp4_through_any_interleaving_every_turn_is_in_the_flesh_or_under_exactl
                 assert sorted(flesh + receipted) == [f"t{i:04d}" for i in range(1, state.seen + 1)], (seed, case)
                 checked += 1
         assert checked >= 300, "control: every step was checked"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# QP5 -- qp1 with each peel judged as it was made: its summary and its
+# references. A peel's text is its summary alone; judged without the words
+# its references show, a peel that keeps the user's orders by reference would
+# read as one that lost them.
+# ---------------------------------------------------------------------------
+def test_qp5_every_step_evicts_its_span_and_every_peel_it_makes_passes_both_faces_with_its_references():
+    lib, loaded, restore = _open()
+    try:
+        peels, probes = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.probes"]
+        gate = replace(peels.load_gate(), span_turns=2)
+        made = repaired = referenced = 0
+        for seed, case, rng in _cases(12):
+            state, steps = _emptied(lib, loaded, rng, gate)
+            assert all(step.evicted for step in steps), (seed, case, [s.rung for s in steps])
+            assert state.flesh.turns() == [], (seed, case, "the queue stopped short")
+            for peel in state.tree.all():
+                span = state.cellar.get(peel.sources[0])
+                judged = peels.decide(span, probes.generate_probes(span, gate.lexicon), peel.text, gate, peel.refs)
+                assert judged.accepted, (seed, case, peel.rung, judged.reason[:80])
+                made += 1
+                repaired += peel.rung == "repaired"
+                referenced += bool(peel.refs)
+        assert made >= 20, "control: peels were made to judge"
+        assert repaired >= 5, "control: repaired peels were among them, each judged"
+        assert referenced >= 3, "control: peels with references were among them"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# QP6 -- what a peel references is a whole turn the user typed, at its place
+# ---------------------------------------------------------------------------
+def test_qp6_every_reference_a_peel_makes_is_a_whole_turn_the_user_typed_at_its_place_with_its_digest():
+    import hashlib
+
+    lib, loaded, restore = _open()
+    try:
+        peels, probes = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.probes"]
+        gate = replace(peels.load_gate(), span_turns=2)
+        # A floor that lets a repair keep a whole turn of several sentences: where a reference to the unit a probe
+        # asks for and one to its whole turn differ.
+        ladder = replace(peels.load_ladder(), rho=1.0)
+        seen = longer = 0
+        for seed, case, rng in _cases(12):
+            lib.reset_librarian()
+            state = lib.state_for("c")
+            state.mirror(_conversation(rng, rng.randint(2, 8)))
+            summarize = _lossy(rng, probes)
+            for _ in range(16):
+                if not state.flesh.turns():
+                    break
+                lib.curate(state, summarize, gate=gate, budget=_tiny(loaded), ladder=ladder)
+            for peel in state.tree.all():
+                span = [t for key in peel.sources for t in state.cellar.get(key)]
+                for turn_id, start, stop, digest in peel.refs:
+                    (turn,) = [t for t in span if t["turn_id"] == turn_id]
+                    assert turn["role"] == "user" and turn["origin"] == "typed", (seed, case, turn_id)
+                    assert (start, stop) == (0, len(turn["text"])), ("the generator's turns declare no segment: "
+                                                                     "whole", seed, case, turn_id)
+                    assert hashlib.sha256(turn["text"].encode("utf-8")).hexdigest() == digest, (seed, case, turn_id)
+                    seen += 1
+                    longer += len(probes.sentences(turn["text"])) > 1
+        assert seen >= 3, "control: references were made"
+        assert longer >= 3, "control: turns of several sentences were referenced, where a unit and its turn differ"
     finally:
         restore()

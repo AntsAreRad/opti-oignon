@@ -346,11 +346,14 @@ def counter_totals(config=None):
 
 
 def _count_step(outcome):
-    """Count one step of the queue: the rung its span left on, and every refusal on the way, by motive."""
+    """Count one step of the queue: the rung its span left on, every refusal on the way, and every sentence the
+    repair dropped, by motive."""
     if outcome.rung:
         _counted("eviction", outcome.rung)
     for motive in outcome.refused:
         _counted("refusal", motive)
+    for motive, _digest in getattr(outcome, "dropped", ()):
+        _counted("repair_dropped", motive)
 
 
 class LibrarianError(ValueError):
@@ -511,6 +514,22 @@ def _turn_digest(role, text, origin, segments, context=None):
     return hashlib.sha256(payload.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _declared_lineage(message):
+    """The lineage a message declares for its turn, sorted; None when it declares none, cut when it lies outside the grammar."""
+    from .peels import CUT
+    from .probes import _context_defect
+
+    if not isinstance(message, dict) or "lineage" not in message:
+        return None
+    declared = message.get("lineage")
+    if not isinstance(declared, (list, tuple)):
+        return (CUT,)
+    entries = sorted(set(entry for entry in declared if isinstance(entry, str)))
+    if len(entries) != len(declared) or _context_defect("assistant", "assistant", [], entries) is not None:
+        return (CUT,)
+    return tuple(entries)
+
+
 class OnionState:
     """One conversation's onion: Core, Cellar, receipts, tree and Flesh.
 
@@ -546,6 +565,10 @@ class OnionState:
         # The keys of the receipts a memory block of this process has folded:
         # a receipt is counted folded once, when it first leaves its own line.
         self.folded = set()
+        # The lineage of each turn mirrored, by turn id, as the conversation
+        # declares it: beside the turn, never in what the turn is, so a
+        # lineage first read now takes no turn back.
+        self.lineage = {}
         self.lock = threading.RLock()
         self.slot = threading.Lock()
 
@@ -572,6 +595,13 @@ class OnionState:
         message declares, read through the same grammar (outside it, legacy);
         a message that declares none keeps none, and the repair reads such an
         answer as one a source outside the conversation reached.
+
+        Each turn's lineage, as its message declares it, is kept beside it
+        (``lineage``, by turn id) for every turn the conversation and the
+        state share and every turn appended: never in what the turn is, so a
+        lineage read for the first time takes no turn back. A message that
+        declares none leaves its turn's unrecorded, and one outside the
+        grammar records it cut.
         """
         from .probes import _stored_context, read_origin
 
@@ -589,7 +619,7 @@ class OnionState:
             )
             declared = m.get("context")
             context = None if declared is None else _stored_context(role, origin, declared, [])[0]
-            incoming.append((role, text, origin, segments, defect, context,
+            incoming.append((role, text, origin, segments, defect, context, _declared_lineage(m),
                              _turn_digest(role, text, origin, segments, context)))
         with self.lock:
             standing, ids, known, held = self._standing()
@@ -601,8 +631,11 @@ class OnionState:
             start, taken, superseded = same, 0, 0
             if same < len(known):
                 start, taken, superseded = self._take_back(same, standing, held, ids)
+            for turn_id, entry in zip(ids[:start], incoming[:start]):
+                if entry[6] is not None:
+                    self.lineage[turn_id] = entry[6]
             added = []
-            for role, text, origin, segments, defect, context, _digest in incoming[start:]:
+            for role, text, origin, segments, defect, context, lineage, _digest in incoming[start:]:
                 self.seen += 1
                 turn = {"turn_id": f"t{self.seen:04d}", "role": role, "text": text, "origin": origin,
                         "segments": segments}
@@ -610,6 +643,8 @@ class OnionState:
                     turn["context"] = context
                 if defect is not None:
                     logger.warning("turn %s mirrored as legacy: %s", turn["turn_id"], defect)
+                if lineage is not None:
+                    self.lineage[turn["turn_id"]] = lineage
                 self.flesh.append(turn)
                 added.append(turn["turn_id"])
             self._known = (ids[:start] + tuple(added), known[:start] + [entry[-1] for entry in incoming[start:]])
@@ -1443,25 +1478,54 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
         return False
 
 
-def _compose_block(state, question, budget):
+class MemoryBlock(str):
+    """The onion's block as the composer rendered it, carrying ``label``: what it places may carry that the user
+    never endorsed, ``(context, lineage)``. Any change to the text is a plain string again, and carries none."""
+
+    label = (("memory",), ())
+
+
+def _placed_items(prompt, retrieval):
+    """The items of ``retrieval`` the composer placed, in order: matched to its segments, the ones it cut left out."""
+    queue, placed = list(retrieval), []
+    for segment in prompt.segments:
+        if segment.layer != "peels":
+            continue
+        while queue and (queue[0].text, queue[0].provenance) != (segment.text, segment.provenance):
+            queue.pop(0)
+        if queue:
+            placed.append(queue.pop(0))
+    return placed
+
+
+def _compose_block(state, question, budget, withdrawn=()):
     """Core, receipts digest, held anchors and the Peels for ``question`` under the caps; raises what the composer refuses.
 
     The anchors of held spans take their share of the peels layer first,
-    their words read from the Cellar; the peels take the rest. A peel that
-    stands on a superseded span is not among them: the conversation no
-    longer holds what it summarises.
+    their words read from the Cellar; the peels take the rest, each shown as
+    ``render_peel`` reads it from the Cellar now, its references re-read. A
+    peel that stands on a superseded span is not among them: the
+    conversation no longer holds what it summarises. A part a withdrawal of
+    ``withdrawn`` reached is not shown, at once, with no mirror. The block
+    carries the label of what it places, the union of each part's after the
+    composer's cut: the Core and the receipts are the user's and the
+    queue's, and carry nothing.
     """
     from .composer import compose, load_budget
-    from .peels import PeelTree, load_ladder, select_anchors, select_peels
+    from .peels import PeelTree, join_labels, load_ladder, render_peel, select_anchors, select_peels
 
     budget = budget or load_budget()
-    dropped, unplaced = [], []
+    withdrawn = frozenset(withdrawn or ())
+    dropped, unplaced, reached = [], [], []
     anchors = select_anchors(state.ledger, state.cellar, question or "", min(load_ladder().anchors, budget.peels),
-                             dropped=dropped, unplaced=unplaced)
+                             dropped=dropped, unplaced=unplaced, lineage=state.lineage, withdrawn=withdrawn,
+                             reached=reached)
     # Events of this composition: the anchors its query reached that the cap
-    # left out, and those whose place no longer reads as a typed unit.
+    # left out, those whose place no longer reads as a typed unit, and those
+    # whose turn a withdrawal reached.
     _counted("block", "anchors_dropped", len(dropped))
     _counted("block", "anchors_unplaced", len(unplaced))
+    _counted("block", "anchors_withdrawn", len(reached))
     taken = sum(estimate_tokens(a.text) for a in anchors)
     tree, gone = state.tree, {r.key for r in state.ledger.all() if r.kind == "superseded"}
     if gone:
@@ -1469,7 +1533,11 @@ def _compose_block(state, question, budget):
         for peel in state.tree.all():
             if not gone.intersection(peel.sources):
                 tree.add(peel)
-    retrieval = anchors + select_peels(tree, question or "", budget.peels - taken)
+
+    def render(peel):
+        return render_peel(peel, state.cellar, lineage=state.lineage, withdrawn=withdrawn)
+
+    retrieval = anchors + select_peels(tree, question or "", budget.peels - taken, render=render)
     prompt = compose(
         core=state.core, ledger=state.ledger, cellar=state.cellar,
         retrieval=retrieval, flesh=[], turn="", budget=budget,
@@ -1480,25 +1548,35 @@ def _compose_block(state, question, budget):
         keys = {r.key for r in state.ledger.open()[: prompt.folded_receipts]}
         _counted("block", "receipts_folded", len(keys - state.folded))
         state.folded |= keys
+    placed = _placed_items(prompt, retrieval)
+    for item in placed:
+        for motive, n in item.events:
+            _counted("block", motive, n)
     kept = tuple(s for s in prompt.segments if s.layer != "turn")
     if not any(s.text.strip() for s in kept):
         return ""
-    return replace(prompt, segments=kept).render()
+    block = MemoryBlock(replace(prompt, segments=kept).render())
+    block.label = tuple(join_labels(item.label for item in placed))
+    return block
 
 
-def memory_block(conversation_id, question=None, *, budget=None, gate=None, config=None):
+def memory_block(conversation_id, question=None, *, budget=None, gate=None, config=None, withdrawn=None):
     """The onion's memory block for the conversation, or an empty string. Never raises.
 
-    A conversation the process and the store do not know yields nothing;
-    a store that refuses the conversation yields nothing too, and the
-    refusal is logged by name where the empty string is not.
+    The block is a ``MemoryBlock``: the string the model reads, carrying the
+    label of what it places. ``withdrawn`` holds the sources the user
+    withdrew, read from the conversation store by the caller: a part a
+    withdrawal reached is not shown. A conversation the process and the
+    store do not know yields nothing; a store that refuses the conversation
+    yields nothing too, and the refusal is logged by name where the empty
+    string is not.
     """
     try:
         state = peek_state(conversation_id, config)
         if state is None:
             return ""
         with state.lock:
-            return _compose_block(state, question, budget)
+            return _compose_block(state, question, budget, withdrawn or ())
     except Exception as exc:  # noqa: BLE001 - a block that cannot be trusted is no block
         _counted("block", f"refused_{type(exc).__name__}")
         logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
@@ -1530,6 +1608,22 @@ def open_receipts(conversation_id, *, config=None):
         return []
     with state.lock:
         return state.ledger.open()
+
+
+def dropped_sentences(conversation_id, *, config=None):
+    """Each sentence the repair dropped from a peel of the conversation, in the order the peels were made.
+
+    One entry per sentence: the peel, the receipt of the span it stands on,
+    the motive and the digest of the sentence -- never its words, which no
+    peel keeps. Empty for an unknown conversation, which is not created.
+    """
+    state = _existing_state(conversation_id, config)
+    if state is None:
+        return []
+    with state.lock:
+        return [{"peel": peel.id, "receipt": peel.sources[0] if peel.sources else "", "motive": motive,
+                 "sha256": digest}
+                for peel in state.tree.all() for motive, digest in peel.dropped]
 
 
 def _core_would_fit(state, text, budget):

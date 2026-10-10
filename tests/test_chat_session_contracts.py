@@ -48,6 +48,8 @@ exception into the loop that prints.
     word for word with their turn and origin; ``/accept ID`` pins one, as
     the user; a line naming more or less than one open proposal is refused
     by name, and nothing is pinned.
+  * CH15 -- ``/dropped`` lists the sentences the repair dropped by peel,
+    receipt, motive and digest, never their words.
 
 Local-only (the public distribution ships no tests). The executor window is
 the one of the onion wiring suite; the librarian, its stores and the skill
@@ -764,5 +766,33 @@ def test_ch14_oo_chat_drives_the_session_at_the_keyboard_and_refuses_a_command_r
         assert piped.exit_code == 0 and len(scripted.calls) == 2, f"control: the piped session sent its one turn: {piped.output}"
         assert "typed at the keyboard" in piped.stderr and "switched off" not in piped.stderr, (
             "a command read from a pipe ran as the user")
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# CH15 -- /dropped lists what the repair dropped, never its words
+# ---------------------------------------------------------------------------
+def test_ch15_dropped_lists_the_sentences_the_repair_dropped_by_peel_receipt_motive_and_digest_never_their_words():
+    loaded, scripted, conversations, restore = _load()
+    try:
+        words = "Bob checks the logs every morning."
+        entry = {"peel": "p" * 64, "receipt": "k" * 64, "motive": "copy", "sha256": "d" * 64}
+        asked = []
+        seam = SimpleNamespace(onion_enabled=lambda: True,
+                               dropped_sentences=lambda cid: asked.append(cid) or [dict(entry)])
+        session = _session(loaded, librarian=seam, conversation_id="conv-7")
+        shown = "\n".join(_kinds(_run(session, "/dropped"), "info"))
+        assert asked == ["conv-7"], "the session's conversation is the one asked"
+        assert "peel pppppppppppp over receipt kkkkkkkkkkkk: copy (dddddddddddd)" in shown, shown
+        assert words not in shown and "Bob" not in shown, "no word of the sentence"
+        empty = SimpleNamespace(onion_enabled=lambda: True, dropped_sentences=lambda cid: [])
+        shown = "\n".join(_kinds(_run(_session(loaded, librarian=empty, conversation_id="conv-7"), "/dropped"), "info"))
+        assert shown == "no sentence dropped by the repair", shown
+        off = SimpleNamespace(onion_enabled=lambda: False, dropped_sentences=lambda cid: [dict(entry)])
+        refused = _kinds(_run(_session(loaded, librarian=off, conversation_id="conv-7"), "/dropped"), "refusal")
+        assert refused and "switched off" in refused[0], "an onion command, refused while the onion is off"
+        helped = "\n".join(_kinds(_run(_session(loaded, librarian=seam), "/help"), "info"))
+        assert "/dropped" in helped, "and the help says so"
     finally:
         restore()

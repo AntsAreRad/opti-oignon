@@ -114,6 +114,11 @@ leaves zero on the input that should move it.
     form -- case, spacing, digits, brackets, nesting, invisible characters
     -- for any turn; a bracket the user typed, as written, stays, and one a
     document wrote protects nothing.
+  * OQ48 -- a summary that loses a probe is repaired with a reference to
+    the fewest typed segments, whole; a sentence the segment shows is
+    said once (supersedes OQ8).
+  * OQ49 -- with no summariser the queue advances by reference: no word
+    of the peel is the model's (supersedes OQ12).
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the registry is blocked, so a
@@ -1392,5 +1397,57 @@ def test_oq47_a_turn_marker_the_model_writes_is_taken_out_in_any_form_and_a_brac
                  "<t0001> Kept.", chr(0xAB) + "t0001" + chr(0xBB) + " Kept.")
         for forged in forms:
             assert peels._unmarked(forged, span) == "Kept.", ascii(forged)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OQ48-OQ49 -- oq8 and oq12 with the user's words by reference: the queue
+# copies no unit into a peel any more; it references the whole typed segment
+# a unit stands in, and a sentence of the summary that segment already shows
+# as written is said once.
+# ---------------------------------------------------------------------------
+def test_oq48_a_summary_that_loses_a_probe_is_repaired_with_a_reference_to_the_fewest_typed_segments():
+    lib, loaded, restore = _open()
+    try:
+        peels, probes = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.probes"]
+        gate = _yaml_gate(loaded)
+        state = lib.state_for("c1")
+        state.mirror(_TYPED)
+        span = state.flesh.turns()
+        typed = _TYPED[0]["content"]
+        assert not _judged(loaded, span, _LOSSY, gate).accepted, "control: the summary alone is refused"
+        outcome = lib.curate(state, lambda turns: _LOSSY, gate=gate, budget=_tiny_flesh(loaded),
+                             ladder=_ladder(loaded, rho=1.0))
+        assert outcome.evicted is True and outcome.rung == "repaired"
+        peel = outcome.peel
+        assert peel.refs == (("t0001", 0, len(typed), peels.segment_digest(typed)),), "one typed segment, whole"
+        assert peel.text == "The Berlin build runs 12 jobs a day. Bob checks the logs every morning.", \
+            "its sentences, the one the segment shows said once"
+        assert peels.decide(span, probes.generate_probes(span, gate.lexicon), peel.text, gate, peel.refs).accepted, \
+            "the repaired peel passes the gate"
+        assert outcome.receipt.kind == "accepted" and state.tree.all() == [peel]
+    finally:
+        restore()
+
+
+def test_oq49_with_no_summariser_the_queue_advances_by_reference_through_the_rungs_that_need_no_model():
+    lib, loaded, restore = _open()
+    try:
+        peels, probes = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.probes"]
+        gate = _yaml_gate(loaded)
+        state = lib.state_for("c1")
+        state.mirror(_TYPED)
+        span = state.flesh.turns()
+        typed = _TYPED[0]["content"]
+        outcome = lib.curate(state, None, gate=gate, budget=_tiny_flesh(loaded), ladder=_ladder(loaded, rho=1.0))
+        assert outcome.evicted is True and outcome.rung == "repaired"
+        assert outcome.peel.text == "", "no summary: no word of the peel is the model's"
+        assert outcome.peel.refs == (("t0001", 0, len(typed), peels.segment_digest(typed)),), outcome.peel.refs
+        shown = peels.joined(outcome.peel.text, peels.shown_words(span, outcome.peel.refs))[0]
+        assert shown == "[t0001] " + typed, "every word it shows is the span's own, marked"
+        assert "Bob checks the logs" not in shown, "and only the user's"
+        assert peels.decide(span, probes.generate_probes(span, gate.lexicon), outcome.peel.text, gate,
+                            outcome.peel.refs).accepted
     finally:
         restore()

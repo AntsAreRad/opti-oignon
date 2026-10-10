@@ -45,8 +45,59 @@ _FRAME_REDACTED = "[redacted-frame-marker]"
 # joined by blank lines, which a marker may hold, so ``[data`` closing one
 # segment and ``]`` opening the next would make a frame between them.
 _FRAME_TAIL_RE = re.compile(r"\[\s*(?:/\s*)?(?:data\s*)?$", re.IGNORECASE)
+# The same start, an opening read on up to its first attribute's name, whose
+# sign the part after it may hold: what ``defanged`` reads at a text's end.
+# Its spaces are read one way only, so a long run of them costs their length,
+# not its square.
+_FRAME_START_RE = re.compile(r"\[\s*(?:/\s*)?(?:data(?:(?:\s*:\s*|\s+)(?:[\"']?\w+[\"']?\s*)?)?)?$", re.IGNORECASE)
 # What a frame header may carry from a tag: no bracket, no line break.
 _TAG_UNSAFE = re.compile(r"[\[\]\r\n]")
+# The head of a frame marker -- the closing tag, closed at once or not, or the
+# opening bracket with its first attribute and its sign -- and no word after
+# it: every match of ``_FRAME_RE`` opens on one, so a text with none left
+# holds no marker, and the words a marker left open would have run on to stay.
+# The same language as that pattern's head, its spaces read one way only.
+_FRAME_HEAD_RE = re.compile(r"\[\s*/\s*data(?:\s*\])?|\[\s*data(?:\s*:\s*|\s+)[\"']?\w+[\"']?\s*=", re.IGNORECASE)
+# The head of a marker of the untrusted-data envelope the executor wraps the
+# window in -- its tag's name, open or closing, with the bracket that closes it
+# at once -- and no word after it. The wrapper's pattern reads a marker from
+# such a name to the next ``>``, across lines: a name left in the window would
+# take every later byte with it, references included. Its spaces are read one
+# way only.
+_ENVELOPE_HEAD_RE = re.compile(r"</?\s*untrusted_data\b(?:\s*(?:/\s*)?>)?", re.IGNORECASE)
+# The start of such a marker left open at the very end of a text: its
+# bracket, with the slash of a closing tag or not -- the name may open the
+# next part, past the line break that joins them.
+_ENVELOPE_TAIL_RE = re.compile(r"</?\s*$")
+_ENVELOPE_REDACTED = "[redacted-untrusted-marker]"
+
+
+def defanged(text):
+    """``text`` as the window and its envelope carry it, and how many markers that took.
+
+    Each marker is defanged by its head alone: a frame's, then one left open
+    at the very end, then the envelope's tag's name, then the start of one
+    left open at the very end -- the words after it are kept, so a marker the
+    user typed costs the reader its name and nothing more. A text defanged
+    here holds no head the composer or the wrapper read a marker from, nor the
+    start of one a part after it could finish, so both pass it unchanged: a
+    caller that shows it shows the bytes the model reads, and can say how many
+    it changed.
+    """
+    count = 0
+
+    def counted(redacted):
+        def sub(_match):
+            nonlocal count
+            count += 1
+            return redacted
+        return sub
+
+    text = _FRAME_HEAD_RE.sub(counted(_FRAME_REDACTED), str(text))
+    text = _FRAME_START_RE.sub(counted(_FRAME_REDACTED), text)
+    text = _ENVELOPE_HEAD_RE.sub(counted(_ENVELOPE_REDACTED), text)
+    text = _ENVELOPE_TAIL_RE.sub(counted(_ENVELOPE_REDACTED), text)
+    return text, count
 
 
 class BudgetError(ValueError):
@@ -142,11 +193,15 @@ class Prompt:
 
         No segment text opens or closes a frame: a marker found in any of
         them, the Core and the turn included, is defanged first, so the only
-        frames in the window are the ones written here.
+        frames in the window are the ones written here. Nor does one hold the
+        name of the envelope's tag, which the wrapper reads a marker from up to
+        its next ``>``: the names are defanged here, each alone, so no segment
+        takes the bytes of the next ones with it.
         """
         parts = []
         for seg in self.segments:
             text = _FRAME_TAIL_RE.sub(_FRAME_REDACTED, _FRAME_RE.sub(_FRAME_REDACTED, str(seg.text)))
+            text = _ENVELOPE_HEAD_RE.sub(_ENVELOPE_REDACTED, text)
             if seg.instruction_bearing:
                 parts.append(text)
             else:

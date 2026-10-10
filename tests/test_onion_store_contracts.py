@@ -54,6 +54,8 @@ is unreachable refuses and creates no file.
   * OS16 -- an error of the database itself during a migration rolls the
     whole file back and is told as it was, never masked by the rollback:
     nothing migrated, nothing marked, and the next opening migrates.
+  * OS17-OS20 -- OS8, OS9, OS10 and OS12 over a state whose repaired peel
+    references the user's words instead of copying them.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the connection seam is blocked, so a
@@ -677,6 +679,101 @@ def test_os16_a_database_error_rolls_the_whole_migration_back_and_is_told_as_it_
         store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
         back = store.load("c2", lib.OnionState())
         assert not any(head in r.stub for head in heads for r in back.ledger.all()), "the next opening migrates it"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS17-OS20 -- os8, os9, os10 and os12 over a state whose repaired peel
+# references the user's words: the queue copies no run into a peel any more,
+# so the control their shared state held -- a repaired peel with stitched
+# units -- is a repaired peel with references; every other assertion is the
+# same.
+# ---------------------------------------------------------------------------
+def _referenced_state(loaded):
+    """A state with a repaired peel (references), a held span (anchors) and an accepted peel with a residual."""
+    from dataclasses import replace
+
+    lib, peels = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.peels"]
+    composer = loaded["opti_oignon.memory.composer"]
+    tiny = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+    gate = replace(peels.load_gate(), span_turns=2)
+    state = lib.state_for("c1")
+    state.mirror(_TYPED * 2)
+    repaired = lib.curate(state, lambda turns: _LOSSY, gate=gate, budget=tiny,
+                          ladder=replace(peels.load_ladder(), rho=1.0))
+    held = lib.curate(state, lambda turns: _LOSSY, gate=gate, budget=tiny, ladder=replace(peels.load_ladder(), rho=0.5))
+    quiet = [dict(m, content=m["content"].replace("agreed", "stated").replace("stays", "lives")) for m in _messages(2)]
+    state.mirror(_TYPED * 2 + quiet)
+    simple = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+    lossy = lambda turns: _faithful(turns).replace("Turn 2:", "Turn:").replace("service 2 ", "service ")  # noqa: E731
+    accepted = lib.curate(state, lossy, gate=simple, budget=tiny)
+    assert (repaired.rung, held.rung, accepted.rung) == ("repaired", "held", "accepted"), "control: one of each"
+    assert repaired.peel.refs and held.receipt.anchors and accepted.peel.residual, "control: each has its mark"
+    return state
+
+
+def test_os17_what_the_queue_adds_comes_back_from_the_store_as_it_was_saved(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _referenced_state(loaded)
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        back = store.load("c1", lib.OnionState())
+        assert back.tree.all() == state.tree.all(), "rung, references, dropped sentences and residual, as made"
+        assert back.ledger.all() == state.ledger.all(), "the held receipt's anchors too"
+    finally:
+        restore()
+
+
+def test_os18_a_residual_moved_in_the_file_is_refused_by_name(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _referenced_state(loaded)
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        conn = sqlite3.connect(str(path))
+        moved = conn.execute("UPDATE onion_peel_marks SET residual = '[]' WHERE residual != '[]'").rowcount
+        conn.commit()
+        conn.close()
+        assert moved == 1, "control: one residual moved in the file"
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not answer to its rows"):
+            store.load("c1", lib.OnionState())
+    finally:
+        restore()
+
+
+def test_os19_the_refusal_marks_come_back_from_the_store_as_they_were_saved(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _referenced_state(loaded)
+        state.refusals = {"a" * 64: "b" * 64, "c" * 64: "d" * 64}
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        back = store.load("c1", lib.OnionState())
+        assert back.refusals == state.refusals
+    finally:
+        restore()
+
+
+def test_os20_a_file_of_a_newer_schema_is_refused_by_name_and_left_as_it_was(tmp_path):
+    loaded, restore = _open()
+    try:
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        store_mod.OnionStore(path, connect=_plain, require_encryption=False).save("c1", _referenced_state(loaded))
+        conn = sqlite3.connect(str(path))
+        conn.execute(f"PRAGMA user_version = {store_mod.SCHEMA_VERSION + 1}")
+        conn.commit()
+        conn.close()
+        before = path.read_bytes()
+        with pytest.raises(store_mod.OnionStoreError, match="newer than this build"):
+            store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert path.read_bytes() == before
     finally:
         restore()
 

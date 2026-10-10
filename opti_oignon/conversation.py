@@ -1401,14 +1401,17 @@ class ConversationManager:
         is built by the read above, which leaves the origin out on purpose.
         Segments that no longer decode are handed on as None, and the mirror
         and the capture then hold the turn legacy. Each turn also carries its
-        context, read legacy when it lies outside the grammar.
+        context and its lineage, read legacy with no lineage when they lie
+        outside the grammar, as a withdrawal reads them: the onion keeps the
+        lineage beside the turn, so a withdrawal finds what a peel of it
+        shows.
 
         Args:
             conv_id: Conversation UUID
 
         Returns:
-            List of dicts with 'role', 'content', 'origin', 'segments' and
-            'context'
+            List of dicts with 'role', 'content', 'origin', 'segments',
+            'context' and 'lineage'
         """
         with self._lock:
             conn = self._get_connection()
@@ -1432,13 +1435,14 @@ class ConversationManager:
                 segments = json.loads(row["segments"])
             except (TypeError, ValueError):
                 segments = None
-            context, _lineage = _stored_context(row["role"], row["origin"], row["context"], row["lineage"])
+            context, lineage = _stored_context(row["role"], row["origin"], row["context"], row["lineage"])
             turns.append({
                 "role": row["role"],
                 "content": _decrypt(row["content"]),
                 "origin": row["origin"],
                 "segments": segments,
                 "context": context,
+                "lineage": lineage,
             })
         return turns
 

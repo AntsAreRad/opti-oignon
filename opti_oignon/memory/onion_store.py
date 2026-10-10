@@ -27,7 +27,14 @@ What the queue adds to a receipt -- its kind when no accepted peel stands
 for its span, the anchors it keeps in the Cellar -- lives in a table of
 marks beside the receipts, and enters the root only when a mark exists: a
 state with none has the root it always had, so a file written before marks
-existed still answers to its rows.
+existed still answers to its rows. A peel's references to the user's words
+and the sentences its repair dropped live in its mark the same way, and
+enter the root only for a peel that has some; each reference is read again
+in the Cellar when the file is loaded, and a peel whose bytes no longer
+answer to it is refused by name. The lineage of each mirrored turn lives in
+a table of its own, in the root once a state holds one: a row moved in the
+file is refused by name, and one read outside the grammar reads cut, never
+empty.
 """
 
 import hashlib
@@ -44,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 TABLES = (
     "onion_core", "onion_cellar", "onion_receipts", "onion_peels", "onion_flesh", "onion_cursor",
-    "onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals",
+    "onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals", "onion_lineage",
 )
 _PROPOSAL_STATUSES = ("open", "accepted", "declined", "deferred", "superseded")
 # The rungs a peel can be made on; a mark naming another is refused on load.
@@ -113,7 +120,15 @@ CREATE TABLE IF NOT EXISTS onion_peel_marks (
     rung TEXT NOT NULL,
     stitched TEXT NOT NULL,
     residual TEXT NOT NULL,
+    refs TEXT NOT NULL DEFAULT '[]',
+    dropped TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (conversation, id)
+);
+CREATE TABLE IF NOT EXISTS onion_lineage (
+    conversation TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    lineage TEXT NOT NULL,
+    PRIMARY KEY (conversation, turn_id)
 );
 CREATE TABLE IF NOT EXISTS onion_proposals (
     conversation TEXT NOT NULL,
@@ -172,9 +187,10 @@ class Snapshot:
     # (seq, kind, anchors) for each receipt that is not a plain accepted
     # one, by its place in the ledger; anchors as (turn_id, start, stop).
     receipt_marks: tuple = ()
-    # (id, rung, stitched, residual) for each peel the queue marked: one
-    # made on another rung than the summary's, with units stitched in, or
-    # with probes it still fails.
+    # (id, rung, stitched, residual, refs, dropped) for each peel the queue
+    # marked: one made on another rung than the summary's, with runs copied
+    # in (before references), with probes it still fails, with references
+    # to the user's words or with sentences its repair dropped.
     peel_marks: tuple = ()
     # (id, span_key, turn_id, start, stop, origin, made_on, status) for each
     # proposal to the Core, in the order made. Not in the root: a proposal
@@ -183,6 +199,11 @@ class Snapshot:
     # (span_key, mark) for each span whose second summary was refused, by
     # key. Not in the root: a mark saves a call, it tells the model nothing.
     refusals: tuple = ()
+    # (turn_id, lineage) for each turn of the Cellar or the Flesh whose
+    # lineage was recorded. In the root when there is one, so a lineage moved
+    # in the file -- in the grammar or not -- is refused by name: a withdrawal
+    # finds what it reached by these rows, and none of them may change unseen.
+    lineage: tuple = ()
 
 
 def onion_root(snapshot):
@@ -206,11 +227,26 @@ def onion_root(snapshot):
             [int(seq), kind, [list(anchor) for anchor in anchors]] for seq, kind, anchors in snapshot.receipt_marks
         ]
     if snapshot.peel_marks:
-        rows["peel_marks"] = [
-            [p_id, rung, [list(unit) for unit in stitched], [list(probe) for probe in residual]]
-            for p_id, rung, stitched, residual in snapshot.peel_marks
-        ]
+        rows["peel_marks"] = [_mark_row(mark) for mark in snapshot.peel_marks]
+    if snapshot.lineage:
+        rows["lineage"] = [[turn_id, list(entries)] for turn_id, entries in snapshot.lineage]
     return hashlib.sha256(_canonical(rows).encode("utf-8")).hexdigest()
+
+
+def _mark_parts(mark):
+    """A peel mark's six parts; a mark of four, written before references, has none and drops none."""
+    p_id, rung, stitched, residual, *more = mark
+    return p_id, rung, stitched, residual, (more[0] if more else ()), (more[1] if len(more) > 1 else ())
+
+
+def _mark_row(mark):
+    """A peel mark as the root reads it: its references and dropped sentences only when it has some, so a state
+    with none keeps the root it had before they existed."""
+    p_id, rung, stitched, residual, refs, dropped = _mark_parts(mark)
+    row = [p_id, rung, [list(unit) for unit in stitched], [list(probe) for probe in residual]]
+    if refs or dropped:
+        row += [[list(ref) for ref in refs], [list(entry) for entry in dropped]]
+    return row
 
 
 def snapshot_of(state):
@@ -229,18 +265,24 @@ def snapshot_of(state):
         for p in state.tree.all()
     )
     peel_marks = tuple(
-        (p.id, p.rung, tuple(tuple(unit) for unit in p.stitched), tuple(tuple(probe) for probe in p.residual))
+        (p.id, p.rung, tuple(tuple(unit) for unit in p.stitched), tuple(tuple(probe) for probe in p.residual),
+         tuple(tuple(ref) for ref in getattr(p, "refs", ())), tuple(tuple(entry) for entry in getattr(p, "dropped", ())))
         for p in state.tree.all()
-        if p.rung != "accepted" or p.stitched or p.residual
+        if p.rung != "accepted" or p.stitched or p.residual or getattr(p, "refs", ()) or getattr(p, "dropped", ())
     )
     proposals = tuple(
         (q.id, q.span_key, q.turn_id, int(q.start), int(q.stop), q.origin, q.made_on, q.status)
         for q in getattr(state, "proposals", ())
     )
     refusals = tuple(sorted((str(k), str(v)) for k, v in getattr(state, "refusals", {}).items()))
+    flesh = tuple(state.flesh.turns())
+    present = {str(t.get("turn_id", "")) for _key, span in cellar for t in span} | {
+        str(t.get("turn_id", "")) for t in flesh}
+    lineage = tuple(sorted((str(turn_id), tuple(entries)) for turn_id, entries in getattr(state, "lineage", {}).items()
+                           if str(turn_id) in present))
     return Snapshot(core=core, cellar=cellar, receipts=receipts, peels=peels,
-                    flesh=tuple(state.flesh.turns()), seen=int(state.seen), receipt_marks=marks,
-                    peel_marks=peel_marks, proposals=proposals, refusals=refusals)
+                    flesh=flesh, seen=int(state.seen), receipt_marks=marks,
+                    peel_marks=peel_marks, proposals=proposals, refusals=refusals, lineage=lineage)
 
 
 def _is_encrypted(conn):
@@ -364,10 +406,16 @@ class OnionStore:
                  for seq, kind, anchors in snapshot.receipt_marks],
             )
             conn.executemany(
-                "INSERT INTO onion_peel_marks (conversation, id, rung, stitched, residual) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO onion_peel_marks (conversation, id, rung, stitched, residual, refs, dropped) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(cid, p_id, rung, _canonical([list(unit) for unit in stitched]),
-                  _canonical([list(probe) for probe in residual]))
-                 for p_id, rung, stitched, residual in snapshot.peel_marks],
+                  _canonical([list(probe) for probe in residual]), _canonical([list(ref) for ref in refs]),
+                  _canonical([list(entry) for entry in dropped]))
+                 for p_id, rung, stitched, residual, refs, dropped in map(_mark_parts, snapshot.peel_marks)],
+            )
+            conn.executemany(
+                "INSERT INTO onion_lineage (conversation, turn_id, lineage) VALUES (?, ?, ?)",
+                [(cid, turn_id, _canonical(list(entries))) for turn_id, entries in snapshot.lineage],
             )
             conn.executemany(
                 "INSERT INTO onion_proposals (conversation, seq, id, span_key, turn_id, start, stop, origin, made_on, "
@@ -441,10 +489,17 @@ def _read_snapshot(conn, cid):
     marks = conn.execute(
         "SELECT seq, kind, anchors FROM onion_receipt_marks WHERE conversation = ? ORDER BY seq", (cid,)
     ).fetchall()
+    # A file a migration is still bringing up may not hold the columns of
+    # references yet: its marks have none.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(onion_peel_marks)").fetchall()}
+    more = "m.refs, m.dropped" if {"refs", "dropped"} <= columns else "'[]', '[]'"
     peel_marks = conn.execute(
-        "SELECT m.id, m.rung, m.stitched, m.residual FROM onion_peel_marks m "
+        f"SELECT m.id, m.rung, m.stitched, m.residual, {more} FROM onion_peel_marks m "
         "LEFT JOIN onion_peels p ON p.conversation = m.conversation AND p.id = m.id "
         "WHERE m.conversation = ? ORDER BY p.seq, m.id", (cid,)
+    ).fetchall()
+    lineage = conn.execute(
+        "SELECT turn_id, lineage FROM onion_lineage WHERE conversation = ? ORDER BY turn_id", (cid,)
     ).fetchall()
     proposals = conn.execute(
         "SELECT id, span_key, turn_id, start, stop, origin, made_on, status FROM onion_proposals "
@@ -467,11 +522,13 @@ def _read_snapshot(conn, cid):
             ),
             peel_marks=tuple(
                 (r[0], r[1], tuple(tuple(unit) for unit in json.loads(r[2])),
-                 tuple(tuple(probe) for probe in json.loads(r[3])))
+                 tuple(tuple(probe) for probe in json.loads(r[3])), tuple(tuple(ref) for ref in json.loads(r[4])),
+                 tuple(tuple(entry) for entry in json.loads(r[5])))
                 for r in peel_marks
             ),
             proposals=tuple((r[0], r[1], r[2], int(r[3]), int(r[4]), r[5], r[6], r[7]) for r in proposals),
             refusals=tuple((r[0], r[1]) for r in refusals),
+            lineage=tuple((r[0], _read_lineage(r[1])) for r in lineage),
         )
     except _CONTENT_ERRORS as exc:
         raise OnionIntegrityError(
@@ -485,6 +542,20 @@ def _read_snapshot(conn, cid):
 # refusal. An error of the database itself is none of these, and is let
 # through as it was.
 _CONTENT_ERRORS = (ValueError, TypeError, AttributeError, KeyError, IndexError, OverflowError, RecursionError)
+
+
+def _read_lineage(text):
+    """A stored lineage, read through the grammar: one that lies outside it reads cut, never empty."""
+    from .peels import CUT
+    from .probes import _context_defect
+
+    try:
+        entries = json.loads(text)
+    except (TypeError, ValueError, RecursionError):
+        return (CUT,)
+    if not isinstance(entries, list) or _context_defect("assistant", "assistant", [], entries) is not None:
+        return (CUT,)
+    return tuple(entries)
 
 
 def _typed_receipts(conn):
@@ -535,6 +606,21 @@ def _type_receipts_of(conn, cid):
     conn.execute("UPDATE onion_cursor SET root = ? WHERE conversation = ?", (root, cid))
 
 
+def _references(conn):
+    """Schema 2, "references": a peel's mark holds its references and its dropped sentences; turns have a lineage table.
+
+    Both columns are added to the marks of a file written before them,
+    empty, and the table of lineages comes with the schema: no peel of such
+    a file references or dropped anything, so every root it holds still
+    answers to its rows and nothing is written again. Its peels are read as
+    they were saved, their copied runs with them.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(onion_peel_marks)").fetchall()}
+    for name in ("refs", "dropped"):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE onion_peel_marks ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'")
+
+
 # The schema a file was written with, in SQLite's ``user_version``: 0 for
 # every file written before versions existed. Each migration brings a file
 # to its version, in order and once, inside one transaction with the tables
@@ -542,6 +628,7 @@ def _type_receipts_of(conn, cid):
 # name, and left as it was.
 _MIGRATIONS = (
     (1, "typed-receipts", _typed_receipts),
+    (2, "references", _references),
 )
 SCHEMA_VERSION = _MIGRATIONS[-1][0]
 _SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";") if statement.strip())
@@ -550,7 +637,7 @@ _SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";")
 def _rebuild(state, snapshot):
     """Fill an empty librarian state from a snapshot through each store's surface, re-hashing as it goes."""
     from .core_store import USER, entry_hash
-    from .peels import Peel
+    from .peels import DROP_MOTIVES, Peel, _well_formed
     from .receipts import RECEIPT_KINDS, Receipt, span_key
 
     for entry_id, text, _sup in snapshot.core:
@@ -580,16 +667,24 @@ def _rebuild(state, snapshot):
         state.ledger.append(Receipt(key=key, stub=stub, turn_ids=tuple(ids), resolved=bool(resolved), kind=kind,
                                     anchors=tuple(tuple(anchor) for anchor in anchors)))
 
-    peel_marks = {p_id: (rung, stitched, residual) for p_id, rung, stitched, residual in snapshot.peel_marks}
+    peel_marks = {mark[0]: _mark_parts(mark)[1:] for mark in snapshot.peel_marks}
     if set(peel_marks) - {row[0] for row in snapshot.peels}:
         raise OnionIntegrityError("a peel mark names a peel the file does not hold: refused, not repaired")
-    if any(rung not in _PEEL_RUNGS for rung, _stitched, _residual in peel_marks.values()):
+    if any(mark[0] not in _PEEL_RUNGS for mark in peel_marks.values()):
         raise OnionIntegrityError("a peel mark names a rung no peel is made on: refused, not repaired")
+    if any(not _well_formed(ref) for mark in peel_marks.values() for ref in mark[3]):
+        raise OnionIntegrityError("a peel mark holds a reference that is no place with its digest: refused, not repaired")
+    if any(len(entry) != 2 or entry[0] not in DROP_MOTIVES or not isinstance(entry[1], str) or len(entry[1]) != 64
+           or not all(ch in "0123456789abcdef" for ch in entry[1])
+           for mark in peel_marks.values() for entry in mark[4]):
+        raise OnionIntegrityError("a peel mark holds a dropped sentence of no known motive or digest: refused, "
+                                  "not repaired")
     for p_id, text, level, sources, children, digest, passed, total in snapshot.peels:
-        rung, stitched, residual = peel_marks.get(p_id, ("accepted", (), ()))
+        rung, stitched, residual, refs, dropped = peel_marks.get(p_id, ("accepted", (), (), (), ()))
         state.tree.add(Peel(id=p_id, text=text, level=int(level), sources=tuple(sources), children=tuple(children),
                             source_digest=digest, probes_passed=int(passed), probes_total=int(total),
-                            rung=rung, stitched=tuple(stitched), residual=tuple(residual)))
+                            rung=rung, stitched=tuple(stitched), residual=tuple(residual),
+                            refs=tuple(tuple(ref) for ref in refs), dropped=tuple(tuple(entry) for entry in dropped)))
     state.tree.verify(state.cellar)
     state.ledger.digest(state.cellar)
 
@@ -597,6 +692,8 @@ def _rebuild(state, snapshot):
         state.flesh.append(turn)
     state.seen = int(snapshot.seen)
     state.refusals = {key: mark for key, mark in snapshot.refusals}
+    if hasattr(state, "lineage"):
+        state.lineage = {str(turn_id): tuple(entries) for turn_id, entries in snapshot.lineage}
 
     if snapshot.proposals:
         from .core_store import Proposal, proposal_id

@@ -168,6 +168,28 @@ except Exception:
     _onion_memory_block = None
     _onion_enabled = None
 
+
+def _withdrawn_sources() -> tuple[str, ...]:
+    """The sources the user withdrew, as the conversation store keeps them; none when it keeps none."""
+    reader = getattr(conversation_manager, "withdrawn_sources", None) if CONVERSATION_AVAILABLE else None
+    if not callable(reader):
+        return ()
+    return tuple(source for source in reader() if isinstance(source, str))
+
+
+def _onion_block_label(block: Any) -> tuple[list[str], list[str]]:
+    """The label the onion's block carries -- what it places may carry that the user never endorsed -- or memory as
+    a whole when it carries none that reads: a plain string says nothing of what it holds."""
+    label = getattr(block, "label", None)
+    try:
+        context, lineage = label
+        if (isinstance(context, (list, tuple)) and isinstance(lineage, (list, tuple))
+                and all(isinstance(kind, str) for kind in context) and all(isinstance(entry, str) for entry in lineage)):
+            return sorted(set(context)), sorted(set(lineage))
+    except (TypeError, ValueError):
+        pass
+    return ["memory"], []
+
 # Intelligent sliding window (v1.4.0)
 try:
     from .context_window import sliding_window_manager, token_budget_manager
@@ -1797,14 +1819,20 @@ class Executor:
         if _onion_enabled is not None and _onion_memory_block is not None:
             try:
                 if _onion_enabled():
-                    memory_block = _onion_memory_block(conversation_id, question) or ""
+                    # The sources the user withdrew, handed only when there
+                    # is one: a part of the onion they reached is not shown
+                    # from this request on, with no mirror on this path.
+                    withdrawn = _withdrawn_sources()
+                    extra = {"withdrawn": withdrawn} if withdrawn else {}
+                    memory_block = _onion_memory_block(conversation_id, question, **extra) or ""
                     from_onion = bool(memory_block)
             except Exception as e:
                 logger.debug(f"Onion memory block skipped: {e}")
                 memory_block = ""
-        # The label of the block: memory as a whole, unless the working block
-        # says fact by fact that the user endorsed every one it placed.
-        label = (["memory"], [])
+        # The label of the block: what the onion's block says it places, or
+        # memory as a whole when it says nothing; the working block's, fact
+        # by fact, unless the user endorsed every one it placed.
+        label = _onion_block_label(memory_block) if from_onion else (["memory"], [])
         if not memory_block and DUAL_LAYER_MEMORY_AVAILABLE and _build_memory_block is not None:
             try:
                 if _compose_memory_block is not None:

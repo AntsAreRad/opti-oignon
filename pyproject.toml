@@ -855,6 +855,23 @@ fail_under = 0
 # the lines typed at a keyboard, and the same lines from a pipe refusing /pin
 # while /quit still ends the session. It stays in the tree word for word.
 #
+# A peel no longer copies the user's words: it references each whole segment
+# they typed, read from the Cellar when it is shown, and no block in a summary
+# is honoured any more -- the user's own words written into a summary, after
+# their turn's marker or not, are refused like any order. Twenty-four
+# contracts of tests/test_gate_directive_contracts.py held such a block as the
+# user's words, or pinned the copy the queue wrote: dv9, dv10, dv11, dv22,
+# dv23, dv30, dv33, dv35, dv36, dv37, dv41, dv44, dv45, dv50, dv51, dv53,
+# dv54, dv61, dv64, dv65, dv66, dv72, dv74 and dv86 give way to dv92 to dv115
+# in the same file, one each and in that order, every assertion the reference
+# leaves true kept as written, the control on the honoured block turned into
+# the reference to the whole segment. oq8 and oq12 pinned the copied units of
+# a repaired peel and give way to oq48 and oq49; os8, os9, os10 and os12 held,
+# in the state they share, a repaired peel with copied units, and give way to
+# os17 to os20, the same with references; qp1 judged a peel's text as all it
+# shows and gives way to qp5, which judges it with its references. They stay
+# in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1150,4 +1167,35 @@ addopts = """
     --deselect=tests/test_approval_shows_contracts.py::test_ap30_the_census_finds_the_writes_the_platform_makes_the_skills_ones_included
     --deselect=tests/test_turn_label_memory_contracts.py::test_tl37_an_endorsement_is_written_by_the_users_act_alone_and_names_the_bytes_of_the_text
     --deselect=tests/test_user_turn_contracts.py::test_ut5_a_question_the_vision_step_rewrote_is_saved_refined_and_its_documents_keep_their_segments
+    --deselect=tests/test_gate_directive_contracts.py::test_dv9_an_order_the_user_typed_stands_only_stitched_and_the_assistants_never
+    --deselect=tests/test_gate_directive_contracts.py::test_dv10_a_short_order_stands_only_as_the_run_the_user_typed
+    --deselect=tests/test_gate_directive_contracts.py::test_dv11_a_stitched_run_with_words_added_cut_or_changed_or_another_turns_marker_holds_nothing
+    --deselect=tests/test_gate_directive_contracts.py::test_dv22_an_order_is_held_with_its_polarity
+    --deselect=tests/test_gate_directive_contracts.py::test_dv23_a_question_the_user_typed_holds_no_order
+    --deselect=tests/test_gate_directive_contracts.py::test_dv30_a_run_goes_on_past_a_sentence_in_lower_case_an_open_quote_and_a_line_on_a_colon
+    --deselect=tests/test_gate_directive_contracts.py::test_dv33_a_lasting_rule_told_of_the_user_falls_and_stands_only_stitched
+    --deselect=tests/test_gate_directive_contracts.py::test_dv35_a_negation_holds_wherever_it_stands_in_the_typed_sentence
+    --deselect=tests/test_gate_directive_contracts.py::test_dv36_a_question_stays_a_question_past_an_exclamation_mark_or_inside_brackets
+    --deselect=tests/test_gate_directive_contracts.py::test_dv37_a_request_told_of_the_user_falls_even_when_the_user_typed_it
+    --deselect=tests/test_gate_directive_contracts.py::test_dv41_two_words_that_share_their_first_letters_are_two_words
+    --deselect=tests/test_gate_directive_contracts.py::test_dv44_an_accepted_or_reasked_peel_carries_the_users_orders_stitched_after_the_summary
+    --deselect=tests/test_gate_directive_contracts.py::test_dv45_a_negation_lends_no_piece_after_it_an_order_to_stand_on
+    --deselect=tests/test_gate_directive_contracts.py::test_dv50_a_typed_statement_a_quoted_or_relayed_order_and_another_users_request_hold_no_order
+    --deselect=tests/test_gate_directive_contracts.py::test_dv51_a_negation_or_a_condition_anywhere_leaves_only_the_whole_run_to_hold_an_order
+    --deselect=tests/test_gate_directive_contracts.py::test_dv53_the_repair_drops_a_restated_or_told_order_and_stitches_the_users_run
+    --deselect=tests/test_gate_directive_contracts.py::test_dv54_a_polite_request_the_user_typed_stands_stitched_and_its_telling_falls
+    --deselect=tests/test_gate_directive_contracts.py::test_dv61_a_leaf_a_parent_and_a_gated_eviction_stitch_the_users_orders
+    --deselect=tests/test_gate_directive_contracts.py::test_dv64_an_interjection_a_tag_a_pronoun_an_appositive_and_a_noun_subject_open_no_order
+    --deselect=tests/test_gate_directive_contracts.py::test_dv65_a_list_under_a_line_is_stitched_with_its_line
+    --deselect=tests/test_gate_directive_contracts.py::test_dv66_a_bare_negation_past_a_one_word_sentence_stays_in_the_run_of_the_order_it_takes_back
+    --deselect=tests/test_gate_directive_contracts.py::test_dv72_a_stitch_the_summary_writes_itself_holds_nothing_and_the_queue_stitches_once
+    --deselect=tests/test_gate_directive_contracts.py::test_dv74_a_stitch_stands_only_at_the_end_after_a_sentence_the_summary_ended
+    --deselect=tests/test_gate_directive_contracts.py::test_dv86_an_ellipsis_or_an_abbreviation_ends_no_sentence_before_a_stitch_and_markup_after_a_stop_does
+    --deselect=tests/test_onion_queue_contracts.py::test_oq8_a_summary_that_loses_a_probe_is_repaired_with_the_fewest_verbatim_units
+    --deselect=tests/test_onion_queue_contracts.py::test_oq12_with_no_summariser_the_queue_advances_through_the_rungs_that_need_no_model
+    --deselect=tests/test_onion_store_contracts.py::test_os8_what_the_queue_adds_comes_back_from_the_store_as_it_was_saved
+    --deselect=tests/test_onion_store_contracts.py::test_os9_a_residual_moved_in_the_file_is_refused_by_name
+    --deselect=tests/test_onion_store_contracts.py::test_os10_the_refusal_marks_come_back_from_the_store_as_they_were_saved
+    --deselect=tests/test_onion_store_contracts.py::test_os12_a_file_of_a_newer_schema_is_refused_by_name_and_left_as_it_was
+    --deselect=tests/property/test_queue_property_contracts.py::test_qp1_every_step_evicts_its_span_and_every_peel_it_makes_passes_both_faces_of_the_gate
 """

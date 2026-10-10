@@ -14,6 +14,7 @@ A line that starts with a slash is a user action:
   /recall KEY       show the verbatim span behind a receipt; the receipt stays open
   /recall code:KEY  show the code block behind a [code:KEY] marker
   /resolve KEY      close a receipt, as the user: it leaves the digest
+  /dropped          list the sentences the repair dropped from a summary, never their words
   /status           show what the onion's queue counted, by event and motive
   /skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix
   /adopt NAME [DIGEST]  show a skill's bytes not adopted here, then adopt those bytes
@@ -65,6 +66,7 @@ HELP = (
     "/proposals        list the decisions you typed that the queue offers the Core, word for word\n"
     "/accept ID        pin one proposal's exact words to the Core, as the user\n"
     "/decline ID       set one proposal aside; the Core does not change\n"
+    "/dropped          list the sentences the repair dropped from a summary: peel, receipt, motive, digest\n"
     "/status           show what the onion's queue counted, by event and motive; no word of a conversation\n"
     "/skill NAME ARGS  run ARGS as a turn with a published skill as the system suffix\n"
     "/adopt NAME [DIGEST]  show a skill's bytes not adopted here, then adopt those bytes\n"
@@ -258,6 +260,7 @@ class ChatSession:
             "proposals": self._proposals,
             "accept": self._accept,
             "decline": self._decline,
+            "dropped": self._dropped,
             "status": self._status,
             "skill": self._skill,
             "adopt": self._adopt,
@@ -386,6 +389,18 @@ class ChatSession:
             return
         lines = [f"{p['id'][:12]} [{p['turn_id']}, {p['origin']}, {p['made_on']}] {p['text']}" for p in offered]
         yield _info("open proposals (/accept ID pins one to the Core, /decline ID sets it aside):\n" + "\n".join(lines))
+
+    def _dropped(self, rest):
+        """The sentences the repair dropped from the peels of the conversation: by peel, receipt, motive and digest."""
+        cid = self._require_conversation("/dropped")
+        found = self._onion().dropped_sentences(cid)
+        if not found:
+            yield _info("no sentence dropped by the repair")
+            return
+        lines = [f"peel {d['peel'][:12]} over receipt {d['receipt'][:12]}: {d['motive']} ({d['sha256'][:12]})"
+                 for d in found]
+        yield _info("sentences the repair dropped from a summary (no peel keeps their words; /recall KEY shows "
+                    "the span):\n" + "\n".join(lines))
 
     def _one_proposal(self, cid, command, rest):
         """The one open proposal ``rest`` begins the id of; anything else is refused by name."""

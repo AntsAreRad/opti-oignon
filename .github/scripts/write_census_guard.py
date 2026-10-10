@@ -572,16 +572,16 @@ GATES = {
         "a span leaves the live turns, and its peel enters the tree, only when the peel answers its probes",
     ),
     "peel.ladder": Gate(
-        "decision", "opti_oignon/memory/peels.py", "advance", ("dv44", "dv53", "oq8", "oq10"),
+        "decision", "opti_oignon/memory/peels.py", "advance", ("dv103", "dv107", "oq48", "oq10"),
         "the eviction ladder keeps a peel only once the gate accepts it, faithful and holding no order but the "
-        "user's own; otherwise the span stays verbatim in the cellar",
+        "user's own, by reference; otherwise the span stays verbatim in the cellar",
     ),
     "peel.leaf": Gate(
-        "decision", "opti_oignon/memory/peels.py", "build_leaf", ("gf14", "dv61"),
+        "decision", "opti_oignon/memory/peels.py", "build_leaf", ("gf14", "dv109"),
         "a leaf peel enters the tree only when the gate accepts it",
     ),
     "peel.parent": Gate(
-        "decision", "opti_oignon/memory/peels.py", "build_parent", ("gf14", "dv61"),
+        "decision", "opti_oignon/memory/peels.py", "build_parent", ("gf14", "dv109"),
         "a parent peel enters the tree only when the gate accepts it",
     ),
     "core.user": Gate(

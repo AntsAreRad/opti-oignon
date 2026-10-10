@@ -24,15 +24,22 @@ The queue does not stop at a refusal. ``advance`` takes the oldest span down
 a ladder below the gate: a span no probe can judge leaves bare, with no
 peel; a refused summary is asked for once more, handed the probes it
 failed; then it is repaired in the user's own words -- the sentences of the
-summary its span holds, and the fewest typed units answering what they miss
--- and kept while it saves enough; else the span is held, the places of its
-typed units kept as anchors in the Cellar. Only words the user typed are
-ever stitched or anchored, and the gate itself never yields: every peel the
-ladder makes has passed it. No summary gives an order, the user's restated
-included: each run the user typed that orders is stitched at the end of
-the peel, word for word and marked with its turn, wherever a peel is made,
-and the gate holds that block only there, after a sentence the summary
-ended.
+summary its span holds, and the fewest typed segments answering what they
+miss -- and kept while it saves enough; else the span is held, the places
+of its typed units kept as anchors in the Cellar. The gate itself never
+yields: every peel the ladder makes has passed it.
+
+The user's words never enter a peel as a copy. A peel is a summary and
+references: each whole segment the user typed that it keeps, by its turn,
+its place and the digest of its bytes, read from the Cellar each time the
+peel is shown and shown only while it still answers to that digest. No
+summary gives an order, the user's restated included, even word for word:
+each segment the user typed that orders is referenced wherever a peel is
+made, and only a reference may carry an order. A sentence the repair drops
+is kept by its motive and its digest, never its words, and the peel says how
+many it lost. A peel is shown with the label of what it shows: a summary is
+memory and carries the context and lineage of every turn it stands on; a
+reference carries its own turn's; a part a withdrawal reached is not shown.
 
 Selection at query time is deterministic and keyword-based, in any script:
 a term is a word as the probes read one, in lower case with its accents
@@ -102,11 +109,27 @@ def source_digest(cellar, sources):
     return hashlib.sha256(_canonical(spans).encode("utf-8")).hexdigest()
 
 
-def peel_id(text, sources):
+def _ref_tokens(refs):
+    """The references of a peel as the tokens its id reads after its sources: none for a peel that makes none."""
+    return [f"ref:{turn_id}:{int(start)}:{int(stop)}:{digest}" for turn_id, start, stop, digest in refs]
+
+
+def peel_id(text, sources, refs=()):
+    """A peel's id: its text and its sources, then each reference it makes as a token after them.
+
+    A peel that makes no reference keeps the id it always had, so a stored
+    peel answers to it; the native core reads the same list, unchanged.
+    """
+    keys = [str(s) for s in sources] + _ref_tokens(refs)
     core = _native()
     if core is not None:
-        return core.peel_id(text, [str(s) for s in sources])
-    return hashlib.sha256(json.dumps([text, list(sources)], ensure_ascii=False).encode("utf-8")).hexdigest()
+        return core.peel_id(text, keys)
+    return hashlib.sha256(json.dumps([text, keys], ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def segment_digest(words):
+    """The digest a reference holds of the bytes it points at: SHA-256 of their UTF-8, total over any string."""
+    return hashlib.sha256(str(words).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -370,13 +393,20 @@ class Peel:
     probes_total: int
     # The rung of the queue that made it: "accepted" for the librarian's
     # summary as the gate judged it, "reasked" for its second summary,
-    # "repaired" for one the queue stitched.
+    # "repaired" for one the queue rebuilt from the user's words.
     rung: str = "accepted"
-    # Each unit stitched in verbatim, ``(turn_id, start, stop)`` in its turn.
+    # A peel made before references: each run of the user's its text holds
+    # as a copy, ``(turn_id, start, stop)`` in its turn. None is made so now.
     stitched: tuple = ()
     # The probes it still fails, ``(kind, answer, turn_id)``: what it lost
     # under the thresholds, kept with it and never logged.
     residual: tuple = ()
+    # Each whole segment the user typed that it keeps, ``(turn_id, start,
+    # stop, sha256)``: read from the Cellar when it is shown, never copied.
+    refs: tuple = ()
+    # Each sentence of the summary the repair dropped, ``(motive, sha256)``:
+    # what it lost and why, never the words.
+    dropped: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -432,6 +462,20 @@ class Selected:
     text: str
     provenance: str
     score: float = 0.0
+    # What it shows may carry that the user never endorsed: ``(context,
+    # lineage)``. Memory as a whole unless whoever made it said better.
+    label: tuple = (("memory",), ())
+    # What a query is matched against, when whoever made it says: what it
+    # holds -- its summary and the words its references read, shown or not --
+    # never the words of a note the queue wrote; a note shown in place of a
+    # withheld part stands where the query reaches what it holds.
+    reach: str = ""
+    # What its showing counted, ``(motive, n)``: the block counts the events
+    # of what it places, once.
+    events: tuple = ()
+    # False when it shows nothing but a note: it then keeps no related peel
+    # out of the block.
+    shows: bool = True
 
 
 @dataclass(frozen=True)
@@ -449,6 +493,9 @@ class Eviction:
     # Why the gate refused the summaries the step was given, by name from
     # ``REFUSAL_MOTIVES``, one entry per refusal and motive.
     refused: tuple = ()
+    # The sentences the repair dropped from the peel it made, ``(motive,
+    # sha256)``, as the peel keeps them.
+    dropped: tuple = ()
 
 
 class PeelTree:
@@ -550,7 +597,7 @@ def faithfulness(span, probes, text, gate):
     directives; then the clauses that order with no typed sentence or typed
     decision of the span behind them, read by ``probes.unbacked_directives``
     with the gate's table: a peel is read by every later turn, and only the
-    user's words may order there.
+    user's words may order there, referenced, never in a summary.
     """
     from .probes import holdings
 
@@ -558,37 +605,45 @@ def faithfulness(span, probes, text, gate):
 
 
 def _unheld(held, probes, text, gate):
-    from .probes import unbacked_decisions, unbacked_directives, unsupported_claims
+    from .probes import unbacked_decisions, unsupported_claims
 
     reporters = gate.reporters or frozenset()
     found = unsupported_claims(held, text)
     found += unbacked_decisions(probes, text, gate.lexicon, reporters, gate.directives, held.typed)
-    found += unbacked_directives(held, probes, text, gate.directives)
+    found += _directives_in_summary(held, probes, text, gate)
     return tuple(found)
 
 
-def decide(span, probes, text, gate):
-    """Both faces of the gate on a summary of ``span``: every site that judges a summary judges it here.
+def decide(span, probes, text, gate, refs=()):
+    """Both faces of the gate on a peel of ``span``: its summary ``text`` and its references ``refs``.
 
-    The first face is ``judge``: the probes the summary must answer. The
-    second is ``faithfulness``: whatever the rates, a claim the span does
-    not hold refuses the summary by name; and its bounds: a summary whose
-    content words its span mostly holds no word for has drifted from it, and
-    one longer than its span saves nothing, each refused with its figure in
-    the reason, never as a claim. The probes are not taken on trust: the
-    span's facts are read again, and a set that leaves more of them unasked
-    than the floor allows judged the summary on less than its span holds,
-    refused with its share and the facts no probe asks for. A decision
-    refused on several counts gives every reason: the first face's, the
-    claims, the bounds, the floor.
+    Every site that judges a peel judges it here. The first face is
+    ``judge``: the probes the peel must answer, read in what the model will
+    read of it -- the summary and the words its references show, the heads of
+    the markers they may hold not yet defanged; the window defangs a head
+    alone and keeps every word around it (``composer.defanged``). The second
+    is ``faithfulness``, on the summary alone: whatever the rates, a claim
+    the span does not hold refuses it by name, and so does an order, even
+    one the user gave, even word for word -- the user's words stand in a
+    peel only referenced. Then its bounds: a summary whose content words its
+    span mostly holds no word for has drifted from it, read in the summary
+    alone so that the user's words shown beside it dilute nothing; a peel
+    longer than its span saves nothing, read in all it shows; each refused
+    with its figure in the reason, never as a claim. The probes are not
+    taken on trust: the span's facts are read again, and a set that leaves
+    more of them unasked than the floor allows judged the peel on less than
+    its span holds, refused with its share and the facts no probe asks for.
+    A decision refused on several counts gives every reason: the first
+    face's, the claims, the bounds, the floor.
     """
     from .probes import holdings, novel_words, probe_coverage, word_count
 
-    first = judge(probes, text, gate)
+    shown = joined(text, shown_words(span, refs))[0]
+    first = judge(probes, shown, gate)
     held = holdings(span, gate.directives)
     found = _unheld(held, probes, text, gate)
     content, new = novel_words(held, text, gate.lexicon, gate.reporters or frozenset())
-    words, span_words = word_count(text), sum(word_count(t) for t in held.texts)
+    words, span_words = word_count(shown), sum(word_count(t) for t in held.texts)
     novelty = len(new) / len(content) if content else None
     ratio = words / span_words if span_words else None
     coverage = probe_coverage(span, probes, gate.lexicon)
@@ -626,14 +681,14 @@ def _summarise(sources, cellar, summarize, gate):
     spans = [cellar.get(k) for k in sources]
     turns = [t for span in spans for t in span]
     probes = generate_probes(turns, gate.lexicon)
-    text, stitched = _with_orders(turns, probes, _unmarked(summarize(turns), turns), gate)
-    return spans, probes, text, decide(turns, probes, text, gate), stitched
+    text, refs = _with_orders(turns, probes, _unmarked(summarize(turns), turns), gate)
+    return spans, probes, text, decide(turns, probes, text, gate, refs), refs
 
 
-def _make(text, sources, level, children, decision, cellar, *, rung="accepted", stitched=()):
+def _make(text, sources, level, children, decision, cellar, *, rung="accepted", refs=(), dropped=()):
     result = decision.result
     return Peel(
-        id=peel_id(text, sources),
+        id=peel_id(text, sources, refs),
         text=text,
         level=level,
         sources=tuple(sources),
@@ -642,8 +697,9 @@ def _make(text, sources, level, children, decision, cellar, *, rung="accepted", 
         probes_passed=result.passed,
         probes_total=result.passed + result.failed,
         rung=rung,
-        stitched=tuple(stitched),
         residual=tuple((p.kind, p.answer, p.turn_id) for p in result.failures),
+        refs=tuple(tuple(ref) for ref in refs),
+        dropped=tuple(tuple(entry) for entry in dropped),
     )
 
 
@@ -651,10 +707,10 @@ def build_leaf(key, cellar, summarize, gate, tree):
     """A level-0 peel over one Cellar span, added to the tree only if the gate accepts."""
     if not cellar.has(key):
         raise PeelIntegrityError(f"source {key} resolves to no Cellar span")
-    _spans, _probes, text, decision, stitched = _summarise((key,), cellar, summarize, gate)
+    _spans, _probes, text, decision, refs = _summarise((key,), cellar, summarize, gate)
     if not decision.accepted:
         return None, decision
-    peel = _make(text, (key,), 0, (), decision, cellar, stitched=stitched)
+    peel = _make(text, (key,), 0, (), decision, cellar, refs=refs)
     tree.add(peel)
     return peel, decision
 
@@ -673,11 +729,11 @@ def build_parent(child_ids, cellar, summarize, gate, tree):
                 sources.append(key)
     if not sources:
         raise PeelIntegrityError("a parent needs at least one child with a source")
-    _spans, _probes, text, decision, stitched = _summarise(tuple(sources), cellar, summarize, gate)
+    _spans, _probes, text, decision, refs = _summarise(tuple(sources), cellar, summarize, gate)
     if not decision.accepted:
         return None, decision
     level = max(c.level for c in children) + 1
-    peel = _make(text, tuple(sources), level, tuple(c.id for c in children), decision, cellar, stitched=stitched)
+    peel = _make(text, tuple(sources), level, tuple(c.id for c in children), decision, cellar, refs=refs)
     tree.add(peel)
     return peel, decision
 
@@ -687,8 +743,23 @@ def verify_peel(peel, cellar, tree=None):
     for key in peel.sources:
         if not cellar.has(key):
             raise PeelIntegrityError(f"peel {peel.id}: source {key} resolves to no Cellar span")
-    if peel_id(peel.text, peel.sources) != peel.id:
-        raise PeelIntegrityError(f"peel {peel.id}: text or sources no longer hash to the id")
+    if any(not _well_formed(ref) for ref in peel.refs):
+        raise PeelIntegrityError(f"peel {peel.id}: a reference is no place in a turn with the digest of its bytes")
+    if peel_id(peel.text, peel.sources, peel.refs) != peel.id:
+        raise PeelIntegrityError(f"peel {peel.id}: text, sources or references no longer hash to the id")
+    if peel.refs:
+        # The bytes, here: a reference names a place in a user's turn of the peel's spans whose bytes answer to its
+        # digest. Whether that place still reads as a whole typed segment is the reader's to say, at each showing:
+        # it depends on the grammar of origins, which may change, and a peel that no longer shows one is not refused.
+        turns = {str(t.get("turn_id", "")): t for key in peel.sources for t in cellar.get(key)}
+        for ref in peel.refs:
+            turn = turns.get(ref[0])
+            text = str(turn.get("text", "") or "") if turn is not None else ""
+            if (turn is None or turn.get("role") != "user" or ref[2] > len(text)
+                    or segment_digest(text[ref[1]:ref[2]]) != ref[3]):
+                raise PeelIntegrityError(
+                    f"peel {peel.id}: a reference no longer reads as the bytes of a user's turn it was made with"
+                )
     if peel.children:
         if tree is None:
             raise PeelIntegrityError(f"peel {peel.id}: has children and no tree to resolve them in")
@@ -724,6 +795,323 @@ def peel_origins(peel, cellar):
     return tuple(sorted(found))
 
 
+# ---------------------------------------------------------------------------
+# References: the user's words by their place, never a copy
+# ---------------------------------------------------------------------------
+
+# The lineage entry that says a lineage is not whole: cut at the grammar's
+# limit, or never recorded.
+CUT = "lineage:truncated"
+# What a turn id may show in a reference's marker: no bracket, no blank, no
+# sign a frame or an envelope is written with.
+_SAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def _received(turn):
+    """True for a turn a peer sent, or whose context does not read as a list: no one vouches for who typed it."""
+    context = turn.get("context", [])
+    return not isinstance(context, (list, tuple)) or "received" in context
+
+
+def typed_segments(span):
+    """The whole segments of a span the user typed, ``(turn_id, start, stop)`` in order: the only words a peel references.
+
+    A segment the origin grammar reads typed -- or a turn of origin typed
+    that declares no segment, whole -- of a turn whose id is its own in the
+    span and that no peer sent (``received``). Typed words that sit against
+    a pasted part are the document's, as the grammar reads them, and none
+    of these. A segment of blanks alone is none.
+    """
+    from .probes import read_origin
+
+    seen = {}
+    for turn in span:
+        turn_id = str(turn.get("turn_id", ""))
+        seen[turn_id] = seen.get(turn_id, 0) + 1
+    found = []
+    for turn in span:
+        turn_id = str(turn.get("turn_id", ""))
+        if not turn_id or seen[turn_id] > 1 or _received(turn):
+            continue
+        text = str(turn.get("text", "") or "")
+        origin, segments, _defect = read_origin(turn)
+        parts = segments if segments else [(0, len(text), origin)]
+        found.extend((turn_id, int(start), int(stop)) for start, stop, label in parts
+                     if label == "typed" and text[start:stop].strip())
+    return found
+
+
+def references(span, places):
+    """The references a peel makes to keep ``places``: each whole typed segment one of them falls in.
+
+    ``places`` are ``(turn_id, start, stop)``; a segment one of them overlaps
+    is referenced whole, ``(turn_id, start, stop, sha256)``, in span order
+    and once. A place in no typed segment -- another origin's words, a turn
+    a peer sent -- references nothing.
+    """
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
+    wanted = [(str(turn_id), int(start), int(stop)) for turn_id, start, stop in places]
+    return tuple(
+        (turn_id, start, stop, segment_digest(texts[turn_id][start:stop]))
+        for turn_id, start, stop in typed_segments(span)
+        if any(at == turn_id and begin < stop and start < end for at, begin, end in wanted)
+    )
+
+
+def _well_formed(ref):
+    """True for a reference of the shape a peel makes: a turn id, two integer places in order, a SHA-256 digest."""
+    try:
+        turn_id, start, stop, digest = ref
+    except (TypeError, ValueError):
+        return False
+    places = all(isinstance(n, int) and not isinstance(n, bool) for n in (start, stop))
+    return (isinstance(turn_id, str) and bool(turn_id) and places and 0 <= start < stop and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None)
+
+
+def _reread(ref, texts, placed):
+    """The words a reference points at, when they still are a whole typed segment answering to its digest; else None."""
+    if not _well_formed(ref):
+        return None
+    turn_id, start, stop, digest = ref
+    if (turn_id, start, stop) not in placed:
+        return None
+    words = texts[turn_id][start:stop]
+    return words if segment_digest(words) == digest else None
+
+
+def read_references(span, refs):
+    """The references of ``refs`` that still read in ``span``, ``(turn_id, words)`` in order; the others left out.
+
+    One reads while its place is a whole typed segment of the span and its
+    bytes answer to its digest; its words are the turn's bytes, as held.
+    """
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in span}
+    placed = set(typed_segments(span))
+    found = []
+    for ref in refs:
+        words = _reread(ref, texts, placed)
+        if words is not None:
+            found.append((str(ref[0]), words))
+    return found
+
+
+def shown_words(span, refs):
+    """What the references of ``refs`` show of ``span``: ``(turn_id, words)``, a fenced block as its marker, never its code."""
+    from .probes import mask_code
+
+    return [(turn_id, mask_code(words)) for turn_id, words in read_references(span, refs)]
+
+
+def _header(turn_id, altered):
+    """The marker a reference's words follow: its turn, and how many markers the frames' rule defanged in them."""
+    shown = _SAFE_ID.sub("", str(turn_id))
+    if not altered:
+        return f"[{shown}]"
+    return f"[{shown}, {altered} marker{'' if altered == 1 else 's'} defanged]"
+
+
+def _as_is(text):
+    return text, 0
+
+
+def joined(summary, shown, notes=(), defang=_as_is):
+    """A peel's parts as one text, and how many markers ``defang`` took in its references' words.
+
+    The summary, then each reference's words after the marker of its turn,
+    then one line of what the peel does not show and why, never a word of
+    it; joined by a line break. Each part goes through ``defang`` on its own:
+    as it is for the gate, which reads what a peel holds; by the composer's
+    rule for the model (``peel_text``).
+    """
+    parts, altered = [], 0
+    if summary:
+        parts.append(defang(summary)[0])
+    for turn_id, words in shown:
+        clean, count = defang(words)
+        altered += count
+        parts.append(f"{_header(turn_id, count)} {clean}")
+    if notes:
+        parts.append(defang("[not shown: " + "; ".join(notes) + "]")[0])
+    return "\n".join(parts), altered
+
+
+def peel_text(summary, shown, notes=()):
+    """What the model reads of a peel, and how many markers its references' words took.
+
+    ``joined``, each part defanged on its own by the composer's rule --
+    frames, a marker left open at its end, the envelope's -- so that no frame
+    or envelope downstream changes a byte of what is shown here: a
+    reference whose words held a marker says so and how many in its own
+    marker, and one that held none shows the bytes its turn holds, a fenced
+    block as its marker.
+    """
+    from .composer import defanged
+
+    return joined(summary, shown, notes, defanged)
+
+
+def join_labels(labels):
+    """The union of several ``(context, lineage)``; past the grammar's limit the lineage says it was cut.
+
+    The wrapper's own join, kept here so the onion stays free of the agent
+    package; a contract holds the two alike.
+    """
+    from .probes import _LINEAGE_LIMIT
+
+    context, lineage = set(), set()
+    for part_context, part_lineage in labels:
+        context.update(part_context)
+        lineage.update(part_lineage)
+    entries = sorted(lineage)
+    if len(entries) > _LINEAGE_LIMIT:
+        entries = sorted(entries[: _LINEAGE_LIMIT - 1] + [CUT])
+    return sorted(context), entries
+
+
+def turn_label(turn, lineage=None):
+    """The ``(context, lineage)`` of a turn the onion mirrored: what its words may carry that the user never endorsed.
+
+    Its context as mirrored; a turn that declares none reads as its own
+    parts give a user turn, legacy for an answer. Its lineage as recorded
+    beside it (``lineage``, by turn id); a user turn's, when none was, from
+    its own parts as the store derives it; an answer's never recorded is
+    unknown, and reads cut. A turn whose parts do not read is legacy, cut.
+    """
+    from .probes import _user_context, _user_lineage
+
+    role = str(turn.get("role", "") or "")
+    text = str(turn.get("text", "") or "")
+    origin, segments = turn.get("origin", "legacy"), turn.get("segments") or []
+    context = turn.get("context")
+    try:
+        if not isinstance(context, (list, tuple)):
+            context = _user_context(origin, segments) if role == "user" else ["legacy"]
+        recorded = (lineage or {}).get(str(turn.get("turn_id", "")))
+        if recorded is not None:
+            found = list(recorded)
+        elif role == "user":
+            found = _user_lineage(text, segments)
+        else:
+            found = [CUT]
+        return sorted(set(context)), sorted(set(found))
+    except (TypeError, ValueError, IndexError, KeyError):
+        return ["legacy"], [CUT]
+
+
+def withheld(label, withdrawn):
+    """True when a withdrawal reached what ``label`` describes.
+
+    Its context says so, its lineage names a source of ``withdrawn``, or its
+    lineage was cut -- or never recorded -- while any source is withdrawn.
+    """
+    context, lineage = label
+    if "withdrawn" in context:
+        return True
+    if not withdrawn:
+        return False
+    return CUT in lineage or any(entry in withdrawn for entry in lineage)
+
+
+def _copies_read(peel, turns):
+    """True when every run a peel made before references copied still reads in its text after its turn's marker."""
+    from .probes import mask_code
+
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in turns}
+    for turn_id, start, stop in peel.stitched:
+        held = texts.get(str(turn_id))
+        if held is None or not 0 <= int(start) < int(stop) <= len(held):
+            return False
+        words = held[int(start):int(stop)]
+        if f"[{turn_id}] {words}" not in peel.text and f"[{turn_id}] {mask_code(words)}" not in peel.text:
+            return False
+    return True
+
+
+def _plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _dropped_note(dropped):
+    """What a peel says of the sentences the repair dropped from it: how many and why, never a word; none for none."""
+    if not dropped:
+        return []
+    motives = ", ".join(sorted({str(motive) for motive, _digest in dropped}))
+    return [f"{_plural(len(dropped), 'sentence')} the repair dropped from the summary ({motives})"]
+
+
+def render_peel(peel, cellar, *, lineage=None, withdrawn=()):
+    """What the model reads of ``peel`` now: a ``Selected`` with the label of what it shows, or None.
+
+    Read from the Cellar at the call. The summary is shown unless a
+    withdrawal reached a turn it stands on (``withheld``); it is memory and
+    carries the context and lineage of every turn it stands on. Each
+    reference is shown while its words still read as the whole typed
+    segment it was made with, its own turn's label beside it; not shown,
+    when they no longer read or a withdrawal reached its turn. A peel made
+    before references shows its text as it was saved, memory, legacy too
+    when a run it copied no longer reads in it, and only a note once a
+    withdrawal reached it. What a peel does not show is said in its last
+    line, by number and reason, and counted in its events; a query reaches
+    it by what it holds, so the note stands where the peel would have.
+    """
+    withdrawn = frozenset(withdrawn or ())
+    turns = [t for key in peel.sources if cellar.has(key) for t in cellar.get(key)]
+    labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in turns}
+    every = join_labels(labels.values())
+    summary_label = (sorted({"memory", *every[0]}), every[1])
+    provenance = f"peel:{peel.id[:12]}:L{peel.level}"
+    if peel.stitched and not peel.refs:
+        if withheld(summary_label, withdrawn):
+            note = peel_text("", (), ["the peel, a turn it stands on was reached by a withdrawal"])[0]
+            return Selected(text=note, provenance=provenance, label=([], []), reach=peel.text,
+                            events=(("peels_withheld", 1),), shows=False)
+        context = summary_label[0] if _copies_read(peel, turns) else sorted({"legacy", *summary_label[0]})
+        return Selected(text=peel.text, provenance=provenance, label=(context, summary_label[1]), reach=peel.text)
+    from .probes import mask_code
+
+    notes, events, shown, shown_labels, held = [], [], [], [], [peel.text]
+    summary = peel.text
+    if summary and withheld(summary_label, withdrawn):
+        summary = ""
+        notes.append("the summary, a turn it stands on was reached by a withdrawal")
+        events.append(("summaries_withheld", 1))
+    elif summary:
+        shown_labels.append(summary_label)
+    texts = {str(t.get("turn_id", "")): str(t.get("text", "") or "") for t in turns}
+    placed = set(typed_segments(turns))
+    unplaced = reached = 0
+    for ref in peel.refs:
+        words = _reread(ref, texts, placed)
+        if words is None:
+            unplaced += 1
+            continue
+        held.append(words)
+        turn_id = str(ref[0])
+        if withheld(labels[turn_id], withdrawn):
+            reached += 1
+            continue
+        shown.append((turn_id, mask_code(words)))
+        shown_labels.append(labels[turn_id])
+    if reached:
+        notes.append(f"{_plural(reached, 'reference')} to words of a turn a withdrawal reached")
+        events.append(("references_withdrawn", reached))
+    if unplaced:
+        notes.append(f"{_plural(unplaced, 'reference')} no longer reading as the words it was made with")
+        events.append(("references_unplaced", unplaced))
+    notes += _dropped_note(peel.dropped)
+    if not summary and not shown and not notes:
+        return None
+    text, altered = peel_text(summary, shown, notes)
+    if altered:
+        events.append(("references_altered", altered))
+    # A query reaches a peel by what it holds -- its summary and the words its references read -- never by the
+    # words of its note, which the queue wrote.
+    return Selected(text=text, provenance=provenance, label=tuple(join_labels(shown_labels)),
+                    reach="\n".join(part for part in held if part), events=tuple(events),
+                    shows=bool(summary or shown))
+
+
 def _terms(text):
     """The terms of a text: its words in any script, folded as the probes fold them, function and question words aside."""
     from .probes import FUNCTION_WORDS, folded_words
@@ -749,11 +1137,16 @@ def _lineage(tree, peel):
     return related
 
 
-def select_peels(tree, query, cap, estimate=None):
+def select_peels(tree, query, cap, estimate=None, render=None):
     """Peels for the query, best first, whole items, never an ancestor with its descendant.
 
-    A peel scores the share of the query's terms its text holds; ties go to
-    the lower level, then the lower id, so the order is the same in every run.
+    A peel scores the share of the query's terms what it holds holds; ties
+    go to the lower level, then the lower id, so the order is the same in
+    every run. ``render`` shows a peel as the model will read it
+    (``render_peel``), None for one that shows nothing, and says what it
+    holds (``reach``), never the words of its note; without it a peel shows
+    its text, memory as a whole. A peel placed keeps its ancestors and
+    descendants out, unless all it shows is a note.
     """
     estimate = estimate or estimate_tokens
     terms = _terms(query)
@@ -761,20 +1154,24 @@ def select_peels(tree, query, cap, estimate=None):
         return []
     scored = []
     for peel in tree.all():
-        hit = len(terms & _terms(peel.text)) / len(terms)
+        shown = (render(peel) if render is not None
+                 else Selected(text=peel.text, provenance=f"peel:{peel.id[:12]}:L{peel.level}"))
+        if shown is None:
+            continue
+        hit = len(terms & _terms(shown.reach if render is not None else shown.text)) / len(terms)
         if hit > 0:
-            scored.append((-hit, peel.level, peel.id, peel))
-    scored.sort()
+            scored.append((-hit, peel.level, peel.id, peel, shown))
+    scored.sort(key=lambda entry: entry[:3])
     chosen, taken, used = [], set(), 0
-    for neg, _level, _pid, peel in scored:
+    for neg, _level, _pid, peel, shown in scored:
         if peel.id in taken:
             continue
-        tokens = estimate(peel.text)
+        tokens = estimate(shown.text)
         if used + tokens > cap:
             continue
         used += tokens
-        taken |= _lineage(tree, peel)
-        chosen.append(Selected(text=peel.text, provenance=f"peel:{peel.id[:12]}:L{peel.level}", score=round(-neg, 4)))
+        taken |= _lineage(tree, peel) if shown.shows else {peel.id}
+        chosen.append(replace(shown, score=round(-neg, 4)))
     return chosen
 
 
@@ -794,12 +1191,12 @@ def evict_gated(*, flesh, cellar, ledger, tree, gate, summarize):
         return Eviction(False, "the Flesh is empty; nothing to evict")
     span = turns[: gate.span_turns]
     probes = generate_probes(span, gate.lexicon)
-    text, stitched = _with_orders(span, probes, _unmarked(summarize([dict(t) for t in span]), span), gate)
-    decision = decide(span, probes, text, gate)
+    text, refs = _with_orders(span, probes, _unmarked(summarize([dict(t) for t in span]), span), gate)
+    decision = decide(span, probes, text, gate, refs)
     if not decision.accepted:
         return Eviction(False, decision.reason, decision=decision)
     receipt = flesh.evict_span(len(span), cellar, ledger, kind="accepted")
-    peel = _make(text, (receipt.key,), 0, (), decision, cellar, stitched=stitched)
+    peel = _make(text, (receipt.key,), 0, (), decision, cellar, refs=refs)
     tree.add(peel)
     return Eviction(True, decision.reason, receipt=receipt, peel=peel, decision=decision, rung="accepted")
 
@@ -985,13 +1382,16 @@ def _typed_units(span):
     """The units of a span the user typed: the only words the queue may keep verbatim.
 
     A document, a tool, the assistant or a turn of no origin is summarised,
-    judged and recallable like any other, but its text is never stitched
-    into a peel nor kept as an anchor: copied verbatim into what every turn
-    reads, an instruction it carries would persist.
+    judged and recallable like any other, but its text is never referenced
+    by a peel nor kept as an anchor: shown verbatim in what every turn
+    reads, an instruction it carries would persist. Nor is a turn a peer
+    sent (``received``), whatever origin it declares: no peer vouches for
+    who typed it.
     """
     from .probes import units
 
-    return [unit for unit in units(span) if unit.origin == "typed"]
+    received = {str(t.get("turn_id", "")) for t in span if _received(t)}
+    return [unit for unit in units(span) if unit.origin == "typed" and unit.turn_id not in received]
 
 
 def _within_reach(targets, found):
@@ -1036,6 +1436,10 @@ def _lowered_turns(span):
 # (categories Ps, Pe, Pi, Pf) and the angle brackets of ASCII, built once on
 # first use.
 _BRACKETED = []
+# The controls of bidirectional text -- marks, embeddings, overrides,
+# isolates -- each of which makes a run display in another order than the one
+# it is written and read in.
+_BIDI_CONTROLS = frozenset(chr(c) for c in (0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A)))
 
 
 def _bracketed():
@@ -1052,34 +1456,63 @@ def _bracketed():
 
 
 def _unmarked(text, span):
-    """The model's ``text`` without a turn marker it wrote: in a peel, a marker is one the repair stitched.
+    """The model's ``text`` without a marker it wrote of what only the queue writes in a peel.
 
-    A marker is a turn id in brackets, the form ``_repair`` writes: ``t``
-    and digits, or an id of ``span``, for any turn. It is read as a reader
-    would see it -- any bracket, any case, spacing or script, invisible
-    characters dropped, a trailing colon -- and taken out until none is
-    left, nested ones included. A bracket the user typed, as written, is
-    their own words and stays; one a document or the assistant wrote
-    protects nothing.
+    A marker is a bracket that opens on a turn id -- ``t`` and digits, past
+    any punctuation between them when the digits are four or more, as an
+    id's are, or an id of ``span``, for any turn -- alone, as a reference's
+    marker shows it,
+    or with more after the id, as the marker of a reference whose words were
+    defanged shows it ("[t0001, 2 markers defanged]"); or a bracket that
+    opens on the words of a peel's note ("[not shown: ...]"). The controls
+    of bidirectional text are taken out of the text first, so it displays
+    in the order it is written and read. A marker is read as a reader would
+    see it -- any bracket, any case, any spacing or punctuation between the
+    note's letters, compatibility forms folded, the marks a letter carries
+    taken off, invisible characters dropped, a trailing colon -- and taken
+    out until none is left, one
+    inside another included: a summary can write nothing a reader would
+    take for the user's words or for the queue's note. Two known
+    misses, counted: a bracket is not read past one it holds that stays, and
+    a letter of another script that only looks like one of these is not
+    read as it. A bracket the user typed, as written inside one unit of
+    theirs, is their own words and stays; one a document, the assistant or
+    a peer wrote protects nothing, nor does one made of the end of a unit
+    and the start of the next.
     """
     import unicodedata
 
-    from .probes import units
+    def fold(text):
+        """``text`` with its compatibility forms folded and the marks its letters carry taken off: a t with a caron reads t."""
+        bare = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.category(ch).startswith("M"))
+        return unicodedata.normalize("NFKC", bare)
 
-    ids = {str(t.get("turn_id", "")).casefold() for t in span} - {""}
-    typed = "\n".join(unit.text for unit in units(span) if unit.origin == "typed")
+    ids = {fold(str(t.get("turn_id", ""))).casefold() for t in span} - {""}
+    typed = [unit.text for unit in _typed_units(span)]
 
-    def name(inner):
-        folded = unicodedata.normalize("NFKC", inner)
-        kept = "".join(ch for ch in folded if not ch.isspace() and unicodedata.category(ch) != "Cf")
-        return kept.casefold().rstrip(":")
+    def name(inner, spaced):
+        folded = fold(inner)
+        kept = "".join((" " if ch.isspace() else ch) if spaced else ("" if ch.isspace() else ch)
+                       for ch in folded if unicodedata.category(ch) != "Cf")
+        return " ".join(kept.split()).casefold().rstrip(":") if spaced else kept.casefold().rstrip(":")
+
+    def opens_on_id(said, head=r"t\d+"):
+        found = re.match(head, said)
+        if found and (found.end() == len(said) or not (said[found.end()].isalnum() or said[found.end()] == ".")):
+            return True
+        return any(said == i or (said.startswith(i) and not said[len(i)].isalnum()) for i in ids)
 
     def drop(match):
-        said = name(match.group(1))
-        marker = re.fullmatch(r"t\d+", said) is not None or said in ids
-        return " " if marker and match.group(0).strip() not in typed else match.group(0)
+        said, spaced = name(match.group(1), False), name(match.group(1), True)
+        # Read with its spaces dropped, ``t`` and the four digits or more of an id open on one past any punctuation
+        # between them -- an index such as ``[t-1]`` stays; and the note's words are its letters alone.
+        letters = "".join(ch for ch in said if ch.isalnum())
+        marker = (opens_on_id(said, r"t[\W_]*\d{4,}") or opens_on_id(spaced)
+                  or letters.startswith("notshown"))
+        written = match.group(0).strip()
+        return " " if marker and not any(written in unit for unit in typed) else match.group(0)
 
-    out, pattern = str(text), _bracketed()
+    out, pattern = "".join(ch for ch in str(text) if ch not in _BIDI_CONTROLS), _bracketed()
     while True:
         again = pattern.sub(drop, out)
         if again == out:
@@ -1109,25 +1542,31 @@ def _asked(model, span, refused, *extra):
         return None
 
 
-def _repair(span, probes, text, gate, ladder):
-    """The summary's sentences its span holds, then the fewest typed units answering what they miss.
+# Why the repair drops a sentence of the summary, in the order it asks: an
+# order, given or told, a claim its span does not hold, a copy of words from
+# outside the conversation, a sentence the summary did not end.
+DROP_MOTIVES = ("order", "unheld", "copy", "unended")
 
-    Returns ``(text, stitched)``. Each unit is marked with its turn. A
-    sentence that copies a unit from outside the conversation -- a
-    document, an answer the assistant gave with a tool or the web or in
-    sight of anything but the user's words -- is dropped like one its span
-    does not hold: a summary the gate refused would otherwise come back as a
-    peel that keeps those words verbatim, an instruction among them. The
-    words of the conversation itself -- typed, refined, the assistant's
-    clean answers, a turn written before origins -- are kept as the first
-    face keeps them. What only words of another origin than the
-    user's typing answer stays missed, and the gate judges the repair with
-    it missing. A unit is stitched with the run of the user's it stands in
-    (``typed_ranges``), so that its condition, its quote, its label and its
-    retraction stay with it; and every run of the user's that orders is
-    stitched too (``order_ranges``): an order stands in a peel only so. The
-    runs come last, after the sentences kept, of which none the summary did
-    not end: the gate holds the stitched block only after a sentence ended.
+
+def _repair(span, probes, text, gate, ladder):
+    """The summary's sentences its span holds, then the fewest typed segments answering what they miss.
+
+    Returns ``(text, refs, dropped)``: the sentences kept, the references to
+    the user's words, and each sentence dropped as ``(motive, sha256)`` from
+    ``DROP_MOTIVES``, never its words. A sentence that copies a unit from
+    outside the conversation -- a document, an answer the assistant gave
+    with a tool or the web or in sight of anything but the user's words --
+    is dropped like one its span does not hold: a summary the gate refused
+    would otherwise come back as a peel that keeps those words verbatim, an
+    instruction among them. The words of the conversation itself -- typed,
+    refined, the assistant's clean answers, a turn written before origins --
+    are kept as the first face keeps them. What only words of another origin
+    than the user's typing answer stays missed, and the gate judges the
+    repair with it missing. Every typed segment holding a run of the user's
+    that orders is referenced (``order_ranges``), then the fewest typed
+    units answering what the sentences and those segments still miss, each
+    by the whole segment it stands in: its condition, its quote, its label
+    and its retraction stay with it, as the user typed them.
     """
     from .probes import (
         _ENDED,
@@ -1138,8 +1577,6 @@ def _repair(span, probes, text, gate, ladder):
         order_ranges,
         score,
         sentences,
-        typed_ranges,
-        unbacked_directives,
         units,
     )
 
@@ -1154,39 +1591,82 @@ def _repair(span, probes, text, gate, ladder):
     # words; a sentence of the repair never ends inside a sentence an order
     # is read in. A sentence the summary did not end ("On every later turn,"
     # or a verb alone) is dropped too: no word of the summary's is read with
-    # a stitched run.
-    refused = [what for _kind, what, _turn in unbacked_directives(held, probes, text, gate.directives)]
-    kept = " ".join(
-        s for s in sentences(text)
-        if not _unheld(held, probes, s, gate) and not any(copies(s, other, ladder.copy_shared_words) for other in others)
-        and not any(clause in _order_prose(s) for clause in refused) and _ENDED.search(s.rstrip())
-    )
-    found = _typed_units(span)
-    chosen = _choose(found, _within_reach(score(probes, kept).failures, found), ladder)
-    runs = typed_ranges(span, gate.directives)
-    wanted = {run for run in runs for i in chosen
-              if run.turn_id == found[i].turn_id and run.start <= found[i].start and found[i].stop <= run.stop}
+    # the user's.
+    refused = [what for _kind, what, _turn in _directives_in_summary(held, probes, text, gate)]
+    places = []
     if gate.directives is not None:
-        wanted.update(order_ranges(span, gate.directives, _names_held(probes)))
-    wanted = [run for run in runs if run in wanted]
-    added = [f"[{run.turn_id}] {run.text}" for run in wanted]
-    stitched = tuple((run.turn_id, run.start, run.stop) for run in wanted)
-    return " ".join(([kept] if kept else []) + added), stitched
+        places = [(run.turn_id, run.start, run.stop)
+                  for run in order_ranges(span, gate.directives, _names_held(probes))]
+    # A sentence the user's orders, referenced, already show as written is said once: neither kept nor dropped,
+    # nothing being lost.
+    shown = _shown_sentences(span, references(span, places))
+    kept, dropped = [], []
+    for sentence in sentences(text):
+        if sentence.strip() in shown:
+            continue
+        if (any(clause in _order_prose(sentence) for clause in refused)
+                or _directives_in_summary(held, probes, sentence, gate)):
+            motive = "order"
+        elif _unheld(held, probes, sentence, gate):
+            motive = "unheld"
+        elif any(copies(sentence, other, ladder.copy_shared_words) for other in others):
+            motive = "copy"
+        elif not _ENDED.search(sentence.rstrip()):
+            motive = "unended"
+        else:
+            kept.append(sentence)
+            continue
+        dropped.append((motive, segment_digest(sentence)))
+    found = _typed_units(span)
+    missing = score(probes, joined(" ".join(kept), shown_words(span, references(span, places)))[0]).failures
+    chosen = _choose(found, _within_reach(missing, found), ladder)
+    places += [(found[i].turn_id, found[i].start, found[i].stop) for i in chosen]
+    return " ".join(kept), references(span, places), tuple(dropped)
+
+
+def _shown_sentences(span, refs):
+    """The sentences the words ``refs`` show hold, each stripped, as the probes split a text."""
+    from .probes import sentences
+
+    return {s.strip() for _turn_id, words in shown_words(span, refs) for s in sentences(words)}
+
+
+def _said_once(text, span, refs):
+    """``text`` without the sentences the words ``refs`` show already hold as written: each said once, nothing lost,
+    the model reading it in the user's own words. A sentence goes only when the user typed it whole, never when it
+    is a piece of one of theirs; a text that repeats none is returned as it was written."""
+    from .probes import sentences
+
+    if not refs or not text:
+        return text
+    shown = _shown_sentences(span, refs)
+    said = sentences(text)
+    kept = [s for s in said if s.strip() not in shown]
+    return text if len(kept) == len(said) else " ".join(kept)
+
+
+def _directives_in_summary(held, probes, text, gate):
+    """The orders ``text`` gives as a summary: every one, no block of the user's words being honoured in it."""
+    from .probes import unbacked_directives
+
+    return unbacked_directives(replace(held, stitchable=()), probes, text, gate.directives)
 
 
 def _with_orders(span, probes, text, gate):
-    """``text`` with each run of the user's that orders (``order_ranges``) after it, word for word and marked with
-    its turn, and the places of those runs: the user's orders stand in a peel only so, and no summary restates
-    them."""
+    """``text`` and the references to each whole typed segment holding a run of the user's that orders.
+
+    The user's orders stand in a peel only so, by reference to what they
+    typed (``order_ranges``), and no summary restates them. A sentence of
+    ``text`` those segments already show as written is said once
+    (``_said_once``): the gate judges what the model will read.
+    """
     if gate.directives is None:
         return text, ()
     from .probes import _names_held, order_ranges
 
     runs = order_ranges(span, gate.directives, _names_held(probes))
-    if not runs:
-        return text, ()
-    added = " ".join(f"[{run.turn_id}] {run.text}" for run in runs)
-    return f"{text} {added}".strip(), tuple((run.turn_id, run.start, run.stop) for run in runs)
+    refs = references(span, [(run.turn_id, run.start, run.stop) for run in runs])
+    return _said_once(text, span, refs), refs
 
 
 def _choose(found, targets, ladder):
@@ -1232,10 +1712,11 @@ def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anc
         receipt = flesh.evict_span(len(span), cellar, ledger, kind=kind, anchors=anchors)
         peel = None
         if made is not None:
-            text, decision, stitched = made
-            peel = _make(text, (receipt.key,), 0, (), decision, cellar, rung=rung, stitched=stitched)
+            text, decision, refs, dropped = made
+            peel = _make(text, (receipt.key,), 0, (), decision, cellar, rung=rung, refs=refs, dropped=dropped)
             tree.add(peel)
-    return Eviction(True, reason, receipt=receipt, peel=peel, decision=decision, rung=rung, refused=tuple(refused))
+    return Eviction(True, reason, receipt=receipt, peel=peel, decision=decision, rung=rung, refused=tuple(refused),
+                    dropped=peel.dropped if peel is not None else ())
 
 
 def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=None, refusals=None, lock=None):
@@ -1246,9 +1727,9 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     * no probe: a span the probes draw nothing from leaves bare. No model is
       asked and no peel placed: the gate cannot judge it, so nothing may
       speak for it, and it stays recallable in the Cellar.
-    * the summary: the librarian's, each run the user typed that orders
-      stitched after it word for word (``order_ranges``), judged by both
-      faces of the gate. An accepted peel keeps what it failed with it, its
+    * the summary: the librarian's, with a reference to each whole segment
+      the user typed that orders (``order_ranges``), judged by both faces of
+      the gate. An accepted peel keeps what it failed with it, its
       residual. A call that
       fails -- the model absent, stopped, past its deadline -- is counted as
       ``call_failed`` and the step goes on down the rungs that need no
@@ -1259,10 +1740,11 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
       span that comes back with the same mark is not asked for again. A
       refusal on the span's probe coverage is not asked for again at all:
       no text can change it.
-    * the repair: the sentences its span holds of the better summary, then the fewest
-      verbatim units of the span answering what they miss, each marked with
-      its turn, judged again by both faces, and kept only while it is at
-      most ``rho`` times its span.
+    * the repair: the sentences its span holds of the better summary, then
+      references to the fewest typed segments of the span answering what
+      they miss, judged again by both faces, and kept only while all it
+      shows is at most ``rho`` times its span; each sentence it drops is
+      kept by its motive and digest, and said in what the peel shows.
     * the hold: no peel; the receipt keeps the places in the Cellar of the
       fewest units answering every probe of the span, its anchors.
 
@@ -1271,8 +1753,8 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     under it only while the span is still the head of the Flesh: otherwise
     nothing leaves and the step says it was stale. No reason given here
     carries a word of the span. A turn marker the model writes is taken out
-    of its text before the gate reads it: in a peel, a marker is one the
-    repair stitched.
+    of its text before the gate reads it: in a peel, a marker is one a
+    reference shows.
     """
     from contextlib import nullcontext
     from functools import partial
@@ -1297,10 +1779,10 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     if first is not None:
         text = first
         ordered, kept_orders = _with_orders(span, probes, text, gate)
-        decision = decide(span, probes, ordered, gate)
+        decision = decide(span, probes, ordered, gate, kept_orders)
         if decision.accepted:
             return commit(rung="accepted", kind="accepted", reason=decision.reason,
-                          made=(ordered, decision, kept_orders))
+                          made=(ordered, decision, kept_orders, ()))
         motives = refusal_motives(decision, gate)
         refused.extend(motives)
         failed = decision.result.failures
@@ -1312,9 +1794,9 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
                 again = _asked(reask, span, refused, [(p.kind, p.answer, p.turn_id) for p in failed])
                 if again is not None:
                     ordered, kept_orders = _with_orders(span, probes, again, gate)
-                    judged = decide(span, probes, ordered, gate)
+                    judged = decide(span, probes, ordered, gate, kept_orders)
                     if judged.accepted:
-                        return commit(rung="reasked", kind="accepted", made=(ordered, judged, kept_orders),
+                        return commit(rung="reasked", kind="accepted", made=(ordered, judged, kept_orders, ()),
                                       refused=refused,
                                       reason="accepted on the second asking, handed the probes the first one failed")
                     refused.extend(refusal_motives(judged, gate))
@@ -1323,31 +1805,38 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
                             refusals[key] = mark
                     if len(judged.result.failures) + len(judged.unsupported) < len(failed) + len(decision.unsupported):
                         text = again
-    repaired, stitched = _repair(span, probes, text, gate, ladder)
-    if repaired:
-        judged = decide(span, probes, repaired, gate)
-        if judged.accepted and _saves_enough(estimate_tokens(repaired), _span_tokens(span), ladder.rho):
-            return commit(rung="repaired", kind="accepted", made=(repaired, judged, stitched), refused=refused,
-                          reason=f"repaired with {len(stitched)} verbatim unit(s) of the span")
+    repaired, refs, dropped = _repair(span, probes, text, gate, ladder)
+    repaired = _said_once(repaired, span, refs) if refs else repaired
+    if repaired or refs:
+        judged = decide(span, probes, repaired, gate, refs)
+        shown = joined(repaired, shown_words(span, refs))[0]
+        if judged.accepted and _saves_enough(estimate_tokens(shown), _span_tokens(span), ladder.rho):
+            return commit(rung="repaired", kind="accepted", made=(repaired, judged, refs, dropped), refused=refused,
+                          reason=f"repaired with {len(refs)} reference(s) to the user's words")
     return commit(rung="held", kind="held", anchors=_anchors(span, probes, ladder), refused=refused,
                   reason="held: no peel answers for the span within the compression floor; its anchors stay")
 
 
-def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unplaced=None):
+def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unplaced=None, *, lineage=None,
+                   withdrawn=(), reached=None):
     """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
 
     An anchor ranks as a peel does, by the share of the query's terms its
     words hold, then the newest receipt first, then its place in its span.
     It shows what a peel would of its unit, re-read from its place: a
-    sentence as written, a code block by its marker, never its code. A place
-    that is no typed unit of its span shows nothing. ``dropped``, a list,
-    receives the provenance of each anchor the query reached that ``cap``
-    left out, and ``unplaced`` of each it reached whose place reads as no
-    typed unit any more.
+    sentence as written, a code block by its marker, never its code; with
+    the label of its turn (``turn_label``), and defanged as a reference is,
+    its turn's marker saying how many markers that took when it took any. A
+    place that is no typed unit of its span -- a turn a peer sent included
+    -- shows nothing. ``dropped``, a list, receives the provenance of each
+    anchor the query reached that ``cap`` left out, ``unplaced`` of each it
+    reached whose place reads as no typed unit any more, and ``reached`` of
+    each it reached whose turn a withdrawal reached, not shown.
     """
-    from .probes import units
+    from .composer import defanged
 
     estimate = estimate or estimate_tokens
+    withdrawn = frozenset(withdrawn or ())
     terms = _terms(query)
     if not terms or cap <= 0:
         return []
@@ -1356,27 +1845,37 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     for age, receipt in enumerate(reversed(held)):
         span = cellar.get(receipt.key)
         texts = {str(t.get("turn_id", "")): str(t.get("text", "")) for t in span}
-        placed = {(u.turn_id, u.start, u.stop): u.text for u in units(span) if u.origin == "typed"}
+        labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in span}
+        typed = {(u.turn_id, u.start, u.stop): u.text for u in _typed_units(span)}
         for place, (turn_id, start, stop) in enumerate(receipt.anchors):
-            shown = placed.get((turn_id, start, stop))
+            shown = typed.get((turn_id, start, stop))
             hit = len(terms & _terms(texts.get(turn_id, "")[start:stop])) / len(terms)
             if hit <= 0:
                 continue
+            provenance = f"anchor:{receipt.key[:12]}:{turn_id}"
             if not shown:
                 if unplaced is not None:
-                    unplaced.append(f"anchor:{receipt.key[:12]}:{turn_id}")
+                    unplaced.append(provenance)
                 continue
-            scored.append((-hit, age, place, shown, f"anchor:{receipt.key[:12]}:{turn_id}"))
-    scored.sort()
+            if withheld(labels[turn_id], withdrawn):
+                if reached is not None:
+                    reached.append(provenance)
+                continue
+            words, altered = defanged(shown)
+            if altered:
+                words = f"{_header(turn_id, altered)} {words}"
+            events = (("anchors_altered", altered),) if altered else ()
+            scored.append((-hit, age, place, words, provenance, tuple(labels[turn_id]), events))
+    scored.sort(key=lambda entry: entry[:3])
     chosen, used = [], 0
-    for neg, _age, _place, words, provenance in scored:
+    for neg, _age, _place, words, provenance, label, events in scored:
         tokens = estimate(words)
         if used + tokens > cap:
             if dropped is not None:
                 dropped.append(provenance)
             continue
         used += tokens
-        chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4)))
+        chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4), label=label, events=events))
     return chosen
 
 
@@ -1384,8 +1883,9 @@ def fidelity(tree, cellar, lexicon=None, probe_recall=None):
     """Probe pass rate of every peel resampled against its Cellar spans. A fixture reading.
 
     The probes are drawn with ``lexicon``, the empty one when none is given,
-    and the reading names it with the version of the generator. Beside the
-    rate stands ``probe_recall``, a gate's stated probe recall, when it
+    and the reading names it with the version of the generator. A peel is
+    read as it shows: its summary and the words its references read. Beside
+    the rate stands ``probe_recall``, a gate's stated probe recall, when it
     holds for these probes; otherwise None, and the note says why.
     """
     from .probes import EMPTY_LEXICON, GENERATOR_VERSION, generate_probes, score
@@ -1394,7 +1894,7 @@ def fidelity(tree, cellar, lexicon=None, probe_recall=None):
     passed = failed = 0
     for peel in tree.all():
         turns = [t for k in peel.sources for t in cellar.get(k)]
-        result = score(generate_probes(turns, lexicon), peel.text)
+        result = score(generate_probes(turns, lexicon), _holds(peel, turns))
         passed += result.passed
         failed += result.failed
     total = passed + failed
@@ -1413,12 +1913,17 @@ def fidelity(tree, cellar, lexicon=None, probe_recall=None):
     }
 
 
+def _holds(peel, turns):
+    """What a peel holds as it shows: its summary, then the words its references read in ``turns``."""
+    return joined(peel.text, shown_words(turns, peel.refs))[0] if peel.refs else peel.text
+
+
 def context_multiplier(tree, cellar, estimate=None):
-    """Source tokens the root peels stand for, over the tokens they cost. A fixture reading."""
+    """Source tokens the root peels stand for, over the tokens they cost as they show. A fixture reading."""
     estimate = estimate or estimate_tokens
     roots = tree.roots()
     source_tokens = sum(estimate(str(t.get("text", ""))) for p in roots for k in p.sources for t in cellar.get(k))
-    peel_tokens = sum(estimate(p.text) for p in roots)
+    peel_tokens = sum(estimate(_holds(p, [t for k in p.sources for t in cellar.get(k)])) for p in roots)
     return {
         "source": "fixture",
         "roots": len(roots),
