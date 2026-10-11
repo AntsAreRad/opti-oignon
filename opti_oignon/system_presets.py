@@ -126,7 +126,7 @@ def _parse_parameter_count(model_name: str, model_details: Any = None) -> float:
     Falls back to size-based estimation if no pattern found.
     """
     # Try to extract from model name
-    match = re.search(r'(\d+(?:\.\d+)?)\s*[bB]', model_name)
+    match = re.search(r'(?<!\d)(\d+(?:\.\d+)?)\s*[bB]', model_name)
     if match:
         return float(match.group(1))
 

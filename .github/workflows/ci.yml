@@ -183,6 +183,14 @@ jobs:
       # census by name.
       - name: Write census guard (every write a model reads back is gated, exempt or owed)
         run: python .github/scripts/write_census_guard.py
+
+      # A backtracking engine takes quadratic time or worse on a pattern that
+      # can split one run of characters more than one way, and a page or a
+      # model's answer can be long and steered. The guard pumps every literal
+      # pattern of the package and holds each module's superlinear ones to a
+      # ledger that may only shrink.
+      - name: Pattern cost guard (no regular expression is superlinear unless owed)
+        run: python .github/scripts/pattern_cost_guard.py
       - name: Run core-boundary guard (the resident core pulls nothing new)
         run: python .github/scripts/core_boundary_guard.py
 

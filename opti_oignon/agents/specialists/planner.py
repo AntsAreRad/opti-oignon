@@ -102,7 +102,8 @@ Decompose the task into:
         # Extract numbered items as steps
         steps = []
         import re
-        step_matches = re.findall(r'(\d+)[.):]\s*(.+?)(?=\n\d+[.):]\s*|\Z)', content, re.DOTALL)
+        # Linear on a long run: a number is read from its first digit only.
+        step_matches = re.findall(r'(?<!\d)(\d+)[.):]\s*(.+?)(?=\n\d+[.):]\s*|\Z)', content, re.DOTALL)
         for i, (num, desc) in enumerate(step_matches[:10]):  # Limit to 10 steps
             steps.append(Step(
                 number=int(num) if num.isdigit() else i + 1,

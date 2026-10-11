@@ -82,7 +82,7 @@ SUBSET = (
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+|$)")
-_ATX_CLOSE = re.compile(r"[ \t]+#+[ \t]*$")
+_ATX_CLOSE = re.compile(r"(?<![ \t])[ \t]+#+[ \t]*$")
 _SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 _BREAK = re.compile(r"^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")
 _LIST = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])(?:[ \t]+|$)")

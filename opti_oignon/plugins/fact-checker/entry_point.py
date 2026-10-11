@@ -64,9 +64,12 @@ _PROPER_NOUN_PATTERN = re.compile(
     r"(?:(?<=[.!?]\s)|(?<=,\s)|(?<=;\s)|(?<=\n))([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)"
 )
 
-# Named entity claims: "X founded Y", "X invented Y", "X is the capital of Y"
+# Named entity claims: "X founded Y", "X invented Y", "X is the capital of Y".
+# A claim starts at the first letter of a word: one starting inside a word
+# would have started a letter earlier, so the scan does not read a long word
+# again from each of its letters.
 _ENTITY_CLAIM_PATTERN = re.compile(
-    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+    r"(?<![A-Z])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
     r"\s+(?:founded|invented|discovered|created|developed|wrote|designed|built|is the (?:capital|president|CEO|founder|author) of)"
     r"\s+(.+?)(?:\.|,|;|\n|$)",
     re.IGNORECASE,

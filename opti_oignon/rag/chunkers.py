@@ -108,7 +108,7 @@ class CodeChunker(BaseChunker):
         re.MULTILINE
     )
     SECTION_PATTERN = re.compile(
-        r'^# [=]{10,}.*?\n# (.+?)\n# [=]{10,}',
+        r'^# ={10}[^\n]*\n# (.+?)\n# [=]{10,}',
         re.MULTILINE
     )
 
@@ -257,7 +257,7 @@ class RChunker(BaseChunker):
         re.MULTILINE
     )
     SECTION_PATTERN = re.compile(
-        r'^# [=]{10,}.*?\n# (.+?)\n# [=]{10,}',
+        r'^# ={10}[^\n]*\n# (.+?)\n# [=]{10,}',
         re.MULTILINE
     )
 
@@ -668,7 +668,8 @@ class ExcelChunker(BaseChunker):
         import re
 
         # Pattern to separate sheets: [Sheet: SheetName]
-        sheet_pattern = re.compile(r'\[Sheet:\s*([^\]]+)\]\n')
+        # Linear on a long run: the name starts at its first non-blank, or is the last blank when there is none.
+        sheet_pattern = re.compile(r'\[Sheet:\s*([^\]\s][^\]]*|\s)\]\n')
 
         # Trouver toutes les feuilles
         sheets = sheet_pattern.split(content)

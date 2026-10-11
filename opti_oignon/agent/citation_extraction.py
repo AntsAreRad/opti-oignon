@@ -88,7 +88,8 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 # A citation marker together with any whitespace immediately preceding it, so
 # stripping "mammals [1]." leaves "mammals." rather than "mammals .".
-_MARKER_WITH_LEAD_WS = re.compile(r"\s*\[\d+\]")
+# Linear on a long run: the blanks are read from the start of their run only.
+_MARKER_WITH_LEAD_WS = re.compile(r"(?:(?<!\s)\s+)?\[\d+\]")
 
 # Collapse any run of whitespace to a single space.
 _WS_RUN = re.compile(r"\s+")

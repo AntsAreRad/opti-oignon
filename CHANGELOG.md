@@ -11,6 +11,44 @@ package costs.
 
 ### Added
 
+- [SECURITY] The regular expressions a first census found taking more
+  than linear time on a long run of one character, on a page, a tool's
+  output, a model's answer or a reply's code, no longer do. Python's engine
+  backtracks: a pattern whose repeats could split one run in more than one
+  way, or whose leading repeat was tried again from every position of a
+  run, took quadratic time or worse -- the frame pattern the window and
+  its envelope share on any fetched page, the FILE blocks of a coding
+  reply in cubic time, the code fences, tags, citations and numbered lists
+  read from answers. Each such pattern is rewritten to read every run from
+  one place, and reads as before: the same matches and groups wherever a
+  caller reads them, or, for nine whose callers read less -- eight
+  line-start readers and the check of an rm outside the workspace -- what
+  those callers read: the same groups, the same answer. The FILE blocks
+  of a coding reply are read in one pass, giving the pairs the pattern
+  gave. A new merge guard, `pattern_cost_guard`, reads the patterns the
+  source fixes -- the
+  literals, and what constants, their loops and their joins build, under
+  any name `re` is imported as; one built by a call, from an argument or
+  from configuration it counts as dynamic and leaves to its module's
+  contracts -- pumps each unbounded repeat behind a
+  text that leads to it (a run of one character, that text repeated with
+  it, a round of its body repeated), times the reading at doubling lengths
+  in the mode its callers use, and fails on any superlinear pattern a
+  module does not owe; a verdict against its ledger counts when two of
+  three readings agree, so the noise of a machine neither fails a linear
+  pattern nor lets a superlinear one through. Not every
+  pattern is linear yet: the guard names 74 still owed, in 28 modules, by
+  digest, and the list may only shrink. Nearly all read an opening marker
+  up to a closing one with no closing one present; some are quadratic on
+  a run of one character -- the command checks of the sandbox, the
+  language detection of code, keyword pairs read across a message -- and
+  one, the backtick span the fact checker reads in an answer, is cubic.
+  Three more are owed outside the list, since a character code builds
+  them and the guard counts them as dynamic: the date forms the probes of
+  a peel read are quadratic on a long word.
+  The window also defangs a frame opening or an envelope bracket left
+  open at a segment's end, which the segment after it could have
+  finished.
 - [SECURITY] A peel of the onion no longer copies the user's words into
   its text. It holds the librarian's summary and references: each whole
   segment the user typed that it keeps, by its turn, its place and the

@@ -29,6 +29,7 @@ Security:
 Author: Leon
 """
 
+import bisect
 import hashlib
 import logging
 import re
@@ -186,6 +187,88 @@ except ImportError:
 _TURN_POLL_S = 0.1
 
 CHAT_CODING_AVAILABLE = SANDBOX_AVAILABLE and FILE_TOOLS_AVAILABLE
+
+# ---------------------------------------------------------------------------
+# File blocks of a reply
+# ---------------------------------------------------------------------------
+
+_FILE_HEAD = re.compile(r"---\s*FILE:")
+_FILE_END = re.compile(r"---\s*END\s*FILE\s*---")
+
+
+def _file_blocks(text: str) -> list[tuple[str, str]]:
+    """The (path, content) pairs of the FILE blocks of a reply, in order, read in one pass.
+
+    The same pairs the pattern ``---\\s*FILE:\\s*(.+?)\\s*---\\s*\\n(.*?)---\\s*END\\s*FILE\\s*---`` (dot
+    matching line breaks) finds with ``findall``; that pattern splits one run of characters many ways when a
+    head has no block that can close after it, and took cubic time on such a reply. Read here:
+
+    * a block opens where ``---\\s*FILE:`` matches, the reading going on from the end of the last block, or one
+      character past a head that opened nothing;
+    * its path starts at the first character after the head that is not a space, and ends where the first
+      ``---`` after that character starts among those followed by a run of spaces holding a line break and,
+      later, an end marker (``---\\s*END\\s*FILE\\s*---``), the spaces before that ``---`` left out; its
+      content runs from the last line break of that run to the first end marker after it;
+    * when no such ``---`` follows, a head whose spaces are followed by such a ``---`` itself opens a block whose
+      path is the last of those spaces.
+    """
+    size = len(text)
+    ends = []
+    at = text.find("---")
+    while at != -1:
+        found = _FILE_END.match(text, at)
+        if found:
+            ends.append((at, found.end()))
+        at = text.find("---", at + 1)
+    starts = [start for start, _end in ends]
+
+    def end_after(position):
+        index = bisect.bisect_left(starts, position)
+        return ends[index] if index < len(ends) else None
+
+    def closing(position):
+        if text[position:position + 3] != "---":
+            return None
+        run_end = position + 3
+        while run_end < size and text[run_end].isspace():
+            run_end += 1
+        last_break = text.rfind("\n", position + 3, run_end)
+        if last_break == -1:
+            return None
+        marker = end_after(last_break + 1)
+        return None if marker is None else (last_break + 1, marker)
+
+    next_closing = [None] * (size + 2)
+    for position in range(size, -1, -1):
+        here = closing(position) if position < size else None
+        next_closing[position] = (position, here) if here is not None else next_closing[position + 1]
+
+    pairs = []
+    position = 0
+    while True:
+        head = _FILE_HEAD.search(text, position)
+        if head is None:
+            return pairs
+        after = head.end()
+        first = after
+        while first < size and text[first].isspace():
+            first += 1
+        found = next_closing[first + 1] if first + 1 <= size else None
+        if first < size and found is not None:
+            dashes, (content_start, (marker_start, marker_end)) = found
+            path_end = dashes
+            while path_end > first + 1 and text[path_end - 1].isspace():
+                path_end -= 1
+            pairs.append((text[first:path_end], text[content_start:marker_start]))
+            position = marker_end
+            continue
+        here = closing(first) if after < first < size else None
+        if here is not None:
+            content_start, (marker_start, marker_end) = here
+            pairs.append((text[first - 1:first], text[content_start:marker_start]))
+            position = marker_end
+            continue
+        position = head.start() + 1
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -1236,11 +1319,7 @@ class ChatCodingSession:
 
         # Parse file blocks from the response
         files_written = []
-        file_pattern = re.compile(
-            r"---\s*FILE:\s*(.+?)\s*---\s*\n(.*?)---\s*END\s*FILE\s*---",
-            re.DOTALL,
-        )
-        matches = file_pattern.findall(response)
+        matches = _file_blocks(response)
 
         for filepath, content in matches:
             filepath = filepath.strip()
@@ -1394,11 +1473,7 @@ class ChatCodingSession:
                 return False
 
             # Apply fixes
-            file_pattern = re.compile(
-                r"---\s*FILE:\s*(.+?)\s*---\s*\n(.*?)---\s*END\s*FILE\s*---",
-                re.DOTALL,
-            )
-            matches = file_pattern.findall(response)
+            matches = _file_blocks(response)
             for filepath, content in matches:
                 filepath = filepath.strip()
                 content = content.strip()

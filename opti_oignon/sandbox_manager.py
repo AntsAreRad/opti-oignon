@@ -994,7 +994,8 @@ class CommandValidator:
         # regardless of config contents
 
         # Prevent rm targeting root or absolute paths outside workspace
-        if re.search(r"\brm\b.*\s+/(?!workspace)", command):
+        # Linear on a long run: the blanks before the slash are read from the start of their run.
+        if re.search(r"\brm\b(?:.*\S)?\s+/(?!workspace)", command):
             return False, "rm targeting paths outside /workspace"
 
         # Block eval/exec with network or OS calls

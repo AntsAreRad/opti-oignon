@@ -44,7 +44,8 @@ logger = logging.getLogger(__name__)
 # captured group, which preserves the previous trailing/leading-whitespace
 # trimming behaviour.
 _FENCE_PATTERN = re.compile(
-    r"```(?:json|JSON|js|javascript)?[ \t]*\n?(.*?)```",
+    # Linear on a long run: the blanks and line break after the tag read one way.
+    r"```(?:json|JSON|js|javascript)?[ \t]*(?![ \t])(?:\n|(?!\n))(.*?)```",
     re.DOTALL,
 )
 
@@ -401,7 +402,7 @@ def fix_missing_closing(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 _NUMBERED_STEP_PATTERN = re.compile(
-    r"^\s*(\d+)\.\s+(.+?)$", re.MULTILINE
+    r"^[^\S\n]*(\d+)\.\s+(.+?)$", re.MULTILINE
 )
 
 

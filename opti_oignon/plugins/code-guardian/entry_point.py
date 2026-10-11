@@ -48,7 +48,8 @@ _LANGUAGE_ALIASES: dict[str, str] = {
 
 # Match fenced code blocks: ```lang\n...code...\n```
 _CODE_BLOCK_RE = re.compile(
-    r"```(\w*)\s*\n(.*?)```",
+    # Linear on a long run: the code starts after the last line break of the blanks.
+    r"```(\w*)\s*\n(?![^\S\n]*\n)(.*?)```",
     re.DOTALL,
 )
 

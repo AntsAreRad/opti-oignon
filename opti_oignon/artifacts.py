@@ -160,7 +160,7 @@ _ARTIFACT_INDICATORS = {
         re.compile(r"^[\w\"'].+[,;|\t]", re.MULTILINE),
     ],
     "json": [
-        re.compile(r"^\s*[\[{]", re.MULTILINE),
+        re.compile(r"^[^\S\n]*[\[{]", re.MULTILINE),
     ],
     "markdown": [
         re.compile(r"^#\s+", re.MULTILINE),
@@ -169,7 +169,8 @@ _ARTIFACT_INDICATORS = {
 
 # Code block regex (same as in code_executor)
 _CODE_BLOCK_RE = re.compile(
-    r"```(\w*)\s*\n(.*?)```",
+    # Linear on a long run: the code starts after the last line break of the blanks.
+    r"```(\w*)\s*\n(?![^\S\n]*\n)(.*?)```",
     re.DOTALL,
 )
 

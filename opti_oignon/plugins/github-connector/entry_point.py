@@ -667,7 +667,8 @@ def route_command(user_input: str, ctx: Any) -> dict[str, Any] | None:
 
 # Patterns: owner/repo#123, #123 (with default_repo), full URLs
 _REF_OWNER_REPO_ISSUE = re.compile(
-    r"(?<!\w)([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)"
+    # Linear on a long run: a start after a dot or a dash that could itself start is skipped.
+    r"(?<!\w)(?:(?<![.-])|(?<=\w[.-]))([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)"
 )
 _REF_BARE_ISSUE = re.compile(
     r"(?<!\w)#(\d+)(?!\w)"

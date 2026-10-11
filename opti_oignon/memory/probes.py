@@ -3030,7 +3030,8 @@ def _orders_in(text, table, names):
                     if forms:
                         found.append((piece, "".join(sorted(forms)), chunk, question, sentence))
         tail = prose.rstrip()
-        label = re.split(r"[.!?;:]\s+|\s*\n\s*", tail[:-1])[-1] if tail.endswith(":") else ""
+        # Linear on a long run: a break's blanks are read from the start of their run only.
+        label = re.split(r"[.!?;:]\s+|(?<!\s)\s*\n\s*", tail[:-1])[-1] if tail.endswith(":") else ""
         carry = (bool(label) and _addresses(label, table)) or addressed
     return found
 

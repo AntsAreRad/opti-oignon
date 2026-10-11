@@ -698,7 +698,7 @@ class DomainTermsTracker:
 # ---------------------------------------------------------------------------
 
 _PYTHON_IMPORT = re.compile(
-    r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.MULTILINE
+    r"^[^\S\n]*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.MULTILINE
 )
 
 

@@ -37,19 +37,17 @@ _CONFIG = Path(__file__).resolve().parent.parent / "config" / "onion.yaml"
 # Only ``render`` writes frames, so one found in a text was forged there and is
 # defanged; a bracket holding the bare word is ordinary code and stays.
 _FRAME_RE = re.compile(
-    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data\s*[:\s]\s*[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
+    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data(?:\s*:\s*|\s+)[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
     re.IGNORECASE,
 )
 _FRAME_REDACTED = "[redacted-frame-marker]"
 # The start of a marker left open at the very end of a text: segments are
 # joined by blank lines, which a marker may hold, so ``[data`` closing one
-# segment and ``]`` opening the next would make a frame between them.
-_FRAME_TAIL_RE = re.compile(r"\[\s*(?:/\s*)?(?:data\s*)?$", re.IGNORECASE)
-# The same start, an opening read on up to its first attribute's name, whose
-# sign the part after it may hold: what ``defanged`` reads at a text's end.
-# Its spaces are read one way only, so a long run of them costs their length,
-# not its square.
-_FRAME_START_RE = re.compile(r"\[\s*(?:/\s*)?(?:data(?:(?:\s*:\s*|\s+)(?:[\"']?\w+[\"']?\s*)?)?)?$", re.IGNORECASE)
+# segment and ``]`` opening the next would make a frame between them. An
+# opening is read on up to its first attribute's name, whose sign the next
+# segment may hold. Its spaces are read one way only, so a long run of them
+# costs their length, not its square.
+_FRAME_TAIL_RE = re.compile(r"\[\s*(?:/\s*)?(?:data(?:(?:\s*:\s*|\s+)(?:[\"']?\w+[\"']?\s*)?)?)?$", re.IGNORECASE)
 # What a frame header may carry from a tag: no bracket, no line break.
 _TAG_UNSAFE = re.compile(r"[\[\]\r\n]")
 # The head of a frame marker -- the closing tag, closed at once or not, or the
@@ -94,7 +92,7 @@ def defanged(text):
         return sub
 
     text = _FRAME_HEAD_RE.sub(counted(_FRAME_REDACTED), str(text))
-    text = _FRAME_START_RE.sub(counted(_FRAME_REDACTED), text)
+    text = _FRAME_TAIL_RE.sub(counted(_FRAME_REDACTED), text)
     text = _ENVELOPE_HEAD_RE.sub(counted(_ENVELOPE_REDACTED), text)
     text = _ENVELOPE_TAIL_RE.sub(counted(_ENVELOPE_REDACTED), text)
     return text, count
@@ -196,12 +194,14 @@ class Prompt:
         frames in the window are the ones written here. Nor does one hold the
         name of the envelope's tag, which the wrapper reads a marker from up to
         its next ``>``: the names are defanged here, each alone, so no segment
-        takes the bytes of the next ones with it.
+        takes the bytes of the next ones with it; nor the start of either
+        marker left open at its end, which the next segment -- the turn after
+        the Core, with no frame between them -- could finish.
         """
         parts = []
         for seg in self.segments:
             text = _FRAME_TAIL_RE.sub(_FRAME_REDACTED, _FRAME_RE.sub(_FRAME_REDACTED, str(seg.text)))
-            text = _ENVELOPE_HEAD_RE.sub(_ENVELOPE_REDACTED, text)
+            text = _ENVELOPE_TAIL_RE.sub(_ENVELOPE_REDACTED, _ENVELOPE_HEAD_RE.sub(_ENVELOPE_REDACTED, text))
             if seg.instruction_bearing:
                 parts.append(text)
             else:

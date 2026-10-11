@@ -69,7 +69,8 @@ class ExecutionResult:
 # Handles: optional leading spaces, language tag with special chars (c++, c#),
 # optional newline after language tag, alternative fence styles.
 _CODE_BLOCK_RE = re.compile(
-    r"[ \t]*```([^\n`]*?)[ \t]*\n(.*?)[ \t]*```",
+    # Linear on a long run: blanks from their start, the tag to its last non-blank, the code to an unblanked fence.
+    r"(?:(?<![ \t])[ \t]+)?```((?:[^\n`]*[^\n` \t])?)[ \t]*\n(.*?)(?<![ \t])[ \t]*```",
     re.DOTALL,
 )
 

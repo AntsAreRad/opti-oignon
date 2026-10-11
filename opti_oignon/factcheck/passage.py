@@ -79,7 +79,7 @@ _BOUNDARY = re.compile(BOUNDARY)
 _INITIAL = re.compile(r"(?<![^\W_])[^\W\d_]\.$")
 _SHORT_CAPITAL = re.compile(r"(?<![^\W_])([^\W\d_]{1,3})\.$")
 _ROMAN = re.compile(r"^[IVXLCDM]{2,}$")
-_DOTTED = re.compile(r"(?:[^\W\d_]+\.)+$")
+_DOTTED = re.compile(r"(?<![^\W\d_])(?<![^\W\d_]\.)(?:[^\W\d_]+\.)+$")
 _SINGLE_WORD = frozenset(a for a in ABBREVIATIONS if " " not in a)
 _SEVERAL_WORDS = tuple(a for a in ABBREVIATIONS if " " in a)
 

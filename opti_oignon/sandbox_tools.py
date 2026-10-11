@@ -138,7 +138,8 @@ _VOID_ELEMENTS = frozenset(
 )
 _SVELTE_BLOCK_KINDS = ("if", "each", "await", "key", "snippet")
 _TAG_RE = re.compile(
-    r"<\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)((?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)(/?)\s*>"
+    # Linear on a long run: the name read whole, the attributes ending where no blank precedes the end.
+    r"<\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)(?![A-Za-z0-9:._-])((?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)(/?)(?<!\s)\s*>"
 )
 _SCRIPT_STYLE_RE = re.compile(
     r"(<(script|style)\b[^>]*>).*?(</\2\s*>)", re.IGNORECASE | re.DOTALL

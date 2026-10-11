@@ -55,7 +55,8 @@ DEFAULT_PATTERNS = [
 
 # Numbered step pattern: "1. Do something", "1) Do something"
 _NUMBERED_STEP_RE = re.compile(
-    r"(?:^|\n)\s*\d+[.)]\s+(.+?)(?=\n\s*\d+[.)]|\n\n|\Z)",
+    # Linear on a long run: the blanks before a number stay on its line; the step read is the same.
+    r"(?:^|\n)[^\S\n]*\d+[.)]\s+(.+?)(?=\n\s*\d+[.)]|\n\n|\Z)",
     re.DOTALL,
 )
 

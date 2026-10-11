@@ -186,7 +186,7 @@ _DELIM_RE = re.compile(r"</?\s*untrusted_data\b[^>]*>?", re.IGNORECASE)
 # first attribute. A bracket holding the bare word -- an index, a list, a
 # section header, a link text -- is ordinary code or prose and is left alone.
 _FRAME_RE = re.compile(
-    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data\s*[:\s]\s*[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
+    r"\[\s*/\s*data(?:\s*\]|\s+[^\]\n]*\]?)|\[\s*data(?:\s*:\s*|\s+)[\"']?\w+[\"']?\s*=[^\]\n]*\]?",
     re.IGNORECASE,
 )
 FRAME_MARKER_REDACTED = "[redacted-frame-marker]"

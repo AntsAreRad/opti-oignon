@@ -342,7 +342,7 @@ def compute_heuristic_compliance(
         if instr.startswith("format:"):
             fmt = instr.split(":", 1)[1].strip()
             if fmt in ("en liste", "as a list", "bullet points", "a list of", "une liste"):
-                has_list = bool(re.search(r"[\-\*]\s", response) or re.search(r"\d+\.\s", response))
+                has_list = bool(re.search(r"[\-\*]\s", response) or re.search(r"(?<!\d)\d+\.\s", response))
                 satisfied = has_list
                 explanation = "List format detected" if has_list else "No list format found"
             elif fmt in ("en tableau", "as a table"):

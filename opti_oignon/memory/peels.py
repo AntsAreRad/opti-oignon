@@ -1434,7 +1434,9 @@ def _lowered_turns(span):
 # The innermost bracketed run of a text, by any opening and closing mark a
 # marker could be dressed in: every bracket and quotation mark Unicode names
 # (categories Ps, Pe, Pi, Pf) and the angle brackets of ASCII, built once on
-# first use.
+# first use. The blanks before it are read from the start of their run only:
+# a run of them costs its length, not its square, and a match starts where it
+# did, since one starting inside a run would have started at its start.
 _BRACKETED = []
 # The controls of bidirectional text -- marks, embeddings, overrides,
 # isolates -- each of which makes a run display in another order than the one
@@ -1449,7 +1451,7 @@ def _bracketed():
         opening = "<" + "".join(chr(c) for c in range(0x10000) if unicodedata.category(chr(c)) in ("Ps", "Pi"))
         closing = ">" + "".join(chr(c) for c in range(0x10000) if unicodedata.category(chr(c)) in ("Pe", "Pf"))
         _BRACKETED.append(re.compile(
-            r"[ \t]*[" + re.escape(opening) + r"]([^" + re.escape(opening + closing) + r"]*)["
+            r"(?:(?<![ \t])[ \t]+)?[" + re.escape(opening) + r"]([^" + re.escape(opening + closing) + r"]*)["
             + re.escape(closing) + r"][ \t]*"
         ))
     return _BRACKETED[0]

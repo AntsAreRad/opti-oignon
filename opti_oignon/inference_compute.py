@@ -32,7 +32,7 @@ from pathlib import Path
 checkpoint_before_apply = True
 
 _CONFIG = Path(__file__).resolve().parent / "config" / "inference_compute.yaml"
-_SUMMARY = re.compile(r"(\d+)\s+(passed|failed|error|errors)\b")
+_SUMMARY = re.compile(r"(?<!\d)(\d+)\s+(passed|failed|error|errors)\b")
 
 
 class ComputeBudgetError(ValueError):

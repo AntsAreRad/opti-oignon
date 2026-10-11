@@ -86,17 +86,17 @@ def extract_code_blocks(text: str) -> list[dict[str, Any]]:
 # =========================================================================
 
 # Python: def name(...), class Name
-_PY_DEF_RE = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
+_PY_DEF_RE = re.compile(r"^[^\S\n]*(?:def|class)\s+(\w+)", re.MULTILINE)
 # JavaScript/TypeScript: function name(, const name =, class Name
 _JS_DEF_RE = re.compile(
-    r"^\s*(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=|class\s+(\w+))",
+    r"^[^\S\n]*(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=|class\s+(\w+))",
     re.MULTILINE,
 )
 # R: name <- function
-_R_DEF_RE = re.compile(r"^\s*(\w+)\s*<-\s*function", re.MULTILINE)
+_R_DEF_RE = re.compile(r"^[^\S\n]*(\w+)\s*<-\s*function", re.MULTILINE)
 # Rust/Go/Java: fn name(, func name(, void/int/... name(
 _GENERIC_FUNC_RE = re.compile(
-    r"^\s*(?:fn|func|pub\s+fn|pub\s+func)\s+(\w+)",
+    r"^[^\S\n]*(?:fn|func|pub\s+fn|pub\s+func)\s+(\w+)",
     re.MULTILINE,
 )
 
