@@ -120,7 +120,13 @@ Each flagged fact must carry a confidence in [0, 1]; only high-confidence flags 
 """
 
 _FENCE_RE = re.compile(r"```(?:json)?", re.IGNORECASE)
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Linear on an opening left open: one with no closing after it takes the rest at once -- no opening after it can
+# close -- and is kept, as only a block that reached its closing sets ``real``.
+_THINK_RE = re.compile(r"<think>(?:.*?</think>(?P<real>)|.*)", re.DOTALL | re.IGNORECASE)
+
+
+def _drop_closed(match: re.Match) -> str:
+    return "" if match.group("real") is not None else match.group(0)
 
 
 @dataclass
@@ -182,7 +188,7 @@ def parse_curation_response(raw: str) -> list[tuple[str, float]]:
     """
     if not raw:
         return []
-    cleaned = _THINK_RE.sub("", raw)
+    cleaned = _THINK_RE.sub(_drop_closed, raw)
     cleaned = _FENCE_RE.sub("", cleaned)
 
     obj_start = cleaned.find("{")

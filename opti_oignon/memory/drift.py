@@ -39,15 +39,132 @@ _LEMMA = {
     "prefers": "prefer", "prefer": "prefer", "likes": "like", "like": "like",
 }
 
-_STATEMENT = re.compile(
-    r"^\s*(?P<subject>.+?)\s+"
-    r"(?P<neg>does not |do not |did not |is not |are not |was not |never )?"
-    r"(?P<verb>lives?|works?|is|are|was|were|prefers?|likes?)"
-    r"(?:\s+(?P<particle>in|at|on|called|born on))?"
-    r"\s+(?P<object>.+?)\s*\.?\s*$",
-    re.IGNORECASE,
-)
 _VALUE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d+(?:[.,]\d+)?\b")
+
+# The words of a statement, each in the order the statement pattern tried them (a verb with its "s" first).
+_NEGATIONS = tuple(re.compile(re.escape(word), re.IGNORECASE) for word in (
+    "does not ", "do not ", "did not ", "is not ", "are not ", "was not ", "never "))
+_VERBS = tuple(re.compile(re.escape(word), re.IGNORECASE) for word in (
+    "lives", "live", "works", "work", "is", "are", "was", "were", "prefers", "prefer", "likes", "like"))
+_PARTICLES = tuple(re.compile(re.escape(word), re.IGNORECASE) for word in ("in", "at", "on", "called", "born on"))
+
+
+class _Statement:
+    """The groups of a statement read by ``_statement``, as a match of the statement pattern gave them."""
+
+    def __init__(self, text, spans):
+        self._text, self._spans = text, spans
+
+    def group(self, name):
+        span = self._spans[name]
+        return None if span is None else self._text[span[0]:span[1]]
+
+    def start(self, name):
+        span = self._spans[name]
+        return -1 if span is None else span[0]
+
+    def end(self, name):
+        span = self._spans[name]
+        return -1 if span is None else span[1]
+
+
+def _statement(text):
+    """What ``re.match`` gave ``text`` with the statement pattern, in time linear in the text, or None.
+
+    The pattern, IGNORECASE: ``^\\s*(?P<subject>.+?)\\s+(?P<neg>does not |do not |did not |is not |are not |was not
+    |never )?(?P<verb>lives?|works?|is|are|was|were|prefers?|likes?)(?:\\s+(?P<particle>in|at|on|called|born on))?
+    \\s+(?P<object>.+?)\\s*\\.?\\s*$`` (written on one line). It tried every split of the leading blanks, every end of
+    the subject and every end of the object, the last against the tail each time: cubic in the length. Here each
+    choice is tried in the pattern's order, and what does not depend on the earlier ones is read once:
+
+      * the tail ``\\s*\\.?\\s*$`` matches from every place from ``tail`` on and from none before, so an object from
+        ``o`` ends at ``max(o + 1, tail)`` and holds no line break before it;
+      * the words after the subject start where its blanks end, so what follows -- negation, verb, particle,
+        object, each word in its order -- depends on that place only, and is read once per place;
+      * the subject from the end of the leading blanks is tried end by end; were none to hold, a subject of one
+        blank ends where the next blank stands, and from there the words start where the leading blanks end.
+    """
+    size = len(text)
+    run = [size] * (size + 1)  # run[i]: where the blanks from i end (i itself when text[i] is no blank)
+    for at in range(size - 1, -1, -1):
+        run[at] = run[at + 1] if text[at].isspace() else at
+    tail = size
+    while tail > 0 and text[tail - 1].isspace():
+        tail -= 1
+    if tail > 0 and text[tail - 1] == ".":
+        tail -= 1
+    while tail > 0 and text[tail - 1].isspace():
+        tail -= 1
+    last_break = text.rfind("\n", 0, tail)
+
+    def object_from(low, high):
+        """The object whose blanks before it are cut first at their end, then shorter: the last start that holds."""
+        for start in range(high, low - 1, -1):
+            if start >= tail:
+                if start < size and text[start] != "\n":
+                    return start, start + 1
+            elif start > last_break:
+                return start, tail
+            else:
+                return None
+        return None
+
+    rests = {}
+
+    def rest(place):
+        """(negation, verb, particle, object) spans read from ``place``, where the words start, or None."""
+        if place in rests:
+            return rests[place]
+        found = None
+        for negation in _NEGATIONS + (None,):
+            word = place
+            if negation is not None:
+                read = negation.match(text, place)
+                if read is None:
+                    continue
+                word = read.end()
+            for verb in _VERBS:
+                read = verb.match(text, word)
+                if read is None or read.end() >= size or not text[read.end()].isspace():
+                    continue
+                after = read.end()
+                for particle in _PARTICLES:
+                    named = particle.match(text, run[after])
+                    if named is not None and named.end() < size and text[named.end()].isspace():
+                        held = object_from(named.end() + 1, run[named.end()])
+                        if held is not None:
+                            found = ((place, word) if negation else None, (word, after), named.span(), held)
+                            break
+                if found is None:
+                    held = object_from(after + 1, run[after])
+                    if held is not None:
+                        found = ((place, word) if negation else None, (word, after), None, held)
+                if found is not None:
+                    break
+            if found is not None:
+                break
+        rests[place] = found
+        return found
+
+    def made(subject, parts):
+        negation, verb, particle, held = parts
+        return _Statement(text, {"subject": subject, "neg": negation, "verb": verb, "particle": particle,
+                                 "object": held})
+
+    lead = run[0]
+    stop = text.find("\n", lead)
+    stop = size - 1 if stop == -1 else min(stop, size - 1)
+    for end in range(lead + 1, stop + 1):
+        if text[end].isspace():
+            parts = rest(run[end])
+            if parts is not None:
+                return made((lead, end), parts)
+    parts = rest(lead) if lead >= 2 else None
+    if parts is not None:
+        for start in range(lead - 2, -1, -1):
+            if text[start] != "\n":
+                return made((start, start + 1), parts)
+    return None
 
 
 @dataclass(frozen=True)
@@ -159,7 +276,7 @@ class _Claim:
 
 
 def _parse(statement):
-    m = _STATEMENT.match(statement or "")
+    m = _statement(statement or "")
     if not m:
         return None
     verb = _LEMMA.get(m.group("verb").lower(), m.group("verb").lower())
@@ -239,7 +356,7 @@ def inject_contradictions(facts, count):
         claim = _parse(text)
         if claim is None or claim.negated:
             continue
-        m = _STATEMENT.match(text)
+        m = _statement(text)
         head = text[: m.start("object")]
         if claim.value:
             injected = head + text[m.start("object"):].replace(claim.value, _shift_value(claim.value), 1)

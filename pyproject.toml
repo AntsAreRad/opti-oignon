@@ -878,6 +878,16 @@ fail_under = 0
 # owes 42 in 25 modules: pg24 gives way to pg44 in the same file, the same
 # checks under the lowered ceiling. It stays in the tree word for word.
 #
+# eq5 and eq6 of tests/test_linear_patterns_contracts.py held the sheet,
+# tag and claim readers to the patterns they replaced, match for match. Those
+# readers now take at once a run left open, where every start fails alike,
+# and mark their real matches: eq5 and eq6 give way to eq24 and eq25 in the
+# same file, the same readers held to the same patterns through what their
+# callers keep. pg44 of tests/test_pattern_cost_guard_contracts.py held the
+# guard's ledger to 42 superlinear patterns; every one now reads in linear
+# time, and pg44 gives way to pg46, which holds the ledger empty. They stay
+# in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1205,4 +1215,7 @@ addopts = """
     --deselect=tests/test_onion_store_contracts.py::test_os12_a_file_of_a_newer_schema_is_refused_by_name_and_left_as_it_was
     --deselect=tests/property/test_queue_property_contracts.py::test_qp1_every_step_evicts_its_span_and_every_peel_it_makes_passes_both_faces_of_the_gate
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg24_the_ledger_never_owes_more_than_it_owed_when_it_was_written
+    --deselect=tests/test_linear_patterns_contracts.py::test_eq5_the_section_sheet_repository_and_tag_readers_read_as_before
+    --deselect=tests/test_linear_patterns_contracts.py::test_eq6_the_claim_reader_reads_as_before_and_the_rm_check_answers_as_before
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg44_the_ledger_never_owes_more_than_it_owes_now_that_thirty_two_patterns_are_linear
 """

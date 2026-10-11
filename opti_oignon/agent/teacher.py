@@ -282,7 +282,9 @@ _TEACHER_SYSTEM = (
 
 # A fenced block explicitly opened with ```skill. Deliberately strict so an
 # ordinary code fence in the guidance is never mistaken for a skill draft.
-_SKILL_FENCE_RE = re.compile(r"```skill\b[^\n]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+# Linear on a fence left open: one with no line break after it, or no closing fence after its line, takes the rest
+# at once -- no fence after it can close either -- and only a block that reached its closing sets ``real``.
+_SKILL_FENCE_RE = re.compile(r"```skill\b(?:[^\n]*\n(?:(.*?)```(?P<real>)|.*)|.*)", re.DOTALL | re.IGNORECASE)
 _FIELD_RE_TMPL = r"^\s*{field}\s*:\s*(.+?)\s*$"
 _SLUG_RE = re.compile(r"[^a-z0-9_\-]+")
 
@@ -306,7 +308,7 @@ def extract_skill_draft(text: str) -> TeacherSkillDraft | None:
     if not text:
         return None
     m = _SKILL_FENCE_RE.search(text)
-    if not m:
+    if not m or m.group("real") is None:
         return None
     body = m.group(1).strip()
     if not body:

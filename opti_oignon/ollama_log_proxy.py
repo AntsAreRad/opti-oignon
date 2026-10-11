@@ -7,13 +7,11 @@ sensitive user messages, API keys, or PII.  This module:
 
   1. Detects the current Ollama logging configuration.
   2. Provides recommended environment variables per security mode.
-  3. Sanitizes log lines to strip potential PII/secrets.
-  4. Surfaces warnings in the health/security status endpoints when
+  3. Surfaces warnings in the health/security status endpoints when
      Ollama logging is unnecessarily verbose.
 
 This module does **not** modify the Ollama process directly -- it
-provides advisory recommendations and a sanitization filter that can
-be applied to captured log output.
+provides advisory recommendations.
 
 Configuration (security.yaml)
 ------------------------------
@@ -28,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -183,67 +180,6 @@ def get_ollama_env_recommendations(mode: str = "daily") -> dict[str, str]:
             "OLLAMA_DEBUG": "0",
             "OLLAMA_KEEP_ALIVE": "5m",
         }
-
-
-# ---------------------------------------------------------------------------
-# Log sanitization
-# ---------------------------------------------------------------------------
-
-# Patterns that likely contain sensitive content
-_SENSITIVE_PATTERNS = [
-    # API keys and tokens
-    re.compile(r"(api[_-]?key|token|secret|password|auth)\s*[:=]\s*\S+", re.IGNORECASE),
-    # Email addresses
-    re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
-    # Credit card-like numbers (13-19 digits)
-    re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{1,7}\b"),
-    # SSN-like patterns
-    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    # Phone numbers (various formats)
-    re.compile(r"\b\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b"),
-    # Long base64 strings (potential keys/tokens, >= 32 chars)
-    re.compile(r"\b[A-Za-z0-9+/]{32,}={0,2}\b"),
-    # Bearer tokens
-    re.compile(r"Bearer\s+\S+", re.IGNORECASE),
-]
-
-# Prompt content markers in Ollama logs
-_PROMPT_MARKERS = [
-    re.compile(r'"prompt"\s*:\s*"[^"]*"', re.IGNORECASE),
-    re.compile(r'"content"\s*:\s*"[^"]*"', re.IGNORECASE),
-    re.compile(r'"system"\s*:\s*"[^"]*"', re.IGNORECASE),
-]
-
-_REDACTION = "[REDACTED]"
-
-
-def sanitize_ollama_prompt_log(text: str) -> str:
-    """Strip PII, secrets, and prompt content from Ollama log lines.
-
-    Parameters
-    ----------
-    text : str
-        Raw log line or block from Ollama.
-
-    Returns
-    -------
-    str
-        Sanitized text with sensitive content replaced by ``[REDACTED]``.
-    """
-    if not text:
-        return text
-
-    result = text
-
-    # Redact prompt content fields
-    for pattern in _PROMPT_MARKERS:
-        result = pattern.sub(_REDACTION, result)
-
-    # Redact sensitive patterns
-    for pattern in _SENSITIVE_PATTERNS:
-        result = pattern.sub(_REDACTION, result)
-
-    return result
 
 
 # ---------------------------------------------------------------------------

@@ -150,7 +150,10 @@ _INJECTION_MARKERS = [
     (r"system\s*:\s*", "system_prefix"),
     (r"\[INST\]", "inst_tag"),
     (r"<\|im_start\|>", "im_start_tag"),
-    (r"forget\s+(?:everything|all|your)\s+(?:\w+\s+)*(instructions|rules|guidelines)", "forget_rules"),
+    # The words between are read up to the next word that holds another "forget ...": a match is found where one
+    # was, from the last such start before its rule word, in linear time (the rule is applied to documents).
+    (r"forget\s+(?:everything|all|your)\s+(?:(?!\w*forget\s+(?:everything|all|your)\s)\w+\s+)*"
+     r"(instructions|rules|guidelines)", "forget_rules"),
     (r"new\s+instructions?\s*:", "new_instructions"),
     (r"override\s+(safety|content|system)", "override_safety"),
     (r"act\s+as\s+if\s+you\s+(have\s+)?no\s+(restrictions|rules|limits)", "no_restrictions"),
@@ -173,8 +176,11 @@ def _generate_pattern_from_payload(payload: str) -> tuple[str, str] | None:
         fragment = re.escape("```") + r"\s*(system|admin|root)"
         return fragment, "backtick_system"
 
-    if re.search(r"</?(?:system|admin|root|override)[^>]*>", payload, re.IGNORECASE):
-        return r"</?(?:system|admin|root|override)[^>]*>", "xml_system_tag"
+    # A tag's run stops at the next "<" and its ">" may be missing, so every opening is read from its own run, in
+    # linear time (the rule is applied to documents): a tag with no "<" inside reads as it did, and an opening
+    # left without ">" is now read too.
+    if re.search(r"</?(?:system|admin|root|override)[^<>]*>?", payload, re.IGNORECASE):
+        return r"</?(?:system|admin|root|override)[^<>]*>?", "xml_system_tag"
 
     return None
 

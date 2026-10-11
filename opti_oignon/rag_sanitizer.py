@@ -100,12 +100,96 @@ _INVISIBLE_CHARS = re.compile(
     r"\ufe00\ufe01\ufe02\ufe03\ufe04\ufe05\ufe06\ufe07"
     r"\ufe08\ufe09\ufe0a\ufe0b\ufe0c\ufe0d\ufe0e\ufe0f]"
 )
-_HIDDEN_CSS = re.compile(
+# The hidden-CSS forms but one, and the head of that one, ``color: rgba(``, which ``_HiddenCss`` reads.
+_HIDDEN_CSS_FIXED = re.compile(
     r"(?i)(display\s*:\s*none|visibility\s*:\s*hidden|"
     r"font-size\s*:\s*0|opacity\s*:\s*0|"
     r"position\s*:\s*absolute\s*;\s*left\s*:\s*-\d+|"
-    r"color\s*:\s*(?:white|#fff(?:fff)?|rgba\([^)]*,\s*0\s*\)))",
+    r"color\s*:\s*(?:white|#fff(?:fff)?))",
 )
+_HIDDEN_RGBA_HEAD = re.compile(r"(?i)color\s*:\s*rgba\(")
+
+
+def _zero_alpha_comma(text: str, close: int) -> int | None:
+    """Where the comma of ``,\\s*0\\s*`` ending right before ``text[close]`` stands, or None when none does."""
+    at = close
+    while at > 0 and text[at - 1].isspace():
+        at -= 1
+    if at == 0 or text[at - 1] != "0":
+        return None
+    at -= 1
+    while at > 0 and text[at - 1].isspace():
+        at -= 1
+    return at - 1 if at > 0 and text[at - 1] == "," else None
+
+
+class _HiddenCss:
+    """The hidden-CSS stripper: the spans, and the replacement, of the one pattern
+    ``(?i)(display\\s*:\\s*none|visibility\\s*:\\s*hidden|font-size\\s*:\\s*0|opacity\\s*:\\s*0|``
+    ``position\\s*:\\s*absolute\\s*;\\s*left\\s*:\\s*-\\d+|color\\s*:\\s*(?:white|#fff(?:fff)?|rgba\\([^)]*,\\s*0\\s*\\)))``,
+    in time linear in the text.
+
+    That pattern read the arguments of ``color: rgba(`` again from every such head of a run with no ``)``, and no
+    single pattern can take the run at once: another form may start inside it. So the other forms are one pattern,
+    searched once per stretch, and the ``rgba(`` form is read here: its arguments end at the first ``)`` after its
+    head, and whether they end in ``, 0`` is read once per ``)``. At one place at most one form matches -- each
+    starts on its own word, and the colours on their own character -- so the first match is the first of the two.
+    """
+
+    def spans(self, text: str):
+        """Each match as ``(start, end)``, as ``finditer`` gave them."""
+        fixed = None  # (searched from, start of what was found or -1, the match or None)
+        colour = None  # (searched from, start of what was found or -1, (start, end) or None)
+        close = (0, -2)  # (searched from, the next ")" from there or -1); -2 before any search
+        commas: dict[int, int | None] = {}
+
+        def colour_from(at):
+            nonlocal close
+            while True:
+                head = _HIDDEN_RGBA_HEAD.search(text, at)
+                if head is None:
+                    return None
+                args = head.end()
+                if not (close[0] <= args and (close[1] == -1 or args <= close[1])):
+                    close = (args, text.find(")", args))
+                if close[1] == -1:
+                    return None  # no ")" after this head, so none after any head after it
+                if close[1] not in commas:
+                    commas[close[1]] = _zero_alpha_comma(text, close[1])
+                comma = commas[close[1]]
+                if comma is not None and comma >= args:
+                    return head.start(), close[1] + 1
+                at = head.start() + 1
+
+        at = 0
+        while True:
+            if fixed is None or not (fixed[0] <= at and (fixed[2] is None or at <= fixed[1])):
+                found = _HIDDEN_CSS_FIXED.search(text, at)
+                fixed = (at, -1 if found is None else found.start(), found)
+            if colour is None or not (colour[0] <= at and (colour[2] is None or at <= colour[1])):
+                found = colour_from(at)
+                colour = (at, -1 if found is None else found[0], found)
+            if fixed[2] is None and colour[2] is None:
+                return
+            if colour[2] is None or (fixed[2] is not None and fixed[1] < colour[1]):
+                span = fixed[2].span()
+            else:
+                span = colour[2]
+            yield span
+            at = span[1]
+
+    def sub(self, replacement: str, text: str) -> str:
+        """``text`` with each match replaced by ``replacement``, taken as it is written."""
+        out, last = [], 0
+        for start, end in self.spans(text):
+            out.append(text[last:start])
+            out.append(replacement)
+            last = end
+        out.append(text[last:])
+        return "".join(out)
+
+
+_HIDDEN_CSS = _HiddenCss()
 _BASE64_INSTRUCTION = re.compile(
     r"(?i)(data:text/[a-z]+;base64,[A-Za-z0-9+/=]{20,})",
 )
@@ -641,11 +725,11 @@ class RAGSanitizer:
 
         # 4. Remove hidden CSS patterns
         if self._san_config.get("strip_hidden_css", True):
-            css_match = _HIDDEN_CSS.search(text)
-            if css_match:
+            css_span = next(_HIDDEN_CSS.spans(text), None)
+            if css_span is not None:
                 weight = self._weights.get("hidden_css", 0.25)
                 matches.append(PatternMatch(
-                    "hidden_css", css_match.group()[:60], weight, css_match.start(),
+                    "hidden_css", text[css_span[0]:css_span[1]][:60], weight, css_span[0],
                 ))
                 max_score = max(max_score, weight)
                 text = _HIDDEN_CSS.sub("[hidden-content-removed]", text)

@@ -72,7 +72,8 @@ power 1.58 (three times per doubling), a blow-up that starts only after a
 length the doubling reached slowly, and the patterns counted dynamic.
 
 THE LEDGER. ``LEDGER`` names, per module, each superlinear pattern it owes by
-the digest of its flags and text, as many times as it is written. It MAY
+the digest of its flags and text, as many times as it is written; it is empty
+now, and a contract holds it so. It MAY
 ONLY SHRINK: a superlinear pattern a module does not owe fails by its line,
 digest and text, even where another owed one was made linear; an owed digest
 the census no longer finds superlinear is stale and fails too, so the ledger
@@ -122,42 +123,11 @@ REPEATS = tuple(op for op in (sre_constants.MAX_REPEAT, sre_constants.MIN_REPEAT
 ATOMIC = getattr(sre_constants, "ATOMIC_GROUP", None)
 ZERO_WIDTH = (sre_constants.AT, sre_constants.ASSERT, sre_constants.ASSERT_NOT)
 
-# MAY ONLY SHRINK: the superlinear patterns each module owes, by digest. Nearly
-# all of them read a marker that opens a span, then anything up to a marker
-# that closes it or to the end of the line (``<think>.*?</think>``, a fenced
-# block, a tag, two keywords across a sentence): linear on a run of one
-# character, they take quadratic time on the opening marker repeated with no
-# closing one. A few hold two repeats over classes that share a character
-# (``\s*`` on both sides of an optional group), or a repeat inside a repeat;
-# the fenced readers of ``agents/dynamic_pipeline.py`` are cubic. Two are in
-# code nothing calls: ``memory/drift.py`` and ``ollama_log_proxy.py``.
-LEDGER = {
-    "opti_oignon/agent/skills.py": ("324648d033fe",),
-    "opti_oignon/agent/teacher.py": ("f184d8badd99",),
-    "opti_oignon/agent/tool_parsing.py": ("c6a3196dc531", "fc392fc7ebfb",),
-    "opti_oignon/agents/dynamic_pipeline.py": ("6e099050686a", "7d4e063b3be0", "ff53ff321499",),
-    "opti_oignon/artifacts.py": ("3948a2d076c1", "8d2ed78bf46e", "8d2ed78bf46e",),
-    "opti_oignon/context_summary.py": ("ea5073aa89b5",),
-    "opti_oignon/conversation_compressor.py": ("9ee6cffa4ca7",),
-    "opti_oignon/factcheck/markup.py": ("77854734d1eb", "38fc4ca02fa3", "15732c54ecae", "94de96ac3d0d",),
-    "opti_oignon/memory/curation.py": ("df20605bf827",),
-    "opti_oignon/memory/drift.py": ("911d5532bd07",),
-    "opti_oignon/memory/extraction.py": ("df20605bf827",),
-    "opti_oignon/memory/legacy.py": ("ea5073aa89b5",),
-    "opti_oignon/ollama_log_proxy.py": ("3e248506960d",),
-    "opti_oignon/plugins/chain-of-thought-enforcer/entry_point.py": ("36f47f591aaf", "56fa2c75e6af", "bccb6d43613e",),
-    "opti_oignon/plugins/fact-checker/entry_point.py": ("a7b22ea7e14c",),
-    "opti_oignon/plugins/markdown-beautifier/entry_point.py": ("ef8c23c51d6e",),
-    "opti_oignon/plugins/task-extractor/entry_point.py": ("bc69b4b5b4a2",),
-    "opti_oignon/rag/chunkers.py": ("77cca5b8b684", "cc030e7612c7", "ae19a9498a0a", "2f6105738aaa",),
-    "opti_oignon/rag_sanitizer.py": ("673cec978dd4",),
-    "opti_oignon/rag_store.py": ("7a49648e5341",),
-    "opti_oignon/redteam/feedback.py": ("01d6eed0458d", "7d7db45861b0",),
-    "opti_oignon/sandbox_tools.py": ("be3b2253127b", "587144fb9084", "fdcc7f2a4518",),
-    "opti_oignon/self_correction.py": ("d396510d26ce",),
-    "opti_oignon/session_fingerprint.py": ("faf6aa785421", "adeeb333a19d",),
-    "opti_oignon/speculative_decoding.py": ("1481e27c4e4a",),
-}
+# MAY ONLY SHRINK: the superlinear patterns each module owes, by digest. It is
+# EMPTY, and a contract holds it so: every pattern the guard measures reads a
+# long run in linear time, and any superlinear one fails by its line, digest
+# and text, without exception.
+LEDGER = {}
 
 CATEGORIES = {
     sre_constants.CATEGORY_SPACE: r"\s", sre_constants.CATEGORY_NOT_SPACE: r"\S",

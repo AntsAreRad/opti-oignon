@@ -464,8 +464,11 @@ class ContextSummarizer:
             Cleaned text without think blocks
         """
         import re
-        # Strip the <think>...</think> blocks (multiline)
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        # Strip the <think>...</think> blocks (multiline). Linear on an opening left open: one with no closing after
+        # it takes the rest at once -- no opening after it can close -- and is kept, as only a block that reached its
+        # closing sets ``real``.
+        cleaned = re.sub(r"<think>(?:.*?</think>(?P<real>)|.*)",
+                         lambda m: "" if m.group("real") is not None else m.group(0), text, flags=re.DOTALL)
         # Also strip the orphan tags
         cleaned = cleaned.replace("<think>", "").replace("</think>", "")
         return cleaned.strip()

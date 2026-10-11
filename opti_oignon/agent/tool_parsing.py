@@ -86,9 +86,14 @@ class ParsedToolCall:
 _FENCED_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 _BRACKET_OPEN_RE = re.compile(r"\[TOOL_CALL\]", re.IGNORECASE)
 _BRACKET_CLOSE_RE = re.compile(r"\[/TOOL_CALL\]", re.IGNORECASE)
-_XML_INVOKE_RE = re.compile(r"<invoke\b([^>]*)>(.*?)</invoke>", re.DOTALL | re.IGNORECASE)
+# Linear on an opening left open: one with no ``>`` after it, or no closing tag after its ``>``, takes the rest of
+# the text at once -- no opening after it can close either -- and only a match that reached the closing tag sets
+# ``real``. Groups 1 and 2 are the attributes and the body.
+_XML_INVOKE_RE = re.compile(
+    r"<invoke\b(?:([^>]*)>(?:(.*?)</invoke>(?P<real>)|.*)|.*)", re.DOTALL | re.IGNORECASE
+)
 _XML_PARAM_RE = re.compile(
-    r"<param(?:eter)?\b([^>]*)>(.*?)</param(?:eter)?>", re.DOTALL | re.IGNORECASE
+    r"<param(?:eter)?\b(?:([^>]*)>(?:(.*?)</param(?:eter)?>(?P<real>)|.*)|.*)", re.DOTALL | re.IGNORECASE
 )
 _NAME_ATTR_RE = re.compile(
     r"""name\s*=\s*"([^"]*)"|name\s*=\s*'([^']*)'""", re.IGNORECASE
@@ -253,11 +258,15 @@ def parse_xml_blocks(text: str) -> list[ParsedToolCall]:
     """Tool calls in XML-style ``<invoke>`` / ``<param>`` blocks."""
     out: list[ParsedToolCall] = []
     for m in _XML_INVOKE_RE.finditer(text or ""):
+        if m.group("real") is None:
+            continue
         name = _attr_name(m.group(1))
         if not name:
             continue
         args: dict[str, Any] = {}
         for pm in _XML_PARAM_RE.finditer(m.group(2)):
+            if pm.group("real") is None:
+                continue
             pname = _attr_name(pm.group(1))
             if not pname:
                 continue

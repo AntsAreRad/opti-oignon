@@ -932,8 +932,10 @@ _RE_N_DRAFTED = re.compile(
 )
 
 # Pattern 4: speedup info "speculative decoding speedup: 2.3x"
+# Read from each line's first "speculative", in linear time: a later one on the line has no speedup after it when
+# the first has none, and the speedup read after the first is the same.
 _RE_SPEEDUP = re.compile(
-    r"speculative.*speedup[:\s]+([\d.]+)\s*x",
+    r"(?m)^(?:(?!speculative).)*speculative.*speedup[:\s]+([\d.]+)\s*x",
     re.IGNORECASE,
 )
 

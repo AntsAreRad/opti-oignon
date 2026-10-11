@@ -122,9 +122,15 @@ Output format (strict JSON):
 ]
 """
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Linear on an opening left open: one with no closing after it takes the rest at once -- no opening after it can
+# close -- and is kept, as only a block that reached its closing sets ``real``.
+_THINK_RE = re.compile(r"<think>(?:.*?</think>(?P<real>)|.*)", re.DOTALL | re.IGNORECASE)
 _FENCE_RE = re.compile(r"```(?:json)?", re.IGNORECASE)
 _WS_RE = re.compile(r"\s+")
+
+
+def _drop_closed(match: re.Match) -> str:
+    return "" if match.group("real") is not None else match.group(0)
 
 
 @dataclass
@@ -179,7 +185,7 @@ def parse_extraction_response(raw: str) -> list[ExtractedFact]:
     """Parse the model reply into validated facts. Returns [] on any problem."""
     if not raw:
         return []
-    cleaned = _THINK_RE.sub("", raw)
+    cleaned = _THINK_RE.sub(_drop_closed, raw)
     cleaned = _FENCE_RE.sub("", cleaned)
 
     start = cleaned.find("[")

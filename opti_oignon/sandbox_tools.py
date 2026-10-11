@@ -137,13 +137,17 @@ _VOID_ELEMENTS = frozenset(
     }
 )
 _SVELTE_BLOCK_KINDS = ("if", "each", "await", "key", "snippet")
-_TAG_RE = re.compile(
-    # Linear on a long run: the name read whole, the attributes ending where no blank precedes the end.
-    r"<\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)(?![A-Za-z0-9:._-])((?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)(/?)(?<!\s)\s*>"
-)
-_SCRIPT_STYLE_RE = re.compile(
-    r"(<(script|style)\b[^>]*>).*?(</\2\s*>)", re.IGNORECASE | re.DOTALL
-)
+# A tag's head, and the end its attributes stop at; ``_tags`` reads the two, once per place.
+_TAG_HEAD_RE = re.compile(r"<\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)(?![A-Za-z0-9:._-])")
+_TAG_END_RE = re.compile(r"(/?)(?<!\s)\s*>")
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b", re.IGNORECASE)
+_SCRIPT_STYLE_ENDS = {
+    "script": re.compile(r"</script\s*>", re.IGNORECASE),
+    "style": re.compile(r"</style\s*>", re.IGNORECASE),
+}
+# Whether a closing tag's name is the opening's as a case-blind back-reference compares them: ``name + "\x00" +
+# closing name``. A pattern's literal reads dotted and dotless i and long s otherwise.
+_SAME_NAME_RE = re.compile(r"([^\x00]*)\x00\1", re.IGNORECASE)
 
 
 def _resolve_workspace_path(
@@ -219,6 +223,108 @@ def load_diagnostics_config() -> dict[str, Any]:
     return cfg
 
 
+def _closing_tag(text: str, name: str, at: int) -> "re.Match[str] | None":
+    """The first closing tag at or after ``at`` whose name is ``name`` as a case-blind back-reference reads it."""
+    ends = _SCRIPT_STYLE_ENDS["script" if len(name) == len("script") else "style"]
+    while True:
+        found = ends.search(text, at)
+        if found is None:
+            return None
+        closing_name = text[found.start() + 2:found.start() + 2 + len(name)]
+        if _SAME_NAME_RE.fullmatch(name + "\x00" + closing_name):
+            return found
+        at = found.start() + 1
+
+
+def _blank_script_style(text: str) -> str:
+    """``text`` with the inner content of each script and style element taken out, the tags kept.
+
+    What ``re.sub(r"(<(script|style)\\b[^>]*>).*?(</\\2\\s*>)", lambda m: m.group(1) + m.group(3), text,
+    flags=re.IGNORECASE | re.DOTALL)`` gives, in time linear in the text: that pattern read from every opening left
+    open to the end of the text. Here the ``>`` after an opening is searched once per stretch (the next one is kept
+    with the place it was searched from), and so is the closing tag of each name as the back-reference compares names
+    (kept per name, lowered): an opening whose name has no closing tag after it is passed at once.
+    """
+    out, last, at = [], 0, 0
+    angle = (0, -2)  # (searched from, the next ">" from there); -2 before any search, -1 for none
+    closings: dict[str, tuple] = {}  # name lowered -> (searched from, closing tag or None)
+    while True:
+        head = _SCRIPT_STYLE_RE.search(text, at)
+        if head is None:
+            break
+        if not (angle[0] <= head.end() and (angle[1] == -1 or head.end() <= angle[1])):
+            angle = (head.end(), text.find(">", head.end()))
+        if angle[1] == -1:
+            break  # no ">" after this opening, so none after any opening after it
+        body = angle[1] + 1
+        name = head.group(1)
+        seen = closings.get(name.lower())
+        if seen is None or not (seen[0] <= body and (seen[1] is None or body <= seen[1].start())):
+            seen = (body, _closing_tag(text, name, body))
+            closings[name.lower()] = seen
+        closing = seen[1]
+        if closing is None:
+            at = head.start() + 1
+            continue
+        out.append(text[last:body])
+        out.append(closing.group())
+        last = at = closing.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _tags(text: str) -> list[tuple[str, str, str, str]]:
+    """The tags of ``text`` as ``(closing slash, name, attributes, self-closing slash)``, in time linear in the text.
+
+    What ``re.findall`` gives with the pattern
+    ``<\\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)(?![A-Za-z0-9:._-])((?:"[^"]*"|'[^']*'|[^>"'])*?)(/?)(?<!\\s)\\s*>``,
+    which read the attributes again from every ``<`` of a long run with no ``>``. From the end of a tag's name, the
+    attributes are walked one unit at a time -- a quoted string, or one character that is neither a quote nor
+    ``>`` -- and stop at the first place where ``_TAG_END_RE`` matches; a quote with no closing one, a ``>`` that is
+    not an end, or the end of the text fails the tag. Where a walk stops depends on the place it passes only, so it
+    is kept for every place passed: each place is walked once.
+    """
+    stops: dict[int, tuple | None] = {}
+
+    def walk(place):
+        passed, stop = [], None
+        while True:
+            if place in stops:
+                stop = stops[place]
+                break
+            passed.append(place)
+            end = _TAG_END_RE.match(text, place)
+            if end is not None:
+                stop = (place, end)
+                break
+            char = text[place:place + 1]
+            if char in ("\"", "'"):
+                quote = text.find(char, place + 1)
+                if quote == -1:
+                    break
+                place = quote + 1
+            elif char and char != ">":
+                place += 1
+            else:
+                break
+        for step in passed:
+            stops[step] = stop
+        return stop
+
+    found, at = [], 0
+    while True:
+        head = _TAG_HEAD_RE.search(text, at)
+        if head is None:
+            return found
+        stop = walk(head.end())
+        if stop is None:
+            at = head.start() + 1
+            continue
+        attributes_end, end = stop
+        found.append((head.group(1), head.group(2), text[head.end():attributes_end], end.group(1)))
+        at = end.end()
+
+
 def _strip_for_tag_scan(text: str) -> str:
     """Reduce Svelte source to scannable markup (heuristic, documented).
 
@@ -228,8 +334,11 @@ def _strip_for_tag_scan(text: str) -> str:
     not read as tags. The checker is a conservative heuristic; the
     host-assured pass exercises it on real Svelte trees.
     """
-    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    text = _SCRIPT_STYLE_RE.sub(lambda m: m.group(1) + m.group(3), text)
+    # Linear on a comment left open: one with no closing after it takes the rest at once -- no comment after it can
+    # close -- and is kept, as only a comment that reached its closing sets ``real``.
+    text = re.sub(r"<!--(?:.*?-->(?P<real>)|.*)",
+                  lambda m: "" if m.group("real") is not None else m.group(0), text, flags=re.DOTALL)
+    text = _blank_script_style(text)
     # Blank non-block brace expressions with a small non-nesting scanner.
     out: list[str] = []
     i = 0
@@ -264,7 +373,7 @@ def svelte_tag_findings(text: str) -> list[str]:
     scannable = _strip_for_tag_scan(text)
     opens: dict[str, int] = {}
     closes: dict[str, int] = {}
-    for closing, name, _attrs, selfclose in _TAG_RE.findall(scannable):
+    for closing, name, _attrs, selfclose in _tags(scannable):
         lowered = name.lower()
         if lowered in _VOID_ELEMENTS or (selfclose and not closing):
             continue

@@ -269,7 +269,8 @@ _IMPORT_PATTERNS: list[tuple[str, str]] = [
     (r"^import\s+(\w+)", "python"),
     (r"^from\s+(\w+)\s+import", "python"),
     (r"^const\s+\w+\s*=\s*require\(", "javascript"),
-    (r"^import\s+.*\s+from\s+['\"]", "javascript"),
+    # A line holds no line break: the blanks around ``.*`` are read by it, one way.
+    (r"^import\s.*\sfrom\s+['\"]", "javascript"),
     (r"^use\s+\w+::", "rust"),
     (r"^package\s+\w+", "go"),
     (r"^import\s+\w+\.\w+", "java"),
@@ -387,7 +388,9 @@ class HotFilesTracker:
 _BUG_PATTERNS: list[tuple[str, str]] = [
     (r"assert(ion)?error", "assertion"),
     (r"import\s*error|modulenotfounderror|no module named", "import"),
-    (r"type\s*error|expected.*got|incompatible type", "type"),
+    # "expected" then "got" on a line, read from the line's first "expected": a later one has no "got" after it
+    # when the first has none.
+    (r"type\s*error|(?m:^(?:(?!expected).)*expected.*got)|incompatible type", "type"),
     (r"syntax\s*error|unexpected token|invalid syntax", "syntax"),
     (r"runtime\s*error|recursion|stack overflow|segfault", "runtime"),
     (r"key\s*error|index\s*error|out of range", "index"),

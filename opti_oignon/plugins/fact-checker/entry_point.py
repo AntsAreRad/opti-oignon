@@ -67,11 +67,14 @@ _PROPER_NOUN_PATTERN = re.compile(
 # Named entity claims: "X founded Y", "X invented Y", "X is the capital of Y".
 # A claim starts at the first letter of a word: one starting inside a word
 # would have started a letter earlier, so the scan does not read a long word
-# again from each of its letters.
+# again from each of its letters. A run of words with no verb in it opens no
+# claim from any of its words, so it is taken at once, and only a claim sets
+# ``real``: linear in the text.
 _ENTITY_CLAIM_PATTERN = re.compile(
     r"(?<![A-Z])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
     r"\s+(?:founded|invented|discovered|created|developed|wrote|designed|built|is the (?:capital|president|CEO|founder|author) of)"
-    r"\s+(.+?)(?:\.|,|;|\n|$)",
+    r"\s+(.+?)(?:\.|,|;|\n|$)(?P<real>)"
+    r"|(?<![A-Z])[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",
     re.IGNORECASE,
 )
 
@@ -169,6 +172,8 @@ def extract_claims(
         for m in pattern.finditer(text):
             if len(claims) >= max_claims:
                 return
+            if "real" in pattern.groupindex and m.group("real") is None:
+                continue
             if skip_code_blocks and _in_code_block(m.start(), code_ranges):
                 continue
             context = _get_sentence_context(text, m.start(), m.end())

@@ -1229,8 +1229,10 @@ class SelfCorrectionEngine:
 
         # Chercher un bloc JSON dans le texte
         # Pattern: {...} ou ```json ... ```
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-        if json_match:
+        # Linear on a block left open: a fence and its { with no closing after them take the rest at once -- no
+        # fence after them can close either -- and only a block that reached its closing sets ``real``.
+        json_match = re.search(r'```(?:json)?\s*(?:(\{.*?\})\s*```(?P<real>)|\{.*)', text, re.DOTALL)
+        if json_match and json_match.group("real") is not None:
             try:
                 return json.loads(json_match.group(1))
             except json.JSONDecodeError:

@@ -198,3 +198,13 @@ def test_safe_chunks_excludes_blocked_and_rejected():
         approved_count=0, preview_required=False,
     )
     assert [c.chunk_id for c in result.safe_chunks] == ["ok"]
+
+
+def test_hidden_css_is_reported_by_its_first_match_its_text_and_where_it_starts():
+    styled = "ab color: rgba(" + "1, " * 30 + "0) cd display:none"
+    chunk = _sanitizer().sanitize_chunk(styled)
+    found = [m for m in chunk.matches if m.pattern_name == "hidden_css"]
+    assert len(found) == 1, found
+    assert found[0].position == 3, found
+    assert found[0].matched_text == styled[3:63], found
+    assert chunk.sanitized_text.count("[hidden-content-removed]") >= 1

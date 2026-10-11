@@ -68,8 +68,11 @@ _IMPERATIVE_VERBS = (
     "review", "backup", "migrate", "download", "upload",
 )
 
+# The verb follows the blanks after a line start, and none starts with a blank: every start in a run of blanks
+# finds the same place after them. So a start whose verb is not there takes the run at once, and only an imperative
+# sets ``real``: linear in the text.
 _IMPERATIVE_RE = re.compile(
-    r"(?:^|\n)\s*(?:" + "|".join(_IMPERATIVE_VERBS) + r")\s+.+?(?:\.|$)",
+    r"(?:^|\n)\s*(?:" + "|".join(_IMPERATIVE_VERBS) + r")\s+.+?(?:\.|$)(?P<real>)|(?:^|\n)\s*",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -152,6 +155,8 @@ def extract_tasks(
 
     # 3. Imperative sentences
     for m in _IMPERATIVE_RE.finditer(clean_text):
+        if m.group("real") is None:
+            continue
         imp_text = m.group(0).strip()
         _add_task(imp_text, "imperative")
 

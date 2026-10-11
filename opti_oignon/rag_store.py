@@ -1251,8 +1251,10 @@ class RAGVectorStore:
                 flags=re.DOTALL | re.IGNORECASE,
             )
 
-        # Step 3: Strip all remaining HTML tags
-        text = re.sub(r'<[^>]+>', ' ', text)
+        # Step 3: Strip all remaining HTML tags. Linear on a "<" left open: one with no ">" after it takes the rest at
+        # once -- no "<" after it can close either -- and is kept, as only a tag sets ``real``.
+        text = re.sub(r'<[^>]+>(?P<real>)|<[^>]*',
+                      lambda m: " " if m.group("real") is not None else m.group(0), text)
 
         # Step 4: Decode HTML entities
         text = html_module.unescape(text)

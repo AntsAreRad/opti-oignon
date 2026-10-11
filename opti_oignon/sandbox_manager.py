@@ -1128,6 +1128,11 @@ class CommandValidator:
         if self._PYTHON_C_NETWORK.search(command):
             return False, "Blocked python -c with network module"
 
+        # Block Python subprocess with shell=True or Popen. Read before the check below, which covers it: after that
+        # check it could never refuse anything, and its reason was never given.
+        if self._PYTHON_C_SUBPROCESS.search(command):
+            return False, "Blocked python -c with subprocess calls"
+
         # Block python -c with subprocess (constructed args attack)
         if self._PYTHON_C_PROCESS.search(command):
             return False, "Blocked python -c with subprocess/os.exec"
@@ -1147,10 +1152,6 @@ class CommandValidator:
         # Block xxd reverse piped to shell
         if self._XXD_TO_SHELL.search(command):
             return False, "Blocked xxd reverse piped to shell"
-
-        # Block Python subprocess with shell=True or Popen
-        if self._PYTHON_C_SUBPROCESS.search(command):
-            return False, "Blocked python -c with subprocess calls"
 
         # Check write-then-execute attack vector
         safe, reason = self._check_file_execution(command)

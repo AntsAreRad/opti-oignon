@@ -37,9 +37,10 @@ _MATH_OPERATORS = re.compile(
     re.IGNORECASE,
 )
 
-# Multi-part question indicators
+# Multi-part question indicators. "and" then "?" on a line is read from the line's first "and", in linear time: a
+# later one has no "?" after it when the first has none.
 _MULTI_PART_PATTERN = re.compile(
-    r"(?:first|second|third|1\)|2\)|3\)|a\)|b\)|c\)|\band\b.*\?)",
+    r"(?:first|second|third|1\)|2\)|3\)|a\)|b\)|c\)|(?m:^(?:(?!\band\b).)*\band\b.*\?))",
     re.IGNORECASE,
 )
 
@@ -60,8 +61,11 @@ _ANSWER_MARKERS = [
     r"(?:^|\n)\s*---+\s*\n",
 ]
 
+# Each marker follows the blanks after a line start, and none starts with a blank: every start in a run of blanks
+# finds the same place after them. So a start whose marker is not there takes the run at once (only a marker sets
+# ``real``), and the markers are read in linear time; ``_first_marker`` gives the first one.
 _ANSWER_MARKER_RE = re.compile(
-    "|".join(_ANSWER_MARKERS),
+    "(?:" + "|".join(_ANSWER_MARKERS) + r")(?P<real>)|(?:^|\n)\s*",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -71,9 +75,14 @@ _REASONING_MARKERS = [
 ]
 
 _REASONING_MARKER_RE = re.compile(
-    "|".join(_REASONING_MARKERS),
+    "(?:" + "|".join(_REASONING_MARKERS) + r")(?P<real>)|(?:^|\n)\s*",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
+def _first_marker(pattern: re.Pattern, text: str) -> re.Match | None:
+    """The first marker ``pattern`` finds in ``text``, as ``search`` found it before the runs were taken at once."""
+    return next((m for m in pattern.finditer(text) if m.group("real") is not None), None)
 
 
 # =========================================================================
@@ -163,7 +172,7 @@ def split_reasoning_and_answer(text: str) -> tuple[str, str]:
         return ("", "")
 
     # Try to find an answer marker
-    match = _ANSWER_MARKER_RE.search(text)
+    match = _first_marker(_ANSWER_MARKER_RE, text)
     if match:
         reasoning = text[:match.start()].strip()
         answer = text[match.end():].strip()
@@ -175,11 +184,11 @@ def split_reasoning_and_answer(text: str) -> tuple[str, str]:
             return (reasoning, answer)
 
     # Try reasoning marker: everything after marker until answer marker
-    reason_match = _REASONING_MARKER_RE.search(text)
+    reason_match = _first_marker(_REASONING_MARKER_RE, text)
     if reason_match:
         # Everything before reasoning marker is preamble
         after_reasoning = text[reason_match.end():]
-        answer_match = _ANSWER_MARKER_RE.search(after_reasoning)
+        answer_match = _first_marker(_ANSWER_MARKER_RE, after_reasoning)
         if answer_match:
             reasoning = after_reasoning[:answer_match.start()].strip()
             answer = after_reasoning[answer_match.end():].strip()
@@ -306,8 +315,8 @@ def hook_post_inference(ctx: Any) -> dict[str, Any] | None:
 
     # Check if CoT was injected or if response has reasoning markers
     cot_injected = ctx.data.get("_cot_injected", False)
-    has_reasoning = _REASONING_MARKER_RE.search(response) is not None
-    has_answer = _ANSWER_MARKER_RE.search(response) is not None
+    has_reasoning = _first_marker(_REASONING_MARKER_RE, response) is not None
+    has_answer = _first_marker(_ANSWER_MARKER_RE, response) is not None
 
     if not (cot_injected or has_reasoning or has_answer):
         return None

@@ -1447,7 +1447,9 @@ def _as_bool(value: Any) -> bool:
 
 # Verification sandbox-testing (the seam; refuse when bwrap is absent)
 
-_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+# Linear on a fence left open: one with no line break after it, or no closing fence after its line, takes the rest
+# at once -- no fence after it can close either -- and only a block that reached its closing sets ``real``.
+_FENCE_RE = re.compile(r"```(?:[^\n]*\n(?:(.*?)```(?P<real>)|.*)|.*)", re.DOTALL)
 
 
 def _sandbox_ready(session: Any) -> bool:
@@ -1474,7 +1476,8 @@ def _verification_commands(body: str) -> list[str]:
     section = _extract_section(body, SECTION_VERIFICATION)
     if not section:
         return []
-    return [m.group(1).strip() for m in _FENCE_RE.finditer(section) if m.group(1).strip()]
+    blocks = (m.group(1).strip() for m in _FENCE_RE.finditer(section) if m.group("real") is not None)
+    return [block for block in blocks if block]
 
 
 @dataclass

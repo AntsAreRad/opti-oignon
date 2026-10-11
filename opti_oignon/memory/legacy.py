@@ -830,7 +830,10 @@ class MemoryManager:
 
     def _clean_think_tags(self, text: str) -> str:
         """Remove <think>...</think> blocks from qwen3 responses."""
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        # Linear on an opening left open: one with no closing after it takes the rest at once -- no opening after
+        # it can close -- and is kept, as only a block that reached its closing sets ``real``.
+        cleaned = re.sub(r"<think>(?:.*?</think>(?P<real>)|.*)",
+                         lambda m: "" if m.group("real") is not None else m.group(0), text, flags=re.DOTALL)
         cleaned = cleaned.replace("<think>", "").replace("</think>", "")
         return cleaned.strip()
 

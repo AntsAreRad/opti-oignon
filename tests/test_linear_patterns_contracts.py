@@ -76,6 +76,49 @@ pattern matches and many it does not, or it does not reach the pattern.
   * EQ23 -- the analyzer's score of a text, and the set its keywords are drawn
     from, do not depend on the order of a level's patterns: the pairs moved to
     the end of their level change neither.
+  * EQ24 -- the section, sheet, repository and tag readers read as before
+    (it gives way for EQ5): a sheet marker or a tag left open takes its run
+    at once, the sheets are split at the real markers only, and the tags are
+    read once per place by the Svelte checker's walker.
+  * EQ25 -- the claim reader reads as before (it gives way for EQ6): a run of
+    words with no verb in it opens no claim and is taken at once; the claims
+    the fact checker extracts are the ones it extracted; the rm check answers
+    as before.
+  * EQ26 -- the XML tool calls of a reply are read as before; an opening left
+    open, without its ">" or its closing tag, takes the rest at once.
+  * EQ27 -- a plan is read from a planner's reply as the three patterns read
+    it, by find and rfind.
+  * EQ28 -- the think blocks of a reply are taken out as before; an opening
+    left open is kept, as it was.
+  * EQ29 -- the Svelte scan takes out comments and script and style bodies as
+    before, names compared as a back-reference compares them (dotted and
+    dotless i and long s read otherwise by a literal).
+  * EQ30 -- the Svelte scan reads each place once: counted calls, not timings.
+  * EQ31 -- the fenced blocks of skills, teacher drafts, beautified text and
+    corrections are read as before.
+  * EQ32 -- the page strippers take out what they took out; hidden CSS is
+    matched where it was.
+  * EQ33 -- the hidden-CSS reader reads each closing parenthesis once:
+    counted calls, not timings.
+  * EQ34 -- the images, links, addresses and table rows of a line read as
+    before.
+  * EQ35 -- an image or a link shares its closing bracket and its target's
+    end with every opening before them: counted calls, not timings.
+  * EQ36 -- the line and marker readers give their callers the same groups,
+    spans or answer.
+  * EQ37 -- the chunkers find the functions and classes they found, a class
+    without bases inside the bases of one left open included.
+  * EQ38 -- a suggested rule finds what it found; the system-tag rule also
+    reads an opening left without its end.
+  * EQ39 -- a statement of the drift ledger is read into the parts the
+    statement pattern gave it, and where.
+  * EQ40 -- a statement reads what follows each place once: counted calls,
+    not timings.
+  * EQ41 -- a python -c subprocess call is refused with the reason its own
+    check gives, read before the broader one that answered first.
+  * EQ42 -- every reader that takes a run at once reads each unit of its head
+    and a character in linear time: four times as many units in well under
+    sixteen times the time, the units the cost guard does not pump included.
 """
 import ast
 import itertools
@@ -949,3 +992,862 @@ def test_eq23_the_analyzer_s_score_and_its_keyword_set_do_not_depend_on_the_orde
         assert sum(task._score_patterns(text, task._patterns["debug"])[0] > 0 for text in texts) > 300
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ24 to EQ38 -- the patterns the cost guard owed, read in linear time
+# ---------------------------------------------------------------------------
+# Each reader is held to the pattern it replaced, written here, as its caller reads it. Its code is run from the
+# source by name, never by importing its module. A reader that takes at once a run where every start fails alike
+# marks its real matches with an empty group ``real``; its caller keeps those. The caller's old reading is had by
+# giving it the old pattern followed by an empty ``real`` group, which every match sets.
+def _with_real(old, flags):
+    """The old pattern, every match of which sets ``real``: a caller that keeps real matches reads it as before."""
+    return re.compile("(?:" + old + ")(?P<real>)", flags)
+
+
+def _defs(module, *names, **given):
+    """A namespace holding the top-level definitions ``names`` of ``module``, run from its source."""
+    import __future__
+
+    import dataclasses
+    tree = ast.parse((REPO / "opti_oignon" / module).read_text(encoding="utf-8"))
+    body = []
+    for node in tree.body:
+        named = []
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            named = [node.name]
+        elif isinstance(node, ast.Assign):
+            named = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            named = [node.target.id]
+        if set(named) & set(names):
+            body.append(node)
+    space = {"re": re, "json": __import__("json"), "dataclass": dataclasses.dataclass, "field": dataclasses.field,
+             "__name__": __name__, **given}
+    code = compile(ast.Module(body=body, type_ignores=[]), module, "exec",
+                   flags=__future__.annotations.compiler_flag, dont_inherit=True)
+    exec(code, space)  # noqa: S102
+    missing = [name for name in names if name not in space]
+    assert not missing, (module, missing)
+    return space
+
+
+def _method(module, name, owner=None, **given):
+    """Method ``name`` of class ``owner`` of ``module`` (the one class that holds it when None), run from its source
+    as a plain function."""
+    import __future__
+    tree = ast.parse((REPO / "opti_oignon" / module).read_text(encoding="utf-8"))
+    found = [item for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and owner in (None, node.name)
+             for item in node.body
+             if isinstance(item, ast.FunctionDef) and item.name == name]
+    assert len(found) == 1, (module, name, len(found))
+    found[0].decorator_list = []
+    space = {"re": re, "json": __import__("json"), **given}
+    code = compile(ast.Module(body=found, type_ignores=[]), module, "exec",
+                   flags=__future__.annotations.compiler_flag, dont_inherit=True)
+    exec(code, space)  # noqa: S102
+    return space[name]
+
+
+def _statement(module, function, marker):
+    """The one assignment of ``function`` in ``module`` that holds ``marker``, as a function of its ``text``."""
+    tree = ast.parse((REPO / "opti_oignon" / module).read_text(encoding="utf-8"))
+    found = [s for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == function
+             for s in node.body if isinstance(s, ast.Assign) and marker in ast.unparse(s)]
+    assert len(found) == 1, (module, function, marker, len(found))
+    code = compile(ast.Module(body=found, type_ignores=[]), module, "exec")
+
+    def run(text):
+        space = {"re": re, "text": text}
+        exec(code, space)  # noqa: S102
+        return space["text"]
+    return run
+
+
+def _class_patterns(module, cls):
+    """The compiled patterns that class ``cls`` of ``module`` holds as attributes, by name, run from its source."""
+    tree = ast.parse((REPO / "opti_oignon" / module).read_text(encoding="utf-8"))
+    node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls)
+    space = {"re": re}
+    for item in node.body:
+        if isinstance(item, ast.Assign) and isinstance(item.value, ast.Call) and "re.compile" in ast.unparse(item.value):
+            exec(compile(ast.Module(body=[item], type_ignores=[]), module, "exec"), space)  # noqa: S102
+    return {name: value for name, value in space.items() if isinstance(value, re.Pattern)}
+
+
+def _drawn(pieces, seed, cases=_CASES):
+    """Texts of up to fourteen of ``pieces``, glued."""
+    rng = random.Random(seed)
+    return ["".join(rng.choice(pieces) for _ in range(rng.randint(0, 14))) for _ in range(cases)]
+
+
+def _both(old, flags, pieces, seed=0):
+    """The corpus of an old pattern (texts built from its tree, then mutated), and texts drawn from ``pieces``."""
+    return list(_corpus(old, flags, seed=seed)) + _drawn(pieces, seed + 1)
+
+
+def _agree(texts, old, new, least=_CASES // 40, hit=bool):
+    """``new`` reads every text as ``old`` does; ``old`` finds something (``hit``) in many texts, and nothing in many."""
+    found = 0
+    for text in texts:
+        expected = old(text)
+        found += bool(hit(expected))
+        assert new(text) == expected, (text, expected)
+    assert least < found < len(texts) - least, ("witness: the corpus reaches both sides", found, len(texts))
+
+
+def _real(compiled, text):
+    """The real matches of a reader that takes a run at once, as (span, the groups before ``real``)."""
+    before = compiled.groupindex["real"] - 1
+    return [(m.span(), m.groups()[:before]) for m in compiled.finditer(text) if m.group("real") is not None]
+
+
+def _all(compiled, text):
+    return [(m.span(), m.groups()) for m in compiled.finditer(text)]
+
+
+class _Counted:
+    """A compiled pattern whose ``search`` and ``match`` calls are counted, with the characters each search passed
+    before what it found (or to the end)."""
+
+    def __init__(self, compiled):
+        self.compiled, self.calls, self.passed = compiled, 0, 0
+
+    def search(self, *args):
+        self.calls += 1
+        found = self.compiled.search(*args)
+        self.passed += (len(args[0]) if found is None else found.start()) - (args[1] if len(args) > 1 else 0)
+        return found
+
+    def match(self, *args):
+        self.calls += 1
+        return self.compiled.match(*args)
+
+    def fullmatch(self, *args):
+        self.calls += 1
+        return self.compiled.fullmatch(*args)
+
+    def __getattr__(self, name):
+        return getattr(self.compiled, name)
+
+
+class _Text(str):
+    """A text whose ``find`` and ``rfind`` calls are counted, with the characters they passed."""
+
+    def find(self, *args):
+        found = str.find(self, *args)
+        self.calls = getattr(self, "calls", 0) + 1
+        start = args[1] if len(args) > 1 else 0
+        self.passed = getattr(self, "passed", 0) + ((len(self) if found == -1 else found) - start)
+        return found
+
+
+def _every(tokens, most):
+    """Every text of at most ``most`` of ``tokens``: a bounded proof the random corpus cannot give."""
+    for count in range(most + 1):
+        for parts in itertools.product(tokens, repeat=count):
+            yield "".join(parts)
+
+
+def _plugin(name):
+    """The entry point of plugin ``name``, loaded alone from its source."""
+    dotted = "opti_oignon.plugins." + name.replace("-", "_")
+    loaded, restore = isolate(targets={dotted + ".entry_point": source("plugins", name, "entry_point.py")},
+                              packages=("opti_oignon.plugins", dotted))
+    return loaded[dotted + ".entry_point"], restore
+
+
+# ---------------------------------------------------------------------------
+# EQ24 -- the section, sheet, repository and tag readers (gives way for EQ5)
+# ---------------------------------------------------------------------------
+_TAG = r"<\s*(/?)([A-Za-z][A-Za-z0-9:._-]*)((?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)(/?)\s*>"
+_SHEET = r"\[Sheet:\s*([^\]]+)\]\n"
+
+
+def _sheet_split():
+    """The statements of ``_chunk_by_sheets`` from its pattern to its list of sheets, as a function of the content."""
+    tree = ast.parse((REPO / "opti_oignon" / "rag" / "chunkers.py").read_text(encoding="utf-8"))
+    method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_chunk_by_sheets")
+    first = next(i for i, s in enumerate(method.body) if "re.compile" in ast.unparse(s))
+    last = next(i for i, s in enumerate(method.body) if "sheets.append" in ast.unparse(s))
+    split = ast.parse("def split(content):\n    return sheets").body[0]
+    split.body = method.body[first:last + 1] + split.body
+    space = {"re": re}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[split], type_ignores=[])), "chunkers", "exec"), space)  # noqa: S102
+    return space["split"]
+
+
+def test_eq24_the_section_sheet_repository_and_tag_readers_read_as_before_with_runs_left_open_taken_at_once():
+    _hold([("plugins/github-connector/entry_point.py", "/[a-zA-Z0-9_.-]+)#",
+            r"(?<!\w)([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)", "exact")])
+    tree = ast.parse((REPO / "opti_oignon" / "rag" / "chunkers.py").read_text(encoding="utf-8"))
+    sections = [n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args
+                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)
+                and n.args[0].value.startswith("^# ")]
+    assert len(sections) == 2 and sections[0] == sections[1], sections
+    assert not _differences(_SECTION, sections[0], M, "exact")
+    split, old = _sheet_split(), re.compile(_SHEET)
+    _agree(_both(_SHEET, 0, ["[Sheet:", " ", "a", "]", "\n", "]\n", "x", "\t", "[Sheet: a]\n"]),
+           old.split, split, hit=lambda sheets: len(sheets) > 1)
+    assert split("[Sheet: a" * 300 + "]\n") == old.split("[Sheet: a" * 300 + "]\n")
+    tags = _defs("sandbox_tools.py", "_TAG_HEAD_RE", "_TAG_END_RE", "_tags")["_tags"]
+    _agree(_both(_TAG, 0, ["<", "</", "< ", "a", "b1", "/", ">", " ", "\n", '"', "'", "x=", "<a", "/>", "\t"]),
+           re.compile(_TAG).findall, tags)
+    _agree(list(_every(["<", "/", "a", " ", ">", '"', "'"], 6)), re.compile(_TAG).findall, tags)
+
+
+# ---------------------------------------------------------------------------
+# EQ25 -- the claim reader and the rm check (gives way for EQ6)
+# ---------------------------------------------------------------------------
+def test_eq25_the_claim_reader_reads_as_before_a_run_of_words_with_no_verb_taken_at_once():
+    claim, flags = _joined("plugins/fact-checker/entry_point.py", "founded|invented")
+    assert flags == I and claim != _CLAIM
+    texts = _both(_CLAIM, I, ["Ada", " ", "Lovelace", "founded", "is the capital of", "x", ".", ",", "\n", "aa", "1"])
+    _agree(texts, lambda t: _all(re.compile(_CLAIM, I), t), lambda t: _real(re.compile(claim, I), t))
+    fact, restore = _plugin("fact-checker")
+    try:
+        def read(text):
+            return [(c.text, c.start, c.end) for c in
+                    fact.extract_claims(text, aggressiveness="moderate", max_claims=100_000)]
+        new = fact._ENTITY_CLAIM_PATTERN
+        fact._ENTITY_CLAIM_PATTERN = _with_real(_CLAIM, I)
+        expected = [read(text) for text in texts[::5]]
+        fact._ENTITY_CLAIM_PATTERN = new
+        assert [read(text) for text in texts[::5]] == expected
+        assert sum(map(bool, expected)) > 100, "witness: claims are read"
+    finally:
+        restore()
+    _hold([("sandbox_manager.py", r"(?!workspace)", r"\brm\b.*\s+/(?!workspace)", "boolean")])
+
+
+# ---------------------------------------------------------------------------
+# EQ26 -- the tool calls of a reply
+# ---------------------------------------------------------------------------
+_INVOKE = r"<invoke\b([^>]*)>(.*?)</invoke>"
+_PARAM = r"<param(?:eter)?\b([^>]*)>(.*?)</param(?:eter)?>"
+
+
+def test_eq26_the_xml_tool_calls_of_a_reply_are_read_as_before_an_opening_left_open_taken_at_once():
+    loaded, restore = isolate(targets={"opti_oignon.agent.tool_parsing": source("agent", "tool_parsing.py")},
+                              packages=("opti_oignon.agent",))
+    try:
+        parsing = loaded["opti_oignon.agent.tool_parsing"]
+        pieces = ["<invoke", "<INVOKE", "<invokex", " name='a'", ' name="b"', ">", "</invoke>", "<param",
+                  "<parameter", " name='p'", "</param>", "</parameter>", "\n", " ", "x", "1", "<", "/",
+                  "<invoke name='a'>", "<parameter name='p'>v</parameter>", "</invoke>"]
+        texts = _both(_INVOKE, S | I, pieces) + _drawn(pieces, 5)
+        _agree(texts, lambda t: _all(re.compile(_INVOKE, S | I), t), lambda t: _real(parsing._XML_INVOKE_RE, t))
+        _agree(texts, lambda t: _all(re.compile(_PARAM, S | I), t), lambda t: _real(parsing._XML_PARAM_RE, t))
+
+        def read(text):
+            return [(call.name, call.arguments, call.raw) for call in parsing.parse_xml_blocks(text)]
+        new = parsing._XML_INVOKE_RE, parsing._XML_PARAM_RE
+        parsing._XML_INVOKE_RE, parsing._XML_PARAM_RE = _with_real(_INVOKE, S | I), _with_real(_PARAM, S | I)
+        expected = [read(text) for text in texts]
+        parsing._XML_INVOKE_RE, parsing._XML_PARAM_RE = new
+        assert [read(text) for text in texts] == expected
+        assert sum(map(bool, expected)) > 200, "witness: calls are read"
+        assert sum(1 for calls in expected for _name, arguments, _raw in calls if arguments) > 50, (
+            "witness: calls with arguments are read")
+        assert read("<invoke name='a'><parameter name='p'>1</parameter></invoke>") == [
+            ("a", {"p": 1}, "<invoke name='a'><parameter name='p'>1</parameter></invoke>")]
+        assert read("<invoke name='a'><parameter name='p'>" * 3000) == []
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ27 -- the plan of a planner's reply
+# ---------------------------------------------------------------------------
+def test_eq27_a_plan_is_read_from_a_reply_as_the_three_patterns_read_it():
+    import json
+
+    class Quiet:
+        @staticmethod
+        def warning(*_args):
+            return None
+
+    parse = _method("agents/dynamic_pipeline.py", "_parse_plan_json", logger=Quiet)
+
+    def old(raw):
+        if not raw:
+            return None
+        try:
+            return json.loads(raw.strip())
+        except json.JSONDecodeError:
+            pass
+        for pattern in (r"```json\s*([\s\S]*?)\s*```", r"```\s*([\s\S]*?)\s*```", r"\{[\s\S]*\}"):
+            match = re.search(pattern, raw)
+            if match:
+                try:
+                    return json.loads((match.group(1) if "```" in pattern else match.group(0)).strip())
+                except json.JSONDecodeError:
+                    continue
+        start, end = raw.find("{"), raw.rfind("}")
+        try:
+            if start != -1 and end > start:
+                return json.loads(raw[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+        return None
+
+    pieces = ["```json", "```", "{", "}", '{"a": 1}', "[1]", " ", "\n", "x", "1", '"', ":", ",", "\t"]
+    _agree(_drawn(pieces, 0) + _drawn(pieces, 1), old, lambda raw: parse(None, raw))
+    assert parse(None, "```json" * 2000) is None and parse(None, "{" * 4000 + "x") is None
+
+
+# ---------------------------------------------------------------------------
+# EQ28 -- the think blocks of a reply
+# ---------------------------------------------------------------------------
+def test_eq28_the_think_blocks_of_a_reply_are_taken_out_as_before_an_opening_left_open_kept():
+    pieces = ["<think>", "</think>", "<THINK>", "</Think>", "<think", "think>", "\n", " ", "x", "<", ">"]
+    texts = _both(r"<think>.*?</think>", S | I, pieces)
+    blocks = re.compile(r"<think>.*?</think>", S)
+    for module in ("context_summary.py", "memory/legacy.py"):
+        clean = _method(module, "_clean_think_tags")
+
+        def old(text):
+            return blocks.sub("", text).replace("<think>", "").replace("</think>", "").strip()
+
+        _agree(texts, lambda text: (old(text), blocks.search(text) is not None),
+               lambda text, clean=clean: (clean(None, text), blocks.search(text) is not None), hit=lambda e: e[1])
+        assert clean(None, "<think>" * 3 + "a</think>b") == "b" and clean(None, "x<think>" * 4) == "x" * 4
+    folded = re.compile(r"<think>.*?</think>", S | I)
+    for module in ("memory/curation.py", "memory/extraction.py"):
+        space = _defs(module, "_THINK_RE", "_drop_closed")
+        _agree(texts, lambda text: (folded.sub("", text), folded.search(text) is not None),
+               lambda text, s=space: (s["_THINK_RE"].sub(s["_drop_closed"], text), folded.search(text) is not None),
+               hit=lambda e: e[1])
+        assert space["_THINK_RE"].sub(space["_drop_closed"], "<THINK>a" * 3 + "</think>b") == "b"
+
+
+# ---------------------------------------------------------------------------
+# EQ29, EQ30 -- the Svelte checker's scan
+# ---------------------------------------------------------------------------
+_SCRIPT_STYLE = r"(<(script|style)\b[^>]*>).*?(</\2\s*>)"
+_DOTLESS, _DOTTED, _LONG_S = chr(0x131), chr(0x130), chr(0x17F)
+
+
+def _scan():
+    return _defs("sandbox_tools.py", "_TAG_HEAD_RE", "_TAG_END_RE", "_SCRIPT_STYLE_RE", "_SCRIPT_STYLE_ENDS",
+                 "_SAME_NAME_RE", "_closing_tag", "_blank_script_style", "_tags")
+
+
+def test_eq29_the_svelte_scan_takes_out_comments_and_script_bodies_as_before_names_compared_as_a_back_reference():
+    blank = _scan()["_blank_script_style"]
+    old = re.compile(_SCRIPT_STYLE, I | S)
+    pieces = ["<script", "<style", "<SCRIPT", "<scr" + _DOTTED + "pt", "<" + _LONG_S + "cript", ">", "</script>",
+              "</style >", "</SCRIPT>", "</" + _LONG_S + "cript>", "</scr" + _DOTLESS + "pt>", " a", "\n", "x", "<"]
+    texts = _both(_SCRIPT_STYLE, I | S, pieces)
+    _agree(texts, lambda t: (old.sub(lambda m: m.group(1) + m.group(3), t), old.search(t) is not None),
+           lambda t: (blank(t), old.search(t) is not None), hit=lambda e: e[1])
+    assert blank("<" + _LONG_S + "cript>a</script>") == "<" + _LONG_S + "cript>a</script>", "a literal would close"
+    assert blank("<style>a<script>b</script>c</style>") == "<style></style>"
+    _agree(list(_every(["<script", "<style", ">", "</script>", "</style>", "a", "<" + _LONG_S + "cript",
+                        "</" + _LONG_S + "cript>"], 5)),
+           lambda t: (old.sub(lambda m: m.group(1) + m.group(3), t), old.search(t) is not None),
+           lambda t: (blank(t), old.search(t) is not None), hit=lambda e: e[1])
+    comments = _statement("sandbox_tools.py", "_strip_for_tag_scan", "<!--")
+    wanted = re.compile(r"<!--.*?-->", S)
+    _agree(_both(r"<!--.*?-->", S, ["<!--", "-->", "<!-->", "--", ">", "x", "\n", "<", "!"]),
+           lambda t: (wanted.sub("", t), wanted.search(t) is not None),
+           lambda t: (comments(t), wanted.search(t) is not None), hit=lambda e: e[1])
+    assert comments("<!--" * 5 + "a-->b<!--c") == "b<!--c"
+
+
+def test_eq30_the_svelte_scan_reads_each_place_once_counted_calls_not_timings():
+    for shape, last in (("<a ", ""), ("< /aa", ""), ("<a x='", ""), ('<a "<a ', ""), ("<b\n", ""), ("<script", ""),
+                        ("<style x", ""), ("<script>", ""), ("</script>a", ""), ("<script ", ">"), ("<a ", ">")):
+        for size in (400, 1600):
+            space = _scan()
+            end, head = _Counted(space["_TAG_END_RE"]), _Counted(space["_TAG_HEAD_RE"])
+            ends = {name: _Counted(pattern) for name, pattern in space["_SCRIPT_STYLE_ENDS"].items()}
+            space.update(_TAG_END_RE=end, _TAG_HEAD_RE=head, _SCRIPT_STYLE_ENDS=ends)
+            text = _Text(shape * size + last)
+            space["_tags"](text)
+            assert 0 < end.calls <= len(text) + 1, ("a place walked twice, or none counted", shape, end.calls)
+            assert head.calls <= text.count("<") + 1, (shape, head.calls)
+            assert getattr(text, "passed", 0) <= len(text), ("a quoted run read twice", shape)
+            assert head.passed <= len(text), ("a head searched twice", shape)
+            text = _Text(shape * size + last)
+            space["_blank_script_style"](text)
+            assert sum(e.calls for e in ends.values()) <= 4, ("a closing tag searched again", shape)
+            opened = "<script" in shape and ">" in shape + last
+            assert not opened or sum(e.calls for e in ends.values()) > 0, ("no closing tag counted", shape)
+            assert sum(e.passed for e in ends.values()) <= 2 * len(text), ("a closing tag searched again", shape)
+            assert getattr(text, "passed", 0) <= 2 * len(text), ("a > searched again", shape)
+
+
+# ---------------------------------------------------------------------------
+# EQ31 -- fenced blocks
+# ---------------------------------------------------------------------------
+_FENCED = r"```[^\n]*\n(.*?)```"
+
+
+def test_eq31_the_fenced_blocks_of_skills_drafts_beautified_text_and_corrections_read_as_before():
+    pieces = ["```", "```skill", "```SKILL", "```skills", "```py", "\n", " ", "x", "`", "``", "{", "}", "json"]
+    texts = _both(_FENCED, S, pieces)
+    space = _defs("agent/skills.py", "SECTION_VERIFICATION", "_extract_section", "_FENCE_RE", "_verification_commands")
+    old = re.compile(_FENCED, S)
+
+    def commands_old(body):
+        section = space["_extract_section"](body, space["SECTION_VERIFICATION"])
+        return [m.group(1).strip() for m in old.finditer(section) if m.group(1).strip()] if section else []
+
+    _agree(["## Verification\n" + t for t in texts], commands_old, space["_verification_commands"])
+    teacher = _defs("agent/teacher.py", "_SKILL_FENCE_RE", "_FIELD_RE_TMPL", "_SLUG_RE", "_slug", "_field",
+                    "TeacherSkillDraft", "SOURCE_TEACHER", "extract_skill_draft")
+    skill = re.compile(r"```skill\b[^\n]*\n(.*?)```", S | I)
+
+    def draft_old(text):
+        found = skill.search(text) if text else None
+        return found.group(1).strip() or None if found else None
+
+    _agree(_both(skill.pattern, S | I, pieces), draft_old,
+           lambda t: (lambda d: None if d is None else d.content)(teacher["extract_skill_draft"](t)))
+    beautifier, restore = _plugin("markdown-beautifier")
+    try:
+        new = beautifier._FENCED_BLOCK_RE
+        beautifier._FENCED_BLOCK_RE = _with_real(r"(```[^\n]*\n[\s\S]*?```)", S)
+        expected = [beautifier._protect_fenced_blocks(text) for text in texts]
+        beautifier._FENCED_BLOCK_RE = new
+        assert [beautifier._protect_fenced_blocks(text) for text in texts] == expected
+        assert sum(1 for _protected, kept in expected if kept) > 200, "witness: blocks are protected"
+        assert beautifier._protect_fenced_blocks("```\n" + "x" * 50) == ("```\n" + "x" * 50, [])
+    finally:
+        restore()
+    corrected = _method("self_correction.py", "_parse_json_response")
+    fence = re.compile(r'```(?:json)?\s*(\{.*?\})\s*```', S)
+
+    def json_old(text):
+        import json
+        if not text:
+            return None
+        try:
+            return json.loads(text.strip())
+        except json.JSONDecodeError:
+            pass
+        for match, group in ((fence.search(text), 1),
+                             (re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL), 0)):
+            if match:
+                try:
+                    return json.loads(match.group(group))
+                except json.JSONDecodeError:
+                    pass
+        return None
+
+    jpieces = ["```", "```json", "{", "}", '{"a": 1}', '"b"', ":", " ", "\n", "x", ","]
+    _agree(_both(fence.pattern, S, jpieces), json_old, corrected)
+    assert corrected("```json {" + "x" * 50) is None
+
+
+# ---------------------------------------------------------------------------
+# EQ32, EQ33 -- pages and documents
+# ---------------------------------------------------------------------------
+_HIDDEN = (r"(?i)(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0|"
+           r"position\s*:\s*absolute\s*;\s*left\s*:\s*-\d+|color\s*:\s*(?:white|#fff(?:fff)?|rgba\([^)]*,\s*0\s*\)))")
+_HIDDEN_PIECES = ["color", "COLOR", ":", " ", "rgba(", "RGBA(", ",", "0", "00", ")", "1", "white", "#fff", "#ffffff",
+                  "display:none", "opacity:0", "position: absolute; left: -9", "font-size:0", "\n", "x", "(", "\t"]
+
+
+def _hidden():
+    return _defs("rag_sanitizer.py", "_HIDDEN_CSS_FIXED", "_HIDDEN_RGBA_HEAD", "_zero_alpha_comma", "_HiddenCss",
+                 "_HIDDEN_CSS")
+
+
+def test_eq32_the_page_strippers_take_out_what_they_took_out_hidden_css_matched_where_it_was():
+    tags = _statement("rag_store.py", "_extract_html_text", "<[^>]+>")
+    _agree(_both(r"<[^>]+>", 0, ["<", ">", "<>", "a", " ", "\n", "<a>", "<<", ">>"]),
+           lambda t: (re.sub(r"<[^>]+>", " ", t), re.search(r"<[^>]+>", t) is not None),
+           lambda t: (tags(t), re.search(r"<[^>]+>", t) is not None), hit=lambda e: e[1])
+    css, old = _hidden()["_HIDDEN_CSS"], re.compile(_HIDDEN)
+    texts = _both(_HIDDEN, 0, _HIDDEN_PIECES)
+    _agree(texts, lambda t: [m.span() for m in old.finditer(t)], lambda t: list(css.spans(t)))
+    _agree(texts, lambda t: (old.sub("[R]", t), old.search(t) is not None),
+           lambda t: (css.sub("[R]", t), old.search(t) is not None), hit=lambda e: e[1])
+    _agree(list(_every(["color:rgba(", "color:", ",", "0", " ", ")", "1", "display:none"], 5)),
+           lambda t: [m.span() for m in old.finditer(t)], lambda t: list(css.spans(t)))
+
+
+def test_eq33_the_hidden_css_reader_reads_each_closing_once_counted_calls_not_timings():
+    for shape, last in (("color: rgba(", ")"), ("color:rgba(1,", ")"), ("color: rgba(x) ", ")"), ("display: ", ")"),
+                        ("color:rgba(1, 0", ")"), ("color:rgba(0, 0) ", "display:none"),
+                        ("display:none ", "color:rgba(1, 0)"), ("color:rgba(0, 0) ", ""), ("display:none ", "")):
+        for size in (400, 1600):
+            space = _hidden()
+            head, fixed = _Counted(space["_HIDDEN_RGBA_HEAD"]), _Counted(space["_HIDDEN_CSS_FIXED"])
+            commas, comma = [], space["_zero_alpha_comma"]
+            space.update(_HIDDEN_RGBA_HEAD=head, _HIDDEN_CSS_FIXED=fixed,
+                         _zero_alpha_comma=lambda text, close, comma=comma: commas.append(close) or comma(text, close))
+            text = _Text(shape * size + last)
+            list(space["_HiddenCss"]().spans(text))
+            assert 0 < head.calls <= size + 2 and 0 < fixed.calls <= size + 2, (shape, head.calls, fixed.calls)
+            assert head.passed <= 2 * len(text) and fixed.passed <= 2 * len(text), (shape, head.passed, fixed.passed)
+            assert len(commas) == len(set(commas)), ("a closing read twice", shape)
+            assert getattr(text, "passed", 0) <= 2 * len(text), ("a ) searched again", shape)
+
+
+# ---------------------------------------------------------------------------
+# EQ34, EQ35 -- the inline readers of the fact checker
+# ---------------------------------------------------------------------------
+_IMAGE = r"!\[[^\]]*\]\([^)\s]*(?:\s+\"[^\"]*\")?\)"
+_LINK = r"(?<!!)\[([^\]]+)\]\([^)\s]*(?:\s+\"[^\"]*\")?\)"
+
+
+def _markup():
+    return _defs("factcheck/markup.py", "_IMAGE_HEAD", "_LINK_HEAD", "_TARGET_STOP", "_TARGET_TAIL", "_targets")
+
+
+_OLD_TARGET_LOOPS = """
+for match in re.finditer(_OLD_IMAGE, subject):
+    for position in range(match.start(), match.end()):
+        deleted[position] = True
+    images.append((cstart + match.start(), cstart + match.end()))
+for match in re.finditer(_OLD_LINK, subject):
+    if any(deleted[match.start():match.end()]):
+        continue
+    deleted[match.start()] = True
+    for position in range(match.end(1), match.end()):
+        deleted[position] = True
+"""
+
+
+def _inlines():
+    """The line reader of the fact checker, and the same with its image and link loops as they were written."""
+    names = ("_TICKS", "_IMAGE_HEAD", "_LINK_HEAD", "_TARGET_STOP", "_TARGET_TAIL", "_AUTOLINK", "_INLINE_HTML",
+             "_STRIKE", "_EMPHASIS", "_code_spans", "_targets", "_inline")
+    new = _defs("factcheck/markup.py", *names)["_inline"]
+    tree = ast.parse((REPO / "opti_oignon" / "factcheck" / "markup.py").read_text(encoding="utf-8"))
+    inline = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_inline")
+    loops = [i for i, s in enumerate(inline.body) if isinstance(s, ast.For) and "_targets" in ast.unparse(s.iter)]
+    assert len(loops) == 2 and loops[1] == loops[0] + 1, loops
+    inline.body[loops[0]:loops[1] + 1] = ast.parse(_OLD_TARGET_LOOPS).body
+    space = _defs("factcheck/markup.py", *names[:-1], _OLD_IMAGE=_IMAGE, _OLD_LINK=_LINK)
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[inline], type_ignores=[])), "markup", "exec"), space)  # noqa: S102
+    return new, space["_inline"]
+
+
+def test_eq34_the_images_links_addresses_and_table_rows_of_a_line_read_as_before():
+    _hold([("factcheck/markup.py", r"[^\s<>@.]*",
+            r"<((?:https?|ftp)://[^\s<>]+|[^\s<>@]+@[^\s<>@]+\.[^\s<>]+)>", "exact")])
+    delim, _flags = _site("factcheck/markup.py", r"(?:\|[ \t]*)?$")
+    old_delim = r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$"
+    _agree(_both(old_delim, 0, [" ", "|", "-", ":", "\t", "--", "x", "\n", "| --- |", "|-|"]),
+           lambda t: (lambda m: m and m.span())(re.match(old_delim, t)),
+           lambda t: (lambda m: m and m.span())(re.match(delim, t)))
+    space = _markup()
+    pieces = ["![", "[", "]", "(", ")", "](", " ", "\t", '"', "a", "!", "\n", "x y", ' "t"']
+    _agree(_both(_IMAGE, 0, pieces), lambda t: [(m.start(), m.end()) for m in re.finditer(_IMAGE, t)],
+           lambda t: [(start, end) for start, _close, end in space["_targets"](t, space["_IMAGE_HEAD"], 0)])
+    _agree(_both(_LINK, 0, pieces, seed=1), lambda t: [(m.start(), m.end(1), m.end()) for m in re.finditer(_LINK, t)],
+           lambda t: space["_targets"](t, space["_LINK_HEAD"], 1))
+    short = list(_every(["![", "[", "]", "(", "](", ")", " ", "a", '"'], 5))
+    _agree(short, lambda t: [(m.start(), m.end()) for m in re.finditer(_IMAGE, t)],
+           lambda t: [(start, end) for start, _close, end in space["_targets"](t, space["_IMAGE_HEAD"], 0)])
+    _agree(short, lambda t: [(m.start(), m.end(1), m.end()) for m in re.finditer(_LINK, t)],
+           lambda t: space["_targets"](t, space["_LINK_HEAD"], 1))
+    new, old = _inlines()
+    _agree(_both(_IMAGE, 0, pieces + ["<a@b.c>", "~~x~~", "`c`", "**b**"], seed=2) + short[::3],
+           lambda t: old(t, 0, len(t)), lambda t: new(t, 0, len(t)), hit=lambda e: e[3] or e[4])
+
+
+def test_eq35_an_image_or_a_link_shares_its_closing_bracket_and_target_end_counted_calls_not_timings():
+    for shape, last in (("![a](", ""), ("[a](", ""), ("![a](x ", ""), ("[a](x \"t", ""), ("![", ""), ("[a]", ""),
+                        ("![a](x![a](", ""), ("[a](x)", ""), ("![", "]"), ("[a", "]"), ("![a](", ")"), ("[a](", ")")):
+        for size in (400, 1600):
+            space = _markup()
+            stop, tail = _Counted(space["_TARGET_STOP"]), _Counted(space["_TARGET_TAIL"])
+            space.update(_TARGET_STOP=stop, _TARGET_TAIL=tail)
+            for head, least in ((space["_IMAGE_HEAD"], 0), (space["_LINK_HEAD"], 1)):
+                text = _Text(shape * size + last)
+                space["_targets"](text, head, least)
+                assert getattr(text, "passed", 0) <= len(text), ("a ] searched again", shape)
+            ends = shape.count(")") + sum(char.isspace() for char in shape)
+            assert stop.calls <= 2 * size + 2 and stop.passed <= 2 * len(text), (shape, stop.calls, stop.passed)
+            assert "(" not in shape or (stop.calls > 0 and tail.calls > 0), ("no target end counted", shape)
+            assert tail.calls <= 2 * (ends * size + 1), ("what follows a target's end read again", shape, tail.calls)
+
+
+# ---------------------------------------------------------------------------
+# EQ36 -- line readers and marker readers
+# ---------------------------------------------------------------------------
+_ANSWER = (r"(?:^|\n)\s*(?:\*\*)?(?:final answer|answer|conclusion|result|therefore|thus|in summary|to summarize|"
+           r"in conclusion|so,?)(?:\*\*)?[:\s]|(?:^|\n)\s*(?:\*\*)?(?:TL;?DR|TLDR)(?:\*\*)?[:\s]|(?:^|\n)\s*---+\s*\n")
+_REASONING = (r"(?:^|\n)\s*(?:\*\*)?(?:reasoning|thought process|analysis|let me think|let's think|step \d|thinking)"
+              r"(?:\*\*)?[:\s]")
+_VERBS = ("install", "configure", "setup", "set up", "create", "add", "remove", "update", "check", "verify", "ensure",
+          "run", "test", "deploy", "build", "fix", "implement", "write", "review", "backup", "migrate", "download",
+          "upload")
+_IMPERATIVE = r"(?:^|\n)\s*(?:" + "|".join(_VERBS) + r")\s+.+?(?:\.|$)"
+
+
+def test_eq36_the_line_and_marker_readers_give_their_callers_the_same_groups_spans_or_answer():
+    tree = ast.parse(source("artifacts.py").read_text(encoding="utf-8"))
+    titles = [n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args
+              and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str) and "<title>" in n.args[0].value]
+    assert len(titles) == 2 and titles[0] == titles[1], titles
+    old_title = re.compile(r"<title>(.*?)</title>", I)
+    _agree(_both(old_title.pattern, I, ["<title>", "</title>", "<TITLE>", "\n", " ", "x", "<", ">"]),
+           lambda t: (lambda m: m and m.group(1))(old_title.search(t)),
+           lambda t: (lambda m: m and m.group(1))(re.search(titles[0], t, I)))
+    _hold([("artifacts.py", r"\w[^\n]*\n", r"^(import|from)\s+\w+.*\n.*(def|class)\s+\w+", "boolean")])
+    speedup, flags = _site("speculative_decoding.py", "speedup")
+    old_speedup = r"speculative.*speedup[:\s]+([\d.]+)\s*x"
+    _agree(_both(old_speedup, I, ["speculative", "speedup", ":", " ", "2.5", "x", "\n", "y"]),
+           lambda t: (lambda m: m and m.group(1))(re.search(old_speedup, t, I)),
+           lambda t: (lambda m: m and m.group(1))(re.search(speedup, t, flags)))
+    fingerprint = _defs("session_fingerprint.py", "_IMPORT_PATTERNS", "_BUG_PATTERNS")
+    typed = next(p for p, category in fingerprint["_BUG_PATTERNS"] if category == "type")
+    assert not _differences(r"type\s*error|expected.*got|incompatible type", typed, 0, "boolean")
+    imports = next(p for p, lang in fingerprint["_IMPORT_PATTERNS"] if lang == "javascript" and "from" in p)
+    old_import = r"^import\s+.*\s+from\s+['\"]"
+    _agree([line.strip() for text in _both(old_import, 0, ["import", " ", "\t", "x", "from", "'", "\r"])
+            for line in text.split("\n")],
+           lambda line: bool(re.match(old_import, line)), lambda line: bool(re.match(imports, line)), least=50)
+    triggers = _defs("conversation_compressor.py", "_RETRIEVAL_TRIGGER_PATTERNS")["_RETRIEVAL_TRIGGER_PATTERNS"]
+    previous = next(p for p in triggers if r"previous\s+" in p)
+    assert not _differences(r"\bin\s+(?:a|our|the|my|this)?\s*previous\s+(?:message|conversation|turn)\b", previous,
+                            I, "boolean")
+    _hold([("plugins/chain-of-thought-enforcer/entry_point.py", r"1\)|2\)",
+            r"(?:first|second|third|1\)|2\)|3\)|a\)|b\)|c\)|\band\b.*\?)", "boolean")])
+    cot, restore = _plugin("chain-of-thought-enforcer")
+    try:
+        pieces = ["\n", " ", "\t", "answer", "Answer:", "**", "final answer", "so,", "TL;DR", "---", ":", "x",
+                  "reasoning:", "step 1", "Let me think "]
+        texts = _both(_ANSWER, I | M, pieces) + _both(_REASONING, I | M, pieces, seed=2)
+        new = cot._ANSWER_MARKER_RE, cot._REASONING_MARKER_RE
+        cot._ANSWER_MARKER_RE, cot._REASONING_MARKER_RE = _with_real(_ANSWER, I | M), _with_real(_REASONING, I | M)
+        expected = [cot.split_reasoning_and_answer(text) for text in texts]
+        cot._ANSWER_MARKER_RE, cot._REASONING_MARKER_RE = new
+        assert [cot.split_reasoning_and_answer(text) for text in texts] == expected
+        assert sum(1 for reasoning, _answer in expected if reasoning) > 200, "witness: replies are split"
+        replies = [text for text in texts if text.strip()]
+        hooked = [cot.hook_post_inference(types.SimpleNamespace(data={"response": text}, config={})) for text in replies]
+        cot._ANSWER_MARKER_RE, cot._REASONING_MARKER_RE = _with_real(_ANSWER, I | M), _with_real(_REASONING, I | M)
+        assert [cot.hook_post_inference(types.SimpleNamespace(data={"response": text}, config={}))
+                for text in replies] == hooked
+        cot._ANSWER_MARKER_RE, cot._REASONING_MARKER_RE = new
+        assert sum(map(bool, hooked)) > 100, "witness: replies are formatted"
+        only_answer = types.SimpleNamespace(data={"response": "We weigh it.\nAnswer: 42"}, config={})
+        assert cot.hook_post_inference(only_answer) is not None, "an answer marker alone is enough to format"
+    finally:
+        restore()
+    tasks, restore = _plugin("task-extractor")
+    try:
+        texts = _both(_IMPERATIVE, I | M, ["\n", " ", "install", "run", "set up", "x", ".", "Fix ", "\t", "y z"])
+        new = tasks._IMPERATIVE_RE
+        tasks._IMPERATIVE_RE = _with_real(_IMPERATIVE, I | M)
+        expected = [tasks.extract_tasks(text, max_tasks=10_000) for text in texts]
+        tasks._IMPERATIVE_RE = new
+        assert [tasks.extract_tasks(text, max_tasks=10_000) for text in texts] == expected
+        assert sum(map(bool, expected)) > 200, "witness: tasks are read"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ37 -- the chunkers' boundaries
+# ---------------------------------------------------------------------------
+_DEF = r"^(async\s+)?def\s+(\w+)\s*\([^)]*\)\s*(?:->.*?)?:"
+_CLASS = r"^class\s+(\w+)\s*(?:\([^)]*\))?\s*:"
+_R_FUNCTION = r"^(\w+)\s*<-\s*function\s*\([^)]*\)\s*\{"
+
+
+def _r_boundaries():
+    """The statements of the R chunker's chunk that gather its boundaries, as a function of (self, content)."""
+    tree = ast.parse((REPO / "opti_oignon" / "rag" / "chunkers.py").read_text(encoding="utf-8"))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "RChunker")
+    chunk = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "chunk")
+    first = next(i for i, s in enumerate(chunk.body) if ast.unparse(s) == "boundaries = []")
+    last = next(i for i, s in enumerate(chunk.body) if "FUNCTION_PATTERN" in ast.unparse(s))
+    gather = ast.parse("def gather(self, content):\n    return boundaries").body[0]
+    gather.body = chunk.body[first:last + 1] + gather.body
+    space = {"re": re}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[gather], type_ignores=[])), "chunkers", "exec"), space)  # noqa: S102
+    return space["gather"]
+
+
+def test_eq37_the_chunkers_find_the_functions_and_classes_they_found_a_class_without_bases_inside_one_left_open():
+    patterns = _class_patterns("rag/chunkers.py", "CodeChunker")
+    find = _method("rag/chunkers.py", "_find_boundaries", "CodeChunker")
+    classes = _method("rag/chunkers.py", "_classes")
+    holder = types.SimpleNamespace(**patterns)
+    holder._classes = lambda content: classes(holder, content)
+
+    def old(content):
+        found = [(m.start(), m.group(1).strip(), "section") for m in patterns["SECTION_PATTERN"].finditer(content)]
+        found += [(m.start(), m.group(1), "class") for m in re.finditer(_CLASS, content, M)]
+        found += [(m.start(), m.group(2), "function") for m in re.finditer(_DEF, content, M)]
+        return found
+
+    pieces = ["def", "async", " ", "f", "(", ")", ":", "\n", "->", "x", "class", " A", "R", "# " + "=" * 10]
+    _agree(_both(_DEF, M, pieces) + _both(_CLASS, M, pieces, seed=1), old, lambda content: find(holder, content))
+    assert classes(holder, "class A(\nclass B:\n)") == [(9, "B")], "a class without bases inside one left open"
+    assert classes(holder, "class A(\nclass B:\n):") == [(0, "A")], "a class without bases inside one with bases"
+    assert classes(holder, "class A(\nclass B:\n):\nclass C:") == [(0, "A"), (21, "C")]
+    _agree(list(_every(["class A", "(", ")", ":", "\n", " "], 6)),
+           lambda t: [(m.start(), m.group(1)) for m in re.finditer(_CLASS, t, M)], lambda t: classes(holder, t))
+    r_patterns = _class_patterns("rag/chunkers.py", "RChunker")
+    r_bounds = _r_boundaries()
+
+    def r_old(content):
+        found = [(m.start(), m.group(1).strip(), "section") for m in r_patterns["SECTION_PATTERN"].finditer(content)]
+        return found + [(m.start(), m.group(1), "function") for m in re.finditer(_R_FUNCTION, content, M)]
+
+    _agree(_both(_R_FUNCTION, M, ["f", " ", "<-", "function", "(", ")", "{", "\n", "x", "# " + "=" * 10]),
+           r_old, lambda content: r_bounds(types.SimpleNamespace(**r_patterns), content))
+
+
+# ---------------------------------------------------------------------------
+# EQ38 -- the rules a red-team finding suggests
+# ---------------------------------------------------------------------------
+_FORGET = r"forget\s+(?:everything|all|your)\s+(?:\w+\s+)*(instructions|rules|guidelines)"
+_SYSTEM_TAG = r"</?(?:system|admin|root|override)[^>]*>"
+
+
+def test_eq38_a_suggested_rule_finds_what_it_found_a_system_tag_rule_also_an_opening_left_without_its_end():
+    markers = _defs("redteam/feedback.py", "_INJECTION_MARKERS")["_INJECTION_MARKERS"]
+    forget = next(pattern for pattern, name in markers if name == "forget_rules")
+    assert not _differences(_FORGET, forget, I, "boolean")
+    _agree(_drawn(["forget ", "forget all ", "forget your ", " ", "everything ", "all ", "the ", "a", "rules", "x",
+                   "\n", "aforget", ".", "instructions"], 3),
+           lambda t: re.search(_FORGET, t, I) is not None, lambda t: re.search(forget, t, I) is not None)
+    text = (REPO / "opti_oignon" / "redteam" / "feedback.py").read_text(encoding="utf-8")
+    wider = re.findall(r'r"(</\?\(\?:system[^"]*)"', text)
+    assert len(wider) == 2 and wider[0] == wider[1] and wider[0] != _SYSTEM_TAG, wider
+    found = 0
+    for case in _both(_SYSTEM_TAG, I, ["<", "</", "system", "ROOT", ">", " ", "x", "\n", "<system>"]):
+        old, new = re.search(_SYSTEM_TAG, case, I), re.search(wider[0], case, I)
+        if old is not None:
+            found += 1
+            assert new is not None and new.start() <= old.start(), case
+            if case.count("<") == 1:
+                assert new.span() == old.span(), case
+    assert found > _CASES // 20, ("witness", found)
+    assert re.search(wider[0], "<system role" + " x" * 50, I), "an opening left without its end is read"
+
+
+# ---------------------------------------------------------------------------
+# EQ39, EQ40 -- the statements of the drift ledger
+# ---------------------------------------------------------------------------
+_STATEMENT = (r"^\s*(?P<subject>.+?)\s+(?P<neg>does not |do not |did not |is not |are not |was not |never )?"
+              r"(?P<verb>lives?|works?|is|are|was|were|prefers?|likes?)(?:\s+(?P<particle>in|at|on|called|born on))?"
+              r"\s+(?P<object>.+?)\s*\.?\s*$")
+_PARTS = ("subject", "neg", "verb", "particle", "object")
+
+
+def _statements():
+    return _defs("memory/drift.py", "_NEGATIONS", "_VERBS", "_PARTICLES", "_Statement", "_statement")
+
+
+def test_eq39_a_statement_is_read_into_the_parts_the_statement_pattern_gave_it_and_where():
+    read, old = _statements()["_statement"], re.compile(_STATEMENT, I)
+
+    def spans(match):
+        return None if match is None else tuple((match.start(n), match.end(n), match.group(n)) for n in _PARTS)
+
+    pieces = [" ", "  ", "\n", "\t", "The user", "Ada", "lives", "live", "LIVES", "is", "is not ", "does not ", "never ",
+              "in", "born on", "called", "on", "at", "Paris", ".", "x", "works", "prefers", "like", "isn", "inside",
+              "live" + _LONG_S, " .", "\n."]
+    _agree(_both(_STATEMENT, I, pieces) + _drawn(pieces, 7), lambda t: spans(old.match(t)), lambda t: spans(read(t)))
+    assert spans(read("   is happy")) == spans(old.match("   is happy")), "a subject of one blank, as the pattern read"
+    _agree(list(_every(["a", " ", "\n", "is", "is not ", "in", ".", "x", "lives", "\t"], 5)),
+           lambda t: spans(old.match(t)), lambda t: spans(read(t)))
+    for statement in ("Ada is .", "Ada is not is Paris", "a lives in in x", "Ada is not\n", " a is x. ", "a  is \n x"):
+        assert spans(read(statement)) == spans(old.match(statement)), statement
+
+
+def test_eq40_a_statement_reads_what_follows_each_place_once_counted_calls_not_timings():
+    for shape in (("a", " ", "is", "\n"), ("a", " ", "lives in", "\n"), ("a b", " ", "x", " "), ("", " ", "is", "")):
+        for size in (300, 1200):
+            space = _statements()
+            verbs = [_Counted(pattern) for pattern in space["_VERBS"]]
+            space["_VERBS"] = tuple(verbs)
+            subject, blanks, verb, after = shape
+            space["_statement"](subject + blanks * size + verb + after * size)
+            assert 0 < sum(v.calls for v in verbs) <= 200 + 2 * size, ("the words after a place read again", shape)
+
+
+# ---------------------------------------------------------------------------
+# EQ41 -- the sandbox's subprocess-call check
+# ---------------------------------------------------------------------------
+def test_eq41_a_python_c_subprocess_call_is_refused_with_the_reason_its_own_check_gives(tmp_path):
+    sm, restore = _sandbox(tmp_path)
+    try:
+        validator = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[]))
+        for call in ("Popen", "call", "run", "check_output", "check_call"):
+            command = f"python3 -c 'import subprocess; subprocess.{call}([1])'"
+            assert validator.validate(command) == (False, "Blocked python -c with subprocess calls"), command
+        assert validator.validate("python -c 'import os; os.system(1)'") == (
+            False, "Blocked python -c with subprocess/os.exec"), "the broader check still refuses the rest"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ42 -- the readers that take a run at once, on every unit of a head and a character
+# ---------------------------------------------------------------------------
+_UNIT_CHARACTERS = " \t\na0_.-:,[](){}<>=/\\'\"!?#@*+|;~" + chr(0xE9) + chr(0x3000) + chr(0x2028) + "bxZ9"
+
+
+def _takers():
+    """(name, compiled, head) of each reader that takes a run at once, as the package writes it."""
+    found = []
+    for module, names, head in (("agent/tool_parsing.py", ("_XML_INVOKE_RE",), "<invoke"),
+                                ("agent/tool_parsing.py", ("_XML_PARAM_RE",), "<param"),
+                                ("agent/skills.py", ("_FENCE_RE",), "```"),
+                                ("agent/teacher.py", ("_SKILL_FENCE_RE",), "```skill"),
+                                ("memory/curation.py", ("_THINK_RE",), "<think>"),
+                                ("memory/extraction.py", ("_THINK_RE",), "<think>"),
+                                ("plugins/markdown-beautifier/entry_point.py", ("_FENCED_BLOCK_RE",), "```"),
+                                ("plugins/task-extractor/entry_point.py", ("_IMPERATIVE_VERBS", "_IMPERATIVE_RE"), "\n"),
+                                ("plugins/fact-checker/entry_point.py", ("_ENTITY_CLAIM_PATTERN",), "Aa "),
+                                ("plugins/chain-of-thought-enforcer/entry_point.py",
+                                 ("_ANSWER_MARKERS", "_ANSWER_MARKER_RE", "_REASONING_MARKERS", "_REASONING_MARKER_RE"),
+                                 "\n")):
+        space = _defs(module, *names)
+        found += [(f"{module}:{name}", space[name], head) for name in names if isinstance(space[name], re.Pattern)]
+    for module, marker, head in (("context_summary.py", "<think>(?:", "<think>"), ("memory/legacy.py", "<think>(?:", "<think>"),
+                                 ("sandbox_tools.py", "<!--(?:", "<!--"), ("self_correction.py", "```(?:json)?", "```json {"),
+                                 ("rag_store.py", "(?P<real>)", "<")):
+        pattern, flags = _site(module, marker)
+        found.append((f"{module}:{marker}", re.compile(pattern, flags), head))
+    chunkers = _class_patterns("rag/chunkers.py", "CodeChunker")
+    found += [("chunkers:def", chunkers["FUNCTION_PATTERN"], "def f("),
+              ("chunkers:class", chunkers["CLASS_BASES_PATTERN"], "class A("),
+              ("chunkers:r", _class_patterns("rag/chunkers.py", "RChunker")["FUNCTION_PATTERN"], "f <- function("),
+              ("chunkers:sheet", re.compile(*_site("rag/chunkers.py", "Sheet:")), "[Sheet:")]
+    return found
+
+
+def _scan_time(compiled, text):
+    """The least of three processor times of a full scan of ``text``, every match read: the time the scan took on
+    the processor, not the wall's, which another process sharing the core would lengthen."""
+    spent = []
+    for _ in range(3):
+        start = time.process_time()
+        for _match in compiled.finditer(text):
+            pass
+        spent.append(time.process_time() - start)
+    return min(spent)
+
+
+def _linear(compiled, unit, size=2000):
+    """True when four times as many units take well under sixteen times the time (a quadratic reader takes it)."""
+    short, long = _scan_time(compiled, unit * size), _scan_time(compiled, unit * size * 4)
+    return long <= 8 * short + 0.002
+
+
+def test_eq42_every_reader_that_takes_a_run_at_once_reads_each_head_and_character_in_linear_time():
+    old = re.compile(r"<[^>]+>")
+    assert not _linear(old, "< "), "witness: a quadratic reader is told from a linear one"
+    takers = _takers()
+    assert len(takers) == 20, [name for name, _compiled, _head in takers]
+    slow = []
+    for name, compiled, head in takers:
+        assert "real" in compiled.groupindex, name
+        for character in _UNIT_CHARACTERS:
+            if not _linear(compiled, head + character) and not _linear(compiled, head + character):
+                slow.append((name, head + character))
+    assert not slow, slow

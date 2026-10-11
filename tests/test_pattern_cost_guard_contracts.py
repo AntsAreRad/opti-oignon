@@ -109,6 +109,9 @@ shrink.
     its own module's names; a
     ``type`` alias or a type parameter binds its name (Python 3.12 and later:
     the syntax does not parse before).
+  * PG46 -- the ledger is empty: every pattern the guard measures reads a long
+    run in linear time, and any superlinear one fails the guard by name. It
+    replaces PG44.
 """
 import sys
 from pathlib import Path
@@ -164,6 +167,7 @@ BUDGET_S = {
     "test_pg43_a_builtin_a_scope_binds_or_another_module_rebinds_is_never_read_as_the_builtin": 3.0,
     "test_pg44_the_ledger_never_owes_more_than_it_owes_now_that_thirty_two_patterns_are_linear": 3.0,
     "test_pg45_a_package_that_can_rebind_the_builtins_reads_none_as_itself": 3.0,
+    "test_pg46_the_ledger_is_empty_so_any_superlinear_pattern_fails_by_name": 3.0,
 }
 
 
@@ -1440,5 +1444,19 @@ def test_pg45_a_package_that_can_rebind_the_builtins_reads_none_as_itself(tmp_pa
             rows = [pattern for _m, _l, _c, pattern, _f, _methods
                     in guard.sites(_tree(tmp_path / "typed", {"typed.py": _TYPED}))]
             assert rows == [None, None], ("a type alias and a type parameter bind their names", rows)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG46 -- the ledger is empty (replaces PG44)
+# ---------------------------------------------------------------------------
+def test_pg46_the_ledger_is_empty_so_any_superlinear_pattern_fails_by_name(tmp_path):
+    guard, restore = _load()
+    try:
+        assert guard.LEDGER == {}, guard.LEDGER
+        code, lines = guard.run(_tree(tmp_path, {"marks.py": _QUADRATIC}))
+        assert code == 1 and any("opti_oignon/marks.py: 1 superlinear pattern(s), 0 owed" in line for line in lines), (
+            "witness: under the ledger as written, a superlinear pattern fails by name", lines)
     finally:
         restore()

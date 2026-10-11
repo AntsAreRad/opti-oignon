@@ -22,7 +22,6 @@ Version: 1.1 (Phase A5)
 
 import json
 import logging
-import re
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
@@ -443,18 +442,15 @@ JSON format:
             pass
 
         # Tentative 2: Extraction depuis bloc de code
-        json_patterns = [
-            r'```json\s*([\s\S]*?)\s*```',
-            r'```\s*([\s\S]*?)\s*```',
-            r'\{[\s\S]*\}',
-        ]
-
-        for pattern in json_patterns:
-            match = re.search(pattern, raw_response)
-            if match:
+        # A block opened with ```json, then any fenced block, each read with find in linear time; the first { to
+        # the last } is tentative 3. The first opening decides: one with no closing after it leaves none to any
+        # opening after it. The blanks a pattern kept out of the block are the ones strip() takes off.
+        for fence in ("```json", "```"):
+            start = raw_response.find(fence)
+            end = raw_response.find("```", start + len(fence)) if start != -1 else -1
+            if end != -1:
                 try:
-                    json_str = match.group(1) if '```' in pattern else match.group(0)
-                    return json.loads(json_str.strip())
+                    return json.loads(raw_response[start + len(fence):end].strip())
                 except json.JSONDecodeError:
                     continue
 

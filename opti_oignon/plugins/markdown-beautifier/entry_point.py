@@ -42,7 +42,9 @@ AVAILABLE_RULES = frozenset(_DEFAULT_RULES)
 # Code block protection
 # =========================================================================
 
-_FENCED_BLOCK_RE = re.compile(r"(```[^\n]*\n[\s\S]*?```)", re.DOTALL)
+# Linear on a fence left open: one with no line break after it, or no closing fence after its line, takes the rest
+# at once -- no fence after it can close either -- and is kept, as only a block that reached its closing sets ``real``.
+_FENCED_BLOCK_RE = re.compile(r"(```[^\n]*\n[\s\S]*?```)(?P<real>)|```[\s\S]*", re.DOTALL)
 
 
 def _protect_fenced_blocks(text: str) -> tuple[str, list[str]]:
@@ -53,6 +55,8 @@ def _protect_fenced_blocks(text: str) -> tuple[str, list[str]]:
     blocks: list[str] = []
 
     def _replace(m: re.Match) -> str:
+        if m.group("real") is None:
+            return m.group(0)
         blocks.append(m.group(0))
         return f"__MD_FENCE_{len(blocks) - 1}__"
 

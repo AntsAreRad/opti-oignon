@@ -149,7 +149,9 @@ _ARTIFACT_INDICATORS = {
     "python": [
         re.compile(r"^(#!/usr/bin/env\s+python|#!/usr/bin/python)", re.MULTILINE),
         re.compile(r"^if\s+__name__\s*==\s*['\"]__main__['\"]", re.MULTILINE),
-        re.compile(r"^(import|from)\s+\w+.*\n.*(def|class)\s+\w+", re.DOTALL),
+        # The same texts in linear time: a word's first character and the rest of its line, then any line break
+        # after it, read one way.
+        re.compile(r"^(import|from)\s+\w[^\n]*\n.*(def|class)\s+\w+", re.DOTALL),
     ],
     "r": [
         re.compile(r"^#!/usr/bin/env\s+Rscript", re.MULTILINE),
@@ -334,15 +336,16 @@ class ArtifactDetector:
         self, artifact_type: str, content: str, lang_tag: str,
     ) -> str:
         """Extract a meaningful title from the artifact content."""
-        # HTML: look for <title> tag
+        # HTML: look for <title> tag. Read from each line's first <title>, in linear time: a later one on the
+        # line has no closing after it when the first has none, and the text of the first closed is the same.
         if artifact_type == "html":
-            m = re.search(r"<title>(.*?)</title>", content, re.IGNORECASE)
+            m = re.search(r"(?m)^(?:(?!<title>).)*<title>(.*?)</title>", content, re.IGNORECASE)
             if m:
                 return m.group(1).strip()
 
         # SVG: look for <title> or first <text> element
         if artifact_type == "svg":
-            m = re.search(r"<title>(.*?)</title>", content, re.IGNORECASE)
+            m = re.search(r"(?m)^(?:(?!<title>).)*<title>(.*?)</title>", content, re.IGNORECASE)
             if m:
                 return m.group(1).strip()
 

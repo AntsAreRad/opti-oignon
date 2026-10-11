@@ -98,15 +98,20 @@ class BaseChunker(ABC):
 class CodeChunker(BaseChunker):
     """Chunker pour le code Python."""
 
-    # Patterns for detecting Python structures
+    # Patterns for detecting Python structures. A signature whose ")" is not followed by its ":" -- or that has no
+    # ")" -- takes its parameters at once: every signature that starts inside them ends at the same ")". Only a
+    # signature sets ``real``; linear in the text.
     FUNCTION_PATTERN = re.compile(
-        r'^(async\s+)?def\s+(\w+)\s*\([^)]*\)\s*(?:->.*?)?:',
+        r'^(async\s+)?def\s+(\w+)\s*\([^)]*\)\s*(?:->.*?)?:(?P<real>)|^(?:async\s+)?def\s+\w+\s*\([^)]*',
         re.MULTILINE
     )
-    CLASS_PATTERN = re.compile(
-        r'^class\s+(\w+)\s*(?:\([^)]*\))?\s*:',
+    # A class with bases is read like a signature; one without is read apart (it may start inside the bases of a
+    # class left open), and is not a class where it falls inside one with bases (``_classes``).
+    CLASS_BASES_PATTERN = re.compile(
+        r'^class\s+(\w+)\s*\([^)]*\)\s*:(?P<real>)|^class\s+\w+\s*\([^)]*',
         re.MULTILINE
     )
+    CLASS_PLAIN_PATTERN = re.compile(r'^class\s+(\w+)\s*:', re.MULTILINE)
     SECTION_PATTERN = re.compile(
         r'^# ={10}[^\n]*\n# (.+?)\n# [=]{10,}',
         re.MULTILINE
@@ -181,11 +186,13 @@ class CodeChunker(BaseChunker):
             boundaries.append((match.start(), match.group(1).strip(), "section"))
 
         # Classes
-        for match in self.CLASS_PATTERN.finditer(content):
-            boundaries.append((match.start(), match.group(1), "class"))
+        for start, name in self._classes(content):
+            boundaries.append((start, name, "class"))
 
         # Fonctions (seulement celles au niveau module, pas dans les classes)
         for match in self.FUNCTION_PATTERN.finditer(content):
+            if match.group("real") is None:
+                continue
             # Check that function is not indented (module level)
             line_start = content.rfind('\n', 0, match.start()) + 1
             indent = match.start() - line_start
@@ -194,6 +201,24 @@ class CodeChunker(BaseChunker):
                 boundaries.append((match.start(), name, "function"))
 
         return boundaries
+
+    def _classes(self, content: str) -> list[tuple[int, str]]:
+        """(start, name) of each class, in order, as ``^class\\s+(\\w+)\\s*(?:\\([^)]*\\))?\\s*:`` found them.
+
+        A start holds a class with bases or one without, never both (``(`` or ``:`` follows the name), and one
+        without spans blanks only, so it holds no other start. So the classes are those with bases, and those without
+        that do not start inside one with bases.
+        """
+        with_bases = [(m.start(), m.end(), m.group(1)) for m in self.CLASS_BASES_PATTERN.finditer(content)
+                      if m.group("real") is not None]
+        found, spans = [(start, name) for start, _end, name in with_bases], iter(with_bases)
+        span = next(spans, None)
+        for match in self.CLASS_PLAIN_PATTERN.finditer(content):
+            while span is not None and span[1] <= match.start():
+                span = next(spans, None)
+            if span is None or match.start() < span[0]:
+                found.append((match.start(), match.group(1)))
+        return sorted(found)
 
     def _chunk_by_size(
         self,
@@ -251,9 +276,10 @@ class CodeChunker(BaseChunker):
 class RChunker(BaseChunker):
     """Chunker pour le code R."""
 
-    # Patterns pour R
+    # Patterns pour R. A function whose ")" is not followed by its "{" -- or that has no ")" -- takes its parameters
+    # at once: every function that starts inside them ends at the same ")". Only a function sets ``real``.
     FUNCTION_PATTERN = re.compile(
-        r'^(\w+)\s*<-\s*function\s*\([^)]*\)\s*\{',
+        r'^(\w+)\s*<-\s*function\s*\([^)]*\)\s*\{(?P<real>)|^\w+\s*<-\s*function\s*\([^)]*',
         re.MULTILINE
     )
     SECTION_PATTERN = re.compile(
@@ -274,7 +300,8 @@ class RChunker(BaseChunker):
 
         # Fonctions R
         for match in self.FUNCTION_PATTERN.finditer(content):
-            boundaries.append((match.start(), match.group(1), "function"))
+            if match.group("real") is not None:
+                boundaries.append((match.start(), match.group(1), "function"))
 
         if not boundaries:
             return self._chunk_by_size(content, source_file, file_type)
@@ -669,10 +696,18 @@ class ExcelChunker(BaseChunker):
 
         # Pattern to separate sheets: [Sheet: SheetName]
         # Linear on a long run: the name starts at its first non-blank, or is the last blank when there is none.
-        sheet_pattern = re.compile(r'\[Sheet:\s*([^\]\s][^\]]*|\s)\]\n')
+        # A marker whose "]" is not followed by a line break -- or that has none -- takes its name at once: every
+        # marker that starts inside the name ends at the same "]". Only a marker sets ``real``, and the content is
+        # split at those as ``split`` split it at the marker alone.
+        sheet_pattern = re.compile(r'\[Sheet:\s*([^\]\s][^\]]*|\s)\]\n(?P<real>)|\[Sheet:[^\]]*')
 
         # Trouver toutes les feuilles
-        sheets = sheet_pattern.split(content)
+        sheets, last = [], 0
+        for marker in sheet_pattern.finditer(content):
+            if marker.group("real") is not None:
+                sheets.extend((content[last:marker.start()], marker.group(1)))
+                last = marker.end()
+        sheets.append(content[last:])
 
         chunks = []
         i = 1  # Data starts at index 1 (after the first match)

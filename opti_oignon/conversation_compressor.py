@@ -102,7 +102,8 @@ _RETRIEVAL_TRIGGER_PATTERNS = [
     r"\bearlier\s+(?:you|we)\b",
     r"\bpreviously\b",
     r"\blast\s+time\b",
-    r"\bin\s+(?:a|our|the|my|this)?\s*previous\s+(?:message|conversation|turn)\b",
+    # The blanks after "in" and after the article are one run when no article stands between them.
+    r"\bin\s+(?:(?:a|our|the|my|this)\s*)?previous\s+(?:message|conversation|turn)\b",
     r"\bdo\s+you\s+remember\b",
     r"\bas\s+(?:you|we)\s+(?:mentioned|discussed|noted)\b",
     r"\b(?:recall|remember)\s+(?:when|that|what|you|the)\b",

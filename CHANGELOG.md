@@ -52,10 +52,32 @@ package costs.
   number of heads on it, and returns the very matches `re` returns -- a
   head that crosses a line break included, which no single rewritten
   pattern read exactly; it refuses, when made, a head or a tail the join
-  would read otherwise. Not every pattern is linear yet: the guard names
-  42 still owed, in 25 modules, by digest, and the list may only shrink.
-  Nearly all read an opening marker up to a closing one with no closing
-  one present; the fenced readers of the dynamic pipeline are cubic.
+  would read otherwise.
+  The last 42 now read in linear time too, and the guard's ledger is
+  empty: it fails on any superlinear pattern of the package, without
+  exception. Where every start inside a run fails for the same reason --
+  an opening marker with no closing one after it, a tag with no `>`, the
+  blanks of a line start before a word that is not there, a run of words
+  with no verb -- the pattern takes the run at once with an alternative
+  of its own and marks its real matches, which its caller keeps; the
+  guard measures that pattern as written. The plan in a planner's reply
+  is read with find and rfind. Five readers no single pattern reads
+  exactly keep what they read once per place: the script and style
+  bodies the Svelte checker blanks (a closing tag's name compared as the
+  back-reference compared it, which a literal reads otherwise for dotted
+  and dotless i and long s), its tags and their quoted attributes, the
+  hidden CSS of a page (its `rgba(` form read once per closing
+  parenthesis), the images and links of an answer, and the statements of
+  the drift ledger, whose pattern was cubic. Each reads as the pattern it
+  replaced, as its callers read it: the same matches, groups and spans,
+  or the same answer. Two rules a red-team finding suggests to the
+  document sanitizer change: the one for an injected system tag also
+  reads an opening left without its `>`, and stops a tag at a `<` inside
+  it; the one for "forget ... rules" finds a match where it found one,
+  from the last such phrase before the rule word. A sandbox check that a
+  broader one always answered first (a `python -c` subprocess call) is
+  read before it, so its own reason is given. The log redaction of the
+  Ollama proxy, which nothing called, is removed.
   The window also defangs a frame opening or an envelope bracket left
   open at a segment's end, which the segment after it could have
   finished.

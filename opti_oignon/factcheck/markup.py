@@ -89,14 +89,20 @@ _LIST = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])(?:[ \t]+|$)")
 _QUOTE = re.compile(r"^ {0,3}>[ ]?")
 _HTML_BLOCK = re.compile(r"^ {0,3}<(?:/?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$)|!--)")
 _DEFINITION = re.compile(r"^ {0,3}\[\^?[^\]]+\]:")
-_DELIM = re.compile(r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
+# The blanks after the last cell and after a closing pipe are one run when no pipe stands between them.
+_DELIM = re.compile(r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?$")
 _INDENTED = re.compile(r"^(?: {4}|\t)")
 _LEADING = re.compile(r"^[ \t]*")
 
 _TICKS = re.compile(r"`+")
-_IMAGE = re.compile(r"!\[[^\]]*\]\([^)\s]*(?:\s+\"[^\"]*\")?\)")
-_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\([^)\s]*(?:\s+\"[^\"]*\")?\)")
-_AUTOLINK = re.compile(r"<((?:https?|ftp)://[^\s<>]+|[^\s<>@]+@[^\s<>@]+\.[^\s<>]+)>")
+# The openings of an image and of a link, the end of a target, and what follows it; ``_targets`` reads them.
+_IMAGE_HEAD = re.compile(r"!\[")
+_LINK_HEAD = re.compile(r"(?<!!)\[")
+_TARGET_STOP = re.compile(r"[)\s]")
+# A target never ends in a blank, so the blanks before a title are read only where a run of them starts.
+_TARGET_TAIL = re.compile(r"(?:(?<!\s)\s+\"[^\"]*\")?\)")
+# The same addresses in linear time: the host up to its first dot after its first character, read one way.
+_AUTOLINK = re.compile(r"<((?:https?|ftp)://[^\s<>]+|[^\s<>@]+@[^\s<>@][^\s<>@.]*\.[^\s<>]+)>")
 _INLINE_HTML = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 _STRIKE = re.compile(r"(~~)(?=\S)(.+?)(?<=\S)~~")
 # The blanks around a closing colon are one run when no colon stands between them.
@@ -345,6 +351,48 @@ def _code_spans(segment):
     return spans
 
 
+def _targets(subject, head, least):
+    """(start, text end, end) of each ``[text](target "title")`` form of a line's content, in order, exactly as
+    ``finditer`` finds them with ``!\\[[^\\]]*\\]\\([^)\\s]*(?:\\s+\\"[^\\"]*\\")?\\)`` (``head`` ``_IMAGE_HEAD``,
+    ``least`` 0) or ``(?<!!)\\[([^\\]]+)\\]\\([^)\\s]*(?:\\s+\\"[^\\"]*\\")?\\)`` (``_LINK_HEAD``, 1), in time linear in
+    the content.
+
+    Those patterns read the text and the target again from every opening of a long run. A text ends at the first
+    ``]`` after its opening, a target at the first ``)`` or blank after its ``(``, and what may follow a target --
+    a title, then ``)`` -- is read at that end: so the next ``]`` and the next end of a target are kept with the place
+    they were searched from, and what follows each end is read once.
+    """
+    found, at, tails = [], 0, {}
+    bracket = (0, -2)  # (searched from, the next "]" from there or -1); -2 before any search
+    stop = (0, -1)  # (searched from, where a target from there ends); -1 before any search
+    while True:
+        opening = head.search(subject, at)
+        if opening is None:
+            return found
+        text = opening.end()
+        if not (bracket[0] <= text and (bracket[1] == -1 or text <= bracket[1])):
+            bracket = (text, subject.find("]", text))
+        close = bracket[1]
+        if close == -1:
+            return found  # no "]" after this opening, so none after any opening after it
+        if close - text < least or subject[close + 1:close + 2] != "(":
+            at = opening.start() + 1
+            continue
+        target = close + 2
+        if not (stop[0] <= target <= stop[1]):
+            hit = _TARGET_STOP.search(subject, target)
+            stop = (target, len(subject) if hit is None else hit.start())
+        if stop[1] not in tails:
+            tail = _TARGET_TAIL.match(subject, stop[1])
+            tails[stop[1]] = None if tail is None else tail.end()
+        end = tails[stop[1]]
+        if end is None:
+            at = opening.start() + 1
+            continue
+        found.append((opening.start(), close, end))
+        at = end
+
+
 def _inline(text, cstart, cend):
     """Plain characters of one line's content, with what each came from."""
     segment = text[cstart:cend]
@@ -363,15 +411,15 @@ def _inline(text, cstart, cend):
             code[position] = True
             protected[position] = True
     subject = "".join("\x00" if protected[i] or deleted[i] else segment[i] for i in range(size))
-    for match in _IMAGE.finditer(subject):
-        for position in range(match.start(), match.end()):
+    for start, _close, end in _targets(subject, _IMAGE_HEAD, 0):
+        for position in range(start, end):
             deleted[position] = True
-        images.append((cstart + match.start(), cstart + match.end()))
-    for match in _LINK.finditer(subject):
-        if any(deleted[match.start():match.end()]):
+        images.append((cstart + start, cstart + end))
+    for start, close, end in _targets(subject, _LINK_HEAD, 1):
+        if any(deleted[start:end]):
             continue
-        deleted[match.start()] = True
-        for position in range(match.end(1), match.end()):
+        deleted[start] = True
+        for position in range(close, end):
             deleted[position] = True
     for match in _AUTOLINK.finditer(subject):
         if any(deleted[match.start():match.end()]):
