@@ -20,7 +20,16 @@ constants: string and bytes literals, the names a module, class, function,
 loop or comprehension binds to constants only, the items of a constant
 tuple, list, set or dict a loop or a comprehension takes them from,
 concatenations, ``%``, f-strings, items and slices, ``join``, ``re.escape``,
-``re`` flags and their union. A name is never taken for a constant when its value can change
+``chr`` of a constant integer, ``tuple``, ``list`` and ``sorted`` (the last
+in its argument's order, not sorted: a gap known), ``re`` flags and their
+union; a builtin is read as itself only where no scope binds
+its name (a ``type`` alias and a type parameter included) and nothing in the
+package names ``__builtins__``, ``exec`` or ``eval``, a frame's builtins or a
+function's globals, imports from ``builtins`` or uses it as an object, or
+reaches the ``__dict__`` of a module it imports by name at run time; a
+builtin rebound by code the source shows by no name (a function made from
+compiled code) is not claimed. A name is never taken for a constant when its
+value can change
 out of the evaluator's sight: bound by ``:=`` inside a comprehension, by a
 ``match`` capture or by ``import *``; rebound through ``global``,
 ``nonlocal``, ``globals()`` or ``vars()``, or by another module (an
@@ -105,6 +114,8 @@ PLANTED = ((r"\[\s*data\s*[:\s]\s*\w+=", re.IGNORECASE, True), (r"\[\s*data(?:\s
 MOST = 512
 # The readings of a verdict against the ledger: it counts when most of them agree.
 READINGS = 3
+# Among the rebound names: the package may rebind the builtins, so none is read as itself. Never a name.
+BUILTINS = " builtins"
 
 REPEATS = tuple(op for op in (sre_constants.MAX_REPEAT, sre_constants.MIN_REPEAT,
                               getattr(sre_constants, "POSSESSIVE_REPEAT", None)) if op is not None)
@@ -114,30 +125,21 @@ ZERO_WIDTH = (sre_constants.AT, sre_constants.ASSERT, sre_constants.ASSERT_NOT)
 # MAY ONLY SHRINK: the superlinear patterns each module owes, by digest. Nearly
 # all of them read a marker that opens a span, then anything up to a marker
 # that closes it or to the end of the line (``<think>.*?</think>``, a fenced
-# block, a tag, two keywords across a sentence, a command word then its
-# arguments): linear on a run of one character, they take quadratic time on
-# the opening marker repeated with no closing one. A few hold two repeats over
-# classes that share a character (``\s*`` on both sides of an optional group),
-# or a repeat inside a repeat; the backtick span of ``factcheck/markup.py`` is
-# cubic. Two are in code nothing calls: ``memory/drift.py`` and
-# ``ollama_log_proxy.py``.
+# block, a tag, two keywords across a sentence): linear on a run of one
+# character, they take quadratic time on the opening marker repeated with no
+# closing one. A few hold two repeats over classes that share a character
+# (``\s*`` on both sides of an optional group), or a repeat inside a repeat;
+# the fenced readers of ``agents/dynamic_pipeline.py`` are cubic. Two are in
+# code nothing calls: ``memory/drift.py`` and ``ollama_log_proxy.py``.
 LEDGER = {
     "opti_oignon/agent/skills.py": ("324648d033fe",),
     "opti_oignon/agent/teacher.py": ("f184d8badd99",),
     "opti_oignon/agent/tool_parsing.py": ("c6a3196dc531", "fc392fc7ebfb",),
     "opti_oignon/agents/dynamic_pipeline.py": ("6e099050686a", "7d4e063b3be0", "ff53ff321499",),
-    "opti_oignon/analyzer.py": (
-        "7d3fe06555af", "22d7404b507d", "67b9d3fcdaf9", "6cb626243efd", "1c4cc1a921d4", "33891c51c272", "d61fff29d811",
-        "d99eaf0e9ed5", "8bd50b6dc62f", "a0697df25c32", "8572eb96893d", "ff513cd3b427", "9ea571a7e8ec", "af44f9065383",
-        "ce4caa0c1acb", "ac78f62359a0", "9d9a290ce13b",
-    ),
     "opti_oignon/artifacts.py": ("3948a2d076c1", "8d2ed78bf46e", "8d2ed78bf46e",),
-    "opti_oignon/code_executor.py": ("e15d6dfba741", "56515b6f7361", "ab236d0d190f", "717b2582c9bf",),
     "opti_oignon/context_summary.py": ("ea5073aa89b5",),
     "opti_oignon/conversation_compressor.py": ("9ee6cffa4ca7",),
-    "opti_oignon/factcheck/markup.py": (
-        "77854734d1eb", "17e476b60d4f", "38fc4ca02fa3", "15732c54ecae", "94de96ac3d0d", "1e5a1a418032",
-    ),
+    "opti_oignon/factcheck/markup.py": ("77854734d1eb", "38fc4ca02fa3", "15732c54ecae", "94de96ac3d0d",),
     "opti_oignon/memory/curation.py": ("df20605bf827",),
     "opti_oignon/memory/drift.py": ("911d5532bd07",),
     "opti_oignon/memory/extraction.py": ("df20605bf827",),
@@ -151,10 +153,6 @@ LEDGER = {
     "opti_oignon/rag_sanitizer.py": ("673cec978dd4",),
     "opti_oignon/rag_store.py": ("7a49648e5341",),
     "opti_oignon/redteam/feedback.py": ("01d6eed0458d", "7d7db45861b0",),
-    "opti_oignon/sandbox_manager.py": (
-        "9d1d77ffa05c", "41cc1c1546e8", "fb2ffdd6cc1d", "0f81ca74a823", "83666781b052", "8cb47d239963", "26208e1f9259",
-        "daa046bc1d56", "dea2cd5b1035",
-    ),
     "opti_oignon/sandbox_tools.py": ("be3b2253127b", "587144fb9084", "fdcc7f2a4518",),
     "opti_oignon/self_correction.py": ("d396510d26ce",),
     "opti_oignon/session_fingerprint.py": ("faf6aa785421", "adeeb333a19d",),
@@ -273,10 +271,12 @@ def mutated(module):
     """The names the module changes in place or rebinds from another scope: a mutating method read on the name, an
     item or slice of it stored or deleted, an augmented assignment, ``global`` or ``nonlocal``, and every name that
     shares objects with one of those (bound from it, taken from it in a loop); a name stored through ``globals()``
-    or ``vars()``. Their values are never known; ``"*"`` among them: the module's names may all be rebound. A
+    or ``vars()``; every name, when the module calls ``exec`` or ``eval``. Their values are never known; ``"*"`` among them: the module's names may all be rebound. A
     change in place counts for the names bound to a list, dict or set: a string or a number never changes."""
     out, rebound_here, edges, containers = set(), set(), [], set()
     for node in _walk(module):
+        if isinstance(node, ast.Name) and node.id in ("exec", "eval"):
+            rebound_here.add("*")
         if isinstance(node, ast.Attribute) and node.attr in MUTATORS:
             if _is_namespace(node.value):
                 rebound_here.add("*")
@@ -316,21 +316,48 @@ def mutated(module):
 
 
 def rebound(parsed):
-    """The names a module of the package rebinds in another: an attribute of a module it imports stored or deleted,
-    or set by ``setattr`` or ``delattr`` under a constant name; ``"*"`` when one is set under a name not known."""
+    """The names a module of the package rebinds in another: an attribute of a module it imports, or of one it binds
+    from ``__import__`` or ``import_module``, stored or deleted, or set by ``setattr`` or ``delattr`` under a constant
+    name; ``"*"`` when one is set under a name not known; ``BUILTINS`` when a module names ``__builtins__``, ``exec``
+    or ``eval``, a frame's ``f_builtins`` or a function's ``__globals__``, imports from ``builtins``, or uses an
+    imported ``builtins`` as an object rather than reading one of its names, any of which can rebind a builtin."""
     out = set()
     for _rel, module in parsed:
         modules = {(alias.asname or alias.name).split(".")[0] for node in _walk(module)
                    if isinstance(node, ast.Import) for alias in node.names}
+        modules |= {name for node in _walk(module) if isinstance(node, ast.Assign) and _importer(node.value)
+                    for target in node.targets for name, _path in _paths(target)}
+        spaces = {alias.asname or alias.name for node in _walk(module) if isinstance(node, ast.Import)
+                  for alias in node.names if alias.name == "builtins"}
+        dynamic = modules - {(alias.asname or alias.name).split(".")[0] for node in _walk(module)
+                             if isinstance(node, ast.Import) for alias in node.names}
+        parents = _parents(module)
         for node in _walk(module):
+            parent = parents.get(id(node))
+            read = isinstance(parent, ast.Attribute) and parent.value is node and parent.attr != "__dict__"
+            if (isinstance(node, ast.Name) and (node.id in ("__builtins__", "exec", "eval") or node.id in spaces and not read)
+                    or isinstance(node, ast.Attribute) and (
+                        node.attr in ("f_builtins", "__globals__", "__builtins__")
+                        or node.attr == "__dict__" and (_importer(node.value) or _roots(node.value) & dynamic))
+                    or isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "vars"
+                    and node.args and _roots(node.args[0]) & dynamic
+                    or isinstance(node, ast.ImportFrom) and node.module == "builtins"):
+                out.add(BUILTINS)
             if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
-                if _roots(node.value) & modules:
+                if _roots(node.value) & modules or _importer(node.value):
                     out.add(node.attr)
             elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("setattr", "delattr")
-                  and len(node.args) >= 2 and _roots(node.args[0]) & modules):
+                  and len(node.args) >= 2 and (_roots(node.args[0]) & modules or _importer(node.args[0]))):
                 name = node.args[1]
                 out.add(name.value if isinstance(name, ast.Constant) and isinstance(name.value, str) else "*")
     return out
+
+
+def _importer(node):
+    """True for a call that returns a module by its name: ``__import__(...)``, ``import_module(...)``."""
+    return isinstance(node, ast.Call) and (
+        isinstance(node.func, ast.Name) and node.func.id in ("__import__", "import_module")
+        or isinstance(node.func, ast.Attribute) and node.func.attr == "import_module")
 
 
 PURE = {"len", "tuple", "list", "sorted", "set", "frozenset", "enumerate", "zip", "any", "all", "min", "max", "sum",
@@ -471,9 +498,27 @@ class Scope:
                     raise Unknown from None
             if method in ("items", "keys", "values") and not args:
                 return [tuple(getattr(value, method)()) for value in self.values(owner) if isinstance(value, dict)]
-        if isinstance(func, ast.Name) and func.id in ("tuple", "list", "sorted") and len(args) == 1:
-            return [tuple(_items(value)) for value in self.values(args[0])]
+        if isinstance(func, ast.Name) and len(args) == 1 and self.builtin(func.id):
+            if func.id in ("tuple", "list", "sorted"):
+                return [tuple(_items(value)) for value in self.values(args[0])]
+            if func.id == "chr":
+                values = self.values(args[0])
+                if not all(type(value) is int and 0 <= value <= sys.maxunicode for value in values):
+                    raise Unknown
+                return [chr(value) for value in values]
         raise Unknown
+
+    def builtin(self, name):
+        """True when ``name`` is read as the builtin of that name here: no scope up to the module binds it, and
+        nothing rebinds it out of sight."""
+        if name in self.changed or "*" in self.changed or BUILTINS in self.changed:
+            return False
+        scope = self
+        while scope is not None:
+            if name in scope.bindings or "*" in scope.bindings:
+                return False
+            scope = scope.parent
+        return True
 
 
 def _paths(target, path=()):
@@ -488,6 +533,7 @@ def _paths(target, path=()):
 
 
 MATCH_CAPTURES = tuple(getattr(ast, kind) for kind in ("MatchAs", "MatchStar", "MatchMapping") if hasattr(ast, kind))
+TYPE_ALIASES = tuple(getattr(ast, kind) for kind in ("TypeAlias",) if hasattr(ast, kind))
 
 
 def bindings(body, params=(), generators=()):
@@ -504,6 +550,9 @@ def bindings(body, params=(), generators=()):
     def visit(node, comprehended=False):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             out.setdefault(node.name, []).append((None, node))
+            return
+        if isinstance(node, TYPE_ALIASES):
+            out.setdefault(node.name.id, []).append((None, node))
             return
         if isinstance(node, ast.Lambda):
             return
@@ -552,6 +601,11 @@ def _params(arguments):
         arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None]
 
 
+def _type_params(node):
+    """The names a function or class binds as type parameters (``def f[T]()``): bound in its own scope."""
+    return [param.name for param in getattr(node, "type_params", ())]
+
+
 def scoped_calls(module, re_names, imported=frozenset(), elsewhere=frozenset()):
     """(call, scope) for every call of the module, the scope being where its names are read."""
     found = []
@@ -562,14 +616,14 @@ def scoped_calls(module, re_names, imported=frozenset(), elsewhere=frozenset()):
                     default for default in node.args.kw_defaults if default is not None]:
                 visit(child, scope, outer)
             body = node.body if isinstance(node.body, list) else [node.body]
-            inner = Scope(bindings(body, _params(node.args)), outer, re_names)
+            inner = Scope(bindings(body, _params(node.args) + _type_params(node)), outer, re_names)
             for child in body:
                 visit(child, inner, inner)
             return
         if isinstance(node, ast.ClassDef):
             for child in node.decorator_list + node.bases + [keyword.value for keyword in node.keywords]:
                 visit(child, scope, outer)
-            inner = Scope(bindings(node.body), scope, re_names)
+            inner = Scope(bindings(node.body, _type_params(node)), scope, re_names)
             for child in node.body:
                 visit(child, inner, outer)
             return

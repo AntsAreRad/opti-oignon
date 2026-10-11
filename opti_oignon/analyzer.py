@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
+from .joined_pattern import JoinedPattern
+
 logger = logging.getLogger(__name__)
 
 # Avoid circular imports
@@ -113,7 +115,7 @@ R_PATTERNS = {
         r"\blibrary\s*\(", r"<-", r"\btidyverse\b", r"\bdplyr\b", r"\bggplot",
         r"\bvegan\b", r"\bphyloseq\b", r"\bdeseq2\b", r"\bedger\b",
         r"%>%", r"\|>", r"\btibble\b", r"\.R\b", r"\.Rmd\b",
-        r"\bdata\.frame\b", r"\bmatrix\b.*\bR\b", r"\bfunction\s*\(",
+        r"\bdata\.frame\b", r"\bfunction\s*\(",
     ],
     "medium": [
         r"\bR\b(?!eact)", r"\bRstudio\b", r"\bcran\b", r"\bbioconductor\b",
@@ -123,8 +125,8 @@ R_PATTERNS = {
         r"\becology\b", r"\bbiodiversity\b",
     ],
     "low": [
-        r"\bstatistique\b", r"\banalyse\b.*\bdonnées\b", r"\bplot\b",
-        r"\bstatistics?\b", r"\banalysis\b.*\bdata\b",
+        r"\bstatistique\b", r"\bplot\b",
+        r"\bstatistics?\b",
     ],
 }
 
@@ -151,12 +153,10 @@ DEBUG_PATTERNS = {
         r"\berror\b", r"\berreur\b", r"\btraceback\b", r"\bexception\b",
         r"\bfailed\b", r"\béchou[ée]\b", r"\bcrash\b", r"\bbug\b",
         r"\bne\s+(fonctionne|marche)\s+pas\b", r"\bdoesn'?t\s+work\b",
-        r"\bwhy\b.*\b(error|fail)\b", r"\bpourquoi\b.*\b(erreur|error)\b",
     ],
     "medium": [
         r"\bproblème\b", r"\bproblem\b", r"\bissue\b",
-        r"\bne\s+pas\b.*\bfonctionne\b", r"\bhelp\b.*\b(understand|solve)\b",
-        r"\baide\b.*\b(comprendre|résoudre)\b", r"\bwarning\b",
+        r"\bwarning\b",
     ],
 }
 
@@ -170,7 +170,6 @@ WRITING_PATTERNS = {
     ],
     "medium": [
         r"\brédige\b", r"\bwrite\b", r"\bécris\b", r"\bformule\b",
-        r"\bexplain\b.*\bscientific\b", r"\bexplique\b.*\bscientifique\b",
         r"\bacadémique\b", r"\bacademic\b", r"\bthèse\b", r"\bthesis\b",
         r"\bmémoire\b", r"\bdissertation\b",
     ],
@@ -189,11 +188,9 @@ PLANNING_PATTERNS = {
         r"\bconseils?\b", r"\badvice\b", r"\brecommand\b", r"\bdécider\b",
     ],
     "complex": [
-        r"\bcomparer\b.*\boptions\b", r"\bcompare\b.*\boptions\b",
         r"\banalyse\s+(approfondie|complète)\b", r"\bin-depth\s+analysis\b",
         r"\bpour\s+et\s+contre\b", r"\bpros\s+and\s+cons\b",
-        r"\bpeser\b.*\balternatives\b", r"\bweigh\b.*\balternatives\b",
-        r"\braisonne\b", r"\breason\b", r"\bréfléchis\b.*\bétapes\b",
+        r"\braisonne\b", r"\breason\b",
     ],
 }
 
@@ -206,9 +203,37 @@ LINUX_PATTERNS = {
     ],
     "medium": [
         r"\blinux\b", r"\bubuntu\b", r"\bkubuntu\b", r"\bdebian\b",
-        r"\bfichier\b.*\bsystème\b", r"\bfile\b.*\bsystem\b",
         r"\bpermission\b", r"\bpath\b",
     ],
+}
+
+
+# Two words in that order on one line ("matrix ... R"), by table and level.
+# Each is read by JoinedPattern, once per line: as one pattern, the engine
+# would start over at every first word and run to the end of the line.
+R_PAIRS = {
+    "high": [(r"\bmatrix\b", r"\bR\b")],
+    "low": [(r"\banalyse\b", r"\bdonn\u00e9es\b"), (r"\banalysis\b", r"\bdata\b")],
+}
+DEBUG_PAIRS = {
+    "high": [(r"\bwhy\b", r"\b(error|fail)\b"), (r"\bpourquoi\b", r"\b(erreur|error)\b")],
+    "medium": [
+        (r"\bne\s+pas\b", r"\bfonctionne\b"), (r"\bhelp\b", r"\b(understand|solve)\b"),
+        (r"\baide\b", r"\b(comprendre|r\u00e9soudre)\b"),
+    ],
+}
+WRITING_PAIRS = {
+    "medium": [(r"\bexplain\b", r"\bscientific\b"), (r"\bexplique\b", r"\bscientifique\b")],
+}
+PLANNING_PAIRS = {
+    "complex": [
+        (r"\bcomparer\b", r"\boptions\b"), (r"\bcompare\b", r"\boptions\b"),
+        (r"\bpeser\b", r"\balternatives\b"), (r"\bweigh\b", r"\balternatives\b"),
+        (r"\br\u00e9fl\u00e9chis\b", r"\b\u00e9tapes\b"),
+    ],
+}
+LINUX_PAIRS = {
+    "medium": [(r"\bfichier\b", r"\bsyst\u00e8me\b"), (r"\bfile\b", r"\bsystem\b")],
 }
 
 
@@ -251,6 +276,21 @@ class TaskAnalyzer:
             "linux": {k: [re.compile(p, re.IGNORECASE) for p in v]
                       for k, v in LINUX_PATTERNS.items()},
         }
+        joined = {
+            "r": {k: [JoinedPattern(re.compile(h, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for h, t in v]
+                  for k, v in R_PAIRS.items()},
+            "debug": {k: [JoinedPattern(re.compile(h, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for h, t in v]
+                      for k, v in DEBUG_PAIRS.items()},
+            "writing": {k: [JoinedPattern(re.compile(h, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for h, t in v]
+                        for k, v in WRITING_PAIRS.items()},
+            "planning": {k: [JoinedPattern(re.compile(h, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for h, t in v]
+                         for k, v in PLANNING_PAIRS.items()},
+            "linux": {k: [JoinedPattern(re.compile(h, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for h, t in v]
+                      for k, v in LINUX_PAIRS.items()},
+        }
+        for name, levels in joined.items():
+            for level, patterns in levels.items():
+                self._patterns[name][level] += patterns
 
     def _get_preset_manager(self) -> Optional['PresetManager']:
         """Get the preset manager (lazy loading to avoid circular imports)."""

@@ -96,6 +96,19 @@ shrink.
     pump, labelled by its kind (fake times, real loop).
   * PG41 -- the guard run from the command line reads the tree it is given and
     exits with the run's code, printing its lines.
+  * PG42 -- ``chr`` of a constant integer is read: a pattern built with it is
+    measured and held to the ledger; ``chr`` of anything else is dynamic.
+  * PG43 -- a builtin whose name a scope binds, or another module rebinds, is
+    never read as the builtin: the site is dynamic.
+  * PG44 -- the ledger never owes more than it owes now that thirty-two of
+    its patterns are linear: 42 patterns in 25 modules. It replaces PG24.
+  * PG45 -- a package that names ``__builtins__``, ``exec`` or ``eval``, a
+    frame's builtins, imports from ``builtins`` or uses it as an object, or
+    writes through a module it imports by name at run time, has no builtin read
+    as itself; a module only read so opens nothing; ``exec`` or ``eval`` opens
+    its own module's names; a
+    ``type`` alias or a type parameter binds its name (Python 3.12 and later:
+    the syntax does not parse before).
 """
 import sys
 from pathlib import Path
@@ -147,6 +160,10 @@ BUDGET_S = {
     "test_pg39_the_pump_helpers_give_their_exact_outputs_on_a_table_of_patterns": 3.0,
     "test_pg40_a_linear_pattern_is_reported_by_its_costliest_pump_labelled_by_its_kind": 3.0,
     "test_pg41_the_guard_run_from_the_command_line_reads_the_tree_it_is_given": 3.0,
+    "test_pg42_chr_of_a_constant_integer_is_read_and_chr_of_anything_else_is_dynamic": 3.0,
+    "test_pg43_a_builtin_a_scope_binds_or_another_module_rebinds_is_never_read_as_the_builtin": 3.0,
+    "test_pg44_the_ledger_never_owes_more_than_it_owes_now_that_thirty_two_patterns_are_linear": 3.0,
+    "test_pg45_a_package_that_can_rebind_the_builtins_reads_none_as_itself": 3.0,
 }
 
 
@@ -1304,5 +1321,124 @@ def test_pg41_the_guard_run_from_the_command_line_reads_the_tree_it_is_given(tmp
         steep = _tree(tmp_path / "script", {"marks.py": _QUADRATIC})
         done = subprocess.run([sys.executable, str(_GUARD), str(steep)], capture_output=True, text=True, timeout=120)
         assert done.returncode == 1 and done.stdout.startswith("Pattern cost: FAILED --"), (done.returncode, done.stdout)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG42 -- chr of a constant integer
+# ---------------------------------------------------------------------------
+_CHARS = ('import re\n\nBLANK = " " + chr(0xA0) + chr(0x202F)\nTOO_FAR = chr(0x110000)\n\n\ndef find(t, n):\n'
+          '    re.search("[" + BLANK + r"]+\\[\\d+\\]", t)\n    re.search(chr(97) + "+", t)\n    re.search(chr(n), t)\n'
+          '    re.search(chr("a"), t)\n    re.search(chr(True), t)\n    re.search(TOO_FAR, t)\n'
+          '    re.search(chr(0) + "+", t)\n    re.search(chr(0x10FFFF) + "+", t)\n    re.search(str(97) + "+", t)\n')
+
+
+def test_pg42_chr_of_a_constant_integer_is_read_and_chr_of_anything_else_is_dynamic(tmp_path):
+    guard, restore = _load()
+    try:
+        tree = _tree(tmp_path, {"chars.py": _CHARS})
+        rows = [(line, pattern) for _m, line, _c, pattern, _f, _methods in guard.sites(tree)]
+        blank = "[ " + chr(0xA0) + chr(0x202F) + "]+\\[\\d+\\]"
+        assert rows == [(8, blank), (9, "a+"), (10, None), (11, None), (12, None), (13, None), (14, chr(0) + "+"),
+                        (15, chr(0x10FFFF) + "+"), (16, None)], ("the bounds of chr; str is not chr", rows)
+        guard.LEDGER = {}
+        code, lines = guard.run(tree)
+        assert code == 1 and _lines(lines) == [8], ("built by chr, measured and held to the ledger", lines)
+        guard.LEDGER = _owing(guard, "chars.py", blank)
+        assert guard.run(tree)[0] == 0, "owed, it passes"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG43 -- builtins a scope binds or another module rebinds
+# ---------------------------------------------------------------------------
+_SHADOWS = ('import re\nT = ("a", "b")\n\n\ndef chr(code):\n    return "b"\n\n\ndef find(t, sorted=None):\n'
+            '    re.search(chr(97), t)\n    re.search("|".join(sorted(T)), t)\n\n\ndef other(t):\n    tuple = list\n'
+            '    return re.search("".join(tuple(T)), t)\n\n\ndef fine(t):\n    return re.search("".join(list(T)), t)\n')
+_USER = 'import re\n\n\ndef find(t):\n    return re.search(chr(97) + "+", t)\n'
+_BUILTINS_REBOUND = 'import builtins\n\nbuiltins.chr = str\n'
+
+
+def test_pg43_a_builtin_a_scope_binds_or_another_module_rebinds_is_never_read_as_the_builtin(tmp_path):
+    guard, restore = _load()
+    try:
+        rows = [(line, pattern) for _m, line, _c, pattern, _f, _methods
+                in guard.sites(_tree(tmp_path / "shadows", {"shadows.py": _SHADOWS}))]
+        assert rows == [(10, None), (11, None), (16, None), (20, "ab")], rows
+        alone = [pattern for _m, _l, _c, pattern, _f, _methods in guard.sites(_tree(tmp_path / "alone", {"user.py": _USER}))]
+        assert alone == ["a+"], ("control: the builtin is read where nothing rebinds it", alone)
+        rebound = [pattern for module, _l, _c, pattern, _f, _methods
+                   in guard.sites(_tree(tmp_path / "rebound", {"user.py": _USER, "rebinder.py": _BUILTINS_REBOUND}))
+                   if module.endswith("user.py")]
+        assert rebound == [None], ("rebound by another module", rebound)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG44 -- the ledger's ceiling, lowered (replaces PG24)
+# ---------------------------------------------------------------------------
+def test_pg44_the_ledger_never_owes_more_than_it_owes_now_that_thirty_two_patterns_are_linear():
+    guard, restore = _load()
+    try:
+        import re
+        owed = sum(len(names) for names in guard.LEDGER.values())
+        assert owed <= 42 and len(guard.LEDGER) <= 25, (owed, len(guard.LEDGER))
+        for module, names in guard.LEDGER.items():
+            assert (REPO / module).is_file(), module
+            assert names and all(re.fullmatch(r"[0-9a-f]{12}", name) for name in names), (module, names)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG45 -- the builtins' namespace, exec and eval, type aliases and parameters
+# ---------------------------------------------------------------------------
+_OPENERS = (
+    'x = __builtins__\n',
+    'import builtins\n\nbuiltins.__dict__["chr"] = str\n',
+    'import builtins as b\n\nvars(b).update(chr=str)\n',
+    'exec("pass")\n',
+    'eval("1")\n',
+    '__import__("builtins").chr = str\n',
+    'from builtins import __dict__ as d\n\nd["chr"] = str\n',
+    'import sys\n\nsys._getframe().f_builtins["chr"] = str\n',
+    'run = exec\n',
+    'import builtins\n\ngetattr(builtins, "exec")("x = 1")\n',
+    'm = __import__("builtins")\n\nm.__dict__["chr"] = str\n',
+    'm = __import__("builtins")\n\nvars(m)["chr"] = str\n',
+    'setattr(__import__("builtins"), "chr", str)\n',
+)
+_HARMLESS = ('import builtins\n\nx = __import__("os")\n\ny = x.getcwd()\nz = __import__("os").cpu_count()\n'
+             'w = builtins.len("ab")\n')
+_OPENED = 'import re\n\nP = r"a+"\n\n\ndef find(t):\n    return re.search(chr(98) + "+", t), re.search(P, t)\n'
+_TYPED = ('import re\n\ntype chr = int\n\n\ndef find(t):\n    return re.search(chr(98), t)\n\n\n'
+          'def typed[sorted](t):\n    return re.search("".join(sorted(("b", "a"))), t)\n')
+
+
+def test_pg45_a_package_that_can_rebind_the_builtins_reads_none_as_itself(tmp_path):
+    guard, restore = _load()
+    try:
+        alone = [pattern for _m, _l, _c, pattern, _f, _methods
+                 in guard.sites(_tree(tmp_path / "alone", {"user.py": _OPENED}))]
+        assert alone == ["b+", "a+"], ("control: nothing rebinds the builtins", alone)
+        harmless = [pattern for module, _l, _c, pattern, _f, _methods
+                    in guard.sites(_tree(tmp_path / "harmless", {"user.py": _OPENED, "opener.py": _HARMLESS}))
+                    if module.endswith("user.py")]
+        assert harmless == ["b+", "a+"], ("control: a module imported by name and only read opens nothing", harmless)
+        for index, opener in enumerate(_OPENERS):
+            rows = [pattern for module, _l, _c, pattern, _f, _methods
+                    in guard.sites(_tree(tmp_path / f"o{index}", {"user.py": _OPENED, "opener.py": opener}))
+                    if module.endswith("user.py")]
+            assert rows == [None, "a+"], (opener, rows)
+        own = _OPENED.replace("def find(t):", 'exec("pass")\n\n\ndef find(t):')
+        rows = [pattern for _m, _l, _c, pattern, _f, _methods in guard.sites(_tree(tmp_path / "own", {"user.py": own}))]
+        assert rows == [None, None], ("exec opens its own module's names", rows)
+        if sys.version_info >= (3, 12):
+            rows = [pattern for _m, _l, _c, pattern, _f, _methods
+                    in guard.sites(_tree(tmp_path / "typed", {"typed.py": _TYPED}))]
+            assert rows == [None, None], ("a type alias and a type parameter bind their names", rows)
     finally:
         restore()

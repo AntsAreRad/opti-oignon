@@ -133,12 +133,17 @@ _DAY = r"(?P<d>3[01]|[12][0-9]|0?[1-9])(?![0-9])(?P<suffix>er|st|nd|rd|th)?"
 _MONTH_WORD = r"(?P<m>[^\W\d_]+)(?P<dot>\.)?"
 _YEAR = r"(?P<y>[1-9][0-9]{3})(?![0-9])"
 _SP = "[" + _BLANK + "]+"
+# A form that opens on the month word starts where a word starts: a start
+# glued to a letter, a figure or an underscore is refused when it is read,
+# and from inside a long word the expression would run to its end from
+# every letter.
+_WORD_OPENS = r"(?<!\w)"
 _DATE_FORMS = (
     ("dmy", re.compile(_DAY + _SP + "(?:(?P<of>of)" + _SP + ")?" + _MONTH_WORD + "(?P<comma>,)?" + _SP + _YEAR)),
-    ("mdy", re.compile(_MONTH_WORD + _SP + _DAY + "(?P<comma>,)?" + _SP + _YEAR)),
+    ("mdy", re.compile(_WORD_OPENS + _MONTH_WORD + _SP + _DAY + "(?P<comma>,)?" + _SP + _YEAR)),
     ("dm", re.compile(_DAY + _SP + "(?:(?P<of>of)" + _SP + ")?" + _MONTH_WORD)),
-    ("md", re.compile(_MONTH_WORD + _SP + _DAY)),
-    ("my", re.compile(_MONTH_WORD + "(?P<comma>,)?" + _SP + _YEAR)),
+    ("md", re.compile(_WORD_OPENS + _MONTH_WORD + _SP + _DAY)),
+    ("my", re.compile(_WORD_OPENS + _MONTH_WORD + "(?P<comma>,)?" + _SP + _YEAR)),
     ("iso", re.compile(_YEAR + "-(?P<m>[0-9]{2})-(?P<d>[0-9]{2})(?![0-9])")),
     ("iso_month", re.compile(_YEAR + "-(?P<m>[0-9]{2})(?![0-9])")),
     ("ymd", re.compile(_YEAR + "/(?P<m>[0-9]{1,2})/(?P<d>[0-9]{1,2})(?![0-9])")),

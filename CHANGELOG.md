@@ -36,16 +36,26 @@ package costs.
   in the mode its callers use, and fails on any superlinear pattern a
   module does not owe; a verdict against its ledger counts when two of
   three readings agree, so the noise of a machine neither fails a linear
-  pattern nor lets a superlinear one through. Not every
-  pattern is linear yet: the guard names 74 still owed, in 28 modules, by
-  digest, and the list may only shrink. Nearly all read an opening marker
-  up to a closing one with no closing one present; some are quadratic on
-  a run of one character -- the command checks of the sandbox, the
-  language detection of code, keyword pairs read across a message -- and
-  one, the backtick span the fact checker reads in an answer, is cubic.
-  Three more are owed outside the list, since a character code builds
-  them and the guard counts them as dynamic: the date forms the probes of
-  a peel read are quadratic on a long word.
+  pattern nor lets a superlinear one through. It reads `chr` of a
+  constant integer, and a builtin only where no scope binds its name and
+  nothing in the package can rebind it (the builtins' namespace, `exec`,
+  `eval`).
+  Thirty-five more patterns now read in linear time: the date forms the
+  probes of a peel read, quadratic on a long word, start only where a
+  word starts, which drops no date they read; the backtick spans the fact
+  checker reads in an answer, cubic, are read by a reader of their own
+  that gives the spans the pattern gave; the command checks of the
+  sandbox, the keyword pairs the analyzer reads across a message and its
+  document, and the language detection of code. A pattern of the form
+  head, then anything on the line, then tail is read by a shared
+  `JoinedPattern`, which tries each line for its tail once, whatever the
+  number of heads on it, and returns the very matches `re` returns -- a
+  head that crosses a line break included, which no single rewritten
+  pattern read exactly; it refuses, when made, a head or a tail the join
+  would read otherwise. Not every pattern is linear yet: the guard names
+  42 still owed, in 25 modules, by digest, and the list may only shrink.
+  Nearly all read an opening marker up to a closing one with no closing
+  one present; the fenced readers of the dynamic pipeline are cubic.
   The window also defangs a frame opening or an envelope bracket left
   open at a segment's end, which the segment after it could have
   finished.

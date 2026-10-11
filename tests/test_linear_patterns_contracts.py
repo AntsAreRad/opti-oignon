@@ -43,13 +43,48 @@ pattern matches and many it does not, or it does not reach the pattern.
     random corpus cannot give, a head left open at the reply's very end and a
     head its closing dashes follow at once included; the witness: over a
     thousand of those replies hold a block.
+  * EQ13 -- the three date forms that open on the month word read as their
+    old patterns less the starts glued to a word character, every one of
+    which the date reader refuses: the dates read are the same; a long word
+    is read in linear time.
+  * EQ14 -- the language indicators of the code executor find a match
+    exactly where their old forms did.
+  * EQ15 -- the code spans of the fact checker are read as the pattern they
+    replaced found them, in linear time, every line of up to eight backticks,
+    letters, blanks and line breaks included; the wholly emphasised line reads
+    as before.
+  * EQ16 -- every head.*tail pair the package reads once per line reads as
+    the one pattern it was, and as ``re`` reads that pattern: each match, its
+    groups, ``findall`` and ``search``.
+  * EQ17 -- a line is tried for its tail once, whatever the number of heads
+    on it, and the joined pattern is run only where it matches: counted
+    calls, not timings.
+  * EQ18 -- the sandbox holds the very class the shared module holds.
+  * EQ19 -- a pair it cannot read exactly is refused: flags that differ,
+    DOTALL, a head that matches the empty string.
+  * EQ20 -- the sandbox refuses the commands it refused, a head across a line
+    break included, passes a tail on another line, and reads a long line that
+    repeats a head at once.
+  * EQ21 -- the analyzer scores a text with each pair read once per line as
+    it scores it with the pair as one pattern.
+  * EQ22 -- a head or a tail the textual join would read otherwise is
+    refused when the pair is made: an alternative at its top level, a group of
+    global flags anywhere but at the head's start, a numbered back-reference or
+    condition in the tail after the head's groups, VERBOSE or a verbose group
+    (its comments run to a line break); the forms that join
+    as written are taken and read as ``re`` reads the join.
+  * EQ23 -- the analyzer's score of a text, and the set its keywords are drawn
+    from, do not depend on the order of a level's patterns: the pairs moved to
+    the end of their level change neither.
 """
 import ast
 import itertools
 import random
 import re
+import sqlite3
 import sys
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -483,5 +518,434 @@ def test_eq10_an_opening_left_open_at_the_core_s_end_finishes_no_marker_with_the
                                      tokens=0, core_root="r", dropped_peels=0)
             shown = prompt.render()
             assert turn in shown and reader.search(shown) is None, shown
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ13 -- the date forms that open on the month word
+# ---------------------------------------------------------------------------
+_OLD_DAY = r"(?P<d>3[01]|[12][0-9]|0?[1-9])(?![0-9])(?P<suffix>er|st|nd|rd|th)?"
+_OLD_MONTH = r"(?P<m>[^\W\d_]+)(?P<dot>\.)?"
+_OLD_YEAR = r"(?P<y>[1-9][0-9]{3})(?![0-9])"
+_OLD_SP = "[ " + chr(0xA0) + chr(0x202F) + "]+"
+_OLD_DATES = {
+    "mdy": _OLD_MONTH + _OLD_SP + _OLD_DAY + "(?P<comma>,)?" + _OLD_SP + _OLD_YEAR,
+    "md": _OLD_MONTH + _OLD_SP + _OLD_DAY,
+    "my": _OLD_MONTH + "(?P<comma>,)?" + _OLD_SP + _OLD_YEAR,
+}
+_DATE_PIECES = ("May", "may", "June", "juin", "Jan.", "janv.", "October", "mars", "ao" + chr(0xFB) + "t", "MAY",
+                "5", "1st", "2nd", "3rd", "4th", "1er", "31", "05", "2026", "1999", ",", ".", " ", chr(0xA0),
+                chr(0x202F), "x", "a", "_", "9", "-", "\n", "st")
+
+
+def test_eq13_the_date_forms_that_open_on_the_month_word_read_as_before_less_the_starts_a_read_refuses():
+    loaded, restore = isolate(targets={"opti_oignon.memory.probes": source("memory", "probes.py")},
+                              packages=("opti_oignon.memory",))
+    try:
+        probes = loaded["opti_oignon.memory.probes"]
+        forms = dict(probes._DATE_FORMS)
+        rng = random.Random(1276)
+        texts = [text for name in _OLD_DATES for text in _corpus(_OLD_DATES[name], 0, cases=1500, seed=13)]
+        for _ in range(6000):
+            texts.append("".join(rng.choice(_DATE_PIECES) + rng.choice(("", " ", "", chr(0xA0)))
+                                 for _ in range(rng.randint(1, 9))))
+        free = glued = 0
+        for text in texts:
+            for name, old in _OLD_DATES.items():
+                kept = []
+                for match in re.finditer(old, text):
+                    if match.start() and re.match(r"\w", text[match.start() - 1]):
+                        glued += 1
+                        assert probes._date_found(name, match, text) is None, ("a glued start is read", name, text)
+                    else:
+                        kept.append((match.span(), match.groups()))
+                        free += 1
+                assert [(m.span(), m.groups()) for m in forms[name].finditer(text)] == kept, (name, text)
+        assert free > 1000 and glued > 1000, ("witness: starts of both kinds", free, glued)
+        for name in _OLD_DATES:
+            read = lambda text, form=forms[name]: list(form.finditer(text))  # noqa: E731
+            spent = [_least(read, "a" * n) for n in (4096, 16384)]
+            assert spent[1] < 0.05 and spent[1] < 8 * spent[0] + 0.002, ("a long word, four times longer", name, spent)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# EQ14 -- the language indicators of the code executor
+# ---------------------------------------------------------------------------
+_OLD_INDICATORS = {
+    "_PYTHON_INDICATORS": (8, r"^\s*#\s*!.*python"),
+    "_R_INDICATORS": (3, r"\w+\s*<-"),
+    "_BASH_INDICATORS": (0, r"^\s*#!/bin/(ba)?sh"),
+}
+_OLD_R_SHEBANG = (10, r"^\s*#\s*!.*Rscript")
+
+
+def _lists(module, names):
+    """The constant lists ``names`` of a module of the package, read from its source."""
+    tree = ast.parse((REPO / "opti_oignon" / module).read_text(encoding="utf-8"))
+    return {node.targets[0].id: ast.literal_eval(node.value) for node in tree.body
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in names}
+
+
+def test_eq14_the_language_indicators_find_a_match_exactly_where_their_old_forms_did():
+    lists = _lists("code_executor.py", _OLD_INDICATORS)
+    rows = [(name, *_OLD_INDICATORS[name]) for name in _OLD_INDICATORS] + [("_R_INDICATORS", *_OLD_R_SHEBANG)]
+    for name, index, old in rows:
+        new = lists[name][index]
+        assert new != old, (name, "the old pattern is still there")
+        hits, misses = _reach(old, M)
+        assert hits > _CASES // 20 and misses > _CASES // 20, ("witness: the corpus reaches both sides", name, hits)
+        assert not _differences(old, new, M, "boolean"), (name, new)
+
+
+# ---------------------------------------------------------------------------
+# EQ15 -- the code spans and the wholly emphasised lines of the fact checker
+# ---------------------------------------------------------------------------
+_OLD_SPAN = r"(`+)(.+?)(?<!`)\1(?!`)"
+_OLD_BOLD = r"^(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1[ \t]*:?[ \t]*$"
+
+
+def test_eq15_the_code_spans_and_the_wholly_emphasised_lines_read_as_before_the_spans_in_linear_time():
+    loaded, restore = isolate(targets={"opti_oignon.factcheck.markup": source("factcheck", "markup.py")},
+                              packages=("opti_oignon.factcheck",))
+    try:
+        spans, old = loaded["opti_oignon.factcheck.markup"]._code_spans, re.compile(_OLD_SPAN)
+        texts = ["".join(p) for count in range(9) for p in itertools.product("`a\n ", repeat=count)]
+        texts += list(_corpus(_OLD_SPAN, 0))
+        reached = 0
+        for text in texts:
+            expected = [(m.start(), m.start(2), m.end(2), m.end()) for m in old.finditer(text)]
+            assert spans(text) == expected, text
+            reached += bool(expected)
+        assert reached > 10000, ("witness: texts holding a span", reached)
+        for make in (lambda n: "`" * n, lambda n: "`" + " ``" * (n // 3), lambda n: "`` " * (n // 3) + "`",
+                     lambda n: "`a" * (n // 2), lambda n: " ".join("`" * (i % 97 + 1) for i in range(n // 50))):
+            spent = [_least(spans, make(n)) for n in (20000, 80000)]
+            assert spent[1] < 0.5 and spent[1] < 8 * spent[0] + 0.005, ("four times longer: linear is four", spent)
+        view = loaded["opti_oignon.factcheck.markup"].plain("Use ``a`b`` and `c` here.")
+        assert view.text == "Use a`b and c here." and sorted(view.inline_removed) == [4, 5, 9, 10, 16, 18], view
+    finally:
+        restore()
+    new, flags = _site("factcheck/markup.py", r"(?::[ \t]*)?$")
+    old, bold = re.compile(_OLD_BOLD, flags), re.compile(new, flags)
+    assert new != _OLD_BOLD
+    rng = random.Random(102)
+    pieces = ("**", "__", "*", "_", "a", " ", "\t", ":", "b c", "x")
+    lines = ["".join(p) for count in range(7) for p in itertools.product(("**", "_", "a", " ", ":", "\t"), repeat=count)]
+    lines += ["".join(rng.choice(pieces) for _ in range(rng.randint(1, 16))) for _ in range(20000)]
+    matched = 0
+    for line in lines:
+        assert _exact(old, line) == _exact(bold, line), line
+        matched += old.match(line) is not None
+    assert matched > 1000 and len(lines) - matched > 1000, ("witness: lines of both kinds", matched)
+
+
+# ---------------------------------------------------------------------------
+# EQ16 - EQ21 -- head.*tail read once per line
+# ---------------------------------------------------------------------------
+_E, _G = chr(0xE9), chr(0xE8)
+_OLD_JOINED = {
+    r"\bsubprocess\b.*\b(Popen|call|run|check_output)\b",
+    r"base64.*\|\s*(bash|sh|zsh|python)",
+    r"\b(eval|exec)\b.*\b(socket|urllib|requests|http)\b",
+    r"python[23]?\s+-c\s+.*\b(urllib|http\.|requests\.|httpx|aiohttp|socket|ftplib|smtplib|xmlrpc|telnetlib|poplib"
+    r"|imaplib|nntplib)",
+    r"python[23]?\s+-c\s+.*\b(subprocess|os\.system|os\.popen|os\.exec[a-z]*|pty\.spawn)\b",
+    r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh|python|perl|ruby)",
+    r"xxd\s+-r.*\|\s*(bash|sh|zsh|python)",
+    r"python[23]?\s+-c\s+.*\bsubprocess\.(Popen|call|run|check_output|check_call)\b",
+    r"\bmatrix\b.*\bR\b", r"\banalyse\b.*\bdonn" + _E + r"es\b", r"\banalysis\b.*\bdata\b",
+    r"\bwhy\b.*\b(error|fail)\b", r"\bpourquoi\b.*\b(erreur|error)\b", r"\bne\s+pas\b.*\bfonctionne\b",
+    r"\bhelp\b.*\b(understand|solve)\b", r"\baide\b.*\b(comprendre|r" + _E + r"soudre)\b",
+    r"\bexplain\b.*\bscientific\b", r"\bexplique\b.*\bscientifique\b", r"\bcomparer\b.*\boptions\b",
+    r"\bcompare\b.*\boptions\b", r"\bpeser\b.*\balternatives\b", r"\bweigh\b.*\balternatives\b",
+    r"\br" + _E + "fl" + _E + r"chis\b.*\b" + _E + r"tapes\b", r"\bfichier\b.*\bsyst" + _G + r"me\b",
+    r"\bfile\b.*\bsystem\b",
+}
+_ESCAPED = re.compile(re.escape("\\" + "u") + "([0-9a-f]{4})")
+
+
+def _sandbox(tmp_path):
+    """sandbox_manager.py loaded from a byte-exact copy whose configuration switches the import-time singleton off."""
+    package = tmp_path / "copy"
+    (package / "config").mkdir(parents=True)
+    (package / "config" / "sandbox.yaml").write_text("enabled: false\n", encoding="utf-8")
+    copy = package / "sandbox_manager.py"
+    copy.write_bytes(source("sandbox_manager.py").read_bytes())
+    db_utils = types.ModuleType("opti_oignon.db_utils")
+    db_utils.safe_connect = lambda path, *a, **k: sqlite3.connect(path)
+    loaded, restore = isolate(targets={"opti_oignon.sandbox_manager": copy}, seeded={"opti_oignon.db_utils": db_utils})
+    if loaded["opti_oignon.sandbox_manager"].sandbox_manager is not None:
+        restore()
+        raise AssertionError("the import-time singleton must stay off in this window")
+    return loaded["opti_oignon.sandbox_manager"], restore
+
+
+def _analyzer():
+    loaded, restore = isolate(targets={"opti_oignon.joined_pattern": source("joined_pattern.py"),
+                                       "opti_oignon.analyzer": source("analyzer.py")})
+    return loaded["opti_oignon.analyzer"], loaded["opti_oignon.joined_pattern"], restore
+
+
+def _pairs(sm, analyzer):
+    """Every head.*tail the package reads once per line: the sandbox's and the analyzer's, as the modules hold them."""
+    validator = sm.CommandValidator
+    found = [value for value in vars(validator).values() if isinstance(value, sm.JoinedPattern)]
+    found += [value for value in validator._DANGEROUS_FILE_CONTENT if isinstance(value, sm.JoinedPattern)]
+    tables = analyzer.TaskAnalyzer()._patterns
+    found += [p for levels in tables.values() for patterns in levels.values() for p in patterns
+              if isinstance(p, analyzer.JoinedPattern)]
+    return found
+
+
+def _pieces(pattern, seed, count=1500):
+    """Texts of the words and alternatives of ``pattern``, glued or apart, on one line or two."""
+    words = re.findall(r"[A-Za-z0-9." + _E + _G + "-]+", pattern.replace("\\b", " ").replace("\\s", " "))
+    words = [w for w in words if w not in ("s", "d", "S", "w")] + ["|", "-c", "x", "  "]
+    rng = random.Random(seed)
+    return ["".join(rng.choice(words) + rng.choice((" ", " ", " ", "", "\n", "\t")) for _ in range(rng.randint(1, 9)))
+            for _ in range(count)]
+
+
+def _runs(reader, text):
+    return [(m.span(), m.groups()) for m in reader.finditer(text)]
+
+
+def test_eq16_every_head_tail_pair_reads_as_the_one_pattern_it_was_and_as_re_reads_it(tmp_path):
+    sm, restore_sm = _sandbox(tmp_path)
+    analyzer, _joined_module, restore = _analyzer()
+    try:
+        pairs = _pairs(sm, analyzer)
+        texts = {_ESCAPED.sub(lambda m: chr(int(m.group(1), 16)), pair.pattern) for pair in pairs}
+        assert len(pairs) == 25 and texts == _OLD_JOINED, sorted(texts ^ _OLD_JOINED)
+        for seed, pair in enumerate(pairs):
+            whole = re.compile(pair.pattern, pair.flags)
+            written = _ESCAPED.sub(lambda m: chr(int(m.group(1), 16)), pair.pattern)
+            hits = 0
+            for text in itertools.chain(_corpus(written, pair.flags, cases=1500, seed=seed),
+                                        _pieces(written, seed, 3000)):
+                expected = _runs(whole, text)
+                hits += bool(expected)
+                assert _runs(pair, text) == expected and pair.findall(text) == whole.findall(text), (pair.pattern, text)
+                found, again = pair.search(text), whole.search(text)
+                assert (found is None) == (again is None) and (found is None or found.span() == again.span())
+            assert 100 < hits < 4400, ("witness: the corpus reaches both sides", pair.pattern, hits)
+    finally:
+        restore()
+        restore_sm()
+
+
+class _Counted:
+    """A compiled pattern whose calls are counted."""
+
+    def __init__(self, compiled):
+        self.compiled, self.pattern, self.flags, self.calls = compiled, compiled.pattern, compiled.flags, 0
+        self.groups = compiled.groups
+
+    def search(self, text, pos=0):
+        self.calls += 1
+        return self.compiled.search(text, pos)
+
+    def match(self, text, pos=0):
+        self.calls += 1
+        return self.compiled.match(text, pos)
+
+
+_SHAPES_JOINED = {
+    "heads on one line": lambda head, tail, n: (head + " ") * n,
+    "heads, then a tail on the next line": lambda head, tail, n: (head + " ") * n + "\n" + tail,
+    "a head and a tail on each line, the tail first": lambda head, tail, n: (tail + " " + head + " x\n") * n,
+    "heads, then a tail at the end of the line": lambda head, tail, n: (head + " ") * n + tail,
+    "a tail between two heads on each line": lambda head, tail, n: (head + " " + tail + " " + head + " x\n") * n,
+}
+
+
+def test_eq17_a_line_is_tried_for_its_tail_once_whatever_the_number_of_heads_on_it():
+    _analyzer_module, joined, restore = _analyzer()
+    try:
+        for head, tail, flags, sample_head, sample_tail in (
+                (r"\bab\b", r"\bcd\b", 0, "ab", "cd"),
+                (r"python[23]?\s+-c\s+", r"\b(urllib|socket)", re.IGNORECASE, "python -c", "urllib"),
+                (r"base64", r"\|\s*(bash|sh)", re.IGNORECASE, "base64", "| sh")):
+            for shape, make in _SHAPES_JOINED.items():
+                for n in (500, 2000):
+                    text = make(sample_head, sample_tail, n)
+                    first, last = _Counted(re.compile(head, flags)), _Counted(re.compile(tail, flags))
+                    reader = joined.JoinedPattern(first, last)
+                    reader._whole = _Counted(reader._whole)
+                    found = list(reader.finditer(text))
+                    if n == 500:
+                        expected = [m.span() for m in re.finditer(reader.pattern, text, flags)]
+                        assert [m.span() for m in found] == expected, ("control: it reads as re", shape)
+                    lines = text.count("\n") + 1
+                    assert last.calls <= len(text) + lines, ("a place of a line tried twice", shape, last.calls)
+                    assert reader._whole.calls == len(found), ("the joined pattern run where it fails", shape)
+                    assert first.calls <= text.count(sample_head) + 1, (shape, first.calls)
+    finally:
+        restore()
+
+
+def test_eq18_the_sandbox_holds_the_very_class_the_shared_module_holds():
+    def class_of(path):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        found = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "JoinedPattern"]
+        assert len(found) == 1, path
+        return ast.dump(found[0])
+
+    assert class_of(source("sandbox_manager.py")) == class_of(source("joined_pattern.py"))
+
+
+def test_eq19_a_pair_it_cannot_read_exactly_is_refused():
+    _analyzer_module, joined, restore = _analyzer()
+    try:
+        for head, tail in ((re.compile("a"), re.compile("b", re.IGNORECASE)),
+                           (re.compile("a", re.DOTALL), re.compile("b", re.DOTALL))):
+            try:
+                joined.JoinedPattern(head, tail)
+            except ValueError:
+                continue
+            raise AssertionError(("taken", head, tail))
+        reader = joined.JoinedPattern(re.compile("x*"), re.compile("y"))
+        try:
+            list(reader.finditer("ab"))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a head that matched the empty string was read")
+        control = joined.JoinedPattern(re.compile("x+"), re.compile("y"))
+        assert [m.span() for m in control.finditer("xxy")] == [(0, 3)], "control: a head that matches text is read"
+    finally:
+        restore()
+
+
+_REFUSED = (
+    ("rm -rf /etc", "rm targeting paths outside /workspace"),
+    ("x rm\t/var/x", "rm targeting paths outside /workspace"),
+    ("eval $x; socket", "Blocked eval/exec with network access"),
+    ("python3 -c\n'import urllib'", "Blocked python -c with network module"),
+    ("python2\n-c 'import os; os.system(1)'", "Blocked python -c with subprocess/os.exec"),
+    ("base64\n-d f | bash", "Blocked base64 decode piped to shell"),
+    ("xxd\n-r -p f |\nsh", "Blocked xxd reverse piped to shell"),
+)
+_PASSED = ("rm -rf /workspace/x", "eval x\nsocket", "python -c x\nurllib", "base64 -d f\n| bash", "xxd -r f\n|sh")
+
+
+def test_eq20_the_sandbox_refuses_what_it_refused_a_head_across_lines_included_and_a_long_line_at_once(tmp_path):
+    sm, restore = _sandbox(tmp_path)
+    try:
+        validator = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[]))
+        for command, reason in _REFUSED:
+            assert validator.validate(command) == (False, reason), command
+        for command in _PASSED:
+            assert validator.validate(command) == (True, ""), command
+        last = validator._PYTHON_C_SUBPROCESS
+        assert last.search("python -c 'subprocess.Popen(1)'") and not last.search("python -c 'subprocess'")
+        process, piped = [p for p in validator._DANGEROUS_FILE_CONTENT if isinstance(p, sm.JoinedPattern)]
+        assert [bool(process.search(t)) for t in ("subprocess\nrun", "subprocess.run(x)")] == [False, True]
+        assert [bool(piped.search(t)) for t in ("base64 x\n| sh", "base64 x | sh")] == [False, True]
+        long = "python -c x " * 20000 + "\nurllib"
+        start = time.perf_counter()
+        assert validator.validate(long) == (True, "")
+        assert time.perf_counter() - start < 2.0, "a long line repeating a head is read at once"
+    finally:
+        restore()
+
+
+def test_eq21_the_analyzer_scores_with_each_pair_as_it_scored_with_the_pair_as_one_pattern():
+    analyzer, _joined_module, restore = _analyzer()
+    try:
+        task = analyzer.TaskAnalyzer()
+        letters = r"[a-zA-Z" + _E + _G + "]+"
+        pairs = []
+        for pattern in sorted(_OLD_JOINED):
+            if pattern.startswith("\\b"):
+                head, tail = (part.replace("\\b", " ").replace("\\s+", " ") for part in pattern.split(".*"))
+                pairs.append((" ".join(re.findall(letters, head)), re.findall(letters, tail)))
+        rng = random.Random(21)
+        texts = []
+        for _ in range(3000):
+            parts = []
+            for _ in range(rng.randint(1, 4)):
+                head, tails = rng.choice(pairs)
+                tail = rng.choice(tails) if rng.random() < 0.7 else rng.choice(rng.choice(pairs)[1])
+                filler = " ".join(rng.choice(("x", "the", "plan", "R", head, tail)) for _ in range(rng.randint(0, 3)))
+                parts.append(rng.choice((head, head.upper())) + " " + filler + rng.choice((" ", "\n", " ")) + tail)
+            texts.append(rng.choice((" ", "\n", ". ")).join(parts))
+        joined = 0
+        for name, levels in task._patterns.items():
+            plain = {level: [re.compile(p.pattern, p.flags) if isinstance(p, analyzer.JoinedPattern) else p
+                             for p in patterns] for level, patterns in levels.items()}
+            joined += sum(isinstance(p, analyzer.JoinedPattern) for patterns in levels.values() for p in patterns)
+            for text in texts:
+                assert task._score_patterns(text, levels) == task._score_patterns(text, plain), (name, text)
+        assert joined == 17, joined
+        pairs = [p for levels in task._patterns.values() for patterns in levels.values() for p in patterns
+                 if isinstance(p, analyzer.JoinedPattern)]
+        reached = sum(any(p.findall(text) for p in pairs) for text in texts)
+        assert 1000 < reached < 2900, ("witness: the corpus holds pairs and texts without", reached)
+    finally:
+        restore()
+
+
+_UNJOINABLE = (("a", "b|c", 0), ("a|b", "c", 0), ("(x)a", r"(a)\1", 0), ("(x)a", "(a)?(?(1)b|c)", 0),
+               ("(?i)y", "(?i)x", re.IGNORECASE), ("a", r"\\|c", 0), ("a", "b", re.VERBOSE), ("a", "(?#()b|c", 0),
+               ("(?x: a # (\n )|b", "c", 0), ("a", "(?x:b#(\n)|c", 0), ("(x)a", r"(a)\1x", 0), ("a", "[x]b|c", 0),
+               ("a", "[]]|c", 0), ("a", "[^]]|c", 0), ("a", "(b)c|d", 0), ("a", "(?#x)|c", 0))
+_JOINABLE = (("a", r"\b(b|c)\b", 0), ("a", "[|]x", 0), ("a", r"\|x", 0), ("(?i)ab", "x", re.IGNORECASE),
+             ("a", r"(b)\1", 0), ("a", "[]|]x", 0), ("a", "[^]|]x", 0), ("a", r"[\]|]x", 0), ("a", "(?i:b|c)", 0),
+             (r"a\s*", "b", 0), ("a", r"\s*b", 0), ("(a)", "(b|c)", 0), ("(a)x?", "(b)", 0), ("a", "(?#|)b", 0),
+             (r"(a)\1", "b", 0), ("(a)?(?(1)b|c)", "x", 0))
+
+
+def test_eq22_a_head_or_a_tail_the_join_would_read_otherwise_is_refused_and_one_it_reads_as_written_is_taken():
+    _analyzer_module, joined, restore = _analyzer()
+    try:
+        for head, tail, flags in _UNJOINABLE:
+            try:
+                joined.JoinedPattern(re.compile(head, flags), re.compile(tail, flags))
+            except ValueError:
+                continue
+            raise AssertionError(("taken", head, tail))
+        texts = ["".join(p) for count in range(6) for p in itertools.product(("a", "b", "c", "x", "|", "]", "\n", "A"),
+                                                                              repeat=count)]
+        for head, tail, flags in _JOINABLE:
+            reader = joined.JoinedPattern(re.compile(head, flags), re.compile(tail, flags))
+            whole, hits = re.compile(reader.pattern, flags), 0
+            for text in texts:
+                expected = _runs(whole, text)
+                hits += bool(expected)
+                assert _runs(reader, text) == expected, (head, tail, text)
+                assert reader.findall(text) == whole.findall(text), (head, tail, text)
+            assert hits > 100, ("witness: the texts reach the pair", head, tail, hits)
+    finally:
+        restore()
+
+
+def test_eq23_the_analyzer_s_score_and_its_keyword_set_do_not_depend_on_the_order_of_a_level_s_patterns():
+    analyzer, _joined_module, restore = _analyzer()
+    try:
+        task = analyzer.TaskAnalyzer()
+        words = sorted({w for levels in (analyzer.R_PAIRS, analyzer.DEBUG_PAIRS, analyzer.PLANNING_PAIRS)
+                        for pairs in levels.values() for pair in pairs
+                        for w in re.findall(r"[a-zA-Z]{2,}", " ".join(pair).replace("\\b", " "))})
+        words += ["library(x)", "<-", "import os", "error", "plan", "bash", "R", "data.frame"]
+        rng = random.Random(23)
+        texts = [" ".join(rng.choice(words) for _ in range(rng.randint(1, 14))) for _ in range(1500)]
+        reordered = compared = 0
+        for levels in task._patterns.values():
+            mixed = {level: rng.sample(patterns, len(patterns)) for level, patterns in levels.items()}
+            reordered += any(mixed[level] != levels[level] for level in levels)
+            for text in texts:
+                score, keywords = task._score_patterns(text, levels)
+                again, other = task._score_patterns(text, mixed)
+                assert score == again, text
+                if len(keywords) < 5 and len(other) < 5:  # five of a larger set: which five is the hash's
+                    assert set(keywords) == set(other), text
+                    compared += bool(keywords)
+        assert reordered >= 5, ("witness: the levels were reordered", reordered)
+        assert compared > 1000, ("witness: keyword sets compared", compared)
+        assert sum(task._score_patterns(text, task._patterns["debug"])[0] > 0 for text in texts) > 300
     finally:
         restore()

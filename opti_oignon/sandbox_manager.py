@@ -67,6 +67,106 @@ from opti_oignon.db_utils import safe_connect
 
 logger = logging.getLogger(__name__)
 
+
+# The class of opti_oignon/joined_pattern.py, copied: this module is loaded
+# alone in contract windows, where a new import would not resolve. A contract
+# holds the two copies equal.
+class JoinedPattern:
+    """``head``, then anything on the same line, then ``tail``: what a compiled ``head.*tail`` answers to
+    ``search``, ``finditer`` and ``findall``, in time linear in the text."""
+
+    def __init__(self, head, tail):
+        if head.flags != tail.flags or head.flags & (re.DOTALL | re.VERBOSE):
+            raise ValueError("head and tail take the same flags, neither DOTALL nor VERBOSE")
+        if not (self._joinable(head.pattern, True, False) and self._joinable(tail.pattern, False, head.groups > 0)):
+            raise ValueError("a head or a tail the join would read otherwise")
+        self.flags = head.flags
+        self.pattern = head.pattern + ".*" + tail.pattern
+        self._head, self._tail = head, tail
+        self._whole = re.compile(self.pattern, self.flags)
+
+    def finditer(self, text):
+        pos, reach = 0, {}
+        while True:
+            head = self._head.search(text, pos)
+            if head is None:
+                return
+            start, end = head.span()
+            if start == end:
+                raise ValueError("head matched the empty string")
+            stop = text.find("\n", end)
+            match = None
+            if self._reaches(text, end, len(text) if stop < 0 else stop, reach):
+                match = self._whole.match(text, start)
+            if match is None:
+                pos = start + 1
+                continue
+            yield match
+            pos = match.end()
+
+    def _reaches(self, text, end, stop, reach):
+        """True when ``tail`` matches from a place between ``end`` and ``stop``, the end of its line. A line is
+        tried from its end back, once: ``reach[stop]`` is the lowest place tried and the highest place ``tail``
+        matched from, or -1."""
+        low, high = reach.get(stop, (stop + 1, -1))
+        while high < 0 and low > end:
+            low -= 1
+            if self._tail.match(text, low):
+                high = low
+        reach[stop] = (low, high)
+        return high >= end
+
+    @staticmethod
+    def _joinable(pattern, first, numbered):
+        """True when ``pattern`` reads the same as a part of the join: no alternative at its top level, no group of
+        global flags unless ``first`` and at its start, and, when ``numbered``, no numbered back-reference or
+        condition (the head's groups would come before the ones it names)."""
+        depth, at, inside = 0, 0, False
+        while at < len(pattern):
+            char = pattern[at]
+            if char == "\\":
+                if numbered and not inside and pattern[at + 1:at + 2] in tuple("123456789"):
+                    return False
+                at += 2
+                continue
+            if inside:
+                inside = char != "]"
+            elif char == "[":
+                inside = True
+                at += 2 if pattern[at + 1:at + 2] == "]" else 3 if pattern[at + 1:at + 3] == "^]" else 1
+                continue
+            elif char == "(":
+                if pattern.startswith("(?#", at):
+                    close = pattern.find(")", at)
+                    at = len(pattern) if close < 0 else close + 1
+                    continue
+                if re.match(r"\(\?[aiLmsu]*x[aiLmsux]*(?:-[imsx]*)?:", pattern[at:]):
+                    return False  # a verbose group: its comments run to a line break the scan does not read
+                group = re.match(r"\(\?(?:([aiLmsux]+)\)|\((\d))", pattern[at:])
+                if group and group.group(1) and not (first and at == 0):
+                    return False
+                if group and group.group(2) and numbered:
+                    return False
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "|" and depth == 0:
+                return False
+            at += 1
+        return True
+
+    def search(self, text):
+        return next(self.finditer(text), None)
+
+    def findall(self, text):
+        groups = self._whole.groups
+        if groups == 0:
+            return [match.group() for match in self.finditer(text)]
+        if groups == 1:
+            return [match.groups("")[0] for match in self.finditer(text)]
+        return [match.groups("") for match in self.finditer(text)]
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -918,13 +1018,33 @@ class CommandValidator:
     _DANGEROUS_FILE_CONTENT = [
         re.compile(r"\b(curl|wget|nc|ncat|netcat)\b", re.IGNORECASE),
         re.compile(r"\b(socket|urllib|requests|httpx|aiohttp)\b", re.IGNORECASE),
-        re.compile(r"\bsubprocess\b.*\b(Popen|call|run|check_output)\b", re.IGNORECASE),
+        JoinedPattern(re.compile(r"\bsubprocess\b", re.IGNORECASE),
+                      re.compile(r"\b(Popen|call|run|check_output)\b", re.IGNORECASE)),
         re.compile(r"\bos\.system\b", re.IGNORECASE),
         re.compile(r"\bexec\s*\(", re.IGNORECASE),
-        re.compile(r"base64.*\|\s*(bash|sh|zsh|python)", re.IGNORECASE),
+        JoinedPattern(re.compile(r"base64", re.IGNORECASE), re.compile(r"\|\s*(bash|sh|zsh|python)", re.IGNORECASE)),
         re.compile(r"\bimport\s+(subprocess|socket|http|urllib|ftplib|smtplib)\b"),
         re.compile(r"\b(rm\s+-rf\s+/|dd\s+if=)"),
     ]
+
+    # Hardcoded command checks of the form head.*tail, read once per line
+    # (JoinedPattern), so a line that repeats the head costs no more than once.
+    _EVAL_NETWORK = JoinedPattern(re.compile(r"\b(eval|exec)\b", re.IGNORECASE),
+                                  re.compile(r"\b(socket|urllib|requests|http)\b", re.IGNORECASE))
+    _PYTHON_C = re.compile(r"python[23]?\s+-c\s+", re.IGNORECASE)
+    _PYTHON_C_NETWORK = JoinedPattern(_PYTHON_C, re.compile(
+        r"\b(urllib|http\.|requests\.|httpx|aiohttp|socket|ftplib|smtplib|xmlrpc|"
+        r"telnetlib|poplib|imaplib|nntplib)",
+        re.IGNORECASE,
+    ))
+    _PYTHON_C_PROCESS = JoinedPattern(_PYTHON_C, re.compile(
+        r"\b(subprocess|os\.system|os\.popen|os\.exec[a-z]*|pty\.spawn)\b", re.IGNORECASE))
+    _BASE64_TO_SHELL = JoinedPattern(re.compile(r"base64\s+(-d|--decode)", re.IGNORECASE),
+                                     re.compile(r"\|\s*(bash|sh|zsh|python|perl|ruby)", re.IGNORECASE))
+    _XXD_TO_SHELL = JoinedPattern(re.compile(r"xxd\s+-r", re.IGNORECASE),
+                                  re.compile(r"\|\s*(bash|sh|zsh|python)", re.IGNORECASE))
+    _PYTHON_C_SUBPROCESS = JoinedPattern(_PYTHON_C, re.compile(
+        r"\bsubprocess\.(Popen|call|run|check_output|check_call)\b", re.IGNORECASE))
 
     def __init__(self, config: SandboxConfig):
         self._blocked_commands = [
@@ -994,45 +1114,27 @@ class CommandValidator:
         # regardless of config contents
 
         # Prevent rm targeting root or absolute paths outside workspace
-        # Linear on a long run: the blanks before the slash are read from the start of their run.
-        if re.search(r"\brm\b(?:.*\S)?\s+/(?!workspace)", command):
+        # Linear on a long run: the blanks before the slash are read from the start of their run. Read from the first
+        # rm of each line: any later rm of that line that reaches a slash, the first one reaches too.
+        if re.search(r"^(?:(?!\brm\b).)*\brm\b(?:.*\S)?\s+/(?!workspace)", command, re.MULTILINE):
             return False, "rm targeting paths outside /workspace"
 
         # Block eval/exec with network or OS calls
-        if re.search(
-            r"\b(eval|exec)\b.*\b(socket|urllib|requests|http)\b",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._EVAL_NETWORK.search(command):
             return False, "Blocked eval/exec with network access"
 
         # Block python -c with network modules (defense-in-depth,
         # catches patterns the YAML regex might miss)
-        if re.search(
-            r"python[23]?\s+-c\s+.*\b(urllib|http\.|requests\.|"
-            r"httpx|aiohttp|socket|ftplib|smtplib|xmlrpc|"
-            r"telnetlib|poplib|imaplib|nntplib)",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._PYTHON_C_NETWORK.search(command):
             return False, "Blocked python -c with network module"
 
         # Block python -c with subprocess (constructed args attack)
-        if re.search(
-            r"python[23]?\s+-c\s+.*\b(subprocess|os\.system|os\.popen|"
-            r"os\.exec[a-z]*|pty\.spawn)\b",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._PYTHON_C_PROCESS.search(command):
             return False, "Blocked python -c with subprocess/os.exec"
 
         # Block base64-encoded commands piped to execution
         # Extended: covers hex decode, xxd, and printf byte sequences
-        if re.search(
-            r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh|python|perl|ruby)",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._BASE64_TO_SHELL.search(command):
             return False, "Blocked base64 decode piped to shell"
 
         # Block echo with base64 piped to decode then execute
@@ -1043,20 +1145,11 @@ class CommandValidator:
             return False, "Blocked echo of base64 payload to decode"
 
         # Block xxd reverse piped to shell
-        if re.search(
-            r"xxd\s+-r.*\|\s*(bash|sh|zsh|python)",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._XXD_TO_SHELL.search(command):
             return False, "Blocked xxd reverse piped to shell"
 
         # Block Python subprocess with shell=True or Popen
-        if re.search(
-            r"python[23]?\s+-c\s+.*\bsubprocess\.(Popen|call|run|"
-            r"check_output|check_call)\b",
-            command,
-            re.IGNORECASE,
-        ):
+        if self._PYTHON_C_SUBPROCESS.search(command):
             return False, "Blocked python -c with subprocess calls"
 
         # Check write-then-execute attack vector

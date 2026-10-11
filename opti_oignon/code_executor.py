@@ -145,7 +145,10 @@ _LANGUAGE_ALIASES = {
     "zsh": "bash",
 }
 
-# Heuristics for language detection when no language tag is given
+# Heuristics for language detection when no language tag is given. Each is
+# only searched for (multiline): a line-start blank run is read on its own
+# line, and a word before "<-" from its start, which finds a match exactly
+# where the wider readings did, in linear time.
 _PYTHON_INDICATORS = [
     r"\bimport\s+\w+",
     r"\bfrom\s+\w+\s+import\b",
@@ -155,25 +158,25 @@ _PYTHON_INDICATORS = [
     r"\bif\s+__name__\b",
     r"\bpd\.DataFrame\b",
     r"\bnp\.\w+",
-    r"^\s*#\s*!.*python",
+    r"^[^\S\n]*#\s*!.*python",
 ]
 
 _R_INDICATORS = [
     r"\blibrary\s*\(",
     r"\brequire\s*\(",
     r"<-\s*\w+",
-    r"\w+\s*<-",
+    r"\b\w+\s*<-",
     r"\bc\s*\(",
     r"\bdata\.frame\s*\(",
     r"\bggplot\s*\(",
     r"\bmutate\s*\(",
     r"\bfilter\s*\(",
     r"\bpipe\b|%>%",
-    r"^\s*#\s*!.*Rscript",
+    r"^[^\S\n]*#\s*!.*Rscript",
 ]
 
 _BASH_INDICATORS = [
-    r"^\s*#!/bin/(ba)?sh",
+    r"^[^\S\n]*#!/bin/(ba)?sh",
     r"\bsudo\s+",
     r"\bapt(-get)?\s+",
     r"\bpip\s+install\b",

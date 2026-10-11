@@ -93,13 +93,14 @@ _DELIM = re.compile(r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ 
 _INDENTED = re.compile(r"^(?: {4}|\t)")
 _LEADING = re.compile(r"^[ \t]*")
 
-_CODE_SPAN = re.compile(r"(`+)(.+?)(?<!`)\1(?!`)")
+_TICKS = re.compile(r"`+")
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)\s]*(?:\s+\"[^\"]*\")?\)")
 _LINK = re.compile(r"(?<!!)\[([^\]]+)\]\([^)\s]*(?:\s+\"[^\"]*\")?\)")
 _AUTOLINK = re.compile(r"<((?:https?|ftp)://[^\s<>]+|[^\s<>@]+@[^\s<>@]+\.[^\s<>]+)>")
 _INLINE_HTML = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 _STRIKE = re.compile(r"(~~)(?=\S)(.+?)(?<=\S)~~")
-_WHOLLY_EMPHASISED = re.compile(r"^(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1[ \t]*:?[ \t]*$")
+# The blanks around a closing colon are one run when no colon stands between them.
+_WHOLLY_EMPHASISED = re.compile(r"^(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1[ \t]*(?::[ \t]*)?$")
 _EMPHASIS = (
     re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"),
     re.compile(r"(?<![*\w])(\*)(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])"),
@@ -316,6 +317,34 @@ def _classify(text):
     return out
 
 
+def _code_spans(segment):
+    """(start, inner start, inner end, end) of each code span of a line's content, in order, exactly as
+    ``(`+)(.+?)(?<!`)\\1(?!`)`` finds them, in time linear in the content.
+
+    A run of backticks opens with its first k backticks, k being the longest length at most its own that a later
+    whole run of the same line has, and closes at the first such run; a run that finds none opens nothing. Each
+    run's closing is found from the right, trying lengths from its own down: no more tries than its backticks.
+    """
+    runs = [(match.start(), match.end() - match.start()) for match in _TICKS.finditer(segment)]
+    closing, nearest = [None] * len(runs), {}
+    for index in range(len(runs) - 1, -1, -1):
+        start, size = runs[index]
+        if index + 1 < len(runs) and segment.find("\n", start + size, runs[index + 1][0]) >= 0:
+            nearest = {}
+        closing[index] = next(((nearest[length], length) for length in range(size, 0, -1) if length in nearest),
+                              None)
+        nearest[size] = index
+    spans, index = [], 0
+    while index < len(runs):
+        if closing[index] is None:
+            index += 1
+            continue
+        (start, _size), (close, length) = runs[index], closing[index]
+        spans.append((start, start + length, runs[close][0], runs[close][0] + length))
+        index = close + 1
+    return spans
+
+
 def _inline(text, cstart, cend):
     """Plain characters of one line's content, with what each came from."""
     segment = text[cstart:cend]
@@ -325,11 +354,10 @@ def _inline(text, cstart, cend):
     code = [False] * size
     html = [False] * size
     images = []
-    for match in _CODE_SPAN.finditer(segment):
-        inner_start, inner_end = match.span(2)
-        for position in range(match.start(), inner_start):
+    for start, inner_start, inner_end, end in _code_spans(segment):
+        for position in range(start, inner_start):
             deleted[position] = True
-        for position in range(inner_end, match.end()):
+        for position in range(inner_end, end):
             deleted[position] = True
         for position in range(inner_start, inner_end):
             code[position] = True
