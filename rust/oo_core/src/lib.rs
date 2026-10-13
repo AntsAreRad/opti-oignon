@@ -18,6 +18,7 @@
 //! only for text they class exactly as Python does, and refuse the rest.
 
 mod allium;
+mod linear;
 mod probes;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -26,6 +27,11 @@ use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
 const VERSION: &str = "0.9.0";
+
+/// The ABI of the interpreter this artefact was built for (build.rs), stamped in the file where the loader reads it
+/// before it loads the artefact: a line `oo_core built for python: <SOABI>`.
+#[used]
+static PYTHON_STAMP: &[u8] = concat!("\noo_core built for python: ", env!("OO_CORE_PYTHON_TAG"), "\n").as_bytes();
 
 fn escape_into(out: &mut String, text: &str) {
     out.push('"');
@@ -264,6 +270,7 @@ fn compose_segments(
 #[pymodule]
 fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("VERSION", VERSION)?;
+    m.add("PYTHON_TAG", env!("OO_CORE_PYTHON_TAG"))?;
     m.add_function(wrap_pyfunction!(entry_hash, m)?)?;
     m.add_function(wrap_pyfunction!(span_key, m)?)?;
     m.add_function(wrap_pyfunction!(digest_spans, m)?)?;
@@ -275,5 +282,8 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(probes::probe_letter_folds, m)?)?;
     m.add_function(wrap_pyfunction!(allium::allium_call, m)?)?;
     m.add_function(wrap_pyfunction!(allium::allium_engine, m)?)?;
+    m.add("LINEAR_FORMAT", linear::FORMAT)?;
+    m.add_class::<linear::LinearProgram>()?;
+    m.add_class::<linear::LinearRead>()?;
     Ok(())
 }

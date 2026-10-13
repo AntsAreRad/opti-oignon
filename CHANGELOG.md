@@ -36,6 +36,26 @@ package costs.
   Where the engine cannot be loaded, or on a version of Python other than
   the ones it was measured on (3.11 to 3.14), every place refuses as before.
 
+- The engine without backtracking reads in the native core where it is
+  built: the programs compiled in Python are handed to Rust as data and
+  read there step for step as the Python read does, with the same answers
+  and the same count of work, the interpreter released meanwhile, and the
+  matches of `finditer`, `findall`, `sub` and `split` found in turn there;
+  about ten times the Python read's speed. A pattern it does not read
+  (groups in a positive lookaround, more than 64 classes or tests), a core
+  that is not built, and every read after a failure of the core, are read
+  in Python, by name. What a read keeps and bounds is now taken when it
+  begins, on both sides.
+
+- [SECURITY] The native core is loaded only by the interpreter it was
+  built for. An extension built for one version of Python can crash
+  another at its first call (one built under 3.13 does, under 3.14); the
+  build now stamps the artefact with its interpreter, and the loader reads
+  the stamp before it loads anything and leaves the reference path to run,
+  saying why, when it does not match. An artefact built before this change
+  carries no stamp and is loaded again once rebuilt
+  (`scripts/build_oo_core.sh`).
+
 - [SECURITY] The regular expressions a first census found taking more
   than linear time on a long run of one character, on a page, a tool's
   output, a model's answer or a reply's code, no longer do. Python's engine

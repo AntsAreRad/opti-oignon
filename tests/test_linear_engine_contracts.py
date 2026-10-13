@@ -144,9 +144,11 @@ BUDGET_S = {
 
 
 def _loaded():
-    """(linear_pattern, linear_engine, restore): both loaded from their files in one window."""
+    """(linear_pattern, linear_engine, restore): both loaded from their files in one window, the engine reading with
+    its Python reference (the native core's read is held to it by the LR contracts)."""
     loaded, restore = isolate(targets={"opti_oignon.linear_pattern": source("linear_pattern.py"),
                                        "opti_oignon.linear_engine": source("linear_engine.py")})
+    loaded["opti_oignon.linear_engine"].USE_NATIVE = False
     return loaded["opti_oignon.linear_pattern"], loaded["opti_oignon.linear_engine"], restore
 
 

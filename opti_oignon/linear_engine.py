@@ -33,6 +33,14 @@ the states the text visits repeat (a list of words, a class run), the moves are 
 the same whatever m. Memory: the text's own size in bytes for the starts, as much again for each lookaround's table,
 m / 8 bytes every WINDOW positions for the backward pass and one window, and at most MOST_MOVES sets of m / 8
 bytes for each automaton's moves. The text read is an exact ``str``: a subclass's methods never run during a read.
+What a read keeps and bounds is taken when it begins: the classes kept are let go between reads, never during one,
+and a text's passes keep the bounds its read began with.
+
+THE NATIVE READ. Where the native core (``oo_core``) is built and reads this format of program, the programs
+compiled here are handed to it as data and read in Rust, step for step as here, with the same count of work, the
+interpreter released meanwhile; it costs two bytes more per position (the class of each character). A pattern it
+does not read (groups in a positive lookaround, more than 64 sets of characters or tests) is read here, by name,
+and so is every read after a failure of the core.
 
 LOOKAROUNDS. Each is an oracle table, one pass per lookaround, the innermost first: a lookahead by the backward
 pass of its body, a lookbehind by a forward pass. The groups of a positive lookaround are read again where the
@@ -86,6 +94,10 @@ MOST_CLASSES = 1 << 16
 # The versions of Python this engine was measured on against ``re``. Not 3.10: its ``re`` keeps the groups of a
 # negative lookaround that failed, and can report a group that ends before it starts.
 MEASURED = ((3, 11), (3, 12), (3, 13), (3, 14))
+# The read side in the native core (``oo_core``), when it is built and reads this format of program: a pattern it
+# does not read (groups in a positive lookaround, more than 64 sets of characters or tests) is read here.
+NATIVE_FORMAT = 1
+USE_NATIVE = True
 
 _C = _check._constants
 _P = _check._parser
@@ -201,11 +213,9 @@ class _Shared:
                 self.asserts.append(found)
         return found
 
-    def classify(self, ch):
-        """The class of a character: its answer for every set, whether it ends a line, and whether it is a word
-        character in Unicode and in ASCII."""
-        if len(self.classes) >= MOST_CLASSES:
-            self.classes.clear()
+    def classify(self, ch, classes):
+        """The class of a character, kept in ``classes``: its answer for every set, whether it ends a line, and
+        whether it is a word character in Unicode and in ASCII."""
         members, point = 0, ord(ch)
         for set_id, (firsts, ranges) in enumerate(self.sets):
             at = bisect.bisect_right(firsts, point) - 1
@@ -216,10 +226,10 @@ class _Shared:
         if found is None:
             found = self.signatures[signature] = len(self.infos)
             self.infos.append(signature)
-        self.classes[ch] = found
+        classes[ch] = found
         return found
 
-    def anchors(self, before, here, first, last, penultimate):
+    def anchors(self, before, here, first, last, penultimate, most_moves):
         """The anchors that hold at a position, as bits over their test ids, from the classes on each side."""
         key = (before, here, first, last, penultimate)
         found = self.contexts.get(key)
@@ -231,7 +241,7 @@ class _Shared:
                 _, kind, flags = self.tests[test_id]
                 if _anchor(kind, flags, prev, cur, first, last, penultimate):
                     found |= 1 << test_id
-            if len(self.contexts) >= MOST_MOVES:
+            if len(self.contexts) >= most_moves:
                 self.contexts.clear()
             self.contexts[key] = found
         return found
@@ -602,16 +612,25 @@ class _Context:
     def __init__(self, shared, text, end, oracles):
         self.shared, self.text, self.end, self.oracles = shared, text, end, oracles
         self.work = 0
+        # the bounds of the read, as they stand when it begins: every pass of this text, now or at a later read, keeps
+        # them (the native core's read takes them at the same moment)
+        self.most_moves, self.window = MOST_MOVES, WINDOW
+        # the classes of the text, all made when the read begins (as the native core makes them) and kept with it:
+        # another read, made between two steps of this one, changes nothing in what this one counts; the classes the
+        # pattern keeps for the next read are let go once they number MOST_CLASSES or more
+        classes = shared.classes
+        for ch in set(text[:end]):
+            if ch not in classes:
+                self.work += len(shared.sets) + 2
+                shared.classify(ch, classes)
+        self.classes = classes
+        if len(classes) >= MOST_CLASSES:
+            shared.classes = {}
 
     def cls(self, at):
         if at >= self.end or at < 0:
             return None
-        ch = self.text[at]
-        found = self.shared.classes.get(ch)
-        if found is None:
-            self.work += len(self.shared.sets) + 2
-            found = self.shared.classify(ch)
-        return found
+        return self.classes[self.text[at]]
 
     def members(self, cls):
         return None if cls is None else self.shared.infos[cls][0]
@@ -622,7 +641,7 @@ class _Context:
         if program.anchored:
             end = self.end
             before = self.cls(at - 1) if at > 0 else None
-            bits = self.shared.anchors(before, here, at == 0, at == end, at == end - 1)
+            bits = self.shared.anchors(before, here, at == 0, at == end, at == end - 1, self.most_moves)
         for test_id, index, positive in program.oracle_tests:
             if (self.oracles[index][at] == 1) == positive:
                 bits |= 1 << test_id
@@ -637,7 +656,7 @@ class _Alive:
     def __init__(self, program, context, start, end, final_only):
         self.program, self.context, self.start, self.end, self.final_only = program, context, start, end, final_only
         self.marks, self.window, self.sets, self.base = {}, None, None, None
-        self.size = size = WINDOW
+        self.size = size = context.window
         starts = bytearray(end - start + 1)
         state = program.empty
         context.work += end - start + 1
@@ -662,7 +681,7 @@ class _Alive:
             return cache.states[found]
         state = _completes(program, following, context.members(cls), bits, may_end)
         context.work += len(program.code) + len(program.chars)
-        if len(cache.moves) >= MOST_MOVES:
+        if len(cache.moves) >= context.most_moves:
             cache.clear()                 # the move is not kept: its key names a state of the cache let go
             return state
         cache.moves[key] = cache.number(state)
@@ -691,6 +710,138 @@ class _Alive:
         return self.sets[at - self.base]
 
 
+class _NativeContext:
+    """A read made by the native core: its work, its end, and the read itself."""
+
+    def __init__(self, read, end):
+        self.read, self.end, self._work = read, end, 0
+
+    @property
+    def work(self):
+        """The read's work, or the last count it gave when the core cannot give one now (it failed)."""
+        try:
+            self._work = self.read.work
+        except BaseException as exc:  # noqa: BLE001 - a panic of the core is a BaseException
+            if not _native_failure(exc):
+                raise
+        return self._work
+
+
+class _NativeAlive:
+    """The native core's backward pass of the main program, as the read path asks it: a start, the next start."""
+
+    def __init__(self, read, final_only, end):
+        self.read, self.final_only, self.end = read, final_only, end
+        self.starts = self
+
+    def __getitem__(self, at):
+        return _core(self.read.starts, self.final_only, at)
+
+
+_AT_CODES = {_C.AT_BEGINNING: 0, _C.AT_BEGINNING_STRING: 1, _C.AT_END: 2, _C.AT_END_STRING: 3, _C.AT_BOUNDARY: 4,
+             _C.AT_NON_BOUNDARY: 5}
+_WORD_RANGES = None
+
+
+def _word_ranges():
+    """The word characters as re reads them over every code point, in Unicode and in ASCII: read once, by
+    ``linear_pattern`` as every set is, and kept (published by one assignment: a thread that compiles at the same
+    time sees none or both)."""
+    global _WORD_RANGES
+    found = _WORD_RANGES
+    if found is None:
+        machine, word = _check._Automaton(), [(_C.CATEGORY, _C.CATEGORY_WORD)]
+        found = ([tuple(span) for span in _check._members(_C.IN, word, re.UNICODE, machine)],
+                 [tuple(span) for span in _check._members(_C.IN, word, re.ASCII, machine)])
+        _WORD_RANGES = found
+    return found
+
+
+def _native_failure(exc):
+    """Whether an exception is one the native core may raise: then the reference reads, and a stop asked for (an
+    interrupt, an exit) is never taken for one."""
+    return isinstance(exc, Exception) or type(exc).__name__ == "PanicException"
+
+
+class _CoreFailed(Exception):
+    """A call into the native core that failed during a read: the reference reads it instead. Only a call into the
+    core raises it: an error of the Python around it (a template, memory for the results) is the caller's, as for
+    re."""
+
+
+def _core(call, *args):
+    """A call into the native core: a failure of the core becomes ``_CoreFailed``; a lack of memory, for the core's
+    buffers or for the Python objects of its results (which pyo3 reports as a panic, "Python API call failed"), is
+    the caller's MemoryError, as it would be for the reference, and the core stays."""
+    try:
+        return call(*args)
+    except MemoryError:
+        raise
+    except BaseException as exc:  # noqa: BLE001 - a panic of the core is a BaseException
+        if not _native_failure(exc):
+            raise
+        if type(exc).__name__ == "PanicException" and "Python API call failed" in str(exc):
+            raise MemoryError(str(exc)) from exc
+        raise _CoreFailed(f"{type(exc).__name__}: {exc}") from exc
+
+
+def _native(shared, main, tried):
+    """(the native core's reading of the programs, why) or (None, why the reference reads them): any failure to
+    hand the programs over is a decline, by name."""
+    try:
+        return _native_plan(shared, main, tried)
+    except BaseException as exc:  # noqa: BLE001 - a panic of the core is a BaseException
+        if not _native_failure(exc):
+            raise
+        return None, f"the native core declined it ({type(exc).__name__}: {exc})"
+
+
+def _native_plan(shared, main, tried):
+    try:
+        from opti_oignon import native
+    except ImportError:
+        return None, "the native core cannot be loaded"
+    core = native.load()
+    if core is None or not hasattr(core, "LinearProgram"):
+        return None, "the native core is not loaded here (not built, or built for another interpreter)"
+    if getattr(core, "LINEAR_FORMAT", None) != NATIVE_FORMAT:
+        return None, f"the native core reads programs of format {getattr(core, 'LINEAR_FORMAT', None)}"
+    if main.looks_with_groups:
+        return None, "groups in a positive lookaround"
+    if len(shared.sets) > 64 or len(shared.tests) > 64:
+        return None, "more than 64 sets of characters or tests"
+    programs, numbers = [], {}
+
+    def number(program):
+        if id(program) not in numbers:
+            numbers[id(program)] = len(programs)
+            programs.append(program)
+        return numbers[id(program)]
+
+    number(main)
+    looks = [(look.behind, number(look.scan)) for look in shared.looks]
+    plans = []
+    for program in programs:
+        code = []
+        for ins in program.code:
+            args = [FAIL if arg is None else arg for arg in ins[1:4]]
+            code.append((ins[0], *(args + [FAIL] * (3 - len(args)))))
+        plans.append((code, list(program.depth), list(program.oracle_tests), bool(program.anchored)))
+    tests = []
+    for test in shared.tests:
+        if test[0] == "at":
+            tests.append((0, _AT_CODES[test[1]], bool(test[2] & re.MULTILINE), bool(test[2] & re.ASCII)))
+        else:
+            tests.append((1, test[1], bool(test[2]), False))
+    word, word_ascii = _word_ranges()
+    plan = (NATIVE_FORMAT, [list(ranges) for _firsts, ranges in shared.sets], word, word_ascii, tests, looks, plans,
+            (0, shared.ncaps, sys.version_info >= (3, 14)), None if tried is None else list(tried[1]))
+    try:
+        return core.LinearProgram(plan), "read by the native core"
+    except ValueError as exc:
+        return None, str(exc)
+
+
 def _oracle(look, context):
     """For every position 0..end, whether the lookaround's body holds there: from it ahead, or up to it behind."""
     program, end = look.scan, context.end
@@ -709,7 +860,7 @@ def _oracle(look, context):
         if found is None:
             state, matched = _forward_set(program, state, context.members(cls), bits)
             context.work += len(program.code) + len(program.chars)
-            if len(cache.moves) >= MOST_MOVES:
+            if len(cache.moves) >= context.most_moves:
                 cache.clear()
             else:
                 cache.moves[key] = cache.number((state, matched))
@@ -879,7 +1030,8 @@ class _Search:
 
 
 class _Matches:
-    """finditer's iterator, as re's: one match at each step, the pattern's lock held only while it is found."""
+    """finditer's iterator, as re's: one match at each step, the pattern's lock held while it is found (a step reads
+    up to the end of its own match, and no further)."""
 
     def __init__(self, pattern, state):
         self._pattern, self._state = pattern, state
@@ -912,6 +1064,14 @@ def _search_set(parsed, flags, machine):
         return None
     ranges = _check._members(_C.IN, charset, re.ASCII if flags & re.ASCII else re.UNICODE, machine)
     return [first for first, _ in ranges], ranges
+
+
+def _ssize(value):
+    """An index or a count as re takes one, a C ssize_t: one out of that range raises what re raises."""
+    value = operator.index(value)
+    if not -sys.maxsize - 1 <= value <= sys.maxsize:
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    return value
 
 
 def _expand(parts, match):
@@ -964,6 +1124,7 @@ class Pattern:
         # (a reader that takes one token after another from a moving position reads the text once in all)
         self._last = None
         self.work = 0
+        self._native, self.native_reason = _native(shared, main, self._tried) if USE_NATIVE else (None, "not asked")
 
     def __repr__(self):
         return f"linear_engine.compile({self.pattern!r}, {self.flags})"
@@ -1002,8 +1163,18 @@ class Pattern:
         return _Matches(self, self._start(string, pos, endpos))
 
     def findall(self, string, pos=0, endpos=sys.maxsize):
+        state, found_all = self._all(string, pos, endpos, raw=True)
+        if found_all and type(found_all[0]) is list:
+            # read by the native core: the groups' strings straight from their ends, no match objects made
+            text, groups = state.text, self.groups
+            if groups == 0:
+                return [text[caps[0]:caps[1]] for caps in found_all]
+            if groups == 1:
+                return [text[caps[2]:caps[3]] if caps[2] is not None else "" for caps in found_all]
+            return [tuple(text[caps[2 * k]:caps[2 * k + 1]] if caps[2 * k] is not None else ""
+                          for k in range(1, groups + 1)) for caps in found_all]
         out = []
-        for found in self._all(string, pos, endpos)[1]:
+        for found in found_all:
             if self.groups == 0:
                 out.append(found.group())
             elif self.groups == 1:
@@ -1013,7 +1184,7 @@ class Pattern:
         return out
 
     def split(self, string, maxsplit=0):
-        state, matches = self._all(string, 0, sys.maxsize, operator.index(maxsplit))
+        state, matches = self._all(string, 0, sys.maxsize, _ssize(maxsplit))
         text, out, last = state.text, [], 0
         for found in matches:
             out.append(text[last:found.start()])
@@ -1026,6 +1197,7 @@ class Pattern:
         return self.subn(repl, string, count)[0]
 
     def subn(self, repl, string, count=0):
+        count = _ssize(count)                 # re converts the count before it reads the template
         if callable(repl):
             make = repl
         else:
@@ -1039,7 +1211,7 @@ class Pattern:
 
                 def make(found):
                     return _expand(parts, found)
-        state, matches = self._all(string, 0, sys.maxsize, operator.index(count))
+        state, matches = self._all(string, 0, sys.maxsize, count)
         text, out, last = state.text, [], 0
         for found in matches:
             out.append(text[last:found.start()])
@@ -1074,17 +1246,20 @@ class Pattern:
     def _bounds(self, string, pos, endpos):
         """(text, start, end): the text to read, as an exact str (a subclass's methods are never called: no code of
         the caller runs while a read holds the lock), pos and endpos clamped as re clamps them."""
+        pos, endpos = _ssize(pos), _ssize(endpos)
         if not isinstance(string, str):
             if isinstance(string, (bytes, bytearray, memoryview)):
                 raise TypeError("cannot use a string pattern on a bytes-like object")
             raise TypeError(f"expected string or bytes-like object, got '{type(string).__name__}'")
         text = string if type(string) is str else str.__str__(string)
         length = len(text)
-        start = min(max(operator.index(pos), 0), length)
-        end = min(max(operator.index(endpos), 0), length)
+        start = min(max(pos, 0), length)
+        end = min(max(endpos, 0), length)
         return text, start, end
 
     def _context(self, text, end):
+        if self._native is not None:
+            return _NativeContext(_core(self._native.read, text, end, MOST_MOVES, WINDOW, MOST_CLASSES), end)
         context = _Context(self._shared, text, end, [])
         for look in self._shared.looks:
             context.oracles.append(_oracle(look, context))
@@ -1105,7 +1280,11 @@ class Pattern:
         context, index = last[2], 4 if final_only else 3
         if last[index] is None:
             before = context.work
-            last[index] = _Alive(self._main, context, 0, end, final_only)
+            if type(context) is _NativeContext:
+                _core(context.read.pass_, final_only)
+                last[index] = _NativeAlive(context.read, final_only, end)
+            else:
+                last[index] = _Alive(self._main, context, 0, end, final_only)
             spent += context.work - before
         return context, last[index], spent
 
@@ -1115,36 +1294,66 @@ class Pattern:
         text, start, end = self._bounds(string, pos, endpos)
         return _Search(string, text, start, end, start > end or self._absent(text, start, end))
 
-    def _all(self, string, pos, endpos, most=0):
+    def _all(self, string, pos, endpos, most=0, raw=False):
         """(state, matches): every match in turn, at most ``most`` when it is not 0, none when it is negative (as re
-        counts), found under one hold of the lock."""
-        state, out = self._start(string, pos, endpos), []
+        counts), found under one hold of the lock; raw: the native core's matches as their caps, no match objects."""
+        state = self._start(string, pos, endpos)
         if most < 0:
-            return state, out
+            return state, []
         with self._lock:
-            while not (most and len(out) >= most):
-                found = self._next(state)
-                if found is None:
-                    break
-                out.append(found)
-        return state, out
+            return state, self._nexts(state, most, raw)
+
+    def _native_off(self, failed):
+        """After a call into the native core failed during a read: the core is let go for this pattern (the
+        reference reads from now on, every live search included, and says why)."""
+        self._native, self.native_reason = None, f"the native core failed ({failed}); the reference reads"
+        self._last = None
 
     def _next(self, state):
         """The next match of a search, or None (the lock held)."""
+        found = self._nexts(state, 1)
+        return found[0] if found else None
+
+    def _nexts(self, state, most, raw=False):
+        """The next matches of a search, at most ``most`` (all when 0), the lock held; a failure of the native core
+        hands the read to the reference, from where it stands."""
+        try:
+            return self._nexts_read(state, most, raw)
+        except _CoreFailed as failed:
+            self._native_off(failed)
+            state.context = state.alive = None
+            return self._nexts_read(state, most, raw)
+
+    def _nexts_read(self, state, most, raw):
         if state.done:
-            return None
+            return []
+        if type(state.context) is _NativeContext and self._native is None:
+            # the core was let go for this pattern by another search's failure: this one goes on with the reference
+            state.context = state.alive = None
         if state.alive is None:
             state.context, state.alive, spent = self._pass(state.string, state.text, state.end, False)
             self.work += spent
         context, alive = state.context, state.alive
         before = context.work
         try:
-            found = self._step(state, context, alive)
+            if type(context) is _NativeContext:
+                found, at, refuse, done = _core(context.read.steps, state.at, state.refuse, most)
+                if not raw:
+                    found = [self._found(caps, state.string, state.text, state.start, state.end, context)
+                             for caps in found]
+                # the search moves on only once its matches are made: an error before leaves it where it stood
+                state.at, state.refuse, state.done = at, refuse, done
+                return found
+            out = []
+            while not (most and len(out) >= most):
+                one = self._step(state, context, alive)
+                if one is None:
+                    state.done = True
+                    break
+                out.append(one)
+            return out
         finally:
             self.work += context.work - before
-        if found is None:
-            state.done = True
-        return found
 
     def _step(self, state, context, alive):
         end, refuse = state.end, state.refuse
@@ -1188,18 +1397,25 @@ class Pattern:
         if self._absent(text, start, end):
             return None
         with self._lock:
-            context, alive, spent = self._pass(string, text, end, final_only)
-            self.work += spent
-            before = context.work
             try:
-                if not alive.starts[start]:
-                    return None
-                caps = self._pike(self._main, context, start, final_only, None, alive)
-                if caps is None:
-                    raise AssertionError("a start the backward pass found holds no match")
-                return self._found(caps, string, text, start, end, context)
-            finally:
-                self.work += context.work - before
+                return self._anchored_read(string, text, start, end, final_only)
+            except _CoreFailed as failed:
+                self._native_off(failed)
+                return self._anchored_read(string, text, start, end, final_only)
+
+    def _anchored_read(self, string, text, start, end, final_only):
+        context, alive, spent = self._pass(string, text, end, final_only)
+        self.work += spent
+        before = context.work
+        try:
+            if not alive.starts[start]:
+                return None
+            caps = self._pike(self._main, context, start, final_only, None, alive)
+            if caps is None:
+                raise AssertionError("a start the backward pass found holds no match")
+            return self._found(caps, string, text, start, end, context)
+        finally:
+            self.work += context.work - before
 
     def _past(self, string, text, start, end):
         """match with pos past endpos: the engine still tries the pattern there, where every read fails."""
@@ -1274,6 +1490,11 @@ class Pattern:
     def _pike(self, program, context, start, final_only, refuse, alive, stop_at=None):
         """The caps of the leftmost-first match from ``start``, or None; a thread that reads into a place from
         which ``alive`` says no match can be completed is dropped (no pruning when alive is None)."""
+        if type(context) is _NativeContext:
+            # the native core reads the main program only: a pattern whose lookarounds hold groups is declined
+            assert program is self._main and stop_at is None, "the native core reads the main program only"
+            caps = _core(context.read.pike, start, final_only, refuse)
+            return None if caps is None else tuple(caps)
         code, end = program.code, context.end
         finish = end if stop_at is None else stop_at
         caps0 = (None,) * self._shared.ncaps + (None,)

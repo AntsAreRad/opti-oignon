@@ -8,6 +8,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CRATE="$ROOT/rust/oo_core"
 DEST="$ROOT/opti_oignon/native"
+# The interpreter pyo3 builds against, named: the artefact is stamped with its ABI (rust/oo_core/build.rs), the
+# loader loads it under that ABI only, and the check below runs it.
+export PYO3_PYTHON="${PYO3_PYTHON:-$(command -v python3)}"
 cargo build --release --locked --manifest-path "$CRATE/Cargo.toml"
 built="$CRATE/target/release/liboo_core.so"
 [ -f "$built" ] || { echo "no artefact at $built" >&2; exit 1; }
@@ -20,7 +23,7 @@ cp "$built" "$staged"
 mv -f "$staged" "$DEST/oo_core.so"
 # Check this tree's artefact, whichever directory the script was run from.
 cd "$ROOT"
-python3 - <<'PY'
+"$PYO3_PYTHON" - <<'PY'
 from opti_oignon.native import load
 core = load()
 print("oo_core", core.VERSION if core else "NOT LOADABLE")

@@ -268,7 +268,7 @@ jobs:
         run: bash scripts/build_oo_core.sh
 
       - name: Native-core contracts (native path against the reference)
-        run: python -m pytest -q tests/test_native_core_contracts.py
+        run: python -m pytest -q tests/test_native_core_contracts.py tests/test_linear_native_contracts.py
 
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate
