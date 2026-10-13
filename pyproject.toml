@@ -919,6 +919,13 @@ fail_under = 0
 # return a costly pattern; it returns the engine's reading of one, and pd4
 # gives way to pd7 in the same file. They stay in the tree word for word.
 #
+# sl2 of tests/test_linear_pattern_contracts.py called a reading steep only
+# past an absolute time of 2 ms on 4,000 characters, and a faster
+# interpreter reads one of its own witnesses under that time, so that it
+# failed where nothing had changed. It gives way to sl56 in the same file:
+# the same corpus and the same witnesses, held to the same growth on texts
+# twice as long, with no absolute time. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1268,4 +1275,5 @@ addopts = """
     --deselect=tests/test_linear_pattern_contracts.py::test_sl20_an_older_red_team_rule_whose_text_holds_a_line_break_keeps_its_written_form
     --deselect=tests/test_linear_pattern_contracts.py::test_sl35_a_blocked_pattern_whose_join_crosses_lines_is_never_read_as_a_chain_of_lines
     --deselect=tests/test_dynamic_pattern_sites_contracts.py::test_pd4_each_named_site_holds_its_reason
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl2_no_pattern_the_check_calls_linear_reads_a_long_text_in_more_than_linear_time
 """

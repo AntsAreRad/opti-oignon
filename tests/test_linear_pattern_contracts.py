@@ -195,6 +195,8 @@ BUDGET_S = {
     "test_sl53_a_custom_rule_that_cannot_be_chained_exactly_is_read_by_the_engine_and_never_stops_blocking": 15.0,
     "test_sl54_an_older_red_team_rule_whose_text_holds_a_line_break_is_read_as_written_by_the_engine": 3.0,
     "test_sl55_a_blocked_pattern_whose_join_crosses_lines_is_read_by_the_engine_never_as_a_chain_of_lines": 6.0,
+    "test_sl56_no_pattern_the_check_calls_linear_reads_a_long_text_in_more_than_linear_time_judged_by_growth":
+        20.0,
 }
 
 
@@ -1812,5 +1814,54 @@ def test_sl55_a_blocked_pattern_whose_join_crosses_lines_is_read_by_the_engine_n
             lp.joins_exactly = joins
         lines = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"curl.*\|\s*sh"]))
         assert lines.validate("curl x | sh")[0] is False and lines.validate("ls") == (True, ""), "control: as a chain"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SL56 -- the soundness SL2 holds, judged by growth alone
+# ---------------------------------------------------------------------------
+# SL2 calls a reading steep only past an absolute time of 2 ms on 4,000 characters, and a faster interpreter reads one
+# of its own witnesses under that time (Python 3.14 does), so that it fails where nothing changed. SL56 holds the same
+# corpus and the same witnesses to the same growth, on texts of 1,000 and 8,000 characters, where a quadratic reading
+# takes some fifty times the shorter one's time and a linear one some eight to twelve; no absolute time is asked, the
+# floor of 20 microseconds under the shorter reading is the only bound on noise.
+def _grows_steeply(read, make):
+    """True when eight times the text takes more than twenty-four times the time, twice in a row; the shorter reading
+    counts as 20 microseconds at least, and no absolute time is asked of the longer one."""
+    def once():
+        small, large = _cpu(read, make(1000)), _cpu(read, make(8000))
+        return large > 24 * max(small, 2e-5)
+    return once() and once()
+
+
+def test_sl56_no_pattern_the_check_calls_linear_reads_a_long_text_in_more_than_linear_time_judged_by_growth():
+    lp, restore = _checker()
+    try:
+        pumps = list(dict.fromkeys("".join(t) for k in (1, 2) for t in itertools.product(_SL2_ALPHABET, repeat=k)))
+
+        def steep(compiled):
+            return [(pump, method) for pump in pumps for method in ("search", "findall")
+                    if _grows_steeply(getattr(compiled, method), _sl2_texts(pump, method))]
+
+        assert steep(re.compile(r"\s*x")), "witness: the measure sees a quadratic search"
+        assert steep(re.compile(r"(?m)^\s*x")), "witness: and the starts of every line"
+        swallowed = {method for _p, method in steep(re.compile(r"x[^0]+0(?P<real>)|x[^0 ]*"))}
+        assert swallowed == {"findall"}, ("witness: every match in turn, where one search is linear", swallowed)
+        assert not steep(re.compile(r"x[^0 ]*")), "control: the measure calls a linear reading flat"
+        rng, seen, linear = random.Random(7), set(), []
+        while len(seen) < 120:
+            pattern, flags = _sl2_pattern(rng, rng.randint(2, 3)), rng.choice([0, re.M, re.S])
+            if (pattern, flags) in seen:
+                continue
+            seen.add((pattern, flags))
+            if rng.random() < 0.2:
+                pattern = "^" + pattern
+            if lp.verdict(pattern, flags) == "linear":
+                linear.append((pattern, flags))
+        assert len(linear) > 40, ("control: the corpus holds many linear patterns", len(linear))
+        slow = [(pattern, flags, found) for pattern, flags in linear for found in [steep(re.compile(pattern, flags))]
+                if found]
+        assert not slow, slow
     finally:
         restore()
