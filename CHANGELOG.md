@@ -2708,6 +2708,15 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A fact or a note that the user's typed words endorse once
+  folded is written from what the user typed. The gate compared the two
+  folded (Unicode NFC, each run of white space as one space) and then
+  wrote the model's spelling: the model chose the white space and the
+  Unicode form that reached the store, a channel of its own into what
+  every later turn reads back. A fact, a note's title and its tags are now
+  written in the folded form of the typed unit, and a note's body as the
+  user typed it, line for line.
+
 - [SECURITY] What the agent writes to memory or notes waits for the user
   unless the user typed it. In Daily, `manage_memory` and `manage_notes`
   wrote into stores every later turn reads back, with no review at all: a

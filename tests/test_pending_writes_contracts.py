@@ -1293,6 +1293,42 @@ def test_pw28_an_interrupted_delete_whose_target_never_existed_is_settled_as_not
     assert [(r["applied"], r["reason"]) for r in done] == [(False, "target not found")] * 2, done
 
 
+
+
+# ---------------------------------------------------------------------------
+# Contract PW29 -- what a fold endorses is written from the typed unit
+# ---------------------------------------------------------------------------
+# A fold endorses a write when the model's value and a typed unit are the same text once folded; the model then chose
+# the white space and the Unicode form of what reached the store. What is written now comes from the typed unit: a
+# fact, a title and a tag in the folded form the gate compares, a note's body as the user typed it, line for line.
+def test_pw29_a_fold_endorses_and_what_is_written_comes_from_the_typed_unit_never_the_model_s_spelling(tmp_path):
+    em, nbsp = chr(0x2003), chr(0xA0)
+    said = "My cat is called Miso."
+    spelled = "My" + em + "cat is  called Miso."
+    nfc_town = "My town is Orl" + chr(0xE9) + "ans."
+    nfd_town = unicodedata.normalize("NFD", nfc_town)
+    typed_note = "Buy milk.\nBuy bread."
+    loaded, restore = _gate_window()
+    try:
+        pw, tools = loaded[_PW], loaded[_TOOLS]
+        queue = _queue(pw, tmp_path)
+        memory, notes = _Memory(), _Notes()
+        _memory_tool(tools, memory, _gate(pw, queue, said))({"action": "add", "text": spelled})
+        _memory_tool(tools, memory, _gate(pw, queue, nfc_town))({"action": "add", "text": nfd_town})
+        _memory_tool(tools, memory, _gate(pw, queue, "My  cat\tis called   Miso."))({"action": "add", "text": said})
+        made = _notes_tool(tools, notes, _gate(pw, queue, typed_note))(
+            {"action": "make", "title": "Buy milk." + nbsp + "Buy bread.", "body": "Buy milk.  Buy bread.",
+             "tags": ["Buy milk." + em + "Buy bread."]})
+        rows = queue.list()
+    finally:
+        restore()
+    assert spelled != said and nfd_town != nfc_town, "control: the model's spellings differ from the typed ones"
+    assert rows == [], f"witness: a fold endorses each of these writes, none is proposed, got {rows}"
+    assert _adds(memory) == [said, nfc_town, said], memory.calls
+    assert made.startswith("Note created"), made
+    assert notes.calls == [("make", "Buy milk. Buy bread.", typed_note.encode("utf-8"),
+                            json.dumps(["Buy milk. Buy bread."]), False)], notes.calls
+
 def _run_all():
     cases = (
         ("PW1 what the user typed writes", test_pw1_a_fact_or_a_note_the_user_typed_whole_is_written_directly),
@@ -1340,6 +1376,8 @@ def _run_all():
          test_pw27_two_recoveries_that_read_one_unfinished_acceptance_apply_it_once),
         ("PW28 a delete cut short is not said to have landed",
          test_pw28_an_interrupted_delete_whose_target_never_existed_is_settled_as_not_found),
+        ("PW29 a fold writes from the typed unit",
+         test_pw29_a_fold_endorses_and_what_is_written_comes_from_the_typed_unit_never_the_model_s_spelling),
     )
     failed = 0
     for name, case in cases:

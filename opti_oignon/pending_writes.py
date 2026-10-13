@@ -809,6 +809,18 @@ class WriteGate:
             elif units:
                 typed[name] = units if name == "tags" else units[0]
         if key in _CONTENT and not untyped:
+            # What is written comes from the typed unit, never from the model's spelling of it: a fact, a title and
+            # each tag in the folded form the gate compares (one line, Unicode NFC, each run of white space one
+            # space), a note's body as the user typed it, line for line. The model may choose the white space and
+            # the Unicode form of an endorsed value; none of that choice reaches the store.
+            for name, unit in typed.items():
+                if name == "tags":
+                    tags = [fold(item) for item in unit]
+                    arguments[name] = json.dumps(tags) if isinstance(arguments.get(name), str) else tags
+                elif name == "body":
+                    arguments[name] = unit
+                else:
+                    arguments[name] = fold(unit)
             return apply_write(store, action, arguments, source="agent",
                                **{"memory_store" if store == "memory" else "notes_store": target})
         with self._count_lock:
