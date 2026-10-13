@@ -888,6 +888,25 @@ fail_under = 0
 # time, and pg44 gives way to pg46, which holds the ledger empty. They stay
 # in the tree word for word.
 #
+# pg19, pg21, pg22, pg35, pg37, pg39 and pg40 of
+# tests/test_pattern_cost_guard_contracts.py held the pattern cost guard to
+# up to four pump characters of a fixed list, to one search for every caller
+# but an anchored one, and to sorted read in its argument's order. The pumps
+# now take one character for each class of characters a pattern tells apart,
+# a caller that reads every match is timed reading every match, and sorted
+# is read sorted: they give way to pg50, pg51, pg52, pg53, pg54, pg55 and
+# pg56 in the same file, the same checks under the new rule. They stay in
+# the tree word for word.
+#
+# eq24 of tests/test_linear_patterns_contracts.py held the GitHub
+# connector's repository references to their old pattern through a pattern
+# rewritten to skip some starts; that pattern still read a run of names joined
+# by dots once for each name, which the pumps show now that a lead is written
+# to satisfy an anchor or a lookaround before the repeat. The references are
+# read one run at a time, and eq24 gives way to eq43 in the same file, the
+# same readers held to the same patterns through what the caller keeps. It
+# stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1218,4 +1237,12 @@ addopts = """
     --deselect=tests/test_linear_patterns_contracts.py::test_eq5_the_section_sheet_repository_and_tag_readers_read_as_before
     --deselect=tests/test_linear_patterns_contracts.py::test_eq6_the_claim_reader_reads_as_before_and_the_rm_check_answers_as_before
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg44_the_ledger_never_owes_more_than_it_owes_now_that_thirty_two_patterns_are_linear
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg19_the_doubling_reads_past_its_short_length_only_while_the_time_more_than_doubles
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg21_every_function_of_re_gives_its_pattern_and_flags_from_their_own_positions
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg22_the_pumps_of_a_pattern_are_its_leads_characters_and_bodies
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg35_the_pump_characters_the_rest_of_the_pattern_refuses_come_first
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg37_every_constant_form_gives_its_patterns_and_every_unread_form_is_dynamic
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg39_the_pump_helpers_give_their_exact_outputs_on_a_table_of_patterns
+    --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg40_a_linear_pattern_is_reported_by_its_costliest_pump_labelled_by_its_kind
+    --deselect=tests/test_linear_patterns_contracts.py::test_eq24_the_section_sheet_repository_and_tag_readers_read_as_before_with_runs_left_open_taken_at_once
 """

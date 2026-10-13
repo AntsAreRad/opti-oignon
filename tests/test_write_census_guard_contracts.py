@@ -167,7 +167,8 @@ visited once), SW54 to SW57.
 
 The guard is loaded alone in an isolation window, and every test package is
 written in memory: no test reaches the maintainer's data. The real tree is
-censused once per session and shared by the contracts that read it.
+censused once while this suite runs and shared by its contracts that read
+it; a contract of another suite takes its own.
 """
 
 import ast
@@ -176,6 +177,8 @@ import os
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -320,13 +323,27 @@ def _line(text, needle):
 
 
 _REAL = []
+_KEEPING = []
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _census_kept_while_this_suite_runs():
+    """The census holds every module it parsed, some 1.7 million objects. Kept for the session, it made each later
+    full collection pay for them, and the pause was charged to whichever contract triggered it."""
+    _KEEPING.append(True)
+    yield
+    _KEEPING.clear()
+    _REAL.clear()
 
 
 def _real(guard):
-    """The census of the repository, taken once per session by the first contract that reads it."""
-    if not _REAL:
-        _REAL.append(guard.run(REPO))
-    return _REAL[0]
+    """The census of the repository, taken once while this suite runs; a contract of another suite takes its own."""
+    if _REAL:
+        return _REAL[0]
+    result = guard.run(REPO)
+    if _KEEPING:
+        _REAL.append(result)
+    return result
 
 
 # ---------------------------------------------------------------------------

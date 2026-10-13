@@ -78,6 +78,56 @@ package costs.
   broader one always answered first (a `python -c` subprocess call) is
   read before it, so its own reason is given. The log redaction of the
   Ollama proxy, which nothing called, is removed.
+  The guard reads every class of characters a pattern tells apart and
+  every match its callers read, and a pattern from outside the code is
+  judged before it runs. The guard pumps each repeat with a character of
+  every class the pattern tells apart -- the exact partition of every code
+  point, read from the engine, where it tried four characters of a list,
+  the text before the repeat written so that an anchor or a lookaround on
+  the way accepts it -- and times every caller that reads each match in
+  turn (`sub`, `findall`, `finditer`, `split`) by reading every match,
+  since a search stops at its first: an alternative that takes a run at
+  once was quadratic match after match, which one search never showed. A
+  new module, `linear_pattern`, decides from the automaton of a pattern
+  whether it reads any text in linear time, soundly: what it does not
+  model (a back-reference, a conditional, a lookaround it cannot bound,
+  the order in which the engine tries branches) it refuses, never guesses.
+  It also refuses a pattern linear in the text that tries thousands of
+  ways from every start (two ways a round of a counted repeat), and bounds
+  what it costs to check. Each place that compiles a pattern from a model,
+  a configuration file or a person now refuses one that may take more than
+  linear time on a long text, as it refuses an invalid one: the agent's
+  grep tells the model to search otherwise; a costly custom pattern of the
+  document or PII sanitizer, or custom rule of the tone shifter, is left
+  out with a warning (the tone shifter applies none when the check cannot
+  be loaded); the red team refuses a costly rule before writing it, and
+  writes its fallback rule for a category, and reads an older one, in a
+  line form that matches exactly as the old one did (an older rule whose
+  text holds a line break is read as written, and left out when costly);
+  the sandbox makes its blocked patterns at its first command, each linear
+  or read as an exact chain of a head and its tails, and refuses every
+  command when one is neither, rather than dropping a rule in silence. Its
+  own default rules that took quadratic time on a repeated word (`fork`
+  ... `while` ... `true`, the forms of `rm`) are rewritten to the same
+  commands. The check refuses some patterns that run in linear time in
+  practice: the red team's PII target now reads a phone number from its
+  `+`. The cleaning of a fetched page by the tags and boilerplate words of
+  the RAG configuration reads in linear time and as before, and a tag's
+  name is read as written, never as a pattern; the header of a skill's
+  section, and the address a port is bound to, read as before, each from
+  its line once. Two patterns built at run time that no test reached took
+  quadratic time on a model's text: the fields of a teacher's skill draft
+  on a body of blank lines or after a value followed by a long run of
+  blanks, and the code block of a benchmark answer after a fence left
+  open. Both read as before in linear time, and a benchmark question's
+  language is read as written: a C++ block was never found. The GitHub
+  connector's reading of `owner/repo#123` references in a model's answer,
+  rewritten before to read in linear time, still read a run of names
+  joined by dots once for each name: it reads each run once, and finds the
+  same references. Every pattern the package builds at run time is now
+  held by a contract: driven over the values the package ships and
+  adversarial ones, caught as `re` compiles it and measured; or named,
+  with a reason checked on the code.
   The window also defangs a frame opening or an envelope bracket left
   open at a segment's end, which the segment after it could have
   finished.

@@ -217,7 +217,11 @@ blocked_commands:
   - "killall"
   - "pkill"
 
-# Blocked patterns - regex (case-insensitive), checked on ALL backends
+# Blocked patterns - regex (case-insensitive), checked on ALL backends.
+# Each must read a long command in linear time, as written or as parts joined
+# by .* that each do and that join exactly (a part ends one way, or with a
+# greedy run of a class the next part cannot start with). Any other pattern
+# refuses the configuration: every command is then refused, naming it.
 blocked_patterns:
   # Pipe or redirect to network tools
   - "\\|\\s*(curl|wget|nc|ncat|netcat)"
@@ -228,9 +232,9 @@ blocked_patterns:
   - "`[^`]*`"
   # $() with dangerous commands
   - "\\$\\(\\s*(curl|wget|sudo|rm|dd|nc|ncat|chmod|chown)"
-  # rm -rf with root or parent traversal
-  - "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?/"
-  - "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?\\.\\."
+  # rm -rf with root or parent traversal (the flags split at their first f)
+  - "rm\\s+(-[a-eg-zA-EG-Z]*f[a-zA-Z]*\\s+)?/"
+  - "rm\\s+(-[a-eg-zA-EG-Z]*f[a-zA-Z]*\\s+)?\\.\\."
   # Path traversal in commands
   - "\\.\\./\\.\\."
   # Fork bomb patterns

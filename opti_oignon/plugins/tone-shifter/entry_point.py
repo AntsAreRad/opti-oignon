@@ -330,10 +330,20 @@ def apply_custom_rules(text: str, custom: dict[str, str]) -> str:
     -------
     str
         Transformed text.
+
+    A rule that may read a long text in more than linear time is skipped like an invalid one; where the check of
+    what a pattern costs cannot be loaded, no custom rule is applied.
     """
+    if not custom:
+        return text
+    try:
+        from opti_oignon.linear_pattern import compile_linear
+    except ImportError:
+        logger.warning("Custom regex rules skipped: the pattern cost check is not available")
+        return text
     for pattern, replacement in custom.items():
         try:
-            text = re.sub(pattern, replacement, text)
+            text = compile_linear(pattern).sub(replacement, text)
         except re.error:
             logger.warning("Invalid custom regex: %s", pattern)
             continue

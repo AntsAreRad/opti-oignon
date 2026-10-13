@@ -468,14 +468,16 @@ def _extract_code_block(response: str, language: str = "python") -> str:
     Tries fenced blocks first (```python ... ```), then falls back
     to the entire response if no blocks found.
     """
-    # Try language-specific fenced block
-    pattern = rf"```(?:{language})?\s*\n(.*?)```"
+    # Try language-specific fenced block. The language is read as written. A block starts after the last line break
+    # of the blanks that follow its fence -- the one a search tried first; when no closing fence follows it, none
+    # follows an earlier one either -- so a fence left open is read once, never from each of its line breaks.
+    pattern = rf"```(?:{re.escape(language)})?\s*\n(?![^\S\n]*\n)(.*?)```"
     matches = re.findall(pattern, response, re.DOTALL)
     if matches:
         return "\n".join(matches)
 
     # Try generic fenced block
-    pattern = r"```\s*\n(.*?)```"
+    pattern = r"```\s*\n(?![^\S\n]*\n)(.*?)```"
     matches = re.findall(pattern, response, re.DOTALL)
     if matches:
         return "\n".join(matches)

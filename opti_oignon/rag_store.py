@@ -14,6 +14,7 @@ Each collection maps to a ChromaDB collection.  Documents are tracked in
 a SQLite ``rag_documents.db`` so they can be listed and deleted cleanly.
 """
 
+import bisect
 import hashlib
 import html as html_module
 import json
@@ -424,6 +425,68 @@ class _RAGDatabase:
             )
             for r in rows
         ]
+
+
+def _real_or_kept(match: re.Match) -> str:
+    """A blank for a real element; for an opening left open, taken at once, the text as it was."""
+    return " " if match.group("real") is not None else match.group(0)
+
+
+_BOILERPLATE_OPENING = re.compile(r"<(?:div|section|aside|ul|ol)", re.IGNORECASE)
+_BOILERPLATE_ATTRIBUTE = re.compile(r"(?:class|id)=[\"']", re.IGNORECASE)
+_BOILERPLATE_CLOSING = re.compile(r"</(?:div|section|aside|ul|ol)>", re.IGNORECASE)
+_QUOTE = re.compile(r"[\"']")
+
+
+def _strip_boilerplate(text: str, word: str) -> str:
+    """``text`` with each element whose class or id holds ``word`` taken out, up to the first closing tag after it.
+
+    What ``re.sub(rf'<(?:div|section|aside|ul|ol)[^>]*(?:class|id)=["\\'][^"\\']*{re.escape(word)}[^"\\']*["\\']'
+    rf'[^>]*>.*?</(?:div|section|aside|ul|ol)>', ' ', text, flags=re.DOTALL | re.IGNORECASE)`` gives, in time
+    linear in the text: that pattern backtracks over the attributes of every opening and over every quoted value,
+    and reads from every opening left open to the end of the text. Here each ``class=`` or ``id=`` with its quote is
+    found once, and whether the pattern goes on from it -- the next quote ends a value that holds the word, a ``>``
+    follows that quote, then a closing tag -- is decided once. An opening goes on from the last such attribute
+    before its first ``>``: the pattern's greedy run over the attributes tries the longest first. Two values never
+    overlap (each ends at or before the next attribute's quote), so each is read once. A word that holds a quote
+    names no element here (the pattern would let it run across one); it is left out with a warning.
+    """
+    if '"' in word or "'" in word:
+        logger.warning("Boilerplate word %r left out: a word cannot hold a quote", word)
+        return text
+    holds = re.compile(re.escape(word), re.IGNORECASE)
+    angles = [found.start() for found in re.finditer(">", text)]
+    quotes = [found.start() for found in _QUOTE.finditer(text)]
+    closings = list(_BOILERPLATE_CLOSING.finditer(text))
+    closing_starts = [found.start() for found in closings]
+    starts, ends = [], []
+    for attribute in _BOILERPLATE_ATTRIBUTE.finditer(text):
+        opened = attribute.end() - 1
+        at = bisect.bisect_right(quotes, opened)
+        if at == len(quotes) or holds.search(text, opened + 1, quotes[at]) is None:
+            continue
+        at = bisect.bisect_left(angles, quotes[at] + 1)
+        if at == len(angles):
+            continue
+        at = bisect.bisect_left(closing_starts, angles[at] + 1)
+        if at == len(closings):
+            continue
+        starts.append(attribute.start())
+        ends.append(closings[at].end())
+    out, last = [], 0
+    for opening in _BOILERPLATE_OPENING.finditer(text):
+        if opening.start() < last:
+            continue
+        at = bisect.bisect_left(angles, opening.end())
+        bound = angles[at] if at < len(angles) else len(text)
+        at = bisect.bisect_left(starts, bound) - 1
+        if at < 0 or starts[at] < opening.end():
+            continue
+        out.append(text[last:opening.start()])
+        out.append(" ")
+        last = ends[at]
+    out.append(text[last:])
+    return "".join(out)
 
 
 # =========================================================================
@@ -1222,17 +1285,21 @@ class RAGVectorStore:
             "noscript", "iframe", "svg", "form",
         ])
         for tag in strip_tags:
+            # The tag's name is read as written, never as a pattern. Linear on an opening left open: one with no
+            # closing after it takes the rest at once -- no opening after it has one either -- and is kept, as only
+            # an element sets ``real``.
+            name = re.escape(tag)
             # Remove <tag ...>...</tag> (non-greedy, case-insensitive)
             text = re.sub(
-                rf'<{tag}[\s>].*?</{tag}>',
-                ' ',
+                rf'<{name}[\s>](?:.*?</{name}>(?P<real>)|.*)',
+                _real_or_kept,
                 text,
                 flags=re.DOTALL | re.IGNORECASE,
             )
             # Remove self-closing <tag ... />
             text = re.sub(
-                rf'<{tag}\s[^>]*/?>',
-                ' ',
+                rf'<{name}\s(?:[^>]*>(?P<real>)|[^>]*)',
+                _real_or_kept,
                 text,
                 flags=re.IGNORECASE,
             )
@@ -1244,12 +1311,7 @@ class RAGVectorStore:
         ])
         for pattern in boilerplate:
             # Remove divs/sections with matching class or id
-            text = re.sub(
-                rf'<(?:div|section|aside|ul|ol)[^>]*(?:class|id)=["\'][^"\']*{re.escape(pattern)}[^"\']*["\'][^>]*>.*?</(?:div|section|aside|ul|ol)>',
-                ' ',
-                text,
-                flags=re.DOTALL | re.IGNORECASE,
-            )
+            text = _strip_boilerplate(text, pattern)
 
         # Step 3: Strip all remaining HTML tags. Linear on a "<" left open: one with no ">" after it takes the rest at
         # once -- no "<" after it can close either -- and is kept, as only a tag sets ``real``.

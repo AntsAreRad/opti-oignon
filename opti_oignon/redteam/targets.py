@@ -364,7 +364,9 @@ class PIISanitizerTarget(TargetAdapter):
          "label": "credit_card"},
         {"pattern": r"\b\d{3}-\d{2}-\d{4}\b", "replacement": "[SSN]",
          "label": "ssn"},
-        {"pattern": r"\+?\d[\d\-\s]{6,}\d", "replacement": "[PHONE]",
+        # From a "+" only: the sanitizer refuses a custom pattern its static check cannot prove linear, and a
+        # number run tried from each of its digits is not proven (the marker this adapter injects has its "+").
+        {"pattern": r"\+\d[\d\-\s]{6,}\d", "replacement": "[PHONE]",
          "label": "phone"},
     ]
 

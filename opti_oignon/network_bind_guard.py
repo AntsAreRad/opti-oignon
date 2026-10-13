@@ -518,9 +518,10 @@ def _check_ollama_ss(port: int) -> str | None:
         for line in result.stdout.splitlines():
             if str(port) not in line:
                 continue
-            # Match patterns like *:11434, 0.0.0.0:11434, 127.0.0.1:11434
+            # Match patterns like *:11434, 0.0.0.0:11434, 127.0.0.1:11434. A match starts where a run of address
+            # characters starts (any later start reads a suffix of that run): each run is tried once, linear.
             match = re.search(
-                rf"([\d.*:]+):{port}\b", line,
+                rf"(?<![\d.*:])([\d.*:]+):{port}\b", line,
             )
             if match:
                 addr = match.group(1)

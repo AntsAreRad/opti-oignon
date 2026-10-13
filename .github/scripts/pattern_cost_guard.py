@@ -20,8 +20,8 @@ constants: string and bytes literals, the names a module, class, function,
 loop or comprehension binds to constants only, the items of a constant
 tuple, list, set or dict a loop or a comprehension takes them from,
 concatenations, ``%``, f-strings, items and slices, ``join``, ``re.escape``,
-``chr`` of a constant integer, ``tuple``, ``list`` and ``sorted`` (the last
-in its argument's order, not sorted: a gap known), ``re`` flags and their
+``chr`` of a constant integer, ``tuple``, ``list`` and ``sorted`` (sorted, a
+value whose items cannot be ordered dynamic), ``re`` flags and their
 union; a builtin is read as itself only where no scope binds
 its name (a ``type`` alias and a type parameter included) and nothing in the
 package names ``__builtins__``, ``exec`` or ``eval``, a frame's builtins or a
@@ -52,15 +52,25 @@ its lead -- a short text the items before it on its path from the top match
 -- then a run of a character its body accepts; that lead and character as a
 unit repeated, which makes a search start the pattern over at each unit; and
 its lead then one round of its body repeated. A back-reference stands for
-the group it names. The characters are those of a fixed list the body
-accepts, the ones the rest of the pattern refuses first (one it accepts lets
-the match end at once), or one its own class names when it accepts none of
-them. Each pump is read at doubling lengths from 2, three lengths at least,
+the group it names. The characters are one of each class of characters the
+pattern tells apart that the body accepts: the partition of every code point
+by the sets its single-character items accept under their own flags, read
+from the engine itself, with the word characters a word boundary reads and
+the newline a line anchor reads; each class is shown by its first character
+in a fixed list, or else by its least code point. The ones the rest of the
+pattern refuses come first (one it accepts lets the match end at once).
+Each pump is read at doubling lengths from 2, three lengths at least,
 until it takes 10 ms or reaches 16,384 characters -- 4,096 when its time
 grows less than two and a half times per doubling -- with the method its
 callers use: a name compiled once and only ever called with ``match`` or
 ``fullmatch`` from the start of its text, in its module, and never imported,
-is timed so; anything else as a search. The pattern is superlinear when,
+is timed so; one only ever searched, or matched from a position, as a
+search; anything else -- ``findall``, ``finditer``, ``sub``, ``subn``,
+``split``, a name passed, stored or imported -- as ``findall``, every match
+in turn: after a match the next search starts again, so a pattern one search
+reads in linear time can take quadratic time to read them all (a branch that
+takes a run at once only where a real match fails, and refuses a character
+the real match accepts). The pattern is superlinear when,
 over the last two doublings of one pump, its time grew at least three times
 per doubling (nine times in all) and the longest reading took at least 1 ms;
 read over two doublings, a pause of the machine in one reading moves the
@@ -89,6 +99,7 @@ guard is blind and fails. The counts read, measured, dynamic and owed are
 printed on a green run.
 """
 import ast
+import bisect
 import hashlib
 import itertools
 import os
@@ -122,6 +133,13 @@ REPEATS = tuple(op for op in (sre_constants.MAX_REPEAT, sre_constants.MIN_REPEAT
                               getattr(sre_constants, "POSSESSIVE_REPEAT", None)) if op is not None)
 ATOMIC = getattr(sre_constants, "ATOMIC_GROUP", None)
 ZERO_WIDTH = (sre_constants.AT, sre_constants.ASSERT, sre_constants.ASSERT_NOT)
+SINGLE = (sre_constants.LITERAL, sre_constants.NOT_LITERAL, sre_constants.ANY, sre_constants.IN)
+# The flags that change which characters one item accepts: multiline and verbose change none.
+CHARACTER_FLAGS = re.IGNORECASE | re.ASCII | re.LOCALE | re.UNICODE | re.DOTALL
+WORD_EDGES = (sre_constants.AT_BOUNDARY, sre_constants.AT_NON_BOUNDARY)
+# The parser writes every caret as AT_BEGINNING; under multiline mode it reads a line start too.
+LINE_ANCHORS = (sre_constants.AT_BEGINNING_LINE, sre_constants.AT_END_LINE, sre_constants.AT_END)
+SURROGATES = range(0xD800, 0xE000)
 
 # MAY ONLY SHRINK: the superlinear patterns each module owes, by digest. It is
 # EMPTY, and a contract holds it so: every pattern the guard measures reads a
@@ -149,7 +167,7 @@ _WALKED = {}
 
 
 def _walk(module):
-    """Every node of a parsed module, walked once and kept while the module lives."""
+    """Every node of a parsed module, walked once and kept with it until the reading that parsed it ends."""
     if _WALKED.get(id(module), (None,))[0] is not module:
         nodes = list(ast.walk(module))
         _WALKED[id(module)] = (module, nodes, {id(child): node for node in nodes for child in ast.iter_child_nodes(node)})
@@ -469,8 +487,13 @@ class Scope:
             if method in ("items", "keys", "values") and not args:
                 return [tuple(getattr(value, method)()) for value in self.values(owner) if isinstance(value, dict)]
         if isinstance(func, ast.Name) and len(args) == 1 and self.builtin(func.id):
-            if func.id in ("tuple", "list", "sorted"):
+            if func.id in ("tuple", "list"):
                 return [tuple(_items(value)) for value in self.values(args[0])]
+            if func.id == "sorted":
+                try:
+                    return [tuple(sorted(_items(value))) for value in self.values(args[0])]
+                except TypeError:
+                    raise Unknown from None
             if func.id == "chr":
                 values = self.values(args[0])
                 if not all(type(value) is int and 0 <= value <= sys.maxunicode for value in values):
@@ -630,6 +653,10 @@ def scoped_calls(module, re_names, imported=frozenset(), elsewhere=frozenset()):
 # Sites
 # ---------------------------------------------------------------------------
 ANCHORED = {"match", "fullmatch"}
+SEARCHED = ("search",)
+# Every match in turn: what findall, finditer, sub, subn and split read, and the most a name read out of the
+# guard's sight can cost (a search is the first of them).
+EVERY_MATCH = ("findall",)
 # The methods of a module the guard could not parse.
 UNREAD = ("unread",)
 
@@ -639,7 +666,10 @@ def _name_of(node):
 
 
 def _from_start(call):
-    """True when a ``match`` or ``fullmatch`` call reads from the start of its text: no position, or 0."""
+    """True when a ``match`` or ``fullmatch`` call reads from the start of its text: no position, or 0; a call that
+    unpacks its arguments (``*args``, ``**kwargs``) may hide one."""
+    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(keyword.arg is None for keyword in call.keywords):
+        return False
     position = call.args[1] if len(call.args) > 1 else next(
         (keyword.value for keyword in call.keywords if keyword.arg == "pos"), None)
     return position is None or (isinstance(position, ast.Constant) and position.value == 0)
@@ -650,8 +680,9 @@ def _modes(module, imported):
 
     Those of ``match`` and ``fullmatch`` called on it by that name from the start of the text, when every read of
     the name in the module is such a call and no module of the package imports the name or reads it from this
-    one; ``search`` otherwise -- a name put in a container, passed, returned, imported or matched from a position
-    is not followed, and is timed in the mode that costs most.
+    one; ``search`` when every read is a call of ``search``, or of ``match`` or ``fullmatch`` from any position;
+    ``findall`` otherwise -- a name called with any other method, put in a container, passed, returned or
+    imported is not followed, and is timed in the mode that costs most.
     """
     calls, reads = {}, {}
     owners = set()
@@ -659,8 +690,10 @@ def _modes(module, imported):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             name = _name_of(node.func.value)
             if name is not None:
-                anchored = node.func.attr in ANCHORED and _from_start(node)
-                calls.setdefault(name, set()).add(node.func.attr if anchored else "search")
+                method = node.func.attr
+                anchored = method in ANCHORED and _from_start(node)
+                searched = method in ANCHORED or method == "search"
+                calls.setdefault(name, set()).add(method if anchored else "search" if searched else "findall")
                 owners.add(id(node.func.value))
     for node in _walk(module):
         name = _name_of(node) if isinstance(getattr(node, "ctx", None), ast.Load) else None
@@ -669,7 +702,10 @@ def _modes(module, imported):
     modes = {}
     for name, methods in calls.items():
         followed = all(read in owners for read in reads.get(name, ())) and name not in imported
-        modes[name] = tuple(sorted(methods)) if followed and methods <= ANCHORED else ("search",)
+        if followed and methods <= ANCHORED:
+            modes[name] = tuple(sorted(methods))
+        else:
+            modes[name] = SEARCHED if followed and methods <= ANCHORED | set(SEARCHED) else EVERY_MATCH
     return modes
 
 
@@ -764,17 +800,37 @@ def sites(root):
 
     A site whose pattern or flags cannot be evaluated gives one row of None. The methods are the ones a search is
     timed with: the anchored function of a direct call (``match``, ``fullmatch``), or for a pattern compiled into
-    a name, those ``_modes`` reads; ``search`` otherwise.
+    a name, those ``_modes`` reads; ``search`` otherwise. The modules are parsed and walked for this reading only.
     """
-    found = []
     parsed = _package(root)
+    try:
+        return _sites(parsed)
+    finally:
+        for _, module in parsed:
+            _WALKED.pop(id(module), None)
+
+
+def _sites(parsed):
+    found = []
     for rel, module in parsed:
         if module is None:
             found.append((rel.as_posix(), 0, 0, None, None, UNREAD))
     parsed = [(rel, module) for rel, module in parsed if module is not None]
     imported, elsewhere = _imported(parsed), rebound(parsed)
+    readers = {}
     for rel, module in parsed:
-        modes = _modes(module, imported)
+        for node in _walk(module):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                readers.setdefault(node.attr, set()).add(rel)
+    for rel, module in parsed:
+        # A pattern stored on an object (an attribute, or a name in a class body) is reached through any object
+        # elsewhere, unlike a name of the module, which only an import reaches: read as an attribute in another
+        # module, it may be read there any way.
+        stored = {target.attr for node in _walk(module) if isinstance(node, ast.Assign) for target in node.targets
+                  if isinstance(target, ast.Attribute)}
+        stored |= {target.id for node in _walk(module) if isinstance(node, ast.ClassDef) for item in node.body
+                   if isinstance(item, ast.Assign) for target in item.targets if isinstance(target, ast.Name)}
+        modes = _modes(module, imported | {name for name in stored if readers.get(name, set()) - {rel}})
         aliases, direct = _re_names(module)
         for node in _loose(module, aliases, direct):
             found.append((rel.as_posix(), node.lineno, node.col_offset, None, None, ("search",)))
@@ -805,9 +861,9 @@ def sites(root):
             if function in ANCHORED:
                 methods = (function,)
             elif function == "compile" and id(node) in bound:
-                methods = modes.get(bound[id(node)], ("search",))
+                methods = modes.get(bound[id(node)], EVERY_MATCH)
             else:
-                methods = ("search",)
+                methods = SEARCHED if function == "search" else EVERY_MATCH
             try:
                 patterns = scope.values(first)
                 flags = [0] if flag_node is None else scope.values(flag_node)
@@ -858,29 +914,131 @@ def _named(item):
             if sub_op in (sre_constants.LITERAL, sre_constants.RANGE)]
 
 
-def first_chars(seq, flags, groups=None):
-    """The characters the first single-character item of ``seq`` accepts: those of the candidates it accepts, or
-    else the first it names itself that it accepts; a back-reference stands for the group it names."""
+_EVERY = []
+_ACCEPTED = {}
+_CLASSES = {}
+
+
+def _local(flags, av):
+    """The flags inside a group: the pattern's, with the group's own added and removed; a type flag the group sets
+    (ASCII, LOCALE, UNICODE) takes the place of the pattern's, as the engine combines them."""
+    if av[1] & sre_parse.TYPE_FLAGS:
+        flags &= ~sre_parse.TYPE_FLAGS
+    return (flags | av[1]) & ~av[2]
+
+
+def members(single, flags):
+    """The code points the single-character pattern ``single`` accepts under ``flags``, as sorted disjoint
+    (first, last) ranges, read from the engine itself over every code point."""
+    flags &= CHARACTER_FLAGS if single == "." else CHARACTER_FLAGS & ~re.DOTALL
+    key = (single, flags)
+    if key not in _ACCEPTED:
+        if not _EVERY:
+            _EVERY.append("".join(map(chr, range(sys.maxunicode + 1))))
+        compiled = re.compile("(?:" + single + ")+", flags)
+        _ACCEPTED[key] = tuple((found.start(), found.end() - 1) for found in compiled.finditer(_EVERY[0]))
+    return _ACCEPTED[key]
+
+
+def _partition(sets):
+    """One character for each class of the partition of every code point by ``sets``: its first character in
+    CANDIDATES, or else its least code point, outside the surrogates when the class holds one."""
+    toggles = {}
+    for index, ranges in enumerate(sorted(sets)):
+        for first, last in ranges:
+            toggles[first] = toggles.get(first, 0) ^ (1 << index)
+            toggles[last + 1] = toggles.get(last + 1, 0) ^ (1 << index)
+    starts, masks, mask = [0], [0], 0
+    for point in sorted(toggles):
+        mask ^= toggles[point]
+        if point == starts[-1]:
+            masks[-1] = mask
+        elif point <= sys.maxunicode:
+            starts.append(point)
+            masks.append(mask)
+    shown = {}
+    for ch in CANDIDATES:
+        shown.setdefault(masks[bisect.bisect_right(starts, ord(ch)) - 1], ch)
+    rest, inside = {}, {}
+    for index, start in enumerate(starts):
+        end = starts[index + 1] - 1 if index + 1 < len(starts) else sys.maxunicode
+        if masks[index] in shown or masks[index] in rest:
+            continue
+        if start not in SURROGATES:
+            rest[masks[index]] = chr(start)
+        elif end >= SURROGATES.stop:
+            rest[masks[index]] = chr(SURROGATES.stop)
+        else:
+            inside.setdefault(masks[index], chr(start))
+    for mask, ch in inside.items():
+        rest.setdefault(mask, ch)
+    return list(shown.values()) + sorted(rest.values())
+
+
+def classes(tree, flags):
+    """One character for each class of characters the parsed pattern tells apart: the partition of every code
+    point by the sets its single-character items accept under their own flags, with the word characters a word
+    boundary reads and the newline a line anchor reads. A literal read with case is itself; any other item is read
+    from the engine."""
+    sets = set()
+
+    def walk(seq, flags):
+        for op, av in seq:
+            if op in SINGLE:
+                single = _one((op, av))
+                if op is sre_constants.LITERAL and not flags & re.IGNORECASE:
+                    sets.add(((av, av),))
+                elif single is not None:
+                    sets.add(members(single, flags))
+            elif op is sre_constants.AT and av in WORD_EDGES:
+                sets.add(members(r"\w", flags))
+            elif op is sre_constants.AT and (av in LINE_ANCHORS or av is sre_constants.AT_BEGINNING
+                                             and flags & re.MULTILINE):
+                sets.add(((10, 10),))
+            elif op is sre_constants.SUBPATTERN:
+                walk(av[-1], _local(flags, av))
+            elif op in REPEATS:
+                walk(av[2], flags)
+            elif op is ATOMIC:
+                walk(av, flags)
+            elif op in (sre_constants.ASSERT, sre_constants.ASSERT_NOT):
+                walk(av[1], flags)
+            elif op is sre_constants.BRANCH or op is sre_constants.GROUPREF_EXISTS:
+                for branch in (av[1] if op is sre_constants.BRANCH else av[1:]):
+                    if branch is not None:
+                        walk(branch, flags)
+
+    walk(tree, flags)
+    key = frozenset(sets)
+    if key not in _CLASSES:
+        _CLASSES[key] = _partition(key)
+    return _CLASSES[key]
+
+
+def first_chars(seq, flags, groups=None, chars=CANDIDATES):
+    """The characters the first single-character item of ``seq`` accepts: those of ``chars`` it accepts, or else
+    the first it names itself that it accepts; a group reads under its own flags, a back-reference stands for the
+    group it names."""
     for op, av in seq:
-        if op in (sre_constants.LITERAL, sre_constants.NOT_LITERAL, sre_constants.ANY, sre_constants.IN):
+        if op in SINGLE:
             single = _one((op, av))
             if single is None:
                 return []
             item = re.compile(single, flags)
-            accepted = [ch for ch in CANDIDATES if item.fullmatch(ch)]
+            accepted = [ch for ch in chars if item.fullmatch(ch)]
             return accepted or [ch for ch in _named((op, av)) if item.fullmatch(ch)][:1]
         if op in REPEATS:
-            return first_chars(av[2], flags, groups)
+            return first_chars(av[2], flags, groups, chars)
         if op is sre_constants.SUBPATTERN:
-            return first_chars(av[-1], flags, groups)
+            return first_chars(av[-1], _local(flags, av), groups, chars)
         if op is ATOMIC:
-            return first_chars(av, flags, groups)
+            return first_chars(av, flags, groups, chars)
         if op is sre_constants.GROUPREF:
-            return first_chars((groups or {}).get(av, []), flags, groups)
+            return first_chars((groups or {}).get(av, []), flags, groups, chars)
         if op is sre_constants.BRANCH or op is sre_constants.GROUPREF_EXISTS:
             out = []
             for branch in (av[1] if op is sre_constants.BRANCH else [b for b in av[1:] if b is not None]):
-                out += [ch for ch in first_chars(branch, flags, groups) if ch not in out]
+                out += [ch for ch in first_chars(branch, flags, groups, chars) if ch not in out]
             return out
         if op in ZERO_WIDTH:
             continue
@@ -888,35 +1046,38 @@ def first_chars(seq, flags, groups=None):
     return []
 
 
-def _sample(seq, flags, groups=None):
-    """A short text the parsed ``seq`` matches -- a class by the first character it accepts, a repeat at its least
-    and once at least, a branch by the first that can be written -- or None when one of its items cannot be
-    written."""
+def _sample(seq, flags, groups=None, prefer=None):
+    """A short text the parsed ``seq`` matches -- a class by the first character it accepts (``prefer`` when it
+    accepts that one), a repeat at its least and once at least, a branch by the first that can be written (the
+    first that writes ``prefer``, when one does) -- or None when one of its items cannot be written."""
     out = []
     for op, av in seq:
         if op in (sre_constants.LITERAL, sre_constants.NOT_LITERAL, sre_constants.ANY, sre_constants.IN):
             accepted = first_chars([(op, av)], flags)
-            if not accepted:
+            liked = prefer is not None and prefer in first_chars([(op, av)], flags, groups, [prefer])
+            if not accepted and not liked:
                 return None
-            out.append(accepted[0])
+            out.append(prefer if liked else accepted[0])
         elif op is sre_constants.GROUPREF:
-            inner = _sample(groups[av], flags, groups) if groups and av in groups else None
+            inner = _sample(groups[av], flags, groups, prefer) if groups and av in groups else None
             if inner is None:
                 return None
             out.append(inner)
         elif op in REPEATS:
-            body = _sample(av[2], flags, groups)
+            body = _sample(av[2], flags, groups, prefer)
             if body is None:
                 return None
             out.append(body * max(av[0], 1))
         elif op is sre_constants.SUBPATTERN or op is ATOMIC:
-            inner = _sample(av if op is ATOMIC else av[-1], flags, groups)
+            inner = (_sample(av, flags, groups, prefer) if op is ATOMIC
+                     else _sample(av[-1], _local(flags, av), groups, prefer))
             if inner is None:
                 return None
             out.append(inner)
         elif op is sre_constants.BRANCH or op is sre_constants.GROUPREF_EXISTS:
             branches = av[1] if op is sre_constants.BRANCH else [b if b is not None else [] for b in av[1:]]
-            inner = next((s for s in (_sample(b, flags, groups) for b in branches) if s is not None), None)
+            written = [s for s in (_sample(b, flags, groups, prefer) for b in branches) if s is not None]
+            inner = next((s for s in written if prefer is not None and prefer in s), written[0] if written else None)
             if inner is None:
                 return None
             out.append(inner)
@@ -925,13 +1086,29 @@ def _sample(seq, flags, groups=None):
     return "".join(out)
 
 
-def _lead(seq, upto, flags, groups=None):
+def _lead(seq, upto, flags, groups=None, prefer=None):
     """A short text the items of ``seq`` before ``upto`` match, each written when it can be, left out when not."""
     out = ""
     for item in seq[:upto]:
         if item[0] not in ZERO_WIDTH:
-            out += _sample([item], flags, groups) or ""
+            out += _sample([item], flags, groups, prefer) or ""
     return out
+
+
+def _shaped(seq):
+    """True when the parsed ``seq`` holds a zero-width item a lead may have to satisfy: an anchor, a word boundary
+    or a lookaround."""
+    for op, av in seq:
+        if op in ZERO_WIDTH:
+            return True
+        inner = (av[-1] if op is sre_constants.SUBPATTERN else av if op is ATOMIC else av[2] if op in REPEATS
+                 else None)
+        if inner is not None and _shaped(inner):
+            return True
+        branches = av[1] if op is sre_constants.BRANCH else av[1:] if op is sre_constants.GROUPREF_EXISTS else []
+        if any(branch is not None and _shaped(branch) for branch in branches):
+            return True
+    return False
 
 
 def _groups(seq, out=None):
@@ -976,46 +1153,56 @@ def unbounded(pattern, flags):
 
 
 def pumps(pattern, flags):
-    """(lead, character, body) for each unbounded repeat of the pattern and each of up to four characters its body
-    accepts; ``body`` is a text one round of the repeat matches, when it is longer than one character.
+    """(lead, character, body) for each unbounded repeat of the pattern and each class of characters the pattern
+    tells apart that its body accepts; ``body`` is a text one round of the repeat matches, when it is longer than
+    one character.
 
     The lead is a text the items before the repeat on its path from the top match: the parser factors a prefix
-    the branches share out of them, so a branch alone does not hold it.
+    the branches share out of them, so a branch alone does not hold it. When an anchor, a word boundary or a
+    lookaround stands in the pattern, the lead is written again preferring each class the pattern tells apart, as
+    the zero-width item may refuse the first character of an item before it (a newline before a multiline caret).
+    Known limits, counted: a lead that needs two classes at once (``[ab][ab](?<=ab)``), an optional item left out
+    (``a?(?<!a)``), or the branch of a conditional its group refuses, is not written; a body is sampled by its
+    first branch (``(?:a|b|ab)*`` is not pumped by ``ab``); a pump that the pattern's continuation ends at once by its
+    last character (``\\w+\\s*\\w+\\W``) is not timed without it; and a run read again from starts a lookbehind
+    places every few characters (a word character and a dot) is not pumped by that period.
     """
     found = []
-    tree = list(sre_parse.parse(pattern, flags))
+    parsed = sre_parse.parse(pattern, flags)
+    tree, flags = list(parsed), parsed.state.flags
     groups = _groups(tree)
+    chars = classes(tree, flags)
 
-    def walk(seq, outer, after):
+    def walk(seq, outer, after, flags, prefer):
         for index, (op, av) in enumerate(seq):
-            here = outer + _lead(seq, index, flags, groups)
-            follow = first_chars(seq[index + 1:], flags, groups) if index + 1 < len(seq) else after
+            here = outer + _lead(seq, index, flags, groups, prefer)
+            follow = first_chars(seq[index + 1:], flags, groups, chars) if index + 1 < len(seq) else after
             if op in REPEATS:
                 if av[1] == sre_constants.MAXREPEAT:
                     body = _sample(av[2], flags, groups)
                     body = body if body is not None and len(body) > 1 else None
-                    accepted = first_chars(av[2], flags, groups)
+                    taken = first_chars(av[2], flags, groups, chars)
                     # A character the continuation refuses first: one it accepts lets the match end at once.
-                    accepted = [ch for ch in accepted if ch not in follow] + [ch for ch in accepted if ch in follow]
-                    for ch in accepted[:4]:
+                    for ch in [ch for ch in taken if ch not in follow] + [ch for ch in taken if ch in follow]:
                         if (here, ch, body) not in found:
                             found.append((here, ch, body))
-                walk(av[2], here, follow)
+                walk(av[2], here, follow, flags, prefer)
             elif op is sre_constants.SUBPATTERN:
-                walk(av[-1], here, follow)
+                walk(av[-1], here, follow, _local(flags, av), prefer)
             elif op is ATOMIC:
-                walk(av, here, follow)
+                walk(av, here, follow, flags, prefer)
             elif op is sre_constants.BRANCH:
                 for branch in av[1]:
-                    walk(branch, here, follow)
+                    walk(branch, here, follow, flags, prefer)
             elif op is sre_constants.GROUPREF_EXISTS:
                 for branch in av[1:]:
                     if branch is not None:
-                        walk(branch, here, follow)
+                        walk(branch, here, follow, flags, prefer)
             elif op in (sre_constants.ASSERT, sre_constants.ASSERT_NOT):
-                walk(av[1], here, [])
+                walk(av[1], here, [], flags, prefer)
 
-    walk(tree, "", [])
+    for prefer in [None] + (list(chars) if _shaped(tree) else []):
+        walk(tree, "", [], flags, prefer)
     return found
 
 

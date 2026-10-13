@@ -709,9 +709,14 @@ class SandboxToolSession:
         context_lines = _clamp(context_lines, 0, GREP_CONTEXT_CAP)
 
         if is_regex:
+            from opti_oignon.linear_pattern import CostlyPattern, compile_linear
             flags = 0 if case_sensitive else re.IGNORECASE
             try:
-                rx = re.compile(pattern, flags)
+                rx = compile_linear(pattern, flags)
+            except CostlyPattern as exc:
+                return (f"Error: regex pattern refused, it could take more than linear time on a long line ({exc}); "
+                        f"search a fixed string (is_regex=false), or a pattern with no unbounded repeat that can "
+                        f"start again where another left off, such as '.*' between two parts")
             except re.error as exc:
                 return f"Error: invalid regex pattern: {exc}"
 

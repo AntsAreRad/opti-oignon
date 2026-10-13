@@ -285,7 +285,11 @@ _TEACHER_SYSTEM = (
 # Linear on a fence left open: one with no line break after it, or no closing fence after its line, takes the rest
 # at once -- no fence after it can close either -- and only a block that reached its closing sets ``real``.
 _SKILL_FENCE_RE = re.compile(r"```skill\b(?:[^\n]*\n(?:(.*?)```(?P<real>)|.*)|.*)", re.DOTALL | re.IGNORECASE)
-_FIELD_RE_TMPL = r"^\s*{field}\s*:\s*(.+?)\s*$"
+# The indent before a field's name is read within its line: from every line start of a run of blank lines a space
+# that also crosses lines read the whole run, quadratic on a body of blank lines. The value is read to its line's
+# end at once (a lazy value before trailing blanks read the blanks again for each character it took) and stripped
+# by the caller: the value it read.
+_FIELD_RE_TMPL = r"^[^\S\n]*{field}\s*:\s*(.+)$"
 _SLUG_RE = re.compile(r"[^a-z0-9_\-]+")
 
 

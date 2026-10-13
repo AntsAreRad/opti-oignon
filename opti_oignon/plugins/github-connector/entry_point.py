@@ -665,11 +665,9 @@ def route_command(user_input: str, ctx: Any) -> dict[str, Any] | None:
 # Auto-link: GitHub reference detection (post_inference)
 # =========================================================================
 
-# Patterns: owner/repo#123, #123 (with default_repo), full URLs
-_REF_OWNER_REPO_ISSUE = re.compile(
-    # Linear on a long run: a start after a dot or a dash that could itself start is skipped.
-    r"(?<!\w)(?:(?<![.-])|(?<=\w[.-]))([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)"
-)
+# Patterns: owner/repo#123 (read by _owner_repo_refs), #123 (with default_repo), full URLs
+_REF_RUN = re.compile(r"[a-zA-Z0-9_.-]+")
+_REF_DIGITS = re.compile(r"\d+")
 _REF_BARE_ISSUE = re.compile(
     r"(?<!\w)#(\d+)(?!\w)"
 )
@@ -682,6 +680,36 @@ _REF_GITHUB_URL = re.compile(
 # Code block detection for exclusion
 _CODE_BLOCK_RE = re.compile(r"```[\s\S]*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def _word(char: str) -> bool:
+    """True for a character ``\\w`` matches in a text pattern."""
+    return char.isalnum() or char == "_"
+
+
+def _owner_repo_refs(text: str) -> list[tuple[int, str, str]]:
+    """(start, owner/repo, number) of each ``owner/repo#123`` in ``text``, as successive searches of
+    ``(?<!\\w)([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\\d+)(?!\\w)`` find them, in linear time.
+
+    Every start inside one run of name characters meets the same slash at the
+    run's end, and so the same rest: the leftmost start that no word character
+    precedes decides for the whole run, which is read once.
+    """
+    found: list[tuple[int, str, str]] = []
+    pos = 0
+    while True:
+        run = _REF_RUN.search(text, pos)
+        if run is None:
+            return found
+        start = next((at for at in range(run.start(), run.end()) if at == 0 or not _word(text[at - 1])), None)
+        end = run.end()
+        tail = _REF_RUN.match(text, end + 1) if start is not None and text.startswith("/", end) else None
+        digits = _REF_DIGITS.match(text, tail.end() + 1) if tail and text.startswith("#", tail.end()) else None
+        if digits is not None and not (digits.end() < len(text) and _word(text[digits.end()])):
+            found.append((start, text[start:end] + "/" + tail.group(), digits.group()))
+            pos = digits.end()
+        else:
+            pos = end
 
 
 def _strip_code_regions(text: str) -> tuple[str, list[tuple[int, int]]]:
@@ -728,11 +756,9 @@ def detect_github_refs(
     seen: set[str] = set()
 
     # owner/repo#123
-    for m in _REF_OWNER_REPO_ISSUE.finditer(text):
-        if _in_code_region(m.start(), code_regions):
+    for start, repo, number in _owner_repo_refs(text):
+        if _in_code_region(start, code_regions):
             continue
-        repo = m.group(1)
-        number = m.group(2)
         key = f"{repo}#{number}"
         if key not in seen:
             seen.add(key)

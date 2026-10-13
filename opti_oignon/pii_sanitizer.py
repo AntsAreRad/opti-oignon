@@ -160,15 +160,17 @@ class PIISanitizer:
         self._compile_custom_patterns()
 
     def _compile_custom_patterns(self) -> None:
-        """Pre-compile custom regex patterns from config."""
+        """Pre-compile custom regex patterns from config; one that may read a long text in more than linear time is
+        refused like an invalid one."""
         self._custom_compiled.clear()
         for entry in self.config.custom_patterns:
             pattern_str = entry.get("pattern", "")
             replacement = entry.get("replacement", "[REDACTED]")
             if not pattern_str:
                 continue
+            from opti_oignon.linear_pattern import compile_linear
             try:
-                compiled = re.compile(pattern_str)
+                compiled = compile_linear(pattern_str)
                 label = entry.get("label", "custom")
                 self._custom_compiled.append((compiled, replacement, label))
             except re.error as e:

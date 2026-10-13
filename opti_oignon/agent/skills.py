@@ -218,14 +218,22 @@ def _extract_section(body: str, header: str) -> str:
     A section header is a line that, with leading ``#`` and surrounding
     whitespace and a trailing colon removed, equals the section name
     (case-insensitively). The section runs until the next header line or EOF.
+    The header is read within its line (blanks, never a line break, around the
+    name and the colon), from each line's start once: linear on a long body.
+    A colon alone past the header's line, with blanks alone before it and
+    after it to its line's end, still closes the header, as it did before.
     """
     pattern = re.compile(
-        r"^#{0,6}\s*" + re.escape(header) + r"\s*:?\s*$", re.IGNORECASE | re.MULTILINE
+        r"^#{0,6}[^\S\n]*" + re.escape(header) + r"[^\S\n]*(?P<colon>:[^\S\n]*)?$", re.IGNORECASE | re.MULTILINE
     )
     m = pattern.search(body)
     if not m:
         return ""
     start = m.end()
+    if m.group("colon") is None:
+        rest = body[start:].lstrip()
+        if rest.startswith(":") and not rest[1:].partition("\n")[0].strip():
+            start = len(body) - len(rest) + 1
     nxt = re.compile(r"^#{1,6}\s+\S", re.MULTILINE).search(body, start)
     end = nxt.start() if nxt else len(body)
     return body[start:end].strip()

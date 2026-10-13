@@ -167,6 +167,74 @@ class JoinedPattern:
         return [match.groups("") for match in self.finditer(text)]
 
 
+class ChainedPattern:
+    """The parts a blocked pattern joins with ``.*``, searched in time linear in the text: whether the first part
+    matches, then each next part from a place between where the one before it ends and the end of that line. A line
+    is tried from its end back once for each part after the first, and what was found is kept. Each part is taken by
+    the first way it matches from a place: the chain is made only where each part joins the rest exactly
+    (``linear_pattern.joins_exactly``), and only of parts that each read a long text in linear time."""
+
+    def __init__(self, pattern, parts):
+        self.pattern, self._parts = pattern, parts
+
+    def search(self, text):
+        reach = [{} for _ in self._parts[1:]]
+        pos = 0
+        while pos <= len(text):
+            head = self._parts[0].search(text, pos)
+            if head is None:
+                return None
+            if self._reaches(text, 0, head.end(), reach):
+                return head
+            pos = head.start() + 1
+        return None
+
+    def _reaches(self, text, index, end, reach):
+        """True when part ``index + 1``, and each after it, matches from a place between ``end`` and the end of its
+        line. ``reach[index][stop]`` is the lowest place tried on the line that ends at ``stop`` and the highest
+        place found, or -1."""
+        stop = text.find("\n", end)
+        stop = len(text) if stop < 0 else stop
+        low, high = reach[index].get(stop, (stop + 1, -1))
+        part = self._parts[index + 1]
+        while high < 0 and low > end:
+            low -= 1
+            found = part.match(text, low)
+            if found is not None and (index + 2 == len(self._parts)
+                                      or self._reaches(text, index + 1, found.end(), reach)):
+                high = low
+        reach[index][stop] = (low, high)
+        return high >= end
+
+
+def _joined_parts(source):
+    """The parts ``source`` joins with ``.*`` or ``.*?`` at its top level -- outside classes and groups, never an
+    escaped dot -- or None when it joins none."""
+    parts, depth, at, inside, begin = [], 0, 0, False, 0
+    while at < len(source):
+        char = source[at]
+        if char == "\\":
+            at += 2
+            continue
+        if inside:
+            inside = char != "]"
+        elif char == "[":
+            inside = True
+            at += 2 if source[at + 1:at + 2] == "]" else 3 if source[at + 1:at + 3] == "^]" else 1
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif depth == 0 and source.startswith(".*", at):
+            parts.append(source[begin:at])
+            at += 3 if source.startswith(".*?", at) else 2
+            begin = at
+            continue
+        at += 1
+    return parts + [source[begin:]] if parts else None
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1050,16 +1118,11 @@ class CommandValidator:
         self._blocked_commands = [
             cmd.lower() for cmd in (config.blocked_commands or [])
         ]
-        self._blocked_patterns: list[re.Pattern] = []
-        for pattern_str in (config.blocked_patterns or []):
-            try:
-                self._blocked_patterns.append(
-                    re.compile(pattern_str, re.IGNORECASE)
-                )
-            except re.error as exc:
-                logger.warning(
-                    "Invalid blocked pattern '%s': %s", pattern_str, exc
-                )
+        # Made at the first command (reading what a pattern costs is not done at import): see _blocked.
+        self._blocked_sources = list(config.blocked_patterns or [])
+        self._blocked_patterns: list | None = None
+        self._blocked_refused: list[str] = []
+        self._blocked_lock = threading.Lock()
 
         # Track recently created files for write-then-execute detection
         self._recent_files: dict[str, str] = {}
@@ -1089,6 +1152,44 @@ class CommandValidator:
         with self._recent_files_lock:
             self._recent_files.clear()
 
+    def _blocked(self):
+        """(patterns, refused): each configured pattern that reads a long command in linear time, as written, or
+        as a chain of the parts it joins with ``.*`` where each part does and joins the rest exactly; and every
+        other one, which refuses the configuration. A rule of refusal never falls silently: while one is refused,
+        every command is refused, naming it. A pattern the engine refuses as invalid is left out with a warning; one
+        too large for it to read is refused as a costly one is."""
+        with self._blocked_lock:
+            if self._blocked_patterns is None and not self._blocked_sources:
+                self._blocked_patterns = []
+            if self._blocked_patterns is None:
+                from opti_oignon.linear_pattern import CostlyPattern, compile_linear, joins_exactly
+                patterns, refused = [], []
+                for source in self._blocked_sources:
+                    try:
+                        patterns.append(compile_linear(source, re.IGNORECASE))
+                        continue
+                    except CostlyPattern:
+                        pass
+                    except re.error as exc:
+                        logger.warning("Invalid blocked pattern '%s': %s", source, exc)
+                        continue
+                    try:
+                        parts = _joined_parts(source)
+                        flags = re.compile(source, re.IGNORECASE).flags
+                        if parts is None or not all(parts) or flags & (re.DOTALL | re.VERBOSE) or not all(
+                                joins_exactly(parts[at], ".*".join(parts[at + 1:]), flags)
+                                for at in range(len(parts) - 1)):
+                            raise CostlyPattern("no exact chain")
+                        patterns.append(ChainedPattern(source, [compile_linear(part, flags) for part in parts]))
+                    except (re.error, RecursionError, OverflowError, ValueError, TypeError):
+                        refused.append(source)
+                if refused:
+                    logger.error("Sandbox configuration refused: blocked pattern(s) %s may take more than linear "
+                                 "time on a long command; every command is refused until they are rewritten",
+                                 refused)
+                self._blocked_patterns, self._blocked_refused = patterns, refused
+            return self._blocked_patterns, self._blocked_refused
+
     def validate(self, command: str) -> tuple[bool, str]:
         """Validate a command. Returns (is_safe, reason).
 
@@ -1098,6 +1199,11 @@ class CommandValidator:
         if not command or not command.strip():
             return False, "Empty command"
 
+        patterns, refused = self._blocked()
+        if refused:
+            return False, (f"Sandbox configuration refused: the blocked pattern {refused[0]!r} may take more than "
+                           f"linear time on a long command")
+
         cmd_lower = command.strip().lower()
 
         # Check blocked command prefixes
@@ -1106,7 +1212,7 @@ class CommandValidator:
                 return False, f"Blocked command: {blocked.strip()}"
 
         # Check blocked patterns
-        for pattern in self._blocked_patterns:
+        for pattern in patterns:
             if pattern.search(command):
                 return False, f"Blocked pattern: {pattern.pattern}"
 

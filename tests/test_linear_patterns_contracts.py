@@ -119,6 +119,10 @@ pattern matches and many it does not, or it does not reach the pattern.
   * EQ42 -- every reader that takes a run at once reads each unit of its head
     and a character in linear time: four times as many units in well under
     sixteen times the time, the units the cost guard does not pump included.
+  * EQ43 -- the section, sheet, repository and tag readers read as before
+    (gives way for EQ24): the GitHub connector's repository references are
+    read one run of name characters at a time, as its old pattern found them,
+    in linear time.
 """
 import ast
 import itertools
@@ -1851,3 +1855,53 @@ def test_eq42_every_reader_that_takes_a_run_at_once_reads_each_head_and_characte
             if not _linear(compiled, head + character) and not _linear(compiled, head + character):
                 slow.append((name, head + character))
     assert not slow, slow
+
+
+# ---------------------------------------------------------------------------
+# EQ43 -- the section, sheet, repository and tag readers, the repository references read run by run (gives way
+# for EQ24)
+# ---------------------------------------------------------------------------
+_REPO_REF = r"(?<!\w)([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)"
+_REPO_REF_BEFORE = r"(?<!\w)(?:(?<![.-])|(?<=\w[.-]))([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)#(\d+)(?!\w)"
+
+
+def test_eq43_the_section_sheet_repository_and_tag_readers_read_as_before_the_references_one_run_at_a_time():
+    refs = _defs("plugins/github-connector/entry_point.py", "_REF_RUN", "_REF_DIGITS", "_word",
+                 "_owner_repo_refs")["_owner_repo_refs"]
+    old = re.compile(_REPO_REF)
+
+    def before(text):
+        return [(m.start(), m.group(1), m.group(2)) for m in old.finditer(text)]
+
+    pieces = ["a", "B", "1", "_", ".", "-", "/", "#", "#1", "12", " ", "\n", "x/y#3", chr(0xE9), chr(0x663), "!"]
+    _agree(_both(_REPO_REF, 0, pieces), before, refs)
+    _agree(list(_every(["a", "1", ".", "/", "#", " ", chr(0xE9)], 6)), before, refs)
+    for unit in ("aa.", "a.-", "1.", "a-b."):
+        short, long = (_cpu_of(refs, unit * size) for size in (2000, 8000))
+        assert long <= 8 * short + 0.002, ("the reader reads a run once", unit, short, long)
+    assert not _linear(re.compile(_REPO_REF_BEFORE), "aa."), "witness: the pattern it replaced read a run per start"
+    tree = ast.parse((REPO / "opti_oignon" / "rag" / "chunkers.py").read_text(encoding="utf-8"))
+    sections = [n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args
+                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)
+                and n.args[0].value.startswith("^# ")]
+    assert len(sections) == 2 and sections[0] == sections[1], sections
+    assert not _differences(_SECTION, sections[0], M, "exact")
+    split, old_split = _sheet_split(), re.compile(_SHEET)
+    _agree(_both(_SHEET, 0, ["[Sheet:", " ", "a", "]", "\n", "]\n", "x", "\t", "[Sheet: a]\n"]),
+           old_split.split, split, hit=lambda sheets: len(sheets) > 1)
+    assert split("[Sheet: a" * 300 + "]\n") == old_split.split("[Sheet: a" * 300 + "]\n")
+    tags = _defs("sandbox_tools.py", "_TAG_HEAD_RE", "_TAG_END_RE", "_tags")["_tags"]
+    _agree(_both(_TAG, 0, ["<", "</", "< ", "a", "b1", "/", ">", " ", "\n", '"', "'", "x=", "<a", "/>", "\t"]),
+           re.compile(_TAG).findall, tags)
+    _agree(list(_every(["<", "/", "a", " ", ">", '"', "'"], 6)), re.compile(_TAG).findall, tags)
+
+
+def _cpu_of(read, text):
+    """The least of three processor times of ``read(text)``."""
+    best = None
+    for _ in range(3):
+        start = time.process_time()
+        read(text)
+        spent = time.process_time() - start
+        best = spent if best is None else min(best, spent)
+    return best

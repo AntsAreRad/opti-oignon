@@ -185,6 +185,14 @@ def _generate_pattern_from_payload(payload: str) -> tuple[str, str] | None:
     return None
 
 
+def held_patterns() -> frozenset[str]:
+    """The patterns this module writes into suggestions. Each is a constant of the package, held to linear time on a
+    long text by the pattern cost guard, so a rule equal to one of them is trusted as written even where the static
+    check of patterns from outside the code cannot prove it (a lookahead that reads one word)."""
+    return frozenset([pattern for pattern, _ in _INJECTION_MARKERS]
+                     + [_generate_pattern_from_payload(probe)[0] for probe in ("``` system", "<system>")])
+
+
 def extract_suggestions(
     attack_scores: list[Any],
     min_confidence: float = 0.7,
@@ -245,7 +253,8 @@ def extract_suggestions(
             suggestion = Suggestion(
                 id=suggestion_store.next_id(),
                 pattern_name=pattern_name,
-                regex=f"(?i).*{re.escape(category)}.*",
+                # The line that holds the category, read from each line's start only: linear on a long text.
+                regex=f"(?im)^.*{re.escape(category)}.*",
                 source_category=category,
                 source_strategy=strategy,
                 source_payload_hash=payload_hash,
@@ -362,8 +371,17 @@ def apply_suggestion_to_config(
         return True
 
     # Validate regex compiles
+    # The rule as the sanitizer reads it (with IGNORECASE, an older red-team rule in its line form) must compile and
+    # read a long text in linear time -- proven by the static check, or one of this module's own patterns: one that
+    # may not is refused before anything is written.
+    from opti_oignon.linear_pattern import compile_linear
+    from opti_oignon.rag_sanitizer import line_form
+    regex = line_form(suggestion.regex)
     try:
-        re.compile(suggestion.regex)
+        if regex in held_patterns():
+            re.compile(regex, re.IGNORECASE)
+        else:
+            compile_linear(regex, re.IGNORECASE)
     except re.error as exc:
         logger.error(
             "Invalid regex in suggestion %s: %s", suggestion.id, exc
@@ -373,7 +391,7 @@ def apply_suggestion_to_config(
     # Append new pattern
     new_entry = {
         "name": suggestion.pattern_name,
-        "regex": suggestion.regex,
+        "regex": regex,
     }
     custom_patterns.append(new_entry)
     sanitization["custom_patterns"] = custom_patterns
