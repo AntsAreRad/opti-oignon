@@ -2708,6 +2708,15 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The tone shifter reads a reply as its code blocks and the prose
+  between them, and gives only the prose to its rules. The code blocks stood
+  in the text while the rules ran as markers (`__CODE_BLOCK_<n>__`), put back
+  wherever they appeared: a model that wrote the marker outside the code had
+  a block copied there, once per marker (a thousand markers, a thousand
+  copies), and a block that quoted another block's marker had that block
+  put inside it. A word that touches a code block is now a word to the
+  rules, where the marker glued it to the next word.
+
 - [SECURITY] A fact or a note that the user's typed words endorse once
   folded is written from what the user typed. The gate compared the two
   folded (Unicode NFC, each run of white space as one space) and then

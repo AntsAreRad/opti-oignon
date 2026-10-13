@@ -49,26 +49,23 @@ Rule = tuple[str, str, int]
 _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```|`[^`\n]+`)", re.DOTALL)
 
 
-def _protect_code_blocks(text: str) -> tuple[str, list[str]]:
-    """Replace code blocks with placeholders to avoid transforming them.
+def _segments(text: str) -> list[tuple[bool, str]]:
+    """``text`` cut into its code blocks and the prose between them, in order, as ``(is_code, piece)``.
 
-    Returns the modified text and a list of extracted code blocks.
+    Joined again, the pieces are ``text`` itself. The rules read the prose pieces only, so a code block comes back as
+    it was, character for character: nothing stands in its place while the rules run, so nothing the model writes can
+    pass for it, and no block can be put back inside another.
     """
-    blocks: list[str] = []
-
-    def _replace(m: re.Match) -> str:
-        blocks.append(m.group(0))
-        return f"__CODE_BLOCK_{len(blocks) - 1}__"
-
-    protected = _CODE_BLOCK_RE.sub(_replace, text)
-    return protected, blocks
-
-
-def _restore_code_blocks(text: str, blocks: list[str]) -> str:
-    """Restore code blocks from placeholders."""
-    for i, block in enumerate(blocks):
-        text = text.replace(f"__CODE_BLOCK_{i}__", block)
-    return text
+    pieces: list[tuple[bool, str]] = []
+    at = 0
+    for m in _CODE_BLOCK_RE.finditer(text):
+        if m.start() > at:
+            pieces.append((False, text[at:m.start()]))
+        pieces.append((True, m.group(0)))
+        at = m.end()
+    if at < len(text):
+        pieces.append((False, text[at:]))
+    return pieces
 
 
 # =========================================================================
@@ -316,6 +313,29 @@ def apply_rules(text: str, rules: list[Rule]) -> str:
     return text
 
 
+def _custom_rules(custom: dict[str, str]) -> list[tuple[Any, str]]:
+    """The custom rules that may be applied, compiled once: ``(pattern, replacement)`` in their order.
+
+    A rule that may read a long text in more than linear time under re is read by the engine without
+    backtracking; one that engine cannot read either is skipped like an invalid one; where the check of what a
+    pattern costs cannot be loaded, no custom rule is applied.
+    """
+    if not custom:
+        return []
+    try:
+        from opti_oignon.linear_pattern import compile_linear
+    except ImportError:
+        logger.warning("Custom regex rules skipped: the pattern cost check is not available")
+        return []
+    compiled = []
+    for pattern, replacement in custom.items():
+        try:
+            compiled.append((compile_linear(pattern), replacement))
+        except re.error:
+            logger.warning("Invalid custom regex: %s", pattern)
+    return compiled
+
+
 def apply_custom_rules(text: str, custom: dict[str, str]) -> str:
     """Apply user-defined custom replacement rules.
 
@@ -330,24 +350,17 @@ def apply_custom_rules(text: str, custom: dict[str, str]) -> str:
     -------
     str
         Transformed text.
-
-    A rule that may read a long text in more than linear time under re is read by the engine without
-    backtracking; one that engine cannot read either is skipped like an invalid one; where the check of what a
-    pattern costs cannot be loaded, no custom rule is applied.
     """
-    if not custom:
-        return text
-    try:
-        from opti_oignon.linear_pattern import compile_linear
-    except ImportError:
-        logger.warning("Custom regex rules skipped: the pattern cost check is not available")
-        return text
-    for pattern, replacement in custom.items():
+    return _apply_compiled(text, _custom_rules(custom))
+
+
+def _apply_compiled(text: str, compiled: list[tuple[Any, str]]) -> str:
+    """``text`` with each compiled custom rule applied in turn; a rule whose template is invalid is skipped."""
+    for pattern, replacement in compiled:
         try:
-            text = compile_linear(pattern).sub(replacement, text)
+            text = pattern.sub(replacement, text)
         except re.error:
-            logger.warning("Invalid custom regex: %s", pattern)
-            continue
+            logger.warning("Invalid custom regex: %s", pattern.pattern)
     return text
 
 
@@ -377,19 +390,18 @@ def transform_tone(
     if mode == "none" and not custom_rules:
         return text
 
-    # Protect code blocks
-    protected, blocks = _protect_code_blocks(text)
-
-    # Apply mode rules
-    if mode in MODE_RULES:
-        protected = apply_rules(protected, MODE_RULES[mode])
-
-    # Apply custom rules
-    if custom_rules:
-        protected = apply_custom_rules(protected, custom_rules)
-
-    # Restore code blocks
-    return _restore_code_blocks(protected, blocks)
+    # The rules read the prose between the code blocks, never a code block
+    rules = MODE_RULES.get(mode)
+    compiled = _custom_rules(custom_rules) if custom_rules else []
+    pieces = []
+    for is_code, piece in _segments(text):
+        if not is_code:
+            if rules:
+                piece = apply_rules(piece, rules)
+            if compiled:
+                piece = _apply_compiled(piece, compiled)
+        pieces.append(piece)
+    return "".join(pieces)
 
 
 # =========================================================================
