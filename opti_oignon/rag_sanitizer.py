@@ -628,21 +628,23 @@ class RAGSanitizer:
         self._flag_threshold = self._score_config.get("flag_threshold", 0.3)
         self._block_threshold = self._score_config.get("block_threshold", 0.7)
 
-        # Custom patterns from config: a pattern that may read a long text in more than linear time is refused like
-        # an invalid one (it comes from outside the code, and a document is long and can be steered), unless it is
-        # one the red team's feedback writes, held to linear time as a constant of the package.
+        # Custom patterns from config: a pattern that may read a long text in more than linear time under re (it
+        # comes from outside the code, and a document is long and can be steered) is read by the engine without
+        # backtracking, or refused like an invalid one when that engine cannot read it either; one the red team's
+        # feedback writes, held to linear time as a constant of the package, runs under re as written.
         self._custom_patterns: list[tuple[str, re.Pattern[str], float]] = []
         for cp in self._san_config.get("custom_patterns", []):
             if isinstance(cp, dict) and "name" in cp and "regex" in cp:
                 from opti_oignon.linear_pattern import CostlyPattern, compile_linear
                 try:
                     try:
-                        compiled = compile_linear(line_form(cp["regex"]), re.IGNORECASE)
+                        compiled = compile_linear(line_form(cp["regex"]), re.IGNORECASE, engine=False)
                     except CostlyPattern:
                         from opti_oignon.redteam.feedback import held_patterns
-                        if cp["regex"] not in held_patterns():
-                            raise
-                        compiled = re.compile(cp["regex"], re.IGNORECASE)
+                        if cp["regex"] in held_patterns():
+                            compiled = re.compile(cp["regex"], re.IGNORECASE)
+                        else:
+                            compiled = compile_linear(line_form(cp["regex"]), re.IGNORECASE)
                     weight = float(cp.get("weight", 0.7))
                     self._custom_patterns.append((cp["name"], compiled, weight))
                 except re.error as exc:

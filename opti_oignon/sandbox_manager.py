@@ -1154,8 +1154,8 @@ class CommandValidator:
 
     def _blocked(self):
         """(patterns, refused): each configured pattern that reads a long command in linear time, as written, or
-        as a chain of the parts it joins with ``.*`` where each part does and joins the rest exactly; and every
-        other one, which refuses the configuration. A rule of refusal never falls silently: while one is refused,
+        as a chain of the parts it joins with ``.*`` where each part does and joins the rest exactly, or as the
+        engine without backtracking reads it; and every other one, which refuses the configuration. A rule of refusal never falls silently: while one is refused,
         every command is refused, naming it. A pattern the engine refuses as invalid is left out with a warning; one
         too large for it to read is refused as a costly one is."""
         with self._blocked_lock:
@@ -1166,7 +1166,7 @@ class CommandValidator:
                 patterns, refused = [], []
                 for source in self._blocked_sources:
                     try:
-                        patterns.append(compile_linear(source, re.IGNORECASE))
+                        patterns.append(compile_linear(source, re.IGNORECASE, engine=False))
                         continue
                     except CostlyPattern:
                         pass
@@ -1180,7 +1180,13 @@ class CommandValidator:
                                 joins_exactly(parts[at], ".*".join(parts[at + 1:]), flags)
                                 for at in range(len(parts) - 1)):
                             raise CostlyPattern("no exact chain")
-                        patterns.append(ChainedPattern(source, [compile_linear(part, flags) for part in parts]))
+                        patterns.append(ChainedPattern(source, [compile_linear(part, flags, engine=False)
+                                                                for part in parts]))
+                        continue
+                    except (re.error, RecursionError, OverflowError, ValueError, TypeError):
+                        pass
+                    try:
+                        patterns.append(compile_linear(source, re.IGNORECASE))
                     except (re.error, RecursionError, OverflowError, ValueError, TypeError):
                         refused.append(source)
                 if refused:

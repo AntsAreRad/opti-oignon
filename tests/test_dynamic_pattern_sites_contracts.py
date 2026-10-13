@@ -33,6 +33,10 @@ module and function (lines move), in one of two ways:
     fence: the blocks the patterns they replaced read, on enumerated and
     structured responses, in linear time on a fence left open; a language is
     read as written.
+  * PD7 -- in place of PD4 (it stays word for word, deselected): each named
+    site holds its reason, read on the code, and a pattern ``compile_linear``
+    returns that the check refuses is the engine's reading of it, never a
+    pattern ``re`` runs; with the engine left out it is refused as before.
 """
 import ast
 import collections
@@ -59,6 +63,7 @@ BUDGET_S = {
     "test_pd4_each_named_site_holds_its_reason": 20.0,
     "test_pd5_a_teacher_field_is_read_from_the_start_of_its_line": 20.0,
     "test_pd6_a_fenced_code_block_is_read_from_the_last_line_break_after_its_fence": 30.0,
+    "test_pd7_each_named_site_holds_its_reason_and_a_costly_pattern_is_returned_only_as_the_engine_reads_it": 20.0,
 }
 
 _GUARD = REPO / ".github" / "scripts" / "pattern_cost_guard.py"
@@ -111,6 +116,7 @@ _NAMED = {
     "opti_oignon/sandbox_manager.py::CommandValidator._blocked": (1, "flags"),
     # Compiled so that an invalid pattern raises, then dropped.
     "opti_oignon/linear_pattern.py::verdict": (1, "dropped"),
+    "opti_oignon/linear_engine.py::Pattern.__init__": (1, "dropped"),
     "opti_oignon/redteam/feedback.py::apply_suggestion_to_config": (1, "dropped"),
     # Returned only when the static check judges it linear.
     "opti_oignon/linear_pattern.py::compile_linear": (1, "judged"),
@@ -694,3 +700,34 @@ def test_pd6_a_fenced_code_block_is_read_from_the_last_line_break_after_its_fenc
     assert not _quadratic(lambda text: extract(text), lambda n: "```" + " \n" * n), "linear on blank lines of spaces"
     assert extract("```c++\nint x;\n```", "c++") == "int x;\n", "a language is read as written"
     assert extract("```(\nx\n```", "(") == "x\n", "a language is never read as a pattern"
+
+
+# ---------------------------------------------------------------------------
+# PD7 -- the named sites, and what compile_linear returns for a costly pattern (in place of PD4)
+# ---------------------------------------------------------------------------
+def test_pd7_each_named_site_holds_its_reason_and_a_costly_pattern_is_returned_only_as_the_engine_reads_it():
+    rows = _dynamic_rows()
+    named = [row for row in rows if row[0] in _NAMED]
+    assert len(named) == sum(count for count, _why in _NAMED.values()), named
+    for key, module, line, column, _methods in named:
+        why = _NAMED[key][1]
+        if why == "judged":
+            continue
+        assert _holds(why, *_site(module, line, column)), f"{key} (line {line}) does not hold its reason: {why}"
+    checker = importlib.import_module("opti_oignon.linear_pattern")
+    engine = importlib.import_module("opti_oignon.linear_engine")
+    costly = checker.compile_linear(r"(?:x+x+)+y")
+    assert isinstance(costly, engine.Pattern) and not isinstance(costly, re.Pattern), type(costly)
+    assert costly.search("xxxy").span() == (0, 4), "read as re reads it"
+    try:
+        checker.compile_linear(r"(?:x+x+)+y", engine=False)
+    except checker.CostlyPattern:
+        pass
+    else:
+        raise AssertionError("with the engine left out, a costly pattern was returned by compile_linear")
+    assert checker.compile_linear(r"\bword\b").pattern == r"\bword\b", "a linear pattern is returned compiled"
+    assert isinstance(checker.compile_linear(r"\bword\b"), re.Pattern)
+    # Not blind: a driven site holds none of the reasons.
+    driven = next(row for row in rows if row[0] == "opti_oignon/agent/teacher.py::_field")
+    for why in ("dropped", "flags", "match"):
+        assert not _holds(why, *_site(*driven[1:4])), f"the teacher's field read as {why}"

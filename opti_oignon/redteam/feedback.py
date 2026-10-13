@@ -372,8 +372,8 @@ def apply_suggestion_to_config(
 
     # Validate regex compiles
     # The rule as the sanitizer reads it (with IGNORECASE, an older red-team rule in its line form) must compile and
-    # read a long text in linear time -- proven by the static check, or one of this module's own patterns: one that
-    # may not is refused before anything is written.
+    # read a long text in linear time -- proven by the static check, read by the engine without backtracking, or one
+    # of this module's own patterns: one none of them reads is refused before anything is written.
     from opti_oignon.linear_pattern import compile_linear
     from opti_oignon.rag_sanitizer import line_form
     regex = line_form(suggestion.regex)

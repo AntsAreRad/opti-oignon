@@ -95,6 +95,32 @@ held to the one it replaced.
   * SL44 -- a state where the match may end still tries every empty way it
     has, to a step or to the end, before it ends.
   * SL45 -- the lookarounds tried on those ways are bounded too.
+  * SL46 to SL55 hold, with the engine without backtracking beside the check
+    as in the package, what SL5, SL7 to SL12, SL17, SL20 and SL35 held for
+    the check alone (they stay word for word, deselected): a pattern the
+    check refuses is read by the engine, one neither reads is refused as
+    before.
+  * SL46 -- ``compile_linear`` returns the compiled pattern, the engine's
+    reading of one the check refuses, or a ``re.error`` that says why.
+  * SL47 -- the agent's grep reads a costly pattern with the engine and
+    refuses one neither reads, telling the model what to search instead.
+  * SL48 -- the sanitizer's custom patterns: a costly one is read by the
+    engine, one neither reads left out with a warning; the rest as SL8.
+  * SL49 -- the PII sanitizer's custom patterns: a costly one is read by the
+    engine as re reads it, one neither reads left out.
+  * SL50 -- the tone shifter applies a costly custom rule with the engine,
+    its template expanded as re expands it, and skips one neither reads.
+  * SL51 -- the red team writes a rule the engine reads and refuses one
+    neither reads before writing.
+  * SL52 -- the sandbox's blocked patterns as SL12; a pattern neither linear
+    nor an exact chain is read by the engine, and one nothing reads refuses
+    every command.
+  * SL53 -- a custom rule that cannot be chained exactly is read by the
+    engine and never stops blocking; chains joined exactly as SL17.
+  * SL54 -- an older red-team rule whose text holds a line break is read as
+    written, by the engine.
+  * SL55 -- a blocked pattern whose join crosses lines is read by the engine
+    across them, never as a chain of lines.
 """
 import itertools
 import random
@@ -105,6 +131,7 @@ import time
 import types
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -156,6 +183,18 @@ BUDGET_S = {
     "test_sl43_the_empty_ways_to_the_end_are_tried_where_the_end_is_refused_and_by_every_match_in_turn": 6.0,
     "test_sl44_a_state_where_the_match_may_end_still_tries_every_empty_way_it_has_before_it_ends": 6.0,
     "test_sl45_the_lookarounds_tried_on_the_ways_of_a_state_where_the_match_may_end_are_bounded": 6.0,
+    "test_sl46_compile_linear_returns_the_pattern_the_engine_s_reading_or_a_re_error_that_says_why": 3.0,
+    "test_sl47_the_agent_s_grep_reads_a_costly_pattern_with_the_engine_and_refuses_what_neither_reads": 6.0,
+    "test_sl48_the_sanitizer_reads_a_costly_custom_pattern_with_the_engine_and_leaves_out_what_neither_reads": 6.0,
+    "test_sl49_the_pii_sanitizer_reads_a_costly_custom_pattern_with_the_engine_and_leaves_out_what_neither_reads":
+        3.0,
+    "test_sl50_the_tone_shifter_applies_a_costly_custom_rule_with_the_engine_and_skips_what_neither_reads": 3.0,
+    "test_sl51_the_red_team_writes_a_rule_the_engine_reads_and_refuses_one_neither_reads_before_writing": 6.0,
+    "test_sl52_the_sandbox_makes_its_blocked_patterns_at_the_first_command_and_the_engine_reads_what_they_cannot":
+        15.0,
+    "test_sl53_a_custom_rule_that_cannot_be_chained_exactly_is_read_by_the_engine_and_never_stops_blocking": 15.0,
+    "test_sl54_an_older_red_team_rule_whose_text_holds_a_line_break_is_read_as_written_by_the_engine": 3.0,
+    "test_sl55_a_blocked_pattern_whose_join_crosses_lines_is_read_by_the_engine_never_as_a_chain_of_lines": 6.0,
 }
 
 
@@ -1413,5 +1452,365 @@ def test_sl45_the_lookarounds_tried_on_the_ways_of_a_state_where_the_match_may_e
         more, few = re.compile(r"(?:(?:|){10}(?=[a-z]{0,60}!)a)?"), re.compile(r"(?:(?:|){2}(?=[a-z]{0,60}!)a)?")
         assert _cpu(more.search, "a" * 60) > 20 * _cpu(few.search, "a" * 60), \
             "witness: every empty way tries the lookahead before the match ends"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SL46 to SL55 -- the places that take a pattern from outside, with the engine without backtracking beside the
+# check, as in the package: a pattern the check refuses is read by the engine, one neither reads is refused as
+# before. Each holds what the contract it replaces held, but for that.
+# ---------------------------------------------------------------------------
+_NEITHER = r"(\w)\1"
+# On a version of Python the engine was not measured on, it reads nothing and the places refuse as before: SL46 to
+# SL55 are skipped by name there (the versions are the engine's own, held by LE18).
+_ENGINE_MEASURED = pytest.mark.skipif(
+    sys.version_info[:2] not in ((3, 11), (3, 12), (3, 13), (3, 14)),
+    reason="the engine without backtracking is not measured on this version of Python")
+
+
+def _checker_and_engine():
+    loaded, restore = isolate(targets={"opti_oignon.linear_pattern": source("linear_pattern.py"),
+                                       "opti_oignon.linear_engine": source("linear_engine.py")})
+    return loaded["opti_oignon.linear_pattern"], loaded["opti_oignon.linear_engine"], restore
+
+
+def _sandbox_and_engine(tmp_path):
+    """sandbox_manager.py loaded as ``_sandbox`` loads it, with the check of patterns and the engine beside it."""
+    package = tmp_path / "copy"
+    (package / "config").mkdir(parents=True)
+    (package / "config" / "sandbox.yaml").write_text("enabled: false\n", encoding="utf-8")
+    copy = package / "sandbox_manager.py"
+    copy.write_bytes(source("sandbox_manager.py").read_bytes())
+    db_utils = types.ModuleType("opti_oignon.db_utils")
+    db_utils.safe_connect = lambda path, *a, **k: sqlite3.connect(path)
+    loaded, restore = isolate(targets={"opti_oignon.linear_pattern": source("linear_pattern.py"),
+                                       "opti_oignon.linear_engine": source("linear_engine.py"),
+                                       "opti_oignon.sandbox_manager": copy},
+                              seeded={"opti_oignon.db_utils": db_utils})
+    if loaded["opti_oignon.sandbox_manager"].sandbox_manager is not None:
+        restore()
+        raise AssertionError("the import-time singleton must stay off in this window")
+    return loaded["opti_oignon.sandbox_manager"], loaded["opti_oignon.linear_engine"], restore
+
+
+@_ENGINE_MEASURED
+def test_sl46_compile_linear_returns_the_pattern_the_engine_s_reading_or_a_re_error_that_says_why():
+    lp, le, restore = _checker_and_engine()
+    try:
+        compiled = lp.compile_linear(r"\bfoo\b", re.I)
+        assert isinstance(compiled, re.Pattern) and compiled.pattern == r"\bfoo\b" and compiled.flags & re.I
+        assert compiled.search("a FOO b")
+        assert issubclass(lp.CostlyPattern, re.error)
+        for pattern, text in ((r"(a+)+b", "x aaab"), (r"foo.*bar", "a foo x bar y")):
+            read = lp.compile_linear(pattern)
+            assert isinstance(read, le.Pattern) and read.search(text).span() == re.search(pattern, text).span(), \
+                pattern
+        for pattern, why in ((_NEITHER, "does not model"), (_NEITHER, "a back-reference"),
+                             ("a{99999999999}", "too large"), (b"a", "only a text pattern")):
+            refused = None
+            try:
+                lp.compile_linear(pattern)
+            except lp.CostlyPattern as exc:
+                refused = str(exc)
+            assert refused and why in refused, (pattern, refused)
+        for pattern, why in ((r"(a+)+b", "exponential"), (r"foo.*bar", "quadratic")):
+            refused = None
+            try:
+                lp.compile_linear(pattern, engine=False)
+            except lp.CostlyPattern as exc:
+                refused = str(exc)
+            assert refused and why in refused, (pattern, refused)
+        invalid = None
+        try:
+            lp.compile_linear("(")
+        except re.error as exc:
+            invalid = exc
+        assert invalid is not None and not isinstance(invalid, lp.CostlyPattern), "invalid, refused as before"
+        assert lp._judged(r"foo.*bar", 0) is lp._judged(r"foo.*bar", 0), "a verdict is kept"
+    finally:
+        restore()
+
+
+@_ENGINE_MEASURED
+def test_sl47_the_agent_s_grep_reads_a_costly_pattern_with_the_engine_and_refuses_what_neither_reads(tmp_path):
+    import importlib.util
+
+    import test_sandbox_tools_confinement_contracts as confinement
+    ctx = confinement._load()
+    names = ("opti_oignon.linear_pattern", "opti_oignon.linear_engine")
+    try:
+        for name in names:
+            spec = importlib.util.spec_from_file_location(name, source(name.split(".")[-1] + ".py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        assert sys.modules[names[0]].verdict(r"foo.*bar") == "polynomial", "witness: the check refuses it"
+        (tmp_path / "notes.txt").write_text("alpha SIGNAL beta\nfoo then bar\n", encoding="ascii")
+        wrapper = ctx.tools.SandboxToolSession(sandbox_mgr=confinement._Manager(workspace=str(tmp_path)),
+                                               tool_registry=confinement._registry(ctx))
+        wrapper.start()
+        try:
+            found = wrapper.grep(r"foo.*bar", is_regex=True)
+            assert "notes.txt:2:" in found and "foo then bar" in found, found
+            refused = wrapper.grep(_NEITHER, is_regex=True)
+            assert refused.startswith("Error: regex pattern refused") and "is_regex=false" in refused, refused
+            assert "a back-reference" in refused, refused
+            found = wrapper.grep(r"\bSIG\w+", is_regex=True)
+            assert "notes.txt:1:" in found and "SIGNAL" in found, found
+            assert "foo then bar" in wrapper.grep("foo then bar"), "control: a fixed string is searched as before"
+            assert wrapper.grep("(", is_regex=True).startswith("Error: invalid regex pattern"), "invalid as before"
+        finally:
+            wrapper.stop()
+    finally:
+        for name in names:
+            sys.modules.pop(name, None)
+        ctx.restore()
+
+
+@_ENGINE_MEASURED
+def test_sl48_the_sanitizer_reads_a_costly_custom_pattern_with_the_engine_and_leaves_out_what_neither_reads(caplog):
+    from opti_oignon.linear_engine import Pattern
+    from opti_oignon.rag_sanitizer import RAGSanitizer, line_form
+    from opti_oignon.redteam.feedback import held_patterns
+    forget = next(pattern for pattern in held_patterns() if pattern.startswith("forget"))
+    custom = [{"name": "costly", "regex": r"(?:x+x+)+y"}, {"name": "kept", "regex": r"\bSIGNAL\b"},
+              {"name": "older", "regex": r"(?i).*prompt_injection.*"}, {"name": "held", "regex": forget},
+              {"name": "neither", "regex": _NEITHER}]
+    with caplog.at_level("WARNING"):
+        sanitizer = RAGSanitizer({"audit": {"enabled": False}, "sanitization": {"custom_patterns": custom}})
+    kept = {name: compiled for name, compiled, _w in sanitizer._custom_patterns}
+    assert {name: compiled.pattern for name, compiled in kept.items()} == {
+        "costly": r"(?:x+x+)+y", "kept": r"\bSIGNAL\b", "older": r"(?im)^.*prompt_injection.*", "held": forget}, kept
+    assert isinstance(kept["costly"], Pattern), "the engine reads the pattern the check refuses"
+    assert isinstance(kept["held"], re.Pattern) and isinstance(kept["kept"], re.Pattern), "re runs the others"
+    for text in ("xxxy", "x" * 10, "XXY", "xy"):  # re takes 2 ** n ways on n x and no y: kept short
+        assert (kept["costly"].search(text) is None) == (re.search(r"(?:x+x+)+y", text, re.I) is None), text
+    assert any("neither" in record.getMessage() and "refused" in record.getMessage() for record in caplog.records)
+    assert line_form(r"(?i).*a\.b.*") == r"(?im)^.*a\.b.*" and line_form(r"(?i).*a.b.*") == r"(?i).*a.b.*", \
+        "only an escaped text is read in its line form"
+    old, new = re.compile(r"(?i).*a\.b.*", re.I), re.compile(r"(?im)^.*a\.b.*", re.I)
+    rng = random.Random(3)
+    for _ in range(3000):
+        text = "".join(rng.choice(["a.b", "A.B", "x", "\n", " ", "a", ".", "b"]) for _ in range(rng.randint(0, 12)))
+        found = old.search(text)
+        assert (found and found.span()) == ((new.search(text) or None) and new.search(text).span()), text
+        assert old.sub("[x]", text) == new.sub("[x]", text), text
+
+
+@_ENGINE_MEASURED
+def test_sl49_the_pii_sanitizer_reads_a_costly_custom_pattern_with_the_engine_and_leaves_out_what_neither_reads(
+        caplog):
+    from opti_oignon.pii_sanitizer import PIISanitizeConfig, PIISanitizer
+    with caplog.at_level("WARNING"):
+        sanitizer = PIISanitizer(PIISanitizeConfig(custom_patterns=[
+            {"pattern": r"(\w+\s?)+$", "replacement": "[X]"}, {"pattern": r"\bACME-\d{4}\b", "replacement": "[ID]"},
+            {"pattern": _NEITHER, "replacement": "[R]"}]))
+    assert [compiled.pattern for compiled, _r, _l in sanitizer._custom_compiled] == [r"(\w+\s?)+$", r"\bACME-\d{4}\b"]
+    assert any("refused" in record.getMessage() for record in caplog.records), "said, never silent"
+    costly = sanitizer._custom_compiled[0][0]
+    for text in ("call ACME-1234 now", "the end!", "", "a b c"):
+        assert costly.sub("[X]", text) == re.sub(r"(\w+\s?)+$", "[X]", text), text
+        assert [found.span() for found in costly.finditer(text)] == \
+            [found.span() for found in re.finditer(r"(\w+\s?)+$", text)], text
+
+
+@_ENGINE_MEASURED
+def test_sl50_the_tone_shifter_applies_a_costly_custom_rule_with_the_engine_and_skips_what_neither_reads(caplog):
+    loaded, restore = isolate(targets={
+        "opti_oignon.linear_pattern": source("linear_pattern.py"),
+        "opti_oignon.linear_engine": source("linear_engine.py"),
+        "tone_shifter_entry_point": source("plugins", "tone-shifter", "entry_point.py")})
+    try:
+        shifter = loaded["tone_shifter_entry_point"]
+        with caplog.at_level("WARNING"):
+            out = shifter.apply_custom_rules("kind words aaaa", {r"(a+)+$": "X", r"\bkind\b": "gentle", _NEITHER: "W"})
+        assert out == re.sub(r"\bkind\b", "gentle", re.sub(r"(a+)+$", "X", "kind words aaaa")) == "gentle words X", out
+        assert any("Invalid custom regex" in record.getMessage() for record in caplog.records)
+        assert shifter.apply_custom_rules("aab", {r"(a+)+(b)": r"<\2\1>"}) == re.sub(r"(a+)+(b)", r"<\2\1>", "aab"), \
+            "a template is expanded as re expands it"
+        assert shifter.apply_custom_rules("text", {}) == "text"
+    finally:
+        restore()
+
+
+@_ENGINE_MEASURED
+def test_sl51_the_red_team_writes_a_rule_the_engine_reads_and_refuses_one_neither_reads_before_writing(tmp_path):
+    from opti_oignon.linear_pattern import verdict
+    from opti_oignon.redteam import feedback
+    score = types.SimpleNamespace(classification="bypass", defense_score=0.0, category="data_exfil",
+                                  strategy="plain", payload_hash="h1")
+    store = feedback.SuggestionStore()
+    original = feedback.suggestion_store if hasattr(feedback, "suggestion_store") else None
+    feedback.suggestion_store = store
+    try:
+        made = feedback.extract_suggestions([score])
+    finally:
+        if original is not None:
+            feedback.suggestion_store = original
+    assert [s.regex for s in made] == [r"(?im)^.*data_exfil.*"], [s.regex for s in made]
+    assert verdict(made[0].regex, re.I) == "linear" and verdict(r"(?i).*data_exfil.*", re.I) == "polynomial"
+    config = tmp_path / "rag.yaml"
+    config.write_text("sanitization:\n  custom_patterns: []\n", encoding="utf-8")
+    before = config.read_bytes()
+
+    def accepted(regex, name):
+        return feedback.Suggestion(id=name, pattern_name=name, regex=regex, source_category="c",
+                                   source_strategy="s", source_payload_hash="h", confidence=1.0, status="accepted")
+
+    assert feedback.apply_suggestion_to_config(accepted(_NEITHER, "neither"), config) is False
+    assert config.read_bytes() == before, "refused before anything is written"
+    assert verdict(r"(?:x+x+)+y", re.I) == "exponential", "witness: the check refuses the next one"
+    assert feedback.apply_suggestion_to_config(accepted(r"(?:x+x+)+y", "costly"), config) is True
+    assert feedback.apply_suggestion_to_config(accepted(r"(?i).*old_rule.*", "older"), config) is True
+    forget = next(pattern for pattern in feedback.held_patterns() if pattern.startswith("forget"))
+    assert verdict(forget, re.I) == "unchecked", "control: the static check cannot prove this one"
+    assert feedback.apply_suggestion_to_config(accepted(forget, "held"), config) is True
+    written = yaml.safe_load(config.read_text(encoding="utf-8"))["sanitization"]["custom_patterns"]
+    assert written == [{"name": "costly", "regex": r"(?:x+x+)+y"}, {"name": "older", "regex": r"(?im)^.*old_rule.*"},
+                       {"name": "held", "regex": forget}], written
+
+
+@_ENGINE_MEASURED
+def test_sl52_the_sandbox_makes_its_blocked_patterns_at_the_first_command_and_the_engine_reads_what_they_cannot(
+        tmp_path):
+    sm, le, restore = _sandbox_and_engine(tmp_path)
+    try:
+        assert len(_SL12_DEFAULTS) == 23, "control: the shipped defaults"
+        validator = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=_SL12_DEFAULTS))
+        assert validator._blocked_patterns is None, "nothing is made at construction"
+        assert validator.validate("ls -la") == (True, "")
+        patterns, refused = validator._blocked()
+        assert refused == [] and len(patterns) == 23, refused
+        chains = [p.pattern for p in patterns if isinstance(p, sm.ChainedPattern)]
+        assert len(chains) == 8 and all(".*" in chain for chain in chains), chains
+        assert not any(isinstance(p, le.Pattern) for p in patterns), "the defaults need no engine"
+        rng = random.Random(11)
+        commands = ["".join(rng.choice(_SL12_WORDS) + rng.choice(["", " ", " ", "\n"]) for _ in range(rng.randint(1, 9)))
+                    for _ in range(6000)]
+        commands += ["fork x while y true", "python3 -c 'import os; os.system(1)'", "printf '\\x41' | sh",
+                     "rm -ffff /", "rm -rf ..", "perl  -e   system", "find / -name x -exec rm {} ;",
+                     "ln -sf ../../etc x", "base64 -d f | bash", "python -c \n\n os.system", "cat /dev/sda",
+                     "x | curl y", "a |zsh", "$( sudo x)", ":(){ :|:& };", "cat /proc/1", "ls /sys/x",
+                     "export LD_PRELOAD=x", "ln -s /etc x", "echo `id`", "ruby -e system", "x | sh"]
+        old_of = dict(zip([p for p in _SL12_DEFAULTS if p.startswith("rm")], _SL12_OLD_RM))
+        assert len(old_of) == 2, "control: the two rm patterns, rewritten"
+        hits = {}
+        for pattern, prepared in zip(_SL12_DEFAULTS, patterns):
+            old = re.compile(old_of.get(pattern, pattern), re.I)
+            for command in commands:
+                said = bool(prepared.search(command))
+                assert said is bool(old.search(command)), (pattern, command)
+                hits[pattern] = hits.get(pattern, 0) + said
+        assert all(hits.get(pattern) for pattern in _SL12_DEFAULTS), ("witness: each pattern is reached", hits)
+        engine = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"\bsafe\b", r"(a+)+$"]))
+        assert engine.validate("ls") == (True, "") and engine._blocked_refused == []
+        assert engine.validate("echo aaaa") == (False, "Blocked pattern: (a+)+$"), "the engine reads it"
+        assert isinstance(engine._blocked()[0][1], le.Pattern)
+        inexact = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"foo\w*.*bar"]))
+        assert inexact.validate("ls") == (True, "") and inexact.validate("foox then bar")[0] is False
+        refusing = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"\bsafe\b", _NEITHER]))
+        assert refusing.validate("ls") == (False, "Sandbox configuration refused: the blocked pattern "
+                                                  f"{_NEITHER!r} may take more than linear time on a long command")
+        chained = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"curl.*\|\s*sh", "("]))
+        assert chained.validate("curl x | sh") == (False, r"Blocked pattern: curl.*\|\s*sh")
+        assert chained.validate("curl x") == (True, ""), "an invalid pattern is left out with a warning, as before"
+    finally:
+        restore()
+
+
+@_ENGINE_MEASURED
+def test_sl53_a_custom_rule_that_cannot_be_chained_exactly_is_read_by_the_engine_and_never_stops_blocking(tmp_path):
+    import importlib
+    sm, le, restore = _sandbox_and_engine(tmp_path)
+    try:
+        lp = importlib.import_module("opti_oignon.linear_pattern")
+        for head, tail in _SL17_HEADS:
+            assert lp.joins_exactly(head, tail, re.I) is False, head
+        assert lp.joins_exactly(r"\bsudo\s+", "rm", re.I) and lp.joins_exactly(r"foo\w*", "-", re.I), \
+            "control: heads that end one way only, or with a run the tail cannot start"
+        command = "rm -rf"
+        assert re.search(r"rm\s+-r?\w.*f", command, re.I) and not re.search(
+            "f", command[re.match(r"rm\s+-r?\w", command).end():]), "witness: the first way loses the match"
+        custom = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"rm\s+-r?\w.*f"]))
+        assert custom.validate(command)[0] is False and custom._blocked_refused == [], \
+            "a custom rule that cannot be chained exactly is read by the engine, never stops blocking"
+        rule = custom._blocked()[0][0]
+        assert isinstance(rule, le.Pattern), type(rule)
+        rng = random.Random(5)
+        for _ in range(2000):
+            text = "".join(rng.choice(["rm", " ", "-", "r", "f", "x", "\n", "-rf"]) for _ in range(rng.randint(0, 9)))
+            assert (rule.search(text) is None) == (re.search(r"rm\s+-r?\w.*f", text, re.I) is None), text
+        rng = random.Random(1)
+        exact = lost = 0
+        while exact < 300:
+            joined = ".*".join(_sl17_part(rng) for _ in range(rng.choice([2, 2, 3])))
+            try:
+                whole = re.compile(joined, re.I)
+            except re.error:
+                continue
+            parts = sm._joined_parts(joined)
+            if parts is None or not all(parts):
+                continue
+            try:
+                chain = sm.ChainedPattern(joined, [lp.compile_linear(part, whole.flags, engine=False) for part in parts])
+            except re.error:
+                continue
+            texts = ["".join(rng.choice("aAbx -/1\n") for _ in range(rng.randint(0, 14))) for _ in range(60)]
+            differs = [text for text in texts if (chain.search(text) is None) != (whole.search(text) is None)]
+            if all(lp.joins_exactly(parts[at], ".*".join(parts[at + 1:]), whole.flags)
+                   for at in range(len(parts) - 1)):
+                exact += 1
+                assert not differs, (joined, differs[:3])
+            else:
+                lost += bool(differs)
+        assert lost, "witness: the oracle sees chains that lose matches where a join is not exact"
+    finally:
+        restore()
+
+
+@_ENGINE_MEASURED
+def test_sl54_an_older_red_team_rule_whose_text_holds_a_line_break_is_read_as_written_by_the_engine(caplog):
+    from opti_oignon.linear_engine import Pattern
+    from opti_oignon.rag_sanitizer import RAGSanitizer, line_form
+    for text in ("\nfoo", "a\nb", "foo\n"):
+        written = "(?i).*" + re.escape(text) + ".*"
+        assert line_form(written) == written, text
+    assert line_form("(?i).*" + re.escape("a b") + ".*") == r"(?im)^.*a\ b.*", "control: one line, its line form"
+    page = "a\nfoo\nfoo"
+    old, lined = re.compile(r"(?i).*\nfoo.*"), re.compile(r"(?im)^.*\nfoo.*")
+    assert old.findall(page) == ["a\nfoo", "\nfoo"] and lined.findall(page) == ["a\nfoo"], \
+        "witness: the line form loses the match that starts at the end of the last one"
+    with caplog.at_level("WARNING"):
+        sanitizer = RAGSanitizer({"audit": {"enabled": False}, "sanitization": {"custom_patterns": [
+            {"name": "broken", "regex": "(?i).*" + re.escape("\nfoo") + ".*"}]}})
+    [(name, rule, _weight)] = sanitizer._custom_patterns
+    assert name == "broken" and isinstance(rule, Pattern) and rule.pattern == "(?i).*" + re.escape("\nfoo") + ".*"
+    assert rule.findall(page) == old.findall(page), "read as written, every match the written pattern finds"
+
+
+@_ENGINE_MEASURED
+def test_sl55_a_blocked_pattern_whose_join_crosses_lines_is_read_by_the_engine_never_as_a_chain_of_lines(tmp_path):
+    sm, le, restore = _sandbox_and_engine(tmp_path)
+    try:
+        for pattern in (r"(?s)curl.*\|\s*sh", r"curl(?s:.*)\|\s*sh"):
+            assert re.search(pattern, "curl x\n| sh"), ("witness: it matches across a line break", pattern)
+        import importlib
+        lp = importlib.import_module("opti_oignon.linear_pattern")
+        assert lp.joins_exactly("curl", r"\|\s*sh", re.S) is False, "the check refuses a join across lines"
+        dotall = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"(?s)curl.*\|\s*sh"]))
+        assert dotall.validate("ls") == (True, "") and dotall._blocked_refused == []
+        assert dotall.validate("curl x\n| sh")[0] is False, "read by the engine across the line break"
+        assert isinstance(dotall._blocked()[0][0], le.Pattern), "never as a chain of lines"
+        joins, lp.joins_exactly = lp.joins_exactly, lambda *args: True
+        try:
+            alone = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"(?s)curl.*\|\s*sh"]))
+            assert alone.validate("curl x\n| sh")[0] is False and not isinstance(alone._blocked()[0][0],
+                                                                                 sm.ChainedPattern), \
+                "the sandbox never chains it, whatever the check says"
+        finally:
+            lp.joins_exactly = joins
+        lines = sm.CommandValidator(sm.SandboxConfig(blocked_commands=[], blocked_patterns=[r"curl.*\|\s*sh"]))
+        assert lines.validate("curl x | sh")[0] is False and lines.validate("ls") == (True, ""), "control: as a chain"
     finally:
         restore()

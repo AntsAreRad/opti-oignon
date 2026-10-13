@@ -907,6 +907,18 @@ fail_under = 0
 # same readers held to the same patterns through what the caller keeps. It
 # stays in the tree word for word.
 #
+# sl5, sl7 to sl12, sl17, sl20 and sl35 of
+# tests/test_linear_pattern_contracts.py held the places that take a pattern
+# from outside to refusing one the linear check refuses; some held it only
+# because their window could not load what the package now loads beside the
+# check. A pattern the check refuses is now read by the engine without
+# backtracking, and only one neither reads is refused: they give way to sl46
+# to sl55 in the same file, the same places held with the engine loaded as in
+# the package, the refusals held on a pattern neither reads. pd4 of
+# tests/test_dynamic_pattern_sites_contracts.py held compile_linear to never
+# return a costly pattern; it returns the engine's reading of one, and pd4
+# gives way to pd7 in the same file. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1245,4 +1257,15 @@ addopts = """
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg39_the_pump_helpers_give_their_exact_outputs_on_a_table_of_patterns
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg40_a_linear_pattern_is_reported_by_its_costliest_pump_labelled_by_its_kind
     --deselect=tests/test_linear_patterns_contracts.py::test_eq24_the_section_sheet_repository_and_tag_readers_read_as_before_with_runs_left_open_taken_at_once
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl5_compile_linear_returns_the_pattern_or_refuses_with_a_re_error_that_says_why
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl7_the_agent_s_grep_refuses_a_costly_pattern_and_still_searches_a_linear_one
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl8_the_sanitizer_leaves_a_costly_custom_pattern_out_and_reads_an_older_red_team_rule_in_its_line_form
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl9_the_pii_sanitizer_leaves_a_costly_custom_pattern_out
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl10_the_tone_shifter_skips_a_costly_custom_rule
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl11_the_red_team_writes_a_linear_fallback_rule_and_refuses_a_costly_one_before_writing
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl12_the_sandbox_makes_its_blocked_patterns_at_the_first_command_and_refuses_what_it_cannot_hold
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl17_a_head_that_may_end_where_another_way_reads_on_does_not_join_exactly
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl20_an_older_red_team_rule_whose_text_holds_a_line_break_keeps_its_written_form
+    --deselect=tests/test_linear_pattern_contracts.py::test_sl35_a_blocked_pattern_whose_join_crosses_lines_is_never_read_as_a_chain_of_lines
+    --deselect=tests/test_dynamic_pattern_sites_contracts.py::test_pd4_each_named_site_holds_its_reason
 """

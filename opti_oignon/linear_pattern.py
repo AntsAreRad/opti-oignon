@@ -54,6 +54,12 @@ plain ones, and the order in which the engine tries branches and repeats is
 not read: a pattern linear only by that order (a lazy repeat, a branch that
 takes a run at once after one that fails) is refused too.
 
+THE ENGINE. ``compile_linear`` hands a pattern the check refuses to
+``linear_engine``, which reads it without backtracking, in time linear in the
+text for a search and for every match in turn, as ``re`` would answer: a
+pattern neither reads is refused, and so is every refused one where that
+engine cannot be loaded. ``verdict`` judges ``re`` alone.
+
 JOINS. ``joins_exactly(head, tail)`` tells whether a reader that takes the
 first way ``head`` matches from a place, then looks for ``tail`` from its end
 to the end of its line, finds whatever ``head.*tail`` finds: when ``head``
@@ -852,10 +858,12 @@ def verdict(pattern, flags=0):
     return _judged(pattern, int(flags))[0]
 
 
-def compile_linear(pattern, flags=0):
-    """``re.compile(pattern, flags)`` for a pattern that reads any text in linear time; ``CostlyPattern`` (a
-    ``re.error``) for any other, so a caller that refuses an invalid pattern refuses it alike: one the engine finds
-    too large to read (a repeat count, a nesting) as a ``CostlyPattern``; flags it cannot hold together, or a
+def compile_linear(pattern, flags=0, engine=True):
+    """``re.compile(pattern, flags)`` for a pattern that reads any text in linear time. For any other, when
+    ``engine`` holds, the pattern as ``linear_engine`` reads it, without backtracking and in linear time, with the
+    calls of ``re.Pattern`` its callers make. ``CostlyPattern`` (a ``re.error``) for a pattern neither reads, or
+    when the engine cannot be loaded, so a caller that refuses an invalid pattern refuses it alike: one the engine
+    finds too large to read (a repeat count, a nesting) as a ``CostlyPattern``; flags it cannot hold together, or a
     pattern or flags of the wrong type, as an invalid one, a ``re.error``."""
     try:
         compiled = re.compile(pattern, flags)
@@ -865,6 +873,17 @@ def compile_linear(pattern, flags=0):
                             pattern) from None
     except (ValueError, TypeError) as exc:
         raise re.error(f"{exc.__class__.__name__}: {exc}", pattern) from None
-    if found != "linear":
-        raise CostlyPattern(f"pattern refused: {why}", pattern)
-    return compiled
+    if found == "linear":
+        return compiled
+    if engine:
+        try:
+            from opti_oignon import linear_engine
+        except ImportError:
+            raise CostlyPattern(f"pattern refused: {why}; the engine without backtracking cannot be loaded",
+                                pattern) from None
+        try:
+            return linear_engine.compile(pattern, flags)
+        except linear_engine.Unreadable as exc:
+            raise CostlyPattern(f"pattern refused: {why}; nor can the engine without backtracking read it "
+                                f"({exc.reason})", pattern) from None
+    raise CostlyPattern(f"pattern refused: {why}", pattern)

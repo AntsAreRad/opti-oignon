@@ -331,8 +331,9 @@ def apply_custom_rules(text: str, custom: dict[str, str]) -> str:
     str
         Transformed text.
 
-    A rule that may read a long text in more than linear time is skipped like an invalid one; where the check of
-    what a pattern costs cannot be loaded, no custom rule is applied.
+    A rule that may read a long text in more than linear time under re is read by the engine without
+    backtracking; one that engine cannot read either is skipped like an invalid one; where the check of what a
+    pattern costs cannot be loaded, no custom rule is applied.
     """
     if not custom:
         return text

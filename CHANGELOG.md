@@ -11,6 +11,31 @@ package costs.
 
 ### Added
 
+- [SECURITY] A pattern from outside the code that the linear check refuses
+  is read, where it can be, by an engine without backtracking rather than
+  refused. A new module, `linear_engine`, answers as Python's engine does --
+  the span of every group, `lastindex` and `lastgroup`, `pos` and `endpos`,
+  a loop that takes an empty round once then leaves, lookarounds and the
+  groups of a positive one, a possessive repeat or an atomic group of one
+  class -- in time linear in the text, for one search and for every match in
+  turn (`finditer`, `findall`, `sub`, `split`), where an engine that runs one
+  search after another may take quadratic time. A pass from the end of the
+  text marks where a match can still be completed, and the Pike machine that
+  follows from each leftmost start drops every thread that cannot, so that
+  it stops where each match ends; a lookaround is a table, one pass each;
+  the sets of characters are the ones the check reads from the engine. What
+  it does not read it refuses by name: a back-reference, a conditional, an
+  atomic group or a possessive repeat of more than one class, groups in a
+  lookaround a repeat may pass twice or in a lookahead wider than 256
+  characters, a program past its bounds. `compile_linear` hands it every
+  pattern the check refuses: the agent's grep searches one, the document and
+  PII sanitizers and the tone shifter apply one, the red team writes one,
+  and the sandbox reads a blocked pattern it cannot chain exactly rather
+  than refusing every command; the sandbox still reads its chains first,
+  and the sanitizer runs the red team's own patterns under `re` as written.
+  Where the engine cannot be loaded, or on a version of Python other than
+  the ones it was measured on (3.11 to 3.14), every place refuses as before.
+
 - [SECURITY] The regular expressions a first census found taking more
   than linear time on a long run of one character, on a page, a tool's
   output, a model's answer or a reply's code, no longer do. Python's engine

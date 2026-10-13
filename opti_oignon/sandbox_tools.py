@@ -714,9 +714,9 @@ class SandboxToolSession:
             try:
                 rx = compile_linear(pattern, flags)
             except CostlyPattern as exc:
-                return (f"Error: regex pattern refused, it could take more than linear time on a long line ({exc}); "
-                        f"search a fixed string (is_regex=false), or a pattern with no unbounded repeat that can "
-                        f"start again where another left off, such as '.*' between two parts")
+                return (f"Error: regex pattern refused, it cannot be read in linear time on a long line ({exc}); "
+                        f"search a fixed string (is_regex=false), or a pattern with no back-reference, conditional "
+                        f"or atomic group")
             except re.error as exc:
                 return f"Error: invalid regex pattern: {exc}"
 
