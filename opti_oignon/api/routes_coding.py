@@ -75,6 +75,14 @@ try:
 except Exception:  # pragma: no cover - constrained environments only
     _emergency_stop = None  # type: ignore[assignment]
 
+# Frames as a strict parser reads them (``api.frames``); each frame is sent
+# as it is where the module cannot be loaded.
+try:
+    from opti_oignon.api.frames import strict_frame as _strict_frame
+except Exception:  # pragma: no cover - constrained environments only
+    def _strict_frame(payload: Any) -> Any:
+        return payload
+
 logger = logging.getLogger(__name__)
 
 _DEGRADED_REQUEST_REFUSED = (
@@ -142,7 +150,7 @@ class _ProgressBroadcaster:
 
         for ws in conns:
             try:
-                await ws.send_json(event)
+                await ws.send_json(_strict_frame(event))
             except Exception:
                 dead.append(ws)
 
@@ -540,11 +548,11 @@ async def websocket_coding_live(ws: WebSocket) -> None:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(ws)
         if user is None:
-            await ws.send_json({"type": "error", "detail": "Authentication required"})
+            await ws.send_json(_strict_frame({"type": "error", "detail": "Authentication required"}))
             await ws.close(code=4001)
             return
     except Exception:
-        await ws.send_json({"type": "error", "detail": "Authentication failed"})
+        await ws.send_json(_strict_frame({"type": "error", "detail": "Authentication failed"}))
         await ws.close(code=4001)
         return
 
@@ -557,18 +565,18 @@ async def websocket_coding_live(ws: WebSocket) -> None:
     try:
         # Send initial status
         agent = _get_agent()
-        await ws.send_json({
+        await ws.send_json(_strict_frame({
             "type": "connected",
             "phase": agent.phase.value,
             "task_id": agent.task_id,
-        })
+        }))
 
         # Poll for events and forward to client
         while True:
             # Drain queued events from the agent thread
             events = _broadcaster.drain_events()
             for event in events:
-                await ws.send_json(event)
+                await ws.send_json(_strict_frame(event))
 
             # Check for incoming messages (keepalive / commands)
             try:
@@ -577,13 +585,13 @@ async def websocket_coding_live(ws: WebSocket) -> None:
                 )
                 # Client can send ping
                 if data == "ping":
-                    await ws.send_json({"type": "pong"})
+                    await ws.send_json(_strict_frame({"type": "pong"}))
             except asyncio.TimeoutError:
                 # Send heartbeat
-                await ws.send_json({
+                await ws.send_json(_strict_frame({
                     "type": "heartbeat",
                     "timestamp": time.time(),
-                })
+                }))
 
     except WebSocketDisconnect:
         pass

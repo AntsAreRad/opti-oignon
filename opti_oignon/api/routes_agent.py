@@ -74,6 +74,14 @@ try:
 except Exception:  # pragma: no cover - constrained environments only
     _emergency_stop = None  # type: ignore[assignment]
 
+# Events as a strict parser reads them (``api.frames``); each event is
+# written as it is where the module cannot be loaded.
+try:
+    from opti_oignon.api.frames import strict_frame as _strict_frame
+except Exception:  # pragma: no cover - constrained environments only
+    def _strict_frame(payload: Any) -> Any:
+        return payload
+
 
 # Teacher escalation wiring (driver-side). The chokepoints themselves live
 # in ``agent.teacher`` (decision + escalation, never raising) and
@@ -220,11 +228,11 @@ class AgentRunManager:
             if getattr(event, "kind", "") == "tool_result":
                 self._note_read(getattr(event, "data", {}) or {})
             payload = json.dumps(
-                {
+                _strict_frame({
                     "kind": getattr(event, "kind", ""),
                     "round": rnd,
                     "data": getattr(event, "data", {}) or {},
-                }
+                })
             )
         except Exception:  # pragma: no cover - defensive
             return

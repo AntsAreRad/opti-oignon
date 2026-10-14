@@ -31,6 +31,14 @@ try:
 except Exception:
     _emergency_stop = None
 
+# Frames as a strict parser reads them (``api.frames``); each frame is sent
+# as it is where the module cannot be loaded.
+try:
+    from opti_oignon.api.frames import strict_frame as _strict_frame
+except Exception:
+    def _strict_frame(payload: Any) -> Any:
+        return payload
+
 logger = logging.getLogger(__name__)
 
 # Conditional imports
@@ -894,11 +902,11 @@ async def benchmark_progress_ws(websocket: WebSocket) -> None:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)
         if user is None:
-            await websocket.send_json({"type": "error", "data": {"detail": "Authentication required"}})
+            await websocket.send_json(_strict_frame({"type": "error", "data": {"detail": "Authentication required"}}))
             await websocket.close(code=4001)
             return
     except Exception:
-        await websocket.send_json({"type": "error", "data": {"detail": "Authentication failed"}})
+        await websocket.send_json(_strict_frame({"type": "error", "data": {"detail": "Authentication failed"}}))
         await websocket.close(code=4001)
         return
 
@@ -909,25 +917,25 @@ async def benchmark_progress_ws(websocket: WebSocket) -> None:
 
     try:
         # Send initial status
-        await websocket.send_json({
+        await websocket.send_json(_strict_frame({
             "type": "status",
             "data": {
                 "running": _state.is_running(),
                 "run_id": _state.current_run_id,
             },
-        })
+        }))
 
         # Forward events from queue to WebSocket
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                await websocket.send_json(event)
+                await websocket.send_json(_strict_frame(event))
                 # Stop after terminal events
                 if event.get("type") in ("completed", "cancelled", "error"):
                     break
             except asyncio.TimeoutError:
                 # Send heartbeat
-                await websocket.send_json({"type": "heartbeat"})
+                await websocket.send_json(_strict_frame({"type": "heartbeat"}))
             except WebSocketDisconnect:
                 break
 

@@ -2708,6 +2708,21 @@ package costs.
 
 ### Fixed
 
+- Every frame a socket sends is one a strict parser reads. The browser
+  reads each frame of the chat, agent, coding, benchmark and metrics
+  sockets with `JSON.parse`, which refuses the `NaN` and `Infinity` that
+  Python writes for a number JSON cannot carry; and a frame's text must be
+  UTF-8, which cannot hold a lone surrogate, the kind a JSON escape in a
+  model's tool arguments, or a tool's output, decodes into. A tool call
+  whose arguments held `NaN` ended the chat turn on "Failed to parse server
+  message"; a token holding a lone surrogate could not be sent, which the
+  chat route reads as the client gone, and the turn stopped; the agent
+  stream dropped an event it could not write. Each frame now comes as a
+  strict parser reads it: a number JSON cannot carry as its text (`"NaN"`,
+  `"Infinity"`, `"-Infinity"`), as the tool call approval shows it; a lone
+  surrogate as its escape, written out; a value JSON has no form for as its
+  text. A frame that was already strict is sent as it was.
+
 - A plugin's hooks are given the configuration saved for it. What the user
   saves for a plugin, in the Plugins panel or through
   `PUT /api/plugins/{name}/config`, was stored and handed to nothing: the

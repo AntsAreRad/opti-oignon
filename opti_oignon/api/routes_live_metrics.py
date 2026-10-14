@@ -28,6 +28,14 @@ from .schemas import (
     LiveMetricsStatusResponse,
 )
 
+# Frames as a strict parser reads them (``api.frames``); each frame is sent
+# as it is where the module cannot be loaded.
+try:
+    from opti_oignon.api.frames import strict_frame as _strict_frame
+except Exception:
+    def _strict_frame(payload):
+        return payload
+
 logger = logging.getLogger(__name__)
 
 # RFC 6455 WebSocket close code for graceful server-side shutdown.
@@ -117,25 +125,25 @@ async def metrics_stream_ws(websocket: WebSocket) -> None:
         from .routes_auth import authenticate_websocket
         user = await authenticate_websocket(websocket)
         if user is None:
-            await websocket.send_json({
+            await websocket.send_json(_strict_frame({
                 "type": "error",
                 "data": {"message": "Authentication required"},
-            })
+            }))
             await websocket.close(code=4001)
             return
     except Exception:
-        await websocket.send_json({
+        await websocket.send_json(_strict_frame({
             "type": "error",
             "data": {"message": "Authentication failed"},
-        })
+        }))
         await websocket.close(code=4001)
         return
 
     if not LIVE_METRICS_AVAILABLE or get_live_metrics is None:
-        await websocket.send_json({
+        await websocket.send_json(_strict_frame({
             "type": "error",
             "data": {"message": "Live metrics not available"},
-        })
+        }))
         await websocket.close()
         return
 
@@ -148,10 +156,10 @@ async def metrics_stream_ws(websocket: WebSocket) -> None:
         while True:
             # Take a snapshot and send it.
             sample = collector.current_snapshot()
-            await websocket.send_json({
+            await websocket.send_json(_strict_frame({
                 "type": "metrics",
                 "data": sample.to_dict(),
-            })
+            }))
 
             # Wait for the sampling interval, but also check for
             # incoming messages (e.g. close requests).
@@ -168,7 +176,7 @@ async def metrics_stream_ws(websocket: WebSocket) -> None:
             # Periodic heartbeat (in case client needs keep-alive).
             now = asyncio.get_event_loop().time()
             if now - last_heartbeat >= heartbeat_interval:
-                await websocket.send_json({"type": "heartbeat"})
+                await websocket.send_json(_strict_frame({"type": "heartbeat"}))
                 last_heartbeat = now
 
     except WebSocketDisconnect:

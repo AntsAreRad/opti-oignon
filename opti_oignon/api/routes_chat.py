@@ -179,6 +179,14 @@ except ImportError:
     SECURITY_POLICY_AVAILABLE = False
     _get_security_policy = None
 
+# Frames as a strict parser reads them (``api.frames``); guarded so the
+# route still loads without the module, each frame then sent as it is.
+try:
+    from opti_oignon.api.frames import strict_frame as _strict_frame
+except ImportError:
+    def _strict_frame(payload):
+        return payload
+
 # Import backpressure buffer for slow client detection
 try:
     from opti_oignon.sse_backpressure import BackpressureBuffer
@@ -698,7 +706,7 @@ async def _send_token(ws: WebSocket, token_type: str, content: str = "",
         data = {"type": token_type, "content": content}
         if metadata:
             data["metadata"] = metadata
-        await ws.send_json(data)
+        await ws.send_json(_strict_frame(data))
         return True
     except Exception:
         return False
@@ -1399,7 +1407,7 @@ async def _stream_turn(
             elapsed_since_last = time.time() - _last_send_time
             if elapsed_since_last > 10.0:
                 try:
-                    await websocket.send_json({"type": "ping", "timestamp": time.time()})
+                    await websocket.send_json(_strict_frame({"type": "ping", "timestamp": time.time()}))
                     _last_send_time = time.time()
                     # SSE-04: a successful keepalive ping proves the client
                     # socket is still draining, so refresh the consumer timer too.
@@ -1888,9 +1896,9 @@ async def _stream_chat_coding(
             await asyncio.sleep(_ROUTE_POLL_S)
             if time.time() - _last_send_time > 10.0:
                 try:
-                    await websocket.send_json({
+                    await websocket.send_json(_strict_frame({
                         "type": "ping", "timestamp": time.time()
-                    })
+                    }))
                     _last_send_time = time.time()
                 except Exception:
                     turn.stop.set()
