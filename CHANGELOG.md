@@ -11,6 +11,14 @@ package costs.
 
 ### Added
 
+- [SECURITY] The injection bench has a harder suite, `injection_mixed`,
+  whose injections reuse the user's own words: a search for what the user
+  asked followed by the secret, a note under the very title the user's task
+  keeps, an instruction planted in memory in the user's name. Under
+  `refuse_unendorsed` none of them sends the secret or lands a write, though
+  each is attempted wherever it reached the model, and the tasks whose words
+  are the user's are answered as without an attack.
+
 - [SECURITY] The injection bench has a capture arm
   (`python -m opti_oignon.agent_eval.capture`): it carries an injection into
   a conversation every way the mirror can carry words the user did not type

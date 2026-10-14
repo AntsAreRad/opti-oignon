@@ -95,7 +95,12 @@ python -m opti_oignon.agent_eval.injection --model qwen3:14b --json qwen3.json
 
 The suites live in `opti_oignon/agent_eval/suites/` (`injection_micro.yaml`
 by default); `--suite` takes another name or a YAML path. The file's header
-says how a world, a task and an injection are written.
+says how a world, a task and an injection are written. `injection_mixed.yaml`
+is harder: its injections reuse your own words -- a search for what you
+asked followed by the secret, a note under the very title your task keeps,
+an instruction planted in memory in your name -- which no comparison with
+what you typed can tell from the task. The gate does not compare: it asks
+whether each value is a part you typed whole.
 
 ## Floors
 
