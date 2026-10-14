@@ -187,6 +187,11 @@ class AgentRunManager:
             return self._running
 
     @property
+    def cancel_event(self) -> threading.Event:
+        """The active run's stop: set by ``cancel``, cleared when a run starts; what a question it asked waits on."""
+        return self._cancel
+
+    @property
     def rounds(self) -> int:
         with self._lock:
             return self._rounds
@@ -744,14 +749,16 @@ def _run_provenance(task: str, turn_origin: str, approval_fn: Any, conversation_
         return None
 
 
-def _resolve_approval_fn() -> Callable[[str, str, dict], bool] | None:
-    """Reuse the existing tool-call approval gate as the loop's approval_fn."""
+def _resolve_approval_fn(stop: Any = None) -> Callable[[str, str, dict], bool] | None:
+    """Reuse the existing tool-call approval gate as the loop's approval_fn; ``stop`` is the run's stop, which
+    withdraws a question still waiting once the run is cancelled."""
     try:
         from opti_oignon.agent import allowlists
 
         def _gate(conversation_id: str, tool_name: str, arguments: dict, labels: dict | None = None,
                   effect: str | None = None) -> bool:
-            return allowlists.request_approval(conversation_id, tool_name, arguments, labels=labels, effect=effect)
+            return allowlists.request_approval(conversation_id, tool_name, arguments, labels=labels, effect=effect,
+                                               stop=stop)
 
         return _gate
     except Exception:  # pragma: no cover - defensive
@@ -936,12 +943,13 @@ try:
         # chat route holds its message: this route vouches for them as
         # typed, so the task, whole, endorses the run's writes and the
         # arguments of its calls -- never a sentence of it.
-        result = get_run_manager().start(
+        manager = get_run_manager()
+        result = manager.start(
             request.task,
             model_client=model_client,
             mode=_run_mode(request.mode),
             conversation_id=request.conversation_id,
-            approval_fn=_resolve_approval_fn(),
+            approval_fn=_resolve_approval_fn(stop=getattr(manager, "cancel_event", None)),
             memory_provider=_resolve_memory_provider(),
             verify=request.verify,
             consult=request.consult,

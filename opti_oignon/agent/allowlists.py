@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -108,6 +109,8 @@ BULBE_ALLOWLIST = frozenset(DAILY_ALLOWLIST - NETWORK_TOOLS - STATE_MUTATION_TOO
 # Default wait for the Bulbe human gate, mirroring the approval manager's own
 # fail-secure auto-deny timeout.
 APPROVAL_TIMEOUT = 30.0
+# How often a wait for a person's answer looks at its run's stop.
+_STOP_POLL_S = 0.1
 
 # Reasons surfaced by ``evaluate`` (kept as plain strings for observations).
 REASON_ALLOWED = "allowed"
@@ -274,6 +277,7 @@ def request_approval(
     timeout: float | None = None,
     labels: dict[str, str] | None = None,
     effect: str | None = None,
+    stop: Any = None,
 ) -> bool:
     """Submit a tool call to the human gate and wait, fail-secure.
 
@@ -281,11 +285,18 @@ def request_approval(
     A missing gate, a submit failure, a timeout, a denial, or any error all
     return False, so the absence of a positive signal denies the call.
     ``labels`` and ``effect`` -- where each argument came from, and the
-    call's class -- travel with the request when given.
+    call's class -- travel with the request when given. ``stop`` is the
+    run's stop (an event): a stopped run asks no one; once it is set, the
+    request still waiting is withdrawn from the queue (denied on the run's
+    behalf when the queue cannot withdraw) and the call is denied, whatever
+    answer came or comes, as a stopped chat turn withdraws its own.
     """
+    if stop is not None and stop.is_set():
+        logger.info("the run of %s is stopped; nothing is asked", tool_name)
+        return False
     mgr = manager if manager is not None else _approval_manager()
     if mgr is None:
-        logger.warning("Bulbe approval gate unavailable; denying %s", tool_name)
+        logger.warning("approval gate unavailable; denying %s", tool_name)
         return False
     extra = ({"labels": dict(labels), "effect": str(effect or "")}
              if labels is not None and _takes_labels(getattr(mgr, "submit", None)) else {})
@@ -296,11 +307,36 @@ def request_approval(
         return False
     wait_s = APPROVAL_TIMEOUT if timeout is None else float(timeout)
     try:
-        event.wait(wait_s)
+        if stop is None:
+            event.wait(wait_s)
+        else:
+            deadline = time.monotonic() + wait_s
+            while not event.is_set() and not stop.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                event.wait(min(_STOP_POLL_S, remaining))
         status = mgr.get_status(approval_id)
     except Exception:
         return False
+    if stop is not None and stop.is_set():
+        _withdraw(mgr, approval_id, "run_cancelled")
+        return False
     return _is_approved(status)
+
+
+def _withdraw(mgr: Any, approval_id: str, reason: str) -> None:
+    """Take a question of a stopped run out of the queue: withdrawn on its behalf, or denied when the queue cannot
+    withdraw; never raises."""
+    for name in ("withdraw", "deny"):
+        decide = getattr(mgr, name, None)
+        if not callable(decide):
+            continue
+        try:
+            decide(approval_id, reason)
+            return
+        except Exception:  # noqa: BLE001 - the next way out is tried; the call is denied either way
+            logger.debug("%s of a stopped run's question failed", name, exc_info=True)
 
 
 def _default_approval_fn(

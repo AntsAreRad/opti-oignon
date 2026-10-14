@@ -561,7 +561,8 @@ def _labels_as_shown(pending, arguments: dict, labels: dict, takes_labels: bool)
 
 
 def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, timeout: float):
-    """The Bulbe approval gate of one turn, bound to that turn's stop.
+    """The approval gate of one turn, bound to that turn's stop: every call that acts outside the run in Bulbe, and
+    in Daily a network call the network policy asks about.
 
     ``manager`` is the approval queue, ``emit`` receives the pending and
     resolved events for the socket, and ``timeout`` bounds the wait. The
@@ -976,7 +977,9 @@ async def _stream_turn(
     # EX-02: per-request tool-approval gate. Bound to this request and
     # passed into the executor call rather than mutated onto a shared singleton,
     # so overlapping Bulbe sessions cannot clobber or drop each other's gate.
-    # Assigned in the Bulbe branch below; None means no gate (Daily / no policy).
+    # Assigned in the Bulbe branch below; None in Daily, where the provenance
+    # gate asks through the turn's own hook (turn.demand) when the network
+    # policy says so.
     _approval_fn = None
 
     def _generate():

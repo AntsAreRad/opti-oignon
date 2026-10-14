@@ -67,12 +67,15 @@ not know is held as networked.
 
 In Daily, `config/provenance.yaml` says what a network call carrying an
 unendorsed argument does -- a tool call's, and the chat's own web search:
-`free` (the default) sends it; `ask_unendorsed` holds it for the user, who
+`ask_unendorsed` (the default) holds it for the user, who
 sees each value whole, every hidden character made visible, with its label,
-in the approval drawer, the agent panel and the terminal (a value too long to be shown
-whole is refused instead); `refuse_unendorsed` refuses it. Only a missing
-file, or one that says `free`, is free: a file that cannot be read, names no
-policy, or gives a value outside the three reads as `refuse_unendorsed`. An
+in the approval drawer, the agent panel and the terminal, and sends it only on
+their yes (a value too long to be shown whole is refused instead, and so is a
+call on a turn with no way to ask); `refuse_unendorsed` refuses it; `free`
+sends it. A call whose every argument is typed or the tool's own default is
+sent under every policy without a question. A missing file asks, as shipped, and only a file that says `free` is
+free: a file that cannot be read, names no policy, or gives a value outside
+the three reads as `refuse_unendorsed`. An
 endorsed network argument is handed to its sink as the user typed it, never
 in the model's spelling. On a turn that says which words are the user's
 (every turn the chat composes), the chat's own search sends those words --
@@ -90,7 +93,9 @@ refused, and the model is told why.
 
 What this cannot see: the user's own words, sent whole by a planted
 instruction, still go -- they are the user's; a search asked for in other
-words than its query is unendorsed, so the strict settings ask or refuse it.
+words than its query is unendorsed, so the default asks the user about it
+and `refuse_unendorsed` refuses it: a search the model words its own way is
+a question to the user, and the question protects only as well as it is read.
 
 ## Memory and notes writes
 

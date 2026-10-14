@@ -22,6 +22,20 @@ The chat interface supports:
   branch explorer above the thread
 
 
+## Questions before a search
+
+In Daily mode, a call that would send words you did not type out of the
+machine waits for your yes: a search the model words its own way, or words
+it read in a page, a file or a tool result. The approval drawer shows the
+call as it would run, each value whole with where it came from. A call
+whose every value is one you typed, whole, or the tool's own default goes
+without a question. A no, or no answer
+within 30 seconds, refuses the call, and the reply goes on without tools
+for the rest of that turn. The network policy that asks is
+`ask_unendorsed`, in `config/provenance.yaml`; `refuse_unendorsed` refuses
+such calls without asking, and `free` sends them unasked.
+
+
 ## Stopping a reply
 
 Stop ends this conversation's reply and nothing else. Replies in other
@@ -37,9 +51,10 @@ conversations, and requests from a paired phone, go on.
   recorded as stopped, with the files it wrote. A new `/code` message in
   the same conversation waits until the previous one has stopped. A reply
   that has no conversation does not run the coding agent.
-- In Bulbe mode, a tool waiting for approval is denied and withdrawn from
-  the approval list when its reply is stopped, and an approval given after
-  the Stop does not run the tool.
+- A tool waiting for your approval -- every tool call in Bulbe mode, and in
+  Daily a network call carrying words you did not type -- is denied and
+  withdrawn from the approval list when its reply is stopped, and an
+  approval given after the Stop does not run the tool.
 - Tools that already ran stay in the conversation's tool history, so the
   next reply knows what they did.
 - Closing the tab stops the reply as Stop does.
@@ -65,8 +80,9 @@ selected automatically based on query analysis:
   goes through the ddgs package, which sends it to Wikipedia and to one
   or more search engines it picks at random. The results reach the model
   wrapped as untrusted data, in front of your question, never in a system
-  message. Refused in Bulbe mode and while the search kill switch is
-  engaged.
+  message. It sends the words you typed and nothing else; words you pasted,
+  or a hook's rewrite of yours, wait for your yes first. Refused in Bulbe
+  mode and while the search kill switch is engaged.
 - **Reasoning** -- advanced strategies (Decompose-and-Solve,
   Tree-of-Thought, Self-Consistency)
 - **Consensus** -- multiple models vote on the best answer

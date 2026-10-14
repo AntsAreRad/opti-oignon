@@ -290,7 +290,8 @@ def summarize_arguments(tool_name: str, arguments: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 class ToolCallApprovalManager:
-    """Thread-safe manager for tool call approval in Bulbe mode.
+    """Thread-safe manager for tool call approval: every call that acts outside the run in Bulbe mode, and in Daily a
+    network call the network policy asks about.
 
     Lifecycle of a tool call:
     1. submit() is called from the tool executor thread, returns an Event.

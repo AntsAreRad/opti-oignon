@@ -940,6 +940,16 @@ fail_under = 0
 # same envelope with the consumers that remain. They stay in the tree word
 # for word.
 #
+# Daily ships the asking network policy, ask_unendorsed, where it shipped
+# free. pv14 of tests/test_provenance_gate_contracts.py pinned the shipped
+# free and a missing file read as free; it gives way to nd1 of
+# tests/test_network_default_contracts.py, the shipped ask_unendorsed, a
+# missing file read the same, and free still read as written. pv8 and pv12
+# held their free arm on the shipped file, through a turn's policy that can
+# only tighten it; they give way to nd3 and nd4 in the same file, word for
+# word with the policy file set to free for the run. They stay in the tree
+# word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1294,4 +1304,7 @@ addopts = """
     --deselect=tests/test_linear_patterns_contracts.py::test_eq42_every_reader_that_takes_a_run_at_once_reads_each_head_and_character_in_linear_time
     --deselect=tests/test_plugin_worker_isolation_contracts.py::test_c3_field_plugins_load_with_fallbacks
     --deselect=tests/test_search_gates_contracts.py::test_ks7_web_results_reach_a_model_only_inside_the_untrusted_envelope_in_the_user_turn
+    --deselect=tests/test_provenance_gate_contracts.py::test_pv14_the_shipped_policy_lets_daily_reach_the_network_freely
+    --deselect=tests/test_provenance_gate_contracts.py::test_pv8_a_tool_call_salvaged_from_the_models_prose_meets_the_same_gate
+    --deselect=tests/test_provenance_gate_contracts.py::test_pv12_a_tool_the_table_does_not_know_is_held_to_the_network_rules
 """

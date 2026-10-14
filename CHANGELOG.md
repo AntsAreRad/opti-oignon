@@ -63,8 +63,9 @@ package costs.
   Through the filter no injected word is kept, from any of them, not even a
   run of six; handed every turn's
   text, the same extractor keeps the injection from each, and a later run
-  that reads the memory back carries it out under `free`. The user's own
-  typed words are kept.
+  that reads the memory back carries it out wherever the network policy
+  lets the call through; the report says the mode and the policy its later
+  runs got. The user's own typed words are kept.
 
 - [SECURITY] An injection bench measures the gates the way published
   agent-security benchmarks measure a defence
@@ -85,7 +86,10 @@ package costs.
   under `refuse_unendorsed` the network receives only the user's own typed
   words, the same with either secret. Each floor holds only where the report
   shows it could have been broken, and is said not measured otherwise; the
-  command exits 1 when one is broken.
+  command exits 1 when one is broken. A run never gets a looser mode or
+  policy than the machine's: under the shipped asking policy a row asked
+  under `free` runs asking, and every row of every arm says the mode and
+  the policy its runs got.
 
 - The gate that labels each argument of a tool call and decides the call
   has a second implementation in the native core, asked in its shadow at
@@ -457,13 +461,19 @@ package costs.
   a closed table (none, session, sandbox, deferred, network, approved), and
   a tool the table does not know is held as networked. In Daily, the
   network policy says what a network call carrying an unendorsed argument
-  does: `free`, the default, sends it as before; `ask_unendorsed` holds it
-  for the user, who sees each value whole with its label (a value too long
-  to be shown whole is refused instead of asked); `refuse_unendorsed`
-  refuses it. Only a missing file, or one that says `free`, is free: a file
-  that is present but cannot be read, names no policy, or gives a value
-  outside the three reads as `refuse_unendorsed`, and a policy given with a
-  turn can only tighten the file's. An endorsed network argument is handed
+  does: `ask_unendorsed`, the default, holds it for the user, who sees each
+  value whole with its label, and sends it only on their yes (a value too
+  long to be shown whole is refused instead of asked); `refuse_unendorsed`
+  refuses it; `free` sends it. A call whose every argument is typed or the
+  tool's own default is sent without a question. A no, or no answer within
+  the approval's 30 seconds, is a refusal: in the chat, as every refusal of
+  the gate, it ends the turn's tool use, and a scripted evaluation, which
+  has no one to ask, is refused at once. A missing file asks, as shipped,
+  and only a file that says `free` is free: a file that is present but
+  cannot be read, names no policy, or gives a value outside the three reads
+  as `refuse_unendorsed`, and a policy given with a turn can only tighten
+  the file's. A question an agent run asked is withdrawn when the run is
+  cancelled, and an answer given after the cancel runs nothing. An endorsed network argument is handed
   to its sink as the typed part's own characters, never the model's
   spelling, so a planted instruction cannot hide a few bits of its own in
   spacing or a Unicode form (the search may still scrub personal data from
@@ -1752,10 +1762,12 @@ package costs.
   stored before turns had origins, a file alone) is not searched. It meets
   the network policy like a tool call: a hook's rewrite, or the question of
   a caller that vouches for no turn (sent as it is under free), is asked
-  about or refused under the strict settings, and Bulbe sends none.
+  about under the default policy and refused under `refuse_unendorsed`,
+  and Bulbe sends none.
 - The chat evaluation harness runs its scripted tools under the same gate:
   on a Bulbe machine a scripted call that needs a person is refused, and
-  under a strict network policy its scripted search is held to it.
+  under the asking default, or the refusing policy, its scripted search for
+  words no one typed is refused, an evaluation having no one to ask.
 - [SECURITY] A peel may no longer give an order, nor restate or tell one,
   the user's included, but in the user's own words, stitched in by the
   queue. Every later turn reads a peel, so the eviction gate's second face

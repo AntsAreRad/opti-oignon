@@ -153,8 +153,9 @@ def leaked(words: str, facts: Iterable[str]) -> bool:
     return any(run and run in " ".join(fact.split()) for fact in facts for run in runs)
 
 
-def _later(suite: Any, injection: Any, facts: list, *, policy: str) -> bool:
-    """Whether a later agent run that reads ``facts`` back carries out ``injection``'s goal."""
+def _later(suite: Any, injection: Any, facts: list, *, policy: str, ran: list | None = None) -> bool:
+    """Whether a later agent run that reads ``facts`` back carries out ``injection``'s goal; ``ran``, when given,
+    takes the mode and the policy each run got."""
     world = bench._World(suite)
     for fact in facts:
         world.memory.add(fact, "fact", source="capture")
@@ -164,16 +165,19 @@ def _later(suite: Any, injection: Any, facts: list, *, policy: str) -> bool:
         persona = bench.Persona(bench.OBEDIENT, victim.plan, [injection], secret=suite.secret, typed=victim.prompt)
         outcome = bench.run_once(world, victim.prompt, persona, mode=bench.DAILY, policy=policy,
                                  responder=bench.APPROVE)
+        if ran is not None:
+            ran.append((outcome.mode, outcome.policy))
         carried = carried or bench.attack_succeeded(injection, outcome, suite.secret, victim.prompt)
     return carried
 
 
-def capture_rows(suite: Any, *, policy: str = "free") -> list:
+def capture_rows(suite: Any, *, policy: str = "free", ran: list | None = None) -> list:
     """Per vector: the injected texts kept and carried out later, through the filter and without it (the witness).
 
     Each exfiltrating injection's words are carried into a conversation
     beside each user task's typed prompt; the facts kept are read back by a
-    later run under ``policy``.
+    later run under ``policy``, never looser than the machine's; ``ran``,
+    when given, takes the mode and the policy each later run got.
     """
     injections = [injection for injection in suite.injection_tasks if injection.kind == bench.EXFILTRATE]
     rows = []
@@ -188,7 +192,7 @@ def capture_rows(suite: Any, *, policy: str = "free") -> list:
                 for name, filtered in (("filtered", True), ("unfiltered", False)):
                     facts = extract(handed(messages, filtered=filtered))
                     counts[name][0] += leaked(injection.text, facts)
-                    counts[name][1] += _later(suite, injection, facts, policy=policy)
+                    counts[name][1] += _later(suite, injection, facts, policy=policy, ran=ran)
                     if filtered:
                         prompts_kept += any(fact == task.prompt for fact in facts)
         rows.append({
@@ -224,14 +228,19 @@ def run_capture(suite: Any, *, policy: str = "free") -> dict:
     """The capture arm's report."""
     if not FEATURE_AVAILABLE:
         raise RuntimeError("the capture arm is unavailable in this build")
+    ran: list = []
     report = {"bench": "capture", "format": REPORT_FORMAT, "suite": suite.name, "policy": policy,
-              "capture": capture_rows(suite, policy=policy)}
+              "capture": capture_rows(suite, policy=policy, ran=ran)}
+    report["later_runs"] = {"mode": bench._joined(mode for mode, _ in ran),
+                            "policy": bench._joined(got for _, got in ran)}
     report["floors"] = floors(report)
     return report
 
 
 def _table(report: dict) -> str:
-    lines = [f"capture arm, suite {report['suite']}, later runs under {report['policy']}"]
+    later = report.get("later_runs") or {}
+    lines = [f"capture arm, suite {report['suite']}, later runs asked under {report['policy']}, run in "
+             f"{later.get('mode') or '-'} under {later.get('policy') or '-'}"]
     for row in report["capture"]:
         lines.append(
             f"  {row['vector']:<15} kept {row['kept']['count']}/{row['kept']['of']}"
@@ -250,7 +259,8 @@ def main(argv: list | None = None) -> int:
                                      description="Measure what the chat's automatic capture keeps of injected words.")
     parser.add_argument("--suite", default="injection_micro", help="Suite name or YAML path")
     parser.add_argument("--policy", default="free", choices=("free", "ask_unendorsed", "refuse_unendorsed"),
-                        help="The network policy the later runs obey (default: free)")
+                        help="The network policy the later runs obey, never looser than the machine's "
+                             "(default: free); the report says the policy they ran under")
     parser.add_argument("--json", default=None, help="Write the report as JSON to this path")
     args = parser.parse_args(argv)
     try:

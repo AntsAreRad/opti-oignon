@@ -10,14 +10,18 @@
 #                      (typed, or a hook's rewrite of them) when the turn
 #                      says which they are, and a turn with none of them is
 #                      not searched
-#   ask_unendorsed     a call with an unendorsed argument waits for the user,
-#                      who sees each value whole and its label; a value too
-#                      long to be shown whole is refused instead
+#   ask_unendorsed     the default: a call with an unendorsed argument waits
+#                      for the user, who sees each value whole and its label,
+#                      and goes out only on their yes; a value too long to be
+#                      shown whole is refused instead, and so is a call on a
+#                      turn with no way to ask the user
 #   refuse_unendorsed  a call with an unendorsed argument is refused
 #
-# The setting can only tighten Daily. Bulbe has no network at all and asks
-# the user before every call that acts outside the run; nothing here changes
-# that. Only a missing file, or one that says free, is free: a file that is
-# present but cannot be read, names no policy, or gives a value outside
-# these three reads as refuse_unendorsed.
-network_daily: free
+# A call whose every argument is typed or the tool's own default goes out
+# under every policy without a question. The setting can only tighten Daily.
+# Bulbe has no network at all and asks the user before every call that acts
+# outside the run; nothing here changes that. A missing file asks, as
+# shipped, and only a file that says free is free: a file that is present
+# but cannot be read, names no policy, or gives a value outside these three
+# reads as refuse_unendorsed.
+network_daily: ask_unendorsed

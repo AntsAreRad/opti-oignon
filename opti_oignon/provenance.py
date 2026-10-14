@@ -31,15 +31,15 @@ filled and their values coerced.
   ``sandbox`` alone, and asks the user before each call that is neither
   ``none`` nor ``session``.
 * THE NETWORK POLICY. In Daily, ``config/provenance.yaml`` says what a
-  network call that carries an unendorsed argument does: ``free``, the
-  default, goes out; ``ask_unendorsed`` waits for the user, who is shown the
-  call as it would run and the label of each argument -- every value whole,
-  so a network value longer than the surfaces can show (``SHOWN_LIMIT``) is
-  refused rather than asked; ``refuse_unendorsed`` is refused. Only an
-  absent file, or one that says ``free``, is free: a file that is present but
-  cannot be read, names no policy, or gives a value outside the three reads
-  as ``refuse_unendorsed`` -- an unreadable policy is an unknown, not a
-  default. A policy given with a turn can only tighten the file's. An
+  network call that carries an unendorsed argument does: ``ask_unendorsed``,
+  the default, waits for the user, who is shown the call as it would run and
+  the label of each argument -- every value whole, so a network value longer
+  than the surfaces can show (``SHOWN_LIMIT``) is refused rather than asked;
+  ``refuse_unendorsed`` is refused; ``free`` goes out. An absent file asks,
+  as shipped, and only a file that says ``free`` is free: a file that is
+  present but cannot be read, names no policy, or gives a value outside the
+  three reads as ``refuse_unendorsed`` -- an unreadable policy is an
+  unknown, not a default. A policy given with a turn can only tighten the file's. An
   endorsed network argument is handed to its sink as the typed part's own
   characters, never the model's spelling of them, so not one of them is the
   model's choice (the search may still scrub personal data from it before
@@ -198,17 +198,17 @@ def machine_mode() -> str:
 def read_network_policy(path: str | Path | None = None) -> str:
     """Daily's network policy as the file says it.
 
-    A missing file is ``free``, the shipped default. A file that is present
-    but cannot be read or parsed, names no policy (empty, or another setting
-    only), or gives a value outside the three is ``refuse_unendorsed``, and
-    the reason is logged: a zero-byte file left by a failed write must not
+    A missing file is ``ask_unendorsed``, the shipped default. A file that is
+    present but cannot be read or parsed, names no policy (empty, or another
+    setting only), or gives a value outside the three is ``refuse_unendorsed``,
+    and the reason is logged: a zero-byte file left by a failed write must not
     loosen a stricter choice.
     """
     target = Path(path) if path is not None else Path(POLICY_FILE)
     try:
         text = target.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return FREE
+        return ASK_UNENDORSED
     except Exception as exc:
         logger.warning("provenance policy %s cannot be read (%s): refuse_unendorsed", target.name, exc)
         return REFUSE_UNENDORSED
