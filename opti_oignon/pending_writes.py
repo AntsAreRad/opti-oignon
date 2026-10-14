@@ -22,9 +22,12 @@ the agent reads. Every such write passes a gate:
 * FAIL CLOSED. A gate with no typed turn endorses nothing; a gate that
   cannot record a proposal writes nothing and says so.
 * BOUNDED. A run makes at most ``max_per_run`` proposals
-  (``config/pending_writes.yaml``); a proposal already waiting is never
-  queued twice, and one the user declined in a conversation is not queued
-  again in that conversation.
+  (``config/pending_writes.yaml``). A write past the bound is refused, and
+  the gate then names a stop for its run (``halt``): the run that owns the
+  gate ends after that round, saying why, since a run that tries to propose
+  more than the bound is likelier to be following words it read than its
+  task. A proposal already waiting is never queued twice, and one the user
+  declined in a conversation is not queued again in that conversation.
 
 Accepting a proposal claims it first, pending to accepted, so it is applied
 once; then its arguments are written exactly as proposed, through the same
@@ -148,6 +151,9 @@ _HEX = frozenset("0123456789abcdef")
 # writes.
 _CATEGORIES_FALLBACK = frozenset({"identity", "preference", "fact", "contact", "project", "goal"})
 _DEFAULT_CATEGORY = "fact"
+
+# The reason a run ends with once its gate refused a write past the bound.
+PROPOSAL_CAP = "proposal_cap"
 
 _CONFIG = Path(__file__).resolve().parent / "config" / "pending_writes.yaml"
 _DEFAULTS: dict[str, Any] = {"max_per_run": 20, "stale_claim_seconds": 300}
@@ -782,6 +788,7 @@ class WriteGate:
         self._pending = pending
         self._read = read
         self._proposed = 0
+        self._capped = False
         self._count_lock = threading.Lock()
 
     def _provenance(self, key: tuple[str, str], typed: dict, untyped: list) -> dict[str, Any]:
@@ -791,6 +798,12 @@ class WriteGate:
             read = []
         return {"source": "agent", "turn": "typed" if self.endorsers.vouched else "none", "typed": typed,
                 "untyped": untyped, "target": _TARGET.get(key), "read": read}
+
+    def halt(self) -> str | None:
+        """``PROPOSAL_CAP`` once a write of this gate's run was refused past the bound, None before: the stop the
+        run that owns the gate takes after the round."""
+        with self._count_lock:
+            return PROPOSAL_CAP if self._capped else None
 
     def write(self, store: str, action: str, arguments: dict, *, target: Any = None) -> str:
         """Write, or propose, ``arguments``; what the model is told."""
@@ -825,6 +838,7 @@ class WriteGate:
                                **{"memory_store" if store == "memory" else "notes_store": target})
         with self._count_lock:
             if self._proposed >= self.max_per_run:
+                self._capped = True
                 return (f"Not proposed: this run already made {self.max_per_run} proposals, the most one run may "
                         "make; nothing was saved.")
             try:

@@ -64,7 +64,8 @@ anywhere:
   wrapped in your words -- in every argument at once and in each one alone;
   then it calls every tool that takes an identifier with each identifier it
   read. What holds against it holds against any model choosing among those
-  values.
+  values. Its flood of writes reaches the bound of proposals a run may make,
+  and its run is then stopped, as a shipped run is, before the identifiers.
 
 With `--model`, a model served by your local inference registry takes the
 stand-ins' place, on the same suites.
@@ -266,9 +267,11 @@ document.
   gate holds what a call carries, not how many calls there are.
 - The `contained` kind is reached whenever the sandbox is permitted: the
   sandbox, not the gate, is the boundary for what runs inside it.
-- A run proposes at most so many writes (`config/pending_writes.yaml`). A
-  model steered by an injection can use them all, and a write of yours that
-  needed a proposal in that run is then not proposed: the bench shows it as
-  lost utility under attack, an availability cost rather than a write.
+- A run proposes at most so many writes (`config/pending_writes.yaml`); one
+  that tries more is stopped there, as a shipped run is. A model steered by
+  an injection can use them all, and the rest of your task is then lost
+  with the run, a write of yours that needed a proposal included: the bench
+  shows it as lost utility under attack, an availability cost rather than a
+  write.
 - The enumerator does not spawn subtasks; a subtask's calls pass the same
   dispatch and are judged by the same run's words.

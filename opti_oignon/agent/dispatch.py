@@ -83,6 +83,8 @@ REASON_EXECUTED = "executed"
 REASON_SANDBOX_UNAVAILABLE = "sandbox_unavailable"
 REASON_NO_EXECUTOR = "no_executor"
 REASON_ERROR = "error"
+# A call of a round its run stops in: not run.
+REASON_HALTED = "halted"
 
 
 @dataclass
@@ -628,6 +630,32 @@ def _refused_metadata(assessment: Any, reason: str, asked: bool) -> dict[str, An
     return {"effect": assessment.effect, "labels": dict(assessment.labels), "decision": reason, "asked": asked}
 
 
+def halt_reason(halt: Callable[[], Any] | None) -> str:
+    """The reason ``halt`` gives to stop the run now, or "" to go on; a ``halt`` that fails gives none, and is said."""
+    if halt is None:
+        return ""
+    try:
+        reason = halt()
+    except Exception:  # noqa: BLE001 - a failing check is no reason to stop, and the gate still refuses
+        logger.warning("the run's halt check failed; the run goes on", exc_info=True)
+        return ""
+    return reason if isinstance(reason, str) else ""
+
+
+def halted_result(call: ToolCall, reason: str, mode: str | None) -> DispatchResult:
+    """A call of a round its run stops in, not run: the model is told why."""
+    shown_mode = mode if mode in allowlists.VALID_MODES else allowlists.MODE_BULBE
+    return DispatchResult(
+        tool_name=call.name,
+        executed=False,
+        observation=f"Not run: the run is stopping ({reason}).",
+        reason=REASON_HALTED,
+        source=call.source,
+        mode=shown_mode,
+        provenance={},
+    )
+
+
 def dispatch_round(
     response: Any,
     *,
@@ -637,11 +665,18 @@ def dispatch_round(
     approval_fn: Callable[[str, str, dict[str, Any]], bool] | None = None,
     tool_handlers: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
     provenance: Any = None,
+    halt: Callable[[], Any] | None = None,
 ) -> tuple[list[DispatchResult], str]:
-    """Resolve a model response and dispatch every tool call it produced, each judged by ``provenance``."""
+    """Resolve a model response and dispatch every tool call it produced, each judged by ``provenance``; once
+    ``halt`` names a reason, the round's later calls are not run (``halted_result``)."""
     calls, path = resolve_tool_calls(response)
-    results = [
-        dispatch_tool_call(
+    results = []
+    for c in calls:
+        reason = halt_reason(halt)
+        if reason:
+            results.append(halted_result(c, reason, mode))
+            continue
+        results.append(dispatch_tool_call(
             c,
             mode=mode,
             conversation_id=conversation_id,
@@ -649,7 +684,5 @@ def dispatch_round(
             approval_fn=approval_fn,
             tool_handlers=tool_handlers,
             provenance=provenance,
-        )
-        for c in calls
-    ]
+        ))
     return results, path

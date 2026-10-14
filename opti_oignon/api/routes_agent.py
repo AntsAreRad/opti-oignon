@@ -171,6 +171,9 @@ class AgentRunManager:
         # The tools whose results the active run has read, each once, in
         # the order first read: what a proposal says the agent had seen.
         self._read: list[str] = []
+        # The active run's write gate's stop: the reason the run ends with
+        # once the gate refused a write past its bound; None without a gate.
+        self._halt: Callable[[], str | None] | None = None
 
     # status / control
 
@@ -293,8 +296,12 @@ class AgentRunManager:
         Every other write is proposed to the user, naming the tools the run
         had read before it. ``skills_factory`` builds the run's skills
         handler over the gate. A gate that cannot be built withdraws the
-        write tools from the run rather than leave them writing.
+        write tools from the run rather than leave them writing. The gate's
+        stop is kept for the run (``_halt``), so a run that writes past the
+        gate's bound ends after that round.
         """
+        with self._lock:
+            self._halt = None
         if not any(name in handlers for name in _PERSISTENT_WRITES):
             return handlers
         try:
@@ -308,6 +315,8 @@ class AgentRunManager:
                 user_id=user_id,
             )
             bound = agent_tools.bind_write_gate(handlers, gate)
+            with self._lock:
+                self._halt = gate.halt
             if agent_tools.TOOL_MANAGE_SKILLS in bound:
                 if skills_factory is None:
                     # No skills handler over the run's gate: withdrawn, never left writing.
@@ -318,6 +327,8 @@ class AgentRunManager:
                     for name, handler in bound.items()}
         except Exception:
             logger.warning("pending-write gate unavailable; the run's write tools are withdrawn", exc_info=True)
+            with self._lock:
+                self._halt = None
             return {name: handler for name, handler in handlers.items() if name not in _PERSISTENT_WRITES}
 
     # run lifecycle
@@ -449,6 +460,10 @@ class AgentRunManager:
             verify=verify,
             provenance=_run_provenance(task, turn_origin, approval_fn, conversation_id),
         )
+        with self._lock:
+            halt = self._halt
+        if halt is not None:
+            kwargs["halt"] = halt
         if max_rounds is not None:
             kwargs["max_rounds"] = max_rounds
         self._thread = threading.Thread(target=self._run, kwargs=kwargs, daemon=True)
@@ -552,6 +567,11 @@ class AgentRunManager:
             if policy is None:
                 return
             if self._cancel.is_set():
+                return
+            capped = _proposal_cap_reason()
+            if capped and getattr(result, "stop_reason", "") == capped:
+                # A run stopped for writing past its gate's bound was likelier
+                # following words it read than its task: nothing is learned.
                 return
             if self._teacher_estop_blocked():
                 return
@@ -747,6 +767,16 @@ def _run_provenance(task: str, turn_origin: str, approval_fn: Any, conversation_
     except Exception:
         logger.warning("the run's provenance cannot be built; no argument of the run is endorsed", exc_info=True)
         return None
+
+
+def _proposal_cap_reason() -> str:
+    """The stop reason of a run that wrote past its gate's bound; "" when the gate is not loaded."""
+    try:
+        from opti_oignon import pending_writes
+
+        return pending_writes.PROPOSAL_CAP
+    except Exception:  # noqa: BLE001 - without the gate no run stops at its bound
+        return ""
 
 
 def _resolve_approval_fn(stop: Any = None) -> Callable[[str, str, dict], bool] | None:

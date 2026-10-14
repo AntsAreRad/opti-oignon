@@ -118,7 +118,13 @@ proposed, never that it was saved.
 The turn of a run is its task. `POST /api/agent/run` vouches for the task as
 the words the user typed; a run started any other way endorses nothing, so
 every write it makes is proposed. A run makes at most `max_per_run` proposals
-(`config/pending_writes.yaml`, 20 by default); a proposal already waiting is
+(`config/pending_writes.yaml`, 20 by default). A run that tries one more is
+likelier to be following words it read than its task: the write is refused,
+the round's later calls are not run, and the run ends with the stop reason
+`proposal_cap`, which the agent panel shows in words; what it proposed
+before waits in the review, where each proposal of a run that made several
+carries the run's tag and one control selects them, and only them, to be
+declined in one decision. A proposal already waiting is
 never queued twice, and a write the user declined in a conversation is not
 proposed again in that conversation (another conversation may ask again; a
 run with no conversation keeps no refusal).
@@ -163,7 +169,9 @@ The running agent is controlled over `/api/agent/*`:
 - `GET /api/agent/status` returns `{running, rounds, stop_reason}`.
 - `POST /api/agent/cancel` requests cooperative cancellation.
 - `WS /api/agent/stream` emits the live `AgentEvent` stream (`round_start`,
-  `model_output`, `tool_result`, `done`, `error`, `verifier_output`).
+  `model_output`, `tool_result`, `done`, `error`, `aborted` -- a run ended
+  for the reason it names: repeating the same call, writing past the bound,
+  the round cap, a cancel -- and `verifier_output`).
 
 The agent panel in the UI consumes this surface: it shows the live tool stream,
 the round and step display, a cancel control, and the Bulbe approval prompts,

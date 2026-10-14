@@ -2,9 +2,12 @@
 # words did not endorse wait here for the user's review (see
 # opti_oignon/pending_writes.py).
 
-# The most proposals one agent run may make. Each further write of that run
-# is refused, with nothing saved, so a page that tells the agent to write
-# again and again cannot flood the review. A whole number from 1 to 1000; any
+# The most proposals one agent run may make. A further write of that run
+# that needs a proposal is refused, with nothing saved; the round's later
+# calls are not run, and the run ends with the stop reason proposal_cap: a
+# page that tells the agent to write again and again cannot flood the
+# review, and the run says why it stopped. A write the user's typed words
+# endorse is never counted. A whole number from 1 to 1000; any
 # other value keeps the default below.
 max_per_run: 20
 

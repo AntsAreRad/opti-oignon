@@ -81,6 +81,7 @@
 	{busy}
 	on:toggle={(event) => (selected = toggle(selected, event.detail))}
 	on:toggleAll={() => (selected = toggleAll(items, selected))}
+	on:selectRun={(event) => (selected = [...event.detail])}
 	on:accept={() => decide('accept')}
 	on:decline={() => decide('decline')}
 />

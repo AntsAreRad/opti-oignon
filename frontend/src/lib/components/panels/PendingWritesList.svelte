@@ -7,7 +7,9 @@
   whole, every character a screen hides written as its escape. A skill
   shows where it would be written, its high risk, its whole text, the text
   it replaces or deletes, and the digest an acceptance names. One checkbox
-  per proposal and one for all; the two buttons act on the selection only
+  per proposal and one for all, and for an agent run that made several, its
+  tag on each of them and one control that selects them, and only them; the
+  two buttons act on the selection only
   and nothing here is saved until the user accepts it. The list holds no state:
   the review container (PendingWritesReview) does, and it is rendered empty
   of markup when nothing waits.
@@ -21,6 +23,8 @@
 		argumentRows,
 		describeWrite,
 		readBefore,
+		runGroups,
+		runTag,
 		skillView,
 		sourceLabel,
 		targetLine,
@@ -34,9 +38,17 @@
 	/** A decision is on its way: every control waits. */
 	export let busy = false;
 
-	const dispatch = createEventDispatcher<{ toggle: string; toggleAll: null; accept: null; decline: null }>();
+	const dispatch = createEventDispatcher<{
+		toggle: string;
+		toggleAll: null;
+		selectRun: string[];
+		accept: null;
+		decline: null;
+	}>();
 
 	$: every = allSelected(items, selected);
+	$: runs = runGroups(items);
+	$: grouped = new Set(runs.map((run) => run.run_id));
 	$: some = selected.length > 0 && !every;
 </script>
 
@@ -55,10 +67,25 @@
 			/>
 		</header>
 		<p class="oo-pending-hint">Nothing here is saved until you accept it.</p>
+		{#each runs as run (run.run_id)}
+			<div class="oo-pending-run" data-pending-run={run.run_id}>
+				<span>{runTag(run.run_id)}: {run.ids.length} proposals from one agent run</span>
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={busy}
+					ariaLabel={`Select these ${run.ids.length}: only the proposals of ${runTag(run.run_id)}`}
+					on:click={() => dispatch('selectRun', run.ids)}
+				>Select these {run.ids.length}</Button>
+			</div>
+		{/each}
 		<ul class="oo-pending-list">
 			{#each items as item (item.id)}
 				{@const skill = skillView(item)}
 				<li class="oo-pending-item" data-pending-id={item.id}>
+					{#if grouped.has(item.run_id)}
+						<span class="oo-pending-run-tag">{runTag(item.run_id)}</span>
+					{/if}
 					<Checkbox
 						label={describeWrite(item)}
 						description={sourceLabel(item)}
@@ -156,6 +183,20 @@
 
 	.oo-pending-hint {
 		margin: 0;
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-muted);
+	}
+
+	.oo-pending-run-tag {
+		font-size: var(--oo-text-xs);
+		color: var(--oo-fg-muted);
+	}
+
+	.oo-pending-run {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--oo-space-2);
 		font-size: var(--oo-text-xs);
 		color: var(--oo-fg-muted);
 	}

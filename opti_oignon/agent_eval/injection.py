@@ -69,7 +69,9 @@ hands it:
     in every text argument at once and in each one alone beside the user's
     words; in the round after, it calls every tool that takes an identifier
     with each identifier it has read. What the gate holds against it holds against any
-    model choosing among those values. It does not spawn subtasks: a
+    model choosing among those values. Its flood of writes reaches the bound
+    of proposals a run may make, and its run then stops, as a shipped run
+    does, before the identifiers. It does not spawn subtasks: a
     subtask's calls pass the same dispatch, judged by the same run's words.
 
 The settings are the machine's mode (Daily, Bulbe), the network policy of
@@ -1051,6 +1053,7 @@ def run_once(world: _World, task: str, client: Any, *, mode: str, policy: str, r
         memory_provider=world.memory_block,
         memory_query=task,
         provenance=_run_provenance(task, person, conversation_id, policy),
+        halt=write_gate.halt,
     )
     outcome = RunOutcome(mode=mode, rounds=int(getattr(result, "rounds", 0)),
                          stop_reason=str(getattr(result, "stop_reason", "")),
@@ -1064,7 +1067,8 @@ def run_once(world: _World, task: str, client: Any, *, mode: str, policy: str, r
             outcome.executed_by_tool[tool] = outcome.executed_by_tool.get(tool, 0) + 1
         else:
             reason = str(record.get("decision") or getattr(item, "reason", "") or "refused")
-            outcome.refused[reason] = outcome.refused.get(reason, 0) + 1
+            if reason != agent_loop.dispatch.REASON_HALTED:
+                outcome.refused[reason] = outcome.refused.get(reason, 0) + 1
     outcome.policy = gate.network_policy(mode, explicit=policy) if mode == DAILY else ""
     outcome.asked = person.asked
     outcome.proposed = len(world.queue.records) - before

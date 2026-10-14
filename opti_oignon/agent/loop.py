@@ -950,6 +950,7 @@ def _dispatch_with_tasks(
     round_budget: int | None = None,
     spill_counter: dict[str, int] | None = None,
     provenance: Any = None,
+    halt: Callable[[], str | None] | None = None,
 ) -> tuple[list[dispatch.DispatchResult], int]:
     """Dispatch a round that contains task calls; returns (results, new_cap).
 
@@ -960,10 +961,16 @@ def _dispatch_with_tasks(
     parent_rounds_remaining - 1), and the child's rounds debited from the
     parent budget through the returned cap. A task call carries its labels
     like any other, and its child is judged by the run's ``provenance``.
+    Once ``halt`` names a reason, the round's later calls, a task's among
+    them, are not run.
     """
     resolved_mode = _resolved_mode(mode)
     results: list[dispatch.DispatchResult] = []
     for call in calls:
+        stopping = _halted(halt)
+        if stopping:
+            results.append(dispatch.halted_result(call, stopping, mode))
+            continue
         if call.name != agent_tools.TOOL_TASK:
             results.append(
                 dispatch.dispatch_tool_call(
@@ -1096,12 +1103,15 @@ def _run_verifier(
     tool_handlers: dict[str, Callable[[dict], Any]] | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
     provenance: Any = None,
+    halt: Callable[[], str | None] | None = None,
 ) -> VerifierResult:
     """A bounded verifier subagent that never exceeds the reference cap.
 
     The cap is the minimum of the requested ``max_rounds`` and
     ``_VERIFIER_MAX_ROUNDS``, so even a larger request cannot loop forever.
-    Its calls are judged by the run's ``provenance``.
+    Its calls are judged by the run's ``provenance``, and the run's ``halt``
+    holds them as it holds the run's: once it names a reason, the round's
+    later calls are not run and the verifier stops after the round.
     """
     cap = max(1, min(_clamp_rounds(max_rounds), _VERIFIER_MAX_ROUNDS))
     msgs = list(base_messages) + [{"role": "user", "content": VERIFIER_PROMPT}]
@@ -1127,6 +1137,7 @@ def _run_verifier(
                 approval_fn=approval_fn,
                 tool_handlers=tool_handlers,
                 provenance=provenance,
+                **({"halt": halt} if halt is not None else {}),
             )
         except Exception:
             results = []
@@ -1136,7 +1147,14 @@ def _run_verifier(
         obs_msg = _observations_message(results)
         if obs_msg is not None:
             msgs.append(obs_msg)
+        if _halted(halt):
+            break
     return VerifierResult(rounds=rounds, verdict=verdict, observations=observations, bounded=rounds <= cap)
+
+
+def _halted(halt: Callable[[], str | None] | None) -> str:
+    """The reason ``halt`` gives to end the run now, or "" to go on; a ``halt`` that fails lets the run go on."""
+    return dispatch.halt_reason(halt)
 
 
 def run(
@@ -1160,13 +1178,21 @@ def run(
     verify: bool = False,
     admitted_num_ctx: int | None = None,
     provenance: Any = None,
+    halt: Callable[[], str | None] | None = None,
 ) -> AgentRunResult:
     """Run the multi-turn streaming agent loop.
 
     ``provenance`` is the run's turn: the parts of the task its user typed,
     whole, and the run's way to ask the user. Every call the run makes -- its
     own, a subtask's, the verifier's -- is judged by it; None endorses
-    nothing.
+    nothing. ``halt`` is asked before each call of a round and after the
+    round: once it names a reason (a gate of the run's that refused a write
+    past its bound, say), the round's later calls are not run and the run
+    ends after the round, with that reason as its stop and an ``aborted``
+    event that names it; a verifier that meets it ends the run with it too.
+    None or an empty reason lets the run go on, and so does a ``halt`` that
+    fails. A run that reaches its round cap, or is cancelled, also ends with
+    an ``aborted`` event naming why.
 
     Streams a model response each round, dispatches any tool calls through the
     sandbox seam, feeds the results back as untrusted observations, and stops
@@ -1227,6 +1253,7 @@ def run(
         if should_continue is not None and not should_continue():
             stop_reason = STOP_CANCELLED
             final_text = final_text or _last_assistant_text(messages)
+            _emit(on_event, "aborted", rounds, {"reason": STOP_CANCELLED})
             break
         rounds += 1
         round_ref["round"] = rounds
@@ -1282,6 +1309,7 @@ def run(
                     round_budget=round_budget,
                     spill_counter=spill_counter,
                     provenance=provenance,
+                    halt=halt,
                 )
             else:
                 results, _path = dispatch.dispatch_round(
@@ -1292,6 +1320,7 @@ def run(
                     approval_fn=approval_fn,
                     tool_handlers=effective_handlers,
                     provenance=provenance,
+                    **({"halt": halt} if halt is not None else {}),
                 )
         except Exception as exc:  # dispatch is built not to raise; defensive
             results = []
@@ -1326,6 +1355,12 @@ def run(
             )
         for r in results:
             _emit(on_event, "tool_result", rounds, r.to_dict())
+        reason = _halted(halt)
+        if reason:
+            _emit(on_event, "aborted", rounds, {"reason": reason})
+            stop_reason = reason
+            final_text = final_text or _last_assistant_text(messages)
+            break
         if _doom_update(
             doom_state,
             doom_threshold,
@@ -1357,6 +1392,7 @@ def run(
     else:
         stop_reason = STOP_MAX_ROUNDS
         final_text = final_text or _last_assistant_text(messages)
+        _emit(on_event, "aborted", rounds, {"reason": STOP_MAX_ROUNDS})
 
     verifier_result = None
     if verify and stop_reason == STOP_DONE:
@@ -1371,7 +1407,14 @@ def run(
             tool_handlers=effective_handlers,
             on_event=on_event,
             provenance=provenance,
+            **({"halt": halt} if halt is not None else {}),
         )
+        # The verifier writes through the run's own handlers: a gate it
+        # drove past its bound ends the run with the gate's reason.
+        reason = _halted(halt)
+        if reason:
+            _emit(on_event, "aborted", rounds, {"reason": reason})
+            stop_reason = reason
 
     return AgentRunResult(
         final_text=final_text,

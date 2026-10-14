@@ -250,6 +250,34 @@ export function toggleAll(items: readonly PendingWrite[], selected: readonly str
 	return allSelected(items, selected) ? [] : items.map((item) => item.id);
 }
 
+/** The proposals one agent run made, when it made more than one: the run, and their ids in the order shown. */
+export interface RunGroup {
+	run_id: string;
+	ids: string[];
+}
+
+/**
+ * The agent runs that made more than one of the proposals shown, in the order
+ * their first proposal is shown: a run that tried many writes is likelier to
+ * be following words it read than its task, and its proposals are declined
+ * together. A proposal of no run (an extraction's) belongs to no group.
+ */
+export function runGroups(items: readonly PendingWrite[]): RunGroup[] {
+	const groups = new Map<string, string[]>();
+	for (const item of items) {
+		if (!item.run_id) continue;
+		const ids = groups.get(item.run_id) ?? [];
+		ids.push(item.id);
+		groups.set(item.run_id, ids);
+	}
+	return [...groups.entries()].filter(([, ids]) => ids.length > 1).map(([run_id, ids]) => ({ run_id, ids }));
+}
+
+/** The short name a run goes by in the review: the start of its id. */
+export function runTag(runId: string): string {
+	return `run ${runId.slice(0, 6)}`;
+}
+
 /** The ids a decision applies to: the selected proposals still shown, in the order shown. */
 export function decisionIds(items: readonly PendingWrite[], selected: readonly string[]): string[] {
 	const chosen = new Set(selected);

@@ -3,8 +3,10 @@
   The agent panel for the sandboxed agent loop, built on the lib/ds
   primitives (Card, Button, Icon, EmptyState, InlineError). It shows the live
   tool-call stream (consuming the loop's AgentEvents over $lib/api/agent), a
-  round / step display, a cancel control, and the Bulbe approval prompts
-  (approve / deny) wired to the existing tool-call approval API, each showing
+  round / step display that says how a run ended ($lib/agentStop), a cancel
+  control, and the approval prompts (approve / deny) -- every call that acts
+  outside the run in Bulbe, a network call carrying words the user did not
+  type in Daily -- wired to the existing tool-call approval API, each showing
   every value the call would run with (ApprovalArguments). Streaming
   updates use aria-live regions. Design-system tokens only (--oo-*); lucide
   icons through Icon.
@@ -24,6 +26,7 @@
 		type PendingApproval
 	} from '$lib/api/agent';
 	import type { ReconnectingWebSocket } from '$lib/api/client';
+	import { endingReason, stopLabel, stopSentence } from '$lib/agentStop';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import ApprovalArguments from '$lib/components/chat/ApprovalArguments.svelte';
 
@@ -50,6 +53,7 @@
 		tool_result: 'wrench',
 		done: 'check-circle',
 		error: 'alert-triangle',
+		aborted: 'alert-octagon',
 		verifier_output: 'badge-check'
 	};
 
@@ -81,6 +85,7 @@
 		}
 		if (event.kind === 'error') return String(event.data.error ?? 'error');
 		if (event.kind === 'done') return String(event.data.final_text ?? 'Done.');
+		if (event.kind === 'aborted') return stopSentence(endingReason(event) ?? 'aborted');
 		return '';
 	}
 
@@ -95,15 +100,13 @@
 		const next = [...items, item];
 		items = next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next;
 
+		const ended = endingReason(event);
 		if (event.kind === 'round_start') {
 			currentRound = event.round;
 			running = true;
-		} else if (event.kind === 'done') {
+		} else if (ended) {
 			running = false;
-			stopReason = 'done';
-		} else if (event.kind === 'error') {
-			running = false;
-			stopReason = 'error';
+			stopReason = ended;
 		}
 	}
 
@@ -148,10 +151,15 @@
 		if (cancelling) return;
 		cancelling = true;
 		try {
-			await cancelAgentRun();
-			running = false;
-			stopReason = 'cancelled';
-			toastSuccess('Agent run cancelled');
+			const { cancelled } = await cancelAgentRun();
+			if (cancelled) {
+				running = false;
+				stopReason = 'cancelled';
+				toastSuccess('Agent run cancelled');
+			} else {
+				running = false;
+				toastSuccess('No agent run was running');
+			}
 		} catch {
 			toastError('Failed to cancel agent run');
 		} finally {
@@ -187,7 +195,7 @@
 				{#if running}
 					Round {currentRound}
 				{:else if stopReason}
-					Stopped ({stopReason})
+					{stopLabel(stopReason)}
 				{:else}
 					Idle
 				{/if}

@@ -2,11 +2,14 @@
  * API client for the sandboxed agent loop (Theme 3 / Odysseus Core).
  *
  * Mirrors the backend AgentEvent contract emitted by opti_oignon/agent/loop.py
- * (round_start / model_output / tool_result / done / error / verifier_output)
+ * (round_start / model_output / tool_result / done / error / aborted /
+ * verifier_output)
  * and exposes a live event-stream subscription plus run-control endpoints. The
  * tool-call approval surface is reused verbatim from the existing
  * /api/security/tool-approval/* API (toolCallApproval.ts): the agent panel
- * polls and resolves Bulbe approvals through it rather than a duplicate route.
+ * polls and resolves approvals through it -- every call that acts outside the
+ * run in Bulbe, a network call carrying words the user did not type in Daily
+ * -- rather than a duplicate route.
  *
  * The live event-stream endpoint and the run-control endpoints are wired to the
  * backend during the end-to-end integration; this client defines the
@@ -32,6 +35,7 @@ export type AgentEventKind =
 	| 'tool_result'
 	| 'done'
 	| 'error'
+	| 'aborted'
 	| 'verifier_output';
 
 /** The full set of event kinds, in loop order. */
@@ -41,6 +45,7 @@ export const AGENT_EVENT_KINDS: AgentEventKind[] = [
 	'tool_result',
 	'done',
 	'error',
+	'aborted',
 	'verifier_output'
 ];
 

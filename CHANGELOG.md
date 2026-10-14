@@ -592,9 +592,13 @@ package costs.
   `POST /api/pending-writes/accept` and `POST /api/pending-writes/decline`
   over a queue beside the other stores, encrypted at rest the same way. A
   run makes at most 20 proposals (`max_per_run` in
-  `config/pending_writes.yaml`); a proposal already waiting is never queued
-  twice, and a write the user declined in a conversation is not proposed
-  again there (another conversation may ask again; a run with no
+  `config/pending_writes.yaml`); a run that tries one more ends there with
+  the stop reason `proposal_cap`, the round's later calls not run, and the
+  agent panel says why; in each review, the proposals of a run that made
+  several carry the run's tag and one control selects only them. A
+  proposal already waiting is
+  never queued twice, and a write the user declined in a conversation is
+  not proposed again there (another conversation may ask again; a run with no
   conversation keeps no refusal). A write that reached
   the store before failing is decided rather than put back, a change whose
   fact or note is gone is reported with nothing saved, and an acceptance cut
@@ -2842,6 +2846,12 @@ package costs.
   folder of their own, keeps its record.
 
 ### Fixed
+
+- The agent panel no longer shows a run as running once the loop ended it
+  without an answer: a run stopped for repeating the same call, for
+  writing past its bound, at its round cap or by a cancel now ends with an
+  `aborted` event that names why, and the panel says it in words. A cancel
+  the server reports as having found no run is no longer shown as one.
 
 - [SECURITY] The automatic memory capture reads a turn's declaration as the
   mirror's reader does: a turn whose declaration lies outside the
