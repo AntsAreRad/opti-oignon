@@ -1905,3 +1905,57 @@ def _cpu_of(read, text):
         spent = time.process_time() - start
         best = spent if best is None else min(best, spent)
     return best
+
+
+# ---------------------------------------------------------------------------
+# EQ44 -- the rm check (gives way for EQ25, whose claim reader is no longer delivered)
+# ---------------------------------------------------------------------------
+def test_eq44_the_rm_check_answers_as_before():
+    _hold([("sandbox_manager.py", r"(?!workspace)", r"\brm\b.*\s+/(?!workspace)", "boolean")])
+
+
+# ---------------------------------------------------------------------------
+# EQ45 -- the readers that take a run at once, as delivered (gives way for EQ42)
+# ---------------------------------------------------------------------------
+def _takers_delivered():
+    """(name, compiled, head) of each reader that takes a run at once, as the package delivers it: the readers of
+    ``_takers`` but the fact checker's, no longer delivered."""
+    found = []
+    for module, names, head in (("agent/tool_parsing.py", ("_XML_INVOKE_RE",), "<invoke"),
+                                ("agent/tool_parsing.py", ("_XML_PARAM_RE",), "<param"),
+                                ("agent/skills.py", ("_FENCE_RE",), "```"),
+                                ("agent/teacher.py", ("_SKILL_FENCE_RE",), "```skill"),
+                                ("memory/curation.py", ("_THINK_RE",), "<think>"),
+                                ("memory/extraction.py", ("_THINK_RE",), "<think>"),
+                                ("plugins/markdown-beautifier/entry_point.py", ("_FENCED_BLOCK_RE",), "```"),
+                                ("plugins/task-extractor/entry_point.py", ("_IMPERATIVE_VERBS", "_IMPERATIVE_RE"), "\n"),
+                                ("plugins/chain-of-thought-enforcer/entry_point.py",
+                                 ("_ANSWER_MARKERS", "_ANSWER_MARKER_RE", "_REASONING_MARKERS", "_REASONING_MARKER_RE"),
+                                 "\n")):
+        space = _defs(module, *names)
+        found += [(f"{module}:{name}", space[name], head) for name in names if isinstance(space[name], re.Pattern)]
+    for module, marker, head in (("context_summary.py", "<think>(?:", "<think>"), ("memory/legacy.py", "<think>(?:", "<think>"),
+                                 ("sandbox_tools.py", "<!--(?:", "<!--"), ("self_correction.py", "```(?:json)?", "```json {"),
+                                 ("rag_store.py", "(?P<real>)", "<")):
+        pattern, flags = _site(module, marker)
+        found.append((f"{module}:{marker}", re.compile(pattern, flags), head))
+    chunkers = _class_patterns("rag/chunkers.py", "CodeChunker")
+    found += [("chunkers:def", chunkers["FUNCTION_PATTERN"], "def f("),
+              ("chunkers:class", chunkers["CLASS_BASES_PATTERN"], "class A("),
+              ("chunkers:r", _class_patterns("rag/chunkers.py", "RChunker")["FUNCTION_PATTERN"], "f <- function("),
+              ("chunkers:sheet", re.compile(*_site("rag/chunkers.py", "Sheet:")), "[Sheet:")]
+    return found
+
+
+def test_eq45_every_delivered_reader_that_takes_a_run_at_once_reads_each_head_and_character_in_linear_time():
+    old = re.compile(r"<[^>]+>")
+    assert not _linear(old, "< "), "witness: a quadratic reader is told from a linear one"
+    takers = _takers_delivered()
+    assert len(takers) == 19, [name for name, _compiled, _head in takers]
+    slow = []
+    for name, compiled, head in takers:
+        assert "real" in compiled.groupindex, name
+        for character in _UNIT_CHARACTERS:
+            if not _linear(compiled, head + character) and not _linear(compiled, head + character):
+                slow.append((name, head + character))
+    assert not slow, slow

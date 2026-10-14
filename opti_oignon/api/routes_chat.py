@@ -1463,7 +1463,7 @@ async def _stream_turn(
                 },
                 redact_sensitive=True,
             )
-            # Collect plugin annotations (e.g. fact-checker results, auto-tldr)
+            # Collect plugin annotations (e.g. auto-tldr)
             for result in post_report.results:
                 if result.success and result.modified_data:
                     ann = result.modified_data.get("annotation")

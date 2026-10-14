@@ -2719,6 +2719,17 @@ package costs.
   fell as debt was paid, and so did the ledger of `public_language_guard.py`,
   which with `public_clean_guard.py` now reads `rust/` as well (above).
 
+### Removed
+
+- The fact checker plugin is no longer delivered. It sent the claims of a
+  reply to a web search engine, while Opti-Oignon checks claims against
+  the user's own sources and takes no search engine's excerpt as one; and
+  it changed nothing in a reply, the chat routes keeping none of what it
+  returned. An installation that had it forgets its record at the first
+  start, whatever its state, so that the boot never tries to load a plugin
+  that is gone; a plugin the user installed under the same name, in a
+  folder of their own, keeps its record.
+
 ### Fixed
 
 - Every frame a socket sends is one a strict parser reads. The browser

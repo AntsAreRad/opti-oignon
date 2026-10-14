@@ -270,6 +270,7 @@ class PluginRegistry:
             if self._discover_builtins:
                 _discover_builtins(self)
                 _withdraw_default_enablement(self)
+                _forget_retired_builtins(self)
         return self._plugin_map
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -714,6 +715,33 @@ def _discover_builtins(
     if registered > 0:
         logger.info("Auto-registered %d builtin plugin(s)", registered)
     return registered
+
+
+# Delivered plugins no longer delivered. The fact checker sent the claims of
+# a reply to a web search engine; the package checks claims against the
+# user's own sources (``factcheck``), and takes no search engine's excerpt as
+# one.
+_RETIRED_BUILTINS = ("fact-checker",)
+
+
+def _forget_retired_builtins(registry: PluginRegistry) -> list[str]:
+    """Unregister each record of a delivered plugin that is no longer delivered.
+
+    Its folder went with the release that retired it, so a record left
+    behind names nothing to load, and the boot would try. A record of that
+    name whose folder still exists is a plugin the user installed, and
+    stays. Returns the names it forgot.
+    """
+    forgotten: list[str] = []
+    for name in _RETIRED_BUILTINS:
+        record = registry.get(name)
+        if record is None or (record.plugin_dir and Path(record.plugin_dir).is_dir()):
+            continue
+        registry.unregister(name)
+        forgotten.append(name)
+    if forgotten:
+        logger.info("Delivered plugin(s) no longer delivered, forgotten: %s", ", ".join(forgotten))
+    return forgotten
 
 
 def _withdraw_default_enablement(

@@ -926,6 +926,20 @@ fail_under = 0
 # the same corpus and the same witnesses, held to the same growth on texts
 # twice as long, with no absolute time. It stays in the tree word for word.
 #
+# eq25 and eq42 of tests/test_linear_patterns_contracts.py, c3 of
+# tests/test_plugin_worker_isolation_contracts.py and ks7 of
+# tests/test_search_gates_contracts.py read the fact checker plugin, which
+# is no longer delivered: its claim reader, its place among the readers
+# that take a run at once, its fallback in the worker, and its place among
+# the consumers of web results. eq25 gives way to eq44 in the same file,
+# the sandbox's rm check it held beside the claim reader; eq42 to eq45,
+# the same readers held to linear time without the retired one; c3 to rw4
+# of tests/test_plugin_retirement_contracts.py, the three other field
+# plugins with their fallbacks, in the shared window (the isolation ledger
+# still owes for c3's suite, which is left untouched); ks7 to ks8, the
+# same envelope with the consumers that remain. They stay in the tree word
+# for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1276,4 +1290,8 @@ addopts = """
     --deselect=tests/test_linear_pattern_contracts.py::test_sl35_a_blocked_pattern_whose_join_crosses_lines_is_never_read_as_a_chain_of_lines
     --deselect=tests/test_dynamic_pattern_sites_contracts.py::test_pd4_each_named_site_holds_its_reason
     --deselect=tests/test_linear_pattern_contracts.py::test_sl2_no_pattern_the_check_calls_linear_reads_a_long_text_in_more_than_linear_time
+    --deselect=tests/test_linear_patterns_contracts.py::test_eq25_the_claim_reader_reads_as_before_a_run_of_words_with_no_verb_taken_at_once
+    --deselect=tests/test_linear_patterns_contracts.py::test_eq42_every_reader_that_takes_a_run_at_once_reads_each_head_and_character_in_linear_time
+    --deselect=tests/test_plugin_worker_isolation_contracts.py::test_c3_field_plugins_load_with_fallbacks
+    --deselect=tests/test_search_gates_contracts.py::test_ks7_web_results_reach_a_model_only_inside_the_untrusted_envelope_in_the_user_turn
 """

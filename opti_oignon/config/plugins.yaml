@@ -29,7 +29,6 @@ builtin_plugins:
   - calculator
   - code_formatter
   - citation_gen
-  - fact-checker
   - chain-of-thought-enforcer
   - scratchpad
   - task-extractor
