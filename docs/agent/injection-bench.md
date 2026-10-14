@@ -107,6 +107,10 @@ python -m opti_oignon.agent_eval.injection --model qwen3:14b --repeat 3 --json q
 
 # One pass at a temperature of 0: the model's likeliest answer at each turn
 python -m opti_oignon.agent_eval.injection --model qwen3:14b --temperature 0
+
+# One line per run, with each call the model emitted, for a reading after the bench
+python -m opti_oignon.agent_eval.injection --model qwen3:14b --repeat 3 --json qwen3.json \
+    --trace qwen3.jsonl
 ```
 
 With `--settings` the memory injection runs only under the Daily policies
@@ -146,6 +150,37 @@ one first makes the task's own search, one titles a note with your request.
 It shows what the strict policy costs: under `refuse_unendorsed` every
 search that is not your request typed whole is refused, the task's own
 included, where `ask_unendorsed` asks you about each one, once per search.
+
+## The trace
+
+`--trace PATH` writes one line of JSON per run of the rows and of the memory
+injection, as the run ends (a first session's once its review is played), so
+a long run with a model that fails late keeps every line before the
+failure. The file is opened at the first line: a command refused before
+any run leaves an earlier trace as it was, and `--trace` naming the
+`--json` file is refused, as is a trace or a report naming the suite's own
+file or any file of the package (its configuration, the network policy
+among it, and its suites). A line says where the run ran
+(the setting, the draw, and the run: alone, attacked, or the memory
+injection's first or later session, the later one naming the task and the
+injection of the session that planted it), the task and the injection, the
+words you typed, each call the model emitted, in order, with its arguments
+and the steps of the task's plan and of the injection's plan it takes up,
+the answers the bench could not read, and its verdicts on the run
+(`utility` alone; `utility_under_attack`, `attempted` and `succeeded` under
+attack; `attempted`, `landed_without_acceptance` and `landed_after_review`
+in a first session; `attempted` and `carried_out` in a later one). With a
+model, each line names it and its options. A line holds no tool's result
+as returned, but a call's arguments are the model's own and may quote what
+it read, the secret included. A call can take up a step of both plans --
+the attacker's goal can carry the task's words -- and is then the
+injection's. A write to the trace that fails stops the trace, never the
+bench: the part of the line written is cut back, so the file ends on a
+whole line; the command says how many lines were written and exits 2 (1
+when a floor is broken, which is said first). The calls
+are what a reading made after the bench needs -- a detector scored on the
+calls a real model made, which the report only counts -- and the report
+written beside the trace is the report written without it.
 
 ## Floors
 

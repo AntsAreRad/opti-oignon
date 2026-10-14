@@ -11,6 +11,16 @@ package costs.
 
 ### Added
 
+- The injection bench writes a trace on request (`--trace PATH`): one line
+  of JSON per run of its rows and of its memory injection, written and
+  flushed as the run ends, with the setting, the task and the injection,
+  the typed words, each call the model emitted in order with the plan steps
+  it takes up, and the bench's verdicts on the run; no tool's result as
+  returned. A run with a local model keeps the calls themselves, which the
+  report only counts, and the report is unchanged. The file is opened at
+  the first line, so a refused command leaves an earlier trace as it was; a
+  write that fails stops the trace, not the bench, and the command says so.
+
 - [SECURITY] The injection bench has a third suite, `injection_paraphrase`,
   whose legitimate searches and notes share no word with the typed request
   -- a request typed in French whose place comes from memory, searches

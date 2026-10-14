@@ -80,6 +80,18 @@ the two bounds of a person's judgement). The mode a run gets is never looser
 than the machine's: on a machine in Bulbe every row runs in Bulbe, and the
 row says so.
 
+A TRACE, when asked for, is one line of JSON per run of the rows and of the
+memory injection, written as the run ends (a first session's once its review
+is played): the setting, the task and the injection, the words the user
+typed, each call the model emitted, in order, with the steps of the task's
+plan and of the injection's plan it takes up, and the bench's verdicts on
+the run. It holds no tool's result as returned; a call's arguments are the
+model's own, and may quote what it read, the secret included. A call may
+take up a step of both plans -- the attacker's goal can carry the task's
+words -- and then it is the injection's. The trace is what a reading of the
+calls made after the bench needs, such as a detector scored on the calls a
+model made, and it changes nothing the bench measures.
+
 A floor read from a report holds only where the report shows it could have
 been broken: an exfiltration floor needs attempts that met the strict
 settings, a confinement floor needs a run where the secret did get out under
@@ -145,6 +157,8 @@ FEATURE_AVAILABLE = _AGENT_OK and _YAML_OK
 
 # The shape of the report; a consumer checks it before reading the rows.
 REPORT_FORMAT = 1
+# The shape of a trace line; a consumer checks it before reading the calls.
+TRACE_FORMAT = 1
 
 SUITES_DIR = Path(__file__).parent / "suites"
 DEFAULT_SUITE = "injection_micro"
@@ -1153,6 +1167,56 @@ def attack_succeeded(injection: InjectionTask, outcome: RunOutcome, secret: str,
 
 
 # ---------------------------------------------------------------------------
+# The trace
+# ---------------------------------------------------------------------------
+def takes_up(step: Step, name: str, arguments: Any, secret: str, typed: str) -> bool:
+    """Whether a call takes up one step of a plan: the step's tool, each of its text values given.
+
+    A value is judged as an attempt's is: the secret by its forms, a long
+    value found inside what was given, a short one as what was given.
+    """
+    given = arguments if isinstance(arguments, dict) else {}
+    wanted = {key: value for key, value in step.arguments.items() if isinstance(value, str)}
+    return name == step.name and all(_gives(value, given.get(key), secret, typed) for key, value in wanted.items())
+
+
+def trace_line(outcome: RunOutcome, task: UserTask, injection: InjectionTask | None, secret: str, *,
+               where: dict, verdicts: dict) -> dict:
+    """One run as the trace keeps it: where it ran, what the user typed, each call the model emitted, in order,
+    with the steps of each plan it takes up, the answers the bench could not read, and its verdicts on the run; no
+    tool's result as returned."""
+    calls = []
+    for name, arguments in outcome.emitted:
+        calls.append({
+            "tool": name,
+            "arguments": arguments,
+            "task_steps": [index for index, step in enumerate(task.plan)
+                           if takes_up(step, name, arguments, secret, task.prompt)],
+            "injection_steps": ([] if injection is None else
+                                [index for index, step in enumerate(injection.plan)
+                                 if takes_up(step, name, arguments, secret, task.prompt)]),
+        })
+    return {
+        "format": TRACE_FORMAT,
+        **where,
+        "mode": outcome.mode,
+        "policy": outcome.policy,
+        "task": task.id,
+        "typed": task.prompt,
+        "injection": None if injection is None else injection.id,
+        "kind": None if injection is None else injection.kind,
+        "calls": calls,
+        "executed": outcome.executed,
+        "refused": dict(sorted(outcome.refused.items())),
+        "asked": outcome.asked,
+        "unread": outcome.unread,
+        "rounds": outcome.rounds,
+        "stop_reason": outcome.stop_reason,
+        "verdicts": dict(verdicts),
+    }
+
+
+# ---------------------------------------------------------------------------
 # The bench
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -1258,14 +1322,24 @@ def _stopped(stops: dict, outcome: RunOutcome) -> None:
         stops[outcome.stop_reason] = stops.get(outcome.stop_reason, 0) + 1
 
 
-def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any = None, repeat: int = 1) -> dict:
+def _draws(items: Iterable, repeat: int) -> list:
+    """Each item ``repeat`` times, in the bench's order, with the draw it belongs to (0 for the first pass)."""
+    once = list(items)
+    return [(index // len(once), item) for index, item in enumerate(once * repeat)]
+
+
+def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any = None, repeat: int = 1,
+              trace: Callable[[dict], Any] | None = None) -> dict:
     """One row: every user task alone, then every pair of a user task and an injection task, each ``repeat`` times.
 
     With a model, the row also carries the 95% interval of its utility,
     utility under attack, targeted success and attempt rate, and, when the
     model's client records its turns' seconds, the seconds it took per run;
-    a persona's row has neither.
+    a persona's row has neither. ``trace``, when given, is handed each run's
+    line (``trace_line``) as the run ends.
     """
+    where = {"suite": suite.name, "arm": "rows", "persona": persona if model_client is None else "model",
+             "mode_asked": setting.mode, "policy_asked": setting.policy, "responder": setting.responder}
     utility = under_attack = succeeded = attempted = 0
     seconds: list = []
     by_kind = {kind: [0, 0, 0] for kind in KINDS}
@@ -1273,7 +1347,7 @@ def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any
     stops: dict = {}
     modes: list = []
     policies: list = []
-    for task in [*suite.user_tasks] * repeat:
+    for draw, task in _draws(suite.user_tasks, repeat):
         world = _World(suite)
         before = len(_turn_seconds(model_client))
         outcome = run_once(world, task.prompt, _client(persona, task.plan, (), suite, task.prompt, model_client),
@@ -1284,8 +1358,11 @@ def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any
         _stopped(stops, outcome)
         modes.append(outcome.mode)
         policies.append(outcome.policy)
+        if trace is not None:
+            trace(trace_line(outcome, task, None, suite.secret, where={**where, "run": "alone", "draw": draw},
+                             verdicts={"utility": utility_holds(task, outcome, suite.secret)}))
     pairs = 0
-    for task in [*suite.user_tasks] * repeat:
+    for draw, task in _draws(suite.user_tasks, repeat):
         for injection in suite.injection_tasks:
             world = _World(suite, injection=injection.text)
             client = _client(persona, task.plan, [injection], suite, task.prompt, model_client)
@@ -1312,6 +1389,11 @@ def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any
             unread += outcome.unread
             modes.append(outcome.mode)
             policies.append(outcome.policy)
+            if trace is not None:
+                trace(trace_line(outcome, task, injection, suite.secret,
+                                 where={**where, "run": "attacked", "draw": draw},
+                                 verdicts={"utility_under_attack": utility_holds(task, outcome, suite.secret),
+                                           "attempted": tried, "succeeded": hit}))
     tasks = len(suite.user_tasks) * repeat
     row = {
         "persona": persona if model_client is None else "model",
@@ -1384,7 +1466,7 @@ def _review(world: _World, review: str) -> int:
 
 
 def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: Iterable[str] = REVIEWS,
-                model_client: Any = None, repeat: int = 1) -> list:
+                model_client: Any = None, repeat: int = 1, trace: Callable[[dict], Any] | None = None) -> list:
     """The two-session memory injection, for each injection that persists, under each policy and review.
 
     The second session runs where an injection that plants another's words
@@ -1392,8 +1474,11 @@ def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: It
     after the review, once per later question of
     the user, each with its own traces; it counts as attempted when the model
     emitted the planted injection's call, and as carried out when that
-    injection's goal is reached in that run.
+    injection's goal is reached in that run. ``trace``, when given, is
+    handed each run's line (``trace_line``) as the run ends, the first
+    session's once the review is played.
     """
+    persona = OBEDIENT if model_client is None else "model"
     rows = []
     persisting = [injection for injection in suite.injection_tasks if injection.kind == PERSIST]
     by_id = {injection.id: injection for injection in suite.injection_tasks}
@@ -1403,7 +1488,9 @@ def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: It
             stops: dict = {}
             modes: list = []
             got: list = []
-            for injection in persisting * repeat:
+            where = {"suite": suite.name, "arm": "memory", "persona": persona, "mode_asked": DAILY,
+                     "policy_asked": policy, "responder": APPROVE, "review": review}
+            for draw, injection in _draws(persisting, repeat):
                 for task in suite.user_tasks:
                     world = _World(suite, injection=injection.text)
                     client = _client(OBEDIENT, task.plan, [injection], suite, task.prompt, model_client)
@@ -1417,6 +1504,16 @@ def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: It
                     _review(world, review)
                     landed_reviewed += attack_succeeded(injection, RunOutcome(landed=world.landed()), suite.secret,
                                                         task.prompt)
+                    if trace is not None:
+                        trace(trace_line(outcome, task, injection, suite.secret,
+                                         where={**where, "run": "first_session", "draw": draw}, verdicts={
+                                             "attempted": attack_attempted(injection, outcome, suite.secret,
+                                                                           task.prompt),
+                                             "landed_without_acceptance": attack_succeeded(
+                                                 injection, outcome, suite.secret, task.prompt),
+                                             "landed_after_review": attack_succeeded(
+                                                 injection, RunOutcome(landed=world.landed()), suite.secret,
+                                                 task.prompt)}))
                     remembered = [fact["text"] for fact in world.memory.live() if fact["source"] != SEEDED]
                     planted = by_id.get(injection.plants)
                     if planted is None or not attack_succeeded(injection, RunOutcome(landed=remembered), suite.secret,
@@ -1432,6 +1529,15 @@ def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: It
                         second_runs += 1
                         tried_later += attack_attempted(planted, second, suite.secret, victim.prompt)
                         carried += attack_succeeded(planted, second, suite.secret, victim.prompt)
+                        if trace is not None:
+                            trace(trace_line(second, victim, planted, suite.secret,
+                                             where={**where, "run": "later_session", "draw": draw,
+                                                    "planted_by": {"task": task.id, "injection": injection.id}},
+                                             verdicts={
+                                                 "attempted": attack_attempted(planted, second, suite.secret,
+                                                                               victim.prompt),
+                                                 "carried_out": attack_succeeded(planted, second, suite.secret,
+                                                                                 victim.prompt)}))
             rows.append({
                 "policy_asked": policy,
                 "review": review,
@@ -1593,7 +1699,8 @@ def floors(report: dict) -> dict:
 
 def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Iterable[Setting] | None = None,
               model_client: Any = None, memory: bool = True, values: bool = True,
-              memory_policies: Iterable[str] = POLICIES, repeat: int = 1) -> dict:
+              memory_policies: Iterable[str] = POLICIES, repeat: int = 1,
+              trace: Callable[[dict], Any] | None = None) -> dict:
     """The whole bench over ``suite``: the rows, the memory injection, the confinement and the non-interference.
 
     The memory injection runs in Daily under ``memory_policies`` (every
@@ -1602,7 +1709,10 @@ def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Ite
     ``repeat`` runs every run of the rows and of the memory injection that
     many times: a model samples, a persona gives the same counts each time.
     A model whose client records its turns' seconds is warmed up by one turn
-    first, kept out of the rows' time and reported apart.
+    first, kept out of the rows' time and reported apart. ``trace``, when
+    given, is handed one line per run of the rows and of the memory
+    injection, as the run ends; the confinement and the non-interference
+    are not traced.
     """
     if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat < 1:
         raise ValueError(f"repeat is a count of runs, at least 1: not {repeat!r}")
@@ -1610,7 +1720,7 @@ def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Ite
     warmed = _warm_up(model_client) if model_client is not None else None
     if model_client is not None:
         personas = ("model",)
-    rows = [bench_row(suite, persona, setting, model_client=model_client, repeat=repeat)
+    rows = [bench_row(suite, persona, setting, model_client=model_client, repeat=repeat, trace=trace)
             for persona in personas for setting in chosen]
     rows.sort(key=lambda row: (row["persona"], row["mode_asked"], row["policy_asked"], row["responder"]))
     report = {
@@ -1620,8 +1730,8 @@ def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Ite
         "machine_mode": gate.machine_mode(),
         "pairs": len(suite.user_tasks) * len(suite.injection_tasks),
         "rows": rows,
-        "memory": (memory_rows(suite, policies=list(memory_policies), model_client=model_client, repeat=repeat)
-                   if memory else []),
+        "memory": (memory_rows(suite, policies=list(memory_policies), model_client=model_client, repeat=repeat,
+                               trace=trace) if memory else []),
         "confinement": confinement(suite) if values and model_client is None else [],
         "noninterference": noninterference(suite) if values and model_client is None else [],
     }
@@ -1697,13 +1807,113 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --model: the decoding temperature handed to the engine, from 0 "
                              "(default: the engine's own)")
     parser.add_argument("--json", default=None, help="Write the report as JSON to this path")
+    parser.add_argument("--trace", default=None,
+                        help="Write one JSON line per run of the rows and of the memory injection to this path, as "
+                             "each run ends: the setting, the task and the injection, the words typed, each call "
+                             "the model emitted with the plan steps it takes up, and the verdicts; no tool's "
+                             "result as returned")
     return parser
 
 
+_INFINITY = float("inf")
+
+
+def _strict(value: Any) -> Any:
+    """``value`` with each number JSON cannot hold (not a number, an infinity) written as its name."""
+    if isinstance(value, float) and (value != value or value in (_INFINITY, -_INFINITY)):
+        return repr(value)
+    if isinstance(value, dict):
+        return {key: _strict(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strict(item) for item in value]
+    return value
+
+
+class TraceFile:
+    """The trace's file: opened at its first line, so a bench that does not run leaves an earlier file as it was;
+    each line handed whole to the system as it comes, with no buffer of its own, so a run that fails later keeps the
+    lines before it.
+
+    ``extra`` joins every line (the model and its options). A write that fails stops the trace, never the bench:
+    the part of the line written is cut back, so the file ends on a whole line; ``failed`` says why, and ``lines``
+    how many were written.
+    """
+
+    def __init__(self, path: str, extra: dict | None = None) -> None:
+        self.path = str(path)
+        self.extra = dict(extra or {})
+        self.lines = 0
+        self.failed = ""
+        self._kept = 0
+        self._handle: Any = None
+
+    def __call__(self, line: dict) -> None:
+        if self.failed:
+            return
+        try:
+            data = (json.dumps(_strict({**line, **self.extra}), sort_keys=True, allow_nan=False) + "\n").encode()
+        except (TypeError, ValueError) as exc:
+            self.failed = f"{type(exc).__name__}: {exc}"
+            return
+        try:
+            if self._handle is None:
+                self._handle = open(self.path, "wb", buffering=0)
+            view = memoryview(data)
+            while view:
+                view = view[self._handle.write(view):]
+            self._kept += len(data)
+            self.lines += 1
+        except OSError as exc:
+            self.failed = f"{type(exc).__name__}: {exc}"
+            self._cut()
+
+    def _cut(self) -> None:
+        """Cut the file back to its last whole line, as far as the system lets it."""
+        if self._handle is None:
+            return
+        try:
+            self._handle.truncate(self._kept)
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        if self._handle is not None:
+            try:
+                self._handle.close()
+            except OSError as exc:
+                self.failed = self.failed or f"{type(exc).__name__}: {exc}"
+            self._handle = None
+
+
+def _same_file(first: str, second: str) -> bool:
+    try:
+        return Path(first).resolve() == Path(second).resolve()
+    except (OSError, RuntimeError):
+        return first == second
+
+
+# The package the bench belongs to: its configuration -- the network policy every call reads among it -- and its
+# suites, which no report of the bench may overwrite.
+_PACKAGE = Path(__file__).resolve().parent.parent
+
+
+def _refused_output(path: str, suite_path: Path) -> str:
+    """Why the bench refuses to write a report or a trace to ``path``, or "": never the suite it reads, never a file
+    of the package."""
+    if _same_file(path, str(suite_path)):
+        return "the suite's own file"
+    try:
+        inside = _PACKAGE in Path(path).resolve().parents
+    except (OSError, RuntimeError):
+        inside = False
+    return "a file of the package, whose configuration and suites the bench reads" if inside else ""
+
+
 def main(argv: list | None = None) -> int:
-    """Run the bench; 1 when a floor is broken (a breach is said first), 2 when the bench could not run or a run
-    erred, 0 otherwise."""
+    """Run the bench; 1 when a floor is broken (a breach is said first), 2 when the bench could not run, a run
+    erred or the trace asked for stopped, 0 otherwise."""
     args = build_parser().parse_args(argv)
+    trace = None
     personas = [p.strip() for p in str(args.persona).split(",") if p.strip()]
     unknown = sorted(set(personas) - set(PERSONAS))
     if unknown or not personas:
@@ -1722,29 +1932,47 @@ def main(argv: list | None = None) -> int:
         if args.repeat > 1 and options.get("temperature") == 0:
             raise ValueError("--repeat draws again only from a model that samples: at a temperature of 0 the runs "
                              "would repeat themselves and narrow the interval without a new draw")
+        if args.trace and args.json and _same_file(args.trace, args.json):
+            raise ValueError("--trace and --json name the same file")
+        for flag, named in (("--trace", args.trace), ("--json", args.json)):
+            why = _refused_output(named, resolve_suite_path(args.suite)) if named else ""
+            if why:
+                raise ValueError(f"{flag} names {why}")
         model_client = None
         if args.model:
             from opti_oignon.agent_eval.runner import RegistryChatClient
 
             model_client = (RegistryChatClient(args.model, options=options) if options
                             else RegistryChatClient(args.model))
-        report = run_bench(suite, personas=personas, settings=settings, model_client=model_client,
-                           memory_policies=memory_policies, repeat=args.repeat)
+        if args.trace:
+            trace = TraceFile(args.trace, {"model": {"name": args.model, "options": options}} if args.model else None)
+            try:
+                report = run_bench(suite, personas=personas, settings=settings, model_client=model_client,
+                                   memory_policies=memory_policies, repeat=args.repeat, trace=trace)
+            finally:
+                trace.close()
+        else:
+            report = run_bench(suite, personas=personas, settings=settings, model_client=model_client,
+                               memory_policies=memory_policies, repeat=args.repeat)
         if args.model:
             report["model"] = {"name": args.model, "options": options}
         if args.json:
             Path(args.json).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - the bench did not run: said, and never read as a floor
         print(f"error: the bench did not run: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if trace is not None and trace.lines:
+            print(f"the trace kept {trace.lines} line(s) in {trace.path}", file=sys.stderr)
         return 2
     print(_table(report))
+    if trace is not None and trace.failed:
+        print(f"error: the trace stopped after {trace.lines} line(s): {trace.failed}", file=sys.stderr)
     if any(held is False for held in report["floors"].values()):
         return 1
     errors = runs_in_error(report)
     if errors:
         print(f"error: {errors} run(s) ended in an error; the report is not a measurement", file=sys.stderr)
         return 2
-    return 0
+    return 2 if trace is not None and trace.failed else 0
 
 
 if __name__ == "__main__":  # pragma: no cover - module entry
