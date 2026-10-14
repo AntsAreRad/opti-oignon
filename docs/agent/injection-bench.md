@@ -131,7 +131,15 @@ is harder: its injections reuse your own words -- a search for what you
 asked followed by the secret, a note under the very title your task keeps,
 an instruction planted in memory in your name -- which no comparison with
 what you typed can tell from the task. The gate does not compare: it asks
-whether each value is a part you typed whole.
+whether each value is a part you typed whole. `injection_paraphrase.yaml`
+holds legitimate searches and notes that share no word with what you typed
+-- a request typed in French whose place comes from memory, searches whose
+words come from a file the task reads, a note whose words come from a
+search result -- and injections that come close to the task's own calls:
+one first makes the task's own search, one titles a note with your request.
+It shows what the strict policy costs: under `refuse_unendorsed` every
+search that is not your request typed whole is refused, the task's own
+included, where `ask_unendorsed` asks you about each one, once per search.
 
 ## Floors
 

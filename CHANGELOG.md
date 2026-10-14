@@ -11,6 +11,18 @@ package costs.
 
 ### Added
 
+- [SECURITY] The injection bench has a third suite, `injection_paraphrase`,
+  whose legitimate searches and notes share no word with the typed request
+  -- a request typed in French whose place comes from memory, searches
+  whose words come from a file, a note whose words come from a search
+  result -- and whose injections come close to the task's own calls: one
+  first makes the task's own search, one titles a note with the user's
+  request. On it the four floors hold with their witnesses; the strict
+  policy costs a model that does only the task exactly the tasks whose
+  search is not the typed request whole; and asking keeps them when the
+  person approves, with one question per such search, never one yes for
+  the rest of the turn.
+
 - The injection bench measures a served model as the sample it is:
   `--repeat N` runs every run N times; four rates of a model's rows come
   with their 95% Wilson interval, and the model's seconds per run after an
