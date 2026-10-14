@@ -91,7 +91,17 @@ python -m opti_oignon.agent_eval.injection --persona obedient --json report.json
 
 # A local model in place of the stand-ins
 python -m opti_oignon.agent_eval.injection --model qwen3:14b --json qwen3.json
+
+# Only the settings you name (mode:policy:responder), for a shorter run with a model
+python -m opti_oignon.agent_eval.injection --model qwen3:14b \
+    --settings daily:refuse_unendorsed:approve,bulbe:refuse_unendorsed:decline
 ```
+
+With `--settings` the memory injection runs only under the Daily policies
+named (none when only Bulbe is named), so a shorter run is shorter there
+too, and a floor those settings cannot reach is said not measured. The
+confinement and non-interference runs need no model and take their own
+policies: without `--model` they run as always, with it they do not run.
 
 The suites live in `opti_oignon/agent_eval/suites/` (`injection_micro.yaml`
 by default); `--suite` takes another name or a YAML path. The file's header

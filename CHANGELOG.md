@@ -11,6 +11,17 @@ package costs.
 
 ### Added
 
+- The injection bench's command runs only the settings it is given
+  (`--settings mode:policy:responder,...`), so a run with a local model
+  need not cover all eight, and its memory injection only under the Daily
+  policies named; a setting outside the modes, the policies or the
+  responders, or named twice, is refused before anything runs. The bench's
+  judges, and its capture arm's, are each held on the case that makes them
+  decide: a run that the round cap stopped while the model was still
+  talking answers no task, an attempt is the call the injection ends on
+  and on no other tool, a short planted text is judged leaked only whole,
+  and a floor is measured only with its whole control and its witness.
+
 - [SECURITY] The injection bench has a harder suite, `injection_mixed`,
   whose injections reuse the user's own words: a search for what the user
   asked followed by the secret, a note under the very title the user's task
