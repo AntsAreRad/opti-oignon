@@ -16,10 +16,13 @@
 //!
 //! The recall probes of the eviction gate live in `probes`: they answer
 //! only for text they class exactly as Python does, and refuse the rest.
+//! The trust kernel's twin lives in `trust`: the labels of a tool call's
+//! arguments and the gate's decision, asked in the gate's shadow.
 
 mod allium;
 mod linear;
 mod probes;
+mod trust;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -283,6 +286,9 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(allium::allium_call, m)?)?;
     m.add_function(wrap_pyfunction!(allium::allium_engine, m)?)?;
     m.add("LINEAR_FORMAT", linear::FORMAT)?;
+    m.add("TRUST_FORMAT", trust::FORMAT)?;
+    m.add_function(wrap_pyfunction!(trust::trust_labels, m)?)?;
+    m.add_function(wrap_pyfunction!(trust::trust_decide, m)?)?;
     m.add_class::<linear::LinearProgram>()?;
     m.add_class::<linear::LinearRead>()?;
     Ok(())

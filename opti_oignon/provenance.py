@@ -74,7 +74,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Collection, Mapping
 
-from opti_oignon.pending_writes import Endorsers, typed_units
+from opti_oignon.pending_writes import Endorsers, fold, typed_units
 
 logger = logging.getLogger(__name__)
 
@@ -240,9 +240,13 @@ def _tighter(first: str, second: str) -> str:
 
 def network_policy(mode: str, *, explicit: str | None = None, path: str | Path | None = None) -> str:
     """The policy a network call obeys in ``mode``: the file's, tightened by ``explicit``; Bulbe refuses."""
+    return _policy(mode, explicit, read_network_policy(path) if mode == MODE_DAILY else None)
+
+
+def _policy(mode: str, explicit: str | None, filed: str | None) -> str:
+    """The policy of ``network_policy`` with the file's reading already made (``filed``, Daily only)."""
     if mode != MODE_DAILY:
         return REFUSE_UNENDORSED
-    filed = read_network_policy(path)
     if explicit is None:
         return filed
     given = explicit if explicit in NETWORK_POLICIES else REFUSE_UNENDORSED
@@ -371,6 +375,7 @@ def assess(tool_name: str, arguments: Mapping[str, Any] | None, provenance: Turn
             executed[name] = unit
         elif executed[name] != unit:
             labels[name] = UNENDORSED
+    _shadow_labels(tool_name, effect, turn, dict(arguments or {}), defaults or {}, labels)
     return Assessment(effect=effect, labels=MappingProxyType(dict(labels)),
                       arguments=MappingProxyType(executed))
 
@@ -408,6 +413,13 @@ def _ask(fn: Callable[..., Any], tool_name: str, assessment: Assessment) -> bool
         return False
 
 
+def _answered(observed: dict[str, Any], fn: Callable[..., Any], tool_name: str, assessment: Assessment) -> bool:
+    """``_ask``, its answer kept in ``observed`` for the twin."""
+    answer = _ask(fn, tool_name, assessment)
+    observed["answers"].append(answer)
+    return answer
+
+
 def _named(names: Collection[str]) -> str:
     return ", ".join(f"{name} ({UNENDORSED})" for name in names)
 
@@ -415,7 +427,23 @@ def _named(names: Collection[str]) -> str:
 def decide(tool_name: str, assessment: Assessment, provenance: TurnProvenance | None = None, *, mode: str,
            offered: Collection[str] | None = None, approval: Callable[..., Any] | None = None,
            approval_required: bool = False) -> Verdict:
-    """Decide one assessed call: offered, permitted in ``mode``, within the network policy, asked when it must be."""
+    """Decide one assessed call: offered, permitted in ``mode``, within the network policy, asked when it must be.
+
+    The native twin decides the same call in the gate's shadow, from the policy file as read here and the answers
+    a person gave here, and never changes the verdict (``twin_share``).
+    """
+    observed: dict[str, Any] = {"answers": [], "filed": None}
+    verdict = _decide(tool_name, assessment, provenance, mode=mode, offered=offered, approval=approval,
+                      approval_required=approval_required, observed=observed)
+    _shadow_decision(tool_name, assessment, provenance, mode, offered, approval, approval_required, observed,
+                     verdict)
+    return verdict
+
+
+def _decide(tool_name: str, assessment: Assessment, provenance: TurnProvenance | None, *, mode: str,
+            offered: Collection[str] | None, approval: Callable[..., Any] | None, approval_required: bool,
+            observed: dict[str, Any]) -> Verdict:
+    """The reference's decision; ``observed`` takes the policy file's reading and each answer, as they come."""
     turn = provenance if provenance is not None else NO_PROVENANCE
     effect = assessment.effect
 
@@ -429,7 +457,12 @@ def decide(tool_name: str, assessment: Assessment, provenance: TurnProvenance | 
         return refused(NOT_PERMITTED,
                        f"Refused: the tool '{tool_name}' ({effect}) is not permitted in {mode} mode; nothing ran.")
     unendorsed = [name for name, tag in assessment.labels.items() if tag == UNENDORSED]
-    policy = network_policy(mode, explicit=turn.policy) if effect == NETWORK and unendorsed else FREE
+    if effect == NETWORK and unendorsed:
+        filed = read_network_policy() if mode == MODE_DAILY else None
+        observed["filed"] = filed
+        policy = _policy(mode, turn.policy, filed)
+    else:
+        policy = FREE
     if policy == REFUSE_UNENDORSED:
         return refused(UNENDORSED_REFUSED,
                        f"Refused: the call to '{tool_name}' would send {_named(unendorsed)}, which the user did not "
@@ -448,7 +481,7 @@ def decide(tool_name: str, assessment: Assessment, provenance: TurnProvenance | 
             return refused(NO_CHANNEL, f"Refused: the tool '{tool_name}' needs the user's approval, and this turn "
                                        "has no way to ask for it; nothing ran.")
         asked = True
-        if not _ask(channel, tool_name, assessment):
+        if not _answered(observed, channel, tool_name, assessment):
             return refused(DENIED, _DENIED_BY_GATE, asked=True)
     if policy == ASK_UNENDORSED and not asked:
         if turn.demand is None:
@@ -456,7 +489,7 @@ def decide(tool_name: str, assessment: Assessment, provenance: TurnProvenance | 
                            f"Refused: the call to '{tool_name}' would send {_named(unendorsed)}, which the user did "
                            "not type in this turn, and this turn has no way to ask the user; nothing was sent.")
         asked = True
-        if not _ask(turn.demand, tool_name, assessment):
+        if not _answered(observed, turn.demand, tool_name, assessment):
             return refused(DENIED, f"Refused: the user did not allow the call to '{tool_name}'; nothing was sent.",
                            asked=True)
     return Verdict(True, ALLOWED, "", assessment, asked)
@@ -478,3 +511,119 @@ def check(tool_name: str, arguments: Mapping[str, Any] | None, provenance: TurnP
         approval_required = approval is not None or (resolved != MODE_DAILY and assessment.effect not in _UNASKED)
     return decide(tool_name, assessment, provenance, mode=resolved, offered=offered, approval=approval,
                   approval_required=approval_required)
+
+
+# ---------------------------------------------------------------------------
+# The native twin, in the gate's shadow
+# ---------------------------------------------------------------------------
+# The trust kernel has a second implementation in the native core
+# (rust/oo_core/src/trust.rs): the label of each argument and the decision on
+# a call, from what this module hands it, the values folded here. It never
+# decides. This module decides, and the twin is asked beside it, at the call,
+# only when the core declares the shape this module hands over. Every
+# comparison is counted, agreed or diverged, and so is every call the twin was
+# not asked, by reason (``twin_share``): a twin that never answers reads as
+# such, never as silence. A divergence is said in the log by tool, class, mode
+# and labels, never by the values of the arguments.
+_TWIN_FORMAT = 1
+_TWIN_CALLS = ("labels", "decision")
+
+
+def _twin_lock():
+    """The lock of the counts below; threading is asked for here, never at module scope."""
+    import threading
+
+    return threading.Lock()
+
+
+_TWIN_COUNTS: dict[tuple[str, str], int] = {}
+_TWIN_LOCK = _twin_lock()
+
+
+def _twin_counted(call: str, outcome: str) -> None:
+    with _TWIN_LOCK:
+        _TWIN_COUNTS[(call, outcome)] = _TWIN_COUNTS.get((call, outcome), 0) + 1
+
+
+def twin_share() -> dict[str, dict[str, int]]:
+    """What the native twin answered since the process began: per call, the comparisons agreed and diverged, and the
+    calls it was not asked, by reason."""
+    with _TWIN_LOCK:
+        counts = sorted(_TWIN_COUNTS.items())
+    return {call: {outcome: n for (kind, outcome), n in counts if kind == call} for call in _TWIN_CALLS}
+
+
+def _twin() -> tuple[Any, str]:
+    """(the native core, "") when it holds the twin of this module's shape; (None, the reason) otherwise."""
+    try:
+        from opti_oignon.native import load
+    except Exception:  # noqa: BLE001 - absence is the reference alone
+        return None, "absent"
+    core = load()
+    if core is None:
+        return None, "absent"
+    if getattr(core, "TRUST_FORMAT", None) != _TWIN_FORMAT:
+        return None, "another shape"
+    return core, ""
+
+
+def _carried(text: str) -> bytes:
+    return text.encode("utf-8", "surrogatepass")
+
+
+def _shadow_labels(tool_name: str, effect: str, turn: TurnProvenance, arguments: dict[str, Any],
+                   defaults: Mapping[str, Any], labels: Mapping[str, str]) -> None:
+    """Ask the twin for the labels of the call ``assess`` labelled, and count what it answered."""
+    core, reason = _twin()
+    if core is None:
+        _twin_counted("labels", reason)
+        return
+    try:
+        units = [(_carried(fold(unit)), _carried(unit)) for unit in turn.units]
+        rows = []
+        for name, value in arguments.items():
+            default = defaults.get(name, MISSING)
+            same = default is not MISSING and type(value) is type(default) and bool(value == default)
+            text = isinstance(value, str)
+            rows.append((str(name), _carried(fold(value)) if text else None, _carried(value) if text else b"", same))
+        answered = dict(core.trust_labels(effect == NETWORK, units, rows))
+    except Exception as exc:  # noqa: BLE001 - the twin's failure is never the call's
+        _twin_counted("labels", "failed")
+        logger.warning("trust twin: labelling a call to %s failed (%s)", tool_name, type(exc).__name__)
+        return
+    if answered == dict(labels):
+        _twin_counted("labels", "agreed")
+        return
+    _twin_counted("labels", "diverged")
+    logger.warning("trust twin: the labels of a call to %s (%s) diverge: %s here, %s in the twin",
+                   tool_name, effect, dict(labels), answered)
+
+
+def _shadow_decision(tool_name: str, assessment: Assessment, provenance: TurnProvenance | None, mode: str,
+                     offered: Collection[str] | None, approval: Callable[..., Any] | None,
+                     approval_required: bool, observed: dict[str, Any], verdict: Verdict) -> None:
+    """Ask the twin for the decision ``decide`` took, from what it read and was answered, and count what it gave."""
+    core, reason = _twin()
+    if core is None:
+        _twin_counted("decision", reason)
+        return
+    turn = provenance if provenance is not None else NO_PROVENANCE
+    here = (verdict.allowed, verdict.reason, verdict.asked)
+    try:
+        lengths = [_shown_length(assessment.arguments.get(name)) for name, tag in assessment.labels.items()
+                   if tag == UNENDORSED]
+        there = tuple(core.trust_decide(
+            str(tool_name), sorted(str(name) for name in offered) if offered is not None else None,
+            assessment.effect, str(mode), [(str(n), str(t)) for n, t in assessment.labels.items()],
+            None if turn.policy is None else str(turn.policy), observed["filed"], lengths, SHOWN_LIMIT,
+            bool(approval_required), approval is not None, turn.demand is not None, list(observed["answers"])))
+    except Exception as exc:  # noqa: BLE001 - the twin's failure is never the call's
+        _twin_counted("decision", "failed")
+        logger.warning("trust twin: deciding a call to %s failed (%s)", tool_name, type(exc).__name__)
+        return
+    if there == here:
+        _twin_counted("decision", "agreed")
+        return
+    _twin_counted("decision", "diverged")
+    logger.warning("trust twin: the decision on a call to %s (%s, %s, labels %s) diverges: %s here, %s in the twin",
+                   tool_name, assessment.effect, mode, dict(assessment.labels), here, there)

@@ -11,6 +11,19 @@ package costs.
 
 ### Added
 
+- The gate that labels each argument of a tool call and decides the call
+  has a second implementation in the native core, asked in its shadow at
+  every call. The gate decides; the twin decides the same call from the
+  same inputs -- the values as the gate folds them, the policy file as the
+  gate read it, the answers a person gave to the gate's questions -- and
+  never changes the verdict. Every comparison is counted, agreed or
+  diverged, and so is every call the twin was not asked because the core
+  is not built, is of another shape or failed (`provenance.twin_share`); a
+  divergence is said in the log by tool, class, mode and labels, never by
+  the values of the arguments. On six thousand calls drawn at random
+  through every reason the gate gives, the twin agrees on every label and
+  every decision.
+
 - [SECURITY] A pattern from outside the code that the linear check refuses
   is read, where it can be, by an engine without backtracking rather than
   refused. A new module, `linear_engine`, answers as Python's engine does --
