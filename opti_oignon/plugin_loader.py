@@ -499,6 +499,9 @@ class PluginLoader:
     def _register_hooks(self, loaded: LoadedPlugin) -> int:
         """Register a loaded plugin's hooks with the global HookManager.
 
+        Each hook is shown the plugin's configuration as the registry holds
+        it at the call.
+
         Returns the number of hooks successfully registered.
         """
         try:
@@ -507,9 +510,12 @@ class PluginLoader:
             logger.debug("plugin_hooks not available, skipping hook registration")
             return 0
 
+        config_source = self._config_source(loaded.name)
         count = 0
         for hook_name, callback in loaded.hooks.items():
-            if hook_manager.register(hook_name, loaded.name, callback):
+            if hook_manager.register(
+                hook_name, loaded.name, callback, config_source=config_source,
+            ):
                 count += 1
                 logger.debug(
                     "Registered hook '%s' for plugin '%s'",
@@ -521,6 +527,24 @@ class PluginLoader:
                 loaded.name, count,
             )
         return count
+
+    def _config_source(self, name: str) -> Any:
+        """Read a plugin's configuration from the registry, at each call.
+
+        None without a registry. A plugin the registry no longer holds has
+        no configuration to read, and its hook is not run.
+        """
+        registry = self._registry
+        if registry is None:
+            return None
+
+        def read() -> dict[str, Any]:
+            record = registry.get(name)
+            if record is None:
+                raise LookupError(f"plugin '{name}' is not in the registry")
+            return record.config
+
+        return read
 
     def _unregister_hooks(self, name: str) -> int:
         """Remove all hooks for a plugin from the global HookManager.

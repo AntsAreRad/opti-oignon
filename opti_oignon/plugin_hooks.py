@@ -28,6 +28,8 @@ class HookContext:
     in-place mutation (including ``set()``) affects only that local view.
     To propagate changes downstream, a hook must RETURN a dict -- it is
     merged into the chain data for subsequent hooks and ``final_data``.
+    ``config`` is the hook's own plugin's configuration, read at the call
+    (see ``HookManager.register``), and a copy of it.
     """
 
     hook_name: str
@@ -85,6 +87,7 @@ class _HookRegistration:
     callback: Callable[[HookContext], dict[str, Any] | None]
     priority: int = DEFAULT_PRIORITY
     enabled: bool = True
+    config_source: Callable[[], dict[str, Any]] | None = None
 
 
 class HookManager:
@@ -114,6 +117,7 @@ class HookManager:
         callback: Callable[[HookContext], dict[str, Any] | None],
         *,
         priority: int = DEFAULT_PRIORITY,
+        config_source: Callable[[], dict[str, Any]] | None = None,
     ) -> bool:
         """Register a hook callback for a specific hook point.
 
@@ -128,6 +132,13 @@ class HookManager:
             a dict of modified data.
         priority : int
             Execution priority (lower = runs first). Default 100.
+        config_source : callable, optional
+            Returns the plugin's configuration. It is called at each
+            execution, so that what is saved holds from the next call on,
+            and what it returns is shown to the hook over the caller's
+            ``config``. A source that raises fails the hook, which is not
+            run: a setting the user saved is never set aside for the
+            plugin's defaults.
 
         Returns
         -------
@@ -155,6 +166,7 @@ class HookManager:
             hook_name=hook_name,
             callback=callback,
             priority=priority,
+            config_source=config_source,
         )
 
         if hook_name not in self._hooks:
@@ -236,7 +248,8 @@ class HookManager:
         data : dict, optional
             Data to pass through the hook chain.
         config : dict, optional
-            Configuration data available to hooks.
+            Configuration shown to every hook, under each plugin's own
+            (see ``register``).
         metadata : dict, optional
             Additional metadata for hooks.
         redact_sensitive : bool
@@ -282,7 +295,6 @@ class HookManager:
                 conversation_id=conversation_id,
                 model=model,
                 data=plugin_data,
-                config=dict(config or {}),
                 metadata=dict(metadata or {}),
             )
 
@@ -294,6 +306,7 @@ class HookManager:
             )
 
             try:
+                ctx.config = _hook_config(config, reg)
                 returned = reg.callback(ctx)
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 result.success = True
@@ -477,6 +490,15 @@ def _isolated(data: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("hook data shown as a shallow copy: %s", exc)
         return dict(data)
+
+
+def _hook_config(
+    shared: dict[str, Any] | None, reg: _HookRegistration,
+) -> dict[str, Any]:
+    """The configuration one hook is shown, as a copy: the caller's, under
+    the hook's own plugin's as read now."""
+    own = reg.config_source() if reg.config_source is not None else {}
+    return copy.deepcopy({**(shared or {}), **own})
 
 
 def has_inference_content_permission(plugin_name: str) -> bool:

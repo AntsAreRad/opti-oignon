@@ -2708,6 +2708,22 @@ package costs.
 
 ### Fixed
 
+- A plugin's hooks are given the configuration saved for it. What the user
+  saves for a plugin, in the Plugins panel or through
+  `PUT /api/plugins/{name}/config`, was stored and handed to nothing: the
+  chat routes call the hooks without a configuration, so every plugin ran
+  on its own defaults whatever was saved. Each hook is now shown its own
+  plugin's configuration, read from the registry at each call: what is
+  saved holds from the next call on, without a restart; no plugin is shown
+  another's; and nothing a hook does to the copy it is shown reaches the
+  store. A hook whose configuration cannot be read is not run, and is
+  reported as failed, rather than run on its defaults: a setting the user
+  saved, such as one that keeps a plugin from reaching the network, is
+  never set aside. The plugins delivered with Opti-Oignon still leave a
+  reply as it was: none of them is shown its content, and the chat routes
+  take back from a plugin only an annotation or a suffix, which none of
+  them returns.
+
 - [SECURITY] The tone shifter reads a reply as its code blocks and the prose
   between them, and gives only the prose to its rules. The code blocks stood
   in the text while the rules ran as markers (`__CODE_BLOCK_<n>__`), put back
