@@ -269,6 +269,7 @@ class PluginRegistry:
             self._load_from_db()
             if self._discover_builtins:
                 _discover_builtins(self)
+                _withdraw_default_enablement(self)
         return self._plugin_map
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -654,9 +655,10 @@ def _discover_builtins(
     and installed_at are preserved by register()).  A record whose
     persisted directory no longer exists -- or differs from the folder
     the manifest was actually found in -- is refreshed the same way, so
-    phantom name-derived paths heal on the next discovery pass.  The
-    ``builtin_dir`` parameter exists for tests; production callers use
-    the default.
+    phantom name-derived paths heal on the next discovery pass.  A
+    builtin found for the first time is registered installed: it runs
+    once the user enables it.  The ``builtin_dir`` parameter exists for
+    tests; production callers use the default.
 
     Returns the number of newly registered builtins.
     """
@@ -705,13 +707,57 @@ def _discover_builtins(
                     )
             continue
         try:
-            registry.register(manifest, str(real_dir), auto_enable=True)
+            registry.register(manifest, str(real_dir), auto_enable=False)
             registered += 1
         except Exception as exc:
             logger.warning("Failed to auto-register builtin '%s': %s", manifest.name, exc)
     if registered > 0:
         logger.info("Auto-registered %d builtin plugin(s)", registered)
     return registered
+
+
+def _withdraw_default_enablement(
+    registry: PluginRegistry,
+    builtin_dir: Path | None = None,
+) -> list[str]:
+    """Set to installed each builtin enabled by default that the user never touched.
+
+    Discovery used to register every builtin enabled, and every enabled
+    plugin starts a worker at boot. A builtin enabled that way has no
+    ``state:`` event in its history, since the registry records one at
+    each change of state. When the user never changed its state and
+    never saved a configuration for it, and its record is the builtin's
+    own folder, it is set to installed, which records such an event: the
+    pass is done once, and a later enable is the user's and holds. A
+    plugin the user installed is never touched. Returns the names it set.
+    """
+    if builtin_dir is None:
+        builtin_dir = Path(__file__).parent / "plugins"
+    if not builtin_dir.is_dir():
+        return []
+
+    withdrawn: list[str] = []
+    for manifest, real_dir in registry.discover_with_paths(builtin_dir):
+        record = registry.get(manifest.name)
+        if (
+            record is None
+            or record.state != PLUGIN_STATE_ENABLED
+            or record.config
+            or not record.plugin_dir
+            or Path(record.plugin_dir).resolve() != real_dir.resolve()
+        ):
+            continue
+        history = registry.get_version_history(manifest.name)
+        if any(str(event["action"]).startswith("state:") for event in history):
+            continue
+        registry.set_state(manifest.name, PLUGIN_STATE_INSTALLED)
+        withdrawn.append(manifest.name)
+    if withdrawn:
+        logger.info(
+            "Builtin plugin(s) enabled by default and never touched, now installed: %s",
+            ", ".join(withdrawn),
+        )
+    return withdrawn
 
 
 try:

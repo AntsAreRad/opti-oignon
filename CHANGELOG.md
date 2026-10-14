@@ -1621,6 +1621,19 @@ package costs.
 
 ### Changed
 
+- The plugins delivered with Opti-Oignon run only once the user enables
+  them. Discovery registered each of them enabled, and every enabled plugin
+  starts a worker of its own at boot: fifteen workers, about 300 MB of
+  memory between them as measured, for plugins that leave every reply as
+  it was (none of them is shown a reply's content, and the chat routes
+  keep none of what they return). A delivered plugin found for the first
+  time is now registered installed. On an existing installation, a pass at
+  the first start sets to installed each delivered plugin that was enabled
+  by default and that the user never touched: its state never changed,
+  the registry recording every change of state, and no configuration was
+  saved for it. A plugin the user enabled, disabled, configured or
+  installed keeps its state, and enabling one afterwards holds.
+
 - [SECURITY] The chat refuses a tool its turn did not offer, whether the
   model decided on it or it was rebuilt from the model's prose, and a tool
   whose class the machine's mode does not permit, the mode read at each
