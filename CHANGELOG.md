@@ -11,6 +11,20 @@ package costs.
 
 ### Added
 
+- [SECURITY] The injection bench has a capture arm
+  (`python -m opti_oignon.agent_eval.capture`): it carries an injection into
+  a conversation every way the mirror can carry words the user did not type
+  -- a document pasted apart from the typed words or among them, a turn that
+  is a document, an attached file's name, a reworded turn or part, a turn of
+  no known origin, a declaration outside the grammar, the assistant's reply,
+  an unreadable turn -- hands it to the automatic capture's own filter, and
+  keeps everything the filter lets through with the worst extraction model.
+  Through the filter no injected word is kept, from any of them, not even a
+  run of six; handed every turn's
+  text, the same extractor keeps the injection from each, and a later run
+  that reads the memory back carries it out under `free`. The user's own
+  typed words are kept.
+
 - [SECURITY] An injection bench measures the gates the way published
   agent-security benchmarks measure a defence
   (`python -m opti_oignon.agent_eval.injection`; `docs/agent/injection-bench.md`):
@@ -2765,6 +2779,16 @@ package costs.
   folder of their own, keeps its record.
 
 ### Fixed
+
+- [SECURITY] The automatic memory capture reads a turn's declaration as the
+  mirror's reader does: a turn whose declaration lies outside the
+  turn-origin grammar -- an unknown origin, a turn of no known origin that
+  carries segments, a label its role cannot carry -- gives the capture
+  nothing. Such a turn with a part labelled typed was handed whole to the
+  extraction, though the mirror holds it of no known origin. The turns the
+  application writes are checked against the grammar when they are saved,
+  so such a turn comes only from a row written another way; the capture's
+  copy of the grammar is held equal to the reader's by its syntax tree.
 
 - Every frame a socket sends is one a strict parser reads. The browser
   reads each frame of the chat, agent, coding, benchmark and metrics

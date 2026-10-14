@@ -61,6 +61,52 @@ def _auto_capture_enabled() -> bool:
     return raw not in ("0", "false", "off", "no", "")
 
 
+# The turn-origin grammar as the mirror's reader holds it (``memory.probes``), copied whole so that this module, loaded
+# alone, keeps no dependency: the copy is held equal to the reader's by its syntax tree.
+_ORIGIN_BASES = ("typed", "refined", "document", "assistant", "legacy")
+_ORIGIN_FLAGS = ("tool", "web")
+_ORIGIN_ROLES = {
+    "user": ("typed", "refined", "document", "legacy"),
+    "assistant": ("assistant", "legacy"),
+}
+
+
+def _origin_defect(role, origin, segments, length):
+    """Why a turn's origin lies outside the grammar, or None when it lies inside."""
+    if not isinstance(origin, str) or not origin:
+        return "an origin is a non-empty string"
+    base, *flags = origin.split("+")
+    if base not in _ORIGIN_BASES:
+        return f"origin base {base[:24]!r} is not in the grammar"
+    for flag in flags:
+        if flag not in _ORIGIN_FLAGS:
+            return f"origin flag {flag[:24]!r} is not in the grammar"
+    if flags != sorted(set(flags)):
+        return "origin flags are written once each, in order"
+    if flags and base != "assistant":
+        return f"a {base} origin carries no flag"
+    allowed = _ORIGIN_ROLES.get(role, ("legacy",)) if isinstance(role, str) else ("legacy",)
+    if base not in allowed:
+        return f"role {str(role)[:24]!r} cannot carry {base}"
+    if not isinstance(segments, (list, tuple)):
+        return "segments are a list"
+    if segments and base == "legacy":
+        return "a legacy turn has no segments"
+    end = 0
+    for segment in segments:
+        if not isinstance(segment, (list, tuple)) or len(segment) != 3:
+            return "a segment is [start, end, base]"
+        start, stop, label = segment
+        if type(start) is not int or type(stop) is not int:
+            return "segment bounds are integers"
+        if not end <= start < stop <= length:
+            return f"segment [{start}, {stop}] overlaps, is empty or leaves the content"
+        if label == "legacy" or label not in allowed:
+            return f"role {str(role)[:24]!r} carries no {str(label)[:24]} segment"
+        end = stop
+    return None
+
+
 def typed_turns(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """The user's own typed words in ``messages``, as user turns for the extraction.
 
@@ -70,7 +116,9 @@ def typed_turns(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     turn of no known origin (legacy), an assistant reply and any turn whose
     origin or segments cannot be read give nothing -- segments the store could
     not decode arrive as None, and such a turn is held legacy, as the mirror
-    holds it.
+    holds it. So does a declaration outside the turn-origin grammar (an
+    unknown base, a legacy turn that carries segments, a label its role
+    cannot carry): the mirror's reader holds it legacy, with no segment.
     """
     turns = []
     for message in messages or ():
@@ -81,6 +129,8 @@ def typed_turns(messages: list[dict[str, Any]] | None) -> list[dict[str, str]]:
             continue
         segments = message.get("segments")
         if not isinstance(segments, (list, tuple)):
+            continue
+        if _origin_defect("user", origin, segments, len(content)) is not None:
             continue
         if not segments:
             parts = [content] if origin == "typed" else []
