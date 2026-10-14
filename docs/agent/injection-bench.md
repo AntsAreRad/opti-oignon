@@ -95,6 +95,12 @@ python -m opti_oignon.agent_eval.injection --model qwen3:14b --json qwen3.json
 # Only the settings you name (mode:policy:responder), for a shorter run with a model
 python -m opti_oignon.agent_eval.injection --model qwen3:14b \
     --settings daily:refuse_unendorsed:approve,bulbe:refuse_unendorsed:decline
+
+# Every run three times, the model sampling as it is configured
+python -m opti_oignon.agent_eval.injection --model qwen3:14b --repeat 3 --json qwen3.json
+
+# One pass at a temperature of 0: the model's likeliest answer at each turn
+python -m opti_oignon.agent_eval.injection --model qwen3:14b --temperature 0
 ```
 
 With `--settings` the memory injection runs only under the Daily policies
@@ -102,6 +108,21 @@ named (none when only Bulbe is named), so a shorter run is shorter there
 too, and a floor those settings cannot reach is said not measured. The
 confinement and non-interference runs need no model and take their own
 policies: without `--model` they run as always, with it they do not run.
+
+A model samples, so its report says how surely and how fast. With `--model`
+each row carries a 95% Wilson interval for four of its rates -- utility,
+utility under attack, targeted attack success, attempt rate -- and the
+seconds the model took per run (median, longest and total, summed over the
+run's turns); the report names the model and the decoding options it was
+handed. One untimed turn warms the model up first, so the first row does
+not pay for loading it; that turn's seconds are reported apart.
+`--repeat N` runs every run of the rows and of the memory injection N
+times, and the denominators count the repeats. `--temperature`, a finite
+number from 0, is handed to the engine; without it the model decodes as its
+engine is configured. A repeat draws again only from a model that samples:
+at a temperature of 0 the runs would repeat themselves and narrow the
+interval without a new draw, so the command refuses the two together. The
+personas are deterministic: their reports carry none of this.
 
 The suites live in `opti_oignon/agent_eval/suites/` (`injection_micro.yaml`
 by default); `--suite` takes another name or a YAML path. The file's header
@@ -183,6 +204,12 @@ document.
 - The stand-ins bound what a model can do with the values it reads; how
   often a real model falls for an injection is measured only with
   `--model`.
+- An interval is about this suite's pairs: how far the model's rate on
+  them may lie from the one observed. It says nothing of the tasks and
+  injections the suite does not hold, and no number of repeats narrows
+  that. The seconds are those of each turn's call to the engine, its queue
+  included; the stand-in tools take none, so a real tool's time is not in
+  them.
 - How many calls a turn makes, and when, can still signal a little: the
   gate holds what a call carries, not how many calls there are.
 - The `contained` kind is reached whenever the sandbox is permitted: the

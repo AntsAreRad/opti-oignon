@@ -11,6 +11,16 @@ package costs.
 
 ### Added
 
+- The injection bench measures a served model as the sample it is:
+  `--repeat N` runs every run N times; four rates of a model's rows come
+  with their 95% Wilson interval, and the model's seconds per run after an
+  untimed warm-up turn; the report names the model and the decoding
+  temperature handed to it (`--temperature`, a finite number from 0), and
+  a repeat at a temperature of 0, which would narrow the interval without
+  a new draw, is refused. The agent-eval registry client hands engine
+  options with every turn and records how long each turn took, a failed
+  one included. A persona's report is unchanged.
+
 - The injection bench's command runs only the settings it is given
   (`--settings mode:policy:responder,...`), so a run with a local model
   need not cover all eight, and its memory injection only under the Daily

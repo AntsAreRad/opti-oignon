@@ -1190,6 +1190,55 @@ def _rate(count: int, total: int) -> dict:
     return {"count": count, "of": total, "rate": round(count / total, 4) if total else 0.0}
 
 
+_Z95 = 1.959964
+_RATES = ("utility", "utility_under_attack", "targeted_asr", "attempt_rate")
+
+
+def wilson(count: int, total: int) -> list:
+    """The 95% Wilson score interval of ``count`` out of ``total``, to four places; ``[0.0, 1.0]`` when there is none.
+
+    A rate a model gave is a sample: the interval says how far its true rate
+    may lie, and stays inside [0, 1] where a normal approximation would not.
+    """
+    if not total:
+        return [0.0, 1.0]
+    share = count / total
+    spread = _Z95 * _Z95 / total
+    center = (share + spread / 2) / (1 + spread)
+    half = _Z95 * (share * (1 - share) / total + spread / (4 * total)) ** 0.5 / (1 + spread)
+    return [round(max(0.0, center - half), 4), round(min(1.0, center + half), 4)]
+
+
+def _turn_seconds(model_client: Any) -> list:
+    """The seconds each of the model's turns took so far, as its client records them (none for a persona)."""
+    return list(getattr(model_client, "turn_seconds", None) or [])
+
+
+def _warm_up(model_client: Any) -> float | None:
+    """One turn before any row, kept out of every row's time, so the first row does not pay for loading the model.
+
+    Only a client that records its turns' seconds is warmed up; the turn's
+    seconds are returned, or None.
+    """
+    if getattr(model_client, "turn_seconds", None) is None:
+        return None
+    before = len(_turn_seconds(model_client))
+    for _chunk in model_client.stream([{"role": "user", "content": "Reply with the word ready."}]):
+        pass
+    return round(float(sum(_turn_seconds(model_client)[before:])), 4)
+
+
+def _seconds(values: list) -> dict:
+    """The model's seconds per run: how many runs, the median, the longest and the total, to four places."""
+    ordered = sorted(values)
+    if not ordered:
+        return {"runs": 0, "median": 0.0, "max": 0.0, "total": 0.0}
+    middle = len(ordered) // 2
+    median = ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+    return {"runs": len(ordered), "median": round(median, 4), "max": round(ordered[-1], 4),
+            "total": round(sum(ordered), 4)}
+
+
 def _client(kind: str, plan: Iterable[Step], injections: Iterable[InjectionTask], suite: Suite, typed: str,
             model_client: Any = None, secret: str | None = None) -> Any:
     if model_client is not None:
@@ -1207,30 +1256,41 @@ def _stopped(stops: dict, outcome: RunOutcome) -> None:
         stops[outcome.stop_reason] = stops.get(outcome.stop_reason, 0) + 1
 
 
-def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any = None) -> dict:
-    """One row: every user task alone, then every pair of a user task and an injection task."""
+def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any = None, repeat: int = 1) -> dict:
+    """One row: every user task alone, then every pair of a user task and an injection task, each ``repeat`` times.
+
+    With a model, the row also carries the 95% interval of its utility,
+    utility under attack, targeted success and attempt rate, and, when the
+    model's client records its turns' seconds, the seconds it took per run;
+    a persona's row has neither.
+    """
     utility = under_attack = succeeded = attempted = 0
+    seconds: list = []
     by_kind = {kind: [0, 0, 0] for kind in KINDS}
     asked = proposed = refused = calls = asked_alone = dropped = enumerated = unread = 0
     stops: dict = {}
     modes: list = []
     policies: list = []
-    for task in suite.user_tasks:
+    for task in [*suite.user_tasks] * repeat:
         world = _World(suite)
+        before = len(_turn_seconds(model_client))
         outcome = run_once(world, task.prompt, _client(persona, task.plan, (), suite, task.prompt, model_client),
                            mode=setting.mode, policy=setting.policy, responder=setting.responder)
+        seconds.append(float(sum(_turn_seconds(model_client)[before:])))
         utility += utility_holds(task, outcome, suite.secret)
         asked_alone += outcome.asked
         _stopped(stops, outcome)
         modes.append(outcome.mode)
         policies.append(outcome.policy)
     pairs = 0
-    for task in suite.user_tasks:
+    for task in [*suite.user_tasks] * repeat:
         for injection in suite.injection_tasks:
             world = _World(suite, injection=injection.text)
             client = _client(persona, task.plan, [injection], suite, task.prompt, model_client)
+            before = len(_turn_seconds(model_client))
             outcome = run_once(world, task.prompt, client, mode=setting.mode, policy=setting.policy,
                                responder=setting.responder)
+            seconds.append(float(sum(_turn_seconds(model_client)[before:])))
             pairs += 1
             under_attack += utility_holds(task, outcome, suite.secret)
             hit = attack_succeeded(injection, outcome, suite.secret, task.prompt)
@@ -1250,8 +1310,8 @@ def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any
             unread += outcome.unread
             modes.append(outcome.mode)
             policies.append(outcome.policy)
-    tasks = len(suite.user_tasks)
-    return {
+    tasks = len(suite.user_tasks) * repeat
+    row = {
         "persona": persona if model_client is None else "model",
         "mode_asked": setting.mode,
         "mode": _joined(modes),
@@ -1274,6 +1334,11 @@ def bench_row(suite: Suite, persona: str, setting: Setting, *, model_client: Any
         "answers_unread": unread,
         "calls": calls,
     }
+    if model_client is not None:
+        row["intervals"] = {name: wilson(row[name]["count"], row[name]["of"]) for name in _RATES}
+        if getattr(model_client, "turn_seconds", None) is not None:
+            row["model_seconds"] = _seconds(seconds)
+    return row
 
 
 def _accepted(world: _World, record: Any) -> bool:
@@ -1317,7 +1382,7 @@ def _review(world: _World, review: str) -> int:
 
 
 def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: Iterable[str] = REVIEWS,
-                model_client: Any = None) -> list:
+                model_client: Any = None, repeat: int = 1) -> list:
     """The two-session memory injection, for each injection that persists, under each policy and review.
 
     The second session runs where an injection that plants another's words
@@ -1335,7 +1400,7 @@ def memory_rows(suite: Suite, *, policies: Iterable[str] = POLICIES, reviews: It
             injected = tried = landed_unreviewed = landed_reviewed = carried = second_runs = tried_later = 0
             stops: dict = {}
             modes: list = []
-            for injection in persisting:
+            for injection in persisting * repeat:
                 for task in suite.user_tasks:
                     world = _World(suite, injection=injection.text)
                     client = _client(OBEDIENT, task.plan, [injection], suite, task.prompt, model_client)
@@ -1516,17 +1581,24 @@ def floors(report: dict) -> dict:
 
 def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Iterable[Setting] | None = None,
               model_client: Any = None, memory: bool = True, values: bool = True,
-              memory_policies: Iterable[str] = POLICIES) -> dict:
+              memory_policies: Iterable[str] = POLICIES, repeat: int = 1) -> dict:
     """The whole bench over ``suite``: the rows, the memory injection, the confinement and the non-interference.
 
     The memory injection runs in Daily under ``memory_policies`` (every
     policy unless the caller limits them); the confinement and the
     non-interference run only without a model, under their own policies.
+    ``repeat`` runs every run of the rows and of the memory injection that
+    many times: a model samples, a persona gives the same counts each time.
+    A model whose client records its turns' seconds is warmed up by one turn
+    first, kept out of the rows' time and reported apart.
     """
+    if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat < 1:
+        raise ValueError(f"repeat is a count of runs, at least 1: not {repeat!r}")
     chosen = list(settings) if settings is not None else default_settings()
+    warmed = _warm_up(model_client) if model_client is not None else None
     if model_client is not None:
         personas = ("model",)
-    rows = [bench_row(suite, persona, setting, model_client=model_client)
+    rows = [bench_row(suite, persona, setting, model_client=model_client, repeat=repeat)
             for persona in personas for setting in chosen]
     rows.sort(key=lambda row: (row["persona"], row["mode_asked"], row["policy_asked"], row["responder"]))
     report = {
@@ -1536,10 +1608,15 @@ def run_bench(suite: Suite, *, personas: Iterable[str] = PERSONAS, settings: Ite
         "machine_mode": gate.machine_mode(),
         "pairs": len(suite.user_tasks) * len(suite.injection_tasks),
         "rows": rows,
-        "memory": memory_rows(suite, policies=list(memory_policies), model_client=model_client) if memory else [],
+        "memory": (memory_rows(suite, policies=list(memory_policies), model_client=model_client, repeat=repeat)
+                   if memory else []),
         "confinement": confinement(suite) if values and model_client is None else [],
         "noninterference": noninterference(suite) if values and model_client is None else [],
     }
+    if repeat != 1:
+        report["repeat"] = repeat
+    if warmed is not None:
+        report["model_warm_up_seconds"] = warmed
     report["floors"] = floors(report)
     return report
 
@@ -1556,6 +1633,11 @@ def runs_in_error(report: dict) -> int:
 
 def _table(report: dict) -> str:
     lines = [f"injection bench, suite {report['suite']}, {report['pairs']} pairs, machine {report['machine_mode']}"]
+    if "model" in report:
+        lines.append(f"  model {report['model']['name']}, options {report['model']['options']},"
+                     f" warm-up {report.get('model_warm_up_seconds', 'not timed')} s")
+    if "repeat" in report:
+        lines.append(f"  each run {report['repeat']} times")
     for row in report["rows"]:
         lines.append(
             f"  {row['persona']:<10} {row['mode']:<6} {row['policy']:<18} {row['responder']:<8}"
@@ -1565,6 +1647,12 @@ def _table(report: dict) -> str:
             f"  attempted {row['attempt_rate']['count']}/{row['attempt_rate']['of']}"
             f"  asks {row['asks_per_pair']}  proposals {row['proposals_per_pair']}"
             f"  stopped {sum(row['runs_stopped'].values())}")
+        if "intervals" in row:
+            low, high = row["intervals"]["targeted_asr"]
+            seconds = row.get("model_seconds")
+            timing = (f"  model s/run median {seconds['median']} max {seconds['max']} total {seconds['total']}"
+                      if seconds else "  model time not recorded")
+            lines.append(f"  {'':<10} asr 95% [{low}, {high}]{timing}")
     for row in report["memory"]:
         lines.append(
             f"  memory {row['policy_asked']:<18} {row['review']:<12}"
@@ -1590,6 +1678,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Comma-separated mode:policy:responder rows to run (default: every setting); "
                              "the memory injection then runs only under the Daily policies named, "
                              "e.g. daily:refuse_unendorsed:approve,bulbe:refuse_unendorsed:decline")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Run every run this many times (default 1), for a model that samples; a persona "
+                             "repeats its counts; not with a temperature of 0")
+    parser.add_argument("--temperature", type=float, default=None,
+                        help="With --model: the decoding temperature handed to the engine, from 0 "
+                             "(default: the engine's own)")
     parser.add_argument("--json", default=None, help="Write the report as JSON to this path")
     return parser
 
@@ -1608,13 +1702,24 @@ def main(argv: list | None = None) -> int:
         settings = parse_settings(args.settings) if args.settings is not None else None
         memory_policies = POLICIES if settings is None else [
             policy for policy in POLICIES if any(each.mode == DAILY and each.policy == policy for each in settings)]
+        options = {} if args.temperature is None else {"temperature": args.temperature}
+        if options and not args.model:
+            raise ValueError("--temperature sets a model's decoding: it needs --model")
+        if options and not 0.0 <= options["temperature"] < float("inf"):
+            raise ValueError(f"--temperature is a finite number from 0: not {args.temperature!r}")
+        if args.repeat > 1 and options.get("temperature") == 0:
+            raise ValueError("--repeat draws again only from a model that samples: at a temperature of 0 the runs "
+                             "would repeat themselves and narrow the interval without a new draw")
         model_client = None
         if args.model:
             from opti_oignon.agent_eval.runner import RegistryChatClient
 
-            model_client = RegistryChatClient(args.model)
+            model_client = (RegistryChatClient(args.model, options=options) if options
+                            else RegistryChatClient(args.model))
         report = run_bench(suite, personas=personas, settings=settings, model_client=model_client,
-                           memory_policies=memory_policies)
+                           memory_policies=memory_policies, repeat=args.repeat)
+        if args.model:
+            report["model"] = {"name": args.model, "options": options}
         if args.json:
             Path(args.json).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - the bench did not run: said, and never read as a floor

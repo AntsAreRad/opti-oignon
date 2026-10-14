@@ -251,11 +251,18 @@ class RegistryChatClient:
     single chunk is a valid stream. With no backend the turn raises by
     name; nothing here reaches for a client. ``host`` is accepted for the
     former signature and unused: where a model is served is the registry's.
+    ``options`` are engine options handed with every turn beside the tools
+    (a temperature: each backend reads the options it knows);
+    ``turn_seconds`` holds how long each turn's ``generate`` took, the
+    engine's queue and a model's load included, a turn that failed too, for
+    a caller that reports the model's time.
     """
 
-    def __init__(self, model: str, *, host: str | None = None) -> None:
+    def __init__(self, model: str, *, host: str | None = None, options: dict[str, Any] | None = None) -> None:
         self._model = model
         self._host = host
+        self._options = dict(options or {})
+        self.turn_seconds: list[float] = []
 
     def stream(self, messages: list[dict[str, Any]], tools: Any = None):
         try:
@@ -269,14 +276,18 @@ class RegistryChatClient:
             raise RuntimeError(
                 f"no inference backend is registered in the registry for {self._model!r}"
             )
-        options: dict[str, Any] = {}
+        options: dict[str, Any] = dict(self._options)
         if tools:
             options["tools"] = list(tools)
-        response = backend.generate(
-            model=self._model,
-            messages=messages,
-            options=options or None,
-        )
+        started = time.monotonic()
+        try:
+            response = backend.generate(
+                model=self._model,
+                messages=messages,
+                options=options or None,
+            )
+        finally:
+            self.turn_seconds.append(time.monotonic() - started)
         to_dict = getattr(response, "to_dict", None)
         if callable(to_dict):
             yield to_dict()
