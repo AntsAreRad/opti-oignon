@@ -167,6 +167,12 @@ except Exception:
     _maybe_curate = None
     _onion_memory_block = None
     _onion_enabled = None
+# The seam through which a turn hands the onion its own counter, imported on
+# its own: a librarian without it leaves the three names above as they are.
+try:
+    from .memory.librarian import use_counter as _onion_use_counter
+except Exception:
+    _onion_use_counter = None
 
 
 def _withdrawn_sources() -> tuple[str, ...]:
@@ -1778,7 +1784,7 @@ class Executor:
         return conversation_manager.get_context_messages(conversation_id)
 
     def _compose_memory_context_labelled(
-        self, question: str | None = None, conversation_id: str | None = None
+        self, question: str | None = None, conversation_id: str | None = None, model: str | None = None
     ) -> tuple[str, tuple[list[str], list[str]]]:
         """The wrapped working-memory block and its label, or an empty string and the clean label.
 
@@ -1798,6 +1804,9 @@ class Executor:
 
         Args:
             question: the current question, used to rank the working block
+            conversation_id: the conversation whose onion block is asked for
+            model: the model the turn is sent to; the onion counts its block
+                with this turn's own counter for it
 
         Returns:
             the wrapped block, or an empty string when there is nothing
@@ -1819,6 +1828,12 @@ class Executor:
         if _onion_enabled is not None and _onion_memory_block is not None:
             try:
                 if _onion_enabled():
+                    # The onion counts its block as this request is counted:
+                    # the turn's own counter, for the model it is sent to.
+                    if conversation_id and model and _onion_use_counter is not None:
+                        _onion_use_counter(
+                            conversation_id, lambda text: self._estimate_tokens(text, model), model
+                        )
                     # The sources the user withdrew, handed only when there
                     # is one: a part of the onion they reached is not shown
                     # from this request on, with no mirror on this path.
@@ -2627,7 +2642,9 @@ class Executor:
         # block joins the tail, whatever the stable-prefix flag says: the
         # tail rides the user role, never the system message, and the flag
         # only asks a llama-server engine to reuse its prompt cache.
-        _mem_wrapped, _mem_label = self._compose_memory_context_labelled(refined_question, conversation_id)
+        _mem_wrapped, _mem_label = self._compose_memory_context_labelled(
+            refined_question, conversation_id, routing.model
+        )
         if _mem_wrapped:
             _volatile_parts.append("\n\n" + _mem_wrapped)
             _volatile_labels.append(_mem_label)

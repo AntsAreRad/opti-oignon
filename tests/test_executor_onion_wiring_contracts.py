@@ -20,6 +20,14 @@ own contracts.
     conversation with its id and messages.
   * XW5 -- a librarian that is absent leaves the executor importable and the
     legacy path intact; one that raises is swallowed.
+  * XW11 -- onion on: before it asks for the block, the turn hands the
+    librarian its own counter, for the model it is sent to, so the block is
+    counted as the request it rides; nothing is handed over with the onion
+    off or with no conversation, and a seam that fails leaves the legacy
+    block riding the turn.
+  * XW12 -- onion off, the request the executor sends is the one it sent
+    before the onion window had rungs, byte for byte: its digest was taken
+    on the tree before the change.
 
 Local-only (the public distribution ships no tests). Same window as the
 memory-wrap suite: the real hub over a scripted registry.
@@ -142,6 +150,8 @@ def _load(*, librarian=None, librarian_absent=False, conversations=None):
         module.onion_enabled = librarian.onion_enabled
         module.memory_block = librarian.memory_block
         module.maybe_curate = librarian.maybe_curate
+        if hasattr(librarian, "use_counter"):
+            module.use_counter = librarian.use_counter
         seeded[_LIBRARIAN] = module
     targets = {
         _WRAPPER: source("agent", "untrusted_context.py"),
@@ -390,6 +400,108 @@ def test_xw10_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legac
         assert conversations.messages.get("conv-1")
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# XW11 -- the turn hands the onion its own counter
+# ---------------------------------------------------------------------------
+class _CountingLibrarian(_Librarian):
+    """The fake seam with the counter seam: it keeps what each turn hands over, in order with the block."""
+
+    def __init__(self, *, raise_on_counter=False, **kwargs):
+        super().__init__(**kwargs)
+        self.counters, self.order, self.raise_on_counter = [], [], raise_on_counter
+
+    def use_counter(self, conversation_id, count, model):
+        self.counters.append((conversation_id, count, model))
+        self.order.append("counter")
+        if self.raise_on_counter:
+            raise TypeError("counter refused")
+
+    def memory_block(self, conversation_id, question=None, **kwargs):
+        self.order.append("block")
+        return super().memory_block(conversation_id, question, **kwargs)
+
+
+_COUNTED = ("Alice tends her garden at dawn.", "def f(x):\n    return {'k': [x, x]}\n",
+            "Le jardin d'Alice fleurit \u00e0 l'aube, pr\u00e8s du vieux mur.", "x" * 97)
+
+
+def test_xw11_the_turn_hands_the_onion_its_own_counter_for_the_model_it_is_sent_to():
+    lib = _CountingLibrarian(enabled=True, block=_ONION)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        # The executor's own count, read for the model the turn is sent to: a
+        # third more for this one than for any other.
+        ex._estimate_tokens = lambda text, model="": len(text) // (3 if model == "counted-model:7b" else 4)
+        _drive(ex.execute("What is my name?", _routing(model="counted-model:7b"), refine=False,
+                          conversation_id="conv-1"))
+        assert lib.order == ["counter", "block"], "the counter is handed over before the block is asked"
+        ((cid, count, model),) = lib.counters
+        assert (cid, model) == ("conv-1", "counted-model:7b")
+        for text in _COUNTED:
+            assert count(text) == ex._estimate_tokens(text, "counted-model:7b") == len(text) // 3, (
+                f"the turn's own count, for the model it is sent to: {text!r}")
+        assert any(count(text) != ex._estimate_tokens(text) for text in _COUNTED), (
+            "control: a count blind to the model gives other numbers")
+        assert any(count(text) != max(1, int(len(text.split()) * 1.3)) for text in _COUNTED), (
+            "control: the turn's count is not the onion's default")
+        assert wrapper.wrap(_ONION, source=wrapper.SOURCE_MEMORY, frames=True) in _turn(scripted)
+    finally:
+        restore()
+    for enabled, conversation_id in ((False, "conv-1"), (True, None)):
+        lib = _CountingLibrarian(enabled=enabled, block=_ONION)
+        mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+        try:
+            _drive(mod.Executor().execute("What is my name?", _routing(), refine=False, conversation_id=conversation_id))
+            assert lib.counters == [], f"nothing handed over (onion {'on' if enabled else 'off'}, {conversation_id})"
+            assert lib.order == (["block"] if enabled else []), lib.order
+        finally:
+            restore()
+    lib = _CountingLibrarian(enabled=True, block=_ONION, raise_on_counter=True)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        _drive(mod.Executor().execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        assert lib.counters and "block" not in lib.order, "a seam that fails: no block counted another way"
+        assert wrapper.wrap(_LEGACY, source=wrapper.SOURCE_MEMORY) in _turn(scripted), "the legacy block rides it"
+        assert conversations.messages.get("conv-1"), "and the turn is saved"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# XW12 -- onion off, the request of before, byte for byte
+# ---------------------------------------------------------------------------
+# The digest of what the executor sent, onion off, for the two turns below,
+# taken on the tree before the onion window had rungs and one count.
+_BEFORE_RUNGS = "d1780f443e749215b4957c5281c645c9025d050a6f18c21687bdcbc9e574742a"
+
+
+def _requests_onion_off():
+    """What the executor sends, onion off, for two turns of one conversation, as canonical JSON."""
+    import json
+
+    lib = _CountingLibrarian(enabled=False, block=_ONION)
+    mod, wrapper, scripted, composer, conversations, restore = _load(librarian=lib)
+    try:
+        ex = mod.Executor()
+        _drive(ex.execute("What is my name?", _routing(), refine=False, conversation_id="conv-1"))
+        _drive(ex.execute("And where does the garden grow?", _routing(), refine=False, conversation_id="conv-1"))
+        assert len(scripted.calls) == 2 and lib.counters == [] and lib.order == []
+        return json.dumps(scripted.calls, sort_keys=True, ensure_ascii=False)
+    finally:
+        restore()
+
+
+def test_xw12_with_the_onion_off_the_request_is_the_one_sent_before_the_window_had_rungs():
+    import hashlib
+
+    first, second = _requests_onion_off(), _requests_onion_off()
+    assert first == second, "control: the request is the same from one run to the next"
+    assert "What is my name?" in first and "And where does the garden grow?" in first and "Hello world" in first, (
+        "control: both turns were sent, the second with the first's answer")
+    assert hashlib.sha256(first.encode("utf-8")).hexdigest() == _BEFORE_RUNGS
 
 
 if __name__ == "__main__":

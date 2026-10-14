@@ -19,8 +19,9 @@ that defaults to a daemon thread, and it never raises into a turn. And it
 composes the memory block the executor places in the prompt: Core, receipts
 digest, the anchors of held spans and the Peels selected for the question,
 under the layer caps, every recalled segment framed as data with its
-provenance; the executor wraps the whole block as untrusted memory before
-it reaches the model. And it is the user's one path to the Core and the
+provenance, every part counted with the counter of the turn the block rides
+(``use_counter``); the executor wraps the whole block as untrusted memory
+before it reaches the model. And it is the user's one path to the Core and the
 Cellar: ``pin``, ``supersede``, ``recall`` and the proposals the queue
 offers (``accept_proposal``, ``decline_proposal``) take the conversation
 id, forward the actor to the store so that only a caller that says it is
@@ -79,6 +80,18 @@ _states = {}
 _watermark = {}
 _lock = threading.Lock()
 _store = {}
+# The counter each conversation's window is counted with, and the model it
+# counts for: the last its turns handed over (``use_counter``).
+_counters = {}
+# The counter a turn handed over on its own thread, for the one block it asks
+# next: two turns of one conversation in flight never count with each other's.
+_handed = threading.local()
+# The fewest characters a token takes under the counters a turn hands over,
+# as the executor's tables ship them: the heaviest family's ratio (3.0) under
+# the largest code adjustment (1.2). A Core grown before any turn counted the
+# conversation is counted so, and fits the count of whichever shipped model
+# the first turn goes to.
+_FEWEST_CHARS_PER_TOKEN = 2.5
 _refused = set()
 # What the queue counted since the process began, by event then motive:
 # names and numbers, never a word of a conversation nor its id.
@@ -774,6 +787,94 @@ def state_for(conversation_id, config=None):
         return state
 
 
+def use_counter(conversation_id, count, model):
+    """Count the conversation's window with ``count``, the counter of the turn it is sent in, for ``model``.
+
+    The executor hands it over each turn before it asks for the block, so
+    what the onion lays is counted as the request it rides is: the block of
+    that turn is counted with it, on the turn's own thread, whatever another
+    turn of the conversation hands over meanwhile. An open counts with the
+    last counter handed over for the conversation in this process, the
+    default before any. A pin, a supersession and an accepted proposal count
+    the Core with that last counter too, or, before any, as the heaviest
+    counter a turn may hand over would; and they leave a share of the Core's
+    cap free (``core_margin``), so the Core still fits a later turn that
+    counts it up to a third more. A Core a turn's counter puts over its cap
+    gets that turn's block refused by name, and steps down by a supersession
+    that does not grow it, which is never refused. A counter that cannot be called, or a model that is no name, is
+    refused by name, and so is any count it gives that is no whole number
+    of tokens, wherever it is read. A turn of no conversation hands nothing
+    over.
+    """
+    if not callable(count):
+        raise TypeError(f"the counter for {model!r} cannot be called")
+    if not isinstance(model, str) or not model:
+        raise TypeError(f"a counter counts for a model by name, not {model!r}")
+    if not conversation_id:
+        return
+    counted = _vetted(count, model)
+    with _lock:
+        _counters[conversation_id] = (counted, model)
+    _handed.counter = (conversation_id, counted, model)
+
+
+def _vetted(count, model):
+    """``count``, each of its answers held to a whole number of tokens and refused by name otherwise: the choice of
+    the block's parts and a pin read it as the composer does."""
+    from .composer import _MOST_TOKENS, BudgetError, _whole
+
+    def counted(text):
+        tokens = count(text)
+        if not (_whole(tokens) and tokens < _MOST_TOKENS):
+            raise BudgetError(f"the counter of {model} gave {tokens!r}: no whole number of tokens under {_MOST_TOKENS}")
+        return tokens
+
+    return counted
+
+
+def _counter(conversation_id, *, turn=False):
+    """The counter the conversation's window is counted with and the model it counts for; the default and None
+    when none was handed over. A turn's block (``turn``) takes the one its own thread handed over, once, before
+    the last one handed over for the conversation. Read before a state's lock is taken, never under it."""
+    if turn:
+        handed, _handed.counter = getattr(_handed, "counter", None), None
+        if handed is not None and handed[0] == conversation_id:
+            return handed[1], handed[2]
+    with _lock:
+        held = _counters.get(conversation_id)
+    return held if held is not None else (estimate_tokens, None)
+
+
+def _admission(conversation_id):
+    """The counter a pin, a supersession or an accepted proposal counts the Core with: the last one a turn handed
+    over for the conversation, or, before any, the heaviest a turn may hand over."""
+    count, model = _counter(conversation_id)
+    return (count, model) if model is not None else (_heaviest, None)
+
+
+def _heaviest(text):
+    """The most tokens any counter a turn hands over may give ``text``, and never fewer than the default."""
+    import math
+
+    return max(estimate_tokens(text), math.ceil(len(text) / _FEWEST_CHARS_PER_TOKEN))
+
+
+def _as_counted(model):
+    """How a refusal names the count it read: the model's counter, or the heaviest one when no turn handed one over."""
+    if model:
+        return f"as the counter of {model} counts them"
+    return "as the heaviest counter a turn may hand over counts them, no turn having handed one over"
+
+
+def _room(budget):
+    """How a refusal names the room the Core had: its cap, less the share held back for the counts of other
+    models."""
+    room = budget.core_room()
+    if room == budget.core:
+        return f"a cap of {budget.core}"
+    return f"{room}, its cap of {budget.core} less the share held back for other models' counts"
+
+
 def peek_state(conversation_id, config=None):
     """The conversation's state if it exists, in memory or in the store; None when neither knows it."""
     with _lock:
@@ -809,6 +910,7 @@ def reset_librarian():
         _states.clear()
         _watermark.clear()
         _store.clear()
+        _counters.clear()
         _refused.clear()
         _hung.clear()
         _holders.clear()
@@ -1498,8 +1600,9 @@ def _placed_items(prompt, retrieval):
     return placed
 
 
-def _compose_block(state, question, budget, withdrawn=()):
-    """Core, receipts digest, held anchors and the Peels for ``question`` under the caps; raises what the composer refuses.
+def _compose_block(state, question, budget, withdrawn=(), estimate=None):
+    """Core, receipts digest, held anchors and the Peels for ``question`` under the caps, every part counted with
+    ``estimate``; raises what the composer refuses.
 
     The anchors of held spans take their share of the peels layer first,
     their words read from the Cellar; the peels take the rest, each shown as
@@ -1515,18 +1618,19 @@ def _compose_block(state, question, budget, withdrawn=()):
     from .peels import PeelTree, join_labels, load_ladder, render_peel, select_anchors, select_peels
 
     budget = budget or load_budget()
+    estimate = estimate or estimate_tokens
     withdrawn = frozenset(withdrawn or ())
     dropped, unplaced, reached = [], [], []
     anchors = select_anchors(state.ledger, state.cellar, question or "", min(load_ladder().anchors, budget.peels),
-                             dropped=dropped, unplaced=unplaced, lineage=state.lineage, withdrawn=withdrawn,
-                             reached=reached)
+                             estimate=estimate, dropped=dropped, unplaced=unplaced, lineage=state.lineage,
+                             withdrawn=withdrawn, reached=reached)
     # Events of this composition: the anchors its query reached that the cap
     # left out, those whose place no longer reads as a typed unit, and those
     # whose turn a withdrawal reached.
     _counted("block", "anchors_dropped", len(dropped))
     _counted("block", "anchors_unplaced", len(unplaced))
     _counted("block", "anchors_withdrawn", len(reached))
-    taken = sum(estimate_tokens(a.text) for a in anchors)
+    taken = sum(estimate(a.text) for a in anchors)
     tree, gone = state.tree, {r.key for r in state.ledger.all() if r.kind == "superseded"}
     if gone:
         tree = PeelTree()
@@ -1537,10 +1641,10 @@ def _compose_block(state, question, budget, withdrawn=()):
     def render(peel):
         return render_peel(peel, state.cellar, lineage=state.lineage, withdrawn=withdrawn)
 
-    retrieval = anchors + select_peels(tree, question or "", budget.peels - taken, render=render)
+    retrieval = anchors + select_peels(tree, question or "", budget.peels - taken, estimate=estimate, render=render)
     prompt = compose(
         core=state.core, ledger=state.ledger, cellar=state.cellar,
-        retrieval=retrieval, flesh=[], turn="", budget=budget,
+        retrieval=retrieval, flesh=[], turn="", budget=budget, estimate=estimate,
     )
     if prompt.folded_receipts:
         _counted("block", "folded")
@@ -1575,8 +1679,9 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
         state = peek_state(conversation_id, config)
         if state is None:
             return ""
+        estimate, _model = _counter(conversation_id, turn=True)
         with state.lock:
-            return _compose_block(state, question, budget, withdrawn or ())
+            return _compose_block(state, question, budget, withdrawn or (), estimate)
     except Exception as exc:  # noqa: BLE001 - a block that cannot be trusted is no block
         _counted("block", f"refused_{type(exc).__name__}")
         logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
@@ -1626,17 +1731,19 @@ def dropped_sentences(conversation_id, *, config=None):
                 for peel in state.tree.all() for motive, digest in peel.dropped]
 
 
-def _core_would_fit(state, text, budget):
-    """Refuse by name a pin that would push the active Core over its cap."""
+def _core_would_fit(state, text, budget, counter):
+    """Refuse by name a pin that would push the active Core past its room, counted as the conversation's last turn
+    counted it."""
     from .core_store import entry_hash
 
+    estimate, model = counter
     active = state.core.active()
     if any(e.id == entry_hash(text) for e in active):
         return
-    tokens = estimate_tokens("\n".join([e.text for e in active] + [text]))
-    if tokens > budget.core:
+    tokens = estimate("\n".join([e.text for e in active] + [text]))
+    if tokens > budget.core_room():
         raise LibrarianError(
-            f"the pin would bring the Core to {tokens} tokens against a cap of {budget.core}: "
+            f"the pin would bring the Core to {tokens} tokens, {_as_counted(model)}, against {_room(budget)}: "
             f"refused before it lands, because the composer never cuts the Core"
         )
 
@@ -1644,8 +1751,11 @@ def _core_would_fit(state, text, budget):
 def pin(conversation_id, text, *, actor, config=None, budget=None):
     """Pin ``text`` to the conversation's Core as ``actor``; the store refuses any actor but the user.
 
-    The cap is checked here, before the store is touched: a Core over its
-    cap would blank the whole memory block at compose time.
+    The Core's room -- its cap, less the share held back for the counts of
+    other models -- is checked here, as the conversation's last turn counted
+    it or, before any, as the heaviest counter a turn may hand over would,
+    before the store is touched: a Core over its cap would blank the whole
+    memory block at compose time.
     """
     from .composer import load_budget
     from .core_store import CoreStore
@@ -1654,8 +1764,9 @@ def pin(conversation_id, text, *, actor, config=None, budget=None):
     config = config or load_config()
     budget = budget or load_budget()
     state = state_for(conversation_id, config)
+    counter = _admission(conversation_id)
     with state.lock:
-        _core_would_fit(state, text, budget)
+        _core_would_fit(state, text, budget, counter)
         entry_id = state.core.add(text, actor=actor)
         _save_state(conversation_id, state, config)
     return entry_id
@@ -1670,15 +1781,20 @@ def supersede(conversation_id, old_id, text, *, actor, config=None, budget=None)
     config = config or load_config()
     budget = budget or load_budget()
     state = state_for(conversation_id, config)
+    estimate, model = _admission(conversation_id)
     with state.lock:
         old = state.core.get(old_id)
         if old.superseded_by:
             raise ValueError(f"entry {old_id!r} is already superseded by {old.superseded_by!r}")
         remaining = [e for e in state.core.active() if e.id != old_id]
-        tokens = estimate_tokens("\n".join([e.text for e in remaining] + [text]))
-        if tokens > budget.core:
+        tokens = estimate("\n".join([e.text for e in remaining] + [text]))
+        # A supersession that does not grow the Core is never refused: a Core
+        # a turn's counter puts over its cap must be able to step down.
+        held = estimate("\n".join(e.text for e in state.core.active()))
+        if tokens > max(budget.core_room(), held):
             raise LibrarianError(
-                f"the supersession would bring the Core to {tokens} tokens against a cap of {budget.core}: refused before it lands"
+                f"the supersession would bring the Core to {tokens} tokens, {_as_counted(model)}, "
+                f"against {_room(budget)}: refused before it lands"
             )
         new_id = state.core.supersede(old_id, text, actor=actor)
         _save_state(conversation_id, state, config)
@@ -1850,12 +1966,13 @@ def accept_proposal(conversation_id, proposal_id, *, actor, config=None, budget=
     if state is None:
         raise KeyError(f"conversation {conversation_id!r} has no onion state")
     lexicon = load_gate().lexicon
+    counter = _admission(conversation_id)
     with state.lock:
         index, proposal = _open_proposal(state, proposal_id)
         words = _placed(state, proposal, lexicon)
         if words is None:
             raise KeyError(f"proposal {proposal_id[:12]} holds no typed decision at its place: nothing pinned")
-        _core_would_fit(state, words, budget)
+        _core_would_fit(state, words, budget, counter)
         key = _decision_key(state, proposal)
         first = key is not None and key not in _decided(state)
         entry_id = state.core.add(words, actor=actor)
@@ -2012,10 +2129,11 @@ def open_onion(conversation_id, question=None, *, config=None, budget=None):
     state = peek_state(conversation_id, config)
     if state is None:
         raise LibrarianError(f"conversation {conversation_id!r} has nothing persisted: nothing to open")
+    estimate, _model = _counter(conversation_id)
     with state.lock:
         return Opening(
             conversation_id=conversation_id,
-            block=_compose_block(state, question, budget),
+            block=_compose_block(state, question, budget, estimate=estimate),
             digest=state.ledger.digest(state.cellar),
             core_root=state.core.root(),
             flesh_turns=len(state.flesh.turns()),

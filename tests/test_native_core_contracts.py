@@ -41,8 +41,21 @@ the artefact itself is never tracked.
   * NC13 -- the native probes draw French names and keep French words whole
     as the reference does, and every accepted code point at the head of a
     name is a capital for the core exactly when Python calls it one.
+  * NC14 -- NC1 for the surface the composer now asks for: the window is
+    assembled from counted parts (``compose_counted``, at the composer's
+    format), the core counts no token of its own, and a core of another
+    format is not asked (NC1 is deselected by name; it asked for the
+    assembly that counted its own words).
+  * NC15 -- the native assembly of counted parts is the reference's, field
+    for field, with the counter the turn hands over, the system prompt and
+    the tail; it refuses each layer with the reference's words; a text the
+    core cannot carry, a lone surrogate, is assembled by the reference. On
+    parts made by hand, which ``compose`` cannot lay -- receipts or a whole
+    over their bound, two faults at once, every optional part absent, a
+    peel cut before one that fits -- the two assemblies give the same
+    window or the same refusal.
 
-NC1 to NC3, NC6 to NC10 and NC13 need the built artefact: the CI job that
+NC1 to NC3, NC6 to NC10 and NC13 to NC15 need the built artefact: the CI job that
 carries a Rust toolchain builds it and runs this file by name, and a local
 sweep needs ``scripts/build_oo_core.sh`` run once. NC4, NC5, NC11 and NC12
 always run: the last two drive a copy of the script with a stand-in cargo
@@ -62,6 +75,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -739,6 +753,162 @@ def test_nc13_the_native_probes_draw_french_names_and_whole_words_as_the_referen
         assert counting.calls["probe_score"] == counting.answered["probe_score"] == 4 * len(_NAMES) + len(_in_scope())
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# NC14 and NC15 -- the window from counted parts. NC14 supersedes NC1, which
+# asked for the assembly that counted its own words.
+# ---------------------------------------------------------------------------
+def test_nc14_the_native_module_assembles_counted_parts_at_the_composers_format_and_counts_nothing():
+    loaded, restore = _open(native=True)
+    try:
+        native = loaded["opti_oignon.native"]
+        composer = loaded["opti_oignon.memory.composer"]
+        core = native.load()
+        assert core is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        for name in ("entry_hash", "span_key", "peel_id", "digest_spans", "compose_counted", "COMPOSE_FORMAT", "VERSION"):
+            assert hasattr(core, name), f"the native surface carries {name}"
+        assert not hasattr(core, "compose_segments"), "no assembly that counts its own words is left to ask"
+        assert core.COMPOSE_FORMAT == composer._COMPOSE_FORMAT == 2
+        assert isinstance(core.VERSION, str) and core.VERSION
+        assert native.available() is True and native.load() is core, "loaded once, then cached"
+        assert composer._native_compose() is core.compose_counted, "the composer asks the core's assembly"
+        library = (_CRATE / "src" / "lib.rs").read_text(encoding="utf-8")
+        assert "split_whitespace" not in library and "1.3" not in library, "the core counts no token of its own"
+        real = native.load
+        try:
+            native.load = lambda: SimpleNamespace(COMPOSE_FORMAT=1, compose_counted=core.compose_counted)
+            assert composer._native_compose() is None, "a core of another format is not asked"
+            native.load = lambda: SimpleNamespace(COMPOSE_FORMAT=2)
+            assert composer._native_compose() is None, "nor one without the assembly"
+        finally:
+            native.load = real
+        assert composer._native_compose() is core.compose_counted
+    finally:
+        restore()
+
+
+def _seven(loaded, *, peels=40, surrogate=False):
+    """The registry state of NC3 with the system prompt and the tail, under a budget that holds all seven."""
+    composer = loaded["opti_oignon.memory.composer"]
+    budget = composer.Budget(window=900, reserve=60, system=100, core=60, receipts=60, peels=120, flesh=200, tail=100,
+                             turn=100)
+    tail = "Retrieved: service 6 moved on Monday." + (" \udc80" if surrogate else "")
+    return dict(_state(loaded, peels=peels), budget=budget, system="You are a careful assistant.", tail=tail)
+
+
+def _plain(prompt):
+    return ([(s.layer, s.text, s.provenance, s.tokens, s.instruction_bearing) for s in prompt.segments],
+            prompt.tokens, prompt.dropped_peels, prompt.folded_receipts, prompt.core_root)
+
+
+def _counter(text):
+    """A turn's counter that is not the default: two tokens a word, and one more for every forty characters."""
+    return 2 * len(text.split()) + len(text) // 40
+
+
+# The layers that may not be cut. The receipts fold to their cap, and a budget
+# that validates holds the whole within the window less the reserve, so
+# neither refusal can be reached through ``compose``.
+_REFUSED = ("system", "core", "flesh", "tail", "turn")
+
+
+def _refusal(loaded, layer):
+    """The composer's refusal of ``layer`` over a cap of one token, the peels taking the room it gives up."""
+    composer = loaded["opti_oignon.memory.composer"]
+    state = _seven(loaded)
+    caps = {name: getattr(state["budget"], name) for name in composer.LAYERS}
+    caps["peels"] += caps[layer] - 1
+    caps[layer] = 1
+    budget = composer.Budget(window=state["budget"].window, reserve=state["budget"].reserve, **caps)
+    with pytest.raises(composer.BudgetError) as caught:
+        composer.compose(**{**state, "budget": budget}, estimate=_counter)
+    return str(caught.value)
+
+
+def _made(composer):
+    """Counted parts made by hand, each with the budget it is laid under: the cases ``compose`` cannot reach."""
+    def part(text, tokens):
+        return (text, f"made:{text}", tokens)
+
+    parts = dict(system=part("system", 5), core=part("core", 5), receipts=part("receipts", 5),
+                 peels=(part("big", 50), part("small", 5), part("last", 15)), flesh=(part("f1", 5), part("f2", 5)),
+                 tail=part("tail", 5), turn=part("turn", 5), core_root="root", folded=0)
+    budget = composer.Budget(window=200, reserve=10, system=10, core=10, receipts=10, peels=20, flesh=20, tail=10,
+                             turn=10)
+    short = composer.Budget(window=60, reserve=30, system=10, core=10, receipts=10, peels=20, flesh=20, tail=10,
+                            turn=10)
+    return {
+        "every part laid, the big peel cut, the last one kept": (parts, budget),
+        "no optional part": ({**parts, "system": None, "receipts": None, "tail": None}, budget),
+        "receipts over their cap": ({**parts, "receipts": part("receipts", 11)}, budget),
+        "system and turn over: the system is named": ({**parts, "system": part("system", 11),
+                                                        "turn": part("turn", 11)}, budget),
+        "core and flesh over: the core is named": ({**parts, "core": part("core", 11),
+                                                     "flesh": (part("f1", 15), part("f2", 6))}, budget),
+        "the flesh over by its sum alone": ({**parts, "flesh": (part("f1", 15), part("f2", 6))}, budget),
+        "tail and turn over: the tail is named": ({**parts, "tail": part("tail", 11), "turn": part("turn", 11)}, budget),
+        "no peel fits": ({**parts, "peels": (part("a", 21), part("b", 21))}, budget),
+        "the whole over the window less the reserve": (parts, short),
+    }
+
+
+def _outcome(composer, assemble, parts, budget):
+    try:
+        segments, total, dropped = assemble(composer._Parts(**parts), budget)
+    except composer.BudgetError as exc:
+        return "refused", str(exc)
+    return [(s.layer, s.text, s.provenance, s.tokens, s.instruction_bearing) for s in segments], total, dropped
+
+
+def test_nc15_the_native_assembly_of_counted_parts_is_the_references_with_the_turns_counter():
+    with_native, restore_native = _open(native=True)
+    try:
+        assert with_native["opti_oignon.native"].load() is not None, "oo_core is not built: run scripts/build_oo_core.sh on this machine"
+        composer = with_native["opti_oignon.memory.composer"]
+        assemble, asked = composer._native_compose(), []
+        assert assemble is not None, "the composer sees the native module"
+
+        def counted(*args):
+            asked.append(args[-1])
+            return assemble(*args)
+
+        refused = 0
+        for case, (parts, budget) in _made(composer).items():
+            native_made = _outcome(composer, lambda p, b: composer._assemble_natively(assemble, p, b), parts, budget)
+            assert native_made == _outcome(composer, composer._assemble, parts, budget), case
+            refused += native_made[0] == "refused"
+        assert refused == 6, "control: six of the made cases are refusals, three are windows"
+        composer._native_compose = lambda: counted
+        native = composer.compose(**_seven(with_native), estimate=_counter)
+        native_default = composer.compose(**_seven(with_native))
+        assert len(asked) == 2, "the core assembled both: a counter handed over keeps the native path"
+        native_refusals = {layer: _refusal(with_native, layer) for layer in _REFUSED}
+        assert len(asked) == 2 + len(_REFUSED), "each refusal is the core's"
+        surrogate = composer.compose(**_seven(with_native, surrogate=True), estimate=_counter)
+        assert len(asked) == 3 + len(_REFUSED), "control: the core was asked for the text it cannot carry"
+    finally:
+        restore_native()
+    without, restore = _open(native=False)
+    try:
+        composer = without["opti_oignon.memory.composer"]
+        assert composer._native_compose() is None, "control: the reference path"
+        reference = composer.compose(**_seven(without), estimate=_counter)
+        assert _plain(native) == _plain(reference), "field for field, with the turn's counter"
+        assert native.render() == reference.render()
+        assert _plain(native_default) == _plain(composer.compose(**_seven(without))), "and with the default"
+        segments = _plain(reference)[0]
+        assert segments[0][0] == "system" and "tail" in [s[0] for s in segments] and reference.dropped_peels >= 1, (
+            "control: seven layers, and a cut")
+        assert [s[3] for s in segments] == [_counter(s[1]) for s in segments], "the counts are the turn's"
+        for layer in _REFUSED:
+            words = _refusal(without, layer)
+            assert native_refusals[layer] == words and words.startswith(f"{layer} is "), (layer, native_refusals[layer], words)
+        assert _plain(surrogate) == _plain(composer.compose(**_seven(without, surrogate=True), estimate=_counter)), (
+            "a text the core cannot carry is assembled by the reference")
+    finally:
+        restore()
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

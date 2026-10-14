@@ -523,8 +523,8 @@ def test_pc11_a_peel_the_composer_leaves_out_adds_nothing_to_the_label():
         assert both.label[1] == ["web:one", "web:two"], "control: both peels placed, both lineages"
         one = composer.Budget(window=4000, reserve=60, core=60, receipts=300, peels=60, flesh=140, turn=60)
         # The selection is held to the cap the composer is held to, by the same estimate; the composer cuts only
-        # where the two disagree -- the native assembly counts its own tokens. A selection that hands it both
-        # peels is that disagreement: the composer places one and cuts the other.
+        # where the two disagree. A selection that hands it both peels is that disagreement: the composer places
+        # one and cuts the other.
         peels = loaded[_PEELS]
         select = peels.select_peels
         peels.select_peels = lambda tree, query, cap, estimate=None, render=None: select(tree, query, 10 ** 6, estimate,

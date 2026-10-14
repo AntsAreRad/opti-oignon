@@ -6,16 +6,45 @@ compression. Every compression step is verified before it is trusted.
 
 ## Layers
 
-| Layer | Content | Changes by | Cap (tokens) |
+| Layer | Content | Changes by | Cap at 16384 (tokens) |
 |---|---|---|---|
+| System | the instructions the turn is sent with; bears instruction | its caller, each turn | 1024 |
 | Core | pinned invariants: persona, hard constraints, canonical decisions | supersession only, on an explicit user action | 1024 |
 | Receipts | one line per evicted span, with its recall key | append and resolve | 512 |
 | Peels | summaries that answered the recall probes drawn from their source spans | regenerated from the Cellar only | 3072 |
 | Flesh | the last turns, verbatim | a turn leaves only through an eviction that leaves a receipt | 5120 |
+| Tail | the sources a turn brings -- retrieval, web results, documents -- as data | its caller, each turn | 3072 |
+| Turn | the current question; refused if over, never truncated | the user | 512 |
 | Cellar | the full archive; not in the window | append only | -- |
 
-The caps and the generation reserve live in `opti_oignon/config/onion.yaml`
-and add up to the window exactly; the composer refuses a file that does not.
+The caps live in `opti_oignon/config/onion.yaml`, one table per rung of the
+context ladder the resource governor admits contexts on (`ctx_ladder` in
+`resource_governor.yaml`, read as a file), with one generation reserve for
+all: each table and the reserve fit within its rung, and no layer is
+smaller at a higher rung. The composer refuses by name, every reason at
+once, a file that breaks any of this or names a key twice, and a ladder
+that is not a list of distinct positive whole numbers, which the governor
+reads more loosely. A context composes under the largest rung at or under
+it; a caller that names no rung composes under the 16384 table without the
+system prompt and the tail, which it does not lay: the window before rungs,
+12288 tokens, cap for cap.
+
+Every part of the window is counted once, with the counter of the turn it
+is sent in. The executor hands the librarian its own counter, for the model
+the turn goes to, before it asks for the block; the librarian counts every
+part of that turn's block with it, on the turn's own thread, so two turns
+of one conversation in flight never count with each other's. A pin, a
+supersession, an accepted proposal and an open count with the last counter
+handed over for the conversation in this process; before any, an open
+counts with the default, and a pin, a supersession or an accepted proposal
+counts the Core as the heaviest counter a turn may hand over would. A Core
+grown by a pin, a supersession or an accepted proposal keeps a quarter of
+its cap free (`core_margin`), and one token more for rounding: what lands
+still fits a later turn that counts it up to a third more. A turn that
+counts the Core over its cap gets no onion block -- refused by name and
+counted -- and the Core is never cut; a supersession that does not grow
+the Core is never refused, so a Core that landed counted by words alone
+can step down until its block comes back.
 
 ## Invariants the contracts hold
 
@@ -78,8 +107,8 @@ and add up to the window exactly; the composer refuses a file that does not.
   anything else -- a dangling key, sources that are not its children's, a
   digest that no longer matches the archive -- is refused.
 - Recalled content is framed as data with its provenance and wrapped as
-  untrusted memory before it reaches the model; only the Core and the
-  current turn bear instruction.
+  untrusted memory before it reaches the model; only the system prompt,
+  the Core and the current turn bear instruction.
 
 ## The librarian
 
@@ -279,7 +308,10 @@ Python stays the reference and the fallback: the memory modules ask for
 the native core at the call, never at import, and run the reference path
 when it is absent. When it is present, every hash is byte-equal to the
 reference and every assembled prompt is field-equal, and the contracts
-that hold it to that run on every machine that builds it. The crate is
+that hold it to that run on every machine that builds it. The core counts
+no token: it assembles the parts the composer counted, so the window has
+one count, and a text it cannot carry, a lone surrogate, is assembled by
+the reference. The crate is
 pinned (exact `pyo3`, committed `Cargo.lock`) so the artefact is
 reproducible. Floats in a span are refused by the core and formatted by
 the reference; the memory stores none.

@@ -10,9 +10,9 @@
 //! refused rather than formatted: Python's shortest-repr float printing is
 //! not reproduced here, and a refusal sends the caller to the reference.
 //!
-//! Known divergence, recorded: the token estimate splits on Unicode
-//! `White_Space`; Python's `str.split()` also treats the four information
-//! separators U+001C..U+001F as whitespace. No memory text carries them.
+//! The window is assembled from parts the caller counted: nothing here
+//! counts a token, so the window is counted once, with the counter of the
+//! turn it is sent in.
 //!
 //! The recall probes of the eviction gate live in `probes`: they answer
 //! only for text they class exactly as Python does, and refuse the rest.
@@ -29,7 +29,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "0.9.0";
+const VERSION: &str = "0.10.0";
+
+/// The shape of `compose_counted`'s arguments; the composer asks a core whose format is its own, and no other.
+const COMPOSE_FORMAT: i64 = 2;
 
 /// The ABI of the interpreter this artefact was built for (build.rs), stamped in the file where the loader reads it
 /// before it loads the artefact: a line `oo_core built for python: <SOABI>`.
@@ -178,15 +181,6 @@ fn peel_id(text: &str, sources: Vec<String>) -> String {
     sha256_hex(out.as_bytes())
 }
 
-fn estimate_tokens(text: &str) -> u64 {
-    if text.is_empty() {
-        return 0;
-    }
-    let words = text.split_whitespace().count() as f64;
-    let estimate = (words * 1.3) as i64;
-    if estimate < 1 { 1 } else { estimate as u64 }
-}
-
 fn refuse_over(layer: &str, tokens: u64, cap: u64, why: &str) -> PyResult<()> {
     if tokens > cap {
         return Err(PyValueError::new_err(format!(
@@ -199,68 +193,80 @@ fn refuse_over(layer: &str, tokens: u64, cap: u64, why: &str) -> PyResult<()> {
 
 type Segment = (String, String, String, u64, bool);
 
-/// Assemble the window: Core, receipts digest, selected Peels, Flesh, turn.
+/// One counted part of the window: `(text, provenance, tokens)`.
+type Part = (String, String, u64);
+
+/// Assemble the window from counted parts: system, Core, receipts digest, Peels, Flesh, tail, turn.
 ///
 /// Returns `(segments, total_tokens, dropped_peels)`; a segment is
-/// `(layer, text, provenance, tokens, instruction_bearing)`. Refuses with
-/// the reference's own sentence when a layer that may not be cut is over
-/// its cap. `caps` is `(window, reserve, core, receipts, peels, flesh, turn)`.
+/// `(layer, text, provenance, tokens, instruction_bearing)`. A part the
+/// caller does not lay is `None`. Refuses with the reference's own sentence
+/// when a part that may not be cut is over its cap; the Peels are cut to
+/// whole items and the cut is counted. `caps` is
+/// `(window, reserve, system, core, receipts, peels, flesh, tail, turn)`.
+/// Every argument is required and positional, the parts not laid included.
 #[pyfunction]
+#[pyo3(signature = (system, core, receipts, peels, flesh, tail, turn, caps))]
 #[allow(clippy::too_many_arguments)]
-fn compose_segments(
-    core_text: &str,
-    core_root: &str,
-    digest: &str,
-    peels: Vec<(String, String)>,
-    flesh: Vec<(String, String, String)>,
-    turn: &str,
-    caps: (u64, u64, u64, u64, u64, u64, u64),
+fn compose_counted(
+    system: Option<Part>,
+    core: Part,
+    receipts: Option<Part>,
+    peels: Vec<Part>,
+    flesh: Vec<Part>,
+    tail: Option<Part>,
+    turn: Part,
+    caps: (u64, u64, u64, u64, u64, u64, u64, u64, u64),
 ) -> PyResult<(Vec<Segment>, u64, u64)> {
-    let (window, reserve, cap_core, cap_receipts, cap_peels, cap_flesh, cap_turn) = caps;
+    let (window, reserve, cap_system, cap_core, cap_receipts, cap_peels, cap_flesh, cap_tail, cap_turn) = caps;
     let mut segments: Vec<Segment> = Vec::new();
 
-    let core_tokens = estimate_tokens(core_text);
-    refuse_over("core", core_tokens, cap_core, "the Core is never cut, it is the registry's bytes")?;
-    segments.push(("core".into(), core_text.into(), format!("core:{}", core_root), core_tokens, true));
+    if let Some((text, provenance, tokens)) = system {
+        refuse_over("system", tokens, cap_system, "the system prompt is never cut")?;
+        segments.push(("system".into(), text, provenance, tokens, true));
+    }
 
-    if !digest.is_empty() {
-        let tokens = estimate_tokens(digest);
+    let (text, provenance, tokens) = core;
+    refuse_over("core", tokens, cap_core, "the Core is never cut, it is the registry's bytes")?;
+    segments.push(("core".into(), text, provenance, tokens, true));
+
+    if let Some((text, provenance, tokens)) = receipts {
         refuse_over("receipts", tokens, cap_receipts, "resolve or archive receipts first")?;
-        segments.push(("receipts".into(), digest.into(), "receipts".into(), tokens, false));
+        segments.push(("receipts".into(), text, provenance, tokens, false));
     }
 
     let mut used: u64 = 0;
     let mut dropped: u64 = 0;
-    for (text, provenance) in peels {
-        let tokens = estimate_tokens(&text);
-        if used + tokens > cap_peels {
-            dropped += 1;
+    for (text, provenance, tokens) in peels {
+        if used.saturating_add(tokens) > cap_peels {
+            dropped = dropped.saturating_add(1);
             continue;
         }
-        used += tokens;
+        used = used.saturating_add(tokens);
         segments.push(("peels".into(), text, provenance, tokens, false));
     }
 
-    let mut flesh_segments: Vec<Segment> = Vec::new();
-    let mut flesh_total: u64 = 0;
-    for (text, turn_id, role) in flesh {
-        let tokens = estimate_tokens(&text);
-        flesh_total += tokens;
-        flesh_segments.push(("flesh".into(), text, format!("flesh:{}:{}", turn_id, role), tokens, false));
-    }
+    let flesh_total = flesh.iter().fold(0u64, |sum, part| sum.saturating_add(part.2));
     refuse_over(
         "flesh",
         flesh_total,
         cap_flesh,
         "a turn leaves the window only with a receipt; evict first, the composer drops nothing",
     )?;
-    segments.extend(flesh_segments);
+    for (text, provenance, tokens) in flesh {
+        segments.push(("flesh".into(), text, provenance, tokens, false));
+    }
 
-    let turn_tokens = estimate_tokens(turn);
-    refuse_over("turn", turn_tokens, cap_turn, "the current turn is never truncated")?;
-    segments.push(("turn".into(), turn.into(), "turn".into(), turn_tokens, true));
+    if let Some((text, provenance, tokens)) = tail {
+        refuse_over("tail", tokens, cap_tail, "the tail is never cut here; its caller fits its sources to the cap")?;
+        segments.push(("tail".into(), text, provenance, tokens, false));
+    }
 
-    let total: u64 = segments.iter().map(|s| s.3).sum();
+    let (text, provenance, tokens) = turn;
+    refuse_over("turn", tokens, cap_turn, "the current turn is never truncated")?;
+    segments.push(("turn".into(), text, provenance, tokens, true));
+
+    let total = segments.iter().fold(0u64, |sum, segment| sum.saturating_add(segment.3));
     refuse_over(
         "window",
         total,
@@ -278,7 +284,8 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(span_key, m)?)?;
     m.add_function(wrap_pyfunction!(digest_spans, m)?)?;
     m.add_function(wrap_pyfunction!(peel_id, m)?)?;
-    m.add_function(wrap_pyfunction!(compose_segments, m)?)?;
+    m.add("COMPOSE_FORMAT", COMPOSE_FORMAT)?;
+    m.add_function(wrap_pyfunction!(compose_counted, m)?)?;
     m.add_function(wrap_pyfunction!(probes::probe_generate, m)?)?;
     m.add_function(wrap_pyfunction!(probes::probe_score, m)?)?;
     m.add_function(wrap_pyfunction!(probes::probe_text_classes, m)?)?;

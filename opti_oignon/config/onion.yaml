@@ -1,23 +1,43 @@
 # Onion memory -- window budget, in tokens
 # =========================================
-# The model always sees a small, bounded, deterministically assembled window.
-# The composer refuses a budget whose layer caps plus the generation reserve
-# exceed the window, so the numbers below must add up.
+# The model always sees a small, bounded, deterministically assembled window,
+# under the budget of one rung of the context ladder (ctx_ladder in
+# resource_governor.yaml). Each table below, plus the reserve, is its rung:
+# the composer refuses a configuration where a rung has no table, a table
+# holds for no rung, a layer is missing or unknown, a table does not hold at
+# its rung, or a layer shrinks as the rung grows -- each by name.
 #
-# Assembly order is fixed: core, receipts, peels, flesh, turn.
+# Assembly order is fixed: system, core, receipts, peels, flesh, tail, turn.
+#   system    the system prompt; refused if over, never cut
+#   core      pinned invariants; refused if over, never cut
+#   receipts  a line per evicted span (key, turns, kind, origins); the oldest fold into one
+#   peels     retrieved episode summaries, cut to fit, whole items only
+#   flesh     last turns verbatim; a turn leaves only with a receipt
+#   tail      the sources a turn brings (retrieval, web, documents), as data
+#   turn      the current turn; refused if over, never truncated
 
-# The whole window the model sees, generation reserve included.
-window: 12288
-
-# Headroom left for generation. Never assembled into.
+# Headroom left for generation, the same at every rung. Never assembled into.
 reserve: 2048
 
-layers:
-  core: 1024        # pinned invariants; never cut, refused if over
-  receipts: 512     # a line per evicted span (key, turns, kind, origins); the oldest fold into one
-  peels: 3072       # retrieved episode summaries, cut to fit, whole items only
-  flesh: 5120       # last turns verbatim; a turn leaves only with a receipt
-  turn: 512         # the current turn; refused if over, never truncated
+# The rung whose table a caller that names no rung composes under, less the
+# system prompt and the tail, which such a caller does not lay: at 16384 that
+# leaves the window before rungs, 12288, with its five caps unchanged.
+home_rung: 16384
+
+# The share of the Core's cap a pin, a supersession or an accepted proposal
+# leaves free, and one token more for the counts' rounding down. What lands
+# is counted as the conversation's last turn counted it (before any, as the
+# heaviest counter a turn may hand over would); held back a quarter, it
+# still fits a later turn that counts it up to a third more. A turn that
+# counts it over its cap gets no onion block, refused by name, and a
+# supersession that does not grow the Core is never refused.
+core_margin: 0.25
+
+budgets:
+  4096:  {system: 512,  core: 256,  receipts: 64,   peels: 256,  flesh: 512,   tail: 192,  turn: 256}
+  8192:  {system: 768,  core: 512,  receipts: 256,  peels: 1024, flesh: 2304,  tail: 896,  turn: 384}
+  16384: {system: 1024, core: 1024, receipts: 512,  peels: 3072, flesh: 5120,  tail: 3072, turn: 512}
+  32768: {system: 1536, core: 1024, receipts: 1024, peels: 6144, flesh: 12288, tail: 7680, turn: 1024}
 
 # The eviction gate, with two faces. A span leaves the flesh only once its
 # peel answers the recall probes drawn from the span, class by class, and

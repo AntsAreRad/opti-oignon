@@ -1734,6 +1734,35 @@ package costs.
 
 ### Changed
 
+- The onion memory's window is budgeted per rung of the context ladder the
+  resource governor admits contexts on. `onion.yaml` holds one table of caps
+  per rung, from 4096 to 32768 tokens, and one generation reserve, and the
+  window has two more layers: the system prompt, which opens it and bears
+  instruction, and the tail, the sources a turn brings, framed as data;
+  each is refused by name over its cap, never cut. A file where a rung has
+  no table, a table holds for no rung, a layer is missing or unknown, a
+  table does not hold at its rung, a layer shrinks as the rung grows or a
+  key is named twice is refused by name, every reason at once; so is a
+  ladder in the governor's file that is not a list of distinct positive
+  whole numbers, which the governor reads more loosely. A caller that names
+  no rung composes under the 16384 table less those two layers: the window
+  before rungs, 12288 tokens, cap for cap. The block is counted once, with
+  the counter of the turn it rides: the executor hands the librarian its
+  own counter, for the model the turn is sent to, and the librarian counts
+  every part of that turn's block with it, on the turn's own thread. A pin,
+  a supersession or an accepted proposal counts the Core as the
+  conversation's last turn counted it -- before any turn since the process
+  started, as the heaviest counter a turn may hand over would -- and leaves
+  a quarter of the Core's cap free (`core_margin`), so the Core still fits
+  a later turn that counts it up to a third more. A turn that counts the
+  Core over its cap gets no onion block, refused by name and counted, and
+  the Core is never cut; a supersession that does not grow the Core is
+  never refused, so a Core that landed before this change, counted by
+  words alone, can step down until its block comes back. The native core assembles the parts the
+  composer counted and counts none of its own (`oo_core` 0.10.0, rebuilt
+  with `scripts/build_oo_core.sh`); a text or a number it cannot carry is
+  assembled by the reference.
+
 - The plugins delivered with Opti-Oignon run only once the user enables
   them. Discovery registered each of them enabled, and every enabled plugin
   starts a worker of its own at boot: fifteen workers, about 300 MB of
