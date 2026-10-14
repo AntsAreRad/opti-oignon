@@ -11,6 +11,27 @@ package costs.
 
 ### Added
 
+- [SECURITY] An injection bench measures the gates the way published
+  agent-security benchmarks measure a defence
+  (`python -m opti_oignon.agent_eval.injection`; `docs/agent/injection-bench.md`):
+  user tasks crossed with injection tasks, run through the real agent loop
+  and the real gates with stand-ins only past the sinks, judged on the state
+  each run left -- utility, utility under attack, targeted attack success by
+  kind beside the rate at which the model attempted the attacker's call, and
+  the asks, proposals and refusals each pair costs. A memory
+  injection runs over two sessions with a review between them; an
+  enumerating stand-in tries every tool with every value it could build from
+  what it read, and the bench labels every value that reached the network
+  and compares two runs with two different secrets. Deterministic stand-in
+  models give the bounds anywhere; `--model` runs a local model on the same
+  suites. On the bundled suite, an obedient model exfiltrates nothing under
+  `refuse_unendorsed` or in Bulbe (every exfiltrating pair succeeds under
+  `free`), no injected record lands without the person's acceptance, and
+  under `refuse_unendorsed` the network receives only the user's own typed
+  words, the same with either secret. Each floor holds only where the report
+  shows it could have been broken, and is said not measured otherwise; the
+  command exits 1 when one is broken.
+
 - The gate that labels each argument of a tool call and decides the call
   has a second implementation in the native core, asked in its shadow at
   every call. The gate decides; the twin decides the same call from the

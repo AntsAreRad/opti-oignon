@@ -81,6 +81,7 @@ nav:
       - Evolving Memory: agent/evolving-memory.md
       - Evolving Skills: agent/evolving-skills.md
       - Agent Performance: agent/agent-performance.md
+      - Injection Bench: agent/injection-bench.md
   - Sync (Veilid):
       - Veilid Sync: sync/veilid-sync.md
       - Remote Inference: sync/remote-inference.md
