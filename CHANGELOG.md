@@ -2876,6 +2876,14 @@ package costs.
 
 ### Fixed
 
+- The pattern cost guard no longer passes a superlinear pattern as linear
+  on one slow reading of the machine, where its longest reading takes
+  1 ms or more. A reading counts the time its thread runs, never the time
+  it waits for the processor; and where the growth reads under the bar
+  over that floor, the shorter of the two readings it compares is read
+  twice more, keeping its least time. Under the floor, where one slow
+  reading can still end the doubling early, nothing changes.
+
 - [SECURITY] A cancelled agent run runs nothing more. The run read its
   cancel once a round, before asking the model, so the calls of the round
   the cancel came in still ran -- at once those that need no approval -- a

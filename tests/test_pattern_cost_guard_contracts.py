@@ -154,6 +154,17 @@ shrink.
   * PG64 -- a lead writes the branch that holds the preferred class, and a
     class none of the candidates shows.
   * PG65 -- a reading of the tree keeps none of the modules it parsed.
+  * PG66 -- each time is the least of two runs of the costliest method, on
+    the thread's own clock: the wall clock is never read. It replaces PG20.
+  * PG67 -- a reading counts the time its thread runs, never the time it
+    waits: a wait alone reads as nothing, and work as itself.
+  * PG68 -- an exponential pattern ends its pump at its first burst and is
+    found within two seconds of its thread's time. It replaces PG34.
+  * PG69 -- where the longest reading takes 1 ms or more and the growth
+    reads under the bar, the shorter of the two readings it compares is read
+    twice more, keeping its least time: a slow spell in it never passes a
+    quadratic pattern as linear, at the stop as at the ceiling; a growth
+    read over the bar, or under the floor, is not read again.
 """
 import gc
 import sys
@@ -231,6 +242,10 @@ BUDGET_S = {
     "test_pg63_a_lead_takes_the_preferred_class_only_where_its_item_does_and_before_a_word_boundary": 10.0,
     "test_pg64_a_lead_writes_the_branch_that_holds_the_preferred_class_and_a_class_no_candidate_shows": 10.0,
     "test_pg65_a_reading_of_the_tree_keeps_none_of_the_modules_it_parsed": 3.0,
+    "test_pg66_each_time_is_the_least_of_two_runs_of_the_costliest_method_on_the_threads_own_clock": 3.0,
+    "test_pg67_a_reading_counts_the_time_its_thread_runs_never_the_time_it_waits": 3.0,
+    "test_pg68_an_exponential_pattern_ends_its_pump_at_its_first_burst_and_is_found_within_its_threads_time": 5.0,
+    "test_pg69_a_growth_read_under_the_bar_over_the_floor_reads_its_shorter_length_again": 3.0,
 }
 
 
@@ -2070,5 +2085,150 @@ def test_pg65_a_reading_of_the_tree_keeps_none_of_the_modules_it_parsed(tmp_path
         pinned.clear()
         gc.collect()
         assert all(ref() is None for ref in kept), "no module the reading parsed is kept once it returns"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG66 -- the least of two runs, on the thread's own clock (replaces PG20)
+# ---------------------------------------------------------------------------
+def test_pg66_each_time_is_the_least_of_two_runs_of_the_costliest_method_on_the_threads_own_clock():
+    guard, restore = _load()
+    try:
+        ticks, calls = [0.0, 5.0, 10.0, 13.0, 20.0, 21.0, 30.0, 32.0], []
+
+        class Clock:
+            @staticmethod
+            def thread_time():
+                return ticks.pop(0)
+
+            @staticmethod
+            def perf_counter():
+                raise AssertionError("the wall clock is never read")
+
+        class Compiled:
+            def match(self, text):
+                calls.append("match")
+
+            def search(self, text):
+                calls.append("search")
+
+        guard.time = Clock
+        assert guard._timed(Compiled(), "x", ("match", "search")) == 3.0
+        assert calls == ["match", "match", "search", "search"] and ticks == []
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG67 -- a reading counts the time its thread runs, never the time it waits
+# ---------------------------------------------------------------------------
+def test_pg67_a_reading_counts_the_time_its_thread_runs_never_the_time_it_waits():
+    guard, restore = _load()
+    try:
+        import time
+
+        class Waiting:
+            def search(self, text):
+                time.sleep(0.05)
+
+        class Working:
+            def search(self, text):
+                end = time.thread_time() + 0.02
+                while time.thread_time() < end:
+                    pass
+
+        assert guard._timed(Waiting(), "x", ("search",)) < 0.01, "a wait is not the pattern's time"
+        assert guard._timed(Working(), "x", ("search",)) >= 0.015, "control: work is"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG68 -- an exponential pattern, within its thread's time (replaces PG34)
+# ---------------------------------------------------------------------------
+def test_pg68_an_exponential_pattern_ends_its_pump_at_its_first_burst_and_is_found_within_its_threads_time():
+    guard, restore = _load()
+    try:
+        import time
+        for pattern in (r"(a+)+b", r"(?:a+){2,9}b", r"(?:x|xx)+y", r"(?:\w+\s?)+:"):
+            start = time.thread_time()
+            result = _steep(guard, pattern)
+            assert result is not None and result[0] >= guard.BURST, (pattern, result)
+            assert time.thread_time() - start < 2.0, (pattern, "never hangs")
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# PG69 -- a growth read under the bar, over the floor, reads its shorter length again
+# ---------------------------------------------------------------------------
+def test_pg69_a_growth_read_under_the_bar_over_the_floor_reads_its_shorter_length_again():
+    guard, restore = _load()
+    try:
+        seen = []
+
+        def spell(cost, slow, slowed=(0,), factor=3.0):
+            """Fake times: ``cost`` of each length; the readings of the length ``slow`` whose rank is in
+            ``slowed`` taken ``factor`` times slower, as in a slow spell of the machine."""
+            ranks = {}
+
+            def timed(compiled, text, methods):
+                size = len(text)
+                seen.append(size)
+                rank = ranks[size] = ranks.get(size, -1) + 1
+                return cost(size) * (factor if size == slow and rank in slowed else 1.0)
+            return timed
+
+        def quadratic(size):
+            return guard.STOP * (size / 4097) ** 2
+
+        guard._timed = spell(quadratic, 1025)
+        result = guard.growth(r"\s*x", 0)
+        assert guard.superlinear(result) and result[0] > 3.9, ("a slow spell in the shorter reading", result)
+        assert seen[-4:] == [2049, 4097, 1025, 1025], ("the shorter length read twice more", seen[-5:])
+        seen.clear()
+        guard._timed = spell(quadratic, 1025, slowed=(0, 2))
+        result = guard.growth(r"\s*x", 0)
+        assert guard.superlinear(result) and result[0] > 3.9, ("its least time, not its last", result)
+        seen.clear()
+        guard._timed = spell(quadratic, 1025, factor=2.0)
+        result = guard.growth(r"\s*x", 0)
+        assert guard.superlinear(result) and result[0] > 3.9, ("a dip between the hint and the bar", result)
+        seen.clear()
+        guard._timed = spell(lambda size: guard.FLOOR * (size / 16385) ** 2, 4097)
+        result = guard.growth(r"\s*x", 0)
+        assert guard.superlinear(result) and result[1] == guard.FLOOR and seen[-4:] == [8193, 16385, 4097, 4097], (
+            "the floor itself is read again", result, seen[-5:])
+        seen.clear()
+
+        def zeroed(compiled, text, methods):
+            size = len(text)
+            seen.append(size)
+            if size == 1025 and seen.count(1025) > 1:
+                return 0.0
+            return quadratic(size) * (3.0 if size == 1025 else 1.0)
+
+        guard._timed = zeroed
+        result = guard.growth(r"\s*x", 0)
+        assert not guard.superlinear(result) and result[0] == 1.0, ("a reading again of 0 divides nothing", result)
+        seen.clear()
+        guard._timed = spell(lambda size: 0.004 * (size / 16385) ** 2, 4097)
+        result = guard.growth(r"\s*x", 0)
+        assert guard.superlinear(result) and result[0] > 3.9 and seen[-4:] == [8193, 16385, 4097, 4097], (
+            "over the floor at the ceiling, under the stop", result, seen[-5:])
+        seen.clear()
+        guard._timed = spell(quadratic, None)
+        assert guard.superlinear(guard.growth(r"\s*x", 0)) and len(seen) == 12, (
+            "control: a growth read over the bar is not read again", seen)
+        seen.clear()
+        guard._timed = spell(lambda size: 3.0 ** ((size - 1).bit_length() - 13) * 2.0 ** -10, None)
+        result = guard.growth(r"\s*x", 0)
+        assert result[0] == guard.GROWTH and guard.superlinear(result) and len(seen) == 14, (
+            "a growth read at the bar exactly is not read again", result, seen[-4:])
+        seen.clear()
+        guard._timed = spell(lambda size: 1e-7 * size, None)
+        result = guard.growth(r"\s*x", 0)
+        assert not guard.superlinear(result) and len(seen) == 12, ("under the floor nothing is read again", seen)
     finally:
         restore()

@@ -77,9 +77,17 @@ read over two doublings, a pause of the machine in one reading moves the
 growth half as much. A reading that grew sixteen times or more over one
 doubling and took 1 ms or more ends the pump at once, superlinear: an
 exponential pattern would not finish the next length. Each time is the
-least of two runs. Not claimed: a cost growing slower than the length to the
-power 1.58 (three times per doubling), a blow-up that starts only after a
-length the doubling reached slowly, and the patterns counted dynamic.
+least of two runs, on the thread's own clock: the time the thread waits
+while another process holds the processor is not the pattern's. Where the
+longest reading takes 1 ms or more and the growth reads under the bar, the
+shorter of the two readings it compares is read twice more, keeping its
+least time: a slow spell of the machine in that reading -- a busy sibling
+thread, a lower clock -- never passes a superlinear pattern as linear. A
+growth read over the bar is not read again here: the verdict against the
+ledger reads again any reading it would fail. Not claimed: a cost growing
+slower than the length to the power 1.58 (three times per doubling), a
+blow-up that starts only after a length the doubling reached slowly, and
+the patterns counted dynamic.
 
 THE LEDGER. ``LEDGER`` names, per module, each superlinear pattern it owes by
 the digest of its flags and text, as many times as it is written; it is empty
@@ -126,6 +134,8 @@ PLANTED = ((r"\[\s*data\s*[:\s]\s*\w+=", re.IGNORECASE, True), (r"\[\s*data(?:\s
 MOST = 512
 # The readings of a verdict against the ledger: it counts when most of them agree.
 READINGS = 3
+# The readings again of the shorter of the two lengths a growth compares, over the floor and under the bar.
+CONFIRM = 2
 # Among the rebound names: the package may rebind the builtins, so none is read as itself. Never a name.
 BUILTINS = " builtins"
 
@@ -1207,15 +1217,16 @@ def pumps(pattern, flags):
 
 
 def _timed(compiled, text, methods):
-    """The least of two runs of the costliest of ``methods`` on ``text``."""
+    """The least of two runs of the costliest of ``methods`` on ``text``, on the thread's own clock: the time the
+    thread waits for the processor another process holds is not the pattern's."""
     worst = 0.0
     for method in methods:
         read = getattr(compiled, method)
         best = None
         for _ in range(2):
-            start = time.perf_counter()
+            start = time.thread_time()
             read(text)
-            spent = time.perf_counter() - start
+            spent = time.thread_time() - start
             best = spent if best is None else min(best, spent)
         worst = max(worst, best)
     return worst
@@ -1266,6 +1277,14 @@ def growth(pattern, flags, methods=("search",)):
                 # much as it would move one doubling.
                 ratio = (spent / times[-3]) ** 0.5 if len(times) >= 3 and times[-3] > 0 else 1.0
                 if len(times) >= 3 and (spent >= STOP or n >= LAST or (n >= SHORT and ratio < HINT)):
+                    if spent >= FLOOR and ratio < GROWTH:
+                        # A reading over the floor that would pass as linear: the shorter of the two lengths it
+                        # compares is read again, keeping its least time, so a slow spell of the machine in that
+                        # reading never passes a superlinear pattern as linear.
+                        quarter = _texts(lead, ch, body, n // 4)[kind]
+                        for _ in range(CONFIRM):
+                            times[-3] = min(times[-3], _timed(compiled, quarter, methods))
+                        ratio = (spent / times[-3]) ** 0.5 if times[-3] > 0 else 1.0
                     if superlinear((ratio, spent)):
                         return ratio, spent, label, ch
                     if worst is None or spent > worst[1]:
