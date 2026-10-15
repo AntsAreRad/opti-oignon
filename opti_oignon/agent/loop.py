@@ -850,6 +850,7 @@ def _run_task_child(
     round_budget: int | None = None,
     spill_counter: dict[str, int] | None = None,
     provenance: Any = None,
+    halt: Callable[[], str | None] | None = None,
 ) -> tuple[str, int]:
     """Run one bounded child task; returns (final_text, rounds_used).
 
@@ -862,7 +863,11 @@ def _run_task_child(
     (the spill counter is shared with the parent, so paths never collide);
     the doom-loop window and the prune stage stay PARENT-ONLY by design --
     the child is already bounded by ``child_cap`` and debited from the
-    parent budget. Never raises.
+    parent budget. The parent run's stop (``halt``, a cancel first) is read
+    before each of the child's rounds, before each of its calls and at each
+    call's sink, so a stopped run's child asks and runs nothing more; a
+    child stopped before its first round uses none (``rounds_used`` 0).
+    Never raises.
     """
     label = description or "subtask"
 
@@ -883,6 +888,8 @@ def _run_task_child(
     final_text = ""
     rounds = 0
     while rounds < child_cap:
+        if _halted(halt):
+            break
         rounds += 1
         child_emit("round_start", rounds, {})
         try:
@@ -902,6 +909,7 @@ def _run_task_child(
                 approval_fn=approval_fn,
                 tool_handlers={},
                 provenance=provenance,
+                **({"halt": halt} if halt is not None else {}),
             )
         except Exception:  # dispatch is built not to raise; defensive
             results = []
@@ -981,6 +989,7 @@ def _dispatch_with_tasks(
                     approval_fn=approval_fn,
                     tool_handlers=tool_handlers,
                     provenance=provenance,
+                    **({"halt": halt} if halt is not None else {}),
                 )
             )
             continue
@@ -1048,8 +1057,13 @@ def _dispatch_with_tasks(
             round_budget=round_budget,
             spill_counter=spill_counter,
             provenance=provenance,
+            **({"halt": halt} if halt is not None else {}),
         )
         cap -= used  # the debit: child rounds come out of the parent budget
+        if not used:
+            # The run stopped before the child's first round: the task ran nothing.
+            results.append(dispatch.halted_result(call, _halted(halt), mode))
+            continue
         bound_report = f"task used {used} rounds of {child_cap}"
         observation = (final_text + "\n\n" if final_text else "") + bound_report
         results.append(
@@ -1110,8 +1124,9 @@ def _run_verifier(
     The cap is the minimum of the requested ``max_rounds`` and
     ``_VERIFIER_MAX_ROUNDS``, so even a larger request cannot loop forever.
     Its calls are judged by the run's ``provenance``, and the run's ``halt``
-    holds them as it holds the run's: once it names a reason, the round's
-    later calls are not run and the verifier stops after the round.
+    holds them as it holds the run's: it is read before each round, so a
+    stopped run's verifier asks nothing more, and once it names a reason the
+    round's later calls are not run and the verifier stops after the round.
     """
     cap = max(1, min(_clamp_rounds(max_rounds), _VERIFIER_MAX_ROUNDS))
     msgs = list(base_messages) + [{"role": "user", "content": VERIFIER_PROMPT}]
@@ -1119,6 +1134,8 @@ def _run_verifier(
     verdict = "unknown"
     rounds = 0
     while rounds < cap:
+        if _halted(halt):
+            break
         rounds += 1
         try:
             content, native = _consume_stream(_invoke_model(model_client, msgs, None))
@@ -1150,6 +1167,28 @@ def _run_verifier(
         if _halted(halt):
             break
     return VerifierResult(rounds=rounds, verdict=verdict, observations=observations, bounded=rounds <= cap)
+
+
+def _run_stop(
+    halt: Callable[[], str | None] | None, should_continue: Callable[[], bool] | None,
+) -> Callable[[], str | None] | None:
+    """The run's stop, asked at each round's start (the run's, a task child's, the verifier's), before each call,
+    again at each call's sink, and after each round: a cancel (``should_continue`` answering no, or failing to
+    answer) first, then ``halt``'s reason; ``halt`` itself when nothing cancels."""
+    if should_continue is None:
+        return halt
+
+    def stop() -> str | None:
+        try:
+            going = should_continue()
+        except Exception:  # noqa: BLE001 - a cancel that cannot be read stops the run
+            logger.warning("the run's cancel could not be read; the run stops", exc_info=True)
+            going = False
+        if not going:
+            return STOP_CANCELLED
+        return halt() if halt is not None else None
+
+    return stop
 
 
 def _halted(halt: Callable[[], str | None] | None) -> str:
@@ -1185,14 +1224,19 @@ def run(
     ``provenance`` is the run's turn: the parts of the task its user typed,
     whole, and the run's way to ask the user. Every call the run makes -- its
     own, a subtask's, the verifier's -- is judged by it; None endorses
-    nothing. ``halt`` is asked before each call of a round and after the
-    round: once it names a reason (a gate of the run's that refused a write
-    past its bound, say), the round's later calls are not run and the run
-    ends after the round, with that reason as its stop and an ``aborted``
+    nothing. ``halt`` is asked before each call of a round, again at each
+    call's sink, after the round, and before each round of a task child and
+    of the verifier: once it names a reason (a gate of the run's that refused
+    a write past its bound, say), the round's later calls are not run and the
+    run ends after the round, with that reason as its stop and an ``aborted``
     event that names it; a verifier that meets it ends the run with it too.
     None or an empty reason lets the run go on, and so does a ``halt`` that
     fails. A run that reaches its round cap, or is cancelled, also ends with
-    an ``aborted`` event naming why.
+    an ``aborted`` event naming why. A cancel (``should_continue`` answering
+    no, or failing to answer) is read where ``halt`` is, and at the start of
+    each of the run's own rounds: the round's later calls do not run, a call
+    approved just before it does not reach its sink, and a task child and
+    the verifier ask nothing more.
 
     Streams a model response each round, dispatches any tool calls through the
     sandbox seam, feeds the results back as untrusted observations, and stops
@@ -1209,6 +1253,7 @@ def run(
     below the static floors; otherwise the static defaults hold.
     """
     cap = _clamp_rounds(max_rounds)
+    halt = _run_stop(halt, should_continue)
     messages = _initial_messages(
         system_prompt, task, include_memory, memory_provider, memory_query, user_id
     )
@@ -1250,7 +1295,7 @@ def run(
 
     rounds = 0
     while rounds < cap:
-        if should_continue is not None and not should_continue():
+        if should_continue is not None and _halted(halt) == STOP_CANCELLED:
             stop_reason = STOP_CANCELLED
             final_text = final_text or _last_assistant_text(messages)
             _emit(on_event, "aborted", rounds, {"reason": STOP_CANCELLED})

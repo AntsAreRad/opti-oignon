@@ -383,16 +383,28 @@ class ToolCallApprovalManager:
             return self._resolve(approval_id, ApprovalStatus.DENIED, user_id)
 
     def withdraw(self, approval_id: str, reason: str = "turn_stopped") -> bool:
-        """Withdraw a pending tool call on behalf of its own stopped turn.
+        """Withdraw a tool call on behalf of its own stopped turn or run.
 
-        The request is denied and leaves the queue at once, and its waiter
-        is released. This resolves on behalf of the request's own turn,
-        never of a person: ``reason`` is recorded as the resolver in both
-        audits, as ``clear_all`` already does. Returns False when the
-        request is no longer pending.
+        A pending request is denied and leaves the queue at once, and its
+        waiter is released. A request a person approved, whose turn or run
+        stopped before the call ran, is withdrawn after its approval: the
+        audit keeps the approval and records the denial after it, so it
+        never says approved for a call that did not run. Either way this
+        resolves on behalf of the request's own turn, never of a person:
+        ``reason`` is recorded as the resolver in both audits, as
+        ``clear_all`` already does. Returns False when the request is
+        neither pending nor approved, a withdrawal after its approval
+        included.
         """
         with self._lock:
-            return self._resolve(approval_id, ApprovalStatus.DENIED, reason)
+            if approval_id in self._pending:
+                return self._resolve(approval_id, ApprovalStatus.DENIED, reason)
+            last = next((e for e in reversed(self._audit_log) if e.approval_id == approval_id), None)
+            if last is None or last.status != ApprovalStatus.APPROVED.value:
+                return False
+            self._record(approval_id, last.tool_name, last.conversation_id, ApprovalStatus.DENIED, reason,
+                         time.time())
+            return True
 
     def _resolve(
         self,
@@ -408,15 +420,32 @@ class ToolCallApprovalManager:
         request.status = status
         request.resolved_at = time.time()
         request.resolved_by = resolved_by
+        self._record(approval_id, request.tool_name, request.conversation_id, status, resolved_by,
+                     request.resolved_at)
 
-        # Audit log
+        # Unblock the waiting thread
+        event = self._events.pop(approval_id, None)
+        if event:
+            event.set()
+        return True
+
+    def _record(
+        self,
+        approval_id: str,
+        tool_name: str,
+        conversation_id: str,
+        status: ApprovalStatus,
+        resolved_by: str,
+        timestamp: float,
+    ) -> None:
+        """One decision into both audits and the log (must hold self._lock)."""
         entry = AuditEntry(
             approval_id=approval_id,
-            tool_name=request.tool_name,
+            tool_name=tool_name,
             status=status.value,
             resolved_by=resolved_by,
-            timestamp=request.resolved_at,
-            conversation_id=request.conversation_id,
+            timestamp=timestamp,
+            conversation_id=conversation_id,
         )
         self._audit_log.append(entry)
         if len(self._audit_log) > MAX_AUDIT_LOG_SIZE:
@@ -428,26 +457,20 @@ class ToolCallApprovalManager:
             chain_log(
                 event_type=f"tool_call_{status.value}",
                 source="tool_call_approval",
-                action=f"{request.tool_name} {status.value}",
+                action=f"{tool_name} {status.value}",
                 severity="WARNING" if status.value == "denied" else "INFO",
                 approval_id=approval_id,
-                tool_name=request.tool_name,
+                tool_name=tool_name,
                 resolved_by=resolved_by,
-                conversation_id=request.conversation_id,
+                conversation_id=conversation_id,
             )
         except Exception:
             pass
 
-        # Unblock the waiting thread
-        event = self._events.pop(approval_id, None)
-        if event:
-            event.set()
-
         logger.info(
             "Tool call %s: %s (%s) by %s",
-            status.value, request.tool_name, approval_id, resolved_by,
+            status.value, tool_name, approval_id, resolved_by,
         )
-        return True
 
     # -- Query --------------------------------------------------------------
 

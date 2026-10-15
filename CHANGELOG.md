@@ -2876,6 +2876,21 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A cancelled agent run runs nothing more. The run read its
+  cancel once a round, before asking the model, so the calls of the round
+  the cancel came in still ran -- at once those that need no approval -- a
+  task child ran its own rounds to their end, and a call a person approved
+  just before the cancel still reached its sink. The cancel is now read
+  where the run's halt is: before each call, again at each call's sink once
+  every gate has let it through, after the round, and at the start of each
+  round of a task child and of the verifier; a cancel that cannot be read
+  stops the run. A call stopped at its sink does not run, and every
+  approval it was given is withdrawn on the run's behalf: the approval
+  queue's audit, and the signed audit with it, keep the person's approval
+  and record the withdrawal after it, so neither says approved for a call
+  that did not run. The chat records an approval its turn's stop overtook
+  the same way.
+
 - The agent panel no longer shows a run as running once the loop ended it
   without an answer: a run stopped for repeating the same call, for
   writing past its bound, at its round cap or by a cancel now ends with an

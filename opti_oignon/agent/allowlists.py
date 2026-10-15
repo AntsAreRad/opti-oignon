@@ -26,13 +26,16 @@ the network or mutate persistent memory or skills autonomously.
 Importlib-isolatable: ``security_mode`` and ``tool_call_approval`` are imported
 lazily and guarded, so this module loads with no backend dependency and the
 gating primitives are exercised with an injected mode and an injected approval
-function in the runtime tests. There is no module-level singleton to reset.
+function in the runtime tests. There is no module-level singleton to reset:
+the approvals a call was given are held per thread, only while the dispatch
+holds that call.
 """
 
 from __future__ import annotations
 
 import inspect
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -289,7 +292,9 @@ def request_approval(
     run's stop (an event): a stopped run asks no one; once it is set, the
     request still waiting is withdrawn from the queue (denied on the run's
     behalf when the queue cannot withdraw) and the call is denied, whatever
-    answer came or comes, as a stopped chat turn withdraws its own.
+    answer came or comes, as a stopped chat turn withdraws its own. An
+    approval is held for the calling thread's call (``withdraw_approved``),
+    so a run that stops before the call reaches its sink withdraws it.
     """
     if stop is not None and stop.is_set():
         logger.info("the run of %s is stopped; nothing is asked", tool_name)
@@ -322,7 +327,46 @@ def request_approval(
     if stop is not None and stop.is_set():
         _withdraw(mgr, approval_id, "run_cancelled")
         return False
-    return _is_approved(status)
+    approved = _is_approved(status)
+    if approved:
+        _hold(mgr, approval_id)
+    return approved
+
+
+# The approvals the calling thread's call was given while the dispatch holds
+# that call: a run that stops before the call reaches its sink withdraws them,
+# so the audit never says approved for a call that did not run. Outside a
+# dispatch nothing is held, so a thread that asks and never dispatches keeps
+# nothing.
+_given = threading.local()
+
+
+def _hold(mgr: Any, approval_id: str) -> None:
+    held = getattr(_given, "approvals", None)
+    if held is not None:
+        held.append((mgr, approval_id))
+
+
+def forget_approved() -> None:
+    """Hold the approvals the calling thread's call is given from now on, forgetting any earlier call's."""
+    _given.approvals = []
+
+
+def release_approved() -> None:
+    """Hold no approval on the calling thread any more: its call has returned."""
+    _given.approvals = None
+
+
+def withdraw_approved(reason: str) -> int:
+    """Withdraw, on behalf of a run stopped before its call reached the sink, every approval the calling thread's
+    call was given; how many there were. Never raises."""
+    held = getattr(_given, "approvals", None)
+    if not held:
+        return 0
+    _given.approvals = []
+    for mgr, approval_id in held:
+        _withdraw(mgr, approval_id, reason)
+    return len(held)
 
 
 def _withdraw(mgr: Any, approval_id: str, reason: str) -> None:

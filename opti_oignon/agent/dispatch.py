@@ -442,6 +442,7 @@ def dispatch_tool_call(
     approval_fn: Callable[[str, str, dict[str, Any]], bool] | None = None,
     tool_handlers: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
     provenance: Any = None,
+    halt: Callable[[], Any] | None = None,
 ) -> DispatchResult:
     """Gate then execute a single tool call, returning an observation result.
 
@@ -455,9 +456,31 @@ def dispatch_tool_call(
     the mode is read again at each call and never looser than the machine's
     (an escalation holds a running agent's next call to Bulbe), and a call
     that cannot run -- no handler, no sandbox -- is refused before anyone is
-    asked about it. Never raises -- every refusal or error is a
-    ``DispatchResult``.
+    asked about it. ``halt``, the run's stop, is read again once every gate
+    has let the call through, just before its sink: a run stopped meanwhile
+    -- a person's yes that landed just before a cancel -- does not run the
+    call, and every approval the call was given is withdrawn on the run's
+    behalf, so the audit says so. Never raises -- every refusal or error is
+    a ``DispatchResult``.
     """
+    allowlists.forget_approved()
+    try:
+        return _gate_and_run(call, mode, conversation_id, sandbox, approval_fn, tool_handlers, provenance, halt)
+    finally:
+        allowlists.release_approved()
+
+
+def _gate_and_run(
+    call: ToolCall,
+    mode: str | None,
+    conversation_id: str,
+    sandbox: Any,
+    approval_fn: Callable[[str, str, dict[str, Any]], bool] | None,
+    tool_handlers: dict[str, Callable[[dict[str, Any]], Any]] | None,
+    provenance: Any,
+    halt: Callable[[], Any] | None,
+) -> DispatchResult:
+    """``dispatch_tool_call``'s gates and sink, while the approvals the call is given are held."""
     handler = (tool_handlers or {}).get(call.name)
     if _provenance is not None:
         mode = allowlists.floor_mode(mode)
@@ -513,6 +536,19 @@ def dispatch_tool_call(
                 provenance=metadata,
             )
         arguments = verdict.arguments
+
+    stopping = halt_reason(halt)
+    if stopping:
+        allowlists.withdraw_approved(f"run_{stopping}")
+        return DispatchResult(
+            tool_name=call.name,
+            executed=False,
+            observation=f"Not run: the run is stopping ({stopping}).",
+            reason=REASON_HALTED,
+            source=call.source,
+            mode=decision.mode,
+            provenance=metadata,
+        )
 
     if allowlists.is_sandbox_tool(call.name):
         if not sandbox_ready(sandbox):
@@ -668,7 +704,8 @@ def dispatch_round(
     halt: Callable[[], Any] | None = None,
 ) -> tuple[list[DispatchResult], str]:
     """Resolve a model response and dispatch every tool call it produced, each judged by ``provenance``; once
-    ``halt`` names a reason, the round's later calls are not run (``halted_result``)."""
+    ``halt`` names a reason, the round's later calls are not run (``halted_result``), nor a call it names one for
+    once its gates let it through."""
     calls, path = resolve_tool_calls(response)
     results = []
     for c in calls:
@@ -684,5 +721,6 @@ def dispatch_round(
             approval_fn=approval_fn,
             tool_handlers=tool_handlers,
             provenance=provenance,
+            **({"halt": halt} if halt is not None else {}),
         ))
     return results, path

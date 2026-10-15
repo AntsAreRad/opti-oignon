@@ -569,7 +569,9 @@ def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, tim
     hook blocks the generation thread until a person decides, the turn is
     stopped, or the deadline passes (an auto-deny). A stopped turn's pending
     request is withdrawn on its behalf, so it leaves the queue and no person
-    is named, and a decision that lands after the stop never runs the tool.
+    is named, and a decision that lands after the stop never runs the tool:
+    an approval the stop overtakes is withdrawn after it, so the audit never
+    says approved for a call that did not run.
     The request and its socket event carry the label of each argument and
     the call's class when the gate gives them.
     """
@@ -601,7 +603,9 @@ def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, tim
         }))
         _await_approval(event, turn.stop, timeout)
         status = manager.get_status(aid)
-        if turn.stop.is_set() and status == _ApprovalStatus.PENDING:
+        # The stop is read once: the decision and the audit follow the same read.
+        stopped = turn.stop.is_set()
+        if stopped and status in (_ApprovalStatus.PENDING, _ApprovalStatus.APPROVED):
             withdraw = getattr(manager, "withdraw", None)
             if callable(withdraw):
                 withdraw(aid, "turn_stopped")
@@ -609,7 +613,7 @@ def _make_approval_hook(manager, turn: ChatTurn, conversation_id: str, emit, tim
         approved = (
             status is not None
             and status == _ApprovalStatus.APPROVED
-            and not turn.stop.is_set()
+            and not stopped
         )
         emit(("tool_call_resolved", {
             "approval_id": aid,

@@ -146,10 +146,12 @@ class AgentRunManager:
     ``manage_skills`` handler, memory and notes writes bound to a pending-write
     gate of the run's own, and, optionally, the skills most relevant to the
     task prepended as untrusted context. ``status`` / ``cancel`` are safe to call
-    concurrently. Cancellation is cooperative: it sets a flag the loop checks
-    between rounds (``should_continue``), so the run stops cleanly. Subscribers
-    are plain callables receiving JSON payloads, which keeps the engine free of
-    any event-loop dependency; the WebSocket endpoint adapts that to asyncio.
+    concurrently. Cancellation is cooperative: it sets a flag the loop reads
+    (``should_continue``) at the start of each round, before each call and at
+    each call's sink, so the run stops cleanly and runs nothing more.
+    Subscribers are plain callables receiving JSON payloads, which keeps the
+    engine free of any event-loop dependency; the WebSocket endpoint adapts
+    that to asyncio.
     """
 
     def __init__(self) -> None:

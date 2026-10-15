@@ -167,7 +167,15 @@ The running agent is controlled over `/api/agent/*`:
   Bulbe for Daily takes the degradation ceremony, not a request field. A mode
   that does not exist, or a machine mode that cannot be read, runs in Bulbe.
 - `GET /api/agent/status` returns `{running, rounds, stop_reason}`.
-- `POST /api/agent/cancel` requests cooperative cancellation.
+- `POST /api/agent/cancel` cancels the run. The cancel is read at the start
+  of each round, before each call of a round, again at each call's sink once
+  every gate has let it through, after the round, and at the start of each
+  round of a task child and of the verifier: the calls of the round it came
+  in do not run, a task child runs nothing more, a call a person approved
+  just before it does not run either, and the approval queue's audit keeps
+  that approval and records, after it, the call's withdrawal on the run's
+  behalf. A cancel that cannot be read counts as one. A question the run
+  was still waiting on is withdrawn.
 - `WS /api/agent/stream` emits the live `AgentEvent` stream (`round_start`,
   `model_output`, `tool_result`, `done`, `error`, `aborted` -- a run ended
   for the reason it names: repeating the same call, writing past the bound,

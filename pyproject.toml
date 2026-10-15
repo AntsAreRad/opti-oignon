@@ -966,6 +966,16 @@ fail_under = 0
 # for the assembly that counted its own words: it gives way to nc14 in the
 # same file. They stay in the tree word for word.
 #
+# An agent run reads its cancel before each call, again at each call's sink,
+# after the round, and before each round of a task child and of the
+# verifier, not only before asking the model. wc1 of
+# tests/test_write_cap_stop_contracts.py pinned a round's calls running after
+# the cancel came in: it gives way to sk1 of
+# tests/test_run_stop_sink_contracts.py, word for word but for the cancel,
+# its stand-in halts, which count their reads, set to the read that stops the
+# same call now that the halt is read at each sink too. It stays in the tree
+# word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1327,4 +1337,5 @@ addopts = """
     --deselect=tests/test_onion_composer_contracts.py::test_cw1_layers_appear_in_the_declared_order
     --deselect=tests/test_onion_composer_contracts.py::test_cw7_the_budget_is_read_from_the_yaml_and_oversubscription_is_refused
     --deselect=tests/test_native_core_contracts.py::test_nc1_the_native_module_loads_and_exposes_the_surface
+    --deselect=tests/test_write_cap_stop_contracts.py::test_wc1_the_loop_ends_a_run_on_its_halt_reason_after_the_round
 """
