@@ -983,6 +983,15 @@ fail_under = 0
 # pg68 in the same file, the same checks on the thread's own clock. They stay
 # in the tree word for word.
 #
+# jw23 of tests/test_onion_journal_contracts.py held a journal that had no
+# shadow: a descent refused, and a Flesh over its cap, or over the room the
+# answer's floor or a turn's images leave it, refused by name. The Flesh now
+# gives: caught up at the plan while no burst holds the conversation's slot,
+# laid over a shadow of its own otherwise, and a descent is composed over a
+# shadow under the rung its context holds. jw23 gives way to jw6a, jw9 and
+# jw24 of tests/test_onion_journal_shadow_contracts.py, the same windows laid
+# where they were refused. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1347,4 +1356,5 @@ addopts = """
     --deselect=tests/test_write_cap_stop_contracts.py::test_wc1_the_loop_ends_a_run_on_its_halt_reason_after_the_round
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg20_each_time_is_the_least_of_two_runs_of_the_costliest_method
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg34_an_exponential_pattern_ends_its_pump_at_its_first_burst_and_is_found
+    --deselect=tests/test_onion_journal_contracts.py::test_jw23_without_a_shadow_a_descent_and_a_flesh_over_its_cap_are_refused_by_name
 """

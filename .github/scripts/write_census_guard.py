@@ -657,7 +657,10 @@ EXEMPT = {
     ("opti_oignon/memory/migration.py", "facts"): (
         "migration", "it moves the legacy rows into the store, at start-up or when the user asks again: nothing new"),
     ("opti_oignon/memory/librarian.py", "flesh"): (
-        "transcript", "the onion mirrors the conversation's own turns, and takes back the turns it took back"),
+        "transcript", "the onion mirrors the conversation's own turns, and takes back the turns it took back; a "
+                      "journal's plan catches the oldest of them up into the Cellar, each span under its bare "
+                      "receipt and recallable, with no model, as the queue would; a window's shadow evicts only from "
+                      "a state of its own, made for one composition and never saved"),
     ("opti_oignon/memory/librarian.py", "peels"): (
         "copy", "it copies the peels already in the tree, less the superseded -- and, for a journal's tail, less "
                 "those its region lays -- into a view for one composition"),
@@ -718,7 +721,8 @@ ARGUED_SITES = {
         ("Executor.execute", "add_message"), ("Executor.execute", "update_conversation_metadata"),),
     ("opti_oignon/memory/librarian.py", "flesh"): (
         ("OnionState._take_back", "take_back"), ("OnionState._take_back", "take_back"),
-        ("OnionState.mirror", "append"),),
+        ("OnionState.mirror", "append"), ("_catch_up", "evict_span"), ("_catch_up", "evict_span"),
+        ("_shadow", "evict_span"), ("_shadow", "evict_span"),),
     ("opti_oignon/memory/librarian.py", "peels"): (
         ("_compose_block", "add"), ("_read", "add"),),
     ("opti_oignon/memory/librarian.py", "receipts"): (

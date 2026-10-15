@@ -792,8 +792,22 @@ def turn_text(pieces, wrap):
     return "\n\n".join(text for _kind, text in _rendered(pieces, wrap))
 
 
+def _fold_part(fold, wrap):
+    """A shadow's fold as the memory lays it: ``(its item, the item alone in the memory's envelope)``, bare as every
+    item of the tail is."""
+    _kind, _key, text, frame, _label = fold
+    item = _framed(frame[0], frame[1], _bare(text))
+    return item, _wrapped(wrap, item, "memory", frames=True)
+
+
+def fold_cost(fold, wrap, count):
+    """What a shadow's fold costs laid alone among the memory, its envelope included: what the Flesh room its
+    eviction freed must hold of it."""
+    return _part("tail", _fold_part(fold, wrap)[1], "tail", count)[2]
+
+
 def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget, count, overhead, wrap, shares,
-                    prompt_cap=None, tail_room=None, images=0, image_tokens=0):
+                    prompt_cap=None, tail_room=None, images=0, image_tokens=0, fold=None):
     """A turn's window as a journal under ``budget``. Pure: same inputs, same journal, inputs untouched.
 
     The system prompt, and a manifest when given (``system``), open it, one
@@ -816,6 +830,13 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     no image. The current turn comes first: their charge takes its room
     from the Flesh, held to its cap less the charge, and a charge over the
     whole Flesh cap is refused ``document``.
+
+    A shadow's ``fold`` -- one memory item naming the turns its eviction set
+    aside -- is laid first among the memory and charged to the Flesh room
+    that eviction freed: the Flesh is held to its cap less the fold, the
+    tail's cap and ``tail_room`` raised by it, the memory share left whole
+    for what follows it; a fold the Flesh cannot hold beside the turn's
+    images is refused ``flesh``.
 
     Every part is counted once with ``count``: a peel, the digest and a
     turn's words by their text, as ``compose`` counts them, a Flesh turn and
@@ -845,6 +866,19 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
                           figures=(image_cost, budget.flesh))
     # The current turn comes first: the Flesh is held to what its images leave of its cap.
     laid_under = replace(budget, flesh=budget.flesh - image_cost)
+    # A shadow's fold is charged to the Flesh room the eviction it names freed, outside the memory share.
+    fold_item, fold_alone, charge = None, "", 0
+    if fold is not None:
+        fold_item, fold_alone = _fold_part(fold, wrap)
+        charge = _part("tail", fold_alone, "tail", count)[2]
+        if image_cost + charge > budget.flesh:
+            raise BudgetError(f"a shadow's fold of {charge} tokens has no room in the Flesh's cap of {budget.flesh} "
+                              f"beside images of {image_cost}: no turn is set aside without its trace",
+                              motive="flesh", figures=(image_cost + charge, budget.flesh))
+        laid_under = replace(laid_under, flesh=laid_under.flesh - charge, tail=laid_under.tail + charge)
+        if tail_room is not None:
+            # The fold's room comes from the Flesh: the tail's kinds keep the room they were given.
+            tail_room += charge
 
     def counted(layer, text):
         return _part(layer, text, layer, count)[2]
@@ -894,6 +928,10 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
         if tail_room is not None:
             cap = min(cap, max(tail_room - tail_tokens, 0))
         kept, dropped, placed = [], 0, ""
+        if kind == "memory" and fold_item is not None:
+            # The fold first, never cut, on the room its eviction freed: the share holds what follows it.
+            kept, placed = [(fold_item, fold[4])], fold_alone
+            cap = cap + charge if tail_room is None else min(cap + charge, tail_room)
         for _kind, key, text, frame, label in by_kind[kind]:
             item = _framed(frame[0], frame[1], _bare(text)) if frame else _bare(text)
             if kept:
@@ -973,6 +1011,19 @@ def over_cap(budget, counts, document_share=0.0, image_charge=0):
     return None
 
 
+def layer_cap(budget, layer, image_charge=0):
+    """What ``budget`` holds of ``layer``, the Flesh less what a turn's images take of it (``image_charge``)."""
+    return getattr(budget, layer) - (image_charge if layer == "flesh" else 0)
+
+
+def at_mark(budget, mark):
+    """``budget`` with the Flesh held to ``mark`` of its cap, rounded down: where a burst aims once a journal laid
+    the conversation, so the Flesh is evicted before it reaches its cap."""
+    import math
+
+    return replace(budget, flesh=math.floor(mark * budget.flesh))
+
+
 def accounted(tokens, margin):
     """What a window of ``tokens`` is held to in its context: its count raised by ``margin``, rounded up."""
     import math
@@ -999,9 +1050,10 @@ class JournalConfig:
     """How a journal is laid and sent: the share of its count held back for the counter's error, a message's
     overhead in tokens, the share of the tail's cap each kind of source may take, the room the answer always
     keeps (``answer_floor``) and what one image of a turn is charged, its room taken from the Flesh
-    (``image_tokens``). How a plan would catch an overgrown Flesh up -- the newest ``catch_up_reach`` turns
-    kept, at most ``catch_up_steps`` steps -- and where a burst would aim, ``burst_mark`` of the Flesh's cap: read
-    and checked here, at their defaults when the section leaves them out; no composition reads them."""
+    (``image_tokens``). How a plan catches the Flesh up when it finds it over its cap: the turns past the
+    newest ``catch_up_reach`` leave bare, then the queue runs at most ``catch_up_steps`` steps with no model, then
+    bare spans until it fits. Where a burst aims once a journal laid the conversation: ``burst_mark`` of the
+    Flesh's cap."""
 
     margin: float
     message_overhead: int

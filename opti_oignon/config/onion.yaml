@@ -45,19 +45,18 @@ budgets:
 # turn. Its rung is home_rung's table and the turn's need, never named here;
 # a section that is missing a key it needs, names one it does not know or
 # names home_rung is refused by name, every reason at once. catch_up and
-# burst_mark, which no composition reads, may be left out: they read at
-# their defaults.
+# burst_mark may be left out: they read at their defaults.
 journal:
   # The share of a window's count held back for the counter's error: the
   # answer is held to what the context leaves past the count with this share
   # added.
   margin: 0.15
   # The room the answer always keeps, in tokens: a window is laid under the
-  # count that leaves it, past the margin -- the tail cut to the room the
-  # rest leaves it; a Flesh over that room is refused by name, and the
-  # window is refused count when the system prompt, the Core, the turn, the
-  # region and the digest alone leave less. A whole number, under the
-  # smallest rung.
+  # count that leaves it, past the margin -- the Flesh gives first, its
+  # oldest turns laid over a shadow, then the tail is cut to the room the
+  # rest leaves it; the window is refused count when the system prompt, the
+  # Core, the turn, the region and the digest alone leave less. A whole
+  # number, under the smallest rung.
   answer_floor: 1024
   # What one image of the current turn is charged, in tokens, counted on
   # its message: the counter reads none. The current turn comes first: the
@@ -72,6 +71,21 @@ journal:
   # cut to whole items; a turn's documents are held to theirs, never cut.
   # They sum to 1 at most.
   tail_shares: {memory: 0.35, rag: 0.25, web: 0.2, document: 0.2}
+  # How a plan catches the Flesh up when it finds it over its cap at the
+  # conversation's own rung -- a conversation the process had not seen, one
+  # older than the onion, one grown past its cap -- with no model, before the
+  # turn is admitted: the turns past the newest ``reach`` leave bare, a span
+  # at a time, then the queue runs at most ``max_steps`` steps on the rungs
+  # that need no model, then bare spans until the Flesh fits. Only while no
+  # burst holds the conversation's slot: otherwise nothing is evicted and
+  # the window lays the overflow over a shadow, one line naming the turns
+  # it set aside, charged to the Flesh room they freed. Whole numbers; reach
+  # at least 1.
+  catch_up: {reach: 64, max_steps: 32}
+  # Where a burst aims once a journal laid the conversation: this share of
+  # the Flesh's cap at its rung, so the Flesh is evicted, with the model,
+  # before a window has to lay its overflow over a shadow. A share in (0, 1].
+  burst_mark: 0.8
 
 # The eviction gate, with two faces. A span leaves the flesh only once its
 # peel answers the recall probes drawn from the span, class by class, and

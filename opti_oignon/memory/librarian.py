@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The librarian: the loop that grows the onion memory behind the chat path.
 
-It does five things and nothing else. It mirrors a saved conversation into
+It does six things and nothing else. It mirrors a saved conversation into
 a Flesh, each turn known by what it is and never by a count: a turn the
 conversation no longer holds as it was -- a retry, a synchronisation, a
 deletion -- is taken back from the Flesh, or the span that holds it in the
@@ -21,7 +21,14 @@ digest, the anchors of held spans and the Peels selected for the question,
 under the layer caps, every recalled segment framed as data with its
 provenance, every part counted with the counter of the turn the block rides
 (``use_counter``); the executor wraps the whole block as untrusted memory
-before it reaches the model. And it is the user's one path to the Core and the
+before it reaches the model. And it plans and composes a turn's window as a
+journal (``plan_window``, ``compose_window``): planned before the turn is
+admitted -- the Flesh caught up then, with no model, when it is over its cap
+and no burst holds the conversation's slot -- and composed after, under the
+rung the governor admitted; an overflow, a descent's included, is laid over
+a shadow of the window's own, the conversation's state untouched, and once a
+journal laid the conversation a burst aims at its mark of the Flesh's cap.
+And it is the user's one path to the Core and the
 Cellar: ``pin``, ``supersede``, ``recall`` and the proposals the queue
 offers (``accept_proposal``, ``decline_proposal``) take the conversation
 id, forward the actor to the store so that only a caller that says it is
@@ -549,9 +556,11 @@ class OnionState:
     Two locks, neither persisted. ``lock`` guards the state itself: the
     mirror, a step's read and its commit, a save, a composition and the
     user's verbs each hold it for as long as they read or write, never
-    across a call to a model. ``slot`` is the one writer of evictions: a
-    burst takes it without waiting and runs nothing when another holds it;
-    a close waits for it.
+    across a call to a model. ``slot`` is held by whoever evicts: a burst
+    takes it without waiting and runs nothing when another holds it; a
+    close waits for it; a journal's plan takes it without waiting, under
+    the lock, to catch the Flesh up, and when another holds it evicts
+    nothing -- the window lays the overflow over a shadow of its own.
     """
 
     def __init__(self):
@@ -1267,12 +1276,15 @@ def _call_identity(config, system):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def curate(state, summarize, *, gate=None, budget=None, estimate=None, ladder=None, reask=None):
+def curate(state, summarize, *, gate=None, budget=None, estimate=None, ladder=None, reask=None, cost=None):
     """One step of the queue if the Flesh overflows: its oldest span leaves under the rung that answers for it.
 
     ``summarize`` None is a librarian absent or not admitted: the step
     starts at the rungs that need no model. ``reask`` asks for a refused
-    summary once more, with the probes it failed.
+    summary once more, with the probes it failed. ``cost``, a turn's cost as
+    a journal lays it -- its words and documents rendered, envelopes and a
+    message's overhead included -- makes the Flesh's fit read that cost, the
+    one a window counts the Flesh at; without it, the Flesh's own count.
     """
     from .composer import load_budget
     from .peels import Eviction, advance, load_gate, load_ladder
@@ -1281,7 +1293,8 @@ def curate(state, summarize, *, gate=None, budget=None, estimate=None, ladder=No
     gate = gate or load_gate()
     ladder = ladder or load_ladder()
     estimate = estimate or estimate_tokens
-    if state.flesh.tokens(estimate) <= budget.flesh:
+    held = sum(cost(turn) for turn in state.flesh.turns()) if cost is not None else state.flesh.tokens(estimate)
+    if held <= budget.flesh:
         return Eviction(False, "the Flesh fits its cap; nothing to evict")
     outcome = advance(
         flesh=state.flesh, cellar=state.cellar, ledger=state.ledger, tree=state.tree,
@@ -1512,12 +1525,20 @@ def _curation_burst(conversation_id, *, config=None, summarize=None, gate=None, 
     _counted("burst", "ran")
     if summarize is None:
         _counted("burst", "model_less")
+    # Once a journal laid the conversation, the burst aims at its mark of the Flesh's cap at the conversation's
+    # rung, read at the cost the journal lays a turn at; a budget handed in wins.
+    cost, record = None, state.journal
+    if budget is None and record is not None and record.burst is not None:
+        from .composer import at_mark
+
+        sticky, mark, cost = record.burst
+        budget = at_mark(sticky, mark)
     if run is not None:
         run.hold()
     try:
         steps = 0
         while steps < config.max_steps_per_burst:
-            outcome = curate(state, summarize, gate=gate, budget=budget, ladder=ladder, reask=reask)
+            outcome = curate(state, summarize, gate=gate, budget=budget, ladder=ladder, reask=reask, cost=cost)
             summarize, reask = broken(outcome, summarize, reask)
             if not outcome.evicted:
                 break
@@ -1561,8 +1582,27 @@ def _default_runner(conversation_id):
     threading.Thread(target=_job, name="oo-librarian", daemon=True).start()
 
 
+def _past_mark(state):
+    """Whether the Flesh is past the burst's mark: only once a journal laid the conversation, read at the cost the
+    journal lays its turns at, outside the module's lock."""
+    from .composer import at_mark, layer_cap
+
+    record = state.journal
+    if record is None or record.burst is None:
+        return False
+    sticky, mark, cost = record.burst
+    with state.lock:
+        turns = state.flesh.turns()
+    return sum(cost(turn) for turn in turns) > layer_cap(at_mark(sticky, mark), "flesh")
+
+
 def maybe_curate(conversation_id, messages, *, config=None, runner=None):
-    """Mirror the conversation and fire a burst if enabled and grown enough. Never raises.
+    """Mirror the conversation and fire a burst if enabled and grown enough, or past the mark. Never raises.
+
+    Once a journal laid the conversation, a burst fires too when the Flesh is
+    past the journal's mark of its cap (``burst_mark``), however few turns it
+    grew by: the burst then evicts down to that mark, with the model, so a
+    window rarely has to lay an overflow over a shadow.
 
     What the process counted is written at a turn once
     ``counters.flush_every_s`` has passed since its last write; what it
@@ -1579,14 +1619,17 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
             _save_state(conversation_id, state, config)
         _flush_when_due(config)
         count = len(state.flesh.turns())
+        marked = _past_mark(state)
         with _lock:
             # Growth counts from what the Flesh holds: once the mirror took
             # turns back, from what is left.
             mark = min(_watermark.get(conversation_id, 0), count)
             _watermark[conversation_id] = mark
-            if count - mark < config.min_new_turns:
+            if count - mark < config.min_new_turns and not marked:
                 return False
             _watermark[conversation_id] = count
+        if marked:
+            _counted("burst", "marked")
         run = runner if runner is not None else _default_runner
         try:
             run(conversation_id)
@@ -1806,6 +1849,20 @@ class _Held:
     tail: tuple
     turn: tuple
     causes: tuple
+    # What a shadow and a descent need: the Flesh's turns as stored, the budgets of every rung, the receipts digest
+    # at each rung up to the plan's, the gate and ladder the queue runs under, a turn's cost as the journal lays
+    # it, the conversation's own rung's budget and the burst's mark, and how the shadow labels what it lays.
+    raw: tuple = ()
+    budgets: object = None
+    digests: tuple = ()
+    gate: object = None
+    ladder: object = None
+    cost: object = None
+    sticky: object = None
+    mark: float = 0.0
+    catch_up: tuple = (0, 0)
+    lineage: tuple = ()
+    withdrawn: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -1820,6 +1877,9 @@ class _JournalRecord:
     chain: str
     epoch: int
     causes: tuple
+    # What a burst reads once a journal laid the conversation: the budget of the conversation's own rung, the
+    # journal's mark of the Flesh's cap, and a turn's cost as the journal lays it.
+    burst: object = None
 
 
 def _refusal_of(exc):
@@ -1862,7 +1922,7 @@ def _digest_text(*parts):
 
 
 def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), model_window=None, messages=None,
-                withdrawn=(), recalled=(), config=None, budgets=None, journal=None, ladder=None):
+                withdrawn=(), recalled=(), config=None, budgets=None, journal=None, ladder=None, gate=None):
     """Plan the turn's window before it is admitted: the rung to ask the governor for, or why none. Never raises.
 
     ``count`` is the counter of the turn, for ``model``: every part is
@@ -1874,8 +1934,13 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     model's window (``model_window``), or a larger one when the system
     prompt, the Core, the turn's words or its documents need it, or its
     images when even the rung's whole Flesh cap cannot hold them, never
-    past the model's window; a Flesh over the rung's cap, less what the
-    turn's images take of it, is refused by name. The region, the receipts
+    past the model's window. A Flesh found over its cap at the
+    conversation's own rung is caught up now, with no model, while no burst
+    holds the conversation's slot (``_catch_up``): the turns past the
+    journal's reach leave bare, the queue runs its rungs that need no model,
+    then bare spans until it fits, and the state is saved once; with the
+    slot held, nothing is evicted and the window lays the overflow over a
+    shadow. The region, the receipts
     digest, the Flesh and the memory a question brings
     -- the anchors of held spans, the peels laid in no region, the spans
     the user recalls (``recalled``) -- are read now, under the state's
@@ -1886,7 +1951,7 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     empty) -- lays nothing of the conversation but the Core, whatever the
     state still mirrors.
     The configurations a caller read once -- ``config``, ``budgets``,
-    ``journal``, ``ladder`` -- are not read again. Every refusal is counted
+    ``journal``, ``ladder``, ``gate`` -- are not read again. Every refusal is counted
     once, by its motive.
 
     What a caller hands over is plain values. ``turn`` is the current turn
@@ -1918,7 +1983,7 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     try:
         plan = _plan(conversation_id, model=model, count=count, system=system, turn=turn, wrap=wrap, tail=tail,
                      model_window=model_window, messages=messages, withdrawn=withdrawn, recalled=recalled,
-                     config=config, budgets=budgets, journal=journal, ladder=ladder)
+                     config=config, budgets=budgets, journal=journal, ladder=ladder, gate=gate)
     except BudgetError as exc:
         plan = Plan(refusal=_refusal_of(exc))
     except Exception as exc:  # noqa: BLE001 - a plan never raises into a turn
@@ -1960,9 +2025,9 @@ def _tail_sources(tail):
 
 
 def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_window, messages, withdrawn, recalled,
-          config, budgets, journal, ladder):
+          config, budgets, journal, ladder, gate):
     from .composer import _part, _rendered, _whole, load_budgets, load_journal
-    from .peels import CUT, join_labels, load_ladder, turn_label
+    from .peels import CUT, join_labels, load_gate, load_ladder, turn_label
 
     # Read once: an iterator handed over is read whole, then by both the test of an empty conversation and the mirror.
     messages = None if messages is None else list(messages)
@@ -1984,6 +2049,7 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         journal = journal or load_journal()
         config = (config or load_config()) if conversation_id else config
         ladder = (ladder or load_ladder()) if conversation_id else None
+        gate = (gate or load_gate()) if conversation_id else None
     except Exception:  # noqa: BLE001 - a configuration that does not read plans nothing
         return Plan(refusal=Refusal("config"))
     try:
@@ -2017,17 +2083,22 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         withdrawn=frozenset(withdrawn or ()), recalled=tuple(recalled or ()), model_window=model_window,
         counted=counted, wrap=wrap, budgets=budgets, journal=journal, ladder=ladder, unheld=unheld,
     )
+    cost = _turn_cost(counted, wrap, journal.message_overhead)
+    sticky = _sticky(budgets, model_window)
+    caught = (0, 0)
     if state is None:
         read = _read(None, asked)
     else:
         with state.lock:
             mirrored = state.mirror(messages) if messages else 0
+            if sticky is not None and not unheld:
+                caught = _catch_up_if_free(state, sticky, cost, journal, gate, ladder)
             read = _read(state, asked)
-        if mirrored:
+        if mirrored or any(caught):
             try:
                 _save_state(conversation_id, state, config)
             except Exception as exc:  # noqa: BLE001 - a store that refuses is said by name, read or written
-                logger.warning("onion window plan refused: the mirror was not saved: %s", type(exc).__name__)
+                logger.warning("onion window plan refused: the state was not saved: %s", type(exc).__name__)
                 return Plan(refusal=Refusal("store"))
     if isinstance(read, Refusal):
         return Plan(refusal=read)
@@ -2037,7 +2108,10 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         shares=journal.shares(), images=images, image_tokens=journal.image_tokens,
         system=asked.system, pinned=read["pinned"], region=read["region"], digest=read["digest"],
         laid_turns=read["laid_turns"],
-        tail=tuple(read["memory"]) + tuple(sources), turn=asked.turn, causes=read["causes"]))
+        tail=tuple(read["memory"]) + tuple(sources), turn=asked.turn, causes=read["causes"],
+        raw=read["raw"], budgets=budgets, digests=read["digests"], gate=gate, ladder=ladder, cost=cost,
+        sticky=sticky, mark=journal.burst_mark, catch_up=(journal.catch_up_reach, journal.catch_up_steps),
+        lineage=read["lineage"], withdrawn=asked.withdrawn))
 
 
 @dataclass(frozen=True)
@@ -2063,7 +2137,9 @@ class _Asked:
 
 def _read(state, asked):
     """What the composition needs of the conversation's state, read under its lock, or the refusal of the plan."""
-    from .composer import _CORE_HEADER, _defang, _part, over_cap, region_cut, turn_text
+    import copy
+
+    from .composer import _CORE_HEADER, _defang, _part, region_cut
     from .peels import (
         PeelTree,
         join_labels,
@@ -2106,16 +2182,16 @@ def _read(state, asked):
     if refusal is not None:
         return refusal
     budget = asked.budgets.at(rung)
-    cost = sum(_part("flesh", turn_text(pieces, asked.wrap), "flesh", counted)[2] + asked.journal.message_overhead
-               for _key, _role, pieces, _label in laid_turns)
-    # The caps are read by the composer: a layer named as an attribute here would read as the state's own. The
-    # Flesh is held to what the turn's images leave of its cap.
-    over = over_cap(budget, (("flesh", cost),), image_charge=charge)
-    if over is not None:
-        return Refusal("flesh", over[1:])
-    memory, digest = [], ""
+    # A Flesh over its cap at the rung, or over what the turn's images leave of it, is laid over a shadow when the
+    # window is composed: the turns as stored are kept for it.
+    memory, digest, raw, digests = [], "", (), tuple((r, "") for r in asked.budgets.rungs if r <= rung)
     if state is not None and not asked.unheld:
-        digest = state.ledger.render(state.cellar, cap=budget.receipts, estimate=counted)[0]
+        # The turns the shadow may lay, as stored.
+        raw = tuple(copy.deepcopy(state.flesh.turns()))
+        # The digest at every rung up to the plan's: a descent lays the one of the rung it is composed under.
+        digests = tuple((r, state.ledger.render(state.cellar, cap=asked.budgets.at(r).receipts, estimate=counted)[0])
+                        for r in asked.budgets.rungs if r <= rung)
+        digest = dict(digests)[rung]
         cap = int(shares.get("memory", 0) * budget.tail)
         anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
                                   estimate=counted, lineage=lineage, withdrawn=asked.withdrawn) if cap > 0 else [])
@@ -2149,7 +2225,8 @@ def _read(state, asked):
                                ("recalled", f"receipt:{str(key)[:12]}"), (tuple(label[0]), tuple(label[1]))))
     return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
             "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory,
-            "causes": tuple(sorted(causes.items()))}
+            "causes": tuple(sorted(causes.items())), "raw": raw, "digests": digests,
+            "lineage": tuple(sorted((key, copy.deepcopy(value)) for key, value in lineage.items()))}
 
 
 def _rung(budgets, model_window, system_tokens, pinned, words_tokens, documents, image_charge, shares, counted, header,
@@ -2185,19 +2262,216 @@ def _rung(budgets, model_window, system_tokens, pinned, words_tokens, documents,
     return 0, Refusal("document" if layer == "images" else layer, (tokens, cap), "supersede" if layer == "core" else "")
 
 
+def _turn_cost(counted, wrap, overhead):
+    """A turn's cost as a journal lays it: its words and documents rendered, envelopes included, counted with the
+    turn's counter, and a message's overhead -- what a window counts a Flesh turn at."""
+    from .composer import _part, turn_text
+
+    def cost(turn):
+        return _part("flesh", turn_text(_turn_pieces(turn), wrap), "flesh", counted)[2] + overhead
+
+    return cost
+
+
+def _sticky(budgets, model_window):
+    """The budget of the conversation's own rung: the largest within ``home_rung`` and the model's window; None when
+    no rung is within it."""
+    bound = min(budgets.home, model_window) if model_window else budgets.home
+    rungs = [rung for rung in budgets.rungs if rung <= bound]
+    return budgets.at(rungs[-1]) if rungs else None
+
+
+def _catch_up_if_free(state, sticky, cost, journal, gate, ladder):
+    """Catch the Flesh up to its cap at the conversation's own rung, under the state's lock, when it is over it and
+    no burst holds the slot; ``(bare spans, queue steps)``. With the slot held, nothing is evicted and it is
+    counted: the window lays the overflow over a shadow."""
+    from .composer import layer_cap
+
+    known = {}
+
+    def costed(turn):
+        """``cost``, once per turn: no id names two turns, and none changes under the state's lock."""
+        key = turn.get("turn_id")
+        if key is None:
+            return cost(turn)
+        if key not in known:
+            known[key] = cost(turn)
+        return known[key]
+
+    cap = layer_cap(sticky, "flesh")
+    if sum(costed(turn) for turn in state.flesh.turns()) <= cap:
+        return 0, 0
+    if not state.slot.acquire(blocking=False):
+        _counted("catch_up", "shadowed")
+        return 0, 0
+    try:
+        if state.journal is not None:
+            # A conversation a journal laid before, grown past its cap between two windows.
+            _counted("catch_up", "turn_time")
+        bare, steps = _catch_up(state, sticky, costed, journal, gate, ladder)
+    finally:
+        state.slot.release()
+    _counted("catch_up", "bare", bare)
+    _counted("catch_up", "steps", steps)
+    return bare, steps
+
+
+def _catch_up(state, sticky, cost, journal, gate, ladder):
+    """Bring the Flesh within its cap at the conversation's own rung with no model; ``(bare spans, queue steps)``.
+
+    Under the state's lock and its slot, and total: the turns past the
+    newest ``catch_up_reach`` leave bare, a span of the gate's size at a
+    time, no probe drawn; then the queue runs at most ``catch_up_steps``
+    steps on the rungs that need no model -- a repair in the user's own
+    words, a hold with its anchors, bare -- as a burst with no summariser
+    would; then bare spans until the Flesh fits. Each turn is costed as the
+    journal lays it, by a ``cost`` that reads each turn once. Every span
+    leaves under its receipt and stays recallable in the Cellar.
+    """
+    from .composer import layer_cap
+
+    cap = layer_cap(sticky, "flesh")
+    costs = [cost(turn) for turn in state.flesh.turns()]
+    total, bare, steps, span = sum(costs), 0, 0, max(1, int(gate.span_turns))
+    while total > cap and len(costs) > journal.catch_up_reach:
+        n = min(span, len(costs) - journal.catch_up_reach)
+        state.flesh.evict_span(n, state.cellar, state.ledger, kind="bare")
+        total, costs, bare = total - sum(costs[:n]), costs[n:], bare + 1
+    while total > cap and costs and steps < journal.catch_up_steps:
+        outcome = curate(state, None, gate=gate, budget=sticky, ladder=ladder, cost=cost)
+        if not outcome.evicted:
+            break
+        steps += 1
+        gone = len(costs) - len(state.flesh.turns())
+        total, costs = total - sum(costs[:gone]), costs[gone:]
+    while total > cap and costs:
+        n = min(span, len(costs))
+        state.flesh.evict_span(n, state.cellar, state.ledger, kind="bare")
+        total, costs, bare = total - sum(costs[:n]), costs[n:], bare + 1
+    return bare, steps
+
+
+def _shadow(turns, room, cost, gate, ladder, reach, most):
+    """The Flesh within ``room`` over a shadow: a state of the shadow's own, its Flesh the turns left.
+
+    Its oldest spans leave as a catch-up would make them leave -- bare past
+    the newest ``reach`` turns, then at most ``most`` steps of the queue on
+    the rungs that need no model, then bare -- into stores of the shadow's
+    own, for one composition: the conversation's state is never touched,
+    nothing is counted as the queue's, no proposal is made, and the shadow
+    is never registered nor saved.
+    """
+    from .peels import advance
+    from .receipts import Flesh
+
+    shadow = OnionState()
+    shadow.flesh = Flesh(turns)
+    costs = [cost(turn) for turn in turns]
+    total, steps, span = sum(costs), 0, max(1, int(gate.span_turns))
+    while total > room and len(costs) > reach:
+        n = min(span, len(costs) - reach)
+        shadow.flesh.evict_span(n, shadow.cellar, shadow.ledger, kind="bare")
+        total, costs = total - sum(costs[:n]), costs[n:]
+    while total > room and costs and steps < most:
+        outcome = advance(flesh=shadow.flesh, cellar=shadow.cellar, ledger=shadow.ledger, tree=shadow.tree,
+                          gate=gate, ladder=ladder)
+        steps += 1
+        if not outcome.evicted:
+            break
+        gone = len(costs) - len(shadow.flesh.turns())
+        total, costs = total - sum(costs[:gone]), costs[gone:]
+    while total > room and costs:
+        n = min(span, len(costs))
+        shadow.flesh.evict_span(n, shadow.cellar, shadow.ledger, kind="bare")
+        total, costs = total - sum(costs[:n]), costs[n:]
+    return shadow
+
+
+def _shadow_into(held, room):
+    """The planned Flesh laid within ``room``, its oldest turns over a shadow; ``(the turns laid, the
+    fold, the shadow's peels)``. The fold is one line naming every span the shadow set aside -- how many, and the
+    turns they ran over, never a key the conversation's Cellar cannot resolve -- with the labels of their turns,
+    None when it set none aside; the peels the queue made of them come framed as data with their labels. The
+    state is not touched."""
+    from .peels import join_labels, render_peel, turn_label
+    from .receipts import _folded
+
+    reach, most = held.catch_up
+    shadow = _shadow(held.raw, room, held.cost, held.gate, held.ladder, reach, most)
+    kept = len(shadow.flesh.turns())
+    laid = held.laid_turns[len(held.laid_turns) - kept:] if kept else ()
+    lineage = dict(held.lineage)
+    receipts, fold = shadow.ledger.all(), None
+    if receipts:
+        label = join_labels(turn_label(turn, lineage) for receipt in receipts
+                            for turn in shadow.cellar.get(receipt.key))
+        fold = ("memory", "shadow:receipts", _folded(receipts), ("receipts", "shadow:receipts"),
+                (tuple(label[0]), tuple(label[1])))
+    peels = []
+    for peel in shadow.tree.all():
+        item = render_peel(peel, shadow.cellar, lineage=lineage, withdrawn=held.withdrawn)
+        if item is not None:
+            peels.append(("memory", f"shadow:{peel.id}", item.text, ("peels", f"shadow:{item.provenance}"),
+                          tuple(tuple(part) for part in item.label)))
+    return laid, fold, tuple(peels)
+
+
+def _shadowed(held, costs, room):
+    """``(the turns laid, the fold, the shadow's peels, the fold's charge)``: the planned Flesh laid within ``room``,
+    its oldest turns over a shadow, the fold that names them charged to the room their eviction freed. When the
+    fold finds no room however many turns are set aside, every turn is, and its charge is then over ``room``."""
+    from .composer import fold_cost
+
+    target = room
+    for _ in range(8):
+        turns, fold, peels = _shadow_into(held, max(target, 0))
+        charge = fold_cost(fold, held.wrap, held.count) if fold is not None else 0
+        if not turns or sum(costs[len(costs) - len(turns):]) + charge <= room:
+            return turns, fold, peels, charge
+        # A fold that names more spans may cost more: the next try leaves it that much more room, at least a token.
+        target = min(room - charge, target - 1)
+    turns, fold, peels = _shadow_into(held, 0)
+    return turns, fold, peels, fold_cost(fold, held.wrap, held.count) if fold is not None else 0
+
+
+def tail_room(model_window=None, *, budgets=None, journal=None):
+    """What each kind of source a turn brings may take, in tokens, at the conversation's own rung -- the largest
+    within ``home_rung`` and the model's window -- by kind (``memory``, ``rag``, ``web``, ``document``): the
+    caps a window cuts them to, so a caller fetches no more than fits. Empty when no rung is within the model's
+    window or a configuration does not read. Never raises."""
+    from .composer import layer_cap, load_budgets, load_journal
+
+    try:
+        budgets = budgets or load_budgets()
+        journal = journal or load_journal()
+        sticky = _sticky(budgets, model_window)
+        if sticky is None:
+            return {}
+        tail = layer_cap(sticky, "tail")
+        return {kind: int(share * tail) for kind, share in journal.shares().items()}
+    except Exception:  # noqa: BLE001 - a room that cannot be read is none
+        return {}
+
+
 def compose_window(plan, *, num_ctx=None):
     """Compose the planned window, sent with ``num_ctx`` -- the context the governor admitted, or the plan's rung
     when none. Never raises.
 
-    The window is composed under the plan's rung; a context under it is
-    refused by name. The answer always keeps ``answer_floor`` tokens: the
+    The window is composed under the plan's rung. A context under it is a
+    descent: the window is composed under the largest rung the context
+    holds, its overflow over a shadow, and the plan's rung stays the
+    conversation's; a context under every rung is refused by name. The
+    answer always keeps ``answer_floor`` tokens: the
     window is laid under the count that leaves them past the journal's
-    margin (``prompt_cap``) -- the tail cut to the room the rest leaves it;
-    a Flesh over that room is refused by name, and the window is refused
-    ``count`` when the system prompt, the Core, the turn, the region and
-    the digest alone leave less; the answer is held to what the context
-    leaves past what the window is accounted, its count with the margin
-    added. The window is compared with the conversation's last:
+    margin (``prompt_cap``) -- the Flesh gives first, its oldest turns over
+    a shadow and one line naming them, charged to the room they freed
+    (``_laid``), then the tail, cut to the room the rest leaves it; a line
+    even the whole Flesh room cannot hold is refused by name, ``rung`` for
+    a descent -- and the window is refused ``count`` when the system prompt,
+    the Core, the turn, the region and the digest alone leave less; the answer
+    is held to what the context leaves past what the window is accounted,
+    its count with the margin added. The window is compared with the
+    conversation's last:
     its stable prefix kept means no epoch; one broken begins an epoch, read
     by why -- the first window, the model, the rung, the system prompt, the
     Core, an accepted proposal, a resolved receipt, a take-back, a
@@ -2237,16 +2511,26 @@ def _compose_window(plan, num_ctx):
         return Window(refusal=plan.refusal)
     held = plan._held
     if num_ctx is None:
-        sent = held.rung
+        sent, rung = held.rung, held.rung
     elif not _whole(num_ctx):
         return Window(rung=held.rung, refusal=Refusal("rung"))
     elif num_ctx < held.rung:
-        return Window(rung=held.rung, refusal=Refusal("rung", (num_ctx, held.rung)))
+        # A descent: composed under the largest rung the context holds, over a shadow; the plan's rung stays.
+        rungs = [r for r in held.budgets.rungs if r <= num_ctx]
+        if not rungs:
+            return Window(rung=held.rung, refusal=Refusal("rung", (num_ctx, held.budgets.rungs[0])))
+        sent, rung = num_ctx, rungs[-1]
+        _counted("journal", "descent")
     else:
-        sent = num_ctx
-    journal, refusal = _laid(held, prompt_cap(held.budget, sent, held.margin, held.floor))
+        sent, rung = num_ctx, held.rung
+    budget = held.budgets.at(rung)
+    journal, refusal = _laid(held, prompt_cap(budget, sent, held.margin, held.floor), budget,
+                             dict(held.digests).get(rung, held.digest), rung, sent)
     if refusal is not None:
-        return Window(rung=held.rung, refusal=refusal)
+        return Window(rung=rung, refusal=refusal)
+    if rung != held.rung:
+        # The epoch and the record read the rung the window was composed under.
+        held = replace(held, rung=rung)
     charged = accounted(journal.tokens, held.margin)
     data = journal.canonical()
     pieces = tuple((layer, key, end, hashlib.sha256(data[start:end]).hexdigest())
@@ -2270,7 +2554,8 @@ def _compose_window(plan, num_ctx):
                                + hashlib.sha256(data[prev.stable_end:journal.stable_end]).digest()).hexdigest()
         epoch = prev.epoch
     record = _JournalRecord(model=held.model, rung=held.rung, pieces=pieces, stable_end=journal.stable_end,
-                            chain=chain, epoch=epoch, causes=held.causes)
+                            chain=chain, epoch=epoch, causes=held.causes,
+                            burst=(held.sticky, held.mark, held.cost) if held.sticky is not None else None)
     if held.conversation:
         with _lock:
             state = _states.get(held.conversation)
@@ -2293,62 +2578,112 @@ def _compose_window(plan, num_ctx):
                   first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None)
 
 
-def _laid(held, cap):
-    """``(journal, refusal)``: the planned window laid under ``cap``, the prompt's cap.
+def _laid(held, cap, budget, digest, rung, sent):
+    """``(journal, refusal)``: the planned window laid under ``budget`` and ``cap``, the prompt's cap.
 
-    As planned when it fits. Otherwise the Flesh gives first -- with no
-    shadow to evict it into, a Flesh over the room the rest leaves it is
-    refused by name -- then the tail, cut to the largest room that fits:
-    the room the rest leaves it, lowered by what each try passed the cap
-    by, then halved down to what fits. Refused ``count`` when the system
-    prompt, the Core and the turn alone, or with the region and the digest,
-    which do not give, break the cap.
+    As planned when it fits. Otherwise the Flesh gives first: its oldest
+    turns leave over a shadow (``_shadow_into``), the state untouched, held
+    first to its cap at the rung less what the turn's images take of it,
+    then to the room the rest of the window leaves it, and to its cap again
+    when laid it passes the sum of its turns -- a header neutralized where
+    two of them meet. The fold naming the turns it set aside is laid first
+    among the memory and charged to the Flesh room their eviction freed,
+    outside the memory share, so no turn leaves without its trace; the
+    peels the shadow made follow the memory the plan selected. A fold even
+    the whole Flesh room cannot hold is refused by name: ``rung`` for a
+    descent, with the next rung up, ``flesh`` otherwise. Then the tail, cut
+    to the largest room that fits: the room the rest leaves it, lowered by
+    what each try passed the cap by, then halved down to what fits. Refused
+    ``count`` when the system prompt, the Core and the turn alone, or with
+    the region and the digest, which do not give, break the cap.
     """
-    from .composer import BudgetError, compose_journal
+    from .composer import BudgetError, compose_journal, layer_cap
 
-    def attempt(*, turns=held.laid_turns, sources=held.tail, region=held.region, digest=held.digest, room=None):
-        """A journal, or the count by which its whole broke the cap; any other refusal is raised."""
+    def attempt(*, turns, sources, fold=None, region=held.region, digest=digest, room=None):
+        """A journal, or the count by which its whole broke the cap -- a Flesh laid past its own cap read as a whole
+        past the prompt's by as much, so the Flesh gives again; any other refusal is raised."""
         try:
             return compose_journal(system=held.system, pinned=held.pinned, region=region, digest=digest, flesh=turns,
-                                   tail=sources, turn=held.turn, budget=held.budget, count=held.count,
+                                   tail=sources, turn=held.turn, budget=budget, count=held.count,
                                    overhead=held.overhead, wrap=held.wrap, shares=held.shares, prompt_cap=cap,
-                                   tail_room=room, images=held.images, image_tokens=held.image_tokens), None
+                                   tail_room=room, images=held.images, image_tokens=held.image_tokens,
+                                   fold=fold), None
         except BudgetError as exc:
+            if exc.motive == "flesh" and len(exc.figures) == 2 and turns and exc.figures[0] > exc.figures[1]:
+                # The Flesh as laid can pass the sum of its turns -- a header neutralized across a joint: it gives
+                # again.
+                return None, cap + exc.figures[0] - exc.figures[1]
             if exc.motive != "window" or len(exc.figures) != 2:
                 raise
             return None, exc.figures[0]
 
-    journal, over = attempt()
-    if journal is not None:
+    def untraced(charge):
+        """The refusal of a shadow whose fold even the whole Flesh room cannot hold: a descent asks the next rung
+        up, a window at its own rung names the Flesh."""
+        if rung < held.rung:
+            return Refusal("rung", (sent, min(r for r in held.budgets.rungs if r > rung)))
+        return Refusal("flesh", (charge, max(room, 0)))
+
+    def done(journal):
+        if len(turns) < len(held.laid_turns):
+            _counted("shadow", str(rung))
         return journal, None
+
+    costs = [held.cost(turn) for turn in held.raw]
+    room = layer_cap(budget, "flesh", held.images * held.image_tokens)
+
+    def shade(target):
+        """The Flesh laid within ``target`` over a shadow: ``(turns, fold, the tail's items, the fold's charge)``,
+        the memory the plan selected before the peels the shadow made of the turns it set aside."""
+        turns, fold, peels, charge = _shadowed(held, costs, target)
+        return turns, fold, held.tail + peels, charge
+
+    turns, fold, sources, charge = held.laid_turns, None, held.tail, 0
+    if 0 <= room < sum(costs):
+        turns, fold, sources, charge = shade(room)
+        if fold is not None and charge > room:
+            return None, untraced(charge)
+    journal, over = attempt(turns=turns, fold=fold, sources=sources)
+    if journal is not None:
+        return done(journal)
     least = attempt(turns=(), sources=(), region=(), digest="")[1]
     if least is not None:
         return None, Refusal("count", (least, cap))
     rest, rest_over = attempt(turns=(), sources=())
     if rest_over is not None:
         return None, Refusal("count", (rest_over, cap))
-    if held.laid_turns:
-        without, without_over = attempt(turns=())
-        others = without.tokens if without is not None else without_over
-        return None, Refusal("flesh", (max(over - others, 0), max(cap - others, 0)))
-    room = cap - rest.tokens
-    for _ in range(4):
-        journal, over = attempt(room=max(room, 0))
+    # The Flesh gives first: each time by what the whole broke the cap by, the fold with it, until it fits or none
+    # is left.
+    for _ in range(8):
+        if not turns:
+            break
+        kept = sum(costs[len(costs) - len(turns):]) + charge
+        turns, fold, sources, charge = shade(kept - (over - cap))
+        if fold is not None and charge > room:
+            return None, untraced(charge)
+        journal, over = attempt(turns=turns, fold=fold, sources=sources)
         if journal is not None:
-            return journal, None
-        room -= over - cap
+            return done(journal)
+    # Then the tail, cut to the room the rest leaves it.
+    tail = cap - rest.tokens
+    for _ in range(4):
+        journal, over = attempt(turns=turns, fold=fold, sources=sources, room=max(tail, 0))
+        if journal is not None:
+            return done(journal)
+        tail -= over - cap
     # A count that is not additive over the last message -- the joints between its parts, a counter's own factor
     # on the whole -- can leave each round's overshoot under an item, the same items passing the cap again: the
-    # largest room that fits is found by halving. A room of nothing lays what ``rest`` laid.
-    low, high, best = 0, max(room, 0), None
+    # largest room that fits is found by halving. A room of nothing lays the rest and the Flesh kept, its fold the
+    # only tail.
+    low, high, best = 0, max(tail, 0), None
     while low <= high:
         middle = (low + high) // 2
-        fitted, _over = attempt(room=middle)
+        fitted, _over = attempt(turns=turns, fold=fold, sources=sources, room=middle)
         if fitted is None:
             high = middle - 1
         else:
             best, low = fitted, middle + 1
-    return (best, None) if best is not None else (None, Refusal("count", (over, cap)))
+    return done(best) if best is not None else (None, Refusal("count", (over, cap)))
 
 
 # The order a change is read in when the first piece that differs is a different layer in each window.
@@ -2356,7 +2691,14 @@ _LAYER_ORDER = ("system", "core", "peels", "receipts", "flesh", "tail", "turn")
 
 
 def _epoch_motive(prev, held, pieces, common):
-    """Why the stable prefix began again, from the first piece that differs and the counts the plan read."""
+    """Why the stable prefix began again, from the first piece that differs and the counts the plan read.
+
+    A turn the last window laid that is still the conversation's but laid
+    no more was set aside over a shadow: an eviction. A shadow lifted --
+    turns a shadow set aside laid again, a turn with images followed by one
+    without -- has no motive of its own: it reads take_back when the Flesh
+    the plan read changed, unexplained when it did not.
+    """
     if prev is None:
         return "first"
     if prev.model != held.model:
@@ -2386,6 +2728,11 @@ def _epoch_motive(prev, held, pieces, common):
         if after["resolved"] > before["resolved"]:
             return "receipt"
         if after["receipts"] > before["receipts"]:
+            return "eviction"
+    if layer == "flesh" and old is not None and old[0] == "flesh":
+        # The last window's first turn that differs is still planned but no longer laid: set aside over a shadow.
+        planned = {key for key, _role, _pieces, _label in held.laid_turns}
+        if old[1] in planned and old[1] not in {piece[1] for piece in pieces if piece[0] == "flesh"}:
             return "eviction"
     if layer == "flesh" and after["flesh"] != before["flesh"]:
         return "take_back"
