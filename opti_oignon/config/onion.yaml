@@ -39,6 +39,40 @@ budgets:
   16384: {system: 1024, core: 1024, receipts: 512,  peels: 3072, flesh: 5120,  tail: 3072, turn: 512}
   32768: {system: 1536, core: 1024, receipts: 1024, peels: 6144, flesh: 12288, tail: 7680, turn: 1024}
 
+# The journal: a turn's window laid as messages, the same bytes from one
+# turn to the next up to the current turn, so the engine reuses the longest
+# prefix. Its order is fixed: system, core, peels, receipts, flesh, tail,
+# turn. Its rung is home_rung's table and the turn's need, never named here;
+# a section that is missing a key it needs, names one it does not know or
+# names home_rung is refused by name, every reason at once. catch_up and
+# burst_mark, which no composition reads, may be left out: they read at
+# their defaults.
+journal:
+  # The share of a window's count held back for the counter's error: the
+  # answer is held to what the context leaves past the count with this share
+  # added.
+  margin: 0.15
+  # The room the answer always keeps, in tokens: a window is laid under the
+  # count that leaves it, past the margin -- the tail cut to the room the
+  # rest leaves it; a Flesh over that room is refused by name, and the
+  # window is refused count when the system prompt, the Core, the turn, the
+  # region and the digest alone leave less. A whole number, under the
+  # smallest rung.
+  answer_floor: 1024
+  # What one image of the current turn is charged, in tokens, counted on
+  # its message: the counter reads none. The current turn comes first: the
+  # charge takes its room from the Flesh, whose cap at the rung it reduces,
+  # and raises the rung only when even the whole Flesh cap cannot hold it.
+  # A provisional charge, on the high side, until it is measured. A whole
+  # number of at least 1.
+  image_tokens: 1024
+  # The tokens a message costs past its content, in a chat template.
+  message_overhead: 4
+  # The share of the tail's cap each kind of source a turn brings may take,
+  # cut to whole items; a turn's documents are held to theirs, never cut.
+  # They sum to 1 at most.
+  tail_shares: {memory: 0.35, rag: 0.25, web: 0.2, document: 0.2}
+
 # The eviction gate, with two faces. A span leaves the flesh only once its
 # peel answers the recall probes drawn from the span, class by class, and
 # says nothing the span does not hold: a name, a date, a number or a code

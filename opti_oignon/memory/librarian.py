@@ -48,7 +48,7 @@ import json
 import logging
 import re
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 checkpoint_before_apply = True
@@ -582,6 +582,9 @@ class OnionState:
         # declares it: beside the turn, never in what the turn is, so a
         # lineage first read now takes no turn back.
         self.lineage = {}
+        # The record of the last window a journal laid for the conversation,
+        # what the next one is compared with: in memory, never persisted.
+        self.journal = None
         self.lock = threading.RLock()
         self.slot = threading.Lock()
 
@@ -615,6 +618,11 @@ class OnionState:
         lineage read for the first time takes no turn back. A message that
         declares none leaves its turn's unrecorded, and one outside the
         grammar records it cut.
+
+        Where the reader read words typed beside a pasted document as a
+        document too, the segments the message declared are kept beside the
+        turn's own (``declared``), so a window lays those words bare; no
+        other turn carries them, and they are no part of what the turn is.
         """
         from .probes import _stored_context, read_origin
 
@@ -632,8 +640,9 @@ class OnionState:
             )
             declared = m.get("context")
             context = None if declared is None else _stored_context(role, origin, declared, [])[0]
+            parts = [list(segment) for segment in m.get("segments", [])] if defect is None else []
             incoming.append((role, text, origin, segments, defect, context, _declared_lineage(m),
-                             _turn_digest(role, text, origin, segments, context)))
+                             parts if parts != segments else None, _turn_digest(role, text, origin, segments, context)))
         with self.lock:
             standing, ids, known, held = self._standing()
             same = 0
@@ -648,12 +657,14 @@ class OnionState:
                 if entry[6] is not None:
                     self.lineage[turn_id] = entry[6]
             added = []
-            for role, text, origin, segments, defect, context, lineage, _digest in incoming[start:]:
+            for role, text, origin, segments, defect, context, lineage, parts, _digest in incoming[start:]:
                 self.seen += 1
                 turn = {"turn_id": f"t{self.seen:04d}", "role": role, "text": text, "origin": origin,
                         "segments": segments}
                 if context is not None:
                     turn["context"] = context
+                if parts is not None:
+                    turn["declared"] = parts
                 if defect is not None:
                     logger.warning("turn %s mirrored as legacy: %s", turn["turn_id"], defect)
                 if lineage is not None:
@@ -813,9 +824,15 @@ def use_counter(conversation_id, count, model):
     if not conversation_id:
         return
     counted = _vetted(count, model)
+    _register_counter(conversation_id, counted, model)
+    _handed.counter = (conversation_id, counted, model)
+
+
+def _register_counter(conversation_id, counted, model):
+    """Hold ``counted``, vetted, as the counter the conversation's verbs and an open count with, for ``model``: the
+    last one a turn handed over. The next block of this thread is not touched."""
     with _lock:
         _counters[conversation_id] = (counted, model)
-    _handed.counter = (conversation_id, counted, model)
 
 
 def _vetted(count, model):
@@ -826,7 +843,8 @@ def _vetted(count, model):
     def counted(text):
         tokens = count(text)
         if not (_whole(tokens) and tokens < _MOST_TOKENS):
-            raise BudgetError(f"the counter of {model} gave {tokens!r}: no whole number of tokens under {_MOST_TOKENS}")
+            raise BudgetError(f"the counter of {model} gave {tokens!r}: no whole number of tokens under {_MOST_TOKENS}",
+                              motive="count")
         return tokens
 
     return counted
@@ -1686,6 +1704,692 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
         _counted("block", f"refused_{type(exc).__name__}")
         logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
         return ""
+
+
+# ---------------------------------------------------------------------------
+# The journal: a turn's window, planned before its admission, then composed
+# ---------------------------------------------------------------------------
+
+# Why no window was composed, by name: a layer, or what else refused it.
+REFUSAL_MOTIVES = ("system", "core", "receipts", "peels", "flesh", "tail", "turn", "window", "rung", "count",
+                   "config", "document", "wrap", "store", "model", "raised")
+# Why a journal's stable prefix began again, by name; any other change is unexplained, and counted so.
+EPOCH_MOTIVES = ("first", "model", "rung", "system", "core", "proposal", "receipt", "take_back", "withdrawn",
+                 "eviction", "peels_full")
+# The labels the sources a turn brings carry when their caller names none.
+_TAIL_LABELS = {"rag": (("retrieved",), ()), "web": (("web",), ())}
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """Why no window was composed: a motive of ``REFUSAL_MOTIVES`` and its whole numbers, the count then the cap
+    where there are both, and the user's gesture that answers it when one does (``remedy``). Never an
+    exception's words."""
+
+    motive: str
+    figures: tuple = ()
+    remedy: str = ""
+
+
+@dataclass(frozen=True)
+class Plan:
+    """A turn's window planned before its admission: the rung the governor is asked for, or why none.
+
+    What the composition needs is read at the plan, under the state's lock,
+    and held here privately; the composition takes no lock but its record's.
+    """
+
+    rung: int = 0
+    refusal: object = None
+    _held: object = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class Window:
+    """A turn's window as composed, or why none (``refusal``).
+
+    Its messages ``(role, content, label)``, plain values: ``label`` is
+    ``(context, lineage)``, two tuples of strings, the parts the message
+    holds joined as the wrapper joins a request's labels. The rung it was
+    composed under and the context it is sent with (``num_ctx``); its count
+    (``tokens``), and what it is accounted in that context (``accounted``:
+    the count raised by the journal's margin, rounded up); the room left for
+    the answer (``num_predict``: the context less what the window is
+    accounted, never under the journal's floor), so ``accounted +
+    num_predict == num_ctx``; its count by layer, the charge of the turn's
+    images named apart (``images``), and what each kind of part left out.
+    Its epoch: its number, why it began (``motive``, None while
+    the stable prefix held), where the first piece that changed since the
+    conversation's last window begins (``first_diff``), the chain of the
+    stable prefix, and whether it has no prefix in common with that window
+    (``cold``: the first window, or one whose first piece changed).
+    """
+
+    messages: tuple = ()
+    rung: int = 0
+    num_ctx: int = 0
+    num_predict: int = 0
+    accounted: int = 0
+    tokens: int = 0
+    layers: tuple = ()
+    cut: tuple = ()
+    epoch: int = 0
+    motive: object = None
+    first_diff: int = 0
+    chain: str = ""
+    cold: bool = False
+    refusal: object = None
+
+
+@dataclass(frozen=True)
+class _Held:
+    """What a plan read for its composition: plain values, the state's own objects never shared with it."""
+
+    conversation: object
+    prev: object
+    model: str
+    rung: int
+    count: object
+    wrap: object
+    budget: object
+    overhead: int
+    margin: float
+    floor: int
+    shares: dict
+    images: int
+    image_tokens: int
+    system: tuple
+    pinned: tuple
+    region: tuple
+    digest: str
+    laid_turns: tuple
+    tail: tuple
+    turn: tuple
+    causes: tuple
+
+
+@dataclass(frozen=True)
+class _JournalRecord:
+    """A window laid, as the next one is compared with it: its model and rung, the digest of each piece in order,
+    where its stable prefix ends, the chain over it, its epoch and the counts its changes are read by."""
+
+    model: str
+    rung: int
+    pieces: tuple
+    stable_end: int
+    chain: str
+    epoch: int
+    causes: tuple
+
+
+def _refusal_of(exc):
+    """A composer's refusal as a value: its motive, and its figures when they are whole numbers."""
+    motive = getattr(exc, "motive", "") or "count"
+    figures = tuple(value for value in getattr(exc, "figures", ()) if type(value) is int)
+    return Refusal(motive if motive in REFUSAL_MOTIVES else "count", figures)
+
+
+def _turn_pieces(turn):
+    """A turn's text as the journal lays it: ``(kind, text)`` in order, ``file`` for what its segments bound as a
+    document, ``bare`` for the words typed or rewritten, an answer's words and what no segment bounds. The segments
+    are the ones the turn declared -- kept apart (``declared``) where the probe reader read words typed beside a
+    paste as a document -- so the user's words stay bare beside what they pasted."""
+    from .probes import _origin_defect
+
+    text = str(turn.get("text", "") or "")
+    if str(turn.get("role", "") or "") != "user":
+        return (("bare", text),)
+    origin, segments = turn.get("origin", "legacy"), turn.get("declared", turn.get("segments", []))
+    if _origin_defect("user", origin, segments, len(text)) is not None:
+        origin, segments = "legacy", []
+    if not segments:
+        return (("file" if origin == "document" else "bare", text),)
+    pieces, at = [], 0
+    for start, stop, label in sorted(segments, key=lambda segment: segment[0]):
+        if start > at:
+            pieces.append(("bare", text[at:start]))
+        pieces.append(("file" if label == "document" else "bare", text[start:stop]))
+        at = max(at, stop)
+    if at < len(text):
+        pieces.append(("bare", text[at:]))
+    return tuple(pieces)
+
+
+def _digest_text(*parts):
+    import hashlib
+
+    return hashlib.sha256("\x00".join(str(part) for part in parts).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), model_window=None, messages=None,
+                withdrawn=(), recalled=(), config=None, budgets=None, journal=None, ladder=None):
+    """Plan the turn's window before it is admitted: the rung to ask the governor for, or why none. Never raises.
+
+    ``count`` is the counter of the turn, for ``model``: every part is
+    counted with it, and it is held as the conversation's last counter, for
+    the user's verbs; the next block of this thread is not touched. The
+    conversation is mirrored from ``messages`` first, so a turn saved
+    without a burst, or taken back by a retry, is laid as the store holds
+    it. The rung is the largest of the ladder within ``home_rung`` and the
+    model's window (``model_window``), or a larger one when the system
+    prompt, the Core, the turn's words or its documents need it, or its
+    images when even the rung's whole Flesh cap cannot hold them, never
+    past the model's window; a Flesh over the rung's cap, less what the
+    turn's images take of it, is refused by name. The region, the receipts
+    digest, the Flesh and the memory a question brings
+    -- the anchors of held spans, the peels laid in no region, the spans
+    the user recalls (``recalled``) -- are read now, under the state's
+    lock, for the composition. ``system`` is the system prompt and, when
+    given, the manifest, one message each (a string is one); ``wrap`` the
+    envelope every data part rides in. A turn when the conversation holds
+    nothing yet -- its first, or the first retried (``messages`` given and
+    empty) -- lays nothing of the conversation but the Core, whatever the
+    state still mirrors.
+    The configurations a caller read once -- ``config``, ``budgets``,
+    ``journal``, ``ladder`` -- are not read again. Every refusal is counted
+    once, by its motive.
+
+    What a caller hands over is plain values. ``turn`` is the current turn
+    as a message -- ``role``, ``content``, ``origin`` and ``segments`` as a
+    turn is saved; ``context`` and ``lineage``, when given, the caller's
+    label for it, read through the grammar, and a turn with images and no
+    context of its own is read as a document, its lineage cut unless it
+    declares one -- and
+    ``images``, how many images it brings, 0 when
+    absent: each is charged the journal's ``image_tokens``, counted on the
+    turn's message, the counter reading none; the current turn comes first,
+    and the charge takes its room from the Flesh, refused ``document`` past
+    the Flesh cap of every rung within the model's window. ``tail`` is the
+    sources the turn brings, a
+    sequence of mappings, each ``{"kind": "rag", "items": [(text, label),
+    ...]}`` or ``{"kind": "web", "items": [...], "suffix": sentence}``, the
+    suffix the bare sentence laid after the web's envelope (its citation);
+    ``label`` is ``(context, lineage)``, two sequences of strings, or None
+    for the kind's own (``retrieved`` or ``web``, no lineage). A tail of
+    any other shape is refused ``tail``; images that are no whole number,
+    ``turn``; a store that cannot save the mirror, ``store``.
+    """
+    try:
+        from .composer import BudgetError
+    except Exception as exc:  # noqa: BLE001 - no composer, no window: a plan never raises into a turn
+        logger.warning("onion window plan refused: %s", type(exc).__name__)
+        _counted("journal", "refused_raised")
+        return Plan(refusal=Refusal("raised"))
+    try:
+        plan = _plan(conversation_id, model=model, count=count, system=system, turn=turn, wrap=wrap, tail=tail,
+                     model_window=model_window, messages=messages, withdrawn=withdrawn, recalled=recalled,
+                     config=config, budgets=budgets, journal=journal, ladder=ladder)
+    except BudgetError as exc:
+        plan = Plan(refusal=_refusal_of(exc))
+    except Exception as exc:  # noqa: BLE001 - a plan never raises into a turn
+        logger.warning("onion window plan refused: %s", type(exc).__name__)
+        plan = Plan(refusal=Refusal("raised"))
+    if plan.refusal is not None:
+        _counted("journal", f"refused_{plan.refusal.motive}")
+    return plan
+
+
+def _tail_sources(tail):
+    """The sources a turn brings as the composer lays them -- ``(kind, key, text, frame, label)``, the web's suffix
+    last, as its citation -- or None when a part is not of the shape ``plan_window`` documents."""
+    if not isinstance(tail or (), (list, tuple)):
+        return None
+    sources, suffixes = [], []
+    for part in tail or ():
+        if not isinstance(part, dict) or not set(part) <= {"kind", "items", "suffix"}:
+            return None
+        kind, items, suffix = part.get("kind"), part.get("items", ()), part.get("suffix", "")
+        if kind not in _TAIL_LABELS or not isinstance(items, (list, tuple)) or not isinstance(suffix, str):
+            return None
+        if suffix and kind != "web":
+            return None
+        for item in items:
+            if not (isinstance(item, (list, tuple)) and len(item) == 2 and isinstance(item[0], str)):
+                return None
+            label = _TAIL_LABELS[kind] if item[1] is None else item[1]
+            if not (isinstance(label, (list, tuple)) and len(label) == 2 and all(
+                    isinstance(entries, (list, tuple)) and all(isinstance(entry, str) for entry in entries)
+                    for entries in label)):
+                return None
+            sources.append((kind, f"{kind}:{len(sources)}", item[0], None, (tuple(label[0]), tuple(label[1]))))
+        if suffix:
+            suffixes.append(suffix)
+    if len(suffixes) > 1:
+        return None
+    return tuple(sources) + tuple(("citation", "citation", suffix, None, None) for suffix in suffixes)
+
+
+def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_window, messages, withdrawn, recalled,
+          config, budgets, journal, ladder):
+    from .composer import _part, _rendered, _whole, load_budgets, load_journal
+    from .peels import CUT, join_labels, load_ladder, turn_label
+
+    # Read once: an iterator handed over is read whole, then by both the test of an empty conversation and the mirror.
+    messages = None if messages is None else list(messages)
+
+    if not callable(count) or not isinstance(model, str) or not model:
+        return Plan(refusal=Refusal("count"))
+    message = dict(turn or {})
+    images = message.get("images", 0)
+    if not _whole(images):
+        return Plan(refusal=Refusal("turn"))
+    sources = _tail_sources(tail)
+    if sources is None:
+        return Plan(refusal=Refusal("tail"))
+    counted = _vetted(count, model)
+    if conversation_id:
+        _register_counter(conversation_id, counted, model)
+    try:
+        budgets = budgets or load_budgets()
+        journal = journal or load_journal()
+        config = (config or load_config()) if conversation_id else config
+        ladder = (ladder or load_ladder()) if conversation_id else None
+    except Exception:  # noqa: BLE001 - a configuration that does not read plans nothing
+        return Plan(refusal=Refusal("config"))
+    try:
+        state = state_for(conversation_id, config) if conversation_id else None
+    except Exception:  # noqa: BLE001 - a store that refuses is said by name, read or written
+        return Plan(refusal=Refusal("store"))
+    current = {"turn_id": "current", "role": "user", "text": str(message.get("content", message.get("text", ""))),
+               "origin": message.get("origin", "legacy"), "segments": message.get("segments", [])}
+    if message.get("context") is not None:
+        current["context"] = message.get("context")
+    declared = _declared_lineage(message)
+    label = turn_label(current, {"current": declared} if declared else {})
+    if images and message.get("context") is None:
+        # An image the model sees brings a document no part of the turn names: it fails closed, its lineage cut
+        # unless the caller declared one.
+        label = join_labels([label, (["document"], [] if declared else [CUT])])
+    pieces = _turn_pieces(current)
+    rendered = _rendered(pieces, wrap)
+    words = "\n\n".join(text for kind, text in rendered if kind != "file")
+    system = (system,) if isinstance(system, str) else (system or ())
+    # A conversation that holds nothing yet -- a first turn, or one retried -- lays nothing of it but the Core,
+    # whatever the state still mirrors: the mirror's own test, and the mirror leaves the state as it is.
+    unheld = messages is not None and not any(
+        isinstance(m, dict) and str(m.get("content", "") or "").strip() for m in messages)
+    asked = _Asked(
+        system=tuple(str(text) for text in system if str(text)),
+        turn=(pieces, tuple(tuple(part) for part in label)),
+        question=current["text"],
+        words=_part("turn", words, "turn", counted)[2] if words else 0, images=images,
+        documents=sum(_part("tail", text, "tail", counted)[2] for kind, text in rendered if kind == "file"),
+        withdrawn=frozenset(withdrawn or ()), recalled=tuple(recalled or ()), model_window=model_window,
+        counted=counted, wrap=wrap, budgets=budgets, journal=journal, ladder=ladder, unheld=unheld,
+    )
+    if state is None:
+        read = _read(None, asked)
+    else:
+        with state.lock:
+            mirrored = state.mirror(messages) if messages else 0
+            read = _read(state, asked)
+        if mirrored:
+            try:
+                _save_state(conversation_id, state, config)
+            except Exception as exc:  # noqa: BLE001 - a store that refuses is said by name, read or written
+                logger.warning("onion window plan refused: the mirror was not saved: %s", type(exc).__name__)
+                return Plan(refusal=Refusal("store"))
+    if isinstance(read, Refusal):
+        return Plan(refusal=read)
+    return Plan(rung=read["rung"], _held=_Held(
+        conversation=conversation_id, prev=read["prev"], model=model, rung=read["rung"], count=counted, wrap=wrap,
+        budget=read["budget"], overhead=journal.message_overhead, margin=journal.margin, floor=journal.answer_floor,
+        shares=journal.shares(), images=images, image_tokens=journal.image_tokens,
+        system=asked.system, pinned=read["pinned"], region=read["region"], digest=read["digest"],
+        laid_turns=read["laid_turns"],
+        tail=tuple(read["memory"]) + tuple(sources), turn=asked.turn, causes=read["causes"]))
+
+
+@dataclass(frozen=True)
+class _Asked:
+    """What a plan was asked, counted once: the system prompt, the turn and its counts, and how to read the rest."""
+
+    system: tuple
+    turn: tuple
+    question: str
+    words: int
+    images: int
+    documents: int
+    withdrawn: frozenset
+    recalled: tuple
+    model_window: object
+    counted: object
+    wrap: object
+    budgets: object
+    journal: object
+    ladder: object
+    unheld: bool
+
+
+def _read(state, asked):
+    """What the composition needs of the conversation's state, read under its lock, or the refusal of the plan."""
+    from .composer import _CORE_HEADER, _defang, _part, over_cap, region_cut, turn_text
+    from .peels import (
+        PeelTree,
+        join_labels,
+        render_peel,
+        select_anchors,
+        select_peels,
+        turn_label,
+        withheld,
+    )
+
+    counted, shares = asked.counted, asked.journal.shares()
+    causes = {"receipts": 0, "superseded": 0, "resolved": 0, "accepted": 0, "core": "", "flesh": "",
+              "system": _digest_text(*asked.system), "withdrawn": _digest_text(*sorted(asked.withdrawn)),
+              "unheld": asked.unheld}
+    pinned, region, laid_turns, rows, gone, accepted, lineage = ("", ""), (), (), [], set(), (), {}
+    if state is not None:
+        lineage = dict(state.lineage)
+        rows = state.ledger.all()
+        gone = {r.key for r in rows if r.kind == "superseded"}
+        pinned = (state.core.root(), state.core.text())
+        # A conversation that holds nothing yet lays nothing its turns left -- no region, Flesh, digest or memory --
+        # but the Core.
+        accepted = () if asked.unheld else tuple(state.tree.all())
+        laid_turns = () if asked.unheld else tuple(
+            (str(t.get("turn_id", "")), str(t.get("role", "")), _turn_pieces(t),
+             tuple(tuple(part) for part in turn_label(t, lineage))) for t in state.flesh.turns())
+        shown = ((peel, render_peel(peel, state.cellar, lineage=lineage, withdrawn=asked.withdrawn))
+                 for peel in accepted if not gone.intersection(peel.sources))
+        region = tuple((peel.id, item.text, item.provenance, tuple(tuple(part) for part in item.label))
+                       for peel, item in shown if item is not None)
+        causes.update(receipts=len(rows), superseded=len(gone), resolved=sum(1 for r in rows if r.resolved),
+                      accepted=sum(1 for q in state.proposals if q.status == "accepted"), core=pinned[0],
+                      flesh=_digest_text(*(key for key, _role, _pieces, _label in laid_turns)))
+    system = sum(_part("system", text, "system", counted)[2] for text in asked.system)
+    # The current turn comes first: its images take their room from the Flesh, and raise the rung only when even
+    # the whole Flesh cap cannot hold them.
+    charge = asked.images * asked.journal.image_tokens
+    rung, refusal = _rung(asked.budgets, asked.model_window, system, pinned, asked.words, asked.documents, charge,
+                          shares, counted, _CORE_HEADER, _defang)
+    if refusal is not None:
+        return refusal
+    budget = asked.budgets.at(rung)
+    cost = sum(_part("flesh", turn_text(pieces, asked.wrap), "flesh", counted)[2] + asked.journal.message_overhead
+               for _key, _role, pieces, _label in laid_turns)
+    # The caps are read by the composer: a layer named as an attribute here would read as the state's own. The
+    # Flesh is held to what the turn's images leave of its cap.
+    over = over_cap(budget, (("flesh", cost),), image_charge=charge)
+    if over is not None:
+        return Refusal("flesh", over[1:])
+    memory, digest = [], ""
+    if state is not None and not asked.unheld:
+        digest = state.ledger.render(state.cellar, cap=budget.receipts, estimate=counted)[0]
+        cap = int(shares.get("memory", 0) * budget.tail)
+        anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
+                                  estimate=counted, lineage=lineage, withdrawn=asked.withdrawn) if cap > 0 else [])
+        room = cap - sum(counted(anchor.text) for anchor in anchors)
+        laid = {key for key, _text, _provenance, _label in region[region_cut(region, budget, counted):]}
+
+        def render(peel):
+            return render_peel(peel, state.cellar, lineage=lineage, withdrawn=asked.withdrawn)
+
+        # The peels the question may still bring into the tail, in a view for one composition: standing on no
+        # superseded span, and laid in no region; the state's tree is not touched.
+        pool = PeelTree()
+        for peel in accepted:
+            if peel.id not in laid and not gone.intersection(peel.sources):
+                pool.add(peel)
+        selected = select_peels(pool, asked.question, room, estimate=counted, render=render) if room > 0 else []
+        memory = [("memory", item.provenance, item.text, ("peels", item.provenance),
+                   tuple(tuple(part) for part in item.label)) for item in list(anchors) + list(selected)]
+        # A recalled span, as the region and the pool would show it: none under a superseded receipt, and no
+        # turn a withdrawal reached, said by number.
+        live = {r.key for r in rows} - gone
+        for key in asked.recalled:
+            if key in live and state.cellar.has(key):
+                whole = state.cellar.get(key)
+                visible = [t for t in whole if not withheld(turn_label(t, lineage), asked.withdrawn)]
+                lines = [f"{t.get('role', '')}: {t.get('text', '')}" for t in visible]
+                if len(visible) < len(whole):
+                    lines.append(f"{len(whole) - len(visible)} of its turns not shown: a withdrawal reached them")
+                label = join_labels(turn_label(t, lineage) for t in visible)
+                memory.append(("memory", f"recalled:{key}", "\n".join(lines),
+                               ("recalled", f"receipt:{str(key)[:12]}"), (tuple(label[0]), tuple(label[1]))))
+    return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
+            "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory,
+            "causes": tuple(sorted(causes.items()))}
+
+
+def _rung(budgets, model_window, system_tokens, pinned, words_tokens, documents, image_charge, shares, counted, header,
+          defang):
+    """The rung a turn is planned at, or the refusal of the first layer no rung within the model's window holds.
+
+    The sticky rung is the largest within ``home_rung`` and the model's
+    window; a larger one only when the system prompt, the Core, the turn's
+    words or its documents need it, or its images when even the whole
+    Flesh cap cannot hold their charge. Images no rung within the model's
+    window makes room for are refused ``document``.
+    """
+    from .composer import _part, over_cap
+
+    bound = min(budgets.home, model_window) if model_window else budgets.home
+    sticky = [rung for rung in budgets.rungs if rung <= bound]
+    if not sticky:
+        return 0, Refusal("model", (model_window,) if type(model_window) is int else ())
+    ceiling = [rung for rung in budgets.rungs if not model_window or rung <= model_window]
+    root, text = pinned
+    core_tokens = _part("core", f"{header.format(root=str(root)[:16])}\n{defang(text)}", "core", counted)[2] \
+        if str(text) else 0
+    last = None
+    for rung in ceiling:
+        if rung < sticky[-1]:
+            continue
+        last = over_cap(budgets.at(rung), (("system", system_tokens), ("core", core_tokens), ("turn", words_tokens),
+                                           ("document", documents), ("images", image_charge)),
+                        shares.get("document", 0))
+        if last is None:
+            return rung, None
+    layer, tokens, cap = last
+    return 0, Refusal("document" if layer == "images" else layer, (tokens, cap), "supersede" if layer == "core" else "")
+
+
+def compose_window(plan, *, num_ctx=None):
+    """Compose the planned window, sent with ``num_ctx`` -- the context the governor admitted, or the plan's rung
+    when none. Never raises.
+
+    The window is composed under the plan's rung; a context under it is
+    refused by name. The answer always keeps ``answer_floor`` tokens: the
+    window is laid under the count that leaves them past the journal's
+    margin (``prompt_cap``) -- the tail cut to the room the rest leaves it;
+    a Flesh over that room is refused by name, and the window is refused
+    ``count`` when the system prompt, the Core, the turn, the region and
+    the digest alone leave less; the answer is held to what the context
+    leaves past what the window is accounted, its count with the margin
+    added. The window is compared with the conversation's last:
+    its stable prefix kept means no epoch; one broken begins an epoch, read
+    by why -- the first window, the model, the rung, the system prompt, the
+    Core, an accepted proposal, a resolved receipt, a take-back, a
+    withdrawal, an eviction, a region past its cap -- and any other cause
+    is counted unexplained. Its record replaces the last only if no other
+    window replaced it since the plan; the epoch's motive is counted with
+    the record it begins, and a window that lost is counted raced. Every
+    refusal is counted once, by its motive: a plan's own, at the plan.
+    """
+    try:
+        from .composer import BudgetError
+    except Exception as exc:  # noqa: BLE001 - no composer, no window: a composition never raises into a turn
+        if getattr(plan, "refusal", None) is not None:
+            return Window(refusal=plan.refusal)
+        logger.warning("onion window composition refused: %s", type(exc).__name__)
+        _counted("journal", "refused_raised")
+        return Window(rung=getattr(plan, "rung", 0), refusal=Refusal("raised"))
+    try:
+        window = _compose_window(plan, num_ctx)
+    except BudgetError as exc:
+        window = Window(rung=getattr(plan, "rung", 0), refusal=_refusal_of(exc))
+    except Exception as exc:  # noqa: BLE001 - a composition never raises into a turn
+        logger.warning("onion window composition refused: %s", type(exc).__name__)
+        window = Window(rung=getattr(plan, "rung", 0), refusal=Refusal("raised"))
+    if window.refusal is not None and window.refusal is not getattr(plan, "refusal", None):
+        _counted("journal", f"refused_{window.refusal.motive}")
+    return window
+
+
+def _compose_window(plan, num_ctx):
+    import hashlib
+
+    from .composer import _whole, accounted, prompt_cap
+    from .peels import join_labels
+
+    if plan.refusal is not None:
+        return Window(refusal=plan.refusal)
+    held = plan._held
+    if num_ctx is None:
+        sent = held.rung
+    elif not _whole(num_ctx):
+        return Window(rung=held.rung, refusal=Refusal("rung"))
+    elif num_ctx < held.rung:
+        return Window(rung=held.rung, refusal=Refusal("rung", (num_ctx, held.rung)))
+    else:
+        sent = num_ctx
+    journal, refusal = _laid(held, prompt_cap(held.budget, sent, held.margin, held.floor))
+    if refusal is not None:
+        return Window(rung=held.rung, refusal=refusal)
+    charged = accounted(journal.tokens, held.margin)
+    data = journal.canonical()
+    pieces = tuple((layer, key, end, hashlib.sha256(data[start:end]).hexdigest())
+                   for layer, key, start, end in journal.pieces)
+    prev = held.prev
+    common = 0
+    if prev is not None:
+        for mine, theirs in zip(prev.pieces, pieces):
+            # Bytes, not names: a turn mirrored again under a new id with the same bytes keeps the prefix.
+            if mine[2:] != theirs[2:]:
+                break
+            common += 1
+    first_diff = pieces[common - 1][2] if common else 0
+    broke = prev is None or prev.model != held.model or prev.rung != held.rung or first_diff < prev.stable_end
+    motive = _epoch_motive(prev, held, pieces, common) if broke else None
+    if broke:
+        chain = hashlib.sha256(hashlib.sha256(data[:journal.stable_end]).digest()).hexdigest()
+        epoch = (prev.epoch if prev is not None else 0) + 1
+    else:
+        chain = hashlib.sha256(bytes.fromhex(prev.chain)
+                               + hashlib.sha256(data[prev.stable_end:journal.stable_end]).digest()).hexdigest()
+        epoch = prev.epoch
+    record = _JournalRecord(model=held.model, rung=held.rung, pieces=pieces, stable_end=journal.stable_end,
+                            chain=chain, epoch=epoch, causes=held.causes)
+    if held.conversation:
+        with _lock:
+            state = _states.get(held.conversation)
+        if state is not None:
+            with state.lock:
+                if state.journal is held.prev:
+                    state.journal = record
+                    if motive is not None:
+                        _counted("journal", motive if motive in EPOCH_MOTIVES else "unexplained")
+                else:
+                    _counted("journal", "raced")
+    elif motive is not None:
+        _counted("journal", motive if motive in EPOCH_MOTIVES else "unexplained")
+    messages = tuple((message.role, message.content,
+                      tuple(tuple(part) for part in join_labels(label for label in message.labels if label)))
+                     for message in journal.messages)
+    # Cold: no prefix in common with the conversation's last window, its first byte changed or there was none.
+    return Window(messages=messages, rung=held.rung, num_ctx=sent, num_predict=sent - charged, accounted=charged,
+                  tokens=journal.tokens, layers=journal.layers, cut=journal.cut, epoch=epoch, motive=motive,
+                  first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None)
+
+
+def _laid(held, cap):
+    """``(journal, refusal)``: the planned window laid under ``cap``, the prompt's cap.
+
+    As planned when it fits. Otherwise the Flesh gives first -- with no
+    shadow to evict it into, a Flesh over the room the rest leaves it is
+    refused by name -- then the tail, cut to the largest room that fits:
+    the room the rest leaves it, lowered by what each try passed the cap
+    by, then halved down to what fits. Refused ``count`` when the system
+    prompt, the Core and the turn alone, or with the region and the digest,
+    which do not give, break the cap.
+    """
+    from .composer import BudgetError, compose_journal
+
+    def attempt(*, turns=held.laid_turns, sources=held.tail, region=held.region, digest=held.digest, room=None):
+        """A journal, or the count by which its whole broke the cap; any other refusal is raised."""
+        try:
+            return compose_journal(system=held.system, pinned=held.pinned, region=region, digest=digest, flesh=turns,
+                                   tail=sources, turn=held.turn, budget=held.budget, count=held.count,
+                                   overhead=held.overhead, wrap=held.wrap, shares=held.shares, prompt_cap=cap,
+                                   tail_room=room, images=held.images, image_tokens=held.image_tokens), None
+        except BudgetError as exc:
+            if exc.motive != "window" or len(exc.figures) != 2:
+                raise
+            return None, exc.figures[0]
+
+    journal, over = attempt()
+    if journal is not None:
+        return journal, None
+    least = attempt(turns=(), sources=(), region=(), digest="")[1]
+    if least is not None:
+        return None, Refusal("count", (least, cap))
+    rest, rest_over = attempt(turns=(), sources=())
+    if rest_over is not None:
+        return None, Refusal("count", (rest_over, cap))
+    if held.laid_turns:
+        without, without_over = attempt(turns=())
+        others = without.tokens if without is not None else without_over
+        return None, Refusal("flesh", (max(over - others, 0), max(cap - others, 0)))
+    room = cap - rest.tokens
+    for _ in range(4):
+        journal, over = attempt(room=max(room, 0))
+        if journal is not None:
+            return journal, None
+        room -= over - cap
+    # A count that is not additive over the last message -- the joints between its parts, a counter's own factor
+    # on the whole -- can leave each round's overshoot under an item, the same items passing the cap again: the
+    # largest room that fits is found by halving. A room of nothing lays what ``rest`` laid.
+    low, high, best = 0, max(room, 0), None
+    while low <= high:
+        middle = (low + high) // 2
+        fitted, _over = attempt(room=middle)
+        if fitted is None:
+            high = middle - 1
+        else:
+            best, low = fitted, middle + 1
+    return (best, None) if best is not None else (None, Refusal("count", (over, cap)))
+
+
+# The order a change is read in when the first piece that differs is a different layer in each window.
+_LAYER_ORDER = ("system", "core", "peels", "receipts", "flesh", "tail", "turn")
+
+
+def _epoch_motive(prev, held, pieces, common):
+    """Why the stable prefix began again, from the first piece that differs and the counts the plan read."""
+    if prev is None:
+        return "first"
+    if prev.model != held.model:
+        return "model"
+    if prev.rung != held.rung:
+        return "rung"
+    before, after = dict(prev.causes), dict(held.causes)
+    if after["unheld"] and not before["unheld"]:
+        # A first turn retried: the conversation's turns taken back, whatever its first change reads.
+        return "take_back"
+    old = prev.pieces[common] if common < len(prev.pieces) else None
+    new = pieces[common] if common < len(pieces) else None
+    layers = [piece[0] for piece in (old, new) if piece is not None]
+    layer = min(layers, key=_LAYER_ORDER.index) if layers else ""
+    if layer == "system":
+        return "system"
+    if layer == "core":
+        return "proposal" if after["accepted"] > before["accepted"] else "core"
+    if layer in ("peels", "receipts"):
+        if after["withdrawn"] != before["withdrawn"]:
+            return "withdrawn"
+        if after["superseded"] > before["superseded"]:
+            return "take_back"
+        region = [piece[1] for piece in pieces if piece[0] == "peels" and not piece[1].startswith("envelope")]
+        if old is not None and old[0] == "peels" and not old[1].startswith("envelope") and old[1] not in region:
+            return "peels_full"
+        if after["resolved"] > before["resolved"]:
+            return "receipt"
+        if after["receipts"] > before["receipts"]:
+            return "eviction"
+    if layer == "flesh" and after["flesh"] != before["flesh"]:
+        return "take_back"
+    return "unexplained"
 
 
 # ---------------------------------------------------------------------------

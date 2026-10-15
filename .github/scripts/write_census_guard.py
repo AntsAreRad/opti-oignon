@@ -659,7 +659,8 @@ EXEMPT = {
     ("opti_oignon/memory/librarian.py", "flesh"): (
         "transcript", "the onion mirrors the conversation's own turns, and takes back the turns it took back"),
     ("opti_oignon/memory/librarian.py", "peels"): (
-        "copy", "it copies the peels already in the tree, less the superseded, into a view for one composition"),
+        "copy", "it copies the peels already in the tree, less the superseded -- and, for a journal's tail, less "
+                "those its region lays -- into a view for one composition"),
     ("opti_oignon/memory/librarian.py", "receipts"): (
         "transcript", "taking back the conversation's last turns supersedes the receipts that pointed at them"),
     ("opti_oignon/memory/onion_store.py", "cellar"): ("restore", _RESTORE),
@@ -719,7 +720,7 @@ ARGUED_SITES = {
         ("OnionState._take_back", "take_back"), ("OnionState._take_back", "take_back"),
         ("OnionState.mirror", "append"),),
     ("opti_oignon/memory/librarian.py", "peels"): (
-        ("_compose_block", "add"),),
+        ("_compose_block", "add"), ("_read", "add"),),
     ("opti_oignon/memory/librarian.py", "receipts"): (
         ("OnionState._take_back", "supersede"),),
     ("opti_oignon/memory/migration.py", "facts"): (

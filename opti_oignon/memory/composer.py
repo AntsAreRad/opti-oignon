@@ -110,7 +110,18 @@ def defanged(text):
 
 
 class BudgetError(ValueError):
-    """The window cannot be assembled under this budget without cutting what may not be cut."""
+    """The window cannot be assembled under this budget without cutting what may not be cut.
+
+    ``motive`` says what refused it, from a closed set -- a layer of
+    ``LAYERS``, or ``window``, ``rung``, ``count``, ``config``, ``document``
+    or ``wrap`` -- and ``figures`` its whole numbers, the count then the cap
+    where there are both: what a caller shows of a refusal, never its words.
+    """
+
+    def __init__(self, message="", *, motive="", figures=()):
+        super().__init__(message)
+        self.motive = motive
+        self.figures = tuple(figures)
 
 
 def estimate_tokens(text):
@@ -184,10 +195,11 @@ class Budgets:
     def at(self, num_ctx):
         """The budget of the largest rung at or under ``num_ctx``; refused by name under the smallest."""
         if not _whole(num_ctx):
-            raise BudgetError(f"num_ctx {num_ctx!r} is not a whole number of tokens")
+            raise BudgetError(f"num_ctx {num_ctx!r} is not a whole number of tokens", motive="rung")
         held = [budget for rung, budget in self.tables if rung <= num_ctx]
         if not held:
-            raise BudgetError(f"num_ctx {num_ctx} is under the smallest rung {self.rungs[0]}: no table holds there")
+            raise BudgetError(f"num_ctx {num_ctx} is under the smallest rung {self.rungs[0]}: no table holds there",
+                              motive="rung", figures=(num_ctx, self.rungs[0]))
         return held[-1]
 
     def unnamed(self):
@@ -265,7 +277,7 @@ def load_budgets(path=None, *, governor_path=None):
     finally:
         loader.dispose()
     if not isinstance(raw, dict):
-        raise BudgetError(f"{target.name} holds no mapping: no budget to read")
+        raise BudgetError(f"{target.name} holds no mapping: no budget to read", motive="config")
     ladder, why = read_ladder(governor_path)
     if why:
         errors.append(why)
@@ -321,7 +333,7 @@ def load_budgets(path=None, *, governor_path=None):
     if not (_whole(home) and home in rows and (ladder is None or home in ladder)):
         errors.append(f"home_rung {home!r} is no rung with a table")
     if errors:
-        raise BudgetError("; ".join(errors))
+        raise BudgetError("; ".join(errors), motive="config")
     return Budgets(reserve=reserve, home=home, tables=tuple(ordered))
 
 
@@ -374,15 +386,22 @@ class Prompt:
         """
         parts = []
         for seg in self.segments:
-            text = _FRAME_TAIL_RE.sub(_FRAME_REDACTED, _FRAME_RE.sub(_FRAME_REDACTED, str(seg.text)))
-            text = _ENVELOPE_TAIL_RE.sub(_ENVELOPE_REDACTED, _ENVELOPE_HEAD_RE.sub(_ENVELOPE_REDACTED, text))
-            if seg.instruction_bearing:
-                parts.append(text)
-            else:
-                layer = _TAG_UNSAFE.sub("", str(seg.layer))
-                provenance = _TAG_UNSAFE.sub("", str(seg.provenance))
-                parts.append(f"[data layer={layer} provenance={provenance}]\n{text}\n[/data]")
+            text = _defang(seg.text)
+            parts.append(text if seg.instruction_bearing else _framed(seg.layer, seg.provenance, text))
         return "\n\n".join(parts)
+
+
+def _defang(text):
+    """``text`` with every frame and envelope marker defanged, and the start of either left open at its end."""
+    text = _FRAME_TAIL_RE.sub(_FRAME_REDACTED, _FRAME_RE.sub(_FRAME_REDACTED, str(text)))
+    return _ENVELOPE_TAIL_RE.sub(_ENVELOPE_REDACTED, _ENVELOPE_HEAD_RE.sub(_ENVELOPE_REDACTED, text))
+
+
+def _framed(layer, provenance, text):
+    """A recalled part as the window frames it, quoted data with its tag: ``text`` defanged already."""
+    layer = _TAG_UNSAFE.sub("", str(layer))
+    provenance = _TAG_UNSAFE.sub("", str(provenance))
+    return f"[data layer={layer} provenance={provenance}]\n{text}\n[/data]"
 
 
 def _segment(layer, text, provenance, estimate):
@@ -397,7 +416,21 @@ def _segment(layer, text, provenance, estimate):
 
 def _refuse_over(layer, tokens, cap, why):
     if tokens > cap:
-        raise BudgetError(f"{layer} is {tokens} tokens against a cap of {cap}: {why}")
+        raise BudgetError(f"{layer} is {tokens} tokens against a cap of {cap}: {why}", motive=layer,
+                          figures=(tokens, cap))
+
+
+# The words of a refusal over a cap, as both assemblies write them: its layer, then its count and its cap.
+_OVER_RE = re.compile(r"(\w+) is (\d+) tokens against a cap of (\d+):")
+
+
+def _refused_in(words):
+    """The refusal ``words`` say, its motive and figures read back from them; words that name no cap are the
+    count's."""
+    found = _OVER_RE.match(words)
+    if found is None:
+        return BudgetError(words, motive="count")
+    return BudgetError(words, motive=found.group(1), figures=(int(found.group(2)), int(found.group(3))))
 
 
 # The shape of the native assembly's arguments: a core whose COMPOSE_FORMAT
@@ -451,7 +484,7 @@ def _part(layer, text, provenance, estimate):
     tokens = estimate(text)
     if not (_whole(tokens) and tokens < _MOST_TOKENS):
         raise BudgetError(f"the counter gave {tokens!r} for a part of the {layer}: no whole number of tokens "
-                          f"under {_MOST_TOKENS}")
+                          f"under {_MOST_TOKENS}", motive="count")
     return text, provenance, tokens
 
 
@@ -543,7 +576,7 @@ def _assemble_natively(assemble, parts, budget):
     except (UnicodeError, OverflowError):
         return _assemble(parts, budget)
     except ValueError as exc:
-        raise BudgetError(str(exc)) from None
+        raise _refused_in(str(exc)) from None
     return [Segment(*segment) for segment in segments], total, dropped
 
 
@@ -560,7 +593,7 @@ def compose(*, core, ledger, cellar, retrieval, flesh, turn, budget, estimate=No
     """
     errors = budget.validate()
     if errors:
-        raise BudgetError("; ".join(errors))
+        raise BudgetError("; ".join(errors), motive="config")
     parts = _count(core, ledger, cellar, retrieval, flesh, turn, budget, estimate or estimate_tokens, system, tail)
     assemble = _native_compose()
     if assemble is not None:
@@ -571,3 +604,536 @@ def compose(*, core, ledger, cellar, retrieval, flesh, turn, budget, estimate=No
         segments=tuple(segments), tokens=total, core_root=parts.core_root, dropped_peels=dropped,
         folded_receipts=parts.folded,
     )
+
+
+# ---------------------------------------------------------------------------
+# The journal: a turn's window as messages
+# ---------------------------------------------------------------------------
+
+# The layers of a journal, in the order its bytes lay them: what changes least
+# comes first, so the engine reuses the longest prefix from one turn to the next.
+JOURNAL = ("system", "core", "peels", "receipts", "flesh", "tail", "turn")
+# The header the Core is laid under. Written here alone: one found in any other
+# part was forged there, and is neutralized. Its words are found whatever root
+# precedes them, or none: the model cannot check a root.
+_CORE_HEADER = "Core {root}, pinned by the user:"
+_CORE_HEADER_RE = re.compile(r"\bpinned\s+by\s+the\s+user\s*:", re.IGNORECASE)
+# A header's words can run across a joint, their start ending one bare part and their rest beginning the next:
+# the end of the part before is read for a start and the head of the part after for the rest, each within this
+# reach of the joint, so a joint costs the same whatever the parts' lengths.
+_JOINT_REACH = 256
+_HEADER_START_RE = re.compile(r"\bpinned(?:\s+by(?:\s+the(?:\s+user)?)?)?\s*\Z", re.IGNORECASE)
+# What completes a header after its first one, two, three or four words, at the very start of a part.
+_HEADER_REST_RE = {
+    1: re.compile(r"\A\s*by\s+the\s+user\s*:", re.IGNORECASE),
+    2: re.compile(r"\A\s*the\s+user\s*:", re.IGNORECASE),
+    3: re.compile(r"\A\s*user\s*:", re.IGNORECASE),
+    4: re.compile(r"\A\s*:"),
+}
+_CORE_HEADER_REDACTED = "[redacted-core-header]"
+# The kinds of source a turn's tail brings, in the order the current turn's
+# message lays them, each held to its share of the tail's cap.
+TAIL_KINDS = ("memory", "rag", "web")
+_SOURCE = {"memory": "memory", "rag": "file", "web": "web"}
+
+
+@dataclass(frozen=True)
+class Message:
+    """One message of a journal: its role, its content, the labels of the parts it holds and their layers."""
+
+    role: str
+    content: str
+    labels: tuple = ()
+    layers: tuple = ()
+
+
+@dataclass(frozen=True)
+class Journal:
+    """A turn's window as messages, the same bytes from one turn to the next up to the current turn's message.
+
+    ``tokens`` is what the request costs: each message's count and the
+    overhead of a message, and the charge of the turn's images. ``layers``
+    holds what each layer counts, in ``JOURNAL`` order, then that charge
+    (``images``), and ``cut`` what each kind of part left out.
+    ``pieces`` place every part in ``canonical()``, ``(layer, key, start,
+    end)`` in bytes, tiling it, the joint before a part counted with it;
+    ``stable_end`` is where the current turn's part begins, the bytes before
+    it the prefix the next turn keeps.
+    """
+
+    messages: tuple
+    tokens: int
+    layers: tuple
+    cut: tuple
+    core_root: str
+    stable_end: int
+    pieces: tuple
+
+    def canonical(self):
+        """The journal as bytes: each message its role, a NUL, its content in UTF-8 and a record separator."""
+        return b"".join(_canonical(message.role, message.content) for message in self.messages)
+
+
+def _canonical(role, content):
+    return role.encode("utf-8") + b"\x00" + str(content).encode("utf-8", "surrogatepass") + b"\x1e"
+
+
+class _Laid:
+    """A journal's messages as they are laid: each a role, its parts ``(layer, key, text, joint)`` and their labels.
+
+    A user message laid after another is one message with it, its first part
+    joined to the last: two user messages are never adjacent.
+    """
+
+    def __init__(self):
+        self.messages = []
+        self.mark = None
+
+    def joined(self, role, text):
+        """``text`` as a part of ``role`` laid next: a user part that joins the user message before it has the rest
+        of a header that message's last part begins neutralized at its start (``_joined``); what is laid already
+        keeps its bytes."""
+        if role == "user" and self.messages and self.messages[-1][0] == "user" and self.messages[-1][1]:
+            return _joined(self.messages[-1][1][-1][2], text)
+        return text
+
+    def enter(self, role, parts, labels=(), *, stable=False):
+        parts = [part for part in parts if part[2]]
+        if not parts:
+            return
+        if self.messages and role == "user" and self.messages[-1][0] == "user":
+            layer, key, text, _joint = parts[0]
+            parts[0] = (layer, key, text, "\n\n")
+            held = self.messages[-1]
+        else:
+            held = [role, [], []]
+            self.messages.append(held)
+        if stable:
+            self.mark = (len(self.messages) - 1, len(held[1]))
+        held[1].extend(parts)
+        held[2].extend(labels)
+
+    def serialized(self):
+        """``(messages, pieces, stable_end)``: the pieces tile the canonical bytes, each a part with the joint before
+        it, the first of a message with its role, the last with its separator."""
+        messages, pieces, offset, stable_end = [], [], 0, None
+        for index, (role, parts, labels) in enumerate(self.messages):
+            texts = []
+            for place, (layer, key, text, joint) in enumerate(parts):
+                piece = (joint if place else "") + text
+                texts.append(piece)
+                size = len(piece.encode("utf-8", "surrogatepass"))
+                if place == 0:
+                    size += len(role.encode("utf-8")) + 1
+                if self.mark == (index, place):
+                    stable_end = offset
+                pieces.append([layer, key, offset, offset + size])
+                offset += size
+            offset += 1
+            pieces[-1][3] = offset
+            messages.append(Message(role, "".join(texts), tuple(labels),
+                                    tuple(dict.fromkeys(layer for layer, _key, _text, _joint in parts))))
+        return tuple(messages), tuple(tuple(piece) for piece in pieces), offset if stable_end is None else stable_end
+
+
+def _bare(text):
+    """A part the journal lays as it is: defanged, and a Core header found in it neutralized."""
+    return _CORE_HEADER_RE.sub(_CORE_HEADER_REDACTED, _defang(text))
+
+
+def _joined(before, text):
+    """``text`` as it is laid after ``before`` across a joint: when the end of ``before`` starts a Core header that
+    the start of ``text`` completes, the completion is neutralized at the start of ``text``; ``before`` keeps its
+    bytes. Only the ends near the joint are read."""
+    start = _HEADER_START_RE.search(before[-_JOINT_REACH:])
+    if start is None:
+        return text
+    rest = _HEADER_REST_RE[len(start.group(0).split())].match(text, 0, _JOINT_REACH)
+    if rest is None:
+        return text
+    return _CORE_HEADER_REDACTED + text[rest.end():]
+
+
+def region_cut(region, budget, count):
+    """How many of ``region``'s oldest items fall out of it: the newest whole items it holds within the peels' cap,
+    each counted by its text, as ``compose`` counts a peel. ``region`` is ``(key, text, provenance, label)`` in the
+    tree's order."""
+    used, kept = 0, 0
+    for key, text, _provenance, _label in reversed(tuple(region)):
+        tokens = _part("peels", _bare(text), key, count)[2]
+        if used + tokens > budget.peels:
+            break
+        used += tokens
+        kept += 1
+    return len(tuple(region)) - kept
+
+
+def _wrapped(wrap, text, source, frames=False):
+    if wrap is None:
+        raise BudgetError(f"a {source} part has no envelope to ride in: the journal lays no data bare", motive="wrap")
+    return wrap(text, source=source, frames=frames)
+
+
+def _rendered(pieces, wrap):
+    """A turn's pieces as its message lays them: words bare, a document in a file envelope at its place."""
+    merged = []
+    for kind, text in pieces:
+        if not str(text):
+            continue
+        if merged and merged[-1][0] == kind:
+            merged[-1] = (kind, merged[-1][1] + str(text))
+        else:
+            merged.append((kind, str(text)))
+    return [(kind, _wrapped(wrap, _bare(text), "file") if kind == "file" else _bare(text)) for kind, text in merged]
+
+
+def turn_text(pieces, wrap):
+    """A turn as its message lays it: its pieces rendered (``_rendered``) and joined by a blank line."""
+    return "\n\n".join(text for _kind, text in _rendered(pieces, wrap))
+
+
+def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget, count, overhead, wrap, shares,
+                    prompt_cap=None, tail_room=None, images=0, image_tokens=0):
+    """A turn's window as a journal under ``budget``. Pure: same inputs, same journal, inputs untouched.
+
+    The system prompt, and a manifest when given (``system``), open it, one
+    message each. The next message holds the Core under its header (``pinned``,
+    its root and its text), then one memory envelope holding the region --
+    the peels the tree accepted, in its order, the newest that fit the
+    peels' cap -- and the receipts digest, then the first Flesh turn when it
+    is the user's. The Flesh follows in its own roles (``flesh``: key, role,
+    pieces, label), each document in a file envelope at its place, its words
+    bare. The last message holds the tail (``tail``: kind, key, text, frame,
+    label, the memory framed as data) -- memory, retrieval, web, each cut
+    to whole items within its share of the tail's cap (``shares``) and
+    counted in its envelope -- then the current turn (``turn``: pieces,
+    label) laid as the Flesh lays a turn, its documents held to the
+    document share. Every bare part is defanged, and a Core header forged in
+    any part but the Core is neutralized, and one forged across the joint
+    where two bare parts meet at the start of the second. The turn's ``images`` ride beside
+    its message, never in its text: each is charged ``image_tokens``,
+    counted on the turn's message and so on the whole, the counter reading
+    no image. The current turn comes first: their charge takes its room
+    from the Flesh, held to its cap less the charge, and a charge over the
+    whole Flesh cap is refused ``document``.
+
+    Every part is counted once with ``count``: a peel, the digest and a
+    turn's words by their text, as ``compose`` counts them, a Flesh turn and
+    the tail as laid, envelopes included; the caps are held by the
+    composer's own assembly, native or reference, the region cut first so it
+    drops nothing; the whole, each message's count and ``overhead``, frames
+    and envelopes included, by the window less the reserve, and by
+    ``prompt_cap`` when it is lower (the refusal's figures are the whole's
+    count and the cap). ``tail_room``, when given, is what the tail may take
+    in all: each kind, in order, within its share and what the kinds before
+    it left of it. What may not be cut is refused by name
+    (``BudgetError``, with its motive and figures).
+    """
+    errors = budget.validate()
+    if errors:
+        raise BudgetError("; ".join(errors), motive="config")
+    if not (_whole(overhead) and overhead < _MOST_TOKENS):
+        raise BudgetError(f"a message's overhead {overhead!r} is no whole number of tokens", motive="config")
+    if not (_whole(image_tokens) and image_tokens < _MOST_TOKENS):
+        raise BudgetError(f"an image's charge {image_tokens!r} is no whole number of tokens", motive="config")
+    if not _whole(images):
+        raise BudgetError(f"a turn's images {images!r} are no whole number", motive="turn")
+    image_cost = images * image_tokens
+    if image_cost > budget.flesh:
+        raise BudgetError(f"images are {image_cost} tokens against the Flesh's cap of {budget.flesh}: a turn's "
+                          "images take their room from the Flesh, never cut", motive="document",
+                          figures=(image_cost, budget.flesh))
+    # The current turn comes first: the Flesh is held to what its images leave of its cap.
+    laid_under = replace(budget, flesh=budget.flesh - image_cost)
+
+    def counted(layer, text):
+        return _part(layer, text, layer, count)[2]
+
+    laid, cut = _Laid(), {}
+    system = (system,) if isinstance(system, str) else (system or ())
+    system = tuple(str(text) for text in system if str(text))
+    for place, text in enumerate(system):
+        laid.enter("system", [("system", f"system:{place}", text, "")])
+    system_tokens = sum(counted("system", text) for text in system)
+    root, core_text = pinned
+    core_part = f"{_CORE_HEADER.format(root=str(root)[:16])}\n{_defang(core_text)}" if str(core_text) else ""
+    core_tokens = counted("core", core_part) if core_part else 0
+    region = tuple(region)
+    cut["peels_full"] = region_cut(region, budget, count)
+    held = region[cut["peels_full"]:]
+    frames = [("peels", key, _framed("peels", provenance, _bare(text)), label) for key, text, provenance, label in held]
+    peel_tokens = tuple(counted("peels", _bare(text)) for _key, text, _provenance, _label in held)
+    digest_frame = _framed("receipts", "receipts", _bare(digest)) if str(digest) else ""
+    digest_tokens = counted("receipts", _bare(digest)) if digest_frame else 0
+    if digest_frame:
+        frames.append(("receipts", "digest", digest_frame, None))
+    memory = []
+    if frames:
+        content = "\n\n".join(frame for _layer, _key, frame, _label in frames)
+        envelope = _wrapped(wrap, content, "memory", frames=True)
+        at = envelope.find(content)
+        # A wrapper that rewrites what it wraps lays its envelope whole, one piece.
+        if at < 0:
+            memory = [("peels", "envelope", envelope, "\n\n")]
+        else:
+            memory = ([("peels", "envelope:open", envelope[:at], "\n\n")]
+                      + [(layer, key, frame, "\n\n" if place else "")
+                         for place, (layer, key, frame, _label) in enumerate(frames)]
+                      + [("receipts", "envelope:close", envelope[at + len(content):], "")])
+    laid.enter("user", ([("core", str(root), core_part, "")] if core_part else []) + memory,
+             [label for _layer, _key, _frame, label in frames if label is not None])
+    flesh_parts = []
+    for key, role, pieces, label in flesh:
+        text = laid.joined(str(role), turn_text(pieces, wrap))
+        flesh_parts.append((text, f"flesh:{key}", counted("flesh", text) + overhead))
+        laid.enter(str(role), [("flesh", str(key), text, "")], [label])
+    tail_text, tail_tokens, tail_labels = [], 0, []
+    by_kind = {kind: [item for item in tail if item[0] == kind] for kind in TAIL_KINDS + ("citation",)}
+    for kind in TAIL_KINDS:
+        cap = int(shares.get(kind, 0) * budget.tail)
+        if tail_room is not None:
+            cap = min(cap, max(tail_room - tail_tokens, 0))
+        kept, dropped, placed = [], 0, ""
+        for _kind, key, text, frame, label in by_kind[kind]:
+            item = _framed(frame[0], frame[1], _bare(text)) if frame else _bare(text)
+            if kept:
+                # Each item is bare alone; the rest of a header the item before it begins is neutralized here.
+                item = _joined(kept[-1][0], item)
+            trial = _wrapped(wrap, "\n\n".join([item for item, _label in kept] + [item]), _SOURCE[kind],
+                             frames=kind == "memory")
+            if kind == "web" and by_kind["citation"]:
+                trial += "\n\n" + _bare(by_kind["citation"][0][2])
+            if counted("tail", trial) > cap:
+                dropped += 1
+                continue
+            kept.append((item, label))
+            placed = trial
+        cut[kind] = dropped
+        if placed:
+            tail_text.append((kind, placed))
+            tail_tokens += counted("tail", placed)
+            tail_labels.extend(label for _item, label in kept if label is not None)
+    pieces, turn_label = turn
+    rendered = _rendered(pieces, wrap)
+    if rendered and not tail_text:
+        # With no tail before it, the turn's first part meets the message before it.
+        rendered[0] = (rendered[0][0], laid.joined("user", rendered[0][1]))
+    words = "\n\n".join(text for kind, text in rendered if kind != "file")
+    documents = sum(counted("tail", text) for kind, text in rendered if kind == "file")
+    share = int(shares.get("document", 0) * budget.tail)
+    if documents > share:
+        raise BudgetError(f"document is {documents} tokens against a cap of {share}: the documents of a turn are "
+                          "never cut", motive="document", figures=(documents, share))
+    tail_tokens += documents
+    laid.enter("user", [("tail", kind, text, "\n\n") for kind, text in tail_text]
+             + [("turn" if kind != "file" else "tail", f"turn:{place}", text, "\n\n")
+                for place, (kind, text) in enumerate(rendered)], tail_labels + [turn_label], stable=True)
+    parts = _Parts(
+        system=("\n\n".join(system), "system", system_tokens) if system else None,
+        core=(core_part, f"core:{root}", core_tokens),
+        receipts=(digest_frame, "receipts", digest_tokens) if digest_frame else None,
+        peels=tuple((frame, key, tokens) for (_layer, key, frame, _label), tokens in zip(frames, peel_tokens)),
+        flesh=tuple(flesh_parts),
+        tail=("\n\n".join(text for _kind, text in tail_text), "tail", tail_tokens) if tail_tokens else None,
+        turn=(words, "turn", counted("turn", words) if words else 0),
+        core_root=str(root),
+        folded=0,
+    )
+    assemble = _native_compose()
+    _segments, _total, dropped = (_assemble_natively(assemble, parts, laid_under) if assemble is not None
+                                  else _assemble(parts, laid_under))
+    if dropped:
+        raise BudgetError(f"{dropped} peels left out after the region was cut to its cap", motive="count")
+    messages, laid_pieces, stable_end = laid.serialized()
+    # The turn's images ride on its message: their charge is counted on the whole.
+    tokens = sum(counted("window", message.content) + overhead for message in messages) + image_cost
+    cap = budget.window - budget.reserve if prompt_cap is None else min(budget.window - budget.reserve, prompt_cap)
+    _refuse_over("window", tokens, cap, _WHY["window"])
+    layers = (("system", system_tokens), ("core", core_tokens), ("peels", sum(peel_tokens)),
+              ("receipts", digest_tokens), ("flesh", sum(part[2] for part in flesh_parts)), ("tail", tail_tokens),
+              ("turn", parts.turn[2]), ("images", image_cost))
+    return Journal(messages=messages, tokens=tokens, layers=layers, cut=tuple(sorted(cut.items())),
+                   core_root=str(root), stable_end=stable_end, pieces=laid_pieces)
+
+
+def over_cap(budget, counts, document_share=0.0, image_charge=0):
+    """The first of ``counts`` -- ``(layer, tokens)`` -- that ``budget`` does not hold, as ``(layer, tokens, cap)``;
+    None when it holds them all. The documents are held to ``document_share`` of the tail's cap; a turn's images
+    (``images``, their charge) to the whole Flesh cap, whose room they take, and the Flesh to what they leave of
+    it, its cap less ``image_charge``."""
+    for layer, tokens in counts:
+        if layer == "document":
+            cap = int(document_share * budget.tail)
+        elif layer == "images":
+            cap = budget.flesh
+        else:
+            cap = getattr(budget, layer) - (image_charge if layer == "flesh" else 0)
+        if tokens > cap:
+            return layer, tokens, cap
+    return None
+
+
+def accounted(tokens, margin):
+    """What a window of ``tokens`` is held to in its context: its count raised by ``margin``, rounded up."""
+    import math
+
+    return math.ceil(tokens * (1 + margin))
+
+
+def prompt_cap(budget, num_ctx, margin, answer_floor):
+    """The most a window may count sent with ``num_ctx`` so that, accounted with ``margin`` (``accounted``), the
+    answer keeps at least ``answer_floor`` tokens: never past the window less the reserve."""
+    import math
+
+    room = num_ctx - answer_floor
+    cap = math.floor(room / (1 + margin))
+    # The division rounds: a cap raised again by the margin can pass the room by a token, and is lowered until
+    # its own account leaves the floor whole.
+    while cap > 0 and accounted(cap, margin) > room:
+        cap -= 1
+    return min(budget.window - budget.reserve, cap)
+
+
+@dataclass(frozen=True)
+class JournalConfig:
+    """How a journal is laid and sent: the share of its count held back for the counter's error, a message's
+    overhead in tokens, the share of the tail's cap each kind of source may take, the room the answer always
+    keeps (``answer_floor``) and what one image of a turn is charged, its room taken from the Flesh
+    (``image_tokens``). How a plan would catch an overgrown Flesh up -- the newest ``catch_up_reach`` turns
+    kept, at most ``catch_up_steps`` steps -- and where a burst would aim, ``burst_mark`` of the Flesh's cap: read
+    and checked here, at their defaults when the section leaves them out; no composition reads them."""
+
+    margin: float
+    message_overhead: int
+    tail_shares: tuple
+    answer_floor: int = 1024
+    image_tokens: int = 1024
+    catch_up_reach: int = 64
+    catch_up_steps: int = 32
+    burst_mark: float = 0.8
+
+    def shares(self):
+        return dict(self.tail_shares)
+
+
+_JOURNAL_KEYS = ("margin", "message_overhead", "tail_shares", "answer_floor", "image_tokens")
+# Keys a section may leave out, read at their defaults when it does: a section written before them reads alike.
+_JOURNAL_OPTIONAL = ("catch_up", "burst_mark")
+_CATCH_UP_KEYS = ("reach", "max_steps")
+_SHARE_KINDS = TAIL_KINDS + ("document",)
+
+
+def _share(value):
+    return type(value) in (int, float) and 0.0 <= value <= 1.0
+
+
+def _scalar_keys(loader, node):
+    """The keys of a mapping node as a load builds them, each with its value node, merges aside; none for no mapping."""
+    import yaml
+
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    return [(loader.construct_object(key), value) for key, value in node.value
+            if key.tag != "tag:yaml.org,2002:merge" and isinstance(key, yaml.ScalarNode)]
+
+
+def _twice(loader, node, where, only=None):
+    """Each key of ``node`` named twice, which a load takes at its last value without a word; ``only`` limits the
+    check to one key."""
+    seen, found = {}, []
+    for built, _value in _scalar_keys(loader, node):
+        if built in seen and (only is None or built == only):
+            found.append(f"{where} names {built!r} twice: the last would win without a word")
+        seen[built] = True
+    return found
+
+
+def _child(loader, node, name):
+    """The value node ``node`` maps ``name`` to, the last when it is named twice; None for none."""
+    held = None
+    for built, value in _scalar_keys(loader, node):
+        if built == name:
+            held = value
+    return held
+
+
+def load_journal(path=None):
+    """The ``journal`` section of ``onion.yaml``; refused by name, every reason at once."""
+    import yaml
+
+    target = Path(path or _CONFIG)
+    loader = yaml.SafeLoader(target.read_text(encoding="utf-8"))
+    errors = []
+    try:
+        root = loader.get_single_node()
+        errors.extend(_twice(loader, root, target.name, only="journal"))
+        node = _child(loader, root, "journal")
+        errors.extend(_twice(loader, node, "journal"))
+        errors.extend(_twice(loader, _child(loader, node, "tail_shares"), "journal.tail_shares"))
+        errors.extend(_twice(loader, _child(loader, node, "catch_up"), "journal.catch_up"))
+        raw = (loader.construct_document(root) if root is not None else None) or {}
+    finally:
+        loader.dispose()
+    section = raw.get("journal") if isinstance(raw, dict) else None
+    if not isinstance(section, dict):
+        raise BudgetError(f"{target.name} has no journal section: no journal to lay", motive="config")
+    if "home_rung" in section:
+        errors.append("journal: home_rung is read once, at the top of the file, never named again here")
+    errors.extend(f"journal: unknown key {name!r}" for name in sorted(str(n) for n in section)
+                  if name not in _JOURNAL_KEYS + _JOURNAL_OPTIONAL and name != "home_rung")
+    errors.extend(f"journal: {name} is missing" for name in _JOURNAL_KEYS if name not in section)
+    margin = section.get("margin")
+    if "margin" in section and not (type(margin) in (int, float) and 0.0 <= margin < 1.0):
+        errors.append(f"journal.margin: {margin!r} is not a share in [0, 1)")
+    overhead = section.get("message_overhead")
+    if "message_overhead" in section and not (_whole(overhead) and overhead < _MOST_TOKENS):
+        errors.append(f"journal.message_overhead: {overhead!r} is not a whole number of tokens")
+    shares = section.get("tail_shares")
+    if "tail_shares" in section:
+        if not isinstance(shares, dict):
+            errors.append("journal.tail_shares: not a mapping of kinds to shares")
+            shares = {}
+        errors.extend(f"journal.tail_shares: unknown kind {name!r}" for name in sorted(str(n) for n in shares)
+                      if name not in _SHARE_KINDS)
+        errors.extend(f"journal.tail_shares: {kind} is missing" for kind in _SHARE_KINDS if kind not in shares)
+        errors.extend(f"journal.tail_shares.{kind}: {shares[kind]!r} is not a share in [0, 1]"
+                      for kind in _SHARE_KINDS if kind in shares and not _share(shares[kind]))
+        if all(kind in shares and _share(shares[kind]) for kind in _SHARE_KINDS):
+            total = sum(shares[kind] for kind in _SHARE_KINDS)
+            if total > 1.0 + 1e-9:
+                errors.append(f"journal.tail_shares: they sum to {round(total, 6)}, over the whole tail")
+    floor = section.get("answer_floor")
+    if "answer_floor" in section:
+        tables = raw.get("budgets") if isinstance(raw.get("budgets"), dict) else {}
+        rungs = sorted(rung for rung in tables if _whole(rung) and rung > 0)
+        if not (_whole(floor) and floor >= 1):
+            errors.append(f"journal.answer_floor: {floor!r} is not a whole number of tokens of at least 1")
+        elif not rungs:
+            errors.append("journal.answer_floor: no rung of budgets to hold it under")
+        elif floor >= rungs[0]:
+            errors.append(f"journal.answer_floor: {floor} is not under the smallest rung {rungs[0]}")
+    image = section.get("image_tokens")
+    if "image_tokens" in section and not (_whole(image) and 1 <= image < _MOST_TOKENS):
+        errors.append(f"journal.image_tokens: {image!r} is not a whole number of tokens of at least 1")
+    defaults = JournalConfig(margin=0.0, message_overhead=0, tail_shares=())
+    catch_up = section.get("catch_up", {"reach": defaults.catch_up_reach, "max_steps": defaults.catch_up_steps})
+    if not isinstance(catch_up, dict):
+        errors.append("journal.catch_up: not a mapping of reach and max_steps")
+        catch_up = {}
+    errors.extend(f"journal.catch_up: unknown key {name!r}" for name in sorted(str(n) for n in catch_up)
+                  if name not in _CATCH_UP_KEYS)
+    errors.extend(f"journal.catch_up: {name} is missing" for name in _CATCH_UP_KEYS
+                  if "catch_up" in section and name not in catch_up)
+    reach, steps = catch_up.get("reach", defaults.catch_up_reach), catch_up.get("max_steps", defaults.catch_up_steps)
+    if not (_whole(reach) and reach >= 1):
+        errors.append(f"journal.catch_up.reach: {reach!r} is not a whole number of turns of at least 1")
+    if not _whole(steps):
+        errors.append(f"journal.catch_up.max_steps: {steps!r} is not a whole number of steps")
+    mark = section.get("burst_mark", defaults.burst_mark)
+    if not (type(mark) in (int, float) and 0.0 < mark <= 1.0):
+        errors.append(f"journal.burst_mark: {mark!r} is not a share in (0, 1]")
+    if errors:
+        raise BudgetError("; ".join(errors), motive="config")
+    return JournalConfig(margin=float(margin), message_overhead=overhead,
+                         tail_shares=tuple((kind, float(shares[kind])) for kind in _SHARE_KINDS), answer_floor=floor,
+                         image_tokens=image, catch_up_reach=reach, catch_up_steps=steps, burst_mark=float(mark))
