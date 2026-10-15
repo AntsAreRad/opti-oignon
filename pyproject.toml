@@ -992,6 +992,30 @@ fail_under = 0
 # jw24 of tests/test_onion_journal_shadow_contracts.py, the same windows laid
 # where they were refused. It stays in the tree word for word.
 #
+# The onion now lays a conversation's window as its journal: planned before
+# the turn is admitted, composed under the context admitted, and never asked
+# for a block; a turn of no conversation keeps the window it had. xw6, xw8,
+# xw10 and xw11 of tests/test_executor_onion_wiring_contracts.py held the
+# block a turn asked the onion for, and the counter it handed over first:
+# xw6 gives way to jw14 and jw5 of
+# tests/test_executor_onion_window_contracts.py, a librarian of three names
+# leaving the request the onion-off one and a journal's turn reaching no
+# legacy mechanism; xw8 to jw14; xw10's first half is jw14's last, word for
+# word, and its second half gives way to jw8, a curation that raises after
+# the save swallowed and the turn completed; xw11 gives way to jw26, the
+# turn's own counter handed to the plan.
+# tl40, tl77 and tl78 of tests/test_turn_label_contracts.py placed the
+# onion's block on a turn of no conversation, labelled a turn by the block,
+# and handed the onion the sources withdrawn with it: tl40 gives way to
+# tl40a in the same file, its first half word for word, and to jw15 of
+# tests/test_executor_onion_window_labels_contracts.py; tl77 and tl78 give
+# way to jw15, the label each message of the window carries and the sources
+# withdrawn the plan is handed. ps17 and ps21 of
+# tests/test_pipeline_step_contracts.py counted three fixed errors and two
+# admission refusals: the onion window's refusal is a fourth fixed error and
+# the journal's admission refused a third safety refusal, and they give way
+# to ps17b and ps21b in the same file. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1357,4 +1381,13 @@ addopts = """
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg20_each_time_is_the_least_of_two_runs_of_the_costliest_method
     --deselect=tests/test_pattern_cost_guard_contracts.py::test_pg34_an_exponential_pattern_ends_its_pump_at_its_first_burst_and_is_found
     --deselect=tests/test_onion_journal_contracts.py::test_jw23_without_a_shadow_a_descent_and_a_flesh_over_its_cap_are_refused_by_name
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw6_the_onion_block_arrives_in_the_turn_with_its_frames_and_the_legacy_composer_is_not_consulted
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw8_with_the_onion_on_but_empty_the_legacy_block_rides_the_turn
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw10_an_absent_or_failing_librarian_never_breaks_the_turn_and_the_legacy_block_rides_it
+    --deselect=tests/test_executor_onion_wiring_contracts.py::test_xw11_the_turn_hands_the_onion_its_own_counter_for_the_model_it_is_sent_to
+    --deselect=tests/test_turn_label_contracts.py::test_tl40_a_memory_block_lowers_a_turn_unless_the_user_endorsed_every_fact_it_places
+    --deselect=tests/test_turn_label_contracts.py::test_tl77_the_onion_s_block_labels_a_turn_by_the_label_it_carries_and_a_plain_string_by_memory
+    --deselect=tests/test_turn_label_contracts.py::test_tl78_the_executor_hands_the_onion_the_sources_the_user_withdrew_and_nothing_when_there_is_none
+    --deselect=tests/test_pipeline_step_contracts.py::test_ps17_a_fixed_server_error_ends_its_step_failed
+    --deselect=tests/test_pipeline_step_contracts.py::test_ps21_a_safety_mechanism_never_ends_a_step_failed
 """

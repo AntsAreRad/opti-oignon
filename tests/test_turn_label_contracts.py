@@ -72,6 +72,11 @@ added by what a turn saw and taken away by the user alone.
   * TL40 -- a memory block lowers the turn it is placed in unless the user
     endorsed every fact it places, and names each fact by id; the onion's
     block is memory as a whole.
+  * TL40a -- supersedes TL40, whose second half placed the onion's block on
+    a turn of no conversation: the onion now lays a conversation's window
+    as its journal and is never asked for a block. A memory block lowers
+    the turn it is placed in unless the user endorsed every fact it places,
+    and names each fact by id, word for word.
   * TL51 to TL54 -- supersede EX1, EX2, EX5 and EX6, whose conversation
     source hands no labels and so, since TL36, no turn the export may take:
     the same escaping, role mapping, quality floor and paging, word for
@@ -1204,6 +1209,30 @@ def test_tl40_a_memory_block_lowers_a_turn_unless_the_user_endorsed_every_fact_i
         assert run.results["context_label"] == (["memory"], []), "the onion's block is memory as a whole"
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# TL40a -- supersedes TL40: the working block lowers a turn unless every fact it places is endorsed
+# ---------------------------------------------------------------------------
+def test_tl40a_a_memory_block_lowers_a_turn_unless_the_user_endorsed_every_fact_it_places():
+    import threading
+
+    block = "Relevant memories:\n- Alice lives in Lyon.\n- Bob arrives at noon."
+    for placed, expected in (
+        ([("f1", True), ("f2", False)], (["memory"], ["memory:f1", "memory:f2"])),
+        ([("f1", True), ("f2", True)], ([], ["memory:f1", "memory:f2"])),
+        ([("legacy:alice lives in lyon", False)], (["memory"], [])),
+    ):
+        mod, wrapper, scripted, store, librarian, restore = _executor(memory=(block, placed))
+        try:
+            ex = mod.Executor()
+            ex._memory_enabled = True
+            run = SimpleNamespace(stop=threading.Event(), results={})
+            _drive(ex.execute(_QUESTION, _routing(), refine=False, conversation_id=None, run=run))
+            assert any("Alice lives in Lyon." in m["content"] for m in _sent(scripted)), "control: the block was placed"
+            assert run.results["context_label"] == expected, placed
+        finally:
+            restore()
 
 
 # ---------------------------------------------------------------------------

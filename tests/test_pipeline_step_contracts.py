@@ -37,6 +37,11 @@ The execution pipeline runner emits through the turn's recorder:
 * PS21 -- a safety mechanism never ends a step ``failed``: the executor's
   admission refusal, read from a structured signal, ends it ``cancelled``
   with the governor's message.
+* PS17b -- supersedes PS17: the onion window's refusal is one of the
+  server's fixed errors, written and yielded in one block of the executor;
+  the closed list has four sites.
+* PS21b -- supersedes PS21: the onion journal's admission refused is a
+  safety refusal too, a third site reporting it beside its ledger write.
 * PS24 -- after a refusal inside step k, the later steps end ``not_run``
   with the same message, none starts, and no prompt holds the refusal.
 
@@ -97,6 +102,8 @@ BUDGET_S = {
     "test_ps13_a_step_ends_with_the_pipeline_its_turn_ran": 2.0,
     "test_ps17_a_fixed_server_error_ends_its_step_failed": 2.0,
     "test_ps21_a_safety_mechanism_never_ends_a_step_failed": 2.0,
+    "test_ps17b_a_fixed_server_error_the_onion_windows_refusal_among_them_ends_its_step_failed": 2.0,
+    "test_ps21b_a_safety_mechanism_the_onion_journals_admission_among_them_never_ends_a_step_failed": 2.0,
     "test_ps24_a_refusal_inside_a_step_ends_the_run": 2.0,
     "test_ps9_a_reasoning_strategy_announces_its_steps": 2.0,
     "test_ps16_a_self_correction_is_two_steps_with_no_progress": 2.0,
@@ -1001,6 +1008,92 @@ def test_ps21_a_safety_mechanism_never_ends_a_step_failed(monkeypatch):
     _ps21_c1(monkeypatch)
     _ps21_c2(monkeypatch)
     _ps21_c3()
+
+
+# ---------------------------------------------------------------------------
+# PS17b and PS21b -- supersede PS17 and PS21: the onion window's refusal is a
+# fixed error; the onion journal's admission refused is a safety refusal
+# ---------------------------------------------------------------------------
+
+def _window_refused():
+    """The onion window's refusal as the executor yields it, under the words it ships for its motive."""
+    tree = ast.parse((_PKG / "executor.py").read_text(encoding="utf-8"))
+    words = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "_ONION_REFUSAL_WORDS" for t in node.targets):
+            words = ast.literal_eval(node.value)
+    return f"[ERR] The onion window was refused (count): {words['count']} [17000 1024]"
+
+
+def _ps17b_c1(monkeypatch):
+    """Each fixed error, the onion window's refusal among them, reported by
+    its call, ends the step failed with that text, never done; the next step
+    runs and is not handed it."""
+    for literal in _FIXED + (_window_refused(),):
+        world = _World(monkeypatch, [_answers(), _fixed_error(literal), _answers()])
+        world.go(_steps("direct", "think", "tools"))
+        assert world.states(1) == ["pending", "running", "failed"]
+        assert world.last(1)["reason"] == literal
+        assert world.states(2) == ["pending", "running", "done"]
+        assert literal not in world.executor.prompts[2]
+
+
+def _ps17b_c2(monkeypatch):
+    """A model reply equal to a fixed error, the onion window's refusal
+    among them, with no report from its call, is the model's text: the step
+    ends done."""
+    for literal in _FIXED + (_window_refused(),):
+        world = _World(monkeypatch, [_answers(text=literal)])
+        world.go(_steps("direct"))
+        assert world.states(0) == ["pending", "running", "done"]
+
+
+def _ps17b_c3():
+    """The fixed errors are a closed list of sites: exactly four writes of
+    the signal in the package, each beside the literal it reports, the onion
+    window's refusal written and yielded in one block of the executor."""
+    writes = _writes("step_error")
+    sites = sorted((name, lit) for name, _, block in writes for lit in _yielded_literals(block))
+    assert len(writes) == 4
+    assert sites == [
+        ("agentic_executor.py", "[ERR] Executor not available"),
+        ("agentic_executor.py", "[ERR] No initial response generated"),
+        ("executor.py", "[ERR] Context exceeds model limit: "),
+        ("executor.py", "[ERR] The onion window was refused ("),
+    ]
+
+
+def test_ps17b_a_fixed_server_error_the_onion_windows_refusal_among_them_ends_its_step_failed(monkeypatch):
+    _ps17b_c1(monkeypatch)
+    _ps17b_c2(monkeypatch)
+    _ps17b_c3()
+
+
+def _ps21b_c3():
+    """The governor's refusal is not a fixed error: the three refusal sites
+    -- the vision model's, the chat's and the onion journal's -- each report
+    ``admission_refused`` beside one ledger write, and no block reports both
+    signals."""
+    refusals = _writes("admission_refused")
+    ledgered, beside = set(), []
+    for name, _, block in refusals:
+        calls = [stmt.value for stmt in block if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+                 and getattr(stmt.value.func, "id", "") == "_emit_ledger"
+                 and stmt.value.args and isinstance(stmt.value.args[0], ast.Constant)]
+        beside.append(len(calls))
+        ledgered.update((name, call.args[0].value) for call in calls)
+    assert len(refusals) == 3 and beside == [1, 1, 1], (len(refusals), beside)
+    assert ledgered == {("executor.py", "vision_refused"), ("executor.py", "governor_refused")}
+    fixed_blocks = {_block_key(name, block) for name, _, block in _writes("step_error")}
+    assert len(fixed_blocks) >= 4
+    assert [line for name, line, block in refusals
+            if _block_key(name, block) in fixed_blocks] == []
+
+
+def test_ps21b_a_safety_mechanism_the_onion_journals_admission_among_them_never_ends_a_step_failed(monkeypatch):
+    _ps21_c1(monkeypatch)
+    _ps21_c2(monkeypatch)
+    _ps21b_c3()
 
 
 # ---------------------------------------------------------------------------
