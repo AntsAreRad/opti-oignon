@@ -172,6 +172,12 @@ ENV_RESULTS_HEADER = (
     "[environment] Results of the tool calls you (the assistant) made:"
 )
 
+# The runtime's line a journal turn's last request is told by, joined after
+# its last message: no tool runs past it, though the same tools are offered
+# for the head's sake, so it asks for the answer where a decision asked for
+# a call.
+_ANSWER_NOW = "[runtime] No further tool can run this turn: answer now from what you have."
+
 # The historical fallback when the configuration seam is absent.
 _FALLBACK_DEFAULT_MODEL = "qwen3:32b"
 
@@ -249,6 +255,13 @@ def _extract_message_content(resp) -> str | None:
         msg, "content", None,
     )
     return content if isinstance(content, str) and content else None
+
+
+def _payload_calls(resp) -> bool:
+    """Whether an Ollama chat response carries any tool call, read without parsing one."""
+    msg = resp.get("message") if isinstance(resp, dict) else getattr(resp, "message", None)
+    calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+    return bool(calls)
 
 
 def _native_call_echo(tool_name: str, arguments: dict) -> dict:
@@ -717,6 +730,7 @@ class ToolExecutor:
         manifest=None,
         should_stop: Callable[[], bool] | None = None,
         provenance=None,
+        rounds=None,
     ):
         """Streaming variant of ``execute_with_tools``.
 
@@ -728,7 +742,16 @@ class ToolExecutor:
         its ``response`` equals exactly the emitted text. A stopped turn
         yields nothing more once its loop ends. Every call is judged by
         ``provenance``, as in ``execute_with_tools``.
+
+        ``rounds`` is the chat executor's hold on a turn the onion's journal
+        laid: the window's messages, each round's options and the admitter of
+        the results (``_stream_rounds``). Handed one, the loop runs under that
+        window and ``conversation_messages`` and ``tool_history`` are not
+        read; with none, every line runs as it always did.
         """
+        if rounds is not None:
+            return (yield from self._stream_rounds(message, model or self.default_model, approval_fn, on_tool_call,
+                                                   manifest, should_stop, provenance, rounds))
         start_time = time.time()
         _model = model or self.default_model
         # The final generation is shown what it could call this turn;
@@ -1021,6 +1044,433 @@ class ToolExecutor:
 
         return tool_calls, tool_results_context, native_transcript, \
             context_messages, None, verification_hints
+
+    # -- the loop under a window the onion's journal laid -------------------
+
+    def _round_tools(self, manifest) -> list:
+        """The tools a journal turn's rounds offer: its manifest's, or the live availability view."""
+        if manifest is not None:
+            return list(getattr(manifest, "tools", ()) or ())
+        return self.registry.list_available() if self.registry else []
+
+    def _decision_instruction(self, available: list) -> str:
+        """The structured decision's instruction a journal turn's round joins after its messages: the engine's own
+        for ``ToolDecision`` with the tools prompt of ``available`` -- the manifest is the window's, in its head.
+        Empty without the engine, the registry or a tool."""
+        describe = getattr(self.structured_engine, "schema_instruction", None) if STRUCTURED_OUTPUT_AVAILABLE else None
+        if not callable(describe) or not self.registry or not available:
+            return ""
+        return describe(ToolDecision, self.registry.get_tools_prompt(tools=available))
+
+    def round_schemas(self, manifest, model: str) -> tuple[str, ...]:
+        """The texts a journal turn's rounds may send beside their messages, for the window's schema charge.
+
+        The tools its rounds offer as native schemas, serialized, for a model
+        that calls tools natively; and the structured decision's instruction
+        (``_decision_instruction``), which a model that does not is sent -- and
+        a native decision that fails falls back to. The window charges the
+        heaviest. Empty when the turn offers no tool: no registry, no tool, or
+        neither a native model nor an engine to decide with.
+        """
+        if not self.registry:
+            return ()
+        available = self._round_tools(manifest)
+        if not available:
+            return ()
+        texts = []
+        if ROBUST_TOOLCALLING_AVAILABLE and model_supports_native_tools(model):
+            texts.append(json.dumps(native_tool_schemas(available), ensure_ascii=False))
+        instruction = self._decision_instruction(available)
+        if instruction:
+            texts.append(instruction)
+        return tuple(texts)
+
+    @staticmethod
+    def _used_all(extra, options: dict) -> bool:
+        """Whether a request's answer used all the room it was sent with: the engine's reason when it says one,
+        else its count against the room; an engine that reports neither is not read as having used it."""
+        extra = extra if isinstance(extra, dict) else {}
+        reason, generated, room = extra.get("done_reason"), extra.get("eval_count"), options.get("num_predict")
+        if isinstance(reason, str):
+            return reason == "length"
+        return type(generated) is int and type(room) is int and generated >= room
+
+    def _round_decision(self, model, backend, rounds, offer, instruction, native):
+        """One decision of a journal turn: ``(calls, text, full)``.
+
+        Native first, offered the round's tools; a native call that fails, or
+        a model that is not native, asks the structured decision, its
+        instruction joined after the request's messages. ``text`` is the
+        decision as the model wrote it. A decision that used all its room is
+        ``full`` and never parsed: its calls are none. A native one that
+        called nothing is stashed as the turn's direct answer, as off the
+        journal, used all its room or not.
+        """
+        if native:
+            options = rounds.options({"temperature": 0.0, **offer})
+            try:
+                response = backend.generate(model=model, messages=rounds.messages(), options=options,
+                                            keep_alive=rounds.keep_alive)
+            except Exception as exc:
+                logger.warning("Native tool call failed (%s); falling back to format=", exc)
+                response = None
+            if response is not None:
+                rounds.heard(getattr(response, "extra", None), options)
+                payload = _payload(response)
+                text = _extract_message_content(payload) or ""
+                full = self._used_all(getattr(response, "extra", None), options)
+                calls = [] if full else parse_native_tool_calls(payload)
+                if not calls and not (full and _payload_calls(payload)):
+                    self._pending_direct_answer = text or None
+                return calls, text, full
+        if not instruction:
+            return [], "", False
+        options = rounds.options({"temperature": 0.0, "schema": ToolDecision.model_json_schema()}, instruction,
+                                 charged=True)
+        try:
+            response = backend.generate(model=model, messages=rounds.messages(instruction), options=options,
+                                        keep_alive=rounds.keep_alive)
+        except Exception as exc:
+            logger.warning("Structured tool decision failed (%s)", exc)
+            return [], "", False
+        rounds.heard(getattr(response, "extra", None), options)
+        text = getattr(response, "content", "") or ""
+        if self._used_all(getattr(response, "extra", None), options):
+            return [], text, True
+        try:
+            decision = ToolDecision.model_validate_json(text)
+        except Exception:
+            return [], text, False
+        if decision.tool_name in ("none", ""):
+            return [], text, False
+        return [(decision.tool_name, decision.arguments)], text, False
+
+    @staticmethod
+    def _round_messages(rounds, laid, said, echoes) -> list[dict]:
+        """The messages one round appends, its results ``laid`` -- ``(name, arguments, content)``, each call named
+        with ``arguments`` -- in its shape: native, each call's echo then its result in role ``tool``; flat, one
+        assistant message, ``said`` (the model's own words, bare) or the runtime's line naming each call, then one
+        user message holding every result."""
+        if echoes:
+            out = []
+            for name, arguments, content in laid:
+                out.append(_native_call_echo(name, arguments))
+                out.append({"role": "tool", "content": content})
+            return out
+        line = said or "\n".join(rounds.line(name, arguments) for name, arguments, _content in laid)
+        return [{"role": "assistant", "content": line},
+                {"role": "user", "content": "\n\n".join(content for _name, _arguments, content in laid)}]
+
+    def _round_said(self, rounds, calls, text, echoes):
+        """What a round's assistant message says -- the model's own decision text, bare (``rounds.bare``), or None
+        for the runtime's line naming each call as decided -- when the room holds the round with each of its
+        calls' results at its least; False when even the runtime's line leaves it no room."""
+        least = [(name, arguments, rounds.least(name, place))
+                 for place, (name, arguments) in enumerate(calls, start=1)]
+        own = rounds.bare(text) if text and not echoes else None
+        for said in ((own, None) if own else (None,)):
+            if sum(rounds.cost(m) for m in self._round_messages(rounds, least, said, echoes)) <= rounds.room():
+                return said
+        return False
+
+    def _append_round(self, rounds, ran, said, echoes) -> None:
+        """Append one round to the transcript, each call named with the arguments it ran with, each result by its
+        place in the round: each result laid in turn within what the room leaves it past every other result at
+        its least, held to the window's cap of one result; a count the joints make pass the room is given back by
+        the last result that shows anything, cut again. A round still past the room -- a call that ran with more
+        than it was decided with -- is laid in the form the room was found to hold before its calls ran, each call
+        named as decided and each result at its least; one that even then passes it raises."""
+        run = [(name, result.arguments if isinstance(result.arguments, dict) else arguments, result)
+               for name, arguments, result in ran]
+        least = [rounds.least(name, place) for place, (name, _arguments, _result) in enumerate(ran, start=1)]
+
+        def past(named, contents):
+            messages = self._round_messages(
+                rounds, [(name, arguments, content) for (name, arguments, _r), content in zip(named, contents)],
+                said, echoes)
+            return messages, sum(rounds.cost(m) for m in messages) - rounds.room()
+
+        _messages, over = past(run, least)
+        spare = -over
+        laid = []
+        for index, (name, arguments, result) in enumerate(run):
+            base = rounds.count(least[index])
+            cap = max(base, min(rounds.result_cap, base + max(spare, 0)))
+            item = rounds.lay(name, index + 1, result.result, cap, arguments)
+            spare -= max(rounds.count(item.content) - base, 0)
+            laid.append(item)
+        named = run
+        for _ in range(8):
+            messages, over = past(named, [item.content for item in laid])
+            shown = [i for i, item in enumerate(laid) if rounds.count(item.content) > rounds.count(least[i])]
+            if over <= 0 or not shown:
+                break
+            i = shown[-1]
+            name, arguments, result = run[i]
+            laid[i] = rounds.lay(name, i + 1, result.result,
+                                 max(rounds.count(least[i]), rounds.count(laid[i].content) - over), arguments)
+        messages, over = past(named, [item.content for item in laid])
+        if over > 0:
+            named = list(ran)
+            laid = [rounds.lay(name, index + 1, result.result, rounds.count(least[index]), arguments)
+                    for index, (name, arguments, result) in enumerate(run)]
+            messages, over = past(named, [item.content for item in laid])
+            if over > 0:
+                raise RuntimeError("a round's results, each at its least, pass the room its transcript keeps")
+        if echoes:
+            for position, item in enumerate(laid):
+                rounds.append(messages[2 * position])
+                rounds.append(messages[2 * position + 1], laid=(item,))
+        else:
+            rounds.append(messages[0])
+            rounds.append(messages[1], laid=tuple(laid))
+
+    def _round_calls(self, calls, approval_fn, on_tool_call, provenance, offered, should_stop, recent):
+        """Run one round's calls in order, as the loop off the journal runs them, each judged by ``provenance``:
+        ``(ran, outcome)``, ``ran`` each call as decided with its result; ``outcome`` ``stopped``, ``spin`` (a call
+        repeating a recent successful one, never run), ``retry`` or ``hard`` (a call that failed), or ``done``."""
+        ran = []
+        for tool_name, arguments in calls:
+            if should_stop():
+                return ran, "stopped"
+            signature = _call_signature(tool_name, arguments)
+            if signature in recent:
+                logger.info("No-progress guard: call to %s repeats a recent successful call; stopping the ReAct "
+                            "loop", tool_name)
+                return ran, "spin"
+            call_result = self._execute_tool(tool_name, arguments, "", approval_fn=approval_fn,
+                                             **_gate_kwargs(provenance=provenance, offered=offered))
+            ran.append((tool_name, arguments, call_result))
+            self._notify_tool_call(on_tool_call, call_result)
+            if not call_result.success:
+                return ran, "retry" if call_result.retryable else "hard"
+            recent.append(signature)
+        return ran, "done"
+
+    def _stream_rounds(self, message, model, approval_fn, on_tool_call, manifest, should_stop, provenance, rounds):
+        """The tool loop of a turn the onion's journal laid, its answer streamed: what ``stream_with_tools`` runs
+        when it is handed ``rounds``.
+
+        Every request is the window's messages, byte for byte, then the
+        transcript the rounds appended, never rewritten (``rounds.messages``),
+        sent with the round's options (``rounds.options``: the window's
+        context, and the room the answer keeps past the window, the transcript
+        and what the request is told past them) and the turn's keep_alive. A
+        model that calls tools natively is offered the same tools on every
+        request, the final included, so the head the engine renders never
+        changes; a native decision that fails, and a model that is not native,
+        ask the structured decision, its instruction joined after the
+        request's last message. The transcript is native for a model the
+        native replay is allowed for -- per call, the assistant's echo of it
+        with the arguments it ran with, then its result in role ``tool`` --
+        and flat for any other: per round, one assistant message, the model's
+        own decision text, bare, or the runtime's line naming each call as it
+        ran, then one user message holding the round's results, so roles
+        alternate. Each result is laid by ``rounds.lay``, named by its place in
+        the round, defanged, enveloped as a tool's output and cut to what the
+        room leaves it (``_append_round``). A round the room cannot hold, each
+        result laid at its least, runs none of its calls, and a decision that
+        used all its room is never parsed: the loop ends by name
+        (``tool_room``). The zero-call reuse, the salvage, the verification
+        pass, the no-progress guard and the retries are the loop's own, as off
+        the journal. A zero-call decision is the answer, before any tool ran
+        or after, as the decision wrote it, its room said by the turn's
+        outcome. Otherwise the final streams over the transcript, told in one
+        line joined after its last message that no further tool can run
+        (``_ANSWER_NOW``), counted, the room the transcript takes keeping it
+        (``rounds.reserve``), the same tools offered for the head's sake; the
+        salvage's own request is told so too when the loop ended on a guard --
+        the room, the no-progress guard, a call that failed for good, the
+        retries or the rounds spent. A stream that fails, before or after its
+        first words, raises -- no text ever stands in for an answer. The
+        return value is the ToolExecutionResult.
+        """
+        start_time = time.time()
+        self._pending_direct_answer = None
+        stop = should_stop if should_stop is not None else (lambda: False)
+        offered = self._offered_names(manifest)
+        available = self._round_tools(manifest)
+        backend = _resolve_backend(model)
+        if backend is None:
+            raise RuntimeError("no inference backend is registered for the tool loop")
+        native = bool(available) and ROBUST_TOOLCALLING_AVAILABLE and model_supports_native_tools(model)
+        offer = {"tools": native_tool_schemas(available)} if native else {}
+        instruction = self._decision_instruction(available)
+        echoes = self._effective_transcript(model) == TOOL_TRANSCRIPT_NATIVE
+        rounds.reserve(_ANSWER_NOW)
+        tool_calls: list[ToolCallResult] = []
+        recent: deque[str] = deque(maxlen=3)
+        failures, verified, hints = 0, False, 0
+        # Why the loop ended: the model's own decision (``answer``), a stop, or a guard -- the round limit unless
+        # another ends it first.
+        ended = "rounds"
+
+        def done(response=""):
+            return ToolExecutionResult(response=response, tool_calls=tool_calls, model=model,
+                                       total_time=time.time() - start_time, verification_hints=hints)
+
+        for _iteration in range(self.max_tool_calls):
+            if stop():
+                ended = "stopped"
+                break
+            calls, text, full = self._round_decision(model, backend, rounds, offer, instruction, native)
+            if stop():
+                ended = "stopped"
+                break
+            if full:
+                # A call cut by its room is never parsed; a direct answer that used it is the answer as it is.
+                ended = "answer" if self._pending_direct_answer else "tool_room"
+                if ended == "tool_room":
+                    rounds.say("tool_room")
+                break
+            if not calls:
+                if not verified and tool_calls:
+                    hint = _verification_hint(tool_calls)
+                    pair = ({"role": "assistant", "content": rounds.bare(text) if text else "[runtime] No tool call."},
+                            {"role": "user", "content": hint or ""})
+                    if hint is not None and sum(rounds.cost(m) for m in pair) <= rounds.room():
+                        verified = True
+                        hints += 1
+                        self._pending_direct_answer = None
+                        rounds.append(pair[0])
+                        rounds.append(pair[1])
+                        logger.info("Verification: success criterion not met; running one corrective iteration")
+                        continue
+                ended = "answer"
+                break
+            said = self._round_said(rounds, calls, text, echoes)
+            if said is False:
+                rounds.say("tool_room")
+                ended = "tool_room"
+                break
+            ran, outcome = self._round_calls(calls, approval_fn, on_tool_call, provenance, offered, stop, recent)
+            tool_calls.extend(result for _name, _arguments, result in ran)
+            if outcome == "stopped" or stop():
+                ended = "stopped"
+                break
+            if ran:
+                self._append_round(rounds, ran, said, echoes)
+            if outcome in ("spin", "hard"):
+                ended = outcome
+                break
+            if outcome == "retry":
+                failures += 1
+                if failures >= self.max_tool_retries:
+                    ended = "retries"
+                    break
+                continue
+            failures = 0
+        if stop():
+            self._pending_direct_answer = None
+            return done()
+
+        candidate = self._take_direct_answer_candidate()
+        answer = None
+        if not tool_calls and ROBUST_TOOLCALLING_AVAILABLE:
+            answer = self._round_salvage(message, model, backend, rounds, offer, candidate, approval_fn,
+                                         on_tool_call, provenance, offered, stop, echoes, tool_calls,
+                                         _ANSWER_NOW if ended not in ("answer", "stopped") else "")
+        elif ended == "answer" and candidate is not None:
+            logger.info("Single-pass reuse: the zero-call decision after the tools is the answer (no final "
+                        "generation)")
+            answer = candidate
+        if stop():
+            return done()
+        emitted: list[str] = []
+        if answer is not None:
+            text, dropped = strip_internal_markers(answer)
+            if dropped:
+                logger.info("Response hygiene: removed %d internal marker line(s) from the final answer", dropped)
+            if text:
+                emitted.append(text)
+                yield text
+            return done("".join(emitted))
+        yield from self._round_final(model, backend, rounds, offer, emitted, stop)
+        return done("".join(emitted))
+
+    def _round_salvage(self, message, model, backend, rounds, offer, candidate, approval_fn, on_tool_call,
+                       provenance, offered, stop, echoes, tool_calls, line=""):
+        """The salvage of a journal turn that called nothing: the candidate -- the decision's direct answer, or one
+        asked for over the window, told ``line`` when one is given -- is the answer, unless calls can be read out of
+        it; those that the room holds run, each judged by ``provenance`` as a decided call is, their results join
+        the transcript, and None says the final answers over them. A candidate that is the answer and called a
+        tool instead is said to have, so the turn that has nothing else to say ends by name."""
+        called, heard = 0, None
+        if candidate is None:
+            options = rounds.options({"temperature": 0.3, **offer}, line)
+            response = backend.generate(model=model, messages=rounds.messages(line), options=options,
+                                        keep_alive=rounds.keep_alive)
+            heard = (dict(getattr(response, "extra", None) or {}), options)
+            rounds.heard(*heard)
+            called = len(getattr(response, "tool_calls", None) or [])
+            candidate = getattr(response, "content", "") or ""
+        else:
+            logger.info("Single-pass reuse: the zero-call decision answer is reused as the final answer (no second "
+                        "generation)")
+
+        def answered(text):
+            if called:
+                rounds.heard(dict(heard[0], tool_calls=called), heard[1], final=True)
+            return text
+
+        names = {t.name for t in self.registry.list_available()} if self.registry else set()
+        salvaged = transpile_intent(candidate, message, names)
+        if not salvaged or stop():
+            return answered(candidate)
+        if self._round_said(rounds, salvaged, None, echoes) is False:
+            rounds.say("tool_room")
+            return answered(candidate)
+        logger.info("Salvaged %d tool call(s) from a narrated response", len(salvaged))
+        ran = []
+        for tool_name, arguments in salvaged:
+            if stop():
+                break
+            call_result = self._execute_tool(tool_name, arguments, "intent-transpiled", approval_fn=approval_fn,
+                                             **_gate_kwargs(provenance=provenance, offered=offered))
+            ran.append((tool_name, arguments, call_result))
+            tool_calls.append(call_result)
+            self._notify_tool_call(on_tool_call, call_result)
+            if not call_result.success:
+                break
+        if ran and not stop():
+            self._append_round(rounds, ran, None, echoes)
+        return None
+
+    def _round_final(self, model, backend, rounds, offer, emitted, stop):
+        """The final of a journal turn, streamed over the window and its transcript with the round's tools, told
+        that no further tool can run (``_ANSWER_NOW``), its echoed markers filtered, until the turn's stop; the
+        engine's report of it heard, whether it called a tool among them. A stream that fails raises: after its
+        first words as a cut answer."""
+        options = rounds.options({"temperature": 0.3, **offer}, _ANSWER_NOW)
+        marker_filter = StreamMarkerFilter() if RESPONSE_HYGIENE_AVAILABLE else None
+        produced = False
+        try:
+            for chunk in backend.stream(model=model, messages=rounds.messages(_ANSWER_NOW), options=options,
+                                        keep_alive=rounds.keep_alive):
+                if stop():
+                    return
+                extra = getattr(chunk, "extra", None)
+                if getattr(chunk, "done", False) or (isinstance(extra, dict) and extra.get("tool_calls")):
+                    rounds.heard(extra, options, final=True)
+                content = getattr(chunk, "content", "")
+                if not content:
+                    continue
+                produced = True
+                out = marker_filter.feed(content) if marker_filter else content
+                if out:
+                    emitted.append(out)
+                    yield out
+        except Exception as exc:
+            if produced:
+                raise CutAnswerError(str(exc)) from exc
+            raise
+        tail = marker_filter.flush() if marker_filter else ""
+        if tail:
+            emitted.append(tail)
+            yield tail
+        if marker_filter is not None and marker_filter.dropped:
+            logger.info("Response hygiene: removed %d internal marker line(s) from the streamed answer",
+                        marker_filter.dropped)
 
     def _resolve_direct_answer_reuse(self) -> bool:
         """Whether the single-pass reuse is enabled.

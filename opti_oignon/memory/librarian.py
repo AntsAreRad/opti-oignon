@@ -1766,7 +1766,7 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
 
 # Why no window was composed, by name: a layer, or what else refused it.
 REFUSAL_MOTIVES = ("system", "core", "receipts", "peels", "flesh", "tail", "turn", "window", "rung", "count",
-                   "config", "document", "wrap", "store", "model", "raised")
+                   "config", "document", "wrap", "store", "model", "raised", "tools")
 # Why a journal's stable prefix began again, by name; any other change is unexplained, and counted so.
 EPOCH_MOTIVES = ("first", "model", "rung", "system", "core", "proposal", "receipt", "take_back", "withdrawn",
                  "eviction", "peels_full")
@@ -1817,6 +1817,14 @@ class Window:
     conversation's last window begins (``first_diff``), the chain of the
     stable prefix, and whether it has no prefix in common with that window
     (``cold``: the first window, or one whose first piece changed).
+
+    What a tool turn's rounds are held to past the window: the schemas'
+    charge counted on the whole (``tools``), the room held back for the
+    transcript (``tool_room``), the most one result may take
+    (``result_cap``), the most the window and its transcript may count with
+    the answer keeping its floor (``limit``), and how a message is counted
+    and the whole accounted (``overhead``, ``margin``): the first four zero
+    on a turn that offers no tool.
     """
 
     messages: tuple = ()
@@ -1833,6 +1841,12 @@ class Window:
     chain: str = ""
     cold: bool = False
     refusal: object = None
+    tools: int = 0
+    tool_room: int = 0
+    result_cap: int = 0
+    limit: int = 0
+    overhead: int = 0
+    margin: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1874,6 +1888,12 @@ class _Held:
     catch_up: tuple = (0, 0)
     lineage: tuple = ()
     withdrawn: frozenset = frozenset()
+    # A tool turn's: that it offers tools (``tooled``), its schemas' charge, and what it holds back for its
+    # transcript and lets one result take, at the home rung.
+    tooled: bool = False
+    tools: int = 0
+    tool_room: int = 0
+    result_cap: int = 0
 
 
 @dataclass(frozen=True)
@@ -1933,7 +1953,7 @@ def _digest_text(*parts):
 
 
 def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), model_window=None, messages=None,
-                withdrawn=(), recalled=(), config=None, budgets=None, journal=None, ladder=None, gate=None):
+                withdrawn=(), recalled=(), config=None, budgets=None, journal=None, ladder=None, gate=None, tools=()):
     """Plan the turn's window before it is admitted: the rung to ask the governor for, or why none. Never raises.
 
     ``count`` is the counter of the turn, for ``model``: every part is
@@ -1984,6 +2004,15 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     for the kind's own (``retrieved`` or ``web``, no lineage). A tail of
     any other shape is refused ``tail``; images that are no whole number,
     ``turn``; a store that cannot save the mirror, ``store``.
+
+    ``tools``, when given, makes the turn a tool turn: the texts of the
+    schemas it may send beside its messages, each counted with the turn's
+    counter and the heaviest charged on the whole, its room taken from the
+    Flesh after the images', raising the rung only when even what they
+    leave of the whole Flesh cap cannot hold it, refused ``tools`` past
+    every rung within the model's window, as is a text that is no string or
+    an empty one. Its window is composed holding back the journal's
+    ``tool_room`` for the transcript its rounds append.
     """
     try:
         from .composer import BudgetError
@@ -1994,7 +2023,7 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     try:
         plan = _plan(conversation_id, model=model, count=count, system=system, turn=turn, wrap=wrap, tail=tail,
                      model_window=model_window, messages=messages, withdrawn=withdrawn, recalled=recalled,
-                     config=config, budgets=budgets, journal=journal, ladder=ladder, gate=gate)
+                     config=config, budgets=budgets, journal=journal, ladder=ladder, gate=gate, tools=tools)
     except BudgetError as exc:
         plan = Plan(refusal=_refusal_of(exc))
     except Exception as exc:  # noqa: BLE001 - a plan never raises into a turn
@@ -2036,7 +2065,7 @@ def _tail_sources(tail):
 
 
 def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_window, messages, withdrawn, recalled,
-          config, budgets, journal, ladder, gate):
+          config, budgets, journal, ladder, gate, tools=()):
     from .composer import _part, _rendered, _whole, load_budgets, load_journal
     from .peels import CUT, join_labels, load_gate, load_ladder, turn_label
 
@@ -2052,6 +2081,9 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
     sources = _tail_sources(tail)
     if sources is None:
         return Plan(refusal=Refusal("tail"))
+    schemas = tuple(tools) if isinstance(tools, (list, tuple)) else None
+    if schemas is None or not all(isinstance(text, str) and text for text in schemas):
+        return Plan(refusal=Refusal("tools"))
     counted = _vetted(count, model)
     if conversation_id:
         _register_counter(conversation_id, counted, model)
@@ -2093,6 +2125,7 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         documents=sum(_part("tail", text, "tail", counted)[2] for kind, text in rendered if kind == "file"),
         withdrawn=frozenset(withdrawn or ()), recalled=tuple(recalled or ()), model_window=model_window,
         counted=counted, wrap=wrap, budgets=budgets, journal=journal, ladder=ladder, unheld=unheld,
+        tooled=bool(schemas), tools=max((_part("tools", text, "tools", counted)[2] for text in schemas), default=0),
     )
     cost = _turn_cost(counted, wrap, journal.message_overhead)
     sticky = _sticky(budgets, model_window)
@@ -2122,12 +2155,14 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         tail=tuple(read["memory"]) + tuple(sources), turn=asked.turn, causes=read["causes"],
         raw=read["raw"], budgets=budgets, digests=read["digests"], gate=gate, ladder=ladder, cost=cost,
         sticky=sticky, mark=journal.burst_mark, catch_up=(journal.catch_up_reach, journal.catch_up_steps),
-        lineage=read["lineage"], withdrawn=asked.withdrawn))
+        lineage=read["lineage"], withdrawn=asked.withdrawn, tooled=asked.tooled, tools=asked.tools,
+        tool_room=journal.tool_room if asked.tooled else 0, result_cap=journal.tool_result_cap if asked.tooled else 0))
 
 
 @dataclass(frozen=True)
 class _Asked:
-    """What a plan was asked, counted once: the system prompt, the turn and its counts, and how to read the rest."""
+    """What a plan was asked, counted once: the system prompt, the turn and its counts, and how to read the rest;
+    for a tool turn, its schemas' charge."""
 
     system: tuple
     turn: tuple
@@ -2144,6 +2179,8 @@ class _Asked:
     journal: object
     ladder: object
     unheld: bool
+    tooled: bool = False
+    tools: int = 0
 
 
 def _read(state, asked):
@@ -2188,8 +2225,11 @@ def _read(state, asked):
     # The current turn comes first: its images take their room from the Flesh, and raise the rung only when even
     # the whole Flesh cap cannot hold them.
     charge = asked.images * asked.journal.image_tokens
+    journal = asked.journal
     rung, refusal = _rung(asked.budgets, asked.model_window, system, pinned, asked.words, asked.documents, charge,
-                          shares, counted, _CORE_HEADER, _defang)
+                          shares, counted, _CORE_HEADER, _defang, tools=asked.tools,
+                          held=(journal.tool_room, journal.margin, journal.answer_floor,
+                                journal.message_overhead * (len(asked.system) + 2)) if asked.tooled else None)
     if refusal is not None:
         return refusal
     budget = asked.budgets.at(rung)
@@ -2241,16 +2281,23 @@ def _read(state, asked):
 
 
 def _rung(budgets, model_window, system_tokens, pinned, words_tokens, documents, image_charge, shares, counted, header,
-          defang):
+          defang, tools=0, held=None):
     """The rung a turn is planned at, or the refusal of the first layer no rung within the model's window holds.
 
     The sticky rung is the largest within ``home_rung`` and the model's
     window; a larger one only when the system prompt, the Core, the turn's
     words or its documents need it, or its images when even the whole
-    Flesh cap cannot hold their charge. Images no rung within the model's
-    window makes room for are refused ``document``.
+    Flesh cap cannot hold their charge, or a tool turn's schemas when even
+    what the images leave of it cannot hold theirs, or -- ``held``, a tool
+    turn's room for its transcript, the journal's margin and answer floor,
+    and the overhead of the messages that always ride -- when what never
+    gives (the system prompt, the Core, the turn, its documents, its images
+    and its schemas) passes what the rung's context leaves once that room,
+    held to the rung in proportion, and the answer's floor are kept. Images
+    no rung within the model's window makes room for are refused
+    ``document``; schemas, or a room for the transcript, ``tools``.
     """
-    from .composer import _part, over_cap
+    from .composer import _part, at_rung, over_cap, prompt_cap
 
     bound = min(budgets.home, model_window) if model_window else budgets.home
     sticky = [rung for rung in budgets.rungs if rung <= bound]
@@ -2265,8 +2312,16 @@ def _rung(budgets, model_window, system_tokens, pinned, words_tokens, documents,
         if rung < sticky[-1]:
             continue
         last = over_cap(budgets.at(rung), (("system", system_tokens), ("core", core_tokens), ("turn", words_tokens),
-                                           ("document", documents), ("images", image_charge)),
-                        shares.get("document", 0))
+                                           ("document", documents), ("images", image_charge), ("tools", tools)),
+                        shares.get("document", 0), image_charge)
+        if last is None and held is not None:
+            # A tool turn's window is composed holding back the room its transcript takes: what never gives must
+            # fit what the rung leaves past it, or the window would be refused its count once admitted.
+            room, margin, floor, overhead = held
+            fixed = system_tokens + core_tokens + words_tokens + documents + image_charge + tools + overhead
+            cap = prompt_cap(budgets.at(rung), rung - at_rung(room, rung, budgets.home), margin, floor)
+            if fixed > cap:
+                last = ("tools", fixed, max(cap, 0))
         if last is None:
             return rung, None
     layer, tokens, cap = last
@@ -2464,6 +2519,30 @@ def tail_room(model_window=None, *, budgets=None, journal=None):
         return {}
 
 
+def lay_tool_result(name, place, text, *, wrap, count, cap):
+    """A tool's result as a tool turn's transcript lays it, within ``cap`` tokens counted with ``count``:
+    ``(content, shown, whole, least)``, the composer's (``composer.tool_result``) -- a bare header naming the call
+    by its place in its round and its name, the result defanged inside its envelope, cut with a line naming how much
+    of it is shown when it passes the cap, and the text of what laying the call's result costs at the least."""
+    from .composer import tool_result
+
+    return tool_result(name, place, text, wrap=wrap, count=count, cap=cap)
+
+
+def tool_call_line(name, arguments):
+    """The runtime's line naming a call in a flat transcript's assistant message (``composer.tool_call_line``)."""
+    from .composer import tool_call_line as line
+
+    return line(name, arguments)
+
+
+def bare_text(text):
+    """The model's own words as a tool turn's transcript lays them, bare (``composer.model_text``)."""
+    from .composer import model_text
+
+    return model_text(text)
+
+
 def compose_window(plan, *, num_ctx=None):
     """Compose the planned window, sent with ``num_ctx`` -- the context the governor admitted, or the plan's rung
     when none. Never raises.
@@ -2481,7 +2560,11 @@ def compose_window(plan, *, num_ctx=None):
     a descent -- and the window is refused ``count`` when the system prompt,
     the Core, the turn, the region and the digest alone leave less; the answer
     is held to what the context leaves past what the window is accounted,
-    its count with the margin added. The window is compared with the
+    its count with the margin added. A tool turn's window is laid under the
+    count that leaves the journal's ``tool_room`` too, held to the rung it
+    is composed under in proportion (``at_rung``): the answer's room is then
+    the transcript's room and the floor at least, and the window carries
+    what its rounds are held to. The window is compared with the
     conversation's last:
     its stable prefix kept means no epoch; one broken begins an epoch, read
     by why -- the first window, the model, the rung, the system prompt, the
@@ -2515,7 +2598,7 @@ def compose_window(plan, *, num_ctx=None):
 def _compose_window(plan, num_ctx):
     import hashlib
 
-    from .composer import _whole, accounted, prompt_cap
+    from .composer import _whole, accounted, answer_limit, at_rung, layer_cap, prompt_cap
     from .peels import join_labels
 
     if plan.refusal is not None:
@@ -2535,8 +2618,11 @@ def _compose_window(plan, num_ctx):
     else:
         sent, rung = num_ctx, held.rung
     budget = held.budgets.at(rung)
-    journal, refusal = _laid(held, prompt_cap(budget, sent, held.margin, held.floor), budget,
-                             dict(held.digests).get(rung, held.digest), rung, sent)
+    # A tool turn holds back its transcript's room at composition, at the rung it is composed under: the window is
+    # laid under the count that leaves the room and the answer's floor past the margin, the Flesh giving first.
+    room = at_rung(held.tool_room, rung, held.budgets.home) if held.tooled else 0
+    cap = prompt_cap(budget, sent - room, held.margin, held.floor)
+    journal, refusal = _laid(held, cap, budget, dict(held.digests).get(rung, held.digest), rung, sent)
     if refusal is not None:
         return Window(rung=rung, refusal=refusal)
     if rung != held.rung:
@@ -2564,9 +2650,16 @@ def _compose_window(plan, num_ctx):
         chain = hashlib.sha256(bytes.fromhex(prev.chain)
                                + hashlib.sha256(data[prev.stable_end:journal.stable_end]).digest()).hexdigest()
         epoch = prev.epoch
+    burst = (held.sticky, held.mark, held.cost) if held.sticky is not None else None
+    if burst is not None and held.tooled:
+        # A tool turn's record names the Flesh room its schemas and its transcript's room leave -- the Flesh's cap
+        # less the turn's charges, held to what the cap leaves it beside every other part laid -- so the burst
+        # evicts ahead of it, and the next tool turn need not lay a shadow.
+        left = min(layer_cap(budget, "flesh", held.images * held.image_tokens + held.tools),
+                   cap - (journal.tokens - dict(journal.layers)["flesh"]))
+        burst = (replace(held.sticky, flesh=max(min(held.sticky.flesh, left), 0)), held.mark, held.cost)
     record = _JournalRecord(model=held.model, rung=held.rung, pieces=pieces, stable_end=journal.stable_end,
-                            chain=chain, epoch=epoch, causes=held.causes,
-                            burst=(held.sticky, held.mark, held.cost) if held.sticky is not None else None)
+                            chain=chain, epoch=epoch, causes=held.causes, burst=burst)
     if held.conversation:
         with _lock:
             state = _states.get(held.conversation)
@@ -2584,9 +2677,14 @@ def _compose_window(plan, num_ctx):
                       tuple(tuple(part) for part in join_labels(label for label in message.labels if label)))
                      for message in journal.messages)
     # Cold: no prefix in common with the conversation's last window, its first byte changed or there was none.
+    tooled = {}
+    if held.tooled:
+        tooled = dict(tools=held.tools, tool_room=room, result_cap=at_rung(held.result_cap, rung, held.budgets.home),
+                      limit=answer_limit(sent, held.margin, held.floor))
     return Window(messages=messages, rung=held.rung, num_ctx=sent, num_predict=sent - charged, accounted=charged,
                   tokens=journal.tokens, layers=journal.layers, cut=journal.cut, epoch=epoch, motive=motive,
-                  first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None)
+                  first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None,
+                  overhead=held.overhead, margin=held.margin, **tooled)
 
 
 def _laid(held, cap, budget, digest, rung, sent):
@@ -2594,7 +2692,8 @@ def _laid(held, cap, budget, digest, rung, sent):
 
     As planned when it fits. Otherwise the Flesh gives first: its oldest
     turns leave over a shadow (``_shadow_into``), the state untouched, held
-    first to its cap at the rung less what the turn's images take of it,
+    first to its cap at the rung less what the turn's images and a tool
+    turn's schemas take of it,
     then to the room the rest of the window leaves it, and to its cap again
     when laid it passes the sum of its turns -- a header neutralized where
     two of them meet. The fold naming the turns it set aside is laid first
@@ -2618,7 +2717,7 @@ def _laid(held, cap, budget, digest, rung, sent):
                                    tail=sources, turn=held.turn, budget=budget, count=held.count,
                                    overhead=held.overhead, wrap=held.wrap, shares=held.shares, prompt_cap=cap,
                                    tail_room=room, images=held.images, image_tokens=held.image_tokens,
-                                   fold=fold), None
+                                   fold=fold, tools=held.tools), None
         except BudgetError as exc:
             if exc.motive == "flesh" and len(exc.figures) == 2 and turns and exc.figures[0] > exc.figures[1]:
                 # The Flesh as laid can pass the sum of its turns -- a header neutralized across a joint: it gives
@@ -2641,7 +2740,7 @@ def _laid(held, cap, budget, digest, rung, sent):
         return journal, None
 
     costs = [held.cost(turn) for turn in held.raw]
-    room = layer_cap(budget, "flesh", held.images * held.image_tokens)
+    room = layer_cap(budget, "flesh", held.images * held.image_tokens + held.tools)
 
     def shade(target):
         """The Flesh laid within ``target`` over a shadow: ``(turns, fold, the tail's items, the fold's charge)``,

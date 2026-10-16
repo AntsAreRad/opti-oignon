@@ -25,7 +25,9 @@ Author: Leon
 """
 
 import hashlib
+import json
 import logging
+import math
 import queue
 import threading
 import time
@@ -178,6 +180,18 @@ except Exception:
     _onion_plan_window = None
     _onion_compose_window = None
     _onion_tail_room = None
+# What a tool turn's transcript lays as the journal lays it: each result, the
+# line naming a call, and the model's own words. Imported on its own: a
+# librarian without these names lays no tool turn, refused by name, and every
+# other turn as before.
+try:
+    from .memory.librarian import bare_text as _onion_bare_text
+    from .memory.librarian import lay_tool_result as _onion_lay_tool_result
+    from .memory.librarian import tool_call_line as _onion_tool_call_line
+except Exception:
+    _onion_bare_text = None
+    _onion_lay_tool_result = None
+    _onion_tool_call_line = None
 
 
 def _withdrawn_sources() -> tuple[str, ...]:
@@ -188,13 +202,17 @@ def _withdrawn_sources() -> tuple[str, ...]:
     return tuple(source for source in reader() if isinstance(source, str))
 
 
-def _journal_on(conversation_id: str | None) -> bool:
+def _journal_on(conversation_id: str | None, switch: bool | None = None) -> bool:
     """Whether the onion lays this turn's window as its journal: a conversation the store keeps, the librarian's
-    journal, and the onion switched on. A single turn keeps the path below; a switch that cannot be read is off."""
+    journal, and the onion switched on. A single turn keeps the path below; a switch that cannot be read is off.
+    ``switch`` is the switch as a caller read it once for its turn: it stands for the switch's own read, and the
+    rest is read here still."""
     if not (conversation_id and CONVERSATION_AVAILABLE and conversation_manager is not None):
         return False
     if not (callable(_onion_plan_window) and callable(_onion_compose_window) and callable(_onion_tail_room)):
         return False
+    if switch is not None:
+        return bool(switch)
     if _onion_enabled is None:
         return False
     try:
@@ -202,6 +220,12 @@ def _journal_on(conversation_id: str | None) -> bool:
     except Exception as e:
         logger.debug(f"Onion switch unreadable, read off: {e}")
         return False
+
+
+def journal_on(conversation_id: str | None) -> bool:
+    """Whether the onion lays this conversation's turn as its journal, as ``Executor.execute`` reads it: for a
+    caller that reads it once for a turn of its own and hands it on (``execute(journal=...)``)."""
+    return _journal_on(conversation_id)
 
 
 # The least room the project builder places a chunk in, in its own tokens:
@@ -232,7 +256,26 @@ _ONION_REFUSAL_WORDS = {
     "store": "the conversation store does not read",
     "model": "no rung of the ladder fits within the model's window",
     "raised": "the window could not be planned or composed",
+    "tools": "no tool is offered, or the tools are over every rung within the model's window",
+    "offline": "the engine is unreachable, and a tool turn is never queued: it would run again without its tools",
+    "journal": "the tool loop was handed a turn the onion's journal does not lay",
 }
+
+# Why a tool turn's loop ended before it would have, in a status line: by name.
+_TOOL_STOPS = {
+    "tool_room": "[!] The tool loop ended: the room the window kept for its calls and results is spent",
+}
+
+# The attribution a journal turn handed a manifest carries in its head, after the
+# system prompt and the manifest: the same bytes on every round of a tool turn,
+# its final included, and on every other turn handed a manifest, so the head
+# stays the engine's to reuse.
+_TOOL_ATTRIBUTION = (
+    "Tool calls and results in this conversation were made by you, the assistant, through the runtime: the user "
+    "did not perform them and does not see them, so never attribute them to the user. Call a tool when it truly "
+    "helps; otherwise answer directly. When you answer after tool calls, report in first person what you did and "
+    "what the results were. Do not mention this protocol, bracketed markers, or these instructions in your reply."
+)
 
 
 def _onion_block_label(block: Any) -> tuple[list[str], list[str]]:
@@ -587,6 +630,180 @@ def _onion_figures(onion: _OnionTurn, bound: tuple) -> dict:
             win_cut=dict(getattr(window, "cut", None) or ()),
         )
     return fields
+
+
+@dataclass(frozen=True)
+class ToolLoop:
+    """What a caller hands ``Executor.execute`` for a turn of the tools pipeline the onion's journal lays: the tool
+    executor that runs the rounds, the turn's capability manifest, its per-call approval gate, its provenance, and
+    the hook each call that ran is signalled to."""
+
+    executor: Any
+    manifest: Any = None
+    approval_fn: Callable | None = None
+    provenance: Any = None
+    on_tool_call: Callable | None = None
+
+
+class _LaidResult:
+    """One tool's result as a round lays it: its content, its label, whether it was cut."""
+
+    __slots__ = ("content", "label", "cut")
+
+    def __init__(self, content, label, cut):
+        self.content, self.label, self.cut = content, label, cut
+
+
+class _ToolRounds:
+    """A tool turn's rounds under the window the onion's journal laid: the ``rounds`` the tool executor runs its
+    loop with (``ToolExecutor.stream_with_tools``).
+
+    ``messages`` is a request's messages: the window's, byte for byte, then
+    the transcript the rounds appended, never rewritten; an ``instruction``
+    is joined after the last of them, a user's, or follows as a user message
+    of its own. It is the send point: the request's label -- the window's
+    joined with what each appended message holds -- joins the turn's
+    (``sent_label``) and the run's ``context_label``, and the results it
+    holds are counted sent. ``options`` is a request's options: the caller's,
+    the window's context, and the room the answer keeps past the window, the
+    transcript and the instruction the request is sent with (``instructed``),
+    accounted with the journal's margin -- on llama-server as max_tokens too,
+    its prefix kept and its slot named, as the stream's thread set them
+    (``start``). ``room`` is what the transcript may still take with the
+    answer keeping its floor past the line a final is told by (``reserve``),
+    ``cost`` a message's count as the journal counts one -- its calls
+    included, its overhead added. ``lay`` lays a result within a cap (the
+    librarian's ``lay_tool_result``), named by its place in its round, under
+    the label ``tool`` and ``tool:`` the digest of its call's name, the
+    arguments it ran with and its whole result; ``least`` is the text of a
+    call's result at its least, ``line`` the runtime's line naming a call,
+    ``bare`` the model's own words as the transcript lays them. ``append``
+    adds a message: an assistant's under the label of the request that
+    produced it, a result's under what it laid, each cut counted. ``heard``
+    keeps what the engine reported of a request and the room it was sent
+    with -- the last heard is the answer's -- and how many tools a final
+    called. ``say`` says why the loop ended early.
+    """
+
+    def __init__(self, *, window, base, label, count, run_results, say):
+        self.window, self._base, self._base_label, self.count = window, list(base), label, count
+        self._run_results, self._say = run_results, say
+        self._options, self._llama, self.keep_alive = {}, False, "30m"
+        self.transcript, self._labels = [], []
+        self.tokens = self.requests = self.results = self.sent_results = self.cut = self.final_calls = 0
+        self.reserved = 0
+        self.sent_label, self._last_label = ([], []), label
+        self.engine, self.first, self.room_sent, self.stops = {}, None, None, []
+
+    @property
+    def result_cap(self) -> int:
+        return int(self.window.result_cap)
+
+    def start(self, options: dict, keep_alive: str, llama: bool) -> None:
+        """The options every request carries -- the window's context, a llama-server engine's prefix kept and its
+        slot -- and the turn's keep_alive, as the stream's thread read them under the turn's ticket."""
+        self._options = {key: value for key, value in options.items()
+                         if key not in ("temperature", "num_predict", "max_tokens")}
+        self.keep_alive, self._llama = keep_alive, llama
+
+    def reserve(self, line: str) -> None:
+        """Keep the room the line a final is told by takes, past the transcript, in a message of its own at the
+        most: the transcript never takes it, so the final keeps the answer's floor."""
+        self.reserved = self.count(line) + int(self.window.overhead)
+
+    def room(self) -> int:
+        return int(self.window.limit) - int(self.window.tokens) - self.tokens - self.reserved
+
+    def cost(self, message: dict) -> int:
+        cost = self.count(str(message.get("content") or "")) + int(self.window.overhead)
+        if message.get("tool_calls"):
+            cost += self.count(json.dumps(message["tool_calls"], sort_keys=True, ensure_ascii=False, default=str))
+        return cost
+
+    def instructed(self, instruction: str, charged: bool = False) -> int:
+        """What ``instruction`` adds to a request's count, joined after its last message: its words, counted
+        across the joint, unless the window's schema charge holds them (``charged``: the structured decision's);
+        past a message that is not a user's, in a message of its own, its overhead too."""
+        if not instruction:
+            return 0
+        messages = self.transcript or self._base
+        last = messages[-1] if messages else None
+        if last is not None and last.get("role") == "user":
+            content = str(last.get("content") or "")
+            return 0 if charged else self.count(f"{content}\n\n{instruction}") - self.count(content)
+        return int(self.window.overhead) + (0 if charged else self.count(instruction))
+
+    def options(self, base: dict, instruction: str = "", charged: bool = False) -> dict:
+        room = int(self.window.num_ctx) - math.ceil(
+            (int(self.window.tokens) + self.tokens + self.instructed(instruction, charged))
+            * (1 + float(self.window.margin)))
+        options = dict(base)
+        options.update(self._options)
+        options["num_ctx"] = int(self.window.num_ctx)
+        options["num_predict"] = room
+        if self._llama:
+            options["max_tokens"] = room
+        return options
+
+    def messages(self, instruction: str | None = None) -> list[dict]:
+        self.requests += 1
+        # What the engine reports is heard of this request, or of none: never of the one before.
+        self.engine, self.room_sent = {}, None
+        label = _join_labels([self._base_label] + self._labels)
+        self._last_label = label
+        self.sent_label = _join_labels([self.sent_label, label])
+        self.sent_results = self.results
+        self._run_results["context_label"] = _join_labels(
+            [self._run_results.get("context_label") or ([], []), label])
+        out = [dict(message) for message in self._base] + [dict(message) for message in self.transcript]
+        if instruction:
+            if out and out[-1].get("role") == "user":
+                out[-1] = dict(out[-1], content=f"{out[-1].get('content', '')}\n\n{instruction}")
+            else:
+                out.append({"role": "user", "content": instruction})
+        return out
+
+    def least(self, name: str, place: int) -> str:
+        return _onion_lay_tool_result(name, place, "", wrap=_wrap_untrusted, count=self.count, cap=0)[3]
+
+    def line(self, name: str, arguments: Any) -> str:
+        return _onion_tool_call_line(name, arguments)
+
+    def bare(self, text: Any) -> str:
+        return _onion_bare_text(text)
+
+    def lay(self, name: str, place: int, text: Any, cap: int, ran: Any) -> _LaidResult:
+        content, shown, whole, _least = _onion_lay_tool_result(name, place, text, wrap=_wrap_untrusted,
+                                                               count=self.count, cap=cap)
+        digest = hashlib.sha256(json.dumps([name, ran, str(text)], sort_keys=True, ensure_ascii=True,
+                                           default=str).encode("utf-8")).hexdigest()
+        return _LaidResult(content, (["tool"], ["tool:" + digest]), shown < whole)
+
+    def append(self, message: dict, laid: Sequence[_LaidResult] = ()) -> None:
+        if laid:
+            label = _join_labels(item.label for item in laid)
+            self.results += 1
+            self.cut += sum(1 for item in laid if item.cut)
+        elif message.get("role") == "assistant":
+            label = self._last_label
+        else:
+            label = ([], [])
+        self.transcript.append(dict(message))
+        self._labels.append(label)
+        self.tokens += self.cost(message)
+
+    def heard(self, extra: Any, options: dict, final: bool = False) -> None:
+        extra = dict(extra) if isinstance(extra, dict) else {}
+        calls = extra.get("tool_calls")
+        if final and type(calls) is int and calls > 0:
+            self.final_calls = max(self.final_calls, calls)
+        if self.first is None:
+            self.first = extra
+        self.engine, self.room_sent = extra, options.get("num_predict")
+
+    def say(self, reason: str) -> None:
+        self.stops.append(reason)
+        self._say(reason)
 
 
 def _governor_account_load(model: str, num_ctx: int | None) -> None:
@@ -2219,6 +2436,7 @@ class Executor:
         tail: Sequence[dict],
         bound: tuple,
         stop: threading.Event,
+        tools: Sequence[str] | None = None,
     ) -> _OnionTurn:
         """The onion's journal window for a conversation's turn, or why the turn leaves before its stream.
 
@@ -2234,6 +2452,13 @@ class Executor:
         is accounted plus the answer's room fits it. An admission the turn
         will not stream with is given back (``_onion_forgo``) before the turn
         says why it leaves. Never raises: what fails is a refusal by name.
+
+        Its head is the system prompt, then the manifest when the turn is
+        handed one, then the tool attribution when it is handed a manifest or
+        is a tool turn. ``tools`` makes it a tool turn's window: the schemas
+        it may send, which the plan charges; offline, such a turn is refused
+        by name, never queued; and the guard holds its window under the
+        limit its rounds are held to.
         """
         model = routing.model
         decision = None
@@ -2244,7 +2469,8 @@ class Executor:
             except Exception as e:
                 logger.debug(f"Onion window: the store's mirror unread: {e}")
                 return _OnionTurn("refused", motive="store")
-            system = (system_prompt,) + ((capability_block,) if capability_block else ())
+            system = ((system_prompt,) + ((capability_block,) if capability_block else ())
+                      + ((_TOOL_ATTRIBUTION,) if capability_block or tools is not None else ()))
             # The turn's own label goes with it: an image the model sees, or
             # words no one vouched for, reach the request's label and the answer.
             turn = {"role": "user", "content": user_content, "origin": turn_origin,
@@ -2254,6 +2480,7 @@ class Executor:
                 conversation_id, model=model, count=lambda text: self._estimate_tokens(text, model),
                 system=system, turn=turn, wrap=_wrap_untrusted, tail=list(tail), model_window=bound[0],
                 messages=messages, withdrawn=_withdrawn_sources(),
+                **({"tools": tuple(tools)} if tools is not None else {}),
             )
             refusal = getattr(plan, "refusal", None)
             if refusal is not None:
@@ -2262,6 +2489,9 @@ class Executor:
             if stop.is_set():
                 return _OnionTurn("cancelled", plan=plan)
             if NETWORK_MANAGER_AVAILABLE and _network_manager is not None and not _network_manager.is_online:
+                # A queued turn would run again without its tools: a tool turn is refused instead.
+                if tools is not None:
+                    return _OnionTurn("refused", motive="offline", plan=plan)
                 return _OnionTurn("offline", message=self._offline_notice(user_content, routing), plan=plan)
             decision = _governor_admit(model, plan.rung, caller="chat")
             if decision is not None and not decision.admitted:
@@ -2293,6 +2523,15 @@ class Executor:
                 _onion_forgo(decision)
                 return _OnionTurn("refused", motive="count",
                                   figures=(window.accounted, window.num_predict, window.num_ctx), plan=plan,
+                                  decision=decision)
+            # A tool turn's rounds are held to the window's limit: a window over it leaves its answer no floor.
+            limit = getattr(window, "limit", None)
+            if tools is not None and not (type(limit) is int and window.tokens <= limit
+                                          and type(getattr(window, "overhead", None)) is int
+                                          and type(getattr(window, "result_cap", None)) is int):
+                _onion_forgo(decision)
+                return _OnionTurn("refused", motive="count",
+                                  figures=(window.tokens, limit if type(limit) is int else 0), plan=plan,
                                   decision=decision)
             return _OnionTurn(plan=plan, window=window, decision=decision)
         except Exception as e:
@@ -2599,6 +2838,8 @@ class Executor:
         capability_block: str | None = None,
         run: Any = None,
         documents: Sequence[tuple[str, str]] | None = None,
+        journal: bool | None = None,
+        tool_loop: ToolLoop | None = None,
     ) -> Generator[str, None, tuple[str, str]]:
         """
         Execute a complete query with streaming.
@@ -2648,6 +2889,22 @@ class Executor:
                 line naming it; each is saved as a document segment of its
                 own. A document of no name, given as ``document``, comes
                 first.
+            journal: The onion's switch as the caller read it once for its
+                turn (``journal_on``): it stands for the switch's own read,
+                the rest of ``_journal_on`` read here still. None reads it
+                here.
+            tool_loop: A turn of the tools pipeline the onion's journal
+                lays (``ToolLoop``): the window is planned with its schemas'
+                charge and the room its transcript takes held back, admitted
+                once, composed once, and the stream's thread runs the tool
+                executor's rounds under it and its ticket instead of one
+                stream -- never served from nor stored in a cache, refused by
+                name offline, its code blocks not verified after it. The
+                answer is saved with the label of every request its rounds
+                sent, flagged tool when a result was among them, then
+                offered to the capture and the curation; its calls land in
+                the run's results. Handed in without a journal, it is
+                refused by name.
 
         Yields:
             Response chunks in streaming. When think=True, thinking chunks
@@ -2679,8 +2936,10 @@ class Executor:
             self._live_stops.add(stop)
         # Whether the onion lays this turn's window as its journal, read once,
         # once the call's stop is live: every step that differs on its path
-        # reads this.
-        _journal = _journal_on(conversation_id)
+        # reads this. A caller that read the switch for its turn hands it in.
+        _journal = _journal_on(conversation_id, journal)
+        # A tool turn the journal lays: its rounds run under the window.
+        _tooled = bool(_journal and tool_loop is not None)
         self._current_task = routing.task_type
         self._last_context_check = None
         self._last_compression_result = None  # reset per-call
@@ -2716,6 +2975,38 @@ class Executor:
             if on_status:
                 on_status(msg)
             logger.info(msg)
+
+        def _refused_by_name(onion: _OnionTurn, figures: dict):
+            """The onion window's refusal by name: one line -- its motive, its fixed words, its whole numbers -- the
+            step it ends failed, one ledger row; nothing is sent, saved or cached, and no admission is left behind."""
+            status(f"[!] The onion window was refused ({onion.motive})")
+            _run_results["step_error"] = (
+                f"[ERR] The onion window was refused ({onion.motive}): {onion.words} [{onion.counted}]"
+            )
+            yield f"[ERR] The onion window was refused ({onion.motive}): {onion.words} [{onion.counted}]"
+            self._current_task = None
+            _emit_ledger("window_refused", **figures)
+
+        # A tool loop is read before anything else: one handed a turn the
+        # journal does not lay, or offered no tool the journal can lay -- no
+        # registry, no tool, no way to lay a result -- is refused by name,
+        # before any plan or admission.
+        _tool_schemas: tuple = ()
+        if tool_loop is not None:
+            _tool_refusal = None if _journal else "journal"
+            if _tool_refusal is None:
+                try:
+                    _tool_schemas = tuple(tool_loop.executor.round_schemas(tool_loop.manifest, routing.model))
+                except Exception as e:
+                    logger.warning(f"The tool loop's schemas unread: {type(e).__name__}")
+                if not (_tool_schemas and _onion_lay_tool_result is not None and _onion_tool_call_line is not None
+                        and _onion_bare_text is not None
+                        and callable(getattr(tool_loop.executor, "stream_with_tools", None))):
+                    _tool_refusal = "tools"
+            if _tool_refusal is not None:
+                yield from _refused_by_name(_OnionTurn("refused", motive=_tool_refusal),
+                                            {"win_refusal": _tool_refusal, "win_figures": []})
+                return question, _run_results["step_error"]
 
         # Step 0: Context validation (NEW: Phase A4)
         # The attachments' text, as the check and the refinement read it.
@@ -3292,20 +3583,16 @@ class Executor:
                 turn_segments=_onion_segments,
                 turn_label=_join_labels([_user_label, ([], _user_turn_label(user_content, _onion_origin,
                                                                              _onion_segments)[1])]),
-                images=len(images or getattr(routing, "images", None) or []),
-                tail=_onion_tail, bound=_onion_bound, stop=stop,
+                # A tool turn's rounds send no image, as the tools pipeline never
+                # did: its window charges none.
+                images=0 if _tooled else len(images or getattr(routing, "images", None) or []),
+                tail=_onion_tail, bound=_onion_bound, stop=stop, tools=_tool_schemas if _tooled else None,
             )
             _onion_plan, _onion_win, _onion_decision = _onion.plan, _onion.window, _onion.decision
             if _onion.leaves == "refused":
                 # A refusal by name: nothing is sent, saved or cached, and no
                 # admission is left behind; the step it ends is failed.
-                status(f"[!] The onion window was refused ({_onion.motive})")
-                _run_results["step_error"] = (
-                    f"[ERR] The onion window was refused ({_onion.motive}): {_onion.words} [{_onion.counted}]"
-                )
-                yield f"[ERR] The onion window was refused ({_onion.motive}): {_onion.words} [{_onion.counted}]"
-                self._current_task = None
-                _emit_ledger("window_refused", **_onion_figures(_onion, _onion_bound))
+                yield from _refused_by_name(_onion, _onion_figures(_onion, _onion_bound))
                 return refined_question, _run_results["step_error"]
             if _onion.leaves == "cancelled":
                 self._current_task = None
@@ -3553,6 +3840,10 @@ class Executor:
             logger.debug("Ledger token gathering skipped: %s", _ledger_tok_err)
         if _journal:
             _ledger_tokens.update(_onion_figures(_OnionTurn(plan=_onion_plan, window=_onion_win), _onion_bound))
+        if _tooled:
+            # The schemas' charge and the transcript's room the tool turn's window was composed with.
+            _ledger_tokens.update(tool_schema=getattr(_onion_win, "tools", None),
+                                  tool_room=getattr(_onion_win, "tool_room", None))
 
         # Step 3b: Cache lookup (exact + multi-turn)
         # Cache s'applique en single-turn ET multi-turn (conversation hashing)
@@ -3610,8 +3901,11 @@ class Executor:
             except Exception as e:
                 logger.debug("Semantic cache lookup error: %s", e)
 
+        # A tool turn is never served from a cache, nor stored in one: a hit
+        # would skip the calls its user asked for.
         if (
             not no_cache
+            and not _tooled
             and self._cache_enabled
             and RESPONSE_CACHE_AVAILABLE
             and _response_cache is not None
@@ -3838,6 +4132,16 @@ class Executor:
         thread_result = {"error": None, "done": False}
         # What the engine reports on its last chunk, read for the journal.
         _onion_engine: dict = {}
+        # A tool turn's rounds, run by the stream's thread under the window and
+        # its ticket; they stop at the turn's stop, and at its caller's close.
+        _tool_rounds = None
+        _abandoned = threading.Event()
+        if _tooled:
+            _tool_rounds = _ToolRounds(
+                window=_onion_win, base=messages, label=_turn_label,
+                count=lambda text: self._estimate_tokens(text, routing.model), run_results=_run_results,
+                say=lambda reason: chunk_queue.put(("status", reason)),
+            )
 
         def stream_thread() -> None:
             """Run inference in separate thread, push chunks to queue."""
@@ -3938,6 +4242,31 @@ class Executor:
                             _onion_end_load(_gov_decision)
                         chunk_queue.put(("cancel", None))
                         return
+                    # A tool turn: the tool executor's rounds, every request
+                    # under this ticket, in place of one stream. Rounds that
+                    # end before their first request claimed no load.
+                    if _tool_rounds is not None:
+                        _tool_rounds.start(options, ka, getattr(backend, "name", "") == "llama_server")
+                        _rounds = tool_loop.executor.stream_with_tools(
+                            message=refined_question, model=routing.model, approval_fn=tool_loop.approval_fn,
+                            on_tool_call=tool_loop.on_tool_call, manifest=tool_loop.manifest,
+                            should_stop=lambda: stop.is_set() or _abandoned.is_set(),
+                            provenance=tool_loop.provenance, rounds=_tool_rounds,
+                        )
+                        while True:
+                            try:
+                                piece = next(_rounds)
+                            except StopIteration as ended:
+                                thread_result["tools"] = ended.value
+                                break
+                            if piece:
+                                chunk_queue.put(("chunk", piece))
+                        if _tool_rounds.requests == 0:
+                            _onion_end_load(_gov_decision)
+                        # Rounds the turn's stop ended are a cancelled call.
+                        if stop.is_set():
+                            chunk_queue.put(("cancel", None))
+                        return
                     stream_iter = backend.stream(
                         model=routing.model,
                         messages=messages,
@@ -3977,6 +4306,8 @@ class Executor:
 
             except Exception as e:
                 thread_result["error"] = str(e)
+                if _tool_rounds is not None and _tool_rounds.requests == 0:
+                    _onion_end_load(_gov_decision)
             finally:
                 # Release the thread-local admission ticket.
                 _governor_release_ticket()
@@ -4017,6 +4348,9 @@ class Executor:
                         full_response += "\n\n[Timeout reached]"
                         yield "\n\n[Timeout reached]"
                         break
+                    elif event_type == "status":
+                        # Why a tool turn's loop ended early, said by name.
+                        status(_TOOL_STOPS.get(content, "[!] The tool loop ended early"))
 
                 except queue.Empty:
                     if stop.is_set():
@@ -4034,7 +4368,9 @@ class Executor:
                         yield ""
         except GeneratorExit:
             # The caller closed the call. After a stop it leaves exactly one
-            # cancelled record; closed without a stop it leaves none.
+            # cancelled record; closed without a stop it leaves none. A tool
+            # turn's rounds make no further call nor run a further tool.
+            _abandoned.set()
             if stop.is_set() and not _ledger_sent[0]:
                 _emit_ledger("cancelled", **_ledger_tokens)
             raise
@@ -4048,9 +4384,39 @@ class Executor:
         else:
             stream_thread_obj.join(timeout=5.0)
             _thread_error = thread_result["error"]
+        # A tool turn's calls and the corrective passes its loop ran, for its
+        # caller, as the loop returned them.
+        _tool_result = thread_result.get("tools")
+        if _tool_rounds is not None and _tool_result is not None:
+            _run_results["tool_calls"] = list(getattr(_tool_result, "tool_calls", None) or [])
+            _run_results["verification_hints"] = getattr(_tool_result, "verification_hints", 0)
+
+        # A tool turn's answer is the last request its rounds sent: its room
+        # and what the engine reported of it are the answer's. A final that
+        # called a tool is said, and one that called a tool and said nothing
+        # ends the turn in fixed words.
+        _onion_room = int(_onion_win.num_predict) if _journal else 0
+        if _tool_rounds is not None and _ledger_outcome != "cancelled":
+            _onion_engine.update(_tool_rounds.engine)
+            if type(_tool_rounds.room_sent) is int:
+                _onion_room = _tool_rounds.room_sent
+            if _tool_rounds.final_calls and not _thread_error:
+                status(f"[!] The answer called {_tool_rounds.final_calls} tool(s) instead of answering only")
+                if not full_response.strip():
+                    _thread_error = "final_called_a_tool"
 
         # Check for thread errors
-        if _thread_error:
+        if _thread_error and _tool_rounds is not None:
+            # A tool turn that failed ends in fixed words, as a failed stream
+            # does: no exception's text, and no result, ever stands for its
+            # answer.
+            error_msg = ("\n\n[ERR] The answer called a tool instead of answering"
+                         if _thread_error == "final_called_a_tool"
+                         else "\n\n[ERR] The tools pipeline failed before its answer was whole")
+            full_response += error_msg
+            yield error_msg
+            status(error_msg.strip())
+        elif _thread_error:
             error_msg = f"\n\n[ERR] Error: {_thread_error}"
             full_response += error_msg
             yield error_msg
@@ -4069,15 +4435,15 @@ class Executor:
         _onion_capped = bool(
             _journal and not _thread_error and _ledger_outcome == "completed"
             and (_onion_reason == "length" if isinstance(_onion_reason, str)
-                 else type(_onion_generated) is int and _onion_generated >= int(_onion_win.num_predict))
+                 else type(_onion_generated) is int and _onion_generated >= _onion_room)
         )
         if _onion_capped:
             _ledger_outcome = "length"
-            if type(_onion_generated) is int and _onion_generated < int(_onion_win.num_predict):
+            if type(_onion_generated) is int and _onion_generated < _onion_room:
                 status(f"[!] The engine stopped the answer at its limit ({_onion_generated} of "
-                       f"{_onion_win.num_predict} tokens)")
+                       f"{_onion_room} tokens)")
             else:
-                status(f"[!] The answer used all its room ({_onion_win.num_predict} tokens)")
+                status(f"[!] The answer used all its room ({_onion_room} tokens)")
         # An engine that reports no count cannot say the room was left: a
         # journal answer it gave is not cached either, until its head reports.
         _onion_room_unread = bool(_journal and type(_onion_engine.get("eval_count")) is not int)
@@ -4112,6 +4478,16 @@ class Executor:
             except Exception as _perf_err:
                 logger.debug("Performance recording skipped: %s", _perf_err)
 
+        # The answer's flags and label: a tool turn's carry every request its
+        # rounds sent, and the tool flag only when a result was among them.
+        _answer_flags = ["web"] if _web_injected else []
+        _answer_lineage = _turn_label[1]
+        if _tool_rounds is not None:
+            _answer_context = sorted({*_answer_context, *_tool_rounds.sent_label[0]})
+            _answer_lineage = _join_labels([([], _turn_label[1]), _tool_rounds.sent_label])[1]
+            if _tool_rounds.sent_results:
+                _answer_flags = sorted({*_answer_flags, "tool"})
+
         # Step 5: Multi-turn save (NEW: v1.3.0)
         # Save messages to conversation after full reception
         if use_conversation and persist and full_response and not _thread_error and _answered:
@@ -4123,8 +4499,8 @@ class Executor:
                 conversation_manager.add_message(
                     conversation_id, "assistant", full_response,
                     model=routing.model,
-                    origin="assistant+web" if _web_injected else "assistant",
-                    context=_answer_context, lineage=_turn_label[1],
+                    origin="+".join(["assistant", *_answer_flags]),
+                    context=_answer_context, lineage=_answer_lineage,
                 )
                 conversation_manager.update_conversation_metadata(
                     conversation_id,
@@ -4253,6 +4629,8 @@ class Executor:
         except Exception:
             pass
 
+        # A tool turn's code is verified by its own loop, as off the journal:
+        # its answer's code blocks are not run again here.
         if (
             VERIFICATION_AVAILABLE
             and _verification_engine is not None
@@ -4262,6 +4640,7 @@ class Executor:
             and _answered
             and not stop.is_set()
             and not _sandbox_mode_active
+            and not _tooled
         ):
             try:
                 # Check whether the response contains executable blocks
@@ -4290,10 +4669,17 @@ class Executor:
         _ledger_final = dict(_ledger_tokens)
         # The engine's count of the whole prompt it was sent, its cached
         # prefix included on either head: kept for a cold window, the window
-        # the journal laid from its first byte.
+        # the journal laid from its first byte -- for a tool turn, by its
+        # first request, its later ones counting its transcript too.
+        _prompt_heard = _onion_engine if _tool_rounds is None else (_tool_rounds.first or {})
         if (_journal and _onion_win is not None and _onion_win.cold
-                and type(_onion_engine.get("prompt_eval_count")) is int):
-            _ledger_final["engine_prompt_tokens"] = _onion_engine["prompt_eval_count"]
+                and type(_prompt_heard.get("prompt_eval_count")) is int):
+            _ledger_final["engine_prompt_tokens"] = _prompt_heard["prompt_eval_count"]
+        # A tool turn's rounds: the requests they sent, the results they cut,
+        # how many tools its final called.
+        if _tool_rounds is not None:
+            _ledger_final.update(tool_rounds=_tool_rounds.requests, tool_cut=_tool_rounds.cut,
+                                 tool_final_calls=_tool_rounds.final_calls)
         if TOKEN_COUNTER_AVAILABLE and _get_token_counter is not None:
             try:
                 _counter = _get_token_counter()

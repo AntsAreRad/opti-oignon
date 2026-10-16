@@ -38,6 +38,7 @@ reads that parse, each with a copy of its own, and a file that does not
 read is refused as each loader refused it.
 """
 
+import json
 import re
 import threading
 from dataclasses import dataclass, replace
@@ -122,9 +123,10 @@ class BudgetError(ValueError):
     """The window cannot be assembled under this budget without cutting what may not be cut.
 
     ``motive`` says what refused it, from a closed set -- a layer of
-    ``LAYERS``, or ``window``, ``rung``, ``count``, ``config``, ``document``
-    or ``wrap`` -- and ``figures`` its whole numbers, the count then the cap
-    where there are both: what a caller shows of a refusal, never its words.
+    ``LAYERS``, or ``window``, ``rung``, ``count``, ``config``, ``document``,
+    ``tools`` or ``wrap`` -- and ``figures`` its whole numbers, the count then
+    the cap where there are both: what a caller shows of a refusal, never its
+    words.
     """
 
     def __init__(self, message="", *, motive="", figures=()):
@@ -777,9 +779,10 @@ class Journal:
     """A turn's window as messages, the same bytes from one turn to the next up to the current turn's message.
 
     ``tokens`` is what the request costs: each message's count and the
-    overhead of a message, and the charge of the turn's images. ``layers``
-    holds what each layer counts, in ``JOURNAL`` order, then that charge
-    (``images``), and ``cut`` what each kind of part left out.
+    overhead of a message, and the charges of the turn's images and of a
+    tool turn's schemas. ``layers`` holds what each layer counts, in
+    ``JOURNAL`` order, then those charges (``images``, ``tools``), and
+    ``cut`` what each kind of part left out.
     ``pieces`` place every part in ``canonical()``, ``(layer, key, start,
     end)`` in bytes, tiling it, the joint before a part counted with it;
     ``stable_end`` is where the current turn's part begins, the bytes before
@@ -932,7 +935,7 @@ def fold_cost(fold, wrap, count):
 
 
 def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget, count, overhead, wrap, shares,
-                    prompt_cap=None, tail_room=None, images=0, image_tokens=0, fold=None):
+                    prompt_cap=None, tail_room=None, images=0, image_tokens=0, fold=None, tools=0):
     """A turn's window as a journal under ``budget``. Pure: same inputs, same journal, inputs untouched.
 
     The system prompt, and a manifest when given (``system``), open it, one
@@ -954,7 +957,11 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     counted on the turn's message and so on the whole, the counter reading
     no image. The current turn comes first: their charge takes its room
     from the Flesh, held to its cap less the charge, and a charge over the
-    whole Flesh cap is refused ``document``.
+    whole Flesh cap is refused ``document``. ``tools`` is a tool turn's
+    schema charge, in tokens, the schemas it sends beside its messages
+    counted as its caller counts them: counted on the whole as the images
+    are, its room taken from the Flesh after theirs, and refused ``tools``
+    past what they leave of the Flesh cap.
 
     A shadow's ``fold`` -- one memory item naming the turns its eviction set
     aside -- is laid first among the memory and charged to the Flesh room
@@ -984,22 +991,29 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
         raise BudgetError(f"an image's charge {image_tokens!r} is no whole number of tokens", motive="config")
     if not _whole(images):
         raise BudgetError(f"a turn's images {images!r} are no whole number", motive="turn")
+    if not (_whole(tools) and tools < _MOST_TOKENS):
+        raise BudgetError(f"a tool turn's schema charge {tools!r} is no whole number of tokens", motive="tools")
     image_cost = images * image_tokens
     if image_cost > budget.flesh:
         raise BudgetError(f"images are {image_cost} tokens against the Flesh's cap of {budget.flesh}: a turn's "
                           "images take their room from the Flesh, never cut", motive="document",
                           figures=(image_cost, budget.flesh))
-    # The current turn comes first: the Flesh is held to what its images leave of its cap.
-    laid_under = replace(budget, flesh=budget.flesh - image_cost)
+    if tools > budget.flesh - image_cost:
+        raise BudgetError(f"tools are {tools} tokens against the {budget.flesh - image_cost} the images leave of "
+                          f"the Flesh's cap of {budget.flesh}: a tool turn's schemas take their room from the Flesh, "
+                          "never cut", motive="tools", figures=(tools, budget.flesh - image_cost))
+    # The current turn comes first: the Flesh is held to what its images and its schemas leave of its cap.
+    laid_under = replace(budget, flesh=budget.flesh - image_cost - tools)
     # A shadow's fold is charged to the Flesh room the eviction it names freed, outside the memory share.
     fold_item, fold_alone, charge = None, "", 0
     if fold is not None:
         fold_item, fold_alone = _fold_part(fold, wrap)
         charge = _part("tail", fold_alone, "tail", count)[2]
-        if image_cost + charge > budget.flesh:
+        if image_cost + tools + charge > budget.flesh:
+            beside = f"images of {image_cost}" + (f" and tools of {tools}" if tools else "")
             raise BudgetError(f"a shadow's fold of {charge} tokens has no room in the Flesh's cap of {budget.flesh} "
-                              f"beside images of {image_cost}: no turn is set aside without its trace",
-                              motive="flesh", figures=(image_cost + charge, budget.flesh))
+                              f"beside {beside}: no turn is set aside without its trace",
+                              motive="flesh", figures=(image_cost + tools + charge, budget.flesh))
         laid_under = replace(laid_under, flesh=laid_under.flesh - charge, tail=laid_under.tail + charge)
         if tail_room is not None:
             # The fold's room comes from the Flesh: the tail's kinds keep the room they were given.
@@ -1108,27 +1122,112 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     if dropped:
         raise BudgetError(f"{dropped} peels left out after the region was cut to its cap", motive="count")
     messages, laid_pieces, stable_end = laid.serialized()
-    # The turn's images ride on its message: their charge is counted on the whole.
-    tokens = sum(counted("window", message.content) + overhead for message in messages) + image_cost
+    # The turn's images ride on its message and a tool turn's schemas beside its messages: both charges are
+    # counted on the whole.
+    tokens = sum(counted("window", message.content) + overhead for message in messages) + image_cost + tools
     cap = budget.window - budget.reserve if prompt_cap is None else min(budget.window - budget.reserve, prompt_cap)
     _refuse_over("window", tokens, cap, _WHY["window"])
     layers = (("system", system_tokens), ("core", core_tokens), ("peels", sum(peel_tokens)),
               ("receipts", digest_tokens), ("flesh", sum(part[2] for part in flesh_parts)), ("tail", tail_tokens),
-              ("turn", parts.turn[2]), ("images", image_cost))
+              ("turn", parts.turn[2]), ("images", image_cost), ("tools", tools))
     return Journal(messages=messages, tokens=tokens, layers=layers, cut=tuple(sorted(cut.items())),
                    core_root=str(root), stable_end=stable_end, pieces=laid_pieces)
+
+
+# The runtime's own words a tool turn's transcript lays a result under, bare: the call it answers, by its place in
+# its round and its name -- its arguments are the echo's or the line's, never laid twice -- then, when the result was
+# cut, how much of it is shown. The widest count a cut line can name is what its least cost is read at.
+_TOOL_RESULT_HEAD = "[runtime] Result of call {place} of this round ({name}):"
+_TOOL_RESULT_CUT = ("[runtime] The result above was cut: {shown} of its {whole} tokens are shown. Call the tool again "
+                    "for a smaller part if you need the rest.")
+_WIDEST = _MOST_TOKENS - 1
+
+
+def tool_call_text(name, arguments):
+    """A tool call as a transcript names it: its name, then its arguments as JSON, laid bare as every bare part is
+    (``_bare``): the model wrote them."""
+    try:
+        written = json.dumps(arguments if arguments is not None else {}, sort_keys=True, ensure_ascii=False,
+                             default=str)
+    except (TypeError, ValueError):
+        written = str(arguments)
+    return _bare(f"{name} {written}")
+
+
+def tool_call_line(name, arguments):
+    """The runtime's line naming a call in a flat transcript's assistant message, when the model wrote no words of
+    its own with it."""
+    return f"[tool call] {tool_call_text(name, arguments)}"
+
+
+def model_text(text):
+    """The model's own words as a tool turn's transcript lays them -- a decision's text, a verification's reply --
+    bare as every bare part is (``_bare``): an envelope or frame marker defanged, a Core header neutralized."""
+    return _bare(str(text if text is not None else ""))
+
+
+def tool_result(name, place, text, *, wrap, count, cap):
+    """A tool's result as a tool turn's transcript lays it: ``(content, shown, whole, least)``. Pure.
+
+    A bare header in the runtime's words naming the call by its ``place`` in
+    its round, counted from 1, and its ``name`` -- never its arguments, which
+    the echo or the line before it carry once --
+    then the result defanged as a tail item is -- frame and envelope markers,
+    a forged Core header -- inside its own envelope (``wrap``, source
+    ``tool``), never bare and never in a system message. ``whole`` is the
+    result's count with ``count``, defanged. When the content passes ``cap``
+    tokens the result is cut, its last characters first, to the most of it
+    that lays within ``cap`` with a bare line naming how many of its tokens
+    are shown out of the whole (``shown`` of ``whole``), so the model can ask
+    for less. ``least`` is what laying this call's result costs at the least,
+    whatever the result: its header and a cut line naming the widest counts,
+    nothing of it shown, as text a caller counts to hold its room. When not
+    even the header and the cut line fit ``cap``, they are the content
+    still, nothing of the result shown: a call that ran is never left out.
+    An empty result lays its header alone.
+    """
+    head = _TOOL_RESULT_HEAD.format(place=int(place), name=_bare(str(name)))
+    body = _bare(str(text if text is not None else ""))
+    least = f"{head}\n{_TOOL_RESULT_CUT.format(shown=_WIDEST, whole=_WIDEST)}"
+    whole, floor = (count(body) if body else 0), count(least)
+    for value in (whole, floor):
+        if not (_whole(value) and value < _MOST_TOKENS):
+            raise BudgetError(f"the counter gave {value!r} for a tool's result: no whole number of tokens under "
+                              f"{_MOST_TOKENS}", motive="count")
+
+    def laid(kept, shown=None):
+        parts = [head] + ([_wrapped(wrap, kept, "tool")] if kept else [])
+        if shown is not None:
+            parts.append(_TOOL_RESULT_CUT.format(shown=shown, whole=whole))
+        return "\n".join(parts)
+
+    content = laid(body)
+    if count(content) <= cap:
+        return content, whole, whole, least
+    kept = body
+    for _ in range(32):
+        if not kept:
+            break
+        keep = int(len(kept) * max(cap - floor, 0) / max(count(laid(kept, count(kept))) - floor, 1))
+        kept = kept[:min(keep, len(kept) - 1)].rstrip()
+        content = laid(kept, count(kept) if kept else 0)
+        if count(content) <= cap:
+            return content, (count(kept) if kept else 0), whole, least
+    return laid("", 0), 0, whole, least
 
 
 def over_cap(budget, counts, document_share=0.0, image_charge=0):
     """The first of ``counts`` -- ``(layer, tokens)`` -- that ``budget`` does not hold, as ``(layer, tokens, cap)``;
     None when it holds them all. The documents are held to ``document_share`` of the tail's cap; a turn's images
-    (``images``, their charge) to the whole Flesh cap, whose room they take, and the Flesh to what they leave of
-    it, its cap less ``image_charge``."""
+    (``images``, their charge) to the whole Flesh cap, whose room they take, a tool turn's schemas (``tools``) to
+    what the images leave of it, and the Flesh to what they leave of it, its cap less ``image_charge``."""
     for layer, tokens in counts:
         if layer == "document":
             cap = int(document_share * budget.tail)
         elif layer == "images":
             cap = budget.flesh
+        elif layer == "tools":
+            cap = budget.flesh - image_charge
         else:
             cap = getattr(budget, layer) - (image_charge if layer == "flesh" else 0)
         if tokens > cap:
@@ -1156,9 +1255,10 @@ def accounted(tokens, margin):
     return math.ceil(tokens * (1 + margin))
 
 
-def prompt_cap(budget, num_ctx, margin, answer_floor):
-    """The most a window may count sent with ``num_ctx`` so that, accounted with ``margin`` (``accounted``), the
-    answer keeps at least ``answer_floor`` tokens: never past the window less the reserve."""
+def answer_limit(num_ctx, margin, answer_floor):
+    """The most a request sent with ``num_ctx`` may count so that, accounted with ``margin`` (``accounted``), the
+    answer keeps at least ``answer_floor`` tokens: a window, or a tool turn's window and the transcript its rounds
+    append to it."""
     import math
 
     room = num_ctx - answer_floor
@@ -1167,7 +1267,19 @@ def prompt_cap(budget, num_ctx, margin, answer_floor):
     # its own account leaves the floor whole.
     while cap > 0 and accounted(cap, margin) > room:
         cap -= 1
-    return min(budget.window - budget.reserve, cap)
+    return cap
+
+
+def prompt_cap(budget, num_ctx, margin, answer_floor):
+    """The most a window may count sent with ``num_ctx`` so that, accounted with ``margin`` (``accounted``), the
+    answer keeps at least ``answer_floor`` tokens: never past the window less the reserve."""
+    return min(budget.window - budget.reserve, answer_limit(num_ctx, margin, answer_floor))
+
+
+def at_rung(tokens, rung, home):
+    """``tokens`` set at the home rung, held to ``rung`` in proportion to its context, rounded down: what a tool
+    turn holds back, or lets one result take, at a rung other than home."""
+    return tokens * rung // home if home > 0 else 0
 
 
 @dataclass(frozen=True)
@@ -1178,7 +1290,9 @@ class JournalConfig:
     (``image_tokens``). How a plan catches the Flesh up when it finds it over its cap: the turns past the
     newest ``catch_up_reach`` leave bare, then the queue runs at most ``catch_up_steps`` steps with no model, then
     bare spans until it fits. Where a burst aims once a journal laid the conversation: ``burst_mark`` of the
-    Flesh's cap."""
+    Flesh's cap. What a tool turn holds back at composition for the transcript its rounds append, past the
+    answer's floor (``tool_room``), and the most one tool's result laid in it may take (``tool_result_cap``),
+    both at the home rung and held to another rung in proportion to its context (``at_rung``)."""
 
     margin: float
     message_overhead: int
@@ -1188,6 +1302,8 @@ class JournalConfig:
     catch_up_reach: int = 64
     catch_up_steps: int = 32
     burst_mark: float = 0.8
+    tool_room: int = 3072
+    tool_result_cap: int = 1536
 
     def shares(self):
         return dict(self.tail_shares)
@@ -1195,7 +1311,7 @@ class JournalConfig:
 
 _JOURNAL_KEYS = ("margin", "message_overhead", "tail_shares", "answer_floor", "image_tokens")
 # Keys a section may leave out, read at their defaults when it does: a section written before them reads alike.
-_JOURNAL_OPTIONAL = ("catch_up", "burst_mark")
+_JOURNAL_OPTIONAL = ("catch_up", "burst_mark", "tool_room", "tool_result_cap")
 _CATCH_UP_KEYS = ("reach", "max_steps")
 _SHARE_KINDS = TAIL_KINDS + ("document",)
 
@@ -1309,8 +1425,18 @@ def load_journal(path=None):
     mark = section.get("burst_mark", defaults.burst_mark)
     if not (type(mark) in (int, float) and 0.0 < mark <= 1.0):
         errors.append(f"journal.burst_mark: {mark!r} is not a share in (0, 1]")
+    room = section.get("tool_room", defaults.tool_room)
+    if not (_whole(room) and 1 <= room < _MOST_TOKENS):
+        errors.append(f"journal.tool_room: {room!r} is not a whole number of tokens of at least 1")
+    elif _whole(floor) and _whole(raw.get("home_rung")) and room + floor >= raw["home_rung"]:
+        errors.append(f"journal.tool_room: {room} and the answer floor {floor} leave nothing of the home rung "
+                      f"{raw['home_rung']}")
+    result_cap = section.get("tool_result_cap", defaults.tool_result_cap)
+    if not (_whole(result_cap) and 1 <= result_cap < _MOST_TOKENS):
+        errors.append(f"journal.tool_result_cap: {result_cap!r} is not a whole number of tokens of at least 1")
     if errors:
         raise BudgetError("; ".join(errors), motive="config")
     return JournalConfig(margin=float(margin), message_overhead=overhead,
                          tail_shares=tuple((kind, float(shares[kind])) for kind in _SHARE_KINDS), answer_floor=floor,
-                         image_tokens=image, catch_up_reach=reach, catch_up_steps=steps, burst_mark=float(mark))
+                         image_tokens=image, catch_up_reach=reach, catch_up_steps=steps, burst_mark=float(mark),
+                         tool_room=room, tool_result_cap=result_cap)

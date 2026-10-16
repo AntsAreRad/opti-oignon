@@ -35,8 +35,11 @@ epoch began and where the window first changed, whether it was cold or a
 descent, how many of each kind of source it left out, whether the
 engine's slot bound was read, and why it was refused with the whole
 numbers of the refusal; on a cold window, the engine's own count of its
-prompt. Numbers and bare-word labels again: a motive that is not one word
-is dropped. A ledger written before these columns gains them when it is
+prompt. A tool turn the journal laid adds how many requests its rounds
+sent, how many results they cut, the charge of its schemas and the room
+held back for its transcript, and whether its final called a tool.
+Numbers and bare-word labels again: a motive that is not one word is
+dropped. A ledger written before these columns gains them when it is
 opened, in one transaction a failure leaves undone, and every row it
 already holds reads NULL there.
 
@@ -130,7 +133,12 @@ CREATE TABLE IF NOT EXISTS context_ledger_entries (
     win_descent INTEGER,
     win_cut_json TEXT,
     win_slot_unknown INTEGER,
-    engine_prompt_tokens INTEGER
+    engine_prompt_tokens INTEGER,
+    tool_rounds INTEGER,
+    tool_cut INTEGER,
+    tool_schema INTEGER,
+    tool_room INTEGER,
+    tool_final_calls INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_context_ledger_request
     ON context_ledger_entries(request_id);
@@ -138,9 +146,10 @@ CREATE INDEX IF NOT EXISTS idx_context_ledger_ts
     ON context_ledger_entries(ts);
 """
 
-# The journal's figures and the engine's count of a cold prompt arrived
-# after the table: a file written before them gains these columns, in this
-# order, when it is opened (``_gain_window_columns``).
+# The journal's figures, the engine's count of a cold prompt and a tool
+# turn's figures arrived after the table: a file written before them gains
+# these columns, in this order, when it is opened (``_gain_window_columns``),
+# whichever of them it already has.
 _WINDOW_COLUMNS = (
     ("win_plan_rung", "INTEGER"),
     ("win_refusal", "TEXT"),
@@ -158,6 +167,11 @@ _WINDOW_COLUMNS = (
     ("win_cut_json", "TEXT"),
     ("win_slot_unknown", "INTEGER"),
     ("engine_prompt_tokens", "INTEGER"),
+    ("tool_rounds", "INTEGER"),
+    ("tool_cut", "INTEGER"),
+    ("tool_schema", "INTEGER"),
+    ("tool_room", "INTEGER"),
+    ("tool_final_calls", "INTEGER"),
 )
 
 _COLUMNS = (
@@ -491,6 +505,11 @@ class ContextLedger:
         win_cut: Any = None,
         win_slot_unknown: bool | None = None,
         engine_prompt_tokens: int | None = None,
+        tool_rounds: int | None = None,
+        tool_cut: int | None = None,
+        tool_schema: int | None = None,
+        tool_room: int | None = None,
+        tool_final_calls: int | None = None,
         **_ignored: Any,
     ) -> bool:
         """Write one request row. Returns False on any fault, never raises.
@@ -499,7 +518,11 @@ class ContextLedger:
         emitter one release ahead of this schema degrades to a partial row
         instead of a lost one. The ``win_*`` fields are a journal window's
         figures, as the executor reports them; ``win_figures`` a refusal's
-        whole numbers, ``win_cut`` the items left out by kind of source.
+        whole numbers, ``win_cut`` the items left out by kind of source. The
+        ``tool_*`` fields are a tool turn's the journal laid: the requests
+        its rounds sent, the results they cut, the schemas' charge and the
+        transcript's room its window was composed with, and the finals that
+        called a tool.
         """
         if not self._ready:
             return False
@@ -549,6 +572,11 @@ class ContextLedger:
                 "win_cut_json": _sanitize_cut(win_cut),
                 "win_slot_unknown": _as_flag(win_slot_unknown),
                 "engine_prompt_tokens": _as_int(engine_prompt_tokens),
+                "tool_rounds": _as_int(tool_rounds),
+                "tool_cut": _as_int(tool_cut),
+                "tool_schema": _as_int(tool_schema),
+                "tool_room": _as_int(tool_room),
+                "tool_final_calls": _as_int(tool_final_calls),
             }
             with self._lock:
                 with contextlib.closing(self._connect()) as conn:

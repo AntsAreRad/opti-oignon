@@ -1761,6 +1761,60 @@ package costs.
 ### Changed
 
 - With the onion memory on (`enabled: true` in
+  `opti_oignon/config/onion.yaml`; off by default), a turn of the chat's
+  tools pipeline -- the path a plain chat turn takes by default -- in a
+  stored conversation is laid by the onion's journal too: the agentic
+  executor reads the switch once for the turn and hands the chat executor
+  the switch and the tool loop. The window is planned with the model the
+  tools run on and no image, its rounds sending none, the schemas the turn
+  may send charged on the whole and taken from the Flesh; it is composed
+  holding back room for the transcript its rounds append
+  (`journal.tool_room`, 3072 at the home rung, held to another rung in
+  proportion), the Flesh giving first, and a rung that cannot keep that
+  room past the system prompt, the Core, the turn and the schemas is passed
+  for the next, refused `tools` past every rung, before any admission; its
+  head is the system prompt, the manifest and one fixed attribution
+  message, as on every journal turn handed a manifest. The turn is admitted
+  once and composed once, and the tool executor's rounds run under that
+  window and its one ticket: every request is the window byte for byte,
+  then the transcript, never rewritten -- native for a model the native
+  replay is allowed for, flat for any other, one assistant message then one
+  user message of results per round, each call named with the arguments it
+  ran with and the model's own words defanged -- sent with the window's
+  context, the room its answer keeps past the window and the transcript,
+  never under its floor, the turn's keep_alive and the same tools on every
+  request, the final's included (on llama-server, `max_tokens`, the prefix
+  kept and the one slot). Each call is judged by the turn's provenance, as
+  off the journal; each result is laid under a bare header naming its call
+  by its place in the round and its tool, never its arguments again,
+  defanged and inside its own tool envelope, and cut past what it may take
+  (`journal.tool_result_cap`, 1536 at the home rung, or what the room
+  leaves) with a line naming how much is shown; a round the room cannot
+  hold runs none of its calls, and the loop ends by name. A decision that
+  calls nothing is the answer, after the tools as before them; a loop its
+  guards end -- a call repeated, a call that failed for good, the retries
+  or the rounds spent, the room spent -- answers over a final told, in one
+  fixed line counted past its last message, that no further tool can run.
+  The turn is never served from nor stored in a cache, and offline it is
+  refused by name instead of queued. Its answer is saved once, with the
+  label of every request its rounds sent and flagged `assistant+tool` only
+  when a result was among them, then offered to the capture and to the
+  curation, which a tools turn never reached; next turn it is a Flesh turn
+  with its label. A final that fails, or a loop that finds no backend, ends
+  the turn in fixed words and saves nothing; a final that calls a tool is
+  said and counted. The context ledger keeps a tool turn's figures in
+  columns of their own -- the requests its rounds sent, the results cut,
+  the schemas' charge, the transcript's room, the tools its final called
+  -- a ledger written before them gaining them when it is opened; the
+  Ollama and llama-server heads say how many tools an answer called,
+  streamed or whole, and the llama-server head's whole answer says what
+  the server counted and why it stopped, as its stream does. With the
+  onion off, the tools pipeline is unchanged, byte for byte. The tool
+  phase of think and tools, the reasoning and consensus engines and
+  self-correct's correction pass keep the context they build themselves.
+  Documented in `docs/architecture/onion-memory.md`.
+
+- With the onion memory on (`enabled: true` in
   `opti_oignon/config/onion.yaml`; off by default), a turn of a stored
   conversation that the chat executor answers -- the direct, web-search,
   code-verify and think pipelines, the think pass of think and tools,
@@ -1779,12 +1833,11 @@ package costs.
   `journal.answer_floor` tokens at least past its count raised by
   `journal.margin` (on llama-server as `max_tokens`, the prefix kept), and
   composes nothing of its own on that path: no optimizer, no history
-  window, no memory block, no archive retrieval. The tools pipeline and
-  the tool phase of think and tools, the reasoning and consensus engines,
-  the cascading and speculative pipelines and self-correct's correction
-  pass keep the context they build themselves, and a plain chat turn takes
-  the tools pipeline by default, its request arming the tools. A context
-  under the rung is a descent, composed over a shadow; a Flesh over its
+  window, no memory block, no archive retrieval. The tool phase of think
+  and tools, the reasoning and consensus engines, the cascading and
+  speculative pipelines and self-correct's correction pass keep the
+  context they build themselves. A context under the rung is a descent,
+  composed over a shadow; a Flesh over its
   cap is caught up at the plan with no model, or laid over a shadow while
   a burst holds the conversation; each image of the turn is charged
   `journal.image_tokens`, its room taken from the Flesh; a stable prefix

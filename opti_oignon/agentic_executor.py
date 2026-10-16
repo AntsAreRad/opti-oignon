@@ -35,6 +35,7 @@ think+tools dispatch.
 Author: Leon
 """
 
+import copy
 import logging
 import os
 import threading
@@ -54,6 +55,16 @@ except ImportError:
     _default_executor = None
     Executor = None
     RoutingResult = None
+
+# The onion's switch as the chat executor reads it, and the loop a turn of the
+# tools pipeline it lays is handed. Imported on their own: an executor without
+# them lays no tool turn, and the tools pipeline builds its own context.
+try:
+    from .executor import ToolLoop as _ToolLoop
+    from .executor import journal_on as _journal_on
+except ImportError:
+    _ToolLoop = None
+    _journal_on = None
 
 # Conditional import of the ToolExecutor
 try:
@@ -1717,6 +1728,11 @@ class AgenticExecutor:
         caller closes it while the answer is streaming; so does a turn whose
         answer the engine cut after its first words, which ends on its
         error, never completed by another pipeline.
+
+        With the onion on, a turn of a conversation is laid by its journal:
+        the switch is read once for the turn, and the turn runs through the
+        chat executor (``_execute_tools_journal``); off, nothing of this
+        path changes.
         """
         turn = turn if turn is not None else self._legacy_turn()
         if not self.tool_executor_available:
@@ -1729,6 +1745,14 @@ class AgenticExecutor:
 
         # Lot 5: honor the optimize-selected model when provided.
         model = model_override or getattr(routing, 'model', self._default_model)
+
+        # The onion's switch, read once for this turn now its stop is live.
+        if self._journal_switch(conversation_id):
+            yield from self._execute_tools_journal(
+                message, routing, conversation_id, on_status, approval_fn=approval_fn, model=model,
+                manifest=manifest, turn=turn,
+            )
+            return
 
         # Fetch the conversation context when available
         conv_messages = self._get_conversation_context(conversation_id)
@@ -1859,6 +1883,89 @@ class AgenticExecutor:
             yield from self._execute_direct_pipeline(
                 message, routing, conversation_id, on_status, turn=turn,
             )
+
+    def _journal_switch(self, conversation_id: str | None) -> bool:
+        """Whether the onion's journal lays this conversation's turn, as the chat executor reads it; off when the
+        executor has no journal to lay one with, or the switch does not read."""
+        if _journal_on is None or _ToolLoop is None or not conversation_id:
+            return False
+        try:
+            return bool(_journal_on(conversation_id))
+        except Exception as exc:
+            logger.debug(f"Onion switch unreadable, read off: {exc}")
+            return False
+
+    @staticmethod
+    def _routed_to(routing: Any, model: str) -> Any:
+        """The routing with ``model`` as its model, the caller's left as it was."""
+        if getattr(routing, "model", None) == model:
+            return routing
+        routed = copy.copy(routing)
+        routed.model = model
+        return routed
+
+    def _execute_tools_journal(
+        self,
+        message: str,
+        routing: Any,
+        conversation_id: str,
+        on_status: Callable | None,
+        approval_fn: Callable[[str, dict], bool] | None,
+        model: str,
+        manifest,
+        turn: _Turn,
+    ) -> Generator:
+        """The tools pipeline on a turn the onion's journal lays: one ``Executor.execute`` call.
+
+        The chat executor plans the window with the model the tools run on,
+        admits it once, composes it once and runs the tool executor's rounds
+        under it (``tool_loop``), the switch it was read with handed on; the
+        conversation's last rows and the native replay of earlier calls are
+        never read here. It saves the turn and offers it to the capture and
+        the curation; this pipeline saves nothing of its own. Each call is
+        recorded for the next turn as it runs, so a turn stopped, closed or
+        failed keeps the record of the tools that ran. A failure is said in
+        fixed words, never completed by another pipeline.
+        """
+        ran: list = []
+
+        def _on_call(call) -> None:
+            ran.append(call)
+            self._record_tool_calls(conversation_id, [call])
+            turn.emit_tool_call(call)
+
+        loop = _ToolLoop(executor=self._tool_executor, manifest=manifest, approval_fn=approval_fn,
+                         provenance=_tool_provenance(turn), on_tool_call=_on_call)
+        gen = self._executor.execute(
+            question=message,
+            routing=self._routed_to(routing, model),
+            document=None,
+            refine=False,
+            conversation_id=conversation_id,
+            think=False,
+            web_search=False,
+            on_status=on_status,
+            capability_block=_manifest_prompt_block(manifest),
+            run=turn,
+            journal=True,
+            tool_loop=loop,
+        )
+        try:
+            for chunk in gen:
+                if chunk:
+                    yield chunk
+        except GeneratorExit:
+            gen.close()
+            raise
+        except Exception as exc:
+            logger.error(f"Tools pipeline error on the journal: {type(exc).__name__}")
+            yield "\n\n[ERR] The tools pipeline failed"
+        finally:
+            calls = list(ran)
+            self._last_tool_calls = calls
+            turn.results["tool_calls"] = calls
+            hints = turn.results.get("verification_hints", 0)
+            self._last_verification_hints = hints if type(hints) is int else 0
 
     def _execute_think_tools_pipeline(
         self,

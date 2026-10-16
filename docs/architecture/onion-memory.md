@@ -51,21 +51,21 @@ step down until the window is laid again.
 
 With the onion on, a turn of a conversation the store keeps that the chat
 executor answers -- the direct, web-search, code-verify and think
-pipelines, the think pass of think and tools, self-correct's first draft
--- is sent as the onion's journal lays it, and the executor composes
-nothing of that window itself: no optimizer, no history window of its
-own, no working-memory block, no archive retrieval, no context check of
-the turn's documents. It gathers the sources the turn brings -- the
-retrieval, asked for within its share of the tail at the conversation's
-own rung, and the web results -- and hands them raw to the journal. A
-turn of no conversation keeps the path it had, as every turn does with
-the onion off. The other pipelines keep the context they build
-themselves: the tools pipeline and the tool phase of think and tools, the
+pipelines, the tools pipeline, the think pass of think and tools,
+self-correct's first draft -- is sent as the onion's journal lays it, and
+the executor composes nothing of that window itself: no optimizer, no
+history window of its own, no working-memory block, no archive retrieval,
+no context check of the turn's documents. It gathers the sources the turn
+brings -- the retrieval, asked for within its share of the tail at the
+conversation's own rung, and the web results -- and hands them raw to the
+journal. A turn of no conversation keeps the path it had, as every turn
+does with the onion off. A plain chat turn takes the tools pipeline by
+default, its request arming the tools; its rounds run inside the one
+window the journal lays for it (below). The other pipelines keep the
+context they build themselves: the tool phase of think and tools, the
 store's last ten turns; the reasoning and consensus engines, the cascading
 and speculative pipelines and self-correct's correction pass, their own,
-or none. A plain chat turn takes the tools pipeline by default, its request
-arming the tools: the journal lays no window for it, refuses nothing by
-name and leaves no window figures in its row.
+or none.
 
 The journal is a window as messages, the same bytes from one turn to the
 next up to the current turn's message, so an engine that keeps its prompt
@@ -120,6 +120,91 @@ charge takes its room from the Flesh, raises the rung only when even the
 whole Flesh cap cannot hold it, and is refused `document` past every rung
 within the model's window.
 
+### A turn of the tools pipeline
+
+The agentic layer reads the switch once for the turn and hands the chat
+executor the switch and the tool loop. A loop handed in without a journal,
+or offered no tool the journal can lay, is refused by name before any
+plan. The window's head is the system prompt, the manifest and one fixed
+attribution message -- every journal turn handed a manifest carries the
+same three, so the head stays the engine's to reuse. The plan charges the
+schemas the turn may send beside its messages -- the native tool schemas,
+or the structured decision's instruction a model that does not call tools
+natively is sent, the heavier -- on the whole, counted with the turn's
+counter: the charge takes its room from the Flesh after the images', raises
+the rung only when even what they leave of the whole Flesh cap cannot hold
+it, and is refused `tools` past every rung, before any admission. The
+window is composed holding back `journal.tool_room` for the transcript its
+rounds append, past the answer's floor, the Flesh giving first over a
+shadow; at another rung than home, the room and `journal.tool_result_cap`
+are held to the rung in proportion. The plan weighs that room: a rung whose
+context, less the room and the answer's floor, cannot hold what never gives
+-- the system prompt, the Core, the turn and the schemas -- is passed for
+the next, and refused `tools` past every rung, so a window is never refused
+its count once admitted. A tool turn is planned with no image: its rounds
+send none, as the tools pipeline never did. The record a burst reads names
+the Flesh room the schemas and the transcript leave, so the burst evicts
+ahead of it.
+
+The turn is admitted once, composed once, never served from nor stored in
+a cache, and refused by name offline instead of queued: a queued turn would
+run again without its tools. The stream's thread runs the tool executor's
+rounds under the window and its ticket, every request through it: the
+window's messages byte for byte, then the transcript, never rewritten --
+native for a model the native replay is allowed for, each call's echo, with
+the arguments it ran with, then its result in role `tool`; flat for any
+other, per round one assistant message (the model's own decision text, or
+the runtime's line naming its calls with the arguments they ran with) then
+one user message holding the round's results. The model's own words the
+transcript lays -- a decision's text, the reply a verification answers --
+are defanged as every bare part is, and counted as laid. A structured
+decision joins its instruction after the request's last message, or past a
+message that is not a user's in a message of its own, its overhead counted;
+each request's messages, what it is told past them stripped, are a prefix
+of the next's. Every request carries the window's context and the room the
+answer keeps past the window, the transcript as sent and what it is told,
+the turn's keep_alive and the same tools, the final's included; on
+llama-server its room as `max_tokens`, the prefix kept and the one slot.
+Each call is judged by the turn's provenance and the names its manifest
+offers, as off the journal. Each result is laid under a bare header in the
+runtime's words naming its call by its place in the round and its tool --
+its arguments are the echo's or the line's, never laid twice -- defanged
+as a tail item is and inside its own tool envelope, and cut past what it
+may take -- the most one result may take, or what the room leaves it --
+with a line naming how much of it is shown. A round the room cannot hold
+runs none of its calls, and a decision that used all its room is never
+parsed: the loop ends by name, and the final keeps the answer's floor. A
+round whose calls ran with more than they were decided with -- a default
+filled -- and so pass the room is laid in the form the room held before
+they ran: each call as decided, each result at its least.
+
+A decision that calls nothing is the answer, after the tools as before
+them, as the decision wrote it. When a guard ends the loop -- a call
+repeated, a call that failed for good, the retries or the rounds spent, the
+room spent -- the final is asked for, told in one fixed line joined after
+its last message that no further tool can run; the line is counted, the
+transcript keeps its room, and the same tools are offered for the head's
+sake. Every final is told so, and so is the salvage's own request when a
+guard ended the loop before any tool ran. A final that calls a tool anyway
+is said and counted, and so is a salvage's candidate that is the answer;
+one that says nothing else ends the turn in fixed words. The Ollama and
+llama-server heads say how many tools an answer called, streamed or whole,
+and the llama-server head's whole answer says what the server counted and
+why it stopped, so a decision that used all its room is seen on either
+engine.
+
+Each request's label, read where it is sent, is the window's joined with
+what its results carry -- `tool`, and `tool:` the digest of the call's
+name, the arguments it ran with and its whole result. The answer is saved
+once with the union of every request's label, flagged `assistant+tool` only
+when a result was among them, then offered to the capture and the curation;
+next turn it is a Flesh turn like any other, laid bare with its label. A
+final that fails, or a loop that finds no backend, ends the turn in fixed
+words and saves nothing; a stop or a close makes no further call, saves
+nothing and keeps the record of the calls that ran; an early exit gives
+back its admission and the load it claimed. The earlier turns' calls are
+not replayed into the window: their answers are its Flesh.
+
 A Flesh found over its cap at the conversation's own rung -- a
 conversation the process had not seen, one older than the onion, one grown
 past its cap -- is caught up at the plan, with no model, while no burst
@@ -147,9 +232,11 @@ the last.
 A window that cannot be laid is refused by name, never with an
 exception's words: a layer over its cap (`system`, `core`, `receipts`,
 `peels`, `flesh`, `turn`, `window`), the turn's documents or images past
-every rung (`document`), a source of a shape the window does not lay
-(`tail`), a context no rung holds (`rung`), no rung within the model's
-window (`model`), an answer left under its floor (`count`), a
+every rung (`document`), a tool turn's schemas past every rung or no tool
+offered (`tools`), a tool turn offline (`offline`), a tool loop handed a
+turn the journal does not lay (`journal`), a source of a shape the window
+does not lay (`tail`), a context no rung holds (`rung`), no rung within the
+model's window (`model`), an answer left under its floor (`count`), a
 configuration that does not read (`config`), no envelope for the data
 (`wrap`), a store that does not read (`store`), a plan or a composition
 that raised (`raised`). The turn says one line -- the motive, its fixed
@@ -164,7 +251,11 @@ whether it was cold or a descent, what each kind of source left out,
 whether the slot bound was read, and a refusal's motive and whole numbers.
 For a cold window it also keeps the engine's own count of the whole
 prompt, its cached prefix included, read on the stream's last chunk, on
-Ollama and on llama-server alike.
+Ollama and on llama-server alike -- for a tool turn, on its first request,
+the window laid from its first byte. A tool turn's row adds the requests
+its rounds sent, the results they cut, the schemas' charge and the
+transcript's room its window was composed with, and how many tools its
+final called.
 
 ## Invariants the contracts hold
 

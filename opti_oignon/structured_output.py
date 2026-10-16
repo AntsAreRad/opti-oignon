@@ -253,6 +253,22 @@ class StructuredOutputEngine:
             + "\n".join(fields)
         )
 
+    def schema_instruction(self, schema: type[BaseModel], extra: str = "") -> str:
+        """The instruction a structured request carries for ``schema``, as ``generate_structured`` places it in
+        the first system message: JSON only, the schema described, then ``extra``. A caller that places it
+        elsewhere -- after a window it may not rewrite -- sends the same words."""
+        return self._schema_instruction(self._format_schema_description(schema, schema.model_json_schema()), extra)
+
+    @staticmethod
+    def _schema_instruction(schema_description: str, extra: str) -> str:
+        instruction = (
+            "You MUST respond with valid JSON only. No markdown, no explanation, no preamble.\n"
+            f"{schema_description}"
+        )
+        if extra:
+            instruction += f"\n\nAdditional instructions:\n{extra}"
+        return instruction
+
     def _inject_schema_instructions(
         self, messages: list[dict], schema_description: str, extra: str
     ) -> list[dict]:
@@ -260,12 +276,7 @@ class StructuredOutputEngine:
         enhanced = list(messages)
 
         # Trouver ou creer le message systeme
-        system_instruction = (
-            "You MUST respond with valid JSON only. No markdown, no explanation, no preamble.\n"
-            f"{schema_description}"
-        )
-        if extra:
-            system_instruction += f"\n\nAdditional instructions:\n{extra}"
+        system_instruction = self._schema_instruction(schema_description, extra)
 
         if enhanced and enhanced[0].get("role") == "system":
             enhanced[0] = {

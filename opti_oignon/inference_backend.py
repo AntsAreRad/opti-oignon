@@ -626,6 +626,9 @@ class StreamChunk:
     (``done_reason``); an earlier chunk names nothing and carries an empty
     dict. A consumer that counts tokens reads the reported count when there
     is one and knows, from its absence, when it is only counting chunks.
+    A stream offered tools on which the model called some names how many
+    (``tool_calls``): on the chunk that carried them for Ollama, on the
+    last chunk for llama-server.
     """
 
     __slots__ = ("content", "thinking", "done", "model", "extra")
@@ -1329,13 +1332,18 @@ class OllamaBackend(InferenceBackend):
                 latency_ms=latency,
             )
 
+        calls = _normalise_tool_calls(raw_calls)
+        reported = _reported(response)
+        # How many tools the answer called, as the stream's last chunk says it.
+        if calls:
+            reported["tool_calls"] = len(calls)
         return ChatResponse(
             content=content,
             thinking=thinking_text or None,
             model=model,
             total_duration=total_dur,
-            extra=_reported(response),
-            tool_calls=_normalise_tool_calls(raw_calls),
+            extra=reported,
+            tool_calls=calls,
         )
 
     def stream(
@@ -1409,12 +1417,20 @@ class OllamaBackend(InferenceBackend):
                 tel.on_token_generated(rid, count=1)
                 token_count += 1
 
+            # A chunk on which the model called tools says how many: a
+            # request offered tools and asked for an answer can call one.
+            reported = _reported(chunk)
+            raw_calls = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
+            calls = _normalise_tool_calls(raw_calls) if raw_calls else []
+            if calls:
+                reported["tool_calls"] = len(calls)
+
             yield StreamChunk(
                 content=content,
                 thinking=thinking_text,
                 done=bool(done),
                 model=model,
-                extra=_reported(chunk),
+                extra=reported,
             )
 
         # Telemetry end.
@@ -2342,13 +2358,19 @@ class LlamaServerBackend(InferenceBackend):
             message = choices[0].get("message") or {}
             content = str(message.get("content") or "")
             raw_calls = message.get("tool_calls")
+        calls = _normalise_tool_calls(raw_calls)
+        # What the server reports of the answer, in the names the Ollama head gives them, as its stream's last
+        # chunk says it: an answer that used all its room is seen on either engine.
+        reported = {"backend": self.name, **_server_reported(data)}
+        if calls:
+            reported["tool_calls"] = len(calls)
         return ChatResponse(
             content=content,
             model=str(data.get("model", model)) if isinstance(data, dict) else model,
             done=True,
             total_duration=int((time.time() - start) * 1e9),
-            extra={"backend": self.name},
-            tool_calls=_normalise_tool_calls(raw_calls),
+            extra=reported,
+            tool_calls=calls,
         )
 
     def stream(
@@ -2419,6 +2441,9 @@ class LlamaServerBackend(InferenceBackend):
         # it stopped -- rides the last chunk, as the Ollama head's does; an
         # earlier chunk carries none.
         reported: dict[str, Any] = {}
+        # The tool calls the deltas streamed, by their index: the last chunk
+        # says how many the model called.
+        called: set = set()
         with resp:
             for raw_line in resp:
                 line = raw_line.decode("utf-8", errors="replace").strip()
@@ -2443,6 +2468,12 @@ class LlamaServerBackend(InferenceBackend):
                     if choices and isinstance(choices[0], dict)
                     else {}
                 )
+                streamed = delta.get("tool_calls") if isinstance(delta, dict) else None
+                if isinstance(streamed, list):
+                    called.update(call["index"] if isinstance(call.get("index"), int) else place
+                                  for place, call in enumerate(streamed) if isinstance(call, dict))
+                    if called:
+                        reported["tool_calls"] = len(called)
                 content = str(delta.get("content") or "")
                 if content:
                     yield StreamChunk(content=content, model=model)

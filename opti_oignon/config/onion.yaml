@@ -44,8 +44,9 @@ budgets:
 # prefix. Its order is fixed: system, core, peels, receipts, flesh, tail,
 # turn. Its rung is home_rung's table and the turn's need, never named here;
 # a section that is missing a key it needs, names one it does not know or
-# names home_rung is refused by name, every reason at once. catch_up and
-# burst_mark may be left out: they read at their defaults.
+# names home_rung is refused by name, every reason at once. catch_up,
+# burst_mark, tool_room and tool_result_cap may be left out: they read at
+# their defaults.
 journal:
   # The share of a window's count held back for the counter's error: the
   # answer is held to what the context leaves past the count with this share
@@ -86,6 +87,19 @@ journal:
   # the Flesh's cap at its rung, so the Flesh is evicted, with the model,
   # before a window has to lay its overflow over a shadow. A share in (0, 1].
   burst_mark: 0.8
+  # What a turn of the tools pipeline holds back at composition, in tokens
+  # at the home rung, for the transcript its rounds append -- the calls and
+  # their results -- past the answer's floor: the Flesh gives first, over a
+  # shadow. At another rung it is held to that rung's context in
+  # proportion. A whole number of at least 1; with the answer floor, under
+  # home_rung. Provisional, until it is measured.
+  tool_room: 3072
+  # The most one tool's result may take in that transcript, in tokens at
+  # the home rung, its envelope and the line naming it included, and held
+  # to another rung in proportion: a longer result is cut, with a line
+  # saying how much of it is shown. A whole number of at least 1.
+  # Provisional, until it is measured.
+  tool_result_cap: 1536
 
 # The eviction gate, with two faces. A span leaves the flesh only once its
 # peel answers the recall probes drawn from the span, class by class, and
@@ -569,14 +583,15 @@ queue:
 # librarian is never asked. On, the librarian mirrors each saved
 # conversation and evicts through the gate off the interactive path, and
 # each turn of a stored conversation the chat executor answers -- the
-# direct, web-search, code-verify and think pipelines, the think pass of
-# think and tools, self-correct's first draft -- is laid by the journal,
-# with no optimizer and no history window, and refused by name when it
-# cannot be laid. The tools pipeline and the tool phase of think and tools,
-# the reasoning and consensus engines, the cascading and speculative
-# pipelines and self-correct's correction pass keep the context they build
-# themselves, and a plain chat turn takes the tools pipeline by default. A
-# turn of no conversation keeps its window.
+# direct, web-search, code-verify and think pipelines, the tools pipeline,
+# the think pass of think and tools, self-correct's first draft -- is laid
+# by the journal, with no optimizer and no history window, and refused by
+# name when it cannot be laid; a turn of the tools pipeline runs its rounds
+# inside that one window, and offline it is refused, never queued. The
+# tool phase of think and tools, the reasoning and consensus engines, the
+# cascading and speculative pipelines and self-correct's correction pass
+# keep the context they build themselves. A turn of no conversation keeps
+# its window.
 # The maintainer turns it on.
 enabled: false
 
