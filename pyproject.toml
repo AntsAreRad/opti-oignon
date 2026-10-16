@@ -1027,6 +1027,12 @@ fail_under = 0
 # the turn's words last; a persistence path refused. It stays in the tree
 # word for word.
 #
+# A call of the injection bench's trace now carries the trust it was chosen
+# in, built as the run journal builds a real run's. it1 of
+# tests/test_injection_trace_contracts.py pinned a call's keys to its four:
+# it gives way to it1a in the same file, word for word but for a call's
+# shape, which adds its trust. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1402,4 +1408,5 @@ addopts = """
     --deselect=tests/test_pipeline_step_contracts.py::test_ps17_a_fixed_server_error_ends_its_step_failed
     --deselect=tests/test_pipeline_step_contracts.py::test_ps21_a_safety_mechanism_never_ends_a_step_failed
     --deselect=tests/test_drift_ab_contracts.py::test_da8_the_arms_differ_by_the_onion_block_in_front_of_the_turn_and_nothing_else
+    --deselect=tests/test_injection_trace_contracts.py::test_it1_one_line_per_run_the_report_counts_and_the_report_unchanged
 """

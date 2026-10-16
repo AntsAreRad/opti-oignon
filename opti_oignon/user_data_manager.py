@@ -119,6 +119,15 @@ def _get_admin_audit() -> Any:
         return None
 
 
+def _get_run_journal() -> Any:
+    """The run journal: the opt-in record of the user's agent runs."""
+    try:
+        from opti_oignon import run_journal
+        return run_journal
+    except ImportError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # RAG collection namespacing
 # ---------------------------------------------------------------------------
@@ -150,6 +159,13 @@ WIPE_NOT_COVERED = (
     "conversation branches store (single-user)",
     "learned routing store (usage-derived)",
     "plugin-owned data stores (plugin-local DBs)",
+)
+
+# Stores the export leaves out though the wipe covers them. The run journal
+# keeps the user's typed words sealed under the retention they consented to:
+# an export would be a copy outside both. The wipe removes it whole.
+EXPORT_NOT_COVERED = (
+    "run journal (opt-in record of agent runs; wiped with the user's data, never exported)",
 )
 
 # Stores deliberately RETAINED on a per-user wipe. Audit
@@ -240,7 +256,7 @@ class UserDataExporter:
                 # 1.1: adds plugin_reviews and retained_by_design.
                 # 1.2: adds pending_writes.
                 "format_version": "1.2",
-                "not_covered": list(WIPE_NOT_COVERED),
+                "not_covered": [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED],
                 # Audit trails survive a wipe by design.
                 "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
             },
@@ -436,6 +452,7 @@ class UserDataDeleter:
         Returns:
             Dict summarizing what was deleted.
         """
+        journal = self._delete_run_journal()
         results: dict[str, Any] = {
             "user_id": user_id,
             "deleted_at": time.time(),
@@ -447,11 +464,16 @@ class UserDataDeleter:
             "settings": self._delete_settings(user_id),
             "encryption_keys": self._delete_encryption_keys(user_id),
             "pending_writes": self._delete_pending_writes(user_id),
+            "run_journal": journal,
             # Stores the per-user wipe cannot cover today.
             "not_covered": list(WIPE_NOT_COVERED),
             # Audit trails survive the wipe by design.
             "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
         }
+        # A journal the wipe could not remove is said where the answer is
+        # read: the route's response keeps not_covered, not this key.
+        if not journal.get("wiped"):
+            results["not_covered"].append(f"run journal (not wiped: {journal.get('reason')})")
 
         # Log to admin audit
         audit_fn = _get_admin_audit()
@@ -477,6 +499,17 @@ class UserDataDeleter:
         except Exception as e:
             logger.warning("Pending writes delete failed for %s: %s", user_id, e)
             return 0
+
+    def _delete_run_journal(self) -> dict[str, Any]:
+        """Wipe the run journal whole: it is single-user, so every user's wipe removes it."""
+        journal = _get_run_journal()
+        if journal is None:
+            return {"wiped": False, "reason": "unavailable"}
+        try:
+            return journal.wipe()
+        except Exception as e:
+            logger.warning("Run journal wipe failed: %s", e)
+            return {"wiped": False, "reason": type(e).__name__}
 
     def _delete_conversations(self, user_id: str) -> int:
         """Delete user conversations. Returns count of deleted items.

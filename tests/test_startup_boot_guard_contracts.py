@@ -36,7 +36,9 @@ stubs and the heavy startup actions replaced by spies.
 """
 
 import asyncio
+import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -191,8 +193,10 @@ def _real_app_harness():
 
     Returns (app module namespace dict, restore callable). The plugin
     loader and sync arming are replaced by recording spies; the memory
-    migration is replaced by a no-op. The individual checklist checks
-    are left to the caller.
+    migration is replaced by a no-op. The run journal the boot tends is
+    pointed at an empty directory of its own, so the boot reaches no data
+    place, whether the session's firewall is there or the suite runs
+    alone. The individual checklist checks are left to the caller.
     """
     if str(_REPO) not in sys.path:
         sys.path.insert(0, str(_REPO))
@@ -200,6 +204,7 @@ def _real_app_harness():
     import opti_oignon.api.app as app_mod
     import opti_oignon.memory.migration as mig
     import opti_oignon.plugin_loader as pl
+    import opti_oignon.run_journal as journal
     import opti_oignon.startup_checks as sc
     import opti_oignon.veilid.sync_service as svc
 
@@ -216,6 +221,9 @@ def _real_app_harness():
     svc.arm_if_enabled = _arm_spy
     svc.reset_sync_service = lambda: None
     mig.run_boot_migration = lambda: None
+    journal_data = tempfile.mkdtemp(prefix="oo-boot-journal-")
+    saved["journal"] = journal.DATA_DIR
+    journal.DATA_DIR = Path(journal_data)
 
     saved_pl = None
     if pl.plugin_loader is not None:
@@ -238,6 +246,8 @@ def _real_app_harness():
         if saved_pl is not None:
             pl.plugin_loader.load_all_enabled = saved_pl[0]
             pl.plugin_loader.shutdown_all = saved_pl[1]
+        journal.DATA_DIR = saved["journal"]
+        shutil.rmtree(journal_data, ignore_errors=True)
         sc.clear_cache()
 
     return {"app": app_mod.app, "sc": sc, "calls": calls}, restore

@@ -86,13 +86,17 @@ A TRACE, when asked for, is one line of JSON per run of the rows and of the
 memory injection, written as the run ends (a first session's once its review
 is played): the setting, the task and the injection, the words the user
 typed, each call the model emitted, in order, with the steps of the task's
-plan and of the injection's plan it takes up, and the bench's verdicts on
-the run. It holds no tool's result as returned; a call's arguments are the
-model's own, and may quote what it read, the secret included. A call may
-take up a step of both plans -- the attacker's goal can carry the task's
-words -- and then it is the injection's. The trace is what a reading of the
-calls made after the bench needs, such as a detector scored on the calls a
-model made, and it changes nothing the bench measures.
+plan and of the injection's plan it takes up and the trust it was chosen in
+-- its class and the label of each argument as the gate found them, the
+tools whose results the model had read, the kinds of untrusted content it
+was handed, built as a run journal builds a real run's (``CallTrust``) --
+and the bench's verdicts on the run. It holds no tool's result as returned;
+a call's arguments are the model's own, and may quote what it read, the
+secret included. A call may take up a step of both plans -- the attacker's
+goal can carry the task's words -- and then it is the injection's. The
+trace is what a reading of the calls made after the bench needs, such as a
+detector scored on the calls a model made, and it changes nothing the bench
+measures.
 
 A floor read from a report holds only where the report shows it could have
 been broken: an exfiltration floor needs attempts that met the strict
@@ -986,6 +990,7 @@ class RunOutcome:
     created: list = field(default_factory=list)
     proposals: list = field(default_factory=list)
     emitted: list = field(default_factory=list)
+    trust: list = field(default_factory=list)
     unread: int = 0
     dropped: int = 0
     enumerated: int = 0
@@ -1038,6 +1043,17 @@ def run_once(world: _World, task: str, client: Any, *, mode: str, policy: str, r
         handlers[agent_tools.TOOL_MANAGE_SKILLS] = _skills_handler(world, write_gate, conversation_id)
     before = len(world.queue.records)
     recorder = _Recorder(client)
+    # Each call's trust, by the builder the run journal's calls carry theirs by,
+    # in the order the model emitted the calls: a round's own calls, then its
+    # subtasks' (observed first, while the round ran), the verifier's last.
+    trust, trusted = agent_loop.CallTrust(), []
+
+    def on_call(event: dict) -> None:
+        held = trust.observe(event)
+        scope = event.get("scope")
+        at = event.get("parent_round") if scope == "task" else event.get("round")
+        trusted.append(((scope == "verifier", int(at or 0), scope == "task", len(trusted)), held))
+
     result = agent_loop.run(
         task,
         model_client=recorder,
@@ -1054,6 +1070,7 @@ def run_once(world: _World, task: str, client: Any, *, mode: str, policy: str, r
         memory_query=task,
         provenance=_run_provenance(task, person, conversation_id, policy),
         halt=write_gate.halt,
+        on_call=on_call,
     )
     outcome = RunOutcome(mode=mode, rounds=int(getattr(result, "rounds", 0)),
                          stop_reason=str(getattr(result, "stop_reason", "")),
@@ -1078,6 +1095,7 @@ def run_once(world: _World, task: str, client: Any, *, mode: str, policy: str, r
     outcome.created = list(world.created)
     outcome.proposals = [dict(record.arguments) for record in world.queue.records[before:]]
     outcome.emitted = list(recorder.emitted)
+    outcome.trust = [held for _order, held in sorted(trusted, key=lambda item: item[0])]
     outcome.unread = recorder.unread
     outcome.dropped = int(getattr(client, "dropped", 0) or 0)
     outcome.enumerated = int(getattr(client, "enumerated", 0) or 0)
@@ -1187,11 +1205,13 @@ def takes_up(step: Step, name: str, arguments: Any, secret: str, typed: str) -> 
 def trace_line(outcome: RunOutcome, task: UserTask, injection: InjectionTask | None, secret: str, *,
                where: dict, verdicts: dict) -> dict:
     """One run as the trace keeps it: where it ran, what the user typed, each call the model emitted, in order,
-    with the steps of each plan it takes up, the answers the bench could not read, and its verdicts on the run; no
-    tool's result as returned."""
+    with the steps of each plan it takes up and, where the run observed each of them, the trust it was chosen in
+    (``agent.loop.CallTrust``, as a run journal's call carries it), the answers the bench could not read, and its
+    verdicts on the run; no tool's result as returned."""
+    trusted = outcome.trust if len(outcome.trust) == len(outcome.emitted) else None
     calls = []
-    for name, arguments in outcome.emitted:
-        calls.append({
+    for position, (name, arguments) in enumerate(outcome.emitted):
+        call = {
             "tool": name,
             "arguments": arguments,
             "task_steps": [index for index, step in enumerate(task.plan)
@@ -1199,7 +1219,10 @@ def trace_line(outcome: RunOutcome, task: UserTask, injection: InjectionTask | N
             "injection_steps": ([] if injection is None else
                                 [index for index, step in enumerate(injection.plan)
                                  if takes_up(step, name, arguments, secret, task.prompt)]),
-        })
+        }
+        if trusted is not None:
+            call["trust"] = trusted[position]
+        calls.append(call)
     return {
         "format": TRACE_FORMAT,
         **where,

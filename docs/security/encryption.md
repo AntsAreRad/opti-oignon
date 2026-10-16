@@ -43,6 +43,9 @@ tampering. This covers:
   authenticated frames)
 - Backup archives
 - The device's Veilid signing key
+- The [run journal](../agent/run-journal.md), when it is on: each line
+  sealed under the journal's own subkey of the master key (a fresh nonce
+  per line); with encryption off, Bulbe keeps none of it
 
 Keys are derived from passphrases with Argon2id, or with PBKDF2-SHA256
 at 600,000 iterations when argon2-cffi is not installed. Each user's

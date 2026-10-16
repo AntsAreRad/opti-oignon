@@ -27,8 +27,10 @@ GET    /api/security/scheduler           -- Full scheduler status
 POST   /api/security/scheduler/trigger   -- Manually trigger scheduled task
 """
 
+import contextlib
 import logging
 import os
+import stat
 from datetime import datetime, timezone
 from typing import Any
 
@@ -93,11 +95,44 @@ def _load_security_yaml() -> dict[str, Any]:
     return {}
 
 
-def _save_security_yaml(data: dict[str, Any]) -> None:
-    """Write the security.yaml config back to disk."""
+def _replace_text(path: str, text: str) -> None:
+    """Write ``text`` to ``path`` whole: a temp beside it with the file's mode, synced, moved in its place, the
+    directory synced. A reader never meets the file empty or half written: an empty security.yaml read mid-save
+    would say encryption is off."""
+    target = os.path.abspath(path)
+    directory = os.path.dirname(target)
     try:
-        with open(_SECURITY_YAML_PATH, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    temp = os.path.join(directory, f".{os.path.basename(target)}.tmp-{os.urandom(4).hex()}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        try:
+            view = memoryview(text.encode("utf-8"))
+            while view:
+                view = view[os.write(fd, view):]
+            os.fchmod(fd, mode)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+    with contextlib.suppress(OSError):
+        handle = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(handle)
+        finally:
+            os.close(handle)
+
+
+def _save_security_yaml(data: dict[str, Any]) -> None:
+    """Write the security.yaml config back to disk, whole (``_replace_text``)."""
+    try:
+        _replace_text(_SECURITY_YAML_PATH, yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -497,6 +532,14 @@ def update_security_config(update: SecurityConfigUpdate) -> dict:
         return {"updated": False, "detail": "No sections provided"}
 
     _save_security_yaml(current)
+    # Encryption turned on here, as setup turns it on: the run journal seals
+    # now what it kept in plaintext.
+    if "encryption" in changes and (current.get("encryption") or {}).get("enabled") is True:
+        try:
+            from opti_oignon import run_journal
+            run_journal.on_encryption_enabled()
+        except Exception:  # noqa: BLE001 - the journal counts its own failures
+            logger.warning("the run journal could not seal its records after the change", exc_info=True)
 
     logger.info("Security config updated: %s", ", ".join(changes))
 
@@ -614,6 +657,13 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     current = _load_security_yaml()
     current.setdefault("encryption", {})["enabled"] = True
     _save_security_yaml(current)
+    # The run journal seals now what it kept in plaintext while encryption was
+    # off; one it cannot reach seals at its next pass, and setup stands.
+    try:
+        from opti_oignon import run_journal
+        run_journal.on_encryption_enabled()
+    except Exception:  # noqa: BLE001 - the journal counts its own failures
+        logger.warning("the run journal could not seal its records at setup", exc_info=True)
 
     return {
         "setup": True,
@@ -2190,13 +2240,16 @@ async def conversation_wipe_all(purge_disk: bool = False) -> dict[str, Any]:
             detail="Conversation wipe module not available",
         )
     results = mgr.wipe_all(purge_disk=purge_disk)
-    return {
+    answer = {
         "conversations_wiped": len(results),
         "total_buffers": sum(r.buffers_wiped for r in results),
         "total_fields_zeroed": sum(r.fields_zeroed for r in results),
         "purge_disk": purge_disk,
         "disk_rows_deleted": sum(r.rows_deleted for r in results),
     }
+    if purge_disk:
+        answer["run_journal"] = getattr(mgr, "run_journal_wiped", None)
+    return answer
 
 
 @router.post("/conversation-wipe/{conversation_id}")

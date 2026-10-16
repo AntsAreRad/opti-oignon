@@ -23,6 +23,7 @@ obscurity (Kerckhoffs principle).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac as _hmac
 import logging
@@ -364,16 +365,48 @@ def _read_yaml_mode() -> str:
     return MODE_DAILY
 
 
+def _replace_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` whole: a temp beside it with the file's mode, synced, moved in its place, the
+    directory synced. A reader never meets the file empty or half written: an empty security.yaml read mid-save
+    would say Daily, and encryption off."""
+    target = Path(path).absolute()
+    try:
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    temp = target.parent / f".{target.name}.tmp-{os.urandom(4).hex()}"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        try:
+            view = memoryview(text.encode("utf-8"))
+            while view:
+                view = view[os.write(fd, view):]
+            os.fchmod(fd, mode)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+    with contextlib.suppress(OSError):
+        handle = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(handle)
+        finally:
+            os.close(handle)
+
+
 def _write_yaml_mode(mode: str) -> None:
-    """Update security_mode in security.yaml, preserving other keys."""
+    """Update security_mode in security.yaml, preserving other keys, written whole (``_replace_text``)."""
     try:
         cfg: dict[str, Any] = {}
         if _SECURITY_YAML.exists():
             with open(_SECURITY_YAML, encoding="utf-8") as fh:
                 cfg = yaml.safe_load(fh) or {}
         cfg["security_mode"] = mode
-        with open(_SECURITY_YAML, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(cfg, fh, default_flow_style=False, sort_keys=False)
+        _replace_text(_SECURITY_YAML, yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False))
     except Exception as exc:
         logger.error("Failed to write security mode to YAML: %s", exc)
         raise

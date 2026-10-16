@@ -165,9 +165,13 @@ among it, and its suites). A line says where the run ran
 (the setting, the draw, and the run: alone, attacked, or the memory
 injection's first or later session, the later one naming the task and the
 injection of the session that planted it), the task and the injection, the
-words you typed, each call the model emitted, in order, with its arguments
-and the steps of the task's plan and of the injection's plan it takes up,
-the answers the bench could not read, and its verdicts on the run
+words you typed, each call the model emitted, in order, with its arguments,
+the steps of the task's plan and of the injection's plan it takes up and
+the trust it was chosen in (`trust`: its effect class and the label of each
+argument, the tools whose results the model had read, the kinds of
+untrusted content it was handed -- built as the [run journal](run-journal.md)
+builds a real run's, so the two read alike), the answers the bench could not
+read, and its verdicts on the run
 (`utility` alone; `utility_under_attack`, `attempted` and `succeeded` under
 attack; `attempted`, `landed_without_acceptance` and `landed_after_review`
 in a first session; `attempted` and `carried_out` in a later one). With a

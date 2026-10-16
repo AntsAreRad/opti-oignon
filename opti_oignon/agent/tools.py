@@ -1178,6 +1178,19 @@ def build_tool_set(mode: str | None = None, *, include_handlers: bool = True) ->
 # The tools whose writes persist into stores later turns read back.
 PERSISTENT_WRITE_TOOLS = frozenset({TOOL_MANAGE_MEMORY, TOOL_MANAGE_NOTES})
 
+# The tools whose results bring a run something to read -- the web, files, a
+# command's output, a subtask's answer -- and the read actions of the state
+# tools, whose facts, note bodies and skill bodies are read as surely as a
+# page: what a call's trust counts as read (``agent.loop.CallTrust``). The
+# run manager counts its write gate's reads by the same two tables
+# (``api/routes_agent.py``), and a contract holds them equal.
+READING_TOOLS = frozenset({TOOL_WEB_SEARCH, TOOL_VIEW, TOOL_GREP, TOOL_GLOB, TOOL_LS, TOOL_BASH, TOOL_TASK})
+READ_ACTIONS = {
+    TOOL_MANAGE_MEMORY: frozenset({"list", "get"}),
+    TOOL_MANAGE_NOTES: frozenset({"list", "get"}),
+    TOOL_MANAGE_SKILLS: frozenset({"list", "index", "view", "view_ref", "search"}),
+}
+
 
 def bind_write_gate(handlers: dict[str, Callable[[dict[str, Any]], str]], gate: Any) -> dict[str, Callable]:
     """``handlers`` with each persistent-write tool they hold bound to ``gate``, over the registry's stores.

@@ -134,6 +134,39 @@ def _load_encryption_config() -> dict[str, Any]:
     return {}
 
 
+def encryption_toggle(path: str | Path | None = None) -> bool | None:
+    """Whether security.yaml (or ``path``) turns encryption on, read strictly.
+
+    False for a missing file, or a file with no ``encryption`` section or no
+    switch in it; the switch's truth for a mapping; None when the file cannot
+    say -- empty (a save caught between its truncation and its write),
+    unparsable, not a mapping, or a section that is not one. A store that
+    must never write in clear by mistake reads None as an unknown, never as
+    off; ``_load_encryption_config`` keeps its lenient reading for the
+    manager.
+    """
+    import yaml
+    cfg_path = Path(path) if path is not None else Path(__file__).parent / "config" / "security.yaml"
+    try:
+        text = cfg_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return None
+    try:
+        data = yaml.safe_load(text)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    section = data.get("encryption")
+    if section is None:
+        return False
+    if not isinstance(section, dict):
+        return None
+    return bool(section.get("enabled", False))
+
+
 # ============================================================================
 # Crypto backend detection (NO fallback to insecure implementations)
 # ============================================================================

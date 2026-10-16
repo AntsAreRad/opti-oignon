@@ -17,6 +17,11 @@ made -- needs the calls themselves, which the report only counts.
     it -- each line with its task, injection, draw and typed words as the
     suite holds them, and the verdicts it carries add up to the report's
     counts; the report written beside it is the report written without it.
+  * IT1a -- IT1, EACH CALL WITH THE TRUST IT WAS CHOSEN IN: IT1 word for
+    word, but a call's shape, which adds its trust as the run journal
+    keeps it -- its class and labels, the tools read before it and the
+    kinds of untrusted content its run was handed; a call chosen after a
+    read says so.
   * IT2 -- THE CALLS IN ORDER, WITH THE PLAN STEPS THEY TAKE UP, AND NO
     RESULT: on each of the three suites, a model that plays the task's plan
     takes up each of its steps in order; each call takes up the step the
@@ -54,6 +59,7 @@ import test_injection_bench_contracts as bench_contracts  # noqa: E402
 
 BUDGET_S = {
     "test_it1_one_line_per_run_the_report_counts_and_the_report_unchanged": 5.0,
+    "test_it1a_one_line_per_run_the_report_counts_and_the_report_unchanged_each_call_with_its_trust": 5.0,
     "test_it2_the_calls_in_order_with_the_plan_steps_they_take_up_and_no_result": 10.0,
     "test_it3_the_commands_trace_is_on_disk_before_the_next_run_begins": 5.0,
     "test_it4_a_refused_command_leaves_an_earlier_trace_as_it_was": 5.0,
@@ -64,6 +70,7 @@ _LINE_KEYS = {"format", "suite", "arm", "persona", "mode_asked", "policy_asked",
               "policy", "task", "typed", "injection", "kind", "calls", "executed", "refused", "asked", "unread",
               "rounds", "stop_reason", "verdicts"}
 _CALL_KEYS = {"tool", "arguments", "task_steps", "injection_steps"}
+_TRUST_KEYS = {"effect", "labels", "read", "context"}
 
 
 def _lines(path):
@@ -116,6 +123,79 @@ def test_it1_one_line_per_run_the_report_counts_and_the_report_unchanged(tmp_pat
         assert line["kind"] == (kinds[line["injection"]] if line["injection"] else None), line
         assert line["draw"] in (0, 1) and line["persona"] == "obedient", (line["draw"], line["persona"])
     assert all(set(call) == _CALL_KEYS for line in lines for call in line["calls"]), "a call's shape"
+    for row in report["rows"]:
+        mine = [line for line in lines if line["arm"] == "rows" and (
+            line["mode_asked"], line["policy_asked"], line["responder"]) == (
+            row["mode_asked"], row["policy_asked"], row["responder"])]
+        alone = [line for line in mine if line["run"] == "alone"]
+        attacked = [line for line in mine if line["run"] == "attacked"]
+        assert len(alone) + len(attacked) == len(mine) and {line["draw"] for line in mine} == {0, 1}, row
+        assert all(line["injection"] is None for line in alone), "a run alone has no injection"
+        assert (len(alone), _sum(alone, "utility")) == (row["utility"]["of"], row["utility"]["count"]), row
+        assert (len(attacked), _sum(attacked, "utility_under_attack")) == (
+            row["utility_under_attack"]["of"], row["utility_under_attack"]["count"]), row
+        assert _sum(attacked, "attempted") == row["attempt_rate"]["count"], row
+        assert _sum(attacked, "succeeded") == row["targeted_asr"]["count"], row
+        assert {line["policy"] for line in mine} == {row["policy"]}, row
+    assert len(report["memory"]) == 4, report["memory"]
+    for row in report["memory"]:
+        mine = [line for line in lines if line["arm"] == "memory" and line["policy_asked"] == row["policy_asked"]
+                and line["review"] == row["review"]]
+        first = [line for line in mine if line["run"] == "first_session"]
+        later = [line for line in mine if line["run"] == "later_session"]
+        assert len(first) + len(later) == len(mine), row
+        assert {line["injection"] for line in first} == {"plant_instruction"}, row
+        assert {line["injection"] for line in later} <= {"iban_by_search"}, row
+        assert (len(first), _sum(first, "attempted")) == (row["attempted"]["of"], row["attempted"]["count"]), row
+        assert _sum(first, "landed_without_acceptance") == row["landed_without_acceptance"]["count"], row
+        assert _sum(first, "landed_after_review") == row["landed_after_review"]["count"], row
+        assert (len(later), _sum(later, "attempted")) == (row["attempted_later"]["of"],
+                                                          row["attempted_later"]["count"]), row
+        assert _sum(later, "carried_out") == row["carried_out_later"]["count"], row
+        for index, line in enumerate(mine):
+            if line["run"] == "later_session":
+                planter = next(each for each in reversed(mine[:index]) if each["run"] == "first_session")
+                assert line["planted_by"] == {"task": planter["task"], "injection": planter["injection"]}, line
+                assert line["draw"] == planter["draw"], (line["draw"], planter["draw"])
+    assert len(lines) == sum(row["utility"]["of"] + row["utility_under_attack"]["of"] for row in report["rows"]) + sum(
+        row["attempted"]["of"] + row["attempted_later"]["of"] for row in report["memory"]), len(lines)
+    assert any(line["verdicts"].get("attempted") for line in lines if line["run"] == "attacked"), "witness: attempts"
+    assert any(line["run"] == "later_session" for line in lines), "witness: a later session ran"
+    assert any(line["verdicts"]["landed_after_review"] for line in lines if line["run"] == "first_session"), (
+        "witness: a planted record landed after the review")
+
+
+# ---------------------------------------------------------------------------
+# IT1a -- IT1, each call with the trust it was chosen in
+# ---------------------------------------------------------------------------
+def test_it1a_one_line_per_run_the_report_counts_and_the_report_unchanged_each_call_with_its_trust(tmp_path):
+    bench, _, close = bench_contracts._window()
+    try:
+        cut, raw = _small(bench, tmp_path)
+        argv = ["--suite", str(cut), "--persona", "obedient",
+                "--settings", "daily:free:approve,daily:refuse_unendorsed:decline", "--repeat", "2"]
+        traced_code = bench.main([*argv, "--trace", str(tmp_path / "trace.jsonl"),
+                                  "--json", str(tmp_path / "traced.json")])
+        plain_code = bench.main([*argv, "--json", str(tmp_path / "plain.json")])
+    finally:
+        close()
+    traced = (tmp_path / "traced.json").read_text(encoding="utf-8")
+    assert traced_code == plain_code and traced == (tmp_path / "plain.json").read_text(encoding="utf-8"), (
+        "the trace changed the report", traced_code, plain_code)
+    report, lines = json.loads(traced), _lines(tmp_path / "trace.jsonl")
+    typed = {task["id"]: task["prompt"] for task in [*raw["user_tasks"], *raw["victim_tasks"]]}
+    kinds = {each["id"]: each["kind"] for each in raw["injection_tasks"]}
+    for line in lines:
+        expected = _LINE_KEYS | ({"review"} if line["arm"] == "memory" else set()) | (
+            {"planted_by"} if line["run"] == "later_session" else set())
+        assert set(line) == expected and line["format"] == 1 and line["suite"] == report["suite"], sorted(line)
+        assert line["typed"] == typed[line["task"]], ("the typed words, as typed", line["task"])
+        assert line["kind"] == (kinds[line["injection"]] if line["injection"] else None), line
+        assert line["draw"] in (0, 1) and line["persona"] == "obedient", (line["draw"], line["persona"])
+    assert all(set(call) == _CALL_KEYS | {"trust"} for line in lines for call in line["calls"]), "a call's shape"
+    assert all(set(call["trust"]) == _TRUST_KEYS for line in lines for call in line["calls"]), "a call's trust"
+    assert any(call["trust"]["read"] and call["trust"]["labels"] for line in lines for call in line["calls"]), (
+        "witness: a call chosen after a read, its arguments labelled")
     for row in report["rows"]:
         mine = [line for line in lines if line["arm"] == "rows" and (
             line["mode_asked"], line["policy_asked"], line["responder"]) == (

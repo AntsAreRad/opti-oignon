@@ -176,6 +176,9 @@ class AgentRunManager:
         # The active run's write gate's stop: the reason the run ends with
         # once the gate refused a write past its bound; None without a gate.
         self._halt: Callable[[], str | None] | None = None
+        # The active run's record in the run journal (opti_oignon.run_journal);
+        # None when the journal is off or the run's task is not vouched typed.
+        self._journal: Any = None
 
     # status / control
 
@@ -355,6 +358,7 @@ class AgentRunManager:
         consult: bool = True,
         max_rounds: int | None = None,
         turn_origin: str = "legacy",
+        model: str = "",
     ) -> dict[str, Any]:
         """Assemble and launch a run; refuse if one is already running.
 
@@ -364,7 +368,10 @@ class AgentRunManager:
         the user's own typed words says typed, and the task, whole, then
         endorses the run's memory and notes writes and the arguments of its
         tool calls. Any other caller leaves it legacy: every such write is
-        proposed, and no argument of the run is endorsed.
+        proposed, and no argument of the run is endorsed. A typed run is
+        recorded in the run journal, under ``model``, while the journal is on
+        (``_open_journal``); one identifier names the run there and its
+        proposals in the review queue.
         """
         if not _AGENT_OK:
             return {"started": False, "reason": "agent_unavailable"}
@@ -376,6 +383,8 @@ class AgentRunManager:
             self._rounds = 0
             self._stop_reason = ""
             self._running = True
+            self._journal = None
+        run_id = uuid.uuid4().hex[:12]
         try:
             tool_set = agent_tools.build_tool_set(mode)
             handlers = dict(tool_set.tool_handlers)
@@ -418,7 +427,7 @@ class AgentRunManager:
                 task=task,
                 turn_origin=turn_origin,
                 conversation_id=conversation_id,
-                run_id=uuid.uuid4().hex[:12],
+                run_id=run_id,
                 user_id=user_id,
                 skills_factory=skills_factory,
             )
@@ -468,22 +477,37 @@ class AgentRunManager:
             kwargs["halt"] = halt
         if max_rounds is not None:
             kwargs["max_rounds"] = max_rounds
+        journal = _open_journal(task, turn_origin, run_id=run_id, conversation_id=conversation_id, model=model,
+                                mode=mode, tool_set=tool_set, verify=verify, consult=consult,
+                                include_memory=include_memory, max_rounds=max_rounds)
+        if journal is not None:
+            kwargs["on_call"] = journal.on_call
+        with self._lock:
+            self._journal = journal
         self._thread = threading.Thread(target=self._run, kwargs=kwargs, daemon=True)
         self._thread.start()
         return {"started": True}
 
     def _run(self, **kwargs: Any) -> None:
+        with self._lock:
+            journal = self._journal
         try:
             result = agent_loop.run(
                 on_event=self._on_event,
                 should_continue=lambda: not self._cancel.is_set(),
                 **kwargs,
             )
+            # The run is written as the loop returns it, before anything the
+            # run's end triggers; a journal never raises into the run.
+            if journal is not None:
+                journal.finish(result)
             with self._lock:
                 self._stop_reason = getattr(result, "stop_reason", "")
                 self._rounds = getattr(result, "rounds", self._rounds)
             self._teacher_post_run(result)
         except BaseException:  # the loop is built not to raise; be defensive anyway
+            if journal is not None:
+                journal.finish(None)
             with self._lock:
                 self._stop_reason = "error"
             logger.exception("agent run thread crashed")
@@ -491,6 +515,7 @@ class AgentRunManager:
             self._detach_owned_sandbox()
             with self._lock:
                 self._running = False
+                self._journal = None
 
     def _detach_owned_sandbox(self) -> None:
         """Release the conversation-bound session, never destroying it.
@@ -771,6 +796,52 @@ def _run_provenance(task: str, turn_origin: str, approval_fn: Any, conversation_
         return None
 
 
+def _open_journal(task: str, turn_origin: str, *, run_id: str, conversation_id: str, model: str, mode: str,
+                  tool_set: Any, verify: bool, consult: bool, include_memory: bool, max_rounds: int | None) -> Any:
+    """The run's record in the run journal, or None: nothing is created or written for a run not recorded.
+
+    A day past the journal's retention goes first, at most once an hour,
+    whether the journal is on or off. Only a run whose caller vouches its
+    task typed is recorded, and only while the journal is switched on
+    (``config/run_journal.yaml``); its calls carry the trust the loop's
+    builder answers over this route's reading tables. Never raises: a run
+    the journal cannot open runs unrecorded.
+    """
+    try:
+        from opti_oignon import run_journal
+    except Exception:  # noqa: BLE001 - without the journal there is nothing to record into
+        return None
+    try:
+        run_journal.prune_if_due()
+        if turn_origin != "typed" or not run_journal.enabled():
+            return None
+        return run_journal.open_run(
+            run_id=run_id,
+            typed=task,
+            trust=agent_loop.CallTrust((_READING_TOOLS, _READ_ACTIONS)),
+            conversation_id=conversation_id,
+            model=model,
+            mode=mode,
+            network_policy=_network_policy(mode),
+            run_settings={"verify": bool(verify), "consult": bool(consult), "include_memory": bool(include_memory),
+                          "max_rounds": max_rounds if max_rounds is not None else agent_loop.MAX_AGENT_ROUNDS},
+            offered=list(tool_set.names),
+        )
+    except Exception:  # noqa: BLE001 - the run goes on unrecorded, and says so
+        logger.warning("the run journal could not open this run; it runs unrecorded", exc_info=True)
+        return None
+
+
+def _network_policy(mode: str) -> str | None:
+    """The network policy a run in ``mode`` starts under, as the gate reads it; None when the gate is not loaded."""
+    try:
+        from opti_oignon import provenance
+
+        return provenance.network_policy(mode)
+    except Exception:  # noqa: BLE001 - the record says it could not be read
+        return None
+
+
 def _proposal_cap_reason() -> str:
     """The stop reason of a run that wrote past its gate's bound; "" when the gate is not loaded."""
     try:
@@ -986,6 +1057,7 @@ try:
             verify=request.verify,
             consult=request.consult,
             turn_origin="typed",
+            model=request.model,
         )
         if not result.get("started"):
             raise HTTPException(status_code=409, detail=result.get("reason", "run_not_started"))

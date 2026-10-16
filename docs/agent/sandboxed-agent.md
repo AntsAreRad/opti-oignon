@@ -166,6 +166,7 @@ The running agent is controlled over `/api/agent/*`:
   may name the stricter Bulbe, never a looser mode than the machine's: leaving
   Bulbe for Daily takes the degradation ceremony, not a request field. A mode
   that does not exist, or a machine mode that cannot be read, runs in Bulbe.
+  While the [run journal](run-journal.md) is on, the run is recorded there.
 - `GET /api/agent/status` returns `{running, rounds, stop_reason}`.
 - `POST /api/agent/cancel` cancels the run. The cancel is read at the start
   of each round, before each call of a round, again at each call's sink once

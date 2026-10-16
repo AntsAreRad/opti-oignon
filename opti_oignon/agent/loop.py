@@ -300,6 +300,130 @@ def _emit(on_event: Callable[[AgentEvent], None] | None, kind: str, rnd: int, da
         logger.debug("on_event callback raised; ignoring", exc_info=True)
 
 
+# The run's calls, observed: ``run(on_call=...)``. Each call the model emitted
+# reaches the observer once, in order, as an event: ``scope`` ("run", "task"
+# for a subtask, "verifier"), ``subrun`` (the subtask's number in its run,
+# from 1, in the order they start), ``parent_round`` (the round of the run
+# that started the subtask), ``round`` (the call's own round in its scope),
+# ``call`` (the resolved ``ToolCall``), ``result`` (its ``DispatchResult``,
+# None for a call never dispatched: a round the repeat watch stopped before
+# it ran, or one the dispatch failed) and ``context`` (the kinds of untrusted
+# content in what the model was handed that round). Unbound, nothing of it
+# is computed.
+
+
+def _turn_context(messages: list[dict[str, Any]]) -> list[str]:
+    """The kinds of untrusted content in what the model is handed this turn, its own words aside."""
+    kinds: set[str] = set()
+    for message in messages:
+        if message.get("role") != "assistant":
+            kinds |= untrusted_context.sources_present(message.get("content"))
+    return sorted(kinds)
+
+
+def _resolved(response: Any) -> list[dispatch.ToolCall]:
+    """The calls a response resolves to, as the dispatch resolves them; none when it cannot be read."""
+    try:
+        return dispatch.resolve_tool_calls(response)[0]
+    except Exception:
+        return []
+
+
+def _observe(
+    on_call: Callable[[dict[str, Any]], None] | None,
+    scope: str,
+    rnd: int,
+    calls: list[dispatch.ToolCall],
+    results: list[dispatch.DispatchResult] | None,
+    context: list[str] | None,
+    *,
+    subrun: int | None = None,
+    parent_round: int | None = None,
+) -> None:
+    """Hand ``on_call`` each call of a round, in order, with its result (None when ``results`` has none for it)."""
+    if on_call is None:
+        return
+    for index, call in enumerate(calls):
+        result = results[index] if results is not None and index < len(results) else None
+        try:
+            on_call({"scope": scope, "subrun": subrun, "parent_round": parent_round, "round": rnd, "call": call,
+                     "result": result, "context": context})
+        except Exception:  # an observer must never break the loop
+            logger.debug("on_call callback raised; ignoring", exc_info=True)
+
+
+class CallTrust:
+    """The trust each call of a run was chosen in, read from the run's ``on_call`` events.
+
+    One builder for every reader of a run's calls -- the run journal and the
+    injection bench's trace -- so a call carries the same trust in both.
+    ``observe`` takes one event and answers its call's trust: ``effect`` and
+    ``labels``, the class and the label of each argument as the gate found
+    them (None for a call that never reached it); ``read``, each tool whose
+    result the model had read when it chose the call, once, in the order
+    first read -- the reading calls that ran in the earlier rounds of its
+    own run, after, for a subtask, those its parent had read when it wrote
+    the subtask, and, for the verifier, all its run read; and ``context``,
+    the kinds of untrusted content the model was handed that round. A call
+    reads when it ran and its tool is a reading tool, or a state tool asked
+    one of its read actions: ``reads``, the two tables the run manager counts
+    its write gate's reads by (``agent.tools.READING_TOOLS`` and
+    ``READ_ACTIONS`` by default). Events come in the loop's order: a
+    subtask's calls before the call that started it.
+    """
+
+    def __init__(self, reads: tuple[Any, Any] | None = None) -> None:
+        tools, actions = reads if reads is not None else (agent_tools.READING_TOOLS, agent_tools.READ_ACTIONS)
+        self._tools = frozenset(str(name) for name in tools)
+        self._actions = {str(name): frozenset(found) for name, found in dict(actions).items()}
+        # scope -> tool -> the round it was first read in, in the order first read.
+        self._first: dict[Any, dict[str, int]] = {}
+
+    def observe(self, event: dict[str, Any]) -> dict[str, Any]:
+        """The trust of the event's call; the call, once it ran, counts as read for the rounds after it."""
+        scope = event.get("scope")
+        rnd = int(event.get("round") or 0)
+        if scope == "task":
+            own: Any = ("task", event.get("subrun"))
+            seen = self._before("run", int(event.get("parent_round") or 0)) + self._before(own, rnd)
+        elif scope == "verifier":
+            own = "verifier"
+            seen = self._before("run", None) + self._before(own, rnd)
+        else:
+            own = "run"
+            seen = self._before(own, rnd)
+        result = event.get("result")
+        provenance = getattr(result, "provenance", None) or {}
+        labels = provenance.get("labels")
+        trust = {
+            "effect": provenance.get("effect"),
+            "labels": dict(labels) if isinstance(labels, dict) else None,
+            "read": list(dict.fromkeys(seen)),
+            "context": sorted({str(kind) for kind in event.get("context") or ()}),
+        }
+        name = self._read_by(event.get("call"), result)
+        if name is not None:
+            self._first.setdefault(own, {}).setdefault(name, rnd)
+        return trust
+
+    def _before(self, scope: Any, rnd: int | None) -> list[str]:
+        first = self._first.get(scope, {})
+        return [name for name, at in first.items() if rnd is None or at < rnd]
+
+    def _read_by(self, call: Any, result: Any) -> str | None:
+        """The tool a call read, or None: one that did not run returned nothing to read."""
+        if result is None or not getattr(result, "executed", False):
+            return None
+        name = str(getattr(call, "name", "") or "")
+        if name in self._tools:
+            return name
+        actions = self._actions.get(name)
+        arguments = getattr(call, "arguments", None) or {}
+        if actions and str(arguments.get("action", "")).strip().lower() in actions:
+            return name
+        return None
+
+
 def _invoke_model(model_client: Any, messages: list[dict], tools: Any):
     """Call the injected model client's streaming entry point.
 
@@ -851,6 +975,9 @@ def _run_task_child(
     spill_counter: dict[str, int] | None = None,
     provenance: Any = None,
     halt: Callable[[], str | None] | None = None,
+    on_call: Callable[[dict[str, Any]], None] | None = None,
+    subrun: int | None = None,
+    parent_round: int | None = None,
 ) -> tuple[str, int]:
     """Run one bounded child task; returns (final_text, rounds_used).
 
@@ -867,7 +994,8 @@ def _run_task_child(
     before each of the child's rounds, before each of its calls and at each
     call's sink, so a stopped run's child asks and runs nothing more; a
     child stopped before its first round uses none (``rounds_used`` 0).
-    Never raises.
+    Its calls reach ``on_call`` as the run's subtask ``subrun``, started in
+    the run's round ``parent_round``. Never raises.
     """
     label = description or "subtask"
 
@@ -892,6 +1020,7 @@ def _run_task_child(
             break
         rounds += 1
         child_emit("round_start", rounds, {})
+        context = _turn_context(msgs) if on_call is not None else None
         try:
             content, native_calls = _consume_stream(_invoke_model(model_client, msgs, native))
         except Exception as exc:
@@ -900,9 +1029,10 @@ def _run_task_child(
             break
         msgs.append({"role": "assistant", "content": content})
         child_emit("model_output", rounds, {"content": content})
+        response = {"message": {"content": content, "tool_calls": native_calls}}
         try:
             results, _path = dispatch.dispatch_round(
-                {"message": {"content": content, "tool_calls": native_calls}},
+                response,
                 mode=mode,
                 conversation_id=conversation_id,
                 sandbox=sandbox,
@@ -913,6 +1043,9 @@ def _run_task_child(
             )
         except Exception:  # dispatch is built not to raise; defensive
             results = []
+        if on_call is not None:
+            _observe(on_call, "task", rounds, _resolved(response), results or None, context, subrun=subrun,
+                     parent_round=parent_round)
         if not results:
             final_text = content
             break
@@ -959,6 +1092,8 @@ def _dispatch_with_tasks(
     spill_counter: dict[str, int] | None = None,
     provenance: Any = None,
     halt: Callable[[], str | None] | None = None,
+    on_call: Callable[[dict[str, Any]], None] | None = None,
+    subruns: dict[str, int] | None = None,
 ) -> tuple[list[dispatch.DispatchResult], int]:
     """Dispatch a round that contains task calls; returns (results, new_cap).
 
@@ -970,7 +1105,8 @@ def _dispatch_with_tasks(
     parent budget through the returned cap. A task call carries its labels
     like any other, and its child is judged by the run's ``provenance``.
     Once ``halt`` names a reason, the round's later calls, a task's among
-    them, are not run.
+    them, are not run. Each child started takes the next number of the
+    run's ``subruns`` counter, which its calls reach ``on_call`` under.
     """
     resolved_mode = _resolved_mode(mode)
     results: list[dispatch.DispatchResult] = []
@@ -1043,6 +1179,10 @@ def _dispatch_with_tasks(
             )
             continue
         description = str(args.get("description") or "").strip()
+        subrun = None
+        if subruns is not None:
+            subruns["k"] += 1
+            subrun = subruns["k"]
         final_text, used = _run_task_child(
             description,
             prompt,
@@ -1058,6 +1198,7 @@ def _dispatch_with_tasks(
             spill_counter=spill_counter,
             provenance=provenance,
             **({"halt": halt} if halt is not None else {}),
+            **({"on_call": on_call, "subrun": subrun, "parent_round": rounds} if on_call is not None else {}),
         )
         cap -= used  # the debit: child rounds come out of the parent budget
         if not used:
@@ -1118,6 +1259,7 @@ def _run_verifier(
     on_event: Callable[[AgentEvent], None] | None = None,
     provenance: Any = None,
     halt: Callable[[], str | None] | None = None,
+    on_call: Callable[[dict[str, Any]], None] | None = None,
 ) -> VerifierResult:
     """A bounded verifier subagent that never exceeds the reference cap.
 
@@ -1127,6 +1269,7 @@ def _run_verifier(
     holds them as it holds the run's: it is read before each round, so a
     stopped run's verifier asks nothing more, and once it names a reason the
     round's later calls are not run and the verifier stops after the round.
+    Its calls reach ``on_call`` as the verifier's.
     """
     cap = max(1, min(_clamp_rounds(max_rounds), _VERIFIER_MAX_ROUNDS))
     msgs = list(base_messages) + [{"role": "user", "content": VERIFIER_PROMPT}]
@@ -1137,6 +1280,7 @@ def _run_verifier(
         if _halted(halt):
             break
         rounds += 1
+        context = _turn_context(msgs) if on_call is not None else None
         try:
             content, native = _consume_stream(_invoke_model(model_client, msgs, None))
         except Exception as exc:
@@ -1145,9 +1289,10 @@ def _run_verifier(
         msgs.append({"role": "assistant", "content": content})
         observations.append(content)
         _emit(on_event, "verifier_output", rounds, {"content": content})
+        response = {"message": {"content": content, "tool_calls": native}}
         try:
             results, _ = dispatch.dispatch_round(
-                {"message": {"content": content, "tool_calls": native}},
+                response,
                 mode=mode,
                 conversation_id=conversation_id,
                 sandbox=sandbox,
@@ -1158,6 +1303,8 @@ def _run_verifier(
             )
         except Exception:
             results = []
+        if on_call is not None:
+            _observe(on_call, "verifier", rounds, _resolved(response), results or None, context)
         if not results:
             verdict = _extract_verdict(content)
             break
@@ -1218,6 +1365,7 @@ def run(
     admitted_num_ctx: int | None = None,
     provenance: Any = None,
     halt: Callable[[], str | None] | None = None,
+    on_call: Callable[[dict[str, Any]], None] | None = None,
 ) -> AgentRunResult:
     """Run the multi-turn streaming agent loop.
 
@@ -1251,6 +1399,12 @@ def run(
     a caller passes the admitted value (or the thread holds an admission
     ticket), the round budget and prune thresholds derive from it, never
     below the static floors; otherwise the static defaults hold.
+
+    ``on_call`` observes every call the model emitted -- the run's, each
+    subtask's, the verifier's -- once, in order, with its result (None for a
+    call never dispatched) and the kinds of untrusted content the model was
+    handed that round (see ``_observe``); an observer that raises is ignored,
+    and unbound, the run is the same, kwarg for kwarg.
     """
     cap = _clamp_rounds(max_rounds)
     halt = _run_stop(halt, should_continue)
@@ -1282,6 +1436,8 @@ def run(
     spill_counter: dict[str, int] = {"k": 0}
     prunable: list[dict[str, Any]] = []
     reminder_sent = False
+    # The run's subtasks, numbered as they start (``on_call``'s ``subrun``).
+    subruns: dict[str, int] = {"k": 0}
 
     if model_client is None:
         return AgentRunResult(
@@ -1309,6 +1465,7 @@ def run(
             reminder_sent = True
             messages.append({"role": "user", "content": MAX_STEPS_REMINDER})
         _emit(on_event, "round_start", rounds, {})
+        context = _turn_context(messages) if on_call is not None else None
         try:
             content, native_calls = _consume_stream(_invoke_model(model_client, messages, tools))
         except Exception as exc:
@@ -1324,6 +1481,7 @@ def run(
         _emit(on_event, "model_output", rounds, {"content": content})
 
         response = {"message": {"content": content, "tool_calls": native_calls}}
+        pre_calls: list[dispatch.ToolCall] = []
         try:
             # The loop intercepts task calls before
             # dispatch_round -- the bounded child needs the model client and
@@ -1334,6 +1492,7 @@ def run(
             # further identical call aborts BEFORE execution.
             doom_tool = _doom_should_abort(doom_state, doom_threshold, pre_calls)
             if doom_tool is not None:
+                _observe(on_call, "run", rounds, pre_calls, None, context)
                 _emit(on_event, "aborted", rounds, {"reason": "doom_loop", "tool": doom_tool})
                 stop_reason = STOP_DOOM_LOOP
                 final_text = final_text or _last_assistant_text(messages)
@@ -1355,6 +1514,7 @@ def run(
                     spill_counter=spill_counter,
                     provenance=provenance,
                     halt=halt,
+                    **({"on_call": on_call, "subruns": subruns} if on_call is not None else {}),
                 )
             else:
                 results, _path = dispatch.dispatch_round(
@@ -1372,6 +1532,7 @@ def run(
             messages.append(
                 untrusted_context.tool_output_message(f"[round {rounds} dispatch error] {exc}")
             )
+            _observe(on_call, "run", rounds, pre_calls, None, context)
 
         if not results:
             final_text = content
@@ -1380,6 +1541,7 @@ def run(
             break
 
         tool_results_all.extend(results)
+        _observe(on_call, "run", rounds, pre_calls, results, context)
         obs_msg, round_spills = _capped_observations_message(
             results,
             cfg=hardening_cfg,
@@ -1453,6 +1615,7 @@ def run(
             on_event=on_event,
             provenance=provenance,
             **({"halt": halt} if halt is not None else {}),
+            **({"on_call": on_call} if on_call is not None else {}),
         )
         # The verifier writes through the run's own handlers: a gate it
         # drove past its bound ends the run with the gate's reason.

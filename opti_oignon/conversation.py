@@ -459,6 +459,10 @@ def _sync_publish_conversation(
       in ANY mode (the documented ``producers.py`` posture). There is
       deliberately no mode gate here; only the wire is Daily-gated, downstream
       at the engine/guard.
+    - A conversation's tombstone is not the producers' empty one
+      (``veilid/producers.py``): its payload names the conversation,
+      ``{"conversation": {"id": ...}}``, since the receiving apply reads the
+      id from the payload alone.
 
     Clock discipline: the next clock for a local edit is the highest clock this
     device has journalled for the key, plus one (an unseen key yields 0, so the
@@ -473,7 +477,12 @@ def _sync_publish_conversation(
         if not veilid_available():
             return
         payload: dict[str, Any] | None = None
-        if not deleted:
+        if deleted:
+            # The sink gets the payload alone: a tombstone names its
+            # conversation, as the receiving apply reads it. The id is the
+            # record's own key already, so nothing new leaves.
+            payload = {"conversation": {"id": conv_id}}
+        else:
             payload = payload_fn() if payload_fn is not None else None
             if payload is None:
                 # The snapshot could not be built (row gone mid-save).
@@ -498,6 +507,26 @@ def _sync_publish_conversation(
     except Exception:
         logger.warning(
             "veilid sync publish failed for conversation %s (save unaffected)",
+            conv_id,
+            exc_info=True,
+        )
+
+
+def _forget_runs(conv_id: str) -> None:
+    """Remove a deleted conversation's agent runs from the run journal, here or from a paired device.
+
+    The journal is imported at the deletion, never with this module, and
+    answers for its own failures (``run_journal.status``); a deletion never
+    fails on it. Lock order is conversation lock -> journal lock, and the
+    journal never calls back into this module.
+    """
+    try:
+        from opti_oignon import run_journal
+
+        run_journal.forget_conversation(conv_id)
+    except Exception:
+        logger.warning(
+            "the run journal could not forget conversation %s (deletion unaffected)",
             conv_id,
             exc_info=True,
         )
@@ -942,12 +971,16 @@ class ConversationManager:
                 cursor = conn.execute(
                     "DELETE FROM conversations WHERE id = ?", (conv_id,)
                 )
+                # The journal forgets before the commit: a deletion cut short
+                # leaves the conversation, never its runs without it.
+                _forget_runs(conv_id)
                 conn.commit()
                 deleted = cursor.rowcount > 0
                 if deleted:
                     logger.debug(f"Conversation supprimee: {conv_id}")
-                    # A domain delete publishes a tombstone so the
-                    # deletion converges on peers (empty payload, deleted=True).
+                    # A domain delete publishes a tombstone so the deletion
+                    # converges on peers (its payload naming the conversation,
+                    # deleted=True).
                     self._publish(
                         conv_id,
                         deleted=True,
@@ -1131,6 +1164,7 @@ class ConversationManager:
                         conn.execute(
                             "DELETE FROM conversations WHERE id = ?", (conv_id,)
                         )
+                        _forget_runs(conv_id)
                         conn.commit()
                         return True
 

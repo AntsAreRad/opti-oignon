@@ -1,0 +1,25 @@
+# The run journal: an opt-in record of your own agent runs, kept on this
+# machine and read by no model (see opti_oignon/run_journal.py and
+# docs/agent/run-journal.md).
+#
+# On only when enabled is the YAML boolean true: a missing key, "true" or 1
+# is off, and so is a file that cannot be read. Off, a run creates and
+# writes nothing. Turning it off pauses it: what is kept stays until its
+# retention; the wipe removes it at once.
+enabled: false
+
+# A record is kept less than this many days, counted back from today (UTC):
+# a whole number from 1 to 30. Older days are removed at boot, every hour
+# while the server runs, at a run's start and at each write, deletion and
+# wipe, whether the journal is on or off.
+retention_days: 30
+
+# Bounds, each a whole number in its range; any other value is refused by
+# name and the value below kept. The calls one run keeps (1 to 5000); the
+# characters of a value kept whole, the typed words included (64 to 65536);
+# the bytes of one record (4096 to 1048576); the bytes of one day's file
+# (65536 to 67108864). What passes a bound is dropped and counted.
+max_calls_per_run: 500
+max_value_chars: 16384
+max_record_bytes: 262144
+max_day_bytes: 8388608

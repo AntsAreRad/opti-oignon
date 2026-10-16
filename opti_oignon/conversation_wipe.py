@@ -250,6 +250,8 @@ class ConversationWipeManager:
         # conversation_id -> list of (weak_ref_or_strong_ref, label)
         self._buffers: dict[str, list[tuple[Any, str]]] = {}
         self._config = self._load_config()
+        # What the run journal's wipe answered at the last full wipe.
+        self.run_journal_wiped: dict[str, Any] | None = None
 
     # -- Configuration -----------------------------------------------------
 
@@ -379,7 +381,9 @@ class ConversationWipeManager:
 
         RAM-only by default. With ``purge_disk=True`` this also
         deletes ALL persisted conversation rows from disk (not only those with a
-        registered RAM buffer), returning a WipeResult per purged conversation.
+        registered RAM buffer), returning a WipeResult per purged conversation,
+        and wipes the run journal first, whose records follow the
+        conversations they ran in (``run_journal_wiped`` says what it answered).
         """
         with self._lock:
             conv_ids = list(self._buffers.keys())
@@ -389,6 +393,7 @@ class ConversationWipeManager:
             results.append(self.wipe(cid))  # RAM only; disk handled uniformly below
 
         if purge_disk:
+            self.run_journal_wiped = self._wipe_run_journal()
             purged_ids = self._purge_disk_all()
             ram_wiped = {r.conversation_id for r in results}
             for r in results:
@@ -435,6 +440,17 @@ class ConversationWipeManager:
                 exc,
             )
             return None
+
+    @staticmethod
+    def _wipe_run_journal() -> dict[str, Any]:
+        """Wipe the run journal whole (best-effort): a journal already wiped makes each deletion below cheap."""
+        try:
+            from opti_oignon import run_journal
+
+            return run_journal.wipe()
+        except Exception as exc:
+            logger.warning("conversation_wipe: the run journal could not be wiped: %s", exc)
+            return {"wiped": False, "reason": type(exc).__name__}
 
     def _purge_disk(self, conversation_id: str) -> bool:
         """Delete the persisted rows for one conversation (best-effort)."""

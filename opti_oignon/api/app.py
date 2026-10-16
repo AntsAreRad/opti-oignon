@@ -136,6 +136,25 @@ async def lifespan(app: FastAPI):
         run_boot_migration()
     except Exception:  # noqa: BLE001 - startup must not break on import/call
         logger.warning("boot: legacy memory migration call failed", exc_info=True)
+    # The run journal keeps no day past its retention, on or off: the days
+    # that passed it while the server was down go now, and every hour after
+    # while it runs -- a server that stays up with nothing to record still
+    # tends it. The pass runs off the event loop.
+    retention = None
+    try:
+        import asyncio
+
+        from opti_oignon import run_journal
+        run_journal.tend()
+
+        async def _journal_retention() -> None:
+            while True:
+                await asyncio.sleep(run_journal.PRUNE_INTERVAL_S)
+                await asyncio.to_thread(run_journal.tend)
+
+        retention = asyncio.create_task(_journal_retention())
+    except Exception:  # noqa: BLE001 - startup must not break on the run journal
+        logger.warning("boot: the run journal could not be tended", exc_info=True)
     # Load all enabled plugins and register their hooks, so plugin effects apply
     # during inference AFTER a restart -- not only right after enable_plugin().
     # (The registry persists "enabled" state; the loaded instances do not, so
@@ -149,6 +168,8 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 - startup must not break on plugin loading
         logger.warning("plugins: load_all_enabled at startup failed", exc_info=True)
     yield
+    if retention is not None:
+        retention.cancel()
     # Shutdown: stop the sync driver if it was armed (a no-op otherwise).
     from opti_oignon.veilid.sync_service import reset_sync_service
     reset_sync_service()

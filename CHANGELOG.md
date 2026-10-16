@@ -21,6 +21,32 @@ package costs.
   the first line, so a refused command leaves an earlier trace as it was; a
   write that fails stops the trace, not the bench, and the command says so.
 
+- [SECURITY] The run journal, a new store of typed words at rest, off by
+  default (`config/run_journal.yaml`): an opt-in record of your own agent
+  runs, kept on this machine and read by no model. For each run whose task
+  you typed it keeps your words and every call the model emitted, in order,
+  with the gate's outcome and the trust the call was chosen in -- never a
+  tool's output as returned (a call's arguments are the model's own and can
+  quote what it read), the memory or skills blocks, or the model's prose.
+  One file per UTC day under `data/run_journal/`, a record kept less than
+  `retention_days` (at most 30), tended at boot and every hour; each line
+  sealed under the journal's subkey of the master key when encryption is on,
+  nothing written when it is on without a key or cannot be read, and nothing
+  in plaintext in Bulbe. Deleting a conversation removes its runs, here or
+  from a paired device, and a run still going then is never written; a
+  sealed line no key opens waits for the key in a ledger of hashes, never
+  dropped blind. The user wipe and the full conversation wipe remove it all;
+  it is never exported. A journal that cannot record counts why and never
+  changes the run. The injection bench's trace gives each call the same
+  trust (`trust`), still format 1. With it, a conversation deleted on a
+  paired device is deleted on this one too -- its tombstone now names the
+  conversation, where it arrived empty and was dropped; one from a device
+  on an older version still does not apply -- and `security.yaml` is
+  written whole, through a temp moved in its place, by the security
+  settings and the mode switch alike, so a reader never meets it empty. A
+  security.yaml that is a symbolic link is replaced by a regular file; the
+  file it pointed to is left as it was.
+
 - [SECURITY] The injection bench has a third suite, `injection_paraphrase`,
   whose legitimate searches and notes share no word with the typed request
   -- a request typed in French whose place comes from memory, searches
