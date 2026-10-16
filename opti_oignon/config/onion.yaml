@@ -564,10 +564,20 @@ queue:
   proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day, superseded ones included; the rest wait for a later day
   copy_shared_words: 2      # content words a summary's sentence shares with a document, tool or web page to be dropped as a copy
 
-# The switch. Off, the chat path keeps the working-memory block it has today
-# and the librarian is never asked; on, the librarian mirrors each saved
-# conversation, evicts through the gate off the interactive path, and its
-# block replaces today's when it has one. The maintainer turns it on.
+# The switch. Off, the chat path keeps the window it has today -- the
+# working-memory block, the optimizer or the history window -- and the
+# librarian is never asked. On, the librarian mirrors each saved
+# conversation and evicts through the gate off the interactive path, and
+# each turn of a stored conversation the chat executor answers -- the
+# direct, web-search, code-verify and think pipelines, the think pass of
+# think and tools, self-correct's first draft -- is laid by the journal,
+# with no optimizer and no history window, and refused by name when it
+# cannot be laid. The tools pipeline and the tool phase of think and tools,
+# the reasoning and consensus engines, the cascading and speculative
+# pipelines and self-correct's correction pass keep the context they build
+# themselves, and a plain chat turn takes the tools pipeline by default. A
+# turn of no conversation keeps its window.
+# The maintainer turns it on.
 enabled: false
 
 # The librarian. Its model is its own, never one that answers the chat: a

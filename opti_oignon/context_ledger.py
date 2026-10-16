@@ -28,6 +28,18 @@ Three properties are load-bearing:
   misconfiguration shrinks the window, it never turns the ledger into an
   unbounded log or a self-erasing one.
 
+A turn the onion's journal laid adds the figures of its window: the rung
+it was planned at and composed under, the context and the answer's room
+it was sent with, its count and what it is accounted, its epoch, why that
+epoch began and where the window first changed, whether it was cold or a
+descent, how many of each kind of source it left out, whether the
+engine's slot bound was read, and why it was refused with the whole
+numbers of the refusal; on a cold window, the engine's own count of its
+prompt. Numbers and bare-word labels again: a motive that is not one word
+is dropped. A ledger written before these columns gains them when it is
+opened, in one transaction a failure leaves undone, and every row it
+already holds reads NULL there.
+
 All persistence rides the project's safe_connect seam (SQLCipher when
 available); every statement is parameterised. When the seam itself is
 absent the ledger reports itself unavailable instead of falling back to a
@@ -67,6 +79,10 @@ _ID_MAX = 128
 _REASON_MAX = 256
 _ZONES_MAX = 16
 _RECENT_LIMIT_MAX = 500
+# The most whole numbers a refusal's figures keep, and the most kinds of
+# source a window's cut names.
+_FIGURES_MAX = 8
+_CUT_MAX = 16
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS context_ledger_entries (
@@ -98,13 +114,51 @@ CREATE TABLE IF NOT EXISTS context_ledger_entries (
     gov_conditional_eviction INTEGER,
     gov_keep_alive TEXT,
     gov_reason TEXT,
-    duration_ms REAL
+    duration_ms REAL,
+    win_plan_rung INTEGER,
+    win_refusal TEXT,
+    win_figures_json TEXT,
+    win_rung INTEGER,
+    win_num_ctx INTEGER,
+    win_num_predict INTEGER,
+    win_tokens INTEGER,
+    win_accounted INTEGER,
+    win_epoch INTEGER,
+    win_motive TEXT,
+    win_first_diff INTEGER,
+    win_cold INTEGER,
+    win_descent INTEGER,
+    win_cut_json TEXT,
+    win_slot_unknown INTEGER,
+    engine_prompt_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_context_ledger_request
     ON context_ledger_entries(request_id);
 CREATE INDEX IF NOT EXISTS idx_context_ledger_ts
     ON context_ledger_entries(ts);
 """
+
+# The journal's figures and the engine's count of a cold prompt arrived
+# after the table: a file written before them gains these columns, in this
+# order, when it is opened (``_gain_window_columns``).
+_WINDOW_COLUMNS = (
+    ("win_plan_rung", "INTEGER"),
+    ("win_refusal", "TEXT"),
+    ("win_figures_json", "TEXT"),
+    ("win_rung", "INTEGER"),
+    ("win_num_ctx", "INTEGER"),
+    ("win_num_predict", "INTEGER"),
+    ("win_tokens", "INTEGER"),
+    ("win_accounted", "INTEGER"),
+    ("win_epoch", "INTEGER"),
+    ("win_motive", "TEXT"),
+    ("win_first_diff", "INTEGER"),
+    ("win_cold", "INTEGER"),
+    ("win_descent", "INTEGER"),
+    ("win_cut_json", "TEXT"),
+    ("win_slot_unknown", "INTEGER"),
+    ("engine_prompt_tokens", "INTEGER"),
+)
 
 _COLUMNS = (
     "ts",
@@ -135,7 +189,7 @@ _COLUMNS = (
     "gov_keep_alive",
     "gov_reason",
     "duration_ms",
-)
+) + tuple(column for column, _definition in _WINDOW_COLUMNS)
 
 _INSERT_SQL = (
     "INSERT INTO context_ledger_entries ("
@@ -162,12 +216,15 @@ def _clip(value: Any, limit: int) -> str | None:
 
 
 def _as_int(value: Any) -> int | None:
+    """A whole number SQLite can hold, or None: an infinity, a NaN or a number past 64 bits drops the field,
+    never the row."""
     if value is None or isinstance(value, bool):
         return int(value) if isinstance(value, bool) else None
     try:
-        return int(value)
-    except (TypeError, ValueError):
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return number if -(1 << 63) <= number < (1 << 63) else None
 
 
 def _as_float(value: Any) -> float | None:
@@ -234,6 +291,92 @@ def _parse_zones(zones_json: Any) -> list[dict[str, Any]]:
     return [item for item in parsed if isinstance(item, dict)]
 
 
+def _word(value: Any) -> str | None:
+    """A label that is one bare word -- ASCII letters, digits and
+    underscores -- clipped to its bound, or None: a motive is a name from a
+    closed list, never a sentence."""
+    text = _clip(value, _LABEL_MAX) if isinstance(value, str) else None
+    if text is None or not text.isascii() or not text.replace("_", "").isalnum():
+        return None
+    return text
+
+
+def _sanitize_figures(figures: Any) -> str | None:
+    """A refusal's figures, its whole numbers alone and at most
+    ``_FIGURES_MAX`` of them; None when no list was given, so a refusal with
+    no figures keeps its empty list."""
+    if not isinstance(figures, (list, tuple)):
+        return None
+    kept = [value for value in figures if type(value) is int][:_FIGURES_MAX]
+    return json.dumps(kept, separators=(",", ":"))
+
+
+def _sanitize_cut(cut: Any) -> str | None:
+    """How many items a window left out, by kind of source: each kind a bare
+    word, each count a whole number, at most ``_CUT_MAX`` kinds; anything else
+    dropped. None when no mapping was given."""
+    if not isinstance(cut, dict):
+        return None
+    kept: dict[str, int] = {}
+    try:
+        for kind, count in cut.items():
+            if len(kept) >= _CUT_MAX:
+                break
+            word = _word(kind)
+            if word is not None and type(count) is int:
+                kept[word] = count
+    except Exception:
+        return None
+    return json.dumps(kept, sort_keys=True, separators=(",", ":"))
+
+
+def _parse_figures(figures_json: Any) -> list[int] | None:
+    if not figures_json:
+        return None
+    try:
+        parsed = json.loads(figures_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [value for value in parsed if type(value) is int]
+
+
+def _parse_cut(cut_json: Any) -> dict[str, int] | None:
+    if not cut_json:
+        return None
+    try:
+        parsed = json.loads(cut_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {kind: count for kind, count in parsed.items() if isinstance(kind, str) and type(count) is int}
+
+
+def _gain_window_columns(conn: sqlite3.Connection) -> None:
+    """Bring a ledger written before the journal's figures to the table:
+    each column of ``_WINDOW_COLUMNS`` it lacks is added, every row it
+    already holds reading NULL there, in one transaction a failure leaves
+    undone. The columns are read again under the write lock, so a file
+    another process brought up meanwhile is left as it is."""
+
+    def missing() -> list[tuple[str, str]]:
+        present = {row[1] for row in conn.execute("PRAGMA table_info(context_ledger_entries)").fetchall()}
+        return [(column, definition) for column, definition in _WINDOW_COLUMNS if column not in present]
+
+    if not missing():
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for column, definition in missing():
+            conn.execute(f"ALTER TABLE context_ledger_entries ADD COLUMN {column} {definition}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Ledger
 # ---------------------------------------------------------------------------
@@ -269,6 +412,7 @@ class ContextLedger:
                 with contextlib.closing(self._connect()) as conn:
                     conn.executescript(_SCHEMA)
                     conn.commit()
+                    _gain_window_columns(conn)
                 self._ready = True
             except Exception as exc:
                 logger.warning("Context ledger unavailable: %s", exc)
@@ -331,13 +475,31 @@ class ContextLedger:
         gov_keep_alive: str | None = None,
         gov_reason: str | None = None,
         duration_ms: float | None = None,
+        win_plan_rung: int | None = None,
+        win_refusal: str | None = None,
+        win_figures: Any = None,
+        win_rung: int | None = None,
+        win_num_ctx: int | None = None,
+        win_num_predict: int | None = None,
+        win_tokens: int | None = None,
+        win_accounted: int | None = None,
+        win_epoch: int | None = None,
+        win_motive: str | None = None,
+        win_first_diff: int | None = None,
+        win_cold: bool | None = None,
+        win_descent: bool | None = None,
+        win_cut: Any = None,
+        win_slot_unknown: bool | None = None,
+        engine_prompt_tokens: int | None = None,
         **_ignored: Any,
     ) -> bool:
         """Write one request row. Returns False on any fault, never raises.
 
         Unknown keyword fields are ignored rather than rejected, so an
         emitter one release ahead of this schema degrades to a partial row
-        instead of a lost one.
+        instead of a lost one. The ``win_*`` fields are a journal window's
+        figures, as the executor reports them; ``win_figures`` a refusal's
+        whole numbers, ``win_cut`` the items left out by kind of source.
         """
         if not self._ready:
             return False
@@ -371,6 +533,22 @@ class ContextLedger:
                 "gov_keep_alive": _clip(gov_keep_alive, _LABEL_MAX),
                 "gov_reason": _clip(gov_reason, _REASON_MAX),
                 "duration_ms": _as_float(duration_ms),
+                "win_plan_rung": _as_int(win_plan_rung),
+                "win_refusal": _word(win_refusal),
+                "win_figures_json": _sanitize_figures(win_figures),
+                "win_rung": _as_int(win_rung),
+                "win_num_ctx": _as_int(win_num_ctx),
+                "win_num_predict": _as_int(win_num_predict),
+                "win_tokens": _as_int(win_tokens),
+                "win_accounted": _as_int(win_accounted),
+                "win_epoch": _as_int(win_epoch),
+                "win_motive": _word(win_motive),
+                "win_first_diff": _as_int(win_first_diff),
+                "win_cold": _as_flag(win_cold),
+                "win_descent": _as_flag(win_descent),
+                "win_cut_json": _sanitize_cut(win_cut),
+                "win_slot_unknown": _as_flag(win_slot_unknown),
+                "engine_prompt_tokens": _as_int(engine_prompt_tokens),
             }
             with self._lock:
                 with contextlib.closing(self._connect()) as conn:
@@ -392,6 +570,8 @@ class ContextLedger:
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         entry = dict(row)
         entry["zones"] = _parse_zones(entry.pop("zones_json", None))
+        entry["win_figures"] = _parse_figures(entry.pop("win_figures_json", None))
+        entry["win_cut"] = _parse_cut(entry.pop("win_cut_json", None))
         return entry
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:

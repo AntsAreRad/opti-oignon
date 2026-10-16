@@ -401,6 +401,12 @@ class ToolExecutionResult(BaseModel):
     verification_hints: int = 0
 
 
+class CutAnswerError(RuntimeError):
+    """The engine's stream of a final answer broke once it had produced words: the answer is cut, and is never
+    completed with another one. A RuntimeError, so every handler of a failed request still takes it; its words are
+    the engine's own error's."""
+
+
 # Extended schema for the LLM decision (can indicate "none")
 class ToolDecision(BaseModel):
     """LLM decision on tool usage."""
@@ -1669,6 +1675,9 @@ class ToolExecutor:
 
         Falls back to a single-shot generation (yielded once) when the
         backend cannot stream, so the streaming front never loses the answer.
+        A stream that fails once it produced words raises ``CutAnswerError``
+        instead, whatever of them a filter still holds: a cut answer is never
+        completed with another one.
         """
         backend = _resolve_backend(model)
         if backend is None:
@@ -1688,6 +1697,8 @@ class ToolExecutor:
             if produced:
                 return
         except Exception as exc:
+            if produced:
+                raise CutAnswerError(str(exc)) from exc
             logger.warning(
                 "Streaming final response failed (%s); falling back to a "
                 "single-shot generation", exc,

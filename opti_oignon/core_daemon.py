@@ -196,7 +196,8 @@ class CoreService:
         return 200, _response_wire(response, request["model"])
 
     def stream(self, payload):
-        """(status, lines): each line a JSON chunk; the status is decided before the first."""
+        """(status, lines): each line a JSON chunk; the status is decided before the first, and a backend that fails
+        once its stream began ends it with a line naming the failure (``error``)."""
         request, error = self._request(payload)
         if error:
             return error[0], iter([error[1]])
@@ -205,13 +206,18 @@ class CoreService:
             return error[0], iter([error[1]])
 
         def lines():
-            for chunk in backend.stream(**request):
-                yield {
-                    "content": getattr(chunk, "content", "") or "",
-                    "thinking": getattr(chunk, "thinking", "") or "",
-                    "done": bool(getattr(chunk, "done", False)),
-                    "model": getattr(chunk, "model", "") or request["model"],
-                }
+            try:
+                for chunk in backend.stream(**request):
+                    yield {
+                        "content": getattr(chunk, "content", "") or "",
+                        "thinking": getattr(chunk, "thinking", "") or "",
+                        "done": bool(getattr(chunk, "done", False)),
+                        "model": getattr(chunk, "model", "") or request["model"],
+                    }
+            except Exception as exc:  # noqa: BLE001 - said on the stream, by name: the answer is cut
+                # The status went out with the first line: the failure is the
+                # stream's last line, before its end, never a clean end.
+                yield {"error": f"backend failed mid-stream: {exc}"}
         return 200, lines()
 
     def admission(self, payload):

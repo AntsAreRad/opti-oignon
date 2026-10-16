@@ -1016,6 +1016,17 @@ fail_under = 0
 # the journal's admission refused a third safety refusal, and they give way
 # to ps17b and ps21b in the same file. They stay in the tree word for word.
 #
+# The drift A/B's onion arm now sends each turn as the onion's journal
+# composed it, the window in place of the history window, as the chat path
+# does with the onion on. da8 of tests/test_drift_ab_contracts.py held the
+# arm to the plain arm's system prompt and history window, the onion's
+# block in front of the turn, and the arm keeps no history window of its
+# own. It gives way to da18 of tests/test_drift_ab_journal_contracts.py:
+# for each turn, exactly the messages the journal composed, labels left
+# behind, the bench's system prompt first, as the plain arm sends it, and
+# the turn's words last; a persistence path refused. It stays in the tree
+# word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1390,4 +1401,5 @@ addopts = """
     --deselect=tests/test_turn_label_contracts.py::test_tl78_the_executor_hands_the_onion_the_sources_the_user_withdrew_and_nothing_when_there_is_none
     --deselect=tests/test_pipeline_step_contracts.py::test_ps17_a_fixed_server_error_ends_its_step_failed
     --deselect=tests/test_pipeline_step_contracts.py::test_ps21_a_safety_mechanism_never_ends_a_step_failed
+    --deselect=tests/test_drift_ab_contracts.py::test_da8_the_arms_differ_by_the_onion_block_in_front_of_the_turn_and_nothing_else
 """

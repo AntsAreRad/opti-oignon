@@ -129,18 +129,26 @@ class RemoteCoreBackend(InferenceBackend):
         )
 
     def stream(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
+        """The daemon's chunks, in order. A line naming an error raises, and so does a stream that ends before its
+        done chunk: a cut answer is never told as a whole one."""
+        done = False
         with self._request("/inference/stream", self._payload(model, messages, options, keep_alive, think, images)) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()
                 if not line:
                     continue
                 chunk = json.loads(line)
+                if isinstance(chunk, dict) and chunk.get("error") is not None:
+                    raise RuntimeError(f"core daemon: {chunk['error']}")
+                done = done or bool(chunk.get("done", False))
                 yield StreamChunk(
                     content=chunk.get("content", "") or "",
                     thinking=chunk.get("thinking", "") or "",
                     done=bool(chunk.get("done", False)),
                     model=chunk.get("model", model) or model,
                 )
+        if not done:
+            raise RuntimeError("core daemon: the stream ended before its done chunk")
 
 
 def register_from_config(registry, path=None):

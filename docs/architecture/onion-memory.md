@@ -30,21 +30,141 @@ system prompt and the tail, which it does not lay: the window before rungs,
 12288 tokens, cap for cap.
 
 Every part of the window is counted once, with the counter of the turn it
-is sent in. The executor hands the librarian its own counter, for the model
-the turn goes to, before it asks for the block; the librarian counts every
-part of that turn's block with it, on the turn's own thread, so two turns
-of one conversation in flight never count with each other's. A pin, a
-supersession, an accepted proposal and an open count with the last counter
-handed over for the conversation in this process; before any, an open
-counts with the default, and a pin, a supersession or an accepted proposal
-counts the Core as the heaviest counter a turn may hand over would. A Core
-grown by a pin, a supersession or an accepted proposal keeps a quarter of
-its cap free (`core_margin`), and one token more for rounding: what lands
+is sent in. The executor hands the journal's plan its own counter, for the
+model the turn goes to; the plan counts every part of that turn's window
+with it, on the turn's own thread, so two turns of one conversation in
+flight never count with each other's, and holds it as the conversation's
+last counter. A pin, a supersession, an accepted proposal and an open
+count with that counter; before any turn in this process, an open counts
+with the default, and a pin, a supersession or an accepted proposal counts
+the Core as the heaviest counter a turn may hand over would. A Core grown
+by a pin, a supersession or an accepted proposal keeps a quarter of its
+cap free (`core_margin`), and one token more for rounding: what lands
 still fits a later turn that counts it up to a third more. A turn that
-counts the Core over its cap gets no onion block -- refused by name and
-counted -- and the Core is never cut; a supersession that does not grow
-the Core is never refused, so a Core that landed counted by words alone
-can step down until its block comes back.
+counts the Core over its cap at every rung the model's window allows is
+refused by name, `core`, with the remedy of superseding it with a shorter
+one, and the Core is never cut; a supersession that does not grow the
+Core is never refused, so a Core that landed counted by words alone can
+step down until the window is laid again.
+
+## The journal
+
+With the onion on, a turn of a conversation the store keeps that the chat
+executor answers -- the direct, web-search, code-verify and think
+pipelines, the think pass of think and tools, self-correct's first draft
+-- is sent as the onion's journal lays it, and the executor composes
+nothing of that window itself: no optimizer, no history window of its
+own, no working-memory block, no archive retrieval, no context check of
+the turn's documents. It gathers the sources the turn brings -- the
+retrieval, asked for within its share of the tail at the conversation's
+own rung, and the web results -- and hands them raw to the journal. A
+turn of no conversation keeps the path it had, as every turn does with
+the onion off. The other pipelines keep the context they build
+themselves: the tools pipeline and the tool phase of think and tools, the
+store's last ten turns; the reasoning and consensus engines, the cascading
+and speculative pipelines and self-correct's correction pass, their own,
+or none. A plain chat turn takes the tools pipeline by default, its request
+arming the tools: the journal lays no window for it, refuses nothing by
+name and leaves no window figures in its row.
+
+The journal is a window as messages, the same bytes from one turn to the
+next up to the current turn's message, so an engine that keeps its prompt
+cache reuses the longest prefix. The system prompt, and the manifest when
+there is one, open it, one system message each. One user message holds
+the Core under its header, then one memory envelope with the peels of the
+region -- the newest the tree accepted that fit the peels' cap -- and the
+receipts digest, with the conversation's first turn joined to it when that
+turn is the user's. The Flesh follows, each turn in its own role, its
+documents in file envelopes at their places and its words bare. The last
+user message holds the tail -- the memory the question brings, the
+retrieval, the web results and the sentence that cites them, each in its
+envelope and cut to whole items within its share of the tail's cap
+(`journal.tail_shares`) -- then the turn, its documents held to the
+document share and refused, never cut, past it. Two user messages are
+never adjacent. Each message carries the label of what it holds, and the
+request's label is their union. The memory shows nothing a withdrawal
+reached: a peel or a recalled span standing on a source the user withdrew
+is left out, and the window says what it left out.
+
+The executor reads the model's window as the context manager gives it --
+its configuration, its table of models, what Ollama says of the model,
+else its default of 8192; 32768 only without the context manager --
+bounded on a llama-server engine by the smallest context of its slots -- a
+listing that names none leaves the bound unknown, and the turn says so in
+its ledger row -- and, with no governor, on an in-process engine by the
+context it loads at. The plan picks the rung: the largest of the ladder
+within `home_rung` and that window, or a larger one when the system prompt,
+the Core, the turn's words or its documents need it, never past the window.
+The resource governor, when on, admits the turn once, at that rung, before
+the window is composed; the window is composed under the context admitted,
+capped by the slot's, or, when no admission names one, under the rung or
+the lower context an in-process engine loads at. A context under the rung
+is a descent: the window is composed under the largest rung the context
+holds, and the conversation keeps its rung. The answer always keeps
+`journal.answer_floor` tokens: the window is laid under the count that
+leaves them once the count is raised by `journal.margin` -- what the window
+is accounted -- and the answer is held to what the context leaves past that
+account. The executor checks that the window was composed for the context
+it is sent with and that its account and the answer's room fit that
+context, then sends it with both (`num_ctx` and `num_predict`; on
+llama-server `max_tokens`, with `cache_prompt` so the prefix is kept): no
+truncation is left to the engine. An answer that used all its room, or
+that llama-server says it stopped at its own limit short of it, is the
+outcome `length`, said in a status line and never in the answer's words,
+and is not cached, since the cache key does not name the room; an answer
+from an engine that reports no count is not cached either.
+
+Each image of the current turn is charged `journal.image_tokens`, counted
+on its message: the counter reads none. The current turn comes first: the
+charge takes its room from the Flesh, raises the rung only when even the
+whole Flesh cap cannot hold it, and is refused `document` past every rung
+within the model's window.
+
+A Flesh found over its cap at the conversation's own rung -- a
+conversation the process had not seen, one older than the onion, one grown
+past its cap -- is caught up at the plan, with no model, while no burst
+holds the conversation's slot: the turns past the newest
+`journal.catch_up.reach` leave bare, a span at a time, then the queue runs
+at most `max_steps` steps on the rungs that need no model, then bare spans
+until the Flesh fits; every span leaves under its receipt and stays
+recallable. With the slot held, nothing is evicted: the window lays the
+overflow over a shadow -- its oldest turns set aside in stores of the
+shadow's own, for one composition, with one line naming them, charged to
+the room they freed, and the peels the shadow's queue made of them -- and
+the conversation's state is not touched. A descent is laid over a shadow
+the same way. A burst aims below the cap, at `journal.burst_mark` of it,
+so a window rarely has a shadow to lay.
+
+Each window is compared with the conversation's last. Its stable prefix
+kept, no epoch begins; broken, an epoch begins, read by why -- the first
+window, the model, the rung, the system prompt, the Core, an accepted
+proposal, a resolved receipt, a take-back, a withdrawal, an eviction, a
+region past its cap -- and any other cause is counted unexplained. The
+window says where its first changed piece begins, and whether it is cold:
+the first window, or one whose first piece changed, sharing no prefix with
+the last.
+
+A window that cannot be laid is refused by name, never with an
+exception's words: a layer over its cap (`system`, `core`, `receipts`,
+`peels`, `flesh`, `turn`, `window`), the turn's documents or images past
+every rung (`document`), a source of a shape the window does not lay
+(`tail`), a context no rung holds (`rung`), no rung within the model's
+window (`model`), an answer left under its floor (`count`), a
+configuration that does not read (`config`), no envelope for the data
+(`wrap`), a store that does not read (`store`), a plan or a composition
+that raised (`raised`). The turn says one line -- the motive, its fixed
+words and its whole numbers -- and leaves nothing behind: nothing is sent,
+saved, captured, curated or cached, and an admission it took is given
+back, as one is when a stop or a cache hit ends a turn before its stream.
+
+The turn's ledger row carries the window's figures: the rung planned and
+the one composed under, the context and the answer's room, the count and
+what it is accounted, the epoch and its motive, where it first changed,
+whether it was cold or a descent, what each kind of source left out,
+whether the slot bound was read, and a refusal's motive and whole numbers.
+For a cold window it also keeps the engine's own count of the whole
+prompt, its cached prefix included, read on the stream's last chunk, on
+Ollama and on llama-server alike.
 
 ## Invariants the contracts hold
 
@@ -54,10 +174,13 @@ can step down until its block comes back.
   hash; an entry whose bytes moved is refused by name, never repaired.
 - No eviction without a receipt; no receipt whose key does not resolve to a
   Cellar span -- the digest checks every key before it renders a line.
-- A span leaves the Flesh only once its candidate peel has answered the
-  recall probes drawn from the span, class by class, at the configured
-  thresholds. The probes read English and French: decisions, negations, names and whole words, accents included. An empty probe set on a rich span is a defect, and an unknown
-  rate is not a pass.
+- A peel stands for a span only once it has answered the recall probes
+  drawn from the span, class by class, at the configured thresholds. The probes read English and French: decisions, negations, names and whole words, accents included. An empty probe set on a rich span is a defect, and an unknown
+  rate is not a pass. A span no peel answers for leaves the Flesh with
+  none: held, its receipt keeping the places in the Cellar of the fewest
+  units that answer its probes, or bare -- a span the probes draw nothing
+  from, and the spans the catch-up and a shadow set aside -- under a
+  receipt that names it, its turns recallable from the Cellar.
 - The same peel must say nothing its span does not hold. The second face
   of the gate reads the summary as a source is read and refuses, by name,
   a name, a date, a number or a code block its span lacks, inline code its
@@ -107,19 +230,22 @@ can step down until its block comes back.
   anything else -- a dangling key, sources that are not its children's, a
   digest that no longer matches the archive -- is refused.
 - Recalled content is framed as data with its provenance and wrapped as
-  untrusted memory before it reaches the model; only the system prompt,
-  the Core and the current turn bear instruction.
+  untrusted memory before it reaches the model. What bears instruction is
+  the system prompt and the manifest, the Core and the words of the
+  conversation's turns -- the current one and the Flesh's, each laid bare
+  in its own role, as it was said; every document, retrieval and web
+  result rides in an envelope as data.
 
 ## The librarian
 
 Off by default (`enabled: false`). Switched on, the executor offers each
 saved conversation to the librarian beside the auto-capture; the librarian
-mirrors it, and when it has grown by `min_new_turns` it evicts through the
+mirrors it, and when it has grown by `min_new_turns`, or once a journal
+laid it and its Flesh passed the journal's mark, it evicts through the
 gate off the interactive path, using the configured model through the
-inference registry. On the next turn, the librarian's block -- Core,
-receipts digest and the peels selected for the question -- replaces today's
-working-memory block when it has one, and today's block stands when it does
-not.
+inference registry. Each turn of the conversation the executor answers is
+sent as the journal lays it (above), and the working-memory block is never
+composed for it; the pipelines that build their own context keep it.
 
 The mirror knows each turn by what it is -- its role, its words, its origin
 and its segments -- and never by a count. A retry, a synchronisation from
@@ -129,7 +255,8 @@ differs from what the librarian holds, the turns that follow are taken back
 from the Flesh, and a span already in the Cellar is superseded with every
 later one. A superseded span keeps its receipt in the ledger and its turns
 in the Cellar, unchanged and recallable, but its peel, its anchors and its
-receipt line leave the block, and a proposal made from it is closed. One
+receipt line leave the block and the journal's window, and a proposal made
+from it is closed. One
 the user was offered still counts in that day's cap, so edits never offer
 more in a day than the cap; made again in the same words from the turns
 mirrored again, it takes the place of the offer the user already had, and
@@ -193,7 +320,9 @@ offers the Core, word for word, and `POST .../proposals/{id}/accept` and
 the librarian inside its handlers and passes
 the user as actor; the store refuses any other actor, and a pin that would
 push the Core over its cap is refused before it lands, because the
-composer never cuts the Core and would otherwise blank the whole block.
+composer never cuts the Core: over its cap, the Core blanks the block, and
+every journal turn is laid at a larger rung, or refused `core` when no
+rung holds it.
 The model's tools reach none of this; a contract on the tree names the
 three modules that import the librarian -- the executor, the memory
 routes and the terminal chat session. Recall has no actor gate by design:
@@ -290,9 +419,13 @@ Drift against a no-onion baseline has a host command of its own,
 `scripts/drift_ab.py`. It runs one scripted conversation -- facts stated,
 replaced on known turns, and asked about long after the history window has
 dropped them -- through two arms that differ the way the chat path does:
-the same system prompt, history window and model, and in one arm the
-onion's block, wrapped as untrusted data in front of the turn, as on the
-chat path. The librarian runs in process
+the same model, the same system prompt first and the same turn last, and
+between them the plain arm's history window or, in the onion arm, the
+journal composed for the turn, planned within the model's window and
+counted with the model's counter as the executor's, sent with the context
+it was composed for; the report carries what the memory laid and the
+Flesh beside the window's whole count.
+The librarian runs in process
 with persistence off, so neither arm reads or writes the data directory.
 Each arm gets contradictions per 1000 turns against the facts holding at
 each turn, the sentences that agree with them, and the sentences the

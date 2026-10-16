@@ -58,6 +58,9 @@ except ImportError:
 # Conditional import of the ToolExecutor
 try:
     from .tool_executor import (
+        CutAnswerError as _CutAnswerError,
+    )
+    from .tool_executor import (
         ToolCallResult,
         ToolExecutionResult,
         ToolExecutor,
@@ -72,6 +75,9 @@ except ImportError:
     ToolExecutor = None
     ToolExecutionResult = None
     ToolCallResult = None
+
+    class _CutAnswerError(RuntimeError):
+        """Stands in for the tool executor's cut answer while it is absent: nothing raises it then."""
 
 # Capability gate for the think=True/400 guard (option A). Stdlib-only primitive;
 # guarded like the rest so a non-thinking active model is never sent think=True.
@@ -1708,7 +1714,9 @@ class AgenticExecutor:
         method then raised an unbound-name error into its fallback.
         A stopped turn keeps the record of the tools that ran (the next
         turn must know their effects) and saves nothing, also when its
-        caller closes it while the answer is streaming.
+        caller closes it while the answer is streaming; so does a turn whose
+        answer the engine cut after its first words, which ends on its
+        error, never completed by another pipeline.
         """
         turn = turn if turn is not None else self._legacy_turn()
         if not self.tool_executor_available:
@@ -1777,6 +1785,20 @@ class AgenticExecutor:
                     turn.results["tool_calls"] = calls
                     self._record_tool_calls(conversation_id, calls)
                     raise
+                except Exception as exc:
+                    if not full_response and not isinstance(exc, _CutAnswerError):
+                        raise
+                    # An answer cut after its first words -- streamed, or still
+                    # held by the marker filter -- is never completed with
+                    # another one nor saved: the record of the tools that ran
+                    # is kept, and the turn says why it stopped.
+                    calls = list(ran)
+                    self._last_tool_calls = calls
+                    turn.results["tool_calls"] = calls
+                    self._record_tool_calls(conversation_id, calls)
+                    logger.error(f"Tools pipeline answer cut: {exc}")
+                    yield f"\n\n[ERR] Error: {exc}"
+                    return
 
                 if result is not None:
                     calls = list(result.tool_calls)

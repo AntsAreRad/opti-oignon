@@ -1734,6 +1734,61 @@ package costs.
 
 ### Changed
 
+- With the onion memory on (`enabled: true` in
+  `opti_oignon/config/onion.yaml`; off by default), a turn of a stored
+  conversation that the chat executor answers -- the direct, web-search,
+  code-verify and think pipelines, the think pass of think and tools,
+  self-correct's first draft -- is sent as the onion's journal lays it.
+  The librarian plans the turn's window before it is admitted, at the rung
+  of the context ladder the turn needs, every part counted with the turn's
+  own counter for its model; the resource governor, when on, admits the
+  turn once at that rung; and the librarian composes the window under the
+  context admitted: the system prompt, the Core under its header, the
+  peels and the receipts digest in one memory envelope, the Flesh in its
+  own roles, then the sources the turn brings and the turn, each data part
+  in its envelope and each message under the label of what it holds -- the
+  same bytes from one turn to the next up to the turn, so an engine reuses
+  the prefix. The executor sends it as composed, with the context it was
+  composed for and the room the window keeps for the answer,
+  `journal.answer_floor` tokens at least past its count raised by
+  `journal.margin` (on llama-server as `max_tokens`, the prefix kept), and
+  composes nothing of its own on that path: no optimizer, no history
+  window, no memory block, no archive retrieval. The tools pipeline and
+  the tool phase of think and tools, the reasoning and consensus engines,
+  the cascading and speculative pipelines and self-correct's correction
+  pass keep the context they build themselves, and a plain chat turn takes
+  the tools pipeline by default, its request arming the tools. A context
+  under the rung is a descent, composed over a shadow; a Flesh over its
+  cap is caught up at the plan with no model, or laid over a shadow while
+  a burst holds the conversation; each image of the turn is charged
+  `journal.image_tokens`, its room taken from the Flesh; a stable prefix
+  that breaks begins an epoch, counted by its motive. A window that cannot
+  be laid is refused by name with its whole numbers, and leaves nothing
+  sent, saved or cached and no admission behind. An answer that used all
+  its room, or that llama-server says it stopped at its own limit short of
+  it, ends as `length`, said in a status line, and is not cached. The
+  context ledger keeps a journal turn's window figures in columns of their
+  own, and the engine's count of a cold window's prompt; a ledger written
+  before them gains the columns when it is opened, its rows reading them
+  empty, and a number no column can hold drops that field, never the row.
+  The llama-server head reports on its stream's last chunk the server's
+  count of the whole prompt, its cached prefix included, and of what it
+  generated, with their times, as the Ollama head does, and why it
+  stopped; an error the server reports mid-stream, or a stream that ends
+  before its last chunk, fails the chat executor's own turn instead of
+  passing a cut answer for a whole one; its request is unchanged. The
+  tools pipeline no longer completes an answer cut after its first words
+  with a fresh one, nor saves it: the turn ends on its error, the record
+  of the tools that ran kept. The core daemon ends a stream its backend
+  broke with a line naming the failure, and its client raises on that line
+  and on a stream that ends before its done chunk. A turn of no
+  conversation, and every turn with the onion off, keeps the window it
+  had. The onion arm of `scripts/drift_ab.py` sends each turn's window as
+  the journal composed it, planned within the model's window with the
+  model's counter and sent with its context, the pair tried at that
+  context; its report carries what the memory laid and the Flesh beside
+  the window's count. Documented in `docs/architecture/onion-memory.md`.
+
 - The onion memory's window is budgeted per rung of the context ladder the
   resource governor admits contexts on. `onion.yaml` holds one table of caps
   per rung, from 4096 to 32768 tokens, and one generation reserve, and the

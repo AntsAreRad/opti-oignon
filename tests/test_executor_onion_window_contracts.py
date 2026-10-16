@@ -373,7 +373,7 @@ def test_jw7_every_request_carries_the_windows_context_and_its_answers_room():
         close()
     assert _events(record, "compose")[0]["num_ctx"] == 16384 and world.rows[-1]["win_slot_unknown"] is True, (
         "a slot that lists no context leaves the bound unknown, said so in the row")
-    # The llama-server head reports no count: its answer is never cached, and is said not stored.
+    # The scripted engine reports no count: its answer is never cached, and is said not stored.
     assert "cache.put" not in w.kinds(record) and world.rows[-1]["cache_stored"] is False, w.kinds(record)
 
     # An in-process engine loads at its own context when no admission names one: with no governor, that context

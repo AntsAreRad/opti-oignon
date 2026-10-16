@@ -2139,7 +2139,9 @@ class Executor:
         """The model's window as the onion's journal is planned under: ``(window, slot context, bound read,
         engine context)``.
 
-        The model's context window (32768 when its limits are not known),
+        The model's context window as the context manager gives it -- its
+        configuration, its table, what Ollama says of the model, else its
+        default of 8192; 32768 only without the context manager --
         bounded on a llama-server engine by the smallest context of its
         slots, so the answer's room is counted against what a slot holds. A
         server that lists no slot leaves that bound unknown: the turn goes
@@ -4057,17 +4059,25 @@ class Executor:
             elapsed = time.time() - start_time
             status(f"[OK] Completed in {elapsed:.1f}s")
 
-        # A journal's answer that used all the room it kept is said by its
-        # outcome and a status line, never by words added to it, and is not
-        # cached: its key does not name the room.
+        # A journal's answer that used all the room it kept, or that the
+        # engine stopped at its own limit short of it, is said by its outcome
+        # and a status line, never by words added to it, and is not cached:
+        # its key does not name the room. An engine that says why it stopped
+        # is read by its reason, one that does not by its count.
+        _onion_reason = _onion_engine.get("done_reason")
+        _onion_generated = _onion_engine.get("eval_count")
         _onion_capped = bool(
             _journal and not _thread_error and _ledger_outcome == "completed"
-            and type(_onion_engine.get("eval_count")) is int
-            and _onion_engine["eval_count"] >= int(_onion_win.num_predict)
+            and (_onion_reason == "length" if isinstance(_onion_reason, str)
+                 else type(_onion_generated) is int and _onion_generated >= int(_onion_win.num_predict))
         )
         if _onion_capped:
             _ledger_outcome = "length"
-            status(f"[!] The answer used all its room ({_onion_win.num_predict} tokens)")
+            if type(_onion_generated) is int and _onion_generated < int(_onion_win.num_predict):
+                status(f"[!] The engine stopped the answer at its limit ({_onion_generated} of "
+                       f"{_onion_win.num_predict} tokens)")
+            else:
+                status(f"[!] The answer used all its room ({_onion_win.num_predict} tokens)")
         # An engine that reports no count cannot say the room was left: a
         # journal answer it gave is not cached either, until its head reports.
         _onion_room_unread = bool(_journal and type(_onion_engine.get("eval_count")) is not int)
@@ -4278,9 +4288,9 @@ class Executor:
         # to exact when its path answers; every other figure stays what the
         # pipeline measured.
         _ledger_final = dict(_ledger_tokens)
-        # The engine's count of a cold prefill, the journal's window laid from
-        # its first byte: on a warm one it counts only what the engine did
-        # not keep, which is no measure of the window.
+        # The engine's count of the whole prompt it was sent, its cached
+        # prefix included on either head: kept for a cold window, the window
+        # the journal laid from its first byte.
         if (_journal and _onion_win is not None and _onion_win.cold
                 and type(_onion_engine.get("prompt_eval_count")) is int):
             _ledger_final["engine_prompt_tokens"] = _onion_engine["prompt_eval_count"]

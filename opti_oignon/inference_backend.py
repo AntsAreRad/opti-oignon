@@ -18,6 +18,7 @@ Author: Leon
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -620,10 +621,11 @@ class StreamChunk:
     """Unified streaming chunk.
 
     ``extra`` carries what the engine reported on this chunk and nothing
-    else: the final Ollama chunk names its token counts and durations, an
-    earlier chunk names nothing and carries an empty dict. A consumer that
-    counts tokens reads the reported count when there is one and knows,
-    from its absence, when it is only counting chunks.
+    else: the final chunk of an Ollama or a llama-server stream names its
+    token counts and durations, and llama-server's why it stopped
+    (``done_reason``); an earlier chunk names nothing and carries an empty
+    dict. A consumer that counts tokens reads the reported count when there
+    is one and knows, from its absence, when it is only counting chunks.
     """
 
     __slots__ = ("content", "thinking", "done", "model", "extra")
@@ -2102,6 +2104,43 @@ class LlamaCppBackend(InferenceBackend):
 # llama-server backend: the external-process seam
 # ---------------------------------------------------------------------------
 
+def _server_reported(body: Any) -> dict:
+    """What one chunk of a llama-server stream reports of its answer, in the names the Ollama head's last chunk gives
+    them: the whole prompt, its cached prefix included as Ollama counts it (``prompt_eval_count``: the timings'
+    cached and evaluated tokens together, else the usage's prompt tokens), the tokens it generated (``eval_count``,
+    from its timings, else its usage), the time each took in nanoseconds, and why it stopped (``done_reason``, its
+    finish reason as it says it). A count that is no whole number, a time that is no finite number and a reason
+    that is no plain word are left out, never defaulted; a prompt the timings count only in part is not counted."""
+    out: dict[str, Any] = {}
+    if not isinstance(body, dict):
+        return out
+    timings = body.get("timings") if isinstance(body.get("timings"), dict) else {}
+    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+
+    def whole(value: Any) -> bool:
+        return type(value) is int and value >= 0
+
+    cached, evaluated = timings.get("cache_n"), timings.get("prompt_n")
+    if whole(cached) and whole(evaluated):
+        out["prompt_eval_count"] = cached + evaluated
+    elif whole(usage.get("prompt_tokens")):
+        out["prompt_eval_count"] = usage["prompt_tokens"]
+    for value in (timings.get("predicted_n"), usage.get("completion_tokens")):
+        if whole(value):
+            out["eval_count"] = value
+            break
+    for key, field in (("prompt_eval_duration", "prompt_ms"), ("eval_duration", "predicted_ms")):
+        value = timings.get(field)
+        if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+            out[key] = int(round(value * 1_000_000))
+    choices = body.get("choices")
+    first = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    reason = first.get("finish_reason")
+    if isinstance(reason, str) and reason.isascii() and reason.replace("_", "").isalnum():
+        out["done_reason"] = reason
+    return out
+
+
 class LlamaServerBackend(InferenceBackend):
     """Backend speaking to an EXTERNAL llama-server over HTTP.
 
@@ -2321,7 +2360,15 @@ class LlamaServerBackend(InferenceBackend):
         think: bool | None = None,
         images: list | None = None,
     ) -> Generator[StreamChunk, None, None]:
-        """Streaming chat through the server's SSE channel."""
+        """Streaming chat through the server's SSE channel.
+
+        The last chunk's ``extra`` is what the server reported of the answer
+        (``_server_reported``): the request is the same whatever it reports.
+        An error the server reports mid-stream, as an ``error:`` line or as a
+        chunk naming one, raises; so does a stream that ends with neither
+        its end marker nor a reason it stopped: a cut answer is never told
+        as a whole one.
+        """
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
         self._bulbe_gate()
@@ -2368,19 +2415,28 @@ class LlamaServerBackend(InferenceBackend):
             raise RuntimeError(
                 f"llama-server unreachable at {self._host}: {exc}"
             ) from exc
+        # What the server reports of its answer -- its counts, its times, why
+        # it stopped -- rides the last chunk, as the Ollama head's does; an
+        # earlier chunk carries none.
+        reported: dict[str, Any] = {}
         with resp:
             for raw_line in resp:
                 line = raw_line.decode("utf-8", errors="replace").strip()
+                if line.startswith("error:"):
+                    raise RuntimeError("llama-server reported an error mid-stream")
                 if not line.startswith("data:"):
                     continue
                 chunk_body = line[len("data:"):].strip()
                 if chunk_body == "[DONE]":
-                    yield StreamChunk(done=True, model=model)
+                    yield StreamChunk(done=True, model=model, extra=dict(reported))
                     return
                 try:
                     data = json.loads(chunk_body)
                 except ValueError:
                     continue
+                if isinstance(data, dict) and data.get("error") is not None:
+                    raise RuntimeError("llama-server reported an error mid-stream")
+                reported.update(_server_reported(data))
                 choices = data.get("choices") or []
                 delta = (
                     choices[0].get("delta", {})
@@ -2390,7 +2446,11 @@ class LlamaServerBackend(InferenceBackend):
                 content = str(delta.get("content") or "")
                 if content:
                     yield StreamChunk(content=content, model=model)
-        yield StreamChunk(done=True, model=model)
+        # No end marker: the answer is whole only when the server said why it
+        # stopped.
+        if "done_reason" not in reported:
+            raise RuntimeError("llama-server's stream ended before its last chunk")
+        yield StreamChunk(done=True, model=model, extra=dict(reported))
 
 
 # ---------------------------------------------------------------------------
