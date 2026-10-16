@@ -28,9 +28,18 @@ its rung, or a layer shrinks as the rung grows, is refused by name. A caller
 that names no rung composes under ``home_rung``'s table without the system
 prompt and the tail, which it does not lay, nor the room they hold: the
 window before rungs, cap for cap.
+
+The files the onion reads, ``onion.yaml`` and the governor's, are parsed
+once for each text of the file (``read_onion``): every read reads the file
+as the loaders read it before, and a text the kept parse was made from is
+not parsed again. Every loader of the onion -- the budgets, the journal and
+the ladder here, the gate, the queue's ladder and the librarian's own --
+reads that parse, each with a copy of its own, and a file that does not
+read is refused as each loader refused it.
 """
 
 import re
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -209,6 +218,130 @@ class Budgets:
         return replace(home, window=home.window - home.system - home.tail, system=0, tail=0)
 
 
+# The one parse kept of each file the onion reads, by the file's absolute path, the last ``_PARSES`` of them, keyed
+# on the text it was made from. Every read reads the file by the call each loader made before any parse was kept, so
+# a read that fails fails there, as it did; a text equal to the kept one is served the kept parse, and any other is
+# parsed, and kept unless the parse refused anything: a refusal is never kept, and the next read parses again. Equal
+# text is a test no clock, attribute cache or file system can get wrong, and nothing of the file but its text is
+# read. One reload at a time, the kept parse looked for again under the lock; a read of a kept text takes no lock.
+_PARSES = 8
+_parses = {}
+_parse_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _Parse:
+    """One parse of a file: the text it was made from (``key``), and what each reader takes of it -- the document
+    ``yaml.safe_load`` builds, and the keys named twice that the budgets' and the journal's readers find on the
+    composed node -- each as ``(value, refusal)``."""
+
+    key: str
+    document: tuple
+    budgets: tuple
+    journal: tuple
+
+    @property
+    def whole(self):
+        """Whether every reader reads it: no refusal on the way."""
+        return all(refusal is None for _value, refusal in (self.document, self.budgets, self.journal))
+
+    def value(self):
+        """The document, a copy of its own for each caller; raises what refused it."""
+        import copy
+
+        value, refusal = self.document
+        if refusal is not None:
+            raise refusal
+        return copy.deepcopy(value)
+
+    def twice(self, reader):
+        """The keys ``reader`` -- ``budgets`` or ``journal`` -- finds named twice, a new list; raises what refused it."""
+        found, refusal = getattr(self, reader)
+        if refusal is not None:
+            raise refusal
+        return list(found)
+
+
+def _attempt(call, *args):
+    """``(call(*args), None)``, or ``(None, what it raised)``."""
+    try:
+        return call(*args), None
+    except Exception as exc:  # noqa: BLE001 - kept, and raised by the reader that reads it
+        return None, exc
+
+
+def _read_twice(check, root, name):
+    """``check`` read on ``root`` with a constructor of its own: a key one reader cannot build stops no other."""
+    import yaml
+
+    loader = yaml.SafeLoader("")
+    try:
+        return check(loader, root, name)
+    finally:
+        loader.dispose()
+
+
+def _parse(text, name, key=None):
+    """``text`` composed once and read by every reader of the onion: the keys named twice read off the composed
+    node first, the budgets' and the journal's -- a merge key rewrites the node as the document is built -- then the
+    document; a text the reader or the composer refuses is refused to every reader."""
+    import yaml
+
+    try:
+        loader = yaml.SafeLoader(text)
+    except Exception as exc:  # noqa: BLE001 - kept, and raised by the reader that reads it
+        refused = (None, exc)
+        return _Parse(key, refused, refused, refused)
+    try:
+        root, refusal = _attempt(loader.get_single_node)
+        if refusal is not None:
+            refused = (None, refusal)
+            return _Parse(key, refused, refused, refused)
+        budgets = _attempt(_read_twice, _named_twice, root, name)
+        journal = _attempt(_read_twice, _journal_twice, root, name)
+        document = _attempt(lambda: loader.construct_document(root) if root is not None else None)
+    finally:
+        loader.dispose()
+    return _Parse(key, document, budgets, journal)
+
+
+def _parsed(target):
+    """The parse of the file at ``target`` as it reads now: the one kept for its text, or a new one.
+
+    The file is read as each loader read it before any parse was kept, and
+    its text compared with the one the kept parse was made from: a parse is
+    made only for a text none was kept for, and kept only when it refused
+    nothing.
+    """
+    import os
+
+    target = Path(target)
+    text = target.read_text(encoding="utf-8")
+    spelled = os.path.abspath(target)
+    key = text
+    held = _parses.get(spelled)
+    if held is not None and held.key == key:
+        return held
+    with _parse_lock:
+        held = _parses.get(spelled)
+        if held is not None and held.key == key:
+            return held
+        parse = _parse(text, target.name, key)
+        _parses.pop(spelled, None)
+        if parse.whole:
+            _parses[spelled] = parse
+            while len(_parses) > _PARSES:
+                _parses.pop(next(iter(_parses)))
+        return parse
+
+
+def read_onion(path=None):
+    """The onion's file -- ``onion.yaml``, or the file at ``path`` -- as ``yaml.safe_load`` reads it, from the one
+    parse kept for the file's text, and refused as that read refuses it. Every caller has a copy of its own: what
+    one does to it reaches no other caller, nor the next read."""
+    return _parsed(path or _CONFIG).value()
+
+
 def read_ladder(path=None):
     """The context ladder of the governor's file, ascending, and "" -- or None and why it cannot be read.
 
@@ -218,13 +351,11 @@ def read_ladder(path=None):
     it cannot read as a positive integer; it truncates a value it can read
     as a number (4096.0, "4096", 4096.7); it keeps a rung named twice -- and
     the onion refuses each of these by name: a budget for a ladder nobody
-    wrote is a guess.
+    wrote is a guess. The file is read from its one parse (``_parsed``).
     """
-    import yaml
-
     target = Path(path or _GOVERNOR_CONFIG)
     try:
-        raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        raw = _parsed(target).value() or {}
     except Exception as exc:  # noqa: BLE001 - said, and refused by name
         return None, f"ctx_ladder unreadable in {target.name}: {type(exc).__name__}"
     ladder = raw.get("ctx_ladder") if isinstance(raw, dict) else None
@@ -266,16 +397,10 @@ def _named_twice(loader, root, name):
 
 def load_budgets(path=None, *, governor_path=None):
     """The budgets of ``onion.yaml``, one per rung of the governor's ladder; refused by name, every reason at once."""
-    import yaml
-
     target = Path(path or _CONFIG)
-    loader = yaml.SafeLoader(target.read_text(encoding="utf-8"))
-    try:
-        root = loader.get_single_node()
-        errors = _named_twice(loader, root, target.name)
-        raw = (loader.construct_document(root) if root is not None else None) or {}
-    finally:
-        loader.dispose()
+    parse = _parsed(target)
+    errors = parse.twice("budgets")
+    raw = parse.value() or {}
     if not isinstance(raw, dict):
         raise BudgetError(f"{target.name} holds no mapping: no budget to read", motive="config")
     ladder, why = read_ladder(governor_path)
@@ -1109,23 +1234,23 @@ def _child(loader, node, name):
     return held
 
 
+def _journal_twice(loader, root, name):
+    """The keys named twice where the journal is read: ``journal`` at the top of the file, then in the section, in
+    its ``tail_shares`` and in its ``catch_up``, read off the composed node in that order."""
+    found = _twice(loader, root, name, only="journal")
+    node = _child(loader, root, "journal")
+    found.extend(_twice(loader, node, "journal"))
+    found.extend(_twice(loader, _child(loader, node, "tail_shares"), "journal.tail_shares"))
+    found.extend(_twice(loader, _child(loader, node, "catch_up"), "journal.catch_up"))
+    return found
+
+
 def load_journal(path=None):
     """The ``journal`` section of ``onion.yaml``; refused by name, every reason at once."""
-    import yaml
-
     target = Path(path or _CONFIG)
-    loader = yaml.SafeLoader(target.read_text(encoding="utf-8"))
-    errors = []
-    try:
-        root = loader.get_single_node()
-        errors.extend(_twice(loader, root, target.name, only="journal"))
-        node = _child(loader, root, "journal")
-        errors.extend(_twice(loader, node, "journal"))
-        errors.extend(_twice(loader, _child(loader, node, "tail_shares"), "journal.tail_shares"))
-        errors.extend(_twice(loader, _child(loader, node, "catch_up"), "journal.catch_up"))
-        raw = (loader.construct_document(root) if root is not None else None) or {}
-    finally:
-        loader.dispose()
+    parse = _parsed(target)
+    errors = parse.twice("journal")
+    raw = parse.value() or {}
     section = raw.get("journal") if isinstance(raw, dict) else None
     if not isinstance(section, dict):
         raise BudgetError(f"{target.name} has no journal section: no journal to lay", motive="config")

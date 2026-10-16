@@ -243,13 +243,23 @@ def _reporters(section):
     return frozenset(words)
 
 
+def _read_onion(path):
+    """The onion's file at ``path`` as ``yaml.safe_load`` reads it: from the composer's one parse of the file as it
+    stands, a copy of its own; read here, as before that parse was kept, where no composer can be imported."""
+    try:
+        from .composer import read_onion
+    except ImportError:
+        import yaml
+
+        return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return read_onion(path)
+
+
 def load_gate(path=None):
     """The gate of ``onion.yaml`` with its lexicon, code threshold, reporters, bounds and directives, refused if out of range or malformed."""
-    import yaml
-
     from .probes import DirectivesError, LexiconError, build_directives, build_lexicon
 
-    raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
+    raw = _read_onion(path or _CONFIG) or {}
     try:
         gate = Gate(
             decision_threshold=float(raw["gate"]["decision_threshold"]),
@@ -1247,9 +1257,7 @@ class Ladder:
 
 def load_ladder(path=None):
     """The ladder from ``onion.yaml``, refused by name when a key is missing, unknown or out of range."""
-    import yaml
-
-    raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
+    raw = _read_onion(path or _CONFIG) or {}
     section = raw.get("queue")
     if not isinstance(section, dict):
         raise GateError("queue: the section is missing or not a mapping")

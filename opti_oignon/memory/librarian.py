@@ -466,11 +466,22 @@ class LibrarianConfig:
         return errors
 
 
+def _read_onion(path):
+    """The onion's file at ``path`` as ``yaml.safe_load`` reads it: from the composer's one parse of the file as it
+    stands, a copy of its own; read here, as before that parse was kept, where no composer can be imported -- the
+    switch reads without one."""
+    try:
+        from .composer import read_onion
+    except ImportError:
+        import yaml
+
+        return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return read_onion(path)
+
+
 def load_config(path=None):
     """The librarian's configuration from ``onion.yaml``, refused when malformed."""
-    import yaml
-
-    raw = yaml.safe_load(Path(path or _CONFIG).read_text(encoding="utf-8")) or {}
+    raw = _read_onion(path or _CONFIG) or {}
     section = raw.get("librarian") or {}
     persistence = raw.get("persistence") or {}
     try:
