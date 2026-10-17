@@ -394,7 +394,18 @@ final called.
 
 ## The librarian
 
-Off by default (`enabled: false`). Switched on, the executor offers each
+Off by default (`enabled: false`). A machine switches it on in
+`opti_oignon/config/local.yaml`, which git ignores, so no tracked file
+changes:
+
+```yaml
+onion:
+  enabled: true
+```
+
+Only a YAML boolean counts there, and it wins over the shipped switch both
+ways; anything else in that file leaves the shipped switch, said once in the
+log. Switched on, the executor offers each
 saved conversation to the librarian beside the auto-capture, and so does
 every pipeline that saves its own turn, on the journal path; the librarian
 mirrors it, and when it has grown by `min_new_turns`, or once a journal

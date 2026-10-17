@@ -11,6 +11,12 @@ package costs.
 
 ### Added
 
+- A machine's own switches, in `opti_oignon/config/local.yaml`, which git
+  ignores: `onion: {enabled: true}` turns the onion memory on and
+  `run_journal: {enabled: true}` the run journal, with no tracked file
+  changed. Only a YAML boolean counts, and it wins over the shipped switch
+  both ways; anything else leaves the shipped switch and is said once. The
+  run journal never turns on over a shipped file that cannot be read.
 - The injection bench writes a trace on request (`--trace PATH`): one line
   of JSON per run of its rows and of its memory injection, written and
   flushed as the run ends, with the setting, the task and the injection,

@@ -479,14 +479,64 @@ def _read_onion(path):
     return read_onion(path)
 
 
+_LOCAL_SAID: set = set()
+
+
+def _local_switch(shipped, section):
+    """The machine's own switch for ``section``, from ``local.yaml`` beside the shipped file: True, False or None.
+
+    ``local.yaml`` is never committed (git ignores it): it holds the
+    switches a machine sets for itself, ``{section: {enabled: true}}``, so
+    turning a feature on or off changes no tracked file. Only a YAML boolean
+    counts. A missing file, or one with no such section, gives None; one
+    that cannot be read, does not parse or holds anything else for the
+    section gives None too, said once for each distinct reason. The twin of
+    this reader lives in opti_oignon/run_journal.py; both read the same file the same way.
+    """
+    local = Path(shipped).with_name("local.yaml")
+    try:
+        text = local.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        reason = f"cannot be read ({type(exc).__name__})"
+    else:
+        try:
+            import yaml
+
+            data = yaml.safe_load(text)
+        except Exception as exc:  # noqa: BLE001 - a local file that does not parse switches nothing, and is said
+            reason = f"does not parse ({type(exc).__name__})"
+        else:
+            if data is None or (isinstance(data, dict) and data.get(section) is None):
+                return None
+            entry = data.get(section) if isinstance(data, dict) else None
+            if isinstance(entry, dict) and type(entry.get("enabled")) is bool:
+                return entry["enabled"]
+            reason = f"holds no boolean {section}.enabled"
+    if (str(local), section, reason) not in _LOCAL_SAID:
+        _LOCAL_SAID.add((str(local), section, reason))
+        logger.warning("%s %s: the shipped switch of %s stands", local.name, reason, section)
+    return None
+
+
 def load_config(path=None):
-    """The librarian's configuration from ``onion.yaml``, refused when malformed."""
+    """The librarian's configuration from ``onion.yaml``, refused when malformed.
+
+    The shipped file's switch gives way to the machine's own in ``local.yaml``
+    (``onion: {enabled: true}``), read only for the shipped file: a path given
+    is read as it stands.
+    """
     raw = _read_onion(path or _CONFIG) or {}
     section = raw.get("librarian") or {}
     persistence = raw.get("persistence") or {}
+    enabled = bool(raw.get("enabled", False))
+    if path is None:
+        local = _local_switch(_CONFIG, "onion")
+        enabled = enabled if local is None else local
     try:
         config = LibrarianConfig(
-            enabled=bool(raw.get("enabled", False)),
+            enabled=enabled,
             model=str(section["model"]),
             keep_alive=str(section["keep_alive"]),
             min_new_turns=int(section["min_new_turns"]),

@@ -313,6 +313,9 @@ def settings(path: str | Path | None = None) -> dict[str, Any]:
     a whole number within ``BOUNDS``; any other value present is refused by
     name and its default kept. Cached until the file changes (its
     modification time, size and inode), so a run's start costs one stat.
+    The shipped file's switch gives way to the machine's own in
+    ``local.yaml`` (``run_journal: {enabled: true}``), read at each call and
+    only for the shipped file, never over one that cannot be read.
     """
     file = Path(path) if path is not None else Path(CONFIG_FILE)
     try:
@@ -322,10 +325,57 @@ def settings(path: str | Path | None = None) -> dict[str, Any]:
         key = (str(file), None)
     entry = _SETTINGS["entry"]
     if entry is not None and entry[0] == key:
-        return dict(entry[1])
-    value = _read_settings(file) if key[1] is not None else dict(DEFAULTS, state="off")
-    _SETTINGS["entry"] = (key, value)
-    return dict(value)
+        value = dict(entry[1])
+    else:
+        value = _read_settings(file) if key[1] is not None else dict(DEFAULTS, state="off")
+        _SETTINGS["entry"] = (key, value)
+        value = dict(value)
+    if path is None and value["state"] != "unreadable":
+        local = _local_switch(CONFIG_FILE, "run_journal")
+        if local is not None:
+            value["enabled"], value["state"] = local, ("on" if local else "off")
+    return value
+
+
+_LOCAL_SAID: set = set()
+
+
+def _local_switch(shipped, section):
+    """The machine's own switch for ``section``, from ``local.yaml`` beside the shipped file: True, False or None.
+
+    ``local.yaml`` is never committed (git ignores it): it holds the
+    switches a machine sets for itself, ``{section: {enabled: true}}``, so
+    turning a feature on or off changes no tracked file. Only a YAML boolean
+    counts. A missing file, or one with no such section, gives None; one
+    that cannot be read, does not parse or holds anything else for the
+    section gives None too, said once for each distinct reason. The twin of
+    this reader lives in opti_oignon/memory/librarian.py; both read the same file the same way.
+    """
+    local = Path(shipped).with_name("local.yaml")
+    try:
+        text = local.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        reason = f"cannot be read ({type(exc).__name__})"
+    else:
+        try:
+            import yaml
+
+            data = yaml.safe_load(text)
+        except Exception as exc:  # noqa: BLE001 - a local file that does not parse switches nothing, and is said
+            reason = f"does not parse ({type(exc).__name__})"
+        else:
+            if data is None or (isinstance(data, dict) and data.get(section) is None):
+                return None
+            entry = data.get(section) if isinstance(data, dict) else None
+            if isinstance(entry, dict) and type(entry.get("enabled")) is bool:
+                return entry["enabled"]
+            reason = f"holds no boolean {section}.enabled"
+    if (str(local), section, reason) not in _LOCAL_SAID:
+        _LOCAL_SAID.add((str(local), section, reason))
+        logger.warning("%s %s: the shipped switch of %s stands", local.name, reason, section)
+    return None
 
 
 def _read_settings(file: Path) -> dict[str, Any]:

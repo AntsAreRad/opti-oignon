@@ -58,6 +58,17 @@ retention_days: 30
 It is on only when `enabled` is the YAML boolean `true`: a missing file or
 key, the string `"true"` or `1` leave it off, and so does a file that cannot
 be read (said once in the log). Off, a run creates and writes nothing.
+A machine can switch it on without changing that tracked file, in
+`opti_oignon/config/local.yaml`, which git ignores:
+
+```yaml
+run_journal:
+  enabled: true
+```
+
+Only a YAML boolean counts there; it wins over the shipped switch both ways,
+is read at each run, and never over a shipped file that cannot be read,
+which keeps the journal off.
 Turning it off is a pause: what is kept stays until its retention ends, and a
 run going when you turn it off is not written.
 

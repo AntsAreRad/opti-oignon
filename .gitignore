@@ -132,3 +132,6 @@ data/sandbox_exports/
 opti_oignon/native/*.so
 rust/oo_core/target/
 rust/allium/target/
+
+# A machine's own switches (the onion memory, the run journal), never committed.
+opti_oignon/config/local.yaml
