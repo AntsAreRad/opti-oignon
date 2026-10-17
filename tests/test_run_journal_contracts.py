@@ -103,6 +103,10 @@ how it keeps it, and that it is never in a run's way:
     security routes and the security mode replace security.yaml in one
     move, its mode kept and no temp left beside it, so a reader never
     finds it empty or half written.
+  * RJ16 -- THE DIRECTORY COMES FROM THE CONFIGURATION MODULE: with no
+    directory given, the journal lives in the configuration module's data
+    directory, though the package exports ``config`` as the settings object,
+    which holds none -- as the real package does.
 
 The journal, the loop, the dispatch, the gates, the tool registry and the
 agent route are loaded through the shared isolation window over a temporary
@@ -154,6 +158,7 @@ BUDGET_S = {
     "test_rj13_the_benchs_calls_carry_the_trust_a_journaled_runs_do": 15.0,
     "test_rj14_the_server_tends_the_journal_with_nothing_else_to_do": 30.0,
     "test_rj15_the_security_settings_the_journal_reads_are_written_whole": 10.0,
+    "test_rj16_the_directory_comes_from_the_configuration_module": 5.0,
 }
 
 _RJ = "opti_oignon.run_journal"
@@ -1607,3 +1612,25 @@ def test_rj15_the_security_settings_the_journal_reads_are_written_whole(tmp_path
     assert by_route == (True, 0o640, {"encryption": {"enabled": True}, "security_mode": "bulbe",
                                       "headers": {"x_frame_options": "DENY"}}, ["security.yaml"]), (
         "the security routes replace the file whole, its mode kept", by_route)
+
+
+def test_rj16_the_directory_comes_from_the_configuration_module(tmp_path):
+    """RJ16: with no directory given, the journal lives in the configuration module's data directory.
+
+    The package exports ``config`` as the settings object, which holds no
+    DATA_DIR, beside the module of the same name that does; the window
+    binds the seeded module on the stand-in package, so the package's own
+    shape is laid back on it here before the journal looks for its home.
+    """
+    package = source("__init__.py").read_text(encoding="utf-8")
+    assert '"config": (".config", "config")' in package, (
+        "the package exports config as the settings object", "the shape this contract lays back changed")
+    rj, restore, directory = _journal_window(tmp_path)
+    try:
+        rj.DATA_DIR = None
+        sys.modules["opti_oignon"].config = SimpleNamespace(settings="the package's settings object, no DATA_DIR")
+        assert rj._base() == (tmp_path / "data").resolve(), (
+            "the journal's home is the configuration module's data directory", rj._base())
+        assert not directory.exists(), ("finding its home creates nothing", sorted(os.listdir(tmp_path / "data")))
+    finally:
+        restore()

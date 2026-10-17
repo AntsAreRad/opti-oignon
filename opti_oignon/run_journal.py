@@ -134,8 +134,8 @@ SUBKEY_LABEL = b"oo-run-journal-v1"
 
 CONFIG_FILE = Path(__file__).resolve().parent / "config" / "run_journal.yaml"
 DIRNAME = "run_journal"
-# The data directory the journal lives in; None reads the package's
-# (``config.DATA_DIR``) when it is first needed.
+# The data directory the journal lives in; None reads the configuration
+# module's (``opti_oignon.config.DATA_DIR``) when it is first needed.
 DATA_DIR: Path | None = None
 
 DEFAULTS: dict[str, Any] = {
@@ -370,9 +370,11 @@ def _cutoff(retention: int) -> date:
 def _base() -> Path:
     base = DATA_DIR
     if base is None:
-        from opti_oignon import config
+        # The configuration MODULE's directory: the package exports ``config``
+        # as the settings object, which holds no DATA_DIR.
+        from opti_oignon.config import DATA_DIR as configured
 
-        base = config.DATA_DIR
+        base = configured
     return Path(base).resolve()
 
 
