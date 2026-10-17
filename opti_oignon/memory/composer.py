@@ -759,9 +759,10 @@ _HEADER_REST_RE = {
 }
 _CORE_HEADER_REDACTED = "[redacted-core-header]"
 # The kinds of source a turn's tail brings, in the order the current turn's
-# message lays them, each held to its share of the tail's cap.
-TAIL_KINDS = ("memory", "rag", "web")
-_SOURCE = {"memory": "memory", "rag": "file", "web": "web"}
+# message lays them, each held to its share of the tail's cap: the memory, the
+# retrieval, the web results, and the calls a tool turn's earlier turns made.
+TAIL_KINDS = ("memory", "rag", "web", "tool")
+_SOURCE = {"memory": "memory", "rag": "file", "web": "web", "tool": "tool"}
 
 
 @dataclass(frozen=True)
@@ -946,9 +947,10 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     is the user's. The Flesh follows in its own roles (``flesh``: key, role,
     pieces, label), each document in a file envelope at its place, its words
     bare. The last message holds the tail (``tail``: kind, key, text, frame,
-    label, the memory framed as data) -- memory, retrieval, web, each cut
-    to whole items within its share of the tail's cap (``shares``) and
-    counted in its envelope -- then the current turn (``turn``: pieces,
+    label, the memory framed as data) -- memory, retrieval, web, a tool
+    turn's earlier calls, each cut to whole items within its share of the
+    tail's cap (``shares``), what it left out counted, and counted in its
+    envelope -- then the current turn (``turn``: pieces,
     label) laid as the Flesh lays a turn, its documents held to the
     document share. Every bare part is defanged, and a Core header forged in
     any part but the Core is neutralized, and one forged across the joint

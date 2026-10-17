@@ -1771,7 +1771,7 @@ REFUSAL_MOTIVES = ("system", "core", "receipts", "peels", "flesh", "tail", "turn
 EPOCH_MOTIVES = ("first", "model", "rung", "system", "core", "proposal", "receipt", "take_back", "withdrawn",
                  "eviction", "peels_full")
 # The labels the sources a turn brings carry when their caller names none.
-_TAIL_LABELS = {"rag": (("retrieved",), ()), "web": (("web",), ())}
+_TAIL_LABELS = {"rag": (("retrieved",), ()), "web": (("web",), ()), "tool": (("tool",), ())}
 
 
 @dataclass(frozen=True)
@@ -1999,11 +1999,14 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     sources the turn brings, a
     sequence of mappings, each ``{"kind": "rag", "items": [(text, label),
     ...]}`` or ``{"kind": "web", "items": [...], "suffix": sentence}``, the
-    suffix the bare sentence laid after the web's envelope (its citation);
-    ``label`` is ``(context, lineage)``, two sequences of strings, or None
-    for the kind's own (``retrieved`` or ``web``, no lineage). A tail of
-    any other shape is refused ``tail``; images that are no whole number,
-    ``turn``; a store that cannot save the mirror, ``store``.
+    suffix the bare sentence laid after the web's envelope (its citation),
+    or ``{"kind": "tool", "items": [...]}``, the calls a tool turn's earlier
+    turns made, newest first, each one item; ``label`` is ``(context,
+    lineage)``, two sequences of strings, or None for the kind's own
+    (``retrieved``, ``web`` or ``tool``, no lineage). An earlier call whose
+    lineage holds a source the user withdrew (``withdrawn``) is withheld. A
+    tail of any other shape is refused ``tail``; images that are no whole
+    number, ``turn``; a store that cannot save the mirror, ``store``.
 
     ``tools``, when given, makes the turn a tool turn: the texts of the
     schemas it may send beside its messages, each counted with the turn's
@@ -2081,6 +2084,9 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
     sources = _tail_sources(tail)
     if sources is None:
         return Plan(refusal=Refusal("tail"))
+    # An earlier call standing on a source the user withdrew is withheld, as a peel or a turn on one is.
+    gone = frozenset(withdrawn or ())
+    sources = tuple(source for source in sources if not (source[0] == "tool" and gone & set(source[4][1])))
     schemas = tuple(tools) if isinstance(tools, (list, tuple)) else None
     if schemas is None or not all(isinstance(text, str) and text for text in schemas):
         return Plan(refusal=Refusal("tools"))
@@ -2502,8 +2508,8 @@ def _shadowed(held, costs, room):
 
 def tail_room(model_window=None, *, budgets=None, journal=None):
     """What each kind of source a turn brings may take, in tokens, at the conversation's own rung -- the largest
-    within ``home_rung`` and the model's window -- by kind (``memory``, ``rag``, ``web``, ``document``): the
-    caps a window cuts them to, so a caller fetches no more than fits. Empty when no rung is within the model's
+    within ``home_rung`` and the model's window -- by kind (``memory``, ``rag``, ``web``, ``tool``, ``document``):
+    the caps a window cuts them to, so a caller fetches no more than fits. Empty when no rung is within the model's
     window or a configuration does not read. Never raises."""
     from .composer import layer_cap, load_budgets, load_journal
 

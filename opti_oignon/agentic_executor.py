@@ -65,6 +65,13 @@ try:
 except ImportError:
     _ToolLoop = None
     _journal_on = None
+# What follows the save a pipeline makes of a turn it answered itself: on the
+# journal path, the turn offered to the memory's write side. Imported on its
+# own: an executor without it offers nothing after a pipeline's save.
+try:
+    from .executor import offer_saved_turn as _offer_saved_turn
+except ImportError:
+    _offer_saved_turn = None
 
 # Conditional import of the ToolExecutor
 try:
@@ -809,6 +816,34 @@ def _tool_provenance(turn: _Turn):
     except Exception as exc:
         logger.warning(f"the turn's typed parts cannot be read ({exc}); none of its arguments is endorsed")
         return _provenance.TurnProvenance(demand=turn.demand)
+
+
+# What a pipeline that builds its own context says of it when the onion's
+# journal lays the conversation: the window is not its own.
+_OUTSIDE_WINDOW = {
+    "reasoning": "[!] The reasoning engine builds its own context (the onion's window is not used)",
+    "consensus": "[!] The consensus engine builds its own context (the onion's window is not used)",
+    "self_correct": "[!] The self-correction pass builds its own context (the onion's window is not used)",
+}
+# What self-correct says of a first answer whose stream failed: fixed words,
+# never the engine's.
+_DRAFT_FAILED = "[ERR] The first answer failed before it was whole"
+
+
+def _no_answer(results: dict, journal: bool) -> str | None:
+    """Why a chat-executor call a pipeline drafts through gave it no answer to build on, or None: ``failed``, its
+    stream failed, before or after its first words, on either path; on the journal path, ``refused``, its window
+    refused by name, ``admission``, its admission refused, or ``offline``, the turn queued, its words the queue's
+    notice."""
+    if results.get("stream_failed"):
+        return "failed"
+    if journal and results.get("step_error"):
+        return "refused"
+    if journal and results.get("admission_refused"):
+        return "admission"
+    if journal and results.get("offline_queued"):
+        return "offline"
+    return None
 
 
 class AgenticExecutor:
@@ -1819,6 +1854,9 @@ class AgenticExecutor:
                     calls = list(ran)
                     self._last_tool_calls = calls
                     turn.results["tool_calls"] = calls
+                    # A stream that failed after its first words, told to the
+                    # run: a pipeline step ends failed on it.
+                    turn.results["stream_failed"] = True
                     self._record_tool_calls(conversation_id, calls)
                     logger.error(f"Tools pipeline answer cut: {exc}")
                     yield f"\n\n[ERR] Error: {exc}"
@@ -1837,7 +1875,7 @@ class AgenticExecutor:
                 if turn.stopped():
                     return
                 self._save_to_conversation(
-                    conversation_id, message, full_response, model, turn=turn,
+                    conversation_id, message, full_response, model, turn=turn, journal=False,
                 )
                 return
 
@@ -1874,7 +1912,7 @@ class AgenticExecutor:
 
             # Save to the conversation when needed
             self._save_to_conversation(
-                conversation_id, message, result.response, model, turn=turn,
+                conversation_id, message, result.response, model, turn=turn, journal=False,
             )
 
         except Exception as e:
@@ -1895,6 +1933,12 @@ class AgenticExecutor:
             logger.debug(f"Onion switch unreadable, read off: {exc}")
             return False
 
+    def journal_lays(self, conversation_id: str | None) -> bool:
+        """Whether the onion's journal lays this conversation's turns, as this executor reads the switch for a turn
+        of its own (``_journal_switch``): for a caller that runs its turns through it, as the pipeline runner does,
+        which then gives its own admission back."""
+        return self._journal_switch(conversation_id)
+
     @staticmethod
     def _routed_to(routing: Any, model: str) -> Any:
         """The routing with ``model`` as its model, the caller's left as it was."""
@@ -1914,6 +1958,7 @@ class AgenticExecutor:
         model: str,
         manifest,
         turn: _Turn,
+        persist: bool = True,
     ) -> Generator:
         """The tools pipeline on a turn the onion's journal lays: one ``Executor.execute`` call.
 
@@ -1921,13 +1966,20 @@ class AgenticExecutor:
         admits it once, composes it once and runs the tool executor's rounds
         under it (``tool_loop``), the switch it was read with handed on; the
         conversation's last rows and the native replay of earlier calls are
-        never read here. It saves the turn and offers it to the capture and
-        the curation; this pipeline saves nothing of its own. Each call is
-        recorded for the next turn as it runs, so a turn stopped, closed or
-        failed keeps the record of the tools that ran. A failure is said in
-        fixed words, never completed by another pipeline.
+        never read here. The calls the conversation's earlier turns made are
+        handed with the loop (``ToolLoop.prior``): the window's tail lays them
+        as data, newest first. The chat executor saves the turn and offers it
+        to the capture and the curation; this pipeline saves nothing of its
+        own, and handed ``persist`` False -- the tool phase of think and
+        tools, whose pipeline saves the turn once -- the chat executor saves
+        nothing either. Each call is recorded for the next turn as it runs,
+        so a turn stopped, closed or failed keeps the record of the tools
+        that ran. A failure is said in fixed words, never completed by
+        another pipeline. Returns whether the chat executor's call ended
+        without raising.
         """
         ran: list = []
+        prior = tuple(self.get_tool_history(conversation_id))
 
         def _on_call(call) -> None:
             ran.append(call)
@@ -1935,7 +1987,7 @@ class AgenticExecutor:
             turn.emit_tool_call(call)
 
         loop = _ToolLoop(executor=self._tool_executor, manifest=manifest, approval_fn=approval_fn,
-                         provenance=_tool_provenance(turn), on_tool_call=_on_call)
+                         provenance=_tool_provenance(turn), on_tool_call=_on_call, prior=prior)
         gen = self._executor.execute(
             question=message,
             routing=self._routed_to(routing, model),
@@ -1949,6 +2001,7 @@ class AgenticExecutor:
             run=turn,
             journal=True,
             tool_loop=loop,
+            **({} if persist else {"persist": False}),
         )
         try:
             for chunk in gen:
@@ -1959,13 +2012,17 @@ class AgenticExecutor:
             raise
         except Exception as exc:
             logger.error(f"Tools pipeline error on the journal: {type(exc).__name__}")
+            # Told to the run, as a stream that failed is: no answer stands.
+            turn.results["stream_failed"] = True
             yield "\n\n[ERR] The tools pipeline failed"
+            return False
         finally:
             calls = list(ran)
             self._last_tool_calls = calls
             turn.results["tool_calls"] = calls
             hints = turn.results.get("verification_hints", 0)
             self._last_verification_hints = hints if type(hints) is int else 0
+        return True
 
     def _execute_think_tools_pipeline(
         self,
@@ -1985,7 +2042,28 @@ class AgenticExecutor:
         approval_fn is the per-invocation tool-approval gate,
         threaded from execute() into the tools phase. A turn stopped during
         phase 1 runs no tool phase; a turn stopped during phase 2 keeps the
-        record of the tools that ran and saves nothing.
+        record of the tools that ran and saves nothing. A first pass whose
+        stream failed, before or after its first words, gave no answer: no
+        tool phase runs and nothing is saved, its error said as the chat
+        executor said it.
+
+        With the onion on, both phases are laid by its journal: the switch
+        is read once for the turn and handed to both chat-executor calls, and
+        the tool phase runs as the tools pipeline does on the journal
+        (``_execute_tools_journal``), its own window and its rounds inside it,
+        the chat executor saving nothing. Its answer is held until its loop
+        ends and shown, as off the journal, only when a tool ran. A first
+        pass that ends by name -- a window or an admission refused, a stream
+        that failed, a turn queued offline -- ends the turn there, said as
+        the chat executor said it, and nothing is saved. A tool phase that
+        ends so -- or whose chat-executor call raised -- is said apart, after
+        a blank line, and joins nothing: the first pass is saved alone,
+        flagged ``assistant``, its report left on the run for a runner to end
+        the step by. The turn is saved once, by this pipeline, with the label
+        the run reports -- the union of the labels of the requests sent on
+        it, both phases' among them -- flagged ``assistant+tool`` only when
+        the tool phase's answer stands in it, then offered once to the
+        capture and once to the curation.
         """
         turn = turn if turn is not None else self._legacy_turn()
         # Phase 1: direct call with think mode for the reasoning pass
@@ -1994,6 +2072,14 @@ class AgenticExecutor:
         # model; the reasoning pass (Phase 1, via routing) stays on the selected
         # model to preserve reasoning quality.
         model = model_override or getattr(routing, 'model', self._default_model)
+        # The onion's switch, read once for this turn now its stop is live:
+        # both phases are handed it.
+        journal = self._journal_switch(conversation_id)
+        # Whether the first pass's stream failed, or its turn was queued, is
+        # its own call's to say: a run a pipeline runner hands on may carry an
+        # earlier step's.
+        for key in ("stream_failed", "offline_queued"):
+            turn.results.pop(key, None)
 
         try:
             # persist=False: this pipeline owns the final save below, after the
@@ -2012,6 +2098,7 @@ class AgenticExecutor:
                 persist=False,
                 capability_block=_manifest_prompt_block(manifest),
                 run=turn,
+                **({"journal": True} if journal else {}),
             )
             for chunk in gen:
                 if chunk:
@@ -2030,6 +2117,14 @@ class AgenticExecutor:
 
         if turn.stopped():
             return
+        # A first pass that gave no answer runs no tool phase, and nothing is
+        # saved: its error was said as it came.
+        if _no_answer(turn.results, journal) is not None:
+            return
+        # The first pass's code verification, the turn's: the tool phase's own
+        # chat-executor call, on the journal, verifies nothing of its own.
+        own = turn.results.get("verification_results") or []
+        flagged = False
 
         # Phase 2: run the tools. With a capability manifest the phase is
         # armed by the manifest itself (the model decides against the full
@@ -2041,9 +2136,38 @@ class AgenticExecutor:
             )
             if self.tool_executor_available else False
         )
-        if _phase2_tools_armed(
+        armed = _phase2_tools_armed(
             self.tool_executor_available, _keyword_verdict, manifest,
-        ):
+        )
+        if armed and journal:
+            held, whole = [], True
+            tools = self._execute_tools_journal(
+                message, routing, conversation_id, on_status, approval_fn=approval_fn, model=model,
+                manifest=manifest, turn=turn, persist=False,
+            )
+            while True:
+                try:
+                    chunk = next(tools)
+                except StopIteration as done:
+                    whole = done.value is not False
+                    break
+                if isinstance(chunk, str):
+                    held.append(chunk)
+            answer = "".join(held)
+            if turn.stopped():
+                return
+            if not whole or _no_answer(turn.results, True) is not None:
+                # The tool phase ended by name: said apart from the first pass,
+                # which is saved alone; what it reported stays on the run.
+                if answer.strip():
+                    yield "\n\n"
+                    yield answer.lstrip("\n")
+            elif turn.results.get("tool_calls") and answer:
+                yield "\n\n"
+                yield answer
+                full_response += "\n\n" + answer
+                flagged = True
+        elif armed:
             conv_messages = self._get_conversation_context(conversation_id)
 
             # Prior tool call history for multi-turn context
@@ -2083,8 +2207,7 @@ class AgenticExecutor:
             except Exception as e:
                 logger.warning(f"Tools phase failed (think+tools): {e}")
 
-        # The executor wrote this call's verification results into the turn.
-        own = turn.results.get("verification_results") or []
+        # The executor wrote the first pass's verification results into the turn.
         self._last_verification_results = own
         turn.results["verification_results"] = own
 
@@ -2092,10 +2215,16 @@ class AgenticExecutor:
         # internal save was suppressed (persist=False) so this single save owns
         # the complete assistant message. _save_to_conversation no-ops on an
         # empty response, so a Phase 1 hard error (which returns early above)
-        # persists nothing here. A stopped turn is not saved.
+        # persists nothing here. A stopped turn is not saved. On the journal
+        # the answer carries the label of every request both phases sent.
         if turn.stopped():
             return
-        self._save_to_conversation(conversation_id, message, full_response, model, turn=turn)
+        if journal:
+            self._save_to_conversation(conversation_id, message, full_response, model, turn=turn, journal=True,
+                                       context_label=turn.results.get("context_label"),
+                                       answer_origin="assistant+tool" if flagged else "assistant")
+        else:
+            self._save_to_conversation(conversation_id, message, full_response, model, turn=turn, journal=False)
 
     def _execute_reasoning_pipeline(
         self,
@@ -2110,7 +2239,11 @@ class AgenticExecutor:
         Uses the ReasoningEngine to decompose the request into
         sub-steps, solve them sequentially, then synthesize a final
         response. Steps are emitted via the on_reasoning_step callback.
-        The engine checks the turn's stop before every model call.
+        The engine checks the turn's stop before every model call. It
+        builds its own context, the question alone: with the onion on, it
+        says so in a status line once it has returned -- never before the
+        fallback, which the journal lays -- and its save, with the wide label,
+        is offered to the capture and the curation as any pipeline's is.
         """
         turn = turn if turn is not None else self._legacy_turn()
         if not self.reasoning_available:
@@ -2123,6 +2256,8 @@ class AgenticExecutor:
             return
 
         model = getattr(routing, 'model', self._default_model)
+        # The onion's switch, read once for this turn: the engine's context is its own.
+        journal = self._journal_switch(conversation_id)
 
         try:
             progress = _reasoning_progress(turn.steps)
@@ -2153,12 +2288,15 @@ class AgenticExecutor:
                     # Final response text
                     full_response += chunk
                     yield chunk
+            # The engine returned: its context was its own, never the window.
+            if journal and on_status:
+                on_status(_OUTSIDE_WINDOW["reasoning"])
 
             # Save to the conversation (a stopped turn is not saved)
             if turn.stopped():
                 return
             self._save_to_conversation(
-                conversation_id, message, full_response, model, turn=turn,
+                conversation_id, message, full_response, model, turn=turn, journal=journal,
             )
 
         except Exception as e:
@@ -2187,7 +2325,12 @@ class AgenticExecutor:
 
         Uses the ConsensusEngine to query several models in parallel,
         compare the responses, and select the best one. A stopped turn
-        stops waiting for the models, merges nothing and saves nothing.
+        stops waiting for the models, merges nothing and saves nothing. It
+        builds its own context, the query alone: with the onion on, it says
+        so in a status line once it has returned -- never before the
+        fallback, which the journal lays -- and its save, with the wide
+        label, is offered to the capture and the curation as any pipeline's
+        is.
         """
         turn = turn if turn is not None else self._legacy_turn()
         if not self.consensus_available:
@@ -2200,6 +2343,8 @@ class AgenticExecutor:
             return
 
         model = getattr(routing, 'model', self._default_model)
+        # The onion's switch, read once for this turn: the engine's context is its own.
+        journal = self._journal_switch(conversation_id)
 
         try:
             progress = _consensus_progress(turn.steps)
@@ -2227,12 +2372,15 @@ class AgenticExecutor:
                     # Selected response text
                     full_response += chunk
                     yield chunk
+            # The engine returned: its context was its own, never the window.
+            if journal and on_status:
+                on_status(_OUTSIDE_WINDOW["consensus"])
 
             # Save to the conversation (a stopped turn is not saved)
             if turn.stopped():
                 return
             self._save_to_conversation(
-                conversation_id, message, full_response, model, turn=turn,
+                conversation_id, message, full_response, model, turn=turn, journal=journal,
             )
 
         except Exception as e:
@@ -2265,8 +2413,19 @@ class AgenticExecutor:
         unavailable. A turn stopped during phase 1 never reaches the
         engine; the engine checks the stop before each model call; a
         stopped turn gets no fallback reply and skips this pipeline's save.
-        Phase 1 saves its draft through the executor, as it always has, so
-        a turn stopped during phase 2 keeps that draft saved.
+        A turn stopped during phase 2 keeps its whole first draft saved. A
+        first answer that was never whole -- its stream failed, before or
+        after its first words, or on the journal its window or its
+        admission refused, or its turn queued offline -- is neither corrected
+        nor saved, the turn stopped or not: its step ends failed (cancelled
+        for an admission or the queue), the correction is not run, and the
+        turn says why in fixed words.
+
+        With the onion on, the first draft is laid by its journal, the
+        switch read once for the turn and handed on; the correction pass
+        builds its own context, the question and the draft, and says so in a
+        status line once it has returned. Every save, with the wide label, is
+        offered to the capture and the curation as any pipeline's is.
         """
         turn = turn if turn is not None else self._legacy_turn()
         if not self.self_correction_available:
@@ -2278,6 +2437,8 @@ class AgenticExecutor:
             return
 
         model = getattr(routing, 'model', self._default_model)
+        # The onion's switch, read once for this turn now its stop is live.
+        journal = self._journal_switch(conversation_id)
 
         # Two steps on the turn's recorder, with no progress: the passes
         # stop early, so the pass number stays in words (correction_step).
@@ -2299,6 +2460,11 @@ class AgenticExecutor:
         step("running", 0)
 
         initial_response = ""
+        # Whether the draft's stream failed, or its turn was queued, is its
+        # own call's to say: a run a pipeline runner hands on may carry an
+        # earlier step's.
+        for key in ("stream_failed", "offline_queued"):
+            turn.results.pop(key, None)
         try:
             # persist=False: the draft is this pipeline's to save -- once,
             # with the corrected reply, or alone when the turn stops after
@@ -2314,6 +2480,7 @@ class AgenticExecutor:
                 on_status=on_status,
                 run=turn,
                 persist=False,
+                **({"journal": True} if journal else {}),
             )
             for chunk in gen:
                 if chunk:
@@ -2331,9 +2498,26 @@ class AgenticExecutor:
 
         if turn.stopped():
             # A draft the Stop cut short is no answer, as the executor's own
-            # rule has it; a whole draft stopped before its correction is kept.
-            if initial_response and not turn.results.get("cancelled"):
-                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
+            # rule has it, nor one that never was whole -- its stream failed,
+            # or on the journal its window or its admission refused, its turn
+            # queued; a whole draft stopped before its correction is kept.
+            if (initial_response and not turn.results.get("cancelled")
+                    and _no_answer(turn.results, journal) is None):
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn,
+                                           journal=journal)
+            return
+
+        # A draft that was never whole is no draft to correct: nothing is
+        # corrected, nothing saved, and the turn says why in fixed words --
+        # the executor's own for a refusal, which never carry an exception's.
+        why = _no_answer(turn.results, journal)
+        if why is not None:
+            said = {"failed": _DRAFT_FAILED, "refused": str(turn.results.get("step_error")),
+                    "admission": f"[ERR] {turn.results.get('admission_refused')}",
+                    "offline": initial_response.strip() or "[!] Ollama offline -- request queued"}[why]
+            step("end", 0, "cancelled" if why in ("admission", "offline") else "failed", reason=said)
+            step("end", 1, "not_run", reason="No first answer to check")
+            yield "\n\n" + said if why == "failed" else said
             return
 
         if not initial_response:
@@ -2345,7 +2529,8 @@ class AgenticExecutor:
             return
         step("end", 0, "done")
 
-        # Phase 2: self-correction
+        # Phase 2: self-correction, outside the onion's window, named so once
+        # it has returned.
         if on_status:
             on_status("Running self-correction...")
         step("running", 1)
@@ -2372,27 +2557,31 @@ class AgenticExecutor:
                 else:
                     full_response += chunk
                     yield chunk
+            if journal and on_status:
+                on_status(_OUTSIDE_WINDOW["self_correct"])
 
             # Save the corrected reply; a stopped turn keeps its first draft
             if turn.stopped():
-                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn,
+                                           journal=journal)
                 return
             step("end", 1, "done")
             self._save_to_conversation(
-                conversation_id, message, full_response, model, turn=turn,
+                conversation_id, message, full_response, model, turn=turn, journal=journal,
             )
 
         except Exception as e:
             logger.error(f"self_correct pipeline error: {e}")
             # A stopped turn gets no fallback reply; it keeps its first draft.
             if turn.stopped():
-                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn)
+                self._save_to_conversation(conversation_id, message, initial_response, model, turn=turn,
+                                           journal=journal)
                 return
             step("end", 1, "failed", reason=str(e))
             # Fallback: stream the initial response
             yield initial_response
             self._save_to_conversation(
-                conversation_id, message, initial_response, model, turn=turn,
+                conversation_id, message, initial_response, model, turn=turn, journal=journal,
             )
 
     # -----------------------------------------------------------------
@@ -2515,6 +2704,9 @@ class AgenticExecutor:
         assistant_response: str,
         model: str,
         turn: _Turn | None = None,
+        journal: bool | None = None,
+        context_label: tuple | None = None,
+        answer_origin: str = "assistant+tool",
     ) -> None:
         """Save messages in the conversation.
 
@@ -2524,7 +2716,18 @@ class AgenticExecutor:
         keeps the claim's origin and segments, any other text -- a prompt a
         pipeline composed from the turn -- is saved as legacy. With no
         claim no one vouches for the message, and it is saved as legacy:
-        only a claim makes words typed.
+        only a claim makes words typed. The answer carries the wide label
+        (``_answer_label``) unless the pipeline hands the label its run
+        reports (``context_label``: the union of the labels of the requests
+        sent on the run, as think and tools hands it on the journal), and is
+        flagged ``answer_origin``.
+
+        Once both rows are written the save passes the one door every save
+        a pipeline makes itself passes (``offer_saved_turn``): on the
+        journal path only -- ``journal``, the switch as the pipeline read it
+        once at the start of its turn -- the turn is offered once to the
+        capture and once to the curation. Off it, or when a row failed,
+        nothing follows the rows.
         """
         if not conversation_id or not assistant_response:
             return
@@ -2536,8 +2739,9 @@ class AgenticExecutor:
 
             claim = getattr(turn, "user_turn", None)
             origin, segments = claim.parts_for(user_message) if claim is not None else ("legacy", [])
-            context, lineage = self._answer_label(conversation_manager, conversation_id, user_message,
-                                                  origin, segments, turn)
+            context, lineage = (self._answer_label(conversation_manager, conversation_id, user_message,
+                                                   origin, segments, turn)
+                                if context_label is None else (list(context_label[0]), list(context_label[1])))
             conversation_manager.add_message(
                 conv_id=conversation_id,
                 role="user",
@@ -2553,10 +2757,12 @@ class AgenticExecutor:
                 content=assistant_response,
                 model=model,
                 metadata={"model": model},
-                origin="assistant+tool",
+                origin=answer_origin,
                 context=context,
                 lineage=lineage,
             )
+            if _offer_saved_turn is not None and journal is not False:
+                _offer_saved_turn(conversation_manager, conversation_id, journal=journal)
 
         except Exception as e:
             # WARNING + traceback, not DEBUG: a swallowed DEBUG here is exactly
@@ -2580,6 +2786,8 @@ class AgenticExecutor:
         if not self.cascading_available:
             yield "[ERR] Cascading inference not available"
             return
+        # The onion's switch, read once for this turn: its save is offered by it.
+        journal = self._journal_switch(conversation_id)
 
         if on_status:
             on_status("[>] Running cascading inference...")
@@ -2605,6 +2813,7 @@ class AgenticExecutor:
                     result.final_response,
                     getattr(result, "model", None) or self._default_model,
                     turn=turn,
+                    journal=journal,
                 )
 
             # Emit cascade result as structured event
@@ -2641,6 +2850,8 @@ class AgenticExecutor:
         if not self.speculative_available:
             yield "[ERR] Speculative generation not available"
             return
+        # The onion's switch, read once for this turn: its save is offered by it.
+        journal = self._journal_switch(conversation_id)
 
         if on_status:
             on_status("[>] Running speculative generation (draft-verify)...")
@@ -2666,6 +2877,7 @@ class AgenticExecutor:
                     result.final_response,
                     getattr(result, "model", None) or self._default_model,
                     turn=turn,
+                    journal=journal,
                 )
 
             # Emit speculative result as structured event

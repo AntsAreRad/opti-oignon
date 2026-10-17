@@ -13,7 +13,8 @@
 #   receipts  a line per evicted span (key, turns, kind, origins); the oldest fold into one
 #   peels     retrieved episode summaries, cut to fit, whole items only
 #   flesh     last turns verbatim; a turn leaves only with a receipt
-#   tail      the sources a turn brings (retrieval, web, documents), as data
+#   tail      the sources a turn brings (retrieval, web, documents, a tool
+#             turn's earlier calls), as data
 #   turn      the current turn; refused if over, never truncated
 
 # Headroom left for generation, the same at every rung. Never assembled into.
@@ -69,9 +70,11 @@ journal:
   # The tokens a message costs past its content, in a chat template.
   message_overhead: 4
   # The share of the tail's cap each kind of source a turn brings may take,
-  # cut to whole items; a turn's documents are held to theirs, never cut.
-  # They sum to 1 at most.
-  tail_shares: {memory: 0.35, rag: 0.25, web: 0.2, document: 0.2}
+  # cut to whole items: the memory, the retrieval, the web results, and the
+  # calls the earlier turns of a tool turn's conversation made (tool), the
+  # newest first; a turn's documents are held to theirs, never cut. Every
+  # kind is named. They sum to 1 at most.
+  tail_shares: {memory: 0.35, rag: 0.25, web: 0.1, tool: 0.1, document: 0.2}
   # How a plan catches the Flesh up when it finds it over its cap at the
   # conversation's own rung -- a conversation the process had not seen, one
   # older than the onion, one grown past its cap -- with no model, before the

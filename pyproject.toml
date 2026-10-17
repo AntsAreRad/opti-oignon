@@ -1033,6 +1033,22 @@ fail_under = 0
 # it gives way to it1a in the same file, word for word but for a call's
 # shape, which adds its trust. It stays in the tree word for word.
 #
+# The calls a conversation's earlier turns made now reach a tool turn's
+# window as a kind of the journal's tail, with a share of its own. jw19 of
+# tests/test_onion_journal_contracts.py held the journal's section to the
+# shares of four kinds, the shipped section's among them: it gives way to
+# jw49 of tests/test_executor_onion_pipelines_contracts.py, word for word but
+# for the shares, which name the tool kind, and three additions: the shares
+# and the tail's kinds as the file ships them, the tool share refused
+# missing, and the tool share refused out of range. A tool's result is now
+# labelled by the digest of its text, the name the withdrawal grammar gives
+# a tool's output, so a withdrawal by value reaches it: jw43 and jw44 of
+# tests/test_executor_onion_tool_window_contracts.py, which read the digest
+# of the call's name, its arguments and its result, give way to jw56 and
+# jw57 of the same new file, word for word but for that digest, jw57
+# withdrawing the source by value through the grammar. They stay in the
+# tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1409,4 +1425,7 @@ addopts = """
     --deselect=tests/test_pipeline_step_contracts.py::test_ps21_a_safety_mechanism_never_ends_a_step_failed
     --deselect=tests/test_drift_ab_contracts.py::test_da8_the_arms_differ_by_the_onion_block_in_front_of_the_turn_and_nothing_else
     --deselect=tests/test_injection_trace_contracts.py::test_it1_one_line_per_run_the_report_counts_and_the_report_unchanged
+    --deselect=tests/test_onion_journal_contracts.py::test_jw19_the_journal_section_is_refused_by_name_every_reason_at_once
+    --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw43_each_request_carries_the_windows_label_and_its_results_and_the_answer_their_union
+    --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw44_the_answer_reads_back_as_a_flesh_turn_with_its_label_and_a_withdrawal_reaches_it
 """

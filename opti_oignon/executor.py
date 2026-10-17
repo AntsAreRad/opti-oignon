@@ -29,6 +29,7 @@ import json
 import logging
 import math
 import queue
+import re
 import threading
 import time
 import uuid
@@ -226,6 +227,49 @@ def journal_on(conversation_id: str | None) -> bool:
     """Whether the onion lays this conversation's turn as its journal, as ``Executor.execute`` reads it: for a
     caller that reads it once for a turn of its own and hands it on (``execute(journal=...)``)."""
     return _journal_on(conversation_id)
+
+
+def _offer_to_memory(conversation_manager, conversation_id: str, curate: bool | None = None) -> None:
+    """Offer a saved turn to the memory's write side, each offer handed the mirror's read of the conversation from
+    the store it was saved to (``conversation_manager``) -- every turn with its origin -- and neither ever breaking
+    the turn: once to the auto-capture, which keeps only what the user typed, then once to the librarian's curation
+    when ``curate`` says the onion is on (None: when its switch reads on now)."""
+    if _maybe_capture is not None:
+        try:
+            _maybe_capture(
+                conversation_id,
+                conversation_manager.get_mirror_messages(conversation_id),
+            )
+        except Exception as _cap_err:
+            logger.debug(f"Auto-capture skipped: {_cap_err}")
+    if _maybe_curate is not None and _onion_enabled is not None:
+        try:
+            if _onion_enabled() if curate is None else curate:
+                _maybe_curate(
+                    conversation_id,
+                    conversation_manager.get_mirror_messages(conversation_id),
+                )
+        except Exception as _lib_err:
+            logger.debug(f"Librarian skipped: {_lib_err}")
+
+
+def offer_saved_turn(store, conversation_id: str | None, *, journal: bool | None = None) -> bool:
+    """What follows every save a pipeline makes of a turn it answered itself -- the agentic pipelines', the coding
+    agent's -- once the turn's rows are in ``store``: on the journal path only, the saved turn offered once to the
+    capture and once to the curation, as ``Executor.execute`` offers its own (``_offer_to_memory``). ``journal`` is
+    the switch as the caller read it once for its turn; None reads it here (``journal_on``). Off the journal path
+    nothing follows the rows. Whether the turn was offered; never raises."""
+    if not conversation_id:
+        return False
+    try:
+        laid = _journal_on(conversation_id) if journal is None else bool(journal)
+    except Exception as e:
+        logger.debug(f"Onion switch unreadable at a save, read off: {e}")
+        laid = False
+    if not laid:
+        return False
+    _offer_to_memory(store, conversation_id, curate=True)
+    return True
 
 
 # The least room the project builder places a chunk in, in its own tokens:
@@ -635,14 +679,51 @@ def _onion_figures(onion: _OnionTurn, bound: tuple) -> dict:
 @dataclass(frozen=True)
 class ToolLoop:
     """What a caller hands ``Executor.execute`` for a turn of the tools pipeline the onion's journal lays: the tool
-    executor that runs the rounds, the turn's capability manifest, its per-call approval gate, its provenance, and
-    the hook each call that ran is signalled to."""
+    executor that runs the rounds, the turn's capability manifest, its per-call approval gate, its provenance, the
+    hook each call that ran is signalled to, and the calls the conversation's earlier turns made (``prior``, oldest
+    first), which the window's tail lays as data (``_earlier_calls``), never as calls of this turn."""
 
     executor: Any
     manifest: Any = None
     approval_fn: Callable | None = None
     provenance: Any = None
     on_tool_call: Callable | None = None
+    prior: tuple = ()
+
+
+def _tool_label(result: Any) -> tuple[list, list]:
+    """The label a tool's result carries wherever the journal lays it -- its own turn's transcript, a later tool
+    turn's tail: ``tool``, and the lineage entry the withdrawal grammar names a tool's output by
+    (``source_withdrawal.source_for``): ``tool:`` the digest of its whole text, so a withdrawal by value reaches
+    it."""
+    return ["tool"], ["tool:" + hashlib.sha256(str(result).encode("utf-8")).hexdigest()]
+
+
+# The words an earlier turn's call is laid under in a tool turn's tail, inside the tool envelope with the other
+# earlier calls: where it comes from, the call as a transcript names it, then its result.
+_EARLIER_CALL = "[runtime] A call an earlier turn made:\n{call}\n{result}"
+# A line of an earlier call's result that opens as those records do -- the runtime's words, a call's line -- is
+# neutralized, so a result never lays the record of a call that did not run.
+_FORGED_RECORD_RE = re.compile(r"^([ \t]*)\[(?:runtime|tool call)\]", re.IGNORECASE | re.MULTILINE)
+_FORGED_RECORD = "[redacted-record-marker]"
+
+
+def _earlier_calls(prior) -> list[tuple]:
+    """The calls a tool turn's earlier turns made, as its tail hands them to the journal (the ``tool`` kind): the
+    newest first, each one whole item -- the runtime's words, the call named as a transcript names it with the
+    arguments it ran with, then its whole result -- under the label its result carried in its own turn
+    (``_tool_label``). The journal cuts them to whole items within the kind's share and withholds one standing on
+    a source the user withdrew. A line of a result that opens as these records do is neutralized
+    (``_FORGED_RECORD_RE``); the label is read on the result as it was returned."""
+    items = []
+    for call in reversed(tuple(prior or ())):
+        name, arguments = str(getattr(call, "tool_name", "")), getattr(call, "arguments", {})
+        result = getattr(call, "result", "")
+        laid = _FORGED_RECORD_RE.sub(lambda found: found.group(1) + _FORGED_RECORD,
+                                     str(result if result is not None else ""))
+        text = _EARLIER_CALL.format(call=_onion_tool_call_line(name, arguments), result=laid)
+        items.append((text, _tool_label(result)))
+    return items
 
 
 class _LaidResult:
@@ -674,9 +755,9 @@ class _ToolRounds:
     ``cost`` a message's count as the journal counts one -- its calls
     included, its overhead added. ``lay`` lays a result within a cap (the
     librarian's ``lay_tool_result``), named by its place in its round, under
-    the label ``tool`` and ``tool:`` the digest of its call's name, the
-    arguments it ran with and its whole result; ``least`` is the text of a
-    call's result at its least, ``line`` the runtime's line naming a call,
+    the label ``tool`` and ``tool:`` the digest of its whole result, as the
+    withdrawal grammar names a tool's output (``_tool_label``); ``least`` is
+    the text of a call's result at its least, ``line`` the runtime's line naming a call,
     ``bare`` the model's own words as the transcript lays them. ``append``
     adds a message: an assistant's under the label of the request that
     produced it, a result's under what it laid, each cut counted. ``heard``
@@ -775,9 +856,7 @@ class _ToolRounds:
     def lay(self, name: str, place: int, text: Any, cap: int, ran: Any) -> _LaidResult:
         content, shown, whole, _least = _onion_lay_tool_result(name, place, text, wrap=_wrap_untrusted,
                                                                count=self.count, cap=cap)
-        digest = hashlib.sha256(json.dumps([name, ran, str(text)], sort_keys=True, ensure_ascii=True,
-                                           default=str).encode("utf-8")).hexdigest()
-        return _LaidResult(content, (["tool"], ["tool:" + digest]), shown < whole)
+        return _LaidResult(content, _tool_label(text), shown < whole)
 
     def append(self, message: dict, laid: Sequence[_LaidResult] = ()) -> None:
         if laid:
@@ -2874,7 +2953,10 @@ class Executor:
                 ``threading.Event``) and ``results`` (a dict). The chat route
                 passes its turn and the agentic executor its own; the call
                 stops when that stop is set and writes its per-call results
-                (``vision_meta``, ``verification_results``) into that dict.
+                (``vision_meta``, ``verification_results``) into that dict,
+                and says there when its stream failed, before or after its
+                first words (``stream_failed``), so a caller that drafts
+                through it keeps no answer from it.
                 With no run the call owns a private one. ``cancel()`` is the
                 emergency broadcast that sets the stop of every live call.
                 A stopped call saves, captures, caches and records nothing,
@@ -2903,8 +2985,10 @@ class Executor:
                 answer is saved with the label of every request its rounds
                 sent, flagged tool when a result was among them, then
                 offered to the capture and the curation; its calls land in
-                the run's results. Handed in without a journal, it is
-                refused by name.
+                the run's results. The calls the conversation's earlier
+                turns made (``ToolLoop.prior``) ride the window's tail as
+                its tool kind, newest first, never as calls of this turn.
+                Handed in without a journal, it is refused by name.
 
         Yields:
             Response chunks in streaming. When think=True, thinking chunks
@@ -2964,6 +3048,9 @@ class Executor:
                 # Told to the run as well: a caller that drafts through this
                 # call keeps no answer from a cancelled one.
                 _run_results["cancelled"] = True
+            if outcome == "offline_queued":
+                # So is a call queued offline: its words are the queue's notice.
+                _run_results["offline_queued"] = True
             fields = dict(_ledger_base)
             fields["outcome"] = outcome
             fields["duration_ms"] = (time.time() - _ledger_t0) * 1000.0
@@ -3436,6 +3523,11 @@ class Executor:
 
         if _journal and _onion_web_items:
             _onion_tail.append({"kind": "web", "items": _onion_web_items, "suffix": _WEB_CITATION})
+        # A tool turn's earlier calls ride its tail as the journal's tool kind,
+        # data among the sources the turn brings: never replayed as calls of
+        # this turn.
+        if _tooled and tool_loop.prior:
+            _onion_tail.append({"kind": "tool", "items": _earlier_calls(tool_loop.prior)})
 
         # Step 3: Build messages (multi-turn ou single-turn)
         # Final user content (refined question + possible documents)
@@ -4405,7 +4497,11 @@ class Executor:
                 if not full_response.strip():
                     _thread_error = "final_called_a_tool"
 
-        # Check for thread errors
+        # Check for thread errors. Told to the run as well: a caller that
+        # drafts through this call keeps no answer from a stream that failed,
+        # before or after its first words.
+        if _thread_error:
+            _run_results["stream_failed"] = True
         if _thread_error and _tool_rounds is not None:
             # A tool turn that failed ends in fixed words, as a failed stream
             # does: no exception's text, and no result, ever stands for its
@@ -4518,28 +4614,11 @@ class Executor:
             # throttled, fire-and-forget; never blocks or breaks the turn).
             # It is offered the mirror's read, each turn with its origin, and
             # keeps only what the user typed: a document or the assistant's
-            # reply never becomes a remembered fact.
-            if _maybe_capture is not None:
-                try:
-                    _maybe_capture(
-                        conversation_id,
-                        conversation_manager.get_mirror_messages(conversation_id),
-                    )
-                except Exception as _cap_err:
-                    logger.debug(f"Auto-capture skipped: {_cap_err}")
-
-            # The librarian mirrors the saved conversation and curates off
-            # the interactive path, only when the onion is switched on. It
-            # reads who wrote each turn, which the model's context never does.
-            if _maybe_curate is not None and _onion_enabled is not None:
-                try:
-                    if _onion_enabled():
-                        _maybe_curate(
-                            conversation_id,
-                            conversation_manager.get_mirror_messages(conversation_id),
-                        )
-                except Exception as _lib_err:
-                    logger.debug(f"Librarian skipped: {_lib_err}")
+            # reply never becomes a remembered fact. The librarian mirrors the
+            # saved conversation and curates off the interactive path, only
+            # when the onion is switched on. It reads who wrote each turn,
+            # which the model's context never does.
+            _offer_to_memory(conversation_manager, conversation_id)
 
         # Step 6: Cache storage (exact + multi-turn)
         # Store the response in cache for successful requests (single AND multi-turn)

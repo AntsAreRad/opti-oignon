@@ -65,6 +65,39 @@ def _resolve_resource_governor():
         return None
 
 
+# The step types whose turn runs an engine of its own, never the chat executor: on the journal path they keep the
+# runner's admission, the only one they hold.
+_OWN_ENGINE_STEPS = ("reasoning", "consensus")
+
+
+def _journal_lays(executor, conversation_id) -> bool:
+    """Whether the onion's journal lays the run's turns, as the agentic executor reads its switch for a turn
+    (``journal_lays``); off when it cannot say. Never raises."""
+    reader = getattr(executor, "journal_lays", None)
+    if not callable(reader) or not conversation_id:
+        return False
+    try:
+        return bool(reader(conversation_id))
+    except Exception as exc:
+        logger.debug("PipelineRunner: the onion's switch unread, read off: %s", exc)
+        return False
+
+
+def _give_back(governor, decision) -> None:
+    """Give back an admission the runner will not stream with, as the chat executor gives back one of its own: the
+    ticket held and released at once, so the governor counts the call ended and its admitted-only grace closes,
+    then the load it admitted ended. Never raises."""
+    try:
+        with governor.ticket_scope(decision):
+            pass
+    except Exception as exc:
+        logger.debug("PipelineRunner: admission give-back failed open: %s", exc)
+    try:
+        governor.get_resource_governor().end_pending_load(getattr(decision, "ticket_id", ""))
+    except Exception as exc:
+        logger.debug("PipelineRunner: pending load end failed open: %s", exc)
+
+
 # Repertoire de config des pipelines
 _CONFIG_DIR = Path(__file__).parent / "config" / "pipelines"
 # Repertoire de data pour les pipelines custom
@@ -734,11 +767,21 @@ class PipelineRunner:
                             f"({_gov_decision.reason})"
                         )
                         return
+                    # On the journal path a step the chat executor answers is
+                    # admitted again by each of its calls, at the rung its
+                    # window needs: this admission was the step's gate, and is
+                    # given back before the step runs, so the step holds one
+                    # admission, not two. A reasoning or consensus step runs
+                    # an engine of its own and keeps this one, its only one.
+                    if (_gov_decision is not None and step.step_type not in _OWN_ENGINE_STEPS
+                            and _journal_lays(executor, conversation_id)):
+                        _give_back(_governor, _gov_decision)
 
                 # The step runs only once admitted; what its call reports
                 # is its own, so the previous step's reports are cleared.
                 if results is not None:
-                    for key in ("pipeline", "admission_refused", "step_error"):
+                    for key in ("pipeline", "admission_refused", "step_error", "stream_failed",
+                                "offline_queued"):
                         results.pop(key, None)
                 started = True
                 emit("running", step_idx)
@@ -796,6 +839,12 @@ class PipelineRunner:
                     refused = str(results["admission_refused"])
                     step_failed = True
                     emit("end", step_idx, "cancelled", reason=refused)
+                elif results is not None and results.get("stream_failed"):
+                    # A step whose answer's stream failed gave no answer: it
+                    # ends failed, in fixed words, and its text never reaches
+                    # a later step.
+                    step_failed = True
+                    emit("end", step_idx, "failed", reason="The step's answer failed before it was whole")
                 else:
                     emit("end", step_idx, "done",
                          ran_as=results.get("pipeline") if results is not None else None)

@@ -188,6 +188,20 @@ _TURN_POLL_S = 0.1
 
 CHAT_CODING_AVAILABLE = SANDBOX_AVAILABLE and FILE_TOOLS_AVAILABLE
 
+
+def _journal_switch(conversation_id: str | None) -> bool:
+    """Whether the onion's journal lays the conversation's turns, as the chat executor reads its switch, read once
+    at the start of a coding turn: off with no executor to read it with, or a switch that does not read."""
+    try:
+        from opti_oignon.executor import journal_on
+    except ImportError:
+        return False
+    try:
+        return bool(journal_on(conversation_id))
+    except Exception as exc:
+        logger.debug("Onion switch unreadable, read off: %s", exc)
+        return False
+
 # ---------------------------------------------------------------------------
 # File blocks of a reply
 # ---------------------------------------------------------------------------
@@ -982,7 +996,13 @@ class ChatCodingSession:
 
         Both user and assistant messages are persisted so they appear
         in the full conversation history and are available for
-        compression and retrieval in future turns.
+        compression and retrieval in future turns. Once both are, the save
+        passes the one door every save a pipeline makes itself passes
+        (``executor.offer_saved_turn``): with the onion's journal laying the
+        conversation -- its switch as the turn read it at its start, or read
+        at the save outside a turn -- the turn is offered once to the capture
+        and once to the curation; off it, or with no executor to offer
+        through, nothing follows the rows.
         """
         if not CONVERSATION_AVAILABLE or _conversation_manager is None:
             return
@@ -1005,6 +1025,13 @@ class ChatCodingSession:
                 self._conversation_id, "assistant", assistant_response,
                 model=model, origin="assistant+tool", context=context, lineage=lineage,
             )
+            try:
+                from opti_oignon.executor import offer_saved_turn
+            except ImportError:
+                offer_saved_turn = None
+            if offer_saved_turn is not None:
+                offer_saved_turn(_conversation_manager, self._conversation_id,
+                                 journal=getattr(self, "_turn_journal", None))
         except Exception as exc:
             logger.warning(
                 "Failed to save coding turn to conversation: %s", exc
@@ -1580,6 +1607,8 @@ class ChatCodingSession:
             self._turn_rich = None
             self._turn_user_turn = user_turn
             self._turn_context_label = None
+            # The onion's switch, read once for the turn: its save is offered by it.
+            self._turn_journal = _journal_switch(self._conversation_id)
             return (yield from self._execute_task_locked(
                 message, model, directives, images, web_search, think,
             ))
@@ -1589,6 +1618,7 @@ class ChatCodingSession:
             self._turn_rich = None
             self._turn_user_turn = None
             self._turn_context_label = None
+            self._turn_journal = None
             self._turn_images = None
             self._turn_web_search = False
             self._turn_think = False

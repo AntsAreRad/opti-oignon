@@ -1761,6 +1761,53 @@ package costs.
 ### Changed
 
 - With the onion memory on (`enabled: true` in
+  `opti_oignon/config/onion.yaml`; off by default), the tool phase of think
+  and tools is laid by the onion's journal too: the agentic executor reads
+  the switch once for the turn and hands it to both chat-executor calls,
+  neither saving; the tool phase runs as the tools pipeline does on the
+  journal -- its own window, planned with the schemas, its rounds inside it
+  -- and never reads the conversation's last ten rows. Its answer is shown,
+  as before, only when a tool ran; the turn is saved once, by its pipeline,
+  with the label its run reports, both phases' requests among it, flagged
+  `assistant+tool` only when the tool phase's answer stands in it. A tool
+  phase refused by name or at its admission, or whose stream or call
+  fails, is said after a blank line and the first pass is saved alone,
+  what the phase reported left for a pipeline runner to end the step by; a
+  first pass queued offline runs no tool phase and saves nothing. The calls
+  a conversation's earlier turns made reach a tool turn's window only as
+  data: a new kind of the journal's tail, `tool`, newest first, each call
+  one whole item -- the call named with the arguments it ran with, then its
+  whole result, a line of it that opens as such a record neutralized -- in
+  one tool envelope, cut to whole items within its share, the ones left out
+  counted, and withheld when it stands on a source the user withdrew; never
+  replayed as an echo. A tool's result, in its own turn or a later one, is
+  labelled by the digest of its text, the name the withdrawal grammar gives
+  a tool's output, so withdrawing it by value from the interface or the
+  command line reaches it. The tail's shares are now memory 0.35, retrieval
+  0.25, web 0.1, tool 0.1, documents 0.2 (`journal.tail_shares`, every kind
+  named). Every save a pipeline makes of a turn it answered itself -- think
+  and tools, the reasoning and consensus engines, self-correct, the
+  cascading and speculative pipelines, the coding agent -- is offered once
+  to the capture and once to the curation on the journal path, by the
+  switch as its turn read it at its start, as the chat executor's own saves
+  are; off it, nothing follows. The reasoning engine, the consensus engine
+  and self-correct's correction pass keep the context they build themselves
+  and their wide label, and say so once they have returned, in a status
+  line the chat loader shows in its own words; one that falls back to a
+  reply the journal lays says nothing of the kind. On the journal path the
+  pipeline runner gives back its own admission before a step the chat
+  executor answers, so a tools step holds one admission, not two; a
+  reasoning or consensus step keeps it. With the onion off, every request,
+  save and admission of these paths is unchanged, but for one fix on both
+  paths: a chat-executor call whose stream fails, before or after its first
+  words, now tells its run so, and think and tools no longer folds that
+  failure into its answer and saves it, nor self-correct take it as a
+  draft to correct and save -- the first step ends failed and nothing is
+  saved -- and a pipeline step whose stream failed, or whose tools answer
+  was cut after its first words, ends failed instead of handing its error
+  text to the next step. Documented in `docs/architecture/onion-memory.md`.
+
+- With the onion memory on (`enabled: true` in
   `opti_oignon/config/onion.yaml`; off by default), a turn of the chat's
   tools pipeline -- the path a plain chat turn takes by default -- in a
   stored conversation is laid by the onion's journal too: the agentic
@@ -1809,10 +1856,10 @@ package costs.
   Ollama and llama-server heads say how many tools an answer called,
   streamed or whole, and the llama-server head's whole answer says what
   the server counted and why it stopped, as its stream does. With the
-  onion off, the tools pipeline is unchanged, byte for byte. The tool
-  phase of think and tools, the reasoning and consensus engines and
-  self-correct's correction pass keep the context they build themselves.
-  Documented in `docs/architecture/onion-memory.md`.
+  onion off, the tools pipeline is unchanged, byte for byte. The reasoning
+  and consensus engines and self-correct's correction pass keep the
+  context they build themselves. Documented in
+  `docs/architecture/onion-memory.md`.
 
 - With the onion memory on (`enabled: true` in
   `opti_oignon/config/onion.yaml`; off by default), a turn of a stored
@@ -1833,10 +1880,10 @@ package costs.
   `journal.answer_floor` tokens at least past its count raised by
   `journal.margin` (on llama-server as `max_tokens`, the prefix kept), and
   composes nothing of its own on that path: no optimizer, no history
-  window, no memory block, no archive retrieval. The tool phase of think
-  and tools, the reasoning and consensus engines, the cascading and
-  speculative pipelines and self-correct's correction pass keep the
-  context they build themselves. A context under the rung is a descent,
+  window, no memory block, no archive retrieval. The reasoning and
+  consensus engines, the cascading and speculative pipelines and
+  self-correct's correction pass keep the context they build themselves.
+  A context under the rung is a descent,
   composed over a shadow; a Flesh over its
   cap is caught up at the plan with no model, or laid over a shadow while
   a burst holds the conversation; each image of the turn is charged

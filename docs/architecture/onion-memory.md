@@ -51,21 +51,22 @@ step down until the window is laid again.
 
 With the onion on, a turn of a conversation the store keeps that the chat
 executor answers -- the direct, web-search, code-verify and think
-pipelines, the tools pipeline, the think pass of think and tools,
+pipelines, the tools pipeline, both phases of think and tools,
 self-correct's first draft -- is sent as the onion's journal lays it, and
 the executor composes nothing of that window itself: no optimizer, no
 history window of its own, no working-memory block, no archive retrieval,
 no context check of the turn's documents. It gathers the sources the turn
 brings -- the retrieval, asked for within its share of the tail at the
-conversation's own rung, and the web results -- and hands them raw to the
+conversation's own rung, the web results, and for a tool turn the calls
+the conversation's earlier turns made -- and hands them raw to the
 journal. A turn of no conversation keeps the path it had, as every turn
 does with the onion off. A plain chat turn takes the tools pipeline by
 default, its request arming the tools; its rounds run inside the one
 window the journal lays for it (below). The other pipelines keep the
-context they build themselves: the tool phase of think and tools, the
-store's last ten turns; the reasoning and consensus engines, the cascading
-and speculative pipelines and self-correct's correction pass, their own,
-or none.
+context they build themselves: the reasoning and consensus engines, the
+cascading and speculative pipelines and self-correct's correction pass,
+their own, or none; the reasoning engine, the consensus engine and the
+correction pass say so in a status line.
 
 The journal is a window as messages, the same bytes from one turn to the
 next up to the current turn's message, so an engine that keeps its prompt
@@ -77,10 +78,12 @@ receipts digest, with the conversation's first turn joined to it when that
 turn is the user's. The Flesh follows, each turn in its own role, its
 documents in file envelopes at their places and its words bare. The last
 user message holds the tail -- the memory the question brings, the
-retrieval, the web results and the sentence that cites them, each in its
-envelope and cut to whole items within its share of the tail's cap
-(`journal.tail_shares`) -- then the turn, its documents held to the
-document share and refused, never cut, past it. Two user messages are
+retrieval, the web results and the sentence that cites them, a tool turn's
+earlier calls, each in its envelope and cut to whole items within its share
+of the tail's cap (`journal.tail_shares`: memory 0.35, retrieval 0.25, web
+0.1, tool 0.1, documents 0.2, every kind named), what each left out counted
+-- then the turn, its documents held to the document share and refused,
+never cut, past it. Two user messages are
 never adjacent. Each message carries the label of what it holds, and the
 request's label is their union. The memory shows nothing a withdrawal
 reached: a peel or a recalled span standing on a source the user withdrew
@@ -194,16 +197,78 @@ why it stopped, so a decision that used all its room is seen on either
 engine.
 
 Each request's label, read where it is sent, is the window's joined with
-what its results carry -- `tool`, and `tool:` the digest of the call's
-name, the arguments it ran with and its whole result. The answer is saved
+what its results carry -- `tool`, and `tool:` the digest of its whole
+result, the entry the withdrawal grammar names a tool's output by, so a
+withdrawal by value reaches it. The answer is saved
 once with the union of every request's label, flagged `assistant+tool` only
 when a result was among them, then offered to the capture and the curation;
 next turn it is a Flesh turn like any other, laid bare with its label. A
 final that fails, or a loop that finds no backend, ends the turn in fixed
 words and saves nothing; a stop or a close makes no further call, saves
 nothing and keeps the record of the calls that ran; an early exit gives
-back its admission and the load it claimed. The earlier turns' calls are
-not replayed into the window: their answers are its Flesh.
+back its admission and the load it claimed. The calls the conversation's
+earlier turns made are never replayed into the window as calls of this
+turn -- no echo, no tool message, no flat replay: the agentic layer hands
+them with the loop, and they ride the tail as its `tool` kind, newest first,
+each one whole item -- the runtime's words, the call named as a transcript
+names it with the arguments it ran with, then its whole result, a line of
+it that opens as those records do neutralized -- in one tool envelope,
+defanged, cut to whole items within the kind's share, the ones left out
+counted, each under the label its result carried in its own turn; one
+standing on a source the user withdrew is withheld. Their answers are the
+window's Flesh.
+
+### Think and tools, and the turns a pipeline saves itself
+
+Think and tools reads the switch once for its turn and hands it to both of
+its chat-executor calls, neither saving: the first pass, then the tool
+phase, laid by the journal as the tools pipeline is -- its own window,
+planned with the schemas, its rounds inside it -- never reading the
+conversation's last rows nor replaying an earlier call. The tool phase's
+answer is held until its loop ends and shown, as off the journal, only
+when a tool ran. A first pass that ends by name -- a window or an admission
+refused, a stream that failed, the turn queued offline -- ends the turn
+there, said as the chat executor said it, and nothing is saved. A tool
+phase that ends so, or whose chat-executor call raised, is said after a
+blank line and joins nothing: the first pass is saved alone, flagged
+`assistant`, and what the phase reported -- the refusal, the admission
+refused, the stream that failed -- stays on the run, so a pipeline runner
+still ends its step by it. Otherwise the pipeline saves the turn once --
+the user's row, then the first pass joined to the tool phase's answer --
+with the label the run reports, the union of the labels of the requests
+sent on it, both phases' among them, flagged `assistant+tool` only when the
+tool phase's answer stands in it.
+
+Every save a pipeline makes of a turn it answered itself -- think and
+tools, the reasoning and consensus engines, self-correct, the cascading and
+speculative pipelines, the coding agent -- passes one door once its rows are
+written (`executor.offer_saved_turn`): on the journal path only -- the
+switch as the turn read it at its start -- the turn is offered once to the
+capture and once to the curation, as the chat executor offers its own; off
+it, nothing follows the rows. Every one of them but think and tools keeps
+the label it always had -- the agentic pipelines' wide one: the question's
+parts, the last ten turns, the `tool` kind and what the run reported -- and
+the reasoning engine, the consensus engine and self-correct's correction
+pass say in a status line, with the caveat's prefix and once they have
+returned, that the onion's window is not theirs; an engine that raises
+falls back to a reply the journal lays, and says nothing of the kind. On the
+journal path the pipeline runner gives back its own admission before a step
+the chat executor answers -- its ticket held and released, its load ended
+-- since every chat-executor call of the step is admitted on its own: a
+tools step holds one admission, not two. A reasoning or a consensus step
+runs an engine of its own and keeps the runner's admission, its only one.
+
+A chat-executor call whose stream fails, before or after its first words,
+says so to its run (`stream_failed`), with the onion off or on, and so does
+one queued offline (`offline_queued`). A pipeline that drafts through it
+keeps no answer from it: think and tools runs no tool phase and saves
+nothing; self-correct corrects nothing and saves nothing, ends its first
+step failed and its second not run, and says so in fixed words; on the
+journal path, a draft refused by name, refused its admission or queued
+offline is neither corrected nor saved either, the turn stopped or not. A
+pipeline step whose stream failed ends failed, and its text never reaches
+the next step -- the chat executor's stream, the tools pipeline's answer cut
+after its first words, its chat-executor call raising on the journal.
 
 A Flesh found over its cap at the conversation's own rung -- a
 conversation the process had not seen, one older than the onion, one grown
@@ -330,7 +395,8 @@ final called.
 ## The librarian
 
 Off by default (`enabled: false`). Switched on, the executor offers each
-saved conversation to the librarian beside the auto-capture; the librarian
+saved conversation to the librarian beside the auto-capture, and so does
+every pipeline that saves its own turn, on the journal path; the librarian
 mirrors it, and when it has grown by `min_new_turns`, or once a journal
 laid it and its Flesh passed the journal's mark, it evicts through the
 gate off the interactive path, using the configured model through the
