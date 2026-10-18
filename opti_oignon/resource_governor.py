@@ -89,10 +89,14 @@ Design decisions (arbitrated):
   ceiling. The two relax knobs are module constants, not config keys, so
   the Section 10 contract is not extended without a spec touch.
 - DI-9: invalidate_on_load() records a pending attribution; the next
-  refresh that sees the model in the S1 view with a positive size_vram
-  writes the learned per-model cost (keyed name+digest when the digest is
-  present). The other hooks (evict / estop-drain / resume) only
-  invalidate. All four are now wired to callers: admission (load),
+  refresh that sees the model resident in the S1 view writes the learned
+  per-model cost (keyed name+digest when the digest is present): the total
+  the engine reports, the context it was loaded at, and the part of it the
+  GPU held. On a machine with a card it prices only a load like the one it
+  was learned of, one that held part of itself on the GPU: a load the CPU
+  held alone keeps the CPU's buffers and copies, which a GPU load never
+  takes, and would refuse a split that fits. The other hooks (evict /
+  estop-drain / resume) only invalidate. All four are now wired to callers: admission (load),
   eviction, and estop observation (drain and resume).
 
 Conservative defaults and fail-open (Section 3.1): capacity unknown
@@ -2271,6 +2275,9 @@ class AdaptStore:
     """
 
     def __init__(self, db_path: str | Path | None = None):
+        # Whether the store keeps the part of a learned cost the GPU held
+        # (on_gpu_bytes); False for an old store that could not gain it.
+        self._gpu_column = False
         self._db_path = str(db_path or _DEFAULT_DB_PATH)
         parent = os.path.dirname(self._db_path)
         if parent:
@@ -2294,6 +2301,7 @@ class AdaptStore:
                         size_vram_bytes INTEGER NOT NULL,
                         num_ctx INTEGER,
                         observed_at REAL NOT NULL,
+                        on_gpu_bytes INTEGER,
                         PRIMARY KEY (name, digest)
                     );
 
@@ -2334,6 +2342,19 @@ class AdaptStore:
                         ON decisions(ts);
                     """
                 )
+                # A store written before the GPU's part was kept gains the
+                # column in place; its rows say nothing of where they lay. One
+                # that cannot gain it -- read-only, or gaining it from another
+                # process at the same moment -- is read without it.
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(model_costs)")}
+                if "on_gpu_bytes" not in columns:
+                    try:
+                        conn.execute("ALTER TABLE model_costs ADD COLUMN on_gpu_bytes INTEGER")
+                    except Exception as exc:  # noqa: BLE001 - a store that cannot gain the column still serves
+                        if "duplicate column" not in str(exc).lower():
+                            logger.warning("The adapt store keeps no GPU part of its costs: %s", exc)
+                    columns = {row[1] for row in conn.execute("PRAGMA table_info(model_costs)")}
+                self._gpu_column = "on_gpu_bytes" in columns
                 conn.commit()
             finally:
                 conn.close()
@@ -2347,28 +2368,40 @@ class AdaptStore:
         size_vram_bytes: int,
         num_ctx: int | None = None,
         observed_at: float | None = None,
+        on_gpu_bytes: int | None = None,
     ) -> None:
         """Persist an observed per-model cost (supersedes statics).
 
         The ``size_vram_bytes`` column keeps its name and holds what the
         model takes as loaded: the total its engine reports when it reports
         one (a split model's VRAM and RAM together), else its VRAM.
+        ``on_gpu_bytes`` is the part of it the GPU held (0 for a load the
+        CPU held alone); None says nothing of where it lay.
         """
+        row = (
+            name,
+            digest or "",
+            int(size_vram_bytes),
+            num_ctx,
+            observed_at if observed_at is not None else time.time(),
+        )
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute(
-                    """INSERT OR REPLACE INTO model_costs
-                       (name, digest, size_vram_bytes, num_ctx, observed_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (
-                        name,
-                        digest or "",
-                        int(size_vram_bytes),
-                        num_ctx,
-                        observed_at if observed_at is not None else time.time(),
-                    ),
-                )
+                if self._gpu_column:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO model_costs
+                           (name, digest, size_vram_bytes, num_ctx, observed_at, on_gpu_bytes)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        row + (None if on_gpu_bytes is None else int(on_gpu_bytes),),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO model_costs
+                           (name, digest, size_vram_bytes, num_ctx, observed_at)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        row,
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -2377,23 +2410,24 @@ class AdaptStore:
         self, name: str, digest: str | None = None
     ) -> dict[str, Any] | None:
         """Latest learned cost for a model; exact digest row preferred."""
+        gpu = "on_gpu_bytes" if self._gpu_column else "NULL"
         with self._lock:
             conn = self._connect()
             try:
                 row = None
                 if digest:
                     row = conn.execute(
-                        """SELECT name, digest, size_vram_bytes, num_ctx,
-                                  observed_at
-                           FROM model_costs WHERE name = ? AND digest = ?""",
+                        f"""SELECT name, digest, size_vram_bytes, num_ctx,
+                                   observed_at, {gpu}
+                            FROM model_costs WHERE name = ? AND digest = ?""",
                         (name, digest),
                     ).fetchone()
                 if row is None:
                     row = conn.execute(
-                        """SELECT name, digest, size_vram_bytes, num_ctx,
-                                  observed_at
-                           FROM model_costs WHERE name = ?
-                           ORDER BY observed_at DESC LIMIT 1""",
+                        f"""SELECT name, digest, size_vram_bytes, num_ctx,
+                                   observed_at, {gpu}
+                            FROM model_costs WHERE name = ?
+                            ORDER BY observed_at DESC LIMIT 1""",
                         (name,),
                     ).fetchone()
                 if row is None:
@@ -2404,6 +2438,7 @@ class AdaptStore:
                     "size_vram_bytes": row[2],
                     "num_ctx": row[3],
                     "observed_at": row[4],
+                    "on_gpu_bytes": row[5],
                 }
             finally:
                 conn.close()
@@ -3604,10 +3639,11 @@ class ResourceGovernor:
         """Best-available weight-cost estimate for one model, with basis.
 
         Order: live S1 observation (when the cached snapshot holds the
-        model with a positive size_vram) > learned cost (the adapt store)
-        > the S3 static table via registry metadata, the serving backend
-        asked first > GGUF file size as a floor > (None, "unknown") --
-        never "too large" (Section 3.1).
+        model with a positive size_vram) > learned cost (the adapt store),
+        when it was learned of a load like the one to price
+        (``_learned_here``) > the S3 static table via registry metadata, the
+        serving backend asked first > GGUF file size as a floor > (None,
+        "unknown") -- never "too large" (Section 3.1).
         """
         with self._cache_lock:
             snap = self._snapshot
@@ -3617,7 +3653,7 @@ class ResourceGovernor:
                     return view.size_vram_gb, "observed"
 
         learned = self._store.get_model_cost(model, digest)
-        if learned is not None and learned.get("size_vram_bytes"):
+        if learned is not None and learned.get("size_vram_bytes") and self._learned_here(learned, snap):
             return learned["size_vram_bytes"] / _BYTES_PER_GIB, "learned"
 
         for backend in self._backend_order(model, engine):
@@ -3625,6 +3661,23 @@ class ResourceGovernor:
             if est is not None:
                 return est, basis
         return None, "unknown"
+
+    @staticmethod
+    def _learned_here(learned: Mapping[str, Any], snapshot: Any) -> bool:
+        """Whether a learned cost can price a load on this machine now.
+
+        On a machine with a card the governor places on, only a cost learned
+        of a load that held part of itself on the GPU: one the CPU held alone
+        carries the CPU's buffers and copies, which a GPU load never takes,
+        and one learned before the GPU's part was kept says nothing of where
+        it lay; the next load is learned again. With no card in the view, a
+        load runs where it was learned, and the cost stands. No view at all
+        is no proof that the machine has no card: the stricter rule holds.
+        """
+        if snapshot is not None and getattr(snapshot, "capacity_gb", None) is None:
+            return True
+        on_gpu = learned.get("on_gpu_bytes")
+        return isinstance(on_gpu, int) and not isinstance(on_gpu, bool) and on_gpu > 0
 
     def resolve_weights_override(
         self, model: str | None
@@ -3856,7 +3909,9 @@ class ResourceGovernor:
 
         The cost learned is the total the engine reports for the model when
         it reports one: a split model's VRAM part alone would price its next
-        load below what it takes.
+        load below what it takes. The part the GPU held is kept beside it,
+        and the context is the one the engine says it loaded, else the one
+        admitted.
         """
         with self._cache_lock:
             if not self._pending_attribution:
@@ -3869,7 +3924,8 @@ class ResourceGovernor:
                         view.name,
                         view.digest,
                         view.size_bytes or view.size_vram_bytes,
-                        pending[view.name],
+                        view.context_length or pending[view.name],
+                        on_gpu_bytes=view.size_vram_bytes,
                     )
                 except Exception as exc:
                     logger.debug(

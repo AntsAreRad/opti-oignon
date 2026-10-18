@@ -3078,6 +3078,18 @@ package costs.
 
 ### Fixed
 
+- The resource governor no longer refuses a split it can place because of
+  a cost it learned of the same model on the CPU alone. Measured after a
+  week whose driver upgrade left the card unseen, a 17 GiB model learned at
+  29 GiB on the CPU was refused once the card was back ("not one of its
+  layers fits"): the CPU keeps buffers and copies a GPU load never takes,
+  and the split put that excess on the GPU. A learned cost now keeps the
+  part of the load the GPU held, and on a machine with a card it prices
+  only a load that held part of itself on the GPU; a store written before
+  gains the column in place, and its rows give way to the next estimate
+  until the model is loaded again. A store that cannot gain the column, a
+  read-only one, still serves, its costs saying nothing of where they lay;
+  and a learned cost keeps the context the engine says it loaded.
 - The pattern cost guard no longer passes a superlinear pattern as linear
   on one slow reading of the machine, where its longest reading takes
   1 ms or more. A reading counts the time its thread runs, never the time
