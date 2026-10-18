@@ -401,11 +401,15 @@ changes:
 ```yaml
 onion:
   enabled: true
+  librarian:
+    model: "qwen3.5:4b"   # the model this machine has for its librarian
 ```
 
-Only a YAML boolean counts there, and it wins over the shipped switch both
-ways; anything else in that file leaves the shipped switch, said once in the
-log. Switched on, the executor offers each
+Only a YAML boolean switches, and it wins over the shipped switch both
+ways; only a name that is not blank names the librarian's model, in place
+of the shipped placeholder. Either stands without the other. Anything else
+in that file leaves what the shipped file says, said once in the log, and a
+path handed to the loader is read as it stands. Switched on, the executor offers each
 saved conversation to the librarian beside the auto-capture, and so does
 every pipeline that saves its own turn, on the journal path; the librarian
 mirrors it, and when it has grown by `min_new_turns`, or once a journal
@@ -451,7 +455,24 @@ governor. The model stays resident for a burst or a close
 (`librarian.keep_alive`) and is let go at its end through the governor,
 which unloads it only when the background alone loaded it and no call is in
 flight on it. The librarian's shipped model is none of the models the
-shipped routes answer with.
+shipped routes answer with; a machine may name one that is, and its calls
+are then served by the chat's load. The governor's floor for `librarian`
+(`ctx_floor`, the ladder's smallest rung) makes every rung acceptable to
+it: a resident serves a call at the context it holds instead of refusing
+the reload a larger `librarian.num_ctx` would take, so a librarian that
+shares the chat's model runs at every rung, and a load of its own model
+that does not fit at `librarian.num_ctx` steps down to the rung that fits,
+in free memory only, as the background always loads. A span that does not
+fit the window admitted, less the margin, is not sent. The engine keeps a
+model for the keep-alive of the last call that ended on it, so a call on a
+load the background did not make, or one a higher class has used since --
+the chat's, or one loaded out of the governor's sight -- carries the
+residence the foreground gives its loads, the warm-up's keep-alive that the
+chat sends with each turn, in place of the run's shorter one: the librarian
+never cuts the residence of a load the chat holds. A load the background
+made and no higher class has used -- the librarian's own, or another
+background caller's, the warm-up's preloading included -- keeps the run's
+residence and is let go at the run's end; a pressure override still wins.
 
 What the queue counts -- bursts, evictions by rung, refusals by motive, the
 block's events, proposals, the mirror, the residence, and the native core's

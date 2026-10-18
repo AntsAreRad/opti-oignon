@@ -11,6 +11,21 @@ package costs.
 
 ### Added
 
+- A machine names its librarian's model in `opti_oignon/config/local.yaml`
+  (`onion: {librarian: {model: "<name>"}}`), in place of the shipped
+  placeholder, with or without the switch; only a name that is not blank
+  counts, and anything else is said once.
+- The resource governor gives the librarian a context floor at the ladder's
+  smallest rung (`ctx_floor.librarian`), so a model the chat holds at 4096
+  serves a librarian that shares it at that context instead of refusing the
+  reload its 8192 would take: the librarian now runs at every rung. A load
+  of the librarian's own model that does not fit at 8192 steps down to the
+  rung that fits, in free memory only, instead of being refused. A
+  background call on a load a higher class holds, or one loaded out of the
+  governor's sight, carries the residence the foreground gives its loads
+  (the warm-up's keep-alive, which the chat sends with each turn), so a
+  librarian sharing the chat's model no longer cuts it from 30 minutes to
+  its run's 5; a pressure override still wins.
 - A machine's own switches, in `opti_oignon/config/local.yaml`, which git
   ignores: `onion: {enabled: true}` turns the onion memory on and
   `run_journal: {enabled: true}` the run journal, with no tracked file

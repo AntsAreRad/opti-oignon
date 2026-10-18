@@ -349,7 +349,8 @@ def _local_switch(shipped, section):
     counts. A missing file, or one with no such section, gives None; one
     that cannot be read, does not parse or holds anything else for the
     section gives None too, said once for each distinct reason. The twin of
-    this reader lives in opti_oignon/memory/librarian.py; both read the same file the same way.
+    this reader lives in opti_oignon/memory/librarian.py (``_local_onion``, which also reads the
+    librarian's model); both read a switch the same way.
     """
     local = Path(shipped).with_name("local.yaml")
     try:

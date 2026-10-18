@@ -849,7 +849,7 @@ class GovernorConfig:
         default_factory=lambda: [32768, 16384, 8192, 4096]
     )
     ctx_floor: dict[str, int] = field(
-        default_factory=lambda: {"chat": 4096, "pipeline": 4096}
+        default_factory=lambda: {"chat": 4096, "pipeline": 4096, "librarian": 4096}
     )
     idle_evict_threshold_s: float = 600.0
     pressure_soft_threshold: float = 0.85
@@ -1859,7 +1859,11 @@ class AdmissionDecision:
     cost), and how many times slower than on the GPU alone the split is
     expected to run, when the bandwidths are known. A refusal reached after
     a split was priced also names the RAM shortfall. keep_alive carries the
-    soft-pressure override when the pressure signal fills it.
+    soft-pressure override when the pressure signal fills it, and otherwise,
+    for a background call served by a load the background did not make (or
+    one a higher class has used since), the residence the foreground gives
+    its loads (the warm-up's keep-alive, which the chat sends with each
+    turn), so that call never shortens it.
     """
 
     admitted: bool
@@ -4800,6 +4804,19 @@ class ResourceGovernor:
             if told is not None and told[0] is not None:
                 held.threads, held.threads_batch, held.threads_source = told[0], told[1], "pinned"
                 held.placement = told[2]
+            if background and held.keep_alive is None:
+                # The engine keeps a model for the keep-alive of the last call
+                # that ended on it: a background call on a load the background
+                # did not make -- the chat's, or one loaded out of the
+                # governor's sight -- carries the residence the foreground
+                # gives its loads, so it never cuts it. A load the background
+                # made, and no higher class has used, keeps the run's.
+                with self._queue_cond:
+                    owner = self._owners.get(model)
+                if owner is None or owner[0] != _BACKGROUND:
+                    residence = getattr(self._warmup, "keep_alive", None)
+                    if isinstance(residence, str) and residence.strip():
+                        held.keep_alive = residence
             self._record_admission(held)
             return held
 

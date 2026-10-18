@@ -482,62 +482,100 @@ def _read_onion(path):
 _LOCAL_SAID: set = set()
 
 
-def _local_switch(shipped, section):
-    """The machine's own switch for ``section``, from ``local.yaml`` beside the shipped file: True, False or None.
+def _say_local(local, reason, outcome):
+    """Say once, for each distinct reason, why ``local.yaml`` set nothing, and what stands instead."""
+    if (str(local), reason) not in _LOCAL_SAID:
+        _LOCAL_SAID.add((str(local), reason))
+        logger.warning("%s %s: %s", local.name, reason, outcome)
 
-    ``local.yaml`` is never committed (git ignores it): it holds the
-    switches a machine sets for itself, ``{section: {enabled: true}}``, so
-    turning a feature on or off changes no tracked file. Only a YAML boolean
-    counts. A missing file, or one with no such section, gives None; one
-    that cannot be read, does not parse or holds anything else for the
-    section gives None too, said once for each distinct reason. The twin of
-    this reader lives in opti_oignon/run_journal.py; both read the same file the same way.
+
+def _local_onion(shipped):
+    """What the machine sets for the onion in ``local.yaml`` beside the shipped file: its switch and its librarian's model.
+
+    ``local.yaml`` is never committed (git ignores it): it holds what a
+    machine sets for itself, ``onion: {enabled: true, librarian: {model:
+    "<name>"}}``, so turning the onion on, or naming the model this machine
+    has for its librarian, changes no tracked file. Only a YAML boolean
+    switches, and only a name that is not blank names the model; either one
+    stands without the other. A missing file, or one with no onion section,
+    sets nothing. A file that cannot be read or does not parse, an onion
+    section that is no mapping, a switch that is no boolean, a model that is
+    no name and a key neither section takes set nothing for what they touch,
+    each said once for each distinct reason, and what the shipped file says
+    stands. The twin of this reader lives in opti_oignon/run_journal.py; both
+    read a switch the same way.
     """
     local = Path(shipped).with_name("local.yaml")
+    shipped_stands = "what the shipped file says stands"
     try:
         text = local.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return None
+        return None, None
     except OSError as exc:
-        reason = f"cannot be read ({type(exc).__name__})"
-    else:
-        try:
-            import yaml
+        _say_local(local, f"cannot be read ({type(exc).__name__})", shipped_stands)
+        return None, None
+    try:
+        import yaml
 
-            data = yaml.safe_load(text)
-        except Exception as exc:  # noqa: BLE001 - a local file that does not parse switches nothing, and is said
-            reason = f"does not parse ({type(exc).__name__})"
-        else:
-            if data is None or (isinstance(data, dict) and data.get(section) is None):
-                return None
-            entry = data.get(section) if isinstance(data, dict) else None
-            if isinstance(entry, dict) and type(entry.get("enabled")) is bool:
-                return entry["enabled"]
-            reason = f"holds no boolean {section}.enabled"
-    if (str(local), section, reason) not in _LOCAL_SAID:
-        _LOCAL_SAID.add((str(local), section, reason))
-        logger.warning("%s %s: the shipped switch of %s stands", local.name, reason, section)
+        data = yaml.safe_load(text)
+    except Exception as exc:  # noqa: BLE001 - a local file that does not parse sets nothing, and is said
+        _say_local(local, f"does not parse ({type(exc).__name__})", shipped_stands)
+        return None, None
+    if data is None or (isinstance(data, dict) and data.get("onion") is None):
+        return None, None
+    entry = data.get("onion") if isinstance(data, dict) else None
+    if not isinstance(entry, dict):
+        _say_local(local, "holds no mapping for onion", shipped_stands)
+        return None, None
+    unknown = sorted(str(key) for key in entry if key not in ("enabled", "librarian"))
+    if unknown:
+        _say_local(local, f"holds keys the onion section does not take ({', '.join(unknown)})", "they set nothing")
+    switch = entry.get("enabled")
+    if type(switch) is not bool:
+        # A switch written but not a boolean is said; one left out is said
+        # only when the section sets nothing else either.
+        if "enabled" in entry or entry.get("librarian") is None:
+            _say_local(local, "holds no boolean onion.enabled", "the shipped switch of onion stands")
+        switch = None
+    return switch, _local_model(local, entry.get("librarian"))
+
+
+def _local_model(local, entry):
+    """The librarian's model named under ``onion.librarian`` in ``local.yaml``, stripped, or None, said once."""
+    if entry is None:
+        return None
+    if isinstance(entry, dict):
+        unknown = sorted(str(key) for key in entry if key != "model")
+        if unknown:
+            _say_local(local, f"holds keys onion.librarian does not take ({', '.join(unknown)})", "they set nothing")
+        name = entry.get("model")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    _say_local(local, "holds no model name for onion.librarian.model", "the shipped model of the librarian stands")
     return None
 
 
 def load_config(path=None):
     """The librarian's configuration from ``onion.yaml``, refused when malformed.
 
-    The shipped file's switch gives way to the machine's own in ``local.yaml``
-    (``onion: {enabled: true}``), read only for the shipped file: a path given
-    is read as it stands.
+    The shipped file's switch and the librarian's model give way to the
+    machine's own in ``local.yaml`` (``onion: {enabled: true, librarian:
+    {model: "<name>"}}``), read only for the shipped file: a path given is
+    read as it stands. The shipped file stays whole either way.
     """
     raw = _read_onion(path or _CONFIG) or {}
     section = raw.get("librarian") or {}
     persistence = raw.get("persistence") or {}
     enabled = bool(raw.get("enabled", False))
+    local_model = None
     if path is None:
-        local = _local_switch(_CONFIG, "onion")
+        local, local_model = _local_onion(_CONFIG)
         enabled = enabled if local is None else local
     try:
+        shipped_model = str(section["model"])
         config = LibrarianConfig(
             enabled=enabled,
-            model=str(section["model"]),
+            model=shipped_model if local_model is None else local_model,
             keep_alive=str(section["keep_alive"]),
             min_new_turns=int(section["min_new_turns"]),
             temperature=float(section["temperature"]),

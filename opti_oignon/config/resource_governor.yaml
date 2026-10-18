@@ -74,12 +74,20 @@ decisions_ring_size: 200
 
 # --- Admission's context shaping, backpressure, queue and limits ---
 
-# The downsize ladder and the per-caller context floors
-# (benchmark/AGT have no floor entry: they never downsize, D3).
+# The downsize ladder and the per-caller context floors. A caller with no
+# floor, here or built in, never downsizes (benchmark/AGT, D3). An entry here
+# replaces the built-in floor of its caller; removing it leaves the built-in
+# one, and a floor above the ladder's top turns that caller's downsizing off.
+# The librarian accepts every rung from the smallest up: a resident serves it
+# at the context it holds -- a librarian that shares the chat's model is
+# answered by the chat's load, never refused for want of a reload -- and a
+# load of its own that does not fit at librarian.num_ctx steps down to the
+# rung that fits, in free memory only, as the background always loads.
 ctx_ladder: [32768, 16384, 8192, 4096]
 ctx_floor:
   chat: 4096
   pipeline: 4096
+  librarian: 4096
 
 # Backpressure.
 idle_evict_threshold_s: 600

@@ -598,16 +598,21 @@ queue:
 # The maintainer turns it on.
 enabled: false
 
-# The librarian. Its model is its own, never one that answers the chat: a
-# summary is written by a model the user did not talk to, and a contract
-# holds this default apart from every model the shipped routes answer with;
-# any model can be named here. Each call asks the resource governor for a
-# ticket of its own, as a background caller, and is not sent when its span,
-# its prompt and the answer's room do not fit the window it was admitted at,
-# less the margin below. A run -- a burst, a close -- keeps the model
-# resident between its calls and lets it go when it ends.
+# The librarian. Its shipped model is its own, never one that answers the
+# chat: a summary is then written by a model the user did not talk to, and a
+# contract holds this default apart from every model the shipped routes
+# answer with. A machine names the model it has in local.yaml (onion:
+# {librarian: {model: "<name>"}}), the chat's own included, which a small
+# card may leave as the only one that fits: the chat's load then serves it
+# at the context that load holds (resource_governor.yaml, ctx_floor), and
+# the governor has its calls carry the chat's residence, never the run's
+# shorter one below. Each call asks the resource governor for a ticket of
+# its own, as a background caller, and is not sent when its span, its prompt
+# and the answer's room do not fit the window it was admitted at, less the
+# margin below. A run -- a burst, a close -- keeps the model resident
+# between its calls and lets it go when it ends.
 librarian:
-  model: "qwen3:4b"        # placeholder until the host measurement picks one
+  model: "qwen3:4b"        # placeholder; a machine names its own in local.yaml
   keep_alive: "5m"         # residence between the calls of a run; the run lets the model go when it ends
   min_new_turns: 8         # turns of growth before a curation fires
   max_steps_per_burst: 16  # the most spans one burst evicts, so that no burst runs away with the machine
