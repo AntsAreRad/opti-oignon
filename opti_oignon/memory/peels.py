@@ -35,11 +35,14 @@ its place and the digest of its bytes, read from the Cellar each time the
 peel is shown and shown only while it still answers to that digest. No
 summary gives an order, the user's restated included, even word for word:
 each segment the user typed that orders is referenced wherever a peel is
-made, and only a reference may carry an order. A sentence the repair drops
-is kept by its motive and its digest, never its words, and the peel says how
-many it lost. A peel is shown with the label of what it shows: a summary is
-memory and carries the context and lineage of every turn it stands on; a
-reference carries its own turn's; a part a withdrawal reached is not shown.
+made, and only a reference may carry an order. The librarian is not given
+the words those references show, so that it does not write them again, and
+is told how many words its bound leaves its summary (``Brief``). A
+sentence the repair drops is kept by its motive and its digest, never its
+words, and the peel says how many it lost. A peel is shown with the label
+of what it shows: a summary is memory and carries the context and lineage
+of every turn it stands on; a reference carries its own turn's; a part a
+withdrawal reached is not shown.
 
 Selection at query time is deterministic and keyword-based, in any script:
 a term is a word as the probes read one, in lower case with its accents
@@ -54,6 +57,7 @@ librarian and nothing else does; a contract on the tree says so.
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -506,6 +510,10 @@ class Eviction:
     # The sentences the repair dropped from the peel it made, ``(motive,
     # sha256)``, as the peel keeps them.
     dropped: tuple = ()
+    # Why the step asked no model for a summary it had a librarian for:
+    # "no_room" when the user's words its peel would show left a librarian
+    # that takes a brief no room (``Brief``); empty when one was asked.
+    unasked: str = ""
 
 
 class PeelTree:
@@ -691,7 +699,8 @@ def _summarise(sources, cellar, summarize, gate):
     spans = [cellar.get(k) for k in sources]
     turns = [t for span in spans for t in span]
     probes = generate_probes(turns, gate.lexicon)
-    text, refs = _with_orders(turns, probes, _unmarked(summarize(turns), turns), gate)
+    written = summarize(turns, *_briefing(summarize, turns, probes, gate))
+    text, refs = _with_orders(turns, probes, _unmarked(written, turns), gate)
     return spans, probes, text, decide(turns, probes, text, gate, refs), refs
 
 
@@ -1201,7 +1210,8 @@ def evict_gated(*, flesh, cellar, ledger, tree, gate, summarize):
         return Eviction(False, "the Flesh is empty; nothing to evict")
     span = turns[: gate.span_turns]
     probes = generate_probes(span, gate.lexicon)
-    text, refs = _with_orders(span, probes, _unmarked(summarize([dict(t) for t in span]), span), gate)
+    written = summarize([dict(t) for t in span], *_briefing(summarize, span, probes, gate))
+    text, refs = _with_orders(span, probes, _unmarked(written, span), gate)
     decision = decide(span, probes, text, gate, refs)
     if not decision.accepted:
         return Eviction(False, decision.reason, decision=decision)
@@ -1369,8 +1379,9 @@ def refusal_fingerprint(failures, gate, asker=""):
     answer and turn, and the mark is the SHA-256 of their sorted list with
     the generator's version, the lexicon's fingerprint, every threshold and
     bound of the gate, its reporting verbs, and ``asker``, what names the
-    second asking (its model, temperature, seed and prompt), so a change of
-    any of them is another mark.
+    second asking (its model, temperature, seed and prompt, the share of its
+    budget, and the queue's floor when it takes a brief), so a change of any
+    of them is another mark.
     """
     from .probes import GENERATOR_VERSION
 
@@ -1679,6 +1690,65 @@ def _with_orders(span, probes, text, gate):
     return _said_once(text, span, refs), refs
 
 
+@dataclass(frozen=True)
+class Brief:
+    """What the librarian is told beside a span: where the user's words its peel shows as written stand, and its room.
+
+    ``shown`` is ``((turn_id, start, stop), ...)``, the places of the peel's
+    references to the user's orders (``references``): words the librarian
+    is not given, since a summary that writes them again only lengthens the
+    peel. ``room`` is the most words a summary may write for the peel to
+    stay within its bound, counted in the gate's words with the words those
+    references show and their markers, never below 0; None when there is no
+    bound or the span holds no word. The bound is the gate's length bound
+    and, on the queue's own step, the tighter compression floor of its
+    ladder (``rho``): a target the librarian is asked to keep to, since a
+    peel longer than that saves too little and stands in the window in
+    place of others, where a span held leaves anchors found again by what
+    is asked. Measured on the drift A/B at 4096, peels that saved a
+    twentieth of their spans pushed the facts out of it. The gate still
+    judges a summary by its length bound alone; the repair alone holds a
+    peel to the floor, in tokens.
+    """
+
+    shown: tuple = ()
+    room: object = None
+
+
+def brief(span, probes, gate, rho=None):
+    """The ``Brief`` of a peel over ``span``, read as the gate reads the peel it will judge (``decide``), its room
+    within the tighter of the gate's length bound and ``rho``."""
+    from .probes import holdings, word_count
+
+    _text, refs = _with_orders(span, probes, "", gate)
+    shown = tuple((turn_id, start, stop) for turn_id, start, stop, _digest in refs)
+    span_words = sum(word_count(t) for t in holdings(span, gate.directives).texts)
+    bounds = [bound for bound in (gate.max_length_ratio, rho) if bound is not None]
+    if not bounds or not span_words or not math.isfinite(min(bounds) * span_words):
+        return Brief(shown, None)
+    words = word_count(joined("", shown_words(span, refs))[0])
+    return Brief(shown, _room(span_words, words, min(bounds)))
+
+
+def _room(span_words, shown_words, ratio):
+    """The most words a summary may add to ``shown_words`` and stay within ``ratio`` of ``span_words``, never below 0.
+
+    Compared as the gate compares them, a ratio and never a product: the
+    floor of ``0.29 * 100`` is 28, and a summary of 29 words is within it.
+    """
+    room = max(0, math.floor(ratio * span_words) - shown_words)
+    while (room + 1 + shown_words) / span_words <= ratio:
+        room += 1
+    while room > 0 and (room + shown_words) / span_words > ratio:
+        room -= 1
+    return room
+
+
+def _briefing(model, span, probes, gate, rho=None):
+    """``(brief,)`` for a model that takes one -- the librarian's own, ``briefed`` -- and nothing for any other."""
+    return (brief(span, probes, gate, rho),) if getattr(model, "briefed", False) else ()
+
+
 def _choose(found, targets, ladder):
     """The units of ``found`` kept for ``targets``: each decision's own sentence, then the fewest for the rest.
 
@@ -1709,7 +1779,8 @@ def _anchors(span, probes, ladder):
     return tuple((found[i].turn_id, found[i].start, found[i].stop) for i in chosen)
 
 
-def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anchors=(), made=None, refused=()):
+def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anchors=(), made=None, refused=(),
+            unasked=""):
     """Evict ``span`` under ``guard`` only while it is still the head of the Flesh, with its receipt and its peel."""
     read = [t.get("turn_id") for t in span]
     decision = made[1] if made is not None else None
@@ -1717,7 +1788,7 @@ def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anc
         if [t.get("turn_id") for t in flesh.turns()[: len(span)]] != read:
             return Eviction(
                 False, "stale: the span left the head of the Flesh while its summary was written; nothing evicted",
-                decision=decision, rung="stale", refused=tuple(refused),
+                decision=decision, rung="stale", refused=tuple(refused), unasked=unasked,
             )
         receipt = flesh.evict_span(len(span), cellar, ledger, kind=kind, anchors=anchors)
         peel = None
@@ -1726,7 +1797,7 @@ def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anc
             peel = _make(text, (receipt.key,), 0, (), decision, cellar, rung=rung, refs=refs, dropped=dropped)
             tree.add(peel)
     return Eviction(True, reason, receipt=receipt, peel=peel, decision=decision, rung=rung, refused=tuple(refused),
-                    dropped=peel.dropped if peel is not None else ())
+                    dropped=peel.dropped if peel is not None else (), unasked=unasked)
 
 
 def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=None, refusals=None, lock=None):
@@ -1739,13 +1810,17 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
       speak for it, and it stays recallable in the Cellar.
     * the summary: the librarian's, with a reference to each whole segment
       the user typed that orders (``order_ranges``), judged by both faces of
-      the gate. An accepted peel keeps what it failed with it, its
-      residual. A call that
+      the gate. A librarian that takes one (``briefed``) is told where those
+      references stand and the room its summary has for the peel to save
+      enough, within ``rho`` of its span: a target, the gate judging the
+      summary by its length bound (``Brief``). An accepted
+      peel keeps what it failed with it, its residual. A call that
       fails -- the model absent, stopped, past its deadline -- is counted as
       ``call_failed`` and the step goes on down the rungs that need no
       model: no call stops the queue.
     * the second asking: a summary the first face refused is asked for once
-      more through ``reask``, handed the probes it failed and no other. A
+      more through ``reask``, handed the probes it failed and no other, and
+      the same brief when it takes one. A
       second refusal is marked in ``refusals`` under the span's key, and a
       span that comes back with the same mark is not asked for again. A
       refusal on the span's probe coverage is not asked for again at all:
@@ -1758,7 +1833,11 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     * the hold: no peel; the receipt keeps the places in the Cellar of the
       fewest units answering every probe of the span, its anchors.
 
-    With no summariser the queue starts at the repair. The span is read
+    With no summariser the queue starts at the repair, and so it does when
+    the user's words the peel would show leave a librarian that takes a
+    brief no room within the floor: no summary could make that peel save
+    enough, and the step asks no model, which it says (``unasked``). The
+    span is read
     under ``lock``, the model is asked without it, and the step commits
     under it only while the span is still the head of the Flesh: otherwise
     nothing leaves and the step says it was stale. No reason given here
@@ -1785,7 +1864,12 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
     if not probes:
         return commit(rung="bare", kind="bare", reason="no probe could be drawn from the span: it leaves bare, with no peel")
     text, refused = "", []
-    first = None if summarize is None else _asked(summarize, span, refused)
+    told = brief(span, probes, gate, ladder.rho) if getattr(summarize, "briefed", False) else None
+    first, unasked = None, ""
+    if told is not None and told.room == 0:
+        unasked = "no_room"
+    elif summarize is not None:
+        first = _asked(summarize, span, refused, *(() if told is None else (told,)))
     if first is not None:
         text = first
         ordered, kept_orders = _with_orders(span, probes, text, gate)
@@ -1799,9 +1883,13 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
         if reask is not None and failed and "coverage" not in motives:
             from .receipts import span_key
 
-            key, mark = span_key(span), refusal_fingerprint(failed, gate, getattr(reask, "identity", ""))
+            # A reask told the queue's floor is another request under another floor: its mark says which.
+            floor = f" (rho {ladder.rho!r})" if getattr(reask, "briefed", False) else ""
+            asker = getattr(reask, "identity", "") + floor
+            key, mark = span_key(span), refusal_fingerprint(failed, gate, asker)
             if refusals is None or refusals.get(key) != mark:
-                again = _asked(reask, span, refused, [(p.kind, p.answer, p.turn_id) for p in failed])
+                again = _asked(reask, span, refused, [(p.kind, p.answer, p.turn_id) for p in failed],
+                               *_briefing(reask, span, probes, gate, ladder.rho))
                 if again is not None:
                     ordered, kept_orders = _with_orders(span, probes, again, gate)
                     judged = decide(span, probes, ordered, gate, kept_orders)
@@ -1822,8 +1910,8 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
         shown = joined(repaired, shown_words(span, refs))[0]
         if judged.accepted and _saves_enough(estimate_tokens(shown), _span_tokens(span), ladder.rho):
             return commit(rung="repaired", kind="accepted", made=(repaired, judged, refs, dropped), refused=refused,
-                          reason=f"repaired with {len(refs)} reference(s) to the user's words")
-    return commit(rung="held", kind="held", anchors=_anchors(span, probes, ladder), refused=refused,
+                          unasked=unasked, reason=f"repaired with {len(refs)} reference(s) to the user's words")
+    return commit(rung="held", kind="held", anchors=_anchors(span, probes, ladder), refused=refused, unasked=unasked,
                   reason="held: no peel answers for the span within the compression floor; its anchors stay")
 
 

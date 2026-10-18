@@ -58,6 +58,8 @@ SWEEP = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
 
 
 def _corpus_turns(corpus):
+    # The corpora's turns carry no origin and read as legacy: no peel references their words, and the librarian
+    # is given every turn. The runbook measures the budget and the prose of its request, never the cut.
     return [
         {"turn_id": f"t{i + 1:04d}", "role": t["role"], "text": t["content"]}
         for i, t in enumerate(corpus.turns)
@@ -71,12 +73,14 @@ def _each_call_a_run(config, resolve=None):
     if registry_summarizer(config, resolve=resolve) is None:
         return None
 
-    def summarize(turns):
+    def summarize(turns, *brief):
         fresh = registry_summarizer(config, resolve=resolve)
         if fresh is None:
             raise RuntimeError(f"no backend resolves {config.model!r} any more")
-        return fresh(turns)
+        return fresh(turns, *brief)
 
+    # The librarian's own request: the queue's brief passes through.
+    summarize.briefed = True
     return summarize
 
 
@@ -170,12 +174,19 @@ def _spread(figures, bound, under=False):
     return entry
 
 
-def _second_face(judged, gate):
-    """What the second face refuses, where its bounds' figures fall, and what share of each span's facts its probes
-    asked for against the floor, with the facts no probe asked for kind by kind, each span judged once at the gate."""
+def _decisions(judged, gate):
+    """Each judged span's decision at ``gate``, ``(span, probes, text)`` with the references its peel would make
+    when given: the summary beside them, as the queue judges it, the librarian not having been given their words."""
     from opti_oignon.memory.peels import decide
 
-    decisions = [decide(span, probes, text, gate) for span, probes, text in judged]
+    return [decide(span, probes, text, gate, *refs) for span, probes, text, *refs in judged]
+
+
+def _second_face(judged, gate):
+    """What the second face refuses, where its bounds' figures fall, and what share of each span's facts its probes
+    asked for against the floor, with the facts no probe asked for kind by kind, each span judged once at the gate
+    (``_decisions``)."""
+    decisions = _decisions(judged, gate)
     claims, unasked = {}, {}
     for decision in decisions:
         for kind, _what, _turn in decision.unsupported:
@@ -201,10 +212,10 @@ def _measure(summarize, config):
     gate = load_gate()
     timings, refused = [], {}
 
-    def timed(turns):
+    def timed(turns, *brief):
         start = time.perf_counter()
         try:
-            text = summarize(turns)
+            text = summarize(turns, *brief)
         except CallRefused as exc:
             # Refused before the model was asked: counted by its name, never timed.
             refused[exc.motive] = refused.get(exc.motive, 0) + 1
@@ -212,6 +223,8 @@ def _measure(summarize, config):
         timings.append(time.perf_counter() - start)
         return text
 
+    # As the librarian it times: briefed when it is, so that the queue's brief reaches it.
+    timed.briefed = getattr(summarize, "briefed", False)
     report = {
         "source": "measured",
         "model": config.model,
@@ -246,21 +259,22 @@ def _measure(summarize, config):
         # thresholds, nor do the figures of its bounds: they are reported
         # once, claims kind by kind and each bound by the spread of its
         # figures, those its calibration is owed on.
-        from opti_oignon.memory.peels import decide
+        from opti_oignon.memory.peels import _unmarked, _with_orders, brief
         from opti_oignon.memory.probes import generate_probes
 
         spans = [turns[i:i + gate.span_turns] for i in range(0, len(turns), gate.span_turns)]
         judged = []
         for span in spans:
+            found = generate_probes(span, gate.lexicon)
             try:
-                text = timed(span)
+                text = timed(span, *((brief(span, found, gate),) if timed.briefed else ()))
             except CallRefused:
                 continue  # counted by its name; the span is not judged
-            judged.append((span, generate_probes(span, gate.lexicon), text))
+            judged.append((span, found) + _with_orders(span, found, _unmarked(text, span), gate))
         entry["second_face"] = _second_face(judged, gate)
         for threshold in SWEEP:
             g = replace(gate, decision_threshold=max(threshold, gate.decision_threshold), episodic_threshold=threshold)
-            passed = sum(1 for span, probes, text in judged if decide(span, probes, text, g).accepted)
+            passed = sum(1 for decision in _decisions(judged, g) if decision.accepted)
             entry["sweep"][str(threshold)] = _sweep_row(len(judged), passed, gate)
         report["corpora"][name] = entry
     report["native"] = _native_entry()

@@ -575,7 +575,8 @@ directives:
 peels:
   span_turns: 4             # turns evicted together into one leaf peel
 queue:
-  rho: 0.5                  # a repaired peel longer than rho times its span saves too little: the span is held
+  rho: 0.5                  # a repaired peel longer than rho times its span saves too little: the span is held;
+                            # the librarian's budget aims at it, and a span past it is not summarised
   exact_cover: 16           # verbatim units at or under which a cover is the fewest; above, greedy (at most 20)
   anchors: 768              # tokens of the peels layer the anchors of held spans may take
   proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day, superseded ones included; the rest wait for a later day
@@ -620,6 +621,13 @@ librarian:
   run_budget_s: 300        # seconds of model calls after which a run starts no other: its budget and one call at most
   num_ctx: 8192            # the context each call asks the governor for, in tokens
   window_margin: 0.25      # the share of the window kept back for the token estimate's error (words x 1.3)
+  # The user's words a peel shows as written are left out of the turns each
+  # call gives the model, and its instructions hold a budget of words: this
+  # share of what the queue's floor (queue.rho) leaves the summary once
+  # those words are counted -- the gate's length bound where a peel is built
+  # outside the queue. PROPOSED, not a calibration: a small model overshoots
+  # a word budget.
+  budget_share: 0.75       # the share of a summary's room its model is asked to keep to, one word at least
   temperature: 0.0        # with the seed below, the same turns ask for the same summary
   seed: 1                 # the sampling seed every librarian call carries
   num_predict: 256
@@ -636,7 +644,8 @@ persistence:
   require_encryption: true
 
 # What the queue counted -- bursts, evictions by rung, refusals by motive,
-# the memory block, proposals, the mirror, the residence -- and the native
+# spans it asked its librarian nothing about and why, the memory block,
+# proposals, the mirror, the residence -- and the native
 # core's share, kept across processes in a file of aggregates: names and
 # numbers, never a word of a conversation nor its id. The status route and
 # the terminal's /status show them. They are written at the end of each

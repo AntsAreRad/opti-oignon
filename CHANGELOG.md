@@ -1794,6 +1794,35 @@ package costs.
 
 ### Changed
 
+- The onion's librarian is no longer given the user's words its peel will
+  show as written beside the summary -- each whole segment the user typed
+  that holds an order: a turn they fill is left out of the turns it is
+  handed, and a segment of a turn is cut from it, the instructions saying
+  so. They hold a budget of words, a share (`budget_share`, 0.75) of what
+  the queue's compression floor (`rho`) leaves the summary once those words
+  are counted, one word at least: a target the gate does not enforce. They
+  ask for plain prose that names, in each sentence, who said what it tells.
+  A span whose shown words already pass the floor is not summarised at all:
+  no summary could make its peel save enough, and such a peel, accepted for
+  the gate's looser bound, stood in a small window in place of the facts;
+  the queue goes to the repair, which rebuilds the peel from the user's
+  words when that saves enough and otherwise holds the span with its
+  anchors, as before, and the step is counted (`brief`, `no_room`). The
+  runbook measures the same request, at the gate's bound as a gated eviction
+  asks it, and judges each summary beside the peel's references; its corpora
+  carry no origin, so none of their words is left out. The second asking is
+  made the same way, the facts the first summary lost on its last line as
+  before. On 44 spans of the drift A/B with a 4B librarian, the earlier
+  request had one summary accepted, the model writing about five times the
+  room it had; this one, asked at the gate's bound, has 41, in a third of
+  the model's time, and under the queue's floor the model is asked on 4 of
+  the 44 spans only (3 accepted, each longer than its room). On the
+  maintainer's machine, the queue counted 20 and 42 refusals for length
+  (4096 and 8192); now one each, since the model is asked only on the spans
+  the user's words leave room in -- 17 and 37 were left unasked -- the runs
+  take 23 and 37 percent less time, and six probes of fourteen were answered
+  right against five before (seven probes a run: a small sample, within its
+  noise). A span refused under the earlier request is asked again.
 - With the onion memory on (`enabled: true` in
   `opti_oignon/config/onion.yaml`; off by default), the tool phase of think
   and tools is laid by the onion's journal too: the agentic executor reads

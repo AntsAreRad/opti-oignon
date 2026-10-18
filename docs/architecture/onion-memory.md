@@ -355,13 +355,13 @@ final called.
   signature, as a request told of the user, or with a verb before its
   object -- is refused by name, the user's own restated or told included,
   and the repair drops it wherever it stands. The user's orders reach a peel
-  only in the user's words: the queue stitches at the end of the peel each
-  run the user typed that orders, word for word and marked with its turn,
-  with the condition, the quote, the list's line or the retraction that
-  goes with it, and the gate holds such runs only as that final block,
-  each exactly the run of its turn, after a sentence the summary ended; a
-  marker anywhere else stitches nothing, and the model's own markers are
-  taken out first. A decision is
+  only in the user's words, by reference: each whole segment the user typed
+  that holds an order, with the condition, the quote, the list's line or
+  the retraction typed with it, by its turn, its place and the digest of
+  its bytes, read from the Cellar each time the peel is shown and shown
+  only while it still answers to that digest. No block a summary writes is
+  honoured, the user's own words written into it included, and the model's
+  own markers are taken out first. A decision is
   held clause by clause: a reporter at the head of a sentence exempts no
   clause that opens on a deciding subject of its own after a semicolon, a
   colon, a dash, a comma, an "and", a bracket or a subordinating word, a
@@ -492,9 +492,21 @@ that attributes each decision to its source: a decision is the user's
 only if the user typed it, and what the assistant, a document or a tool
 said is told with them as the subject, the form the second face accepts.
 It asks the model to give no order and to restate none, whoever gave it:
-the user's orders are kept apart, in the user's own words.
-What the request changes in the share of refused summaries is a host
-measurement.
+the user's orders are kept apart, in the user's own words. The words the
+peel shows as written are left out of the turns each call gives the model,
+since a summary that retells them only lengthens the peel, and its
+instructions hold a budget of words: a share (`budget_share`) of what the
+queue's compression floor (`rho`) leaves the summary once those words are
+counted, a target the gate does not enforce (it judges a summary by its
+length bound; the repair alone holds a peel to the floor). A span whose
+shown words already pass that floor is not summarised, and the queue counts
+it (`brief`, `no_room`): its peel could not save enough, and a peel that
+saves a twentieth of its span takes the place of others in a small window,
+where a span held leaves anchors found again by what is asked. The model
+is asked for plain prose that names, in each sentence, who said what it
+tells: an answer told bare would make the assistant's claim a fact. What
+the request changes on real conversations is a host measurement; on the
+drift A/B it is in the changelog.
 
 The user's surface on the Core and the receipts is a memory route scoped
 to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
