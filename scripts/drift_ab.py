@@ -44,7 +44,26 @@ evictions by rung, refusals by motive, the window's tokens at each turn,
 its layers summed (``block_tokens``), what the memory laid of them
 (``memory_tokens``) and the Flesh's (``flesh_tokens``) -- with the
 version of the probe generator and the fingerprint of the decision
-lexicon, so that two readings are compared only under the same.
+lexicon, so that two readings are compared only under the same. It also
+carries what the gate weighed for each summary the librarian handed it
+(``gate``): the span's turns and words, the summary's, the words the peel
+shows, the length ratio, the novelty and the probes' coverage, whether it
+was accepted and the motives of a refusal, each decision and their
+spread -- numbers and motive names, never a word.
+
+Each arm's reading also scores its probes on their own (``probes``):
+how many asked, how many answered with the fact expected, contradicted,
+or left undecided, and the share recalled; the report gives the
+difference of the two arms' recall. Most undecided sentences are answers
+to the long turns of talk, which no template reads: they weigh nothing in
+the recall.
+
+With ``--answers PATH``, once the run has measured, every turn's question
+(with the fact a probe expects) and both arms' answers go to PATH as JSON
+lines, each answer's sentences with their verdicts (contradicts, agrees,
+decided, undecided): what a rate and its undecided share were read from.
+The conversation is the bench's own, synthetic; the file is written
+whole, so a run that breaks leaves an earlier one as it was.
 
 A sentence the deterministic templates cannot parse is counted undecided,
 never as agreement: the host's model judge is the remedy, and the report
@@ -58,6 +77,7 @@ Run on the host, never in CI::
     python3 scripts/drift_ab.py --model llama3:8b              # another answering model
     python3 scripts/drift_ab.py --librarian-model qwen3:4b     # another librarian
     python3 scripts/drift_ab.py --history-tokens 2048
+    python3 scripts/drift_ab.py --answers /tmp/drift_answers.jsonl  # the answers and their verdicts too
 
 Without a backend for the answering model or for the librarian's, or when
 the backend lists either model as not installed, it asks nothing, names
@@ -213,26 +233,64 @@ def _claim_key(claim):
     return (claim.subject, claim.predicate, claim.obj, claim.negated)
 
 
-def reading(turns, answers, *, arm, source, templates=None):
-    """What each answer contradicts, and agrees with, among the facts holding at its turn."""
+def reading(turns, answers, *, arm, source, templates=None, verdicts=None):
+    """What each answer contradicts, and agrees with, among the facts holding at its turn.
+
+    With ``verdicts``, a list, each answer's sentences are appended to it as
+    read, one list per answer: each sentence with its verdict, "contradicts"
+    a fact holding at its turn, else "agrees" with one, else "decided"
+    (parsed, neither agreeing nor contradicting), or "undecided" (no
+    template parses it).
+
+    The probes are read on their own (``probes``): each answer to a turn
+    that asks for a fact is "agrees" when one of its sentences states the
+    fact expected and none contradicts that fact -- an answer that gives the
+    retired value beside the current one recalls nothing -- else
+    "contradicts" when one contradicts a fact holding, else "decided" or
+    "undecided"; ``recall`` is the share of probes that agree. The undecided
+    sentences of the other turns -- answers to talk the templates were never
+    meant to read -- weigh nothing there.
+    """
     if len(answers) > len(turns):
         raise ValueError(f"{len(answers)} answers for {len(turns)} turns")
     drift = templates or _templates()
     sentences = decided = agreements = 0
     at = []
+    probes = dict.fromkeys(("asked", "agrees", "contradicts", "decided", "undecided"), 0)
     for index, answer in enumerate(answers):
         held = held_facts(turns, index + 1)
         held_claims = {_claim_key(c) for c in (drift._parse(s) for _id, s in held) if c is not None}
+        turn = turns[index]
+        wanted = drift._parse(turn.expects) if turn.probe and turn.expects else None
+        expected = _claim_key(wanted) if wanted is not None else None
+        probed = next((fact_id for fact_id, statement in held if statement == turn.expects), None)
+        recalled = hedged = False
+        said = []
         for sentence in (s.strip() for s in _SENTENCE_SPLIT.split(str(answer or "")) if s.strip()):
             sentences += 1
             claim = drift._parse(sentence)
             if claim is None:
+                said.append({"text": sentence, "verdict": "undecided"})
                 continue
             decided += 1
-            if _claim_key(claim) in held_claims:
+            agrees = _claim_key(claim) in held_claims
+            if agrees:
                 agreements += 1
-            for found in drift.find_contradictions(held, sentence):
-                at.append({"turn": index + 1, "sentence": sentence, "fact": found.fact_id, "template": found.template})
+            if expected is not None and _claim_key(claim) == expected:
+                recalled = True
+            found = list(drift.find_contradictions(held, sentence))
+            for contradiction in found:
+                at.append({"turn": index + 1, "sentence": sentence, "fact": contradiction.fact_id,
+                           "template": contradiction.template})
+                hedged = hedged or (turn.probe and contradiction.fact_id == probed)
+            said.append({"text": sentence, "verdict": "contradicts" if found else "agrees" if agrees else "decided"})
+        if verdicts is not None:
+            verdicts.append(said)
+        if turn.probe:
+            probes["asked"] += 1
+            kinds = {s["verdict"] for s in said}
+            probes["agrees" if recalled and not hedged else "contradicts" if "contradicts" in kinds
+                   else "undecided" if kinds <= {"undecided"} else "decided"] += 1
     turns_judged = len(answers)
     return {
         "arm": arm,
@@ -245,6 +303,7 @@ def reading(turns, answers, *, arm, source, templates=None):
         "contradictions": len(at),
         "rate_per_1000_turns": None if turns_judged == 0 else round(1000.0 * len(at) / turns_judged, 3),
         "at": at,
+        "probes": {**probes, "recall": None if not probes["asked"] else round(probes["agrees"] / probes["asked"], 3)},
     }
 
 
@@ -435,10 +494,110 @@ def run_arm(turns, answer):
     return answers
 
 
+def _stats(values):
+    """The spread of ``values``, None left out: how many, the least, the median, the ninth decile, the most, the
+    mean; None throughout for none."""
+    kept = sorted(float(v) for v in values if v is not None)
+    if not kept:
+        return {"n": 0, "min": None, "median": None, "p90": None, "max": None, "mean": None}
+
+    def at(share):
+        return kept[min(len(kept) - 1, int(math.ceil(share * len(kept))) - 1)]
+
+    return {"n": len(kept), "min": round(kept[0], 3), "median": round(at(0.5), 3), "p90": round(at(0.9), 3),
+            "max": round(kept[-1], 3), "mean": round(sum(kept) / len(kept), 3)}
+
+
+def recording_gate(peels, probes, figures, unread):
+    """``peels.decide`` with each decision's figures appended to ``figures``: numbers and motive names, never a word.
+
+    Each figure is what the gate weighed: the span's turns and words, the
+    summary's words, the words the peel shows (the summary and the user's
+    words it references), the length ratio and the novelty it was held to,
+    the share of the span's facts the probes ask for, whether it was
+    accepted, and the motives of a refusal. Reading the figures never
+    breaks the decision it reads: a decision whose figures could not be
+    read is counted in ``unread``, by the name of what stopped it.
+    """
+    decide = peels.decide
+
+    def recorded(span, probes_, text, gate, refs=()):
+        decision = decide(span, probes_, text, gate, refs)
+        try:
+            figures.append({
+                "span_turns": len(span),
+                "span_words": sum(probes.word_count(str(turn.get("text", "") or "")) for turn in span),
+                "summary_words": probes.word_count(str(text or "")),
+                "shown_words": probes.word_count(peels.joined(text, peels.shown_words(span, refs))[0]),
+                "length_ratio": decision.length_ratio,
+                "novelty": decision.novelty,
+                "probe_coverage": decision.probe_coverage,
+                "accepted": bool(decision.accepted),
+                "motives": list(peels.refusal_motives(decision, gate)),
+            })
+        except Exception as exc:  # noqa: BLE001 - the bench's instrument never breaks the run it measures
+            unread.append(type(exc).__name__)
+        return decision
+
+    return recorded
+
+
+def gate_report(figures, max_length_ratio, unread=()):
+    """What the gate weighed over a run, decision by decision and summed: numbers and motive names only; and how
+    many decisions were taken whose figures could not be read."""
+    motives = {}
+    for figure in figures:
+        for motive in figure["motives"]:
+            motives[motive] = motives.get(motive, 0) + 1
+    over = [f for f in figures if f["length_ratio"] is not None and max_length_ratio is not None
+            and f["length_ratio"] > max_length_ratio]
+    return {
+        "decisions": len(figures),
+        "unread": len(unread),
+        "accepted": sum(1 for f in figures if f["accepted"]),
+        "motives": dict(sorted(motives.items())),
+        "max_length_ratio": max_length_ratio,
+        "over_length": len(over),
+        "length_ratio": _stats(f["length_ratio"] for f in figures),
+        "span_words": _stats(f["span_words"] for f in figures),
+        "summary_words": _stats(f["summary_words"] for f in figures),
+        "reference_words": _stats(max(0, f["shown_words"] - f["summary_words"]) for f in figures),
+        "each": [
+            {key: (round(value, 4) if isinstance(value, float) else value) for key, value in figure.items()}
+            for figure in figures
+        ],
+    }
+
+
+def write_answers(path, turns, arms):
+    """Every turn's question and each arm's answer, with its sentences' verdicts, one JSON line per arm and turn.
+
+    ``arms`` maps an arm's name to ``(answers, verdicts)``. The file is
+    written whole beside its place and moved into it, so a run that breaks
+    leaves an earlier file as it was. The conversation is the bench's own,
+    synthetic: no word of anyone's.
+    """
+    target = Path(path)
+    staged = target.with_name(target.name + ".partial")
+    try:
+        with staged.open("w", encoding="utf-8") as handle:
+            for arm, (answers, verdicts) in arms.items():
+                for index, (turn, answer, said) in enumerate(zip(turns, answers, verdicts), start=1):
+                    handle.write(json.dumps({"arm": arm, "turn": index, "question": turn.text,
+                                             "expects": turn.expects if turn.probe else None, "answer": answer,
+                                             "sentences": said}, ensure_ascii=False) + "\n")
+        staged.replace(target)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def compare(onion, plain):
     """Both readings and the difference of their rates, onion minus plain."""
     a, b = onion["rate_per_1000_turns"], plain["rate_per_1000_turns"]
-    return {"onion": onion, "plain": plain, "delta_rate_per_1000_turns": None if a is None or b is None else round(a - b, 3)}
+    ra, rb = onion["probes"]["recall"], plain["probes"]["recall"]
+    return {"onion": onion, "plain": plain,
+            "delta_rate_per_1000_turns": None if a is None or b is None else round(a - b, 3),
+            "delta_probe_recall": None if ra is None or rb is None else round(ra - rb, 3)}
 
 
 def _registry_resolver():
@@ -598,6 +757,10 @@ def main(argv=None, *, resolve=None):
     parser.add_argument("--mode", choices=MODES, default="launcher",
                         help="launcher: bursts at the chat path's rhythm, off the answering thread (default); "
                              "fast: curation after every turn, on the answering thread")
+    parser.add_argument("--answers", default=None, metavar="PATH",
+                        help="write every turn's question and both arms' answers, each sentence with its verdict, "
+                             "as JSON lines to PATH once the run has measured (the bench's own conversation, "
+                             "synthetic)")
     args = parser.parse_args(argv)
     if resolve is None:
         sys.path.insert(0, str(_REPO))
@@ -644,14 +807,20 @@ def main(argv=None, *, resolve=None):
     onion_answer = onion_arm(ask, librarian=librarian, config=config, summarize=None, resolve=resolve,
                              wrap=untrusted_context.wrap, mode=args.mode, model=model, model_window=window,
                              count=_model_counter(model))
+    # What the gate weighed at each decision of the run, read where the queue asks it, and put back as it was.
+    figures, unread, decide = [], [], peels.decide
+    peels.decide = recording_gate(peels, probes, figures, unread)
     try:
         plain_answers = run_arm(TURNS, plain_arm(ask, history_tokens=args.history_tokens))
         onion_answers = run_arm(TURNS, onion_answer)
     except Exception as exc:  # noqa: BLE001 - a half-run is not a measurement
         print(f"the run broke before its end ({exc!r}): nothing measured", file=sys.stderr)
         return 2
-    plain = reading(TURNS, plain_answers, arm="plain", source="measured")
-    onion = reading(TURNS, onion_answers, arm="onion", source="measured")
+    finally:
+        peels.decide = decide
+    said = {"plain": [], "onion": []}
+    plain = reading(TURNS, plain_answers, arm="plain", source="measured", verdicts=said["plain"])
+    onion = reading(TURNS, onion_answers, arm="onion", source="measured", verdicts=said["onion"])
     report = {
         "source": "measured",
         "mode": args.mode,
@@ -670,8 +839,16 @@ def main(argv=None, *, resolve=None):
             "memory_tokens": _spread(onion_answer.memory_tokens),
             "flesh_tokens": _spread(onion_answer.flesh_tokens),
         },
+        # What the gate weighed for each summary the librarian handed it: numbers and motive names only.
+        "gate": gate_report(figures, peels.load_gate().max_length_ratio, unread),
         **compare(onion, plain),
     }
+    if args.answers:
+        try:
+            write_answers(args.answers, TURNS, {"plain": (plain_answers, said["plain"]),
+                                                "onion": (onion_answers, said["onion"])})
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"the answers could not be written to {args.answers} ({exc!r}); the report stands", file=sys.stderr)
     print(json.dumps(report, indent=2))
     return 0
 

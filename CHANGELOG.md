@@ -11,6 +11,19 @@ package costs.
 
 ### Added
 
+- The drift A/B scores each arm's probes on their own: how many it asked,
+  answered with the fact expected, contradicted or left undecided, and the
+  share recalled, with the difference of the two arms' recall. Measured on
+  the maintainer's machine, most undecided sentences were answers to the
+  long turns of talk, which no template reads; the probes were all decided.
+- The drift A/B's report carries what the gate weighed for each summary the
+  librarian handed it (`gate`): the span's turns and words, the summary's,
+  the words the peel shows, its length ratio, novelty and coverage, whether
+  it was accepted and why not, decision by decision and their spread;
+  numbers and motive names only. With `--answers PATH` the command also
+  writes, once the run has measured, every turn's question and both arms'
+  answers, each sentence with its verdict, as JSON lines: what a rate and
+  its undecided share were read from. The conversation is the bench's own.
 - A machine names its librarian's model in `opti_oignon/config/local.yaml`
   (`onion: {librarian: {model: "<name>"}}`), in place of the shipped
   placeholder, with or without the switch; only a name that is not blank
