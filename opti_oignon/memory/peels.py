@@ -26,8 +26,9 @@ peel; a refused summary is asked for once more, handed the probes it
 failed; then it is repaired in the user's own words -- the sentences of the
 summary its span holds, and the fewest typed segments answering what they
 miss -- and kept while it saves enough; else the span is held, the places
-of its typed units kept as anchors in the Cellar. The gate itself never
-yields: every peel the ladder makes has passed it.
+of its typed units kept as anchors in the Cellar, a unit that reaches into
+an order by the whole segments that order was typed in. The gate itself
+never yields: every peel the ladder makes has passed it.
 
 The user's words never enter a peel as a copy. A peel is a summary and
 references: each whole segment the user typed that it keeps, by its turn,
@@ -1771,12 +1772,65 @@ def _choose(found, targets, ladder):
     return tuple(sorted(own | set(cover(found, rest, ladder.exact_cover) or ())))
 
 
-def _anchors(span, probes, ladder):
+def _ordering(span, probes, gate):
+    """``(orders, later)``: the places of the runs ``order_ranges`` keeps in ``span`` -- the user's orders and each
+    bare retraction typed after one -- and, by place, the bare retractions typed after each; nothing with no table
+    of directives.
+
+    A retraction typed in a later turn is a run of its own, whether it took
+    the order back ("Delete the logs on Atlas.", then "No." to "Shall I
+    delete them now?") or answered another question ("Never push to the main
+    branch.", then "No." to "Shall I reformat the tests?"): which one it is
+    is not read, so an order is shown with each typed after it, as a peel
+    references them all, or not at all (``select_anchors``).
+    """
+    if gate.directives is None:
+        return [], {}
+    from .probes import _names_held, _retraction, order_ranges
+
+    runs = order_ranges(span, gate.directives, _names_held(probes))
+    order = {str(t.get("turn_id", "")): n for n, t in enumerate(span)}
+    orders = [(run.turn_id, run.start, run.stop) for run in runs]
+    backs = [(run.turn_id, run.start, run.stop) for run in runs if _retraction(run.text)]
+    return orders, {o: [b for b in backs if (order[b[0]], b[1]) > (order[o[0]], o[1])] for o in orders}
+
+
+def _reached(place, orders):
+    """The places of ``orders`` that ``place``, ``(turn_id, start, stop)``, reaches into."""
+    turn_id, start, stop = place
+    return [o for o in orders if o[0] == turn_id and o[1] < stop and start < o[2]]
+
+
+def _anchors(span, probes, gate, ladder):
     """What a held span keeps: the places in the Cellar of each typed decision, then of the fewest typed units
-    answering what else typed words can."""
+    answering what else typed words can -- a unit that reaches into an order of the user's by the whole segments
+    that order was typed in.
+
+    A sentence of an order kept alone could show it without what bounds it:
+    "Delete the logs on Atlas." without the "Not before next week." typed
+    after it, or the "Only if Bob agrees." typed before. So a unit that
+    reaches into a run of the user's that orders (``order_ranges``) is kept
+    by each whole segment that run stands in, as a peel references it, and
+    never by its own place; the block shows it with each bare retraction
+    typed after it (``select_anchors``). Any other unit, a fact typed beside
+    an order included, shows no order and keeps its own place, so that the
+    block can still show it where it does not show the segment, and only
+    there. Each place once, in span order, a segment before the units it
+    holds.
+    """
+    orders, _later = _ordering(span, probes, gate)
     found = _typed_units(span)
     chosen = _choose(found, _within_reach(probes, found), ladder)
-    return tuple((found[i].turn_id, found[i].start, found[i].stop) for i in chosen)
+    kept = set()
+    for unit in (found[i] for i in chosen):
+        place = (unit.turn_id, unit.start, unit.stop)
+        reached = _reached(place, orders)
+        if reached:
+            kept.update(ref[:3] for ref in references(span, reached))
+        else:
+            kept.add(place)
+    order = {str(t.get("turn_id", "")): n for n, t in enumerate(span)}
+    return tuple(sorted(kept, key=lambda place: (order[place[0]], place[1], -place[2])))
 
 
 def _commit(guard, flesh, cellar, ledger, tree, span, *, rung, kind, reason, anchors=(), made=None, refused=(),
@@ -1831,7 +1885,8 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
       shows is at most ``rho`` times its span; each sentence it drops is
       kept by its motive and digest, and said in what the peel shows.
     * the hold: no peel; the receipt keeps the places in the Cellar of the
-      fewest units answering every probe of the span, its anchors.
+      fewest units answering every probe of the span, its anchors: a unit
+      that reaches into an order by the whole segments it was typed in.
 
     With no summariser the queue starts at the repair, and so it does when
     the user's words the peel would show leave a librarian that takes a
@@ -1911,68 +1966,117 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
         if judged.accepted and _saves_enough(estimate_tokens(shown), _span_tokens(span), ladder.rho):
             return commit(rung="repaired", kind="accepted", made=(repaired, judged, refs, dropped), refused=refused,
                           unasked=unasked, reason=f"repaired with {len(refs)} reference(s) to the user's words")
-    return commit(rung="held", kind="held", anchors=_anchors(span, probes, ladder), refused=refused, unasked=unasked,
+    anchors = _anchors(span, probes, gate, ladder)
+    return commit(rung="held", kind="held", anchors=anchors, refused=refused, unasked=unasked,
                   reason="held: no peel answers for the span within the compression floor; its anchors stay")
 
 
 def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unplaced=None, *, lineage=None,
-                   withdrawn=(), reached=None):
+                   withdrawn=(), reached=None, gate=None):
     """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
 
     An anchor ranks as a peel does, by the share of the query's terms its
     words hold, then the newest receipt first, then its place in its span.
     It shows what a peel would of its unit, re-read from its place: a
-    sentence as written, a code block by its marker, never its code; with
-    the label of its turn (``turn_label``), and defanged as a reference is,
-    its turn's marker saying how many markers that took when it took any. A
-    place that is no typed unit of its span -- a turn a peer sent included
-    -- shows nothing. ``dropped``, a list, receives the provenance of each
-    anchor the query reached that ``cap`` left out, ``unplaced`` of each it
-    reached whose place reads as no typed unit any more, and ``reached`` of
-    each it reached whose turn a withdrawal reached, not shown.
+    sentence as written, a code block by its marker, never its code, and a
+    segment kept whole (``_anchors``) by its words, its fenced blocks by
+    their markers; with the label of its turn (``turn_label``), and
+    defanged as a reference is, its turn's marker saying how many markers
+    that took when it took any. Where an order of the user's may stand with
+    more than one segment -- a span holding a bare retraction, or a turn of
+    several segments the user typed -- the span's orders are read
+    (``_ordering``, with ``gate``'s table, the shipped one when it holds
+    none), and an anchor that reaches into one is shown as one item: every
+    segment of that order and of each bare retraction typed after it --
+    several parts, each after its turn's marker as a peel's references are
+    -- ranked by the words of them all, and left out whole when ``cap`` or
+    a withdrawal reaches any part. An anchor within a part the block shows is not shown
+    again: a fact kept beside the segment of an order shows alone only when
+    the block does not show that segment. A place that is neither a typed
+    unit of its span nor a whole segment the user typed
+    (``typed_segments``) -- a turn a peer sent included -- shows nothing.
+    ``dropped``, a list, receives the provenance of each anchor the query
+    reached that ``cap`` left out, ``unplaced`` of each it reached whose
+    place reads as neither any more, and ``reached`` of each it reached a
+    part of which a withdrawal reached, not shown.
     """
     from .composer import defanged
+    from .probes import _retraction, generate_probes, mask_code
 
     estimate = estimate or estimate_tokens
     withdrawn = frozenset(withdrawn or ())
     terms = _terms(query)
     if not terms or cap <= 0:
         return []
+    table = None
     scored = []
     held = [r for r in ledger.open() if r.kind == "held" and r.anchors]
     for age, receipt in enumerate(reversed(held)):
         span = cellar.get(receipt.key)
         texts = {str(t.get("turn_id", "")): str(t.get("text", "")) for t in span}
         labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in span}
-        typed = {(u.turn_id, u.start, u.stop): u.text for u in _typed_units(span)}
+        units = _typed_units(span)
+        typed = {(u.turn_id, u.start, u.stop): u.text for u in units}
+        wide = reading = None
         for place, (turn_id, start, stop) in enumerate(receipt.anchors):
-            shown = typed.get((turn_id, start, stop))
-            hit = len(terms & _terms(texts.get(turn_id, "")[start:stop])) / len(terms)
-            if hit <= 0:
+            own = _terms(texts.get(turn_id, "")[start:stop])
+            if not terms & own:
                 continue
+            if wide is None:
+                # Read once a receipt is reached: its whole segments, and whether an order may stand with more.
+                segments = typed_segments(span)
+                for at, begin, end in segments:
+                    typed.setdefault((at, begin, end), mask_code(texts[at][begin:end]))
+                wide = any(_retraction(u.text) for u in units) or len({s[0] for s in segments}) < len(segments)
+            shown = typed.get((turn_id, start, stop))
             provenance = f"anchor:{receipt.key[:12]}:{turn_id}"
             if not shown:
                 if unplaced is not None:
                     unplaced.append(provenance)
                 continue
-            if withheld(labels[turn_id], withdrawn):
+            parts = [(turn_id, start, stop)]
+            if wide:
+                if reading is None:
+                    if table is None:
+                        table = gate if gate is not None and gate.directives is not None else load_gate()
+                    reading = _ordering(span, generate_probes(span, table.lexicon), table)
+                orders, later = reading
+                runs = _reached((turn_id, start, stop), orders)
+                if runs:
+                    parts = [ref[:3] for ref in references(span, runs + [back for run in runs for back in later[run]])]
+            if any(withheld(labels[at], withdrawn) for at, _begin, _end in parts):
                 if reached is not None:
                     reached.append(provenance)
                 continue
-            words, altered = defanged(shown)
-            if altered:
-                words = f"{_header(turn_id, altered)} {words}"
+            alone = parts == [(turn_id, start, stop)]
+            said = own if alone else set().union(*(_terms(texts[at][begin:end]) for at, begin, end in parts))
+            hit = len(terms & said) / len(terms)
+            if alone:
+                words, altered = defanged(shown)
+                if altered:
+                    words = f"{_header(turn_id, altered)} {words}"
+                label = labels[turn_id]
+            else:
+                words, altered = joined("", [(at, typed[at, begin, end]) for at, begin, end in parts],
+                                        defang=defanged)
+                label = join_labels(labels[at] for at, _begin, _end in parts)
             events = (("anchors_altered", altered),) if altered else ()
-            scored.append((-hit, age, place, words, provenance, tuple(labels[turn_id]), events))
+            scored.append((-hit, age, place, words, provenance, tuple(label), events, (turn_id, start, stop),
+                           tuple(parts)))
+    # An item holds the words of the anchors within it, so it ranks before them: its hit is no lower, its place
+    # earlier; an anchor within a part shown is shown there.
     scored.sort(key=lambda entry: entry[:3])
-    chosen, used = [], 0
-    for neg, _age, _place, words, provenance, label, events in scored:
+    chosen, used, laid = [], 0, []
+    for neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts in scored:
+        if any(at == age and on == turn_id and begin <= start and stop <= end for at, on, begin, end in laid):
+            continue
         tokens = estimate(words)
         if used + tokens > cap:
             if dropped is not None:
                 dropped.append(provenance)
             continue
         used += tokens
+        laid.extend((age, at, begin, end) for at, begin, end in parts)
         chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4), label=label, events=events))
     return chosen
 

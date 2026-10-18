@@ -2207,7 +2207,8 @@ package costs.
   each marked with its turn, kept when the gate accepts it again and it
   saves enough (`queue.rho`, compared as written); else the span is held,
   the places of the typed units that answer its probes (each typed
-  decision's own sentence, then the fewest for the rest) kept in the
+  decision's own sentence, then the fewest for the rest; one that reaches
+  into an order by each whole segment the order was typed in) kept in the
   archive as anchors and shown to the model as data -- a code block by its
   marker, never its code -- within their share of the summaries' layer. A
   repair drops each sentence of the summary that shares at least
@@ -3119,6 +3120,32 @@ package costs.
   folder of their own, keeps its record.
 
 ### Fixed
+
+- [SECURITY] A span the onion's queue holds no longer keeps an order the
+  user typed without what bounds it. A held span keeps, as anchors, the
+  fewest typed units -- sentences and fenced blocks -- that answer its
+  probes, and "Delete the logs on Atlas. Not before next week." kept "Delete
+  the logs on Atlas." alone, since the bound states no fact for a probe to
+  ask for: the memory block showed that order, as written and as the user's,
+  to each turn whose question reached it. An order lost an "Only if Bob
+  agrees." typed before it the same way, and one the user took back two
+  turns later ("No.") was shown as standing. A unit that reaches into an
+  order is now kept by each whole segment the order was typed in, the
+  segments a peel references for it, and never alone; the block shows it as
+  one item with every segment of that order and of each bare retraction
+  typed after it, whatever that retraction answered, or not at all when the
+  window has no room for the item or a withdrawal reaches a part of it, an
+  item of several parts showing each after its turn's marker as a peel's
+  references are; a fact typed beside an order keeps its own place, and the
+  block shows it alone only where it does not show the order's segment. A
+  decision that is also an order is no longer offered to the Core, where,
+  accepted, it stood without its bound. A span held before this change keeps
+  its anchors as they were made. Measured with a 4B model on the drift A/B,
+  the probes answered are unchanged (three of seven at 4096 and at 8192),
+  the memory block lays 488 tokens a turn at 8192 against 532, and the
+  decision the bench's filler repeats, which the directives read as an order
+  ("the dashboards and alerts that must exist before the switch"), is no
+  longer offered: five offers before, none now.
 
 - The resource governor no longer refuses a split it can place because of
   a cost it learned of the same model on the CPU alone. Measured after a

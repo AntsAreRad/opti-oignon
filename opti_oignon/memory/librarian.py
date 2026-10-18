@@ -1529,7 +1529,10 @@ def _propose(state, receipt, gate, ladder):
     Returns ``(made, capped)``. Only a decision probe drawn from a typed
     turn makes a proposal, from the anchor that is its own sentence: a
     date, a name, a neighbour that answers it, or the words of the
-    assistant, a document or a tool kept as an anchor propose nothing. The
+    assistant, a document or a tool kept as an anchor propose nothing; nor
+    does a decision that reaches into an order of the user's (``_ordering``),
+    whether its anchor is the order's segment or the sentence alone: offered
+    alone, it would stand in the Core without what bounds it. The
     cap is the conversation's, in offers per UTC day (see ``_take_room``).
     A decision past it is deferred with the state, never lost: each step
     first opens, oldest first, what earlier days deferred, while the day has
@@ -1544,6 +1547,7 @@ def _propose(state, receipt, gate, ladder):
     decision, offered as any is.
     """
     from .core_store import Proposal, proposal_id
+    from .peels import _ordering, _reached
     from .probes import generate_probes
 
     today, capped, held_back = _today(), 0, 0
@@ -1554,7 +1558,9 @@ def _propose(state, receipt, gate, ladder):
     if receipt is not None and receipt.kind == "held" and receipt.anchors:
         span = state.cellar.get(receipt.key)
         turns = {str(t.get("turn_id", "")): t for t in span}
-        typed = [p for p in generate_probes(span, gate.lexicon) if p.kind == "decision" and p.origin == "typed"]
+        drawn = generate_probes(span, gate.lexicon)
+        typed = [p for p in drawn if p.kind == "decision" and p.origin == "typed"]
+        orders, _later = _ordering(span, drawn, gate)
         with state.lock:
             # The probes were drawn outside the lock: the mirror may have
             # superseded the receipt meanwhile.
@@ -1562,7 +1568,8 @@ def _propose(state, receipt, gate, ladder):
             decided = _decided(state) if anchors else set()
             for turn_id, start, stop in anchors:
                 words = str(turns.get(turn_id, {}).get("text", ""))[start:stop]
-                if not any(p.turn_id == turn_id and p.answer == words for p in typed):
+                if _reached((turn_id, start, stop), orders) or not any(
+                        p.turn_id == turn_id and p.answer == words for p in typed):
                     continue
                 pid = proposal_id(receipt.key, turn_id, start, stop)
                 if any(q.id == pid for q in state.proposals):
@@ -1858,7 +1865,7 @@ def _placed_items(prompt, retrieval):
     return placed
 
 
-def _compose_block(state, question, budget, withdrawn=(), estimate=None):
+def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=None):
     """Core, receipts digest, held anchors and the Peels for ``question`` under the caps, every part counted with
     ``estimate``; raises what the composer refuses.
 
@@ -1881,10 +1888,10 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None):
     dropped, unplaced, reached = [], [], []
     anchors = select_anchors(state.ledger, state.cellar, question or "", min(load_ladder().anchors, budget.peels),
                              estimate=estimate, dropped=dropped, unplaced=unplaced, lineage=state.lineage,
-                             withdrawn=withdrawn, reached=reached)
+                             withdrawn=withdrawn, reached=reached, gate=gate)
     # Events of this composition: the anchors its query reached that the cap
-    # left out, those whose place no longer reads as a typed unit, and those
-    # whose turn a withdrawal reached.
+    # left out, those whose place no longer reads as a typed unit or a whole
+    # typed segment, and those whose turn a withdrawal reached.
     _counted("block", "anchors_dropped", len(dropped))
     _counted("block", "anchors_unplaced", len(unplaced))
     _counted("block", "anchors_withdrawn", len(reached))
@@ -1939,7 +1946,7 @@ def memory_block(conversation_id, question=None, *, budget=None, gate=None, conf
             return ""
         estimate, _model = _counter(conversation_id, turn=True)
         with state.lock:
-            return _compose_block(state, question, budget, withdrawn or (), estimate)
+            return _compose_block(state, question, budget, withdrawn or (), estimate, gate)
     except Exception as exc:  # noqa: BLE001 - a block that cannot be trusted is no block
         _counted("block", f"refused_{type(exc).__name__}")
         logger.warning("onion memory block for %s refused, answering none: %s", conversation_id, exc)
@@ -2318,6 +2325,7 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         withdrawn=frozenset(withdrawn or ()), recalled=tuple(recalled or ()), model_window=model_window,
         counted=counted, wrap=wrap, budgets=budgets, journal=journal, ladder=ladder, unheld=unheld,
         tooled=bool(schemas), tools=max((_part("tools", text, "tools", counted)[2] for text in schemas), default=0),
+        gate=gate,
     )
     cost = _turn_cost(counted, wrap, journal.message_overhead)
     sticky = _sticky(budgets, model_window)
@@ -2373,6 +2381,7 @@ class _Asked:
     unheld: bool
     tooled: bool = False
     tools: int = 0
+    gate: object = None
 
 
 def _read(state, asked):
@@ -2437,7 +2446,8 @@ def _read(state, asked):
         digest = dict(digests)[rung]
         cap = int(shares.get("memory", 0) * budget.tail)
         anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
-                                  estimate=counted, lineage=lineage, withdrawn=asked.withdrawn) if cap > 0 else [])
+                                  estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate)
+                   if cap > 0 else [])
         room = cap - sum(counted(anchor.text) for anchor in anchors)
         laid = {key for key, _text, _provenance, _label in region[region_cut(region, budget, counted):]}
 

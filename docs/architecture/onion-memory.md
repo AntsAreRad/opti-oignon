@@ -334,9 +334,11 @@ final called.
   drawn from the span, class by class, at the configured thresholds. The probes read English and French: decisions, negations, names and whole words, accents included. An empty probe set on a rich span is a defect, and an unknown
   rate is not a pass. A span no peel answers for leaves the Flesh with
   none: held, its receipt keeping the places in the Cellar of the fewest
-  units that answer its probes, or bare -- a span the probes draw nothing
-  from, and the spans the catch-up and a shadow set aside -- under a
-  receipt that names it, its turns recallable from the Cellar.
+  units that answer its probes (a unit that reaches into an order the user
+  typed kept by each whole segment that order stands in), or bare -- a span
+  the probes draw nothing from, and the spans the catch-up and a shadow set
+  aside -- under a receipt that names it, its turns recallable from the
+  Cellar.
 - The same peel must say nothing its span does not hold. The second face
   of the gate reads the summary as a source is read and refuses, by name,
   a name, a date, a number or a code block its span lacks, inline code its
@@ -359,7 +361,16 @@ final called.
   that holds an order, with the condition, the quote, the list's line or
   the retraction typed with it, by its turn, its place and the digest of
   its bytes, read from the Cellar each time the peel is shown and shown
-  only while it still answers to that digest. No block a summary writes is
+  only while it still answers to that digest. A span held keeps them by
+  the same segments: an anchor that reaches into an order keeps each whole
+  segment the order was typed in, never the order's sentence alone, and
+  the memory block shows it as one item with every segment of that order
+  and of each bare retraction typed after it, as a peel references them,
+  or not at all; a fact typed beside an order keeps its own place, shown
+  alone only where the block does not show the order's segment. A
+  decision that reaches into an order is not
+  offered to the Core. A span held before this rule keeps its anchors as
+  they were made. No block a summary writes is
   honoured, the user's own words written into it included, and the model's
   own markers are taken out first. A decision is
   held clause by clause: a reporter at the head of a sentence exempts no
