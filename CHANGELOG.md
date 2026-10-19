@@ -3121,6 +3121,24 @@ package costs.
 
 ### Fixed
 
+- The onion lays the memory a question brings in the order of time, the
+  newest nearest the question. It chose that memory by rank -- the share of
+  the question's terms an item holds -- and laid it in that order, so a fact
+  and the later one that updates it stood in either order, the stale one
+  nearest the question when it ranked lower. The memory is still chosen by
+  rank, and a cap, the plan's or that of a window that cuts it further,
+  leaves out the last chosen first; what is kept is laid by its receipt's
+  place in the ledger, then its place in the span, a peel at the place of
+  the newest receipt it stands for, and a recalled span after it -- in the
+  order chosen where a count that reads the whole would make the order of
+  time pass the cap. The memory block the executor places is ordered the
+  same way. Measured on the drift A/B, a 4B model answers six of seven
+  memory probes right at 4096 where it answered three, none wrong against
+  two -- the home and the release date the user updated now right -- and
+  five of seven at 8192 where it answered four, laying the same memory to
+  the token in another order; a 27B model answers six of seven at 4096, as
+  before.
+
 - At the 4096 rung, the onion lays again the memory a question reaches,
   where the region of accepted peels leaves it room. The tail held each kind
   of source to its share of its cap, envelope included, and at 4096 the

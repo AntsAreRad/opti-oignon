@@ -1871,7 +1871,8 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=No
 
     The anchors of held spans take their share of the peels layer first,
     their words read from the Cellar; the peels take the rest, each shown as
-    ``render_peel`` reads it from the Cellar now, its references re-read. A
+    ``render_peel`` reads it from the Cellar now, its references re-read;
+    chosen by rank, they are laid in the order of time (``in_time``). A
     peel that stands on a superseded span is not among them: the
     conversation no longer holds what it summarises. A part a withdrawal of
     ``withdrawn`` reached is not shown, at once, with no mirror. The block
@@ -1880,7 +1881,16 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=No
     queue's, and carry nothing.
     """
     from .composer import compose, load_budget
-    from .peels import PeelTree, join_labels, load_ladder, render_peel, select_anchors, select_peels
+    from .peels import (
+        PeelTree,
+        in_time,
+        join_labels,
+        load_ladder,
+        peel_time,
+        render_peel,
+        select_anchors,
+        select_peels,
+    )
 
     budget = budget or load_budget()
     estimate = estimate or estimate_tokens
@@ -1903,10 +1913,15 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=No
             if not gone.intersection(peel.sources):
                 tree.add(peel)
 
-    def render(peel):
-        return render_peel(peel, state.cellar, lineage=state.lineage, withdrawn=withdrawn)
+    places = {r.key: n for n, r in enumerate(state.ledger.all())}
 
-    retrieval = anchors + select_peels(tree, question or "", budget.peels - taken, estimate=estimate, render=render)
+    def render(peel):
+        shown = render_peel(peel, state.cellar, lineage=state.lineage, withdrawn=withdrawn)
+        return shown if shown is None else replace(shown, at=peel_time(peel, places))
+
+    # Chosen by rank within the cap, laid in the order of time: the newest nearest the question.
+    retrieval = in_time(anchors + select_peels(tree, question or "", budget.peels - taken, estimate=estimate,
+                                               render=render))
     prompt = compose(
         core=state.core, ledger=state.ledger, cellar=state.cellar,
         retrieval=retrieval, flesh=[], turn="", budget=budget, estimate=estimate,
@@ -2397,6 +2412,7 @@ def _read(state, asked):
     from .peels import (
         PeelTree,
         join_labels,
+        peel_time,
         render_peel,
         select_anchors,
         select_peels,
@@ -2460,8 +2476,11 @@ def _read(state, asked):
         room = cap - sum(counted(anchor.text) for anchor in anchors)
         laid = {key for key, _text, _provenance, _label in region[region_cut(region, budget, counted):]}
 
+        places = {r.key: n for n, r in enumerate(state.ledger.all())}
+
         def render(peel):
-            return render_peel(peel, state.cellar, lineage=lineage, withdrawn=asked.withdrawn)
+            shown = render_peel(peel, state.cellar, lineage=lineage, withdrawn=asked.withdrawn)
+            return shown if shown is None else replace(shown, at=peel_time(peel, places))
 
         # The peels the question may still bring into the tail, in a view for one composition: standing on no
         # superseded span, and laid in no region; the state's tree is not touched.
@@ -2470,8 +2489,9 @@ def _read(state, asked):
             if peel.id not in laid and not gone.intersection(peel.sources):
                 pool.add(peel)
         selected = select_peels(pool, asked.question, room, estimate=counted, render=render) if room > 0 else []
+        # Each item says where it stands in time: chosen in this order, it is laid in that one (``fit_kind``).
         memory = [("memory", item.provenance, item.text, ("peels", item.provenance),
-                   tuple(tuple(part) for part in item.label)) for item in list(anchors) + list(selected)]
+                   tuple(tuple(part) for part in item.label), item.at) for item in list(anchors) + list(selected)]
         # A recalled span, as the region and the pool would show it: none under a superseded receipt, and no
         # turn a withdrawal reached, said by number.
         live = {r.key for r in rows} - gone
@@ -2486,10 +2506,12 @@ def _read(state, asked):
                 memory.append(("memory", f"recalled:{key}", "\n".join(lines),
                                ("recalled", f"receipt:{str(key)[:12]}"), (tuple(label[0]), tuple(label[1]))))
         if memory and asked.wrap is not None:
-            # What the composer's own loop lays of it at that cap, envelope and frames counted as it counts them: the
-            # plan hands it nothing it would cut there, and the window counts what it keeps back as cut. With no
-            # wrapper the composer refuses the memory by name.
-            kept = fit_kind("memory", memory, cap, asked.wrap, counted)[0]
+            # What the composer's own loop lays of it at that cap -- chosen in this order, laid in the order of time,
+            # a recalled span after the rest -- envelope and frames counted as it counts them: the plan hands it
+            # nothing it would cut there, and the window counts what it keeps back as cut. Handed in the order it was
+            # chosen in, so a window that cuts it further leaves out the last chosen first. With no wrapper the
+            # composer refuses the memory by name.
+            kept = sorted(fit_kind("memory", memory, cap, asked.wrap, counted)[0])
             trimmed, memory = len(memory) - len(kept), [memory[index] for index in kept]
     return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
             "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory, "trimmed": trimmed,

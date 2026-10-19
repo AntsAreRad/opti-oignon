@@ -796,13 +796,30 @@ def fit_kind(kind, items, cap, wrap, measure, seed=(), citation="", trials=None)
     """``(taken, kept, placed, dropped)``: what the tail lays of ``kind`` within ``cap`` tokens counted with
     ``measure`` -- the loop a window cuts a kind by, so that a plan which selects with it hands the composer what it
     lays. In their order, each item that would pass the cap is left out and counted (``dropped``) and the next one
-    tried; ``taken`` are the indices of the items laid, ``kept`` each laid as it is (text, label) after ``seed``,
-    those laid before them, and ``placed`` the kind's envelope as laid, ``citation`` closing it. ``trials``, a list,
-    receives the count of each try."""
-    kept, taken, dropped, placed = list(seed), [], 0, ""
+    tried; ``taken`` are the indices of the items laid, in the order laid, ``kept`` each laid as it is (text, label)
+    after ``seed``, those laid before them, and ``placed`` the kind's envelope as laid, ``citation`` closing it.
+    ``trials``, a list, receives the count of each try that chooses. An item may say where it stands in time, a sixth
+    part (``peels.Selected.at``): the items are then chosen in their order -- a cap that binds leaves out the last
+    in that order, never the newest for being the newest -- and laid in the order of time, the ones that say a time
+    first, the oldest first (one whose time is not known before them), the others after them in their order; where
+    a count that reads the whole would make that order pass the cap with all of them, in the order chosen."""
+    taken, kept, placed = _fitted(kind, list(enumerate(items)), cap, wrap, measure, seed, citation, trials)
+    if any(len(items[index]) > 5 for index in taken):
+        order = sorted(taken, key=lambda index: (0, items[index][5]) if len(items[index]) > 5 else (1, index))
+        if order != taken:
+            again = _fitted(kind, [(index, items[index]) for index in order], cap, wrap, measure, seed, citation,
+                            None)
+            if len(again[0]) == len(taken):
+                taken, kept, placed = again
+    return taken, kept, placed, len(items) - len(taken)
+
+
+def _fitted(kind, numbered, cap, wrap, measure, seed, citation, trials):
+    """One pass of ``fit_kind`` over ``(index, item)`` in their order: ``(taken, kept, placed)``."""
+    kept, taken, placed = list(seed), [], ""
     if kept:
         placed = _wrapped(wrap, "\n\n".join(item for item, _label in kept), _SOURCE[kind], frames=kind == "memory")
-    for index, (_kind, _key, text, frame, label) in enumerate(items):
+    for index, (_kind, _key, text, frame, label, *_when) in numbered:
         item = _framed(frame[0], frame[1], _bare(text)) if frame else _bare(text)
         if kept:
             # Each item is bare alone; the rest of a header the item before it begins is neutralized here.
@@ -815,12 +832,11 @@ def fit_kind(kind, items, cap, wrap, measure, seed=(), citation="", trials=None)
         if trials is not None:
             trials.append(counted)
         if counted > cap:
-            dropped += 1
             continue
         kept.append((item, label))
         taken.append(index)
         placed = trial
-    return taken, kept, placed, dropped
+    return taken, kept, placed
 
 
 @dataclass(frozen=True)
@@ -998,8 +1014,8 @@ def fold_cost(fold, wrap, count):
 def memory_wants(items, own, wrap, count, fold=None):
     """What the memory among a tail's ``items`` takes past its own share ``own`` for all of it to be laid as
     ``compose_journal`` lays it -- after a shadow's ``fold``, charged outside the share: the heaviest of the loop's
-    tries, since a count may fall as an item is added, so that from that ``lend`` on a window lays all of it, and
-    below it does not. 0 with no memory item."""
+    tries that choose, since a count may fall as an item is added, so that from that ``lend`` on a window lays all
+    of it, and below it does not. 0 with no memory item."""
     memory = [item for item in items if item[0] == "memory"]
     if not memory:
         return 0
@@ -1028,7 +1044,8 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     is the user's. The Flesh follows in its own roles (``flesh``: key, role,
     pieces, label), each document in a file envelope at its place, its words
     bare. The last message holds the tail (``tail``: kind, key, text, frame,
-    label, the memory framed as data) -- memory, retrieval, web, a tool
+    label, the memory framed as data, an item of it saying where it stands
+    in time, a sixth part, laid in that order) -- memory, retrieval, web, a tool
     turn's earlier calls, each cut to whole items within its share of the
     tail's cap (``shares``), the memory's holding the shares of the other
     kinds the turn brings nothing of and the room the region leaves of the

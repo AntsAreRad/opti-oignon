@@ -88,11 +88,14 @@ since at 4096 its own share does not hold its envelope: room it gives up
 first when the window passes its cap, before the Flesh gives, none of it
 under a tail's room, and that a burst is not aimed on; the plan keeps of
 the memory it chose, a recalled span included, what the composer's own
-loop lays at that cap, and the window counts what it kept back as cut --
-then the turn, its documents held to the document share and refused,
-never cut, past it. Two user messages are never adjacent. Each message
-carries the label of what it holds, and the
-request's label is their union. The memory shows nothing a withdrawal
+loop lays at that cap, and the window counts what it kept back as cut;
+chosen by rank, so that a cap leaves out the last chosen first, the
+memory is laid in the order of time, the newest nearest the question, a
+recalled span after it, wherever that order holds within the cap -- then
+the turn, its documents held to the document share and refused, never
+cut, past it. Two user messages are
+never adjacent. Each message carries the label of what it holds, and
+the request's label is their union. The memory shows nothing a withdrawal
 reached: a peel or a recalled span standing on a source the user withdrew
 is left out, and the window says what it left out.
 

@@ -488,6 +488,9 @@ class Selected:
     # What its showing counted, ``(motive, n)``: the block counts the events
     # of what it places, once.
     events: tuple = ()
+    # Where what it shows stands in time: its receipt's place in the ledger,
+    # then its own in that receipt's span; empty when none is known.
+    at: tuple = ()
     # False when it shows nothing but a note: it then keeps no related peel
     # out of the block.
     shows: bool = True
@@ -1976,7 +1979,9 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
 
     An anchor ranks as a peel does, by the share of the query's terms its
-    words hold, then the newest receipt first, then its place in its span.
+    words hold, then the newest receipt first, then its place in its span;
+    it says where it stands in time (``at``: its receipt's place in the
+    ledger, then its own in the span).
     It shows what a peel would of its unit, re-read from its place: a
     sentence as written, a code block by its marker, never its code, and a
     segment kept whole (``_anchors``) by its words, its fenced blocks by
@@ -2011,6 +2016,7 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     table = None
     scored = []
     held = [r for r in ledger.open() if r.kind == "held" and r.anchors]
+    index = {r.key: n for n, r in enumerate(ledger.all())}
     for age, receipt in enumerate(reversed(held)):
         span = cellar.get(receipt.key)
         texts = {str(t.get("turn_id", "")): str(t.get("text", "")) for t in span}
@@ -2062,12 +2068,12 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
                 label = join_labels(labels[at] for at, _begin, _end in parts)
             events = (("anchors_altered", altered),) if altered else ()
             scored.append((-hit, age, place, words, provenance, tuple(label), events, (turn_id, start, stop),
-                           tuple(parts)))
+                           tuple(parts), (index.get(receipt.key, -1), place)))
     # An item holds the words of the anchors within it, so it ranks before them: its hit is no lower, its place
     # earlier; an anchor within a part shown is shown there.
     scored.sort(key=lambda entry: entry[:3])
     chosen, used, laid = [], 0, []
-    for neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts in scored:
+    for neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts, when in scored:
         if any(at == age and on == turn_id and begin <= start and stop <= end for at, on, begin, end in laid):
             continue
         tokens = estimate(words)
@@ -2077,8 +2083,24 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
             continue
         used += tokens
         laid.extend((age, at, begin, end) for at, begin, end in parts)
-        chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4), label=label, events=events))
+        chosen.append(Selected(text=words, provenance=provenance, score=round(-neg, 4), label=label, events=events,
+                               at=when))
     return chosen
+
+
+def in_time(items):
+    """Selected items in the order of the time they show: by their receipt's place in the ledger, then their own
+    place in its span, the oldest first, so that the newest stands nearest the question -- a fact and the later
+    one that updates it in the order the user typed them. An item whose time is not known (``at`` empty) comes
+    first. Stable."""
+    return sorted(items, key=lambda item: item.at)
+
+
+def peel_time(peel, places):
+    """Where a peel stands in time: ``places``, each receipt's place in the ledger by its key, read for the newest
+    receipt it stands for; empty when the ledger holds none of them."""
+    found = [places[key] for key in peel.sources if key in places]
+    return (max(found), 0) if found else ()
 
 
 def fidelity(tree, cellar, lexicon=None, probe_recall=None):
