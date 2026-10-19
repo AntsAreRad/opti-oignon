@@ -134,6 +134,8 @@ HISTORY_TOKENS = 1024
 MAX_CURATION_STEPS = 16
 # How the onion arm curates: at the chat path's rhythm, or after every turn.
 MODES = ("launcher", "fast")
+# How both arms ask the answering model: greedy, seeded, the same room for the answer.
+SAMPLING = {"temperature": 0.0, "seed": 0, "num_predict": 128}
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant in a long working conversation. Answer briefly, "
@@ -853,16 +855,19 @@ def _spread(values):
             "max": max(values, default=0)}
 
 
-def asker(backend, model):
+def asker(backend, model, *, cold=False):
     """How both arms ask ``model`` on ``backend``: the same sampling and the same room for the answer. A window the
     journal composed goes with the context it was composed for, as on the chat path: an engine left at its own
-    default context would cut it."""
+    default context would cut it. ``cold`` asks each window of a model loaded for it alone (Ollama's keep-alive
+    of 0): an engine reuses the prefix a request shares with the one before it, computed in other batches, and
+    an answer then depends on the requests before it."""
 
     def ask(messages, window=None):
-        options = {"temperature": 0.0, "seed": 0, "num_predict": 128}
+        options = dict(SAMPLING)
         if window is not None:
             options["num_ctx"] = int(window.num_ctx)
-        response = backend.generate(model=model, messages=messages, options=options, think=False)
+        extra = {"keep_alive": 0} if cold else {}
+        response = backend.generate(model=model, messages=messages, options=options, think=False, **extra)
         return str(getattr(response, "content", "") or "")
 
     return ask

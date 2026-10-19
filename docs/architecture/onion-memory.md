@@ -694,7 +694,33 @@ kept turn that is not its probe; `compare` reads two such files probe by
 probe -- the windows that differ, and, when both were asked, the probes
 each tree answers right and what the second gains and loses. Under the
 tree that kept them a state composes again to the window it sent, unless a
-burst held the conversation when the run planned it.
+burst held the conversation when the run planned it. On Ollama each window
+is asked of a model loaded for it alone, the bench's trial line asked
+first so that a model left loaded answers no window warm: an engine that
+reuses the prefix a window shares with the one asked before it, computed
+in other batches, moved a 4B model's log-probabilities by about a nat on
+the maintainer's machine, enough to turn a verdict. A verdict is one
+greedy draw, and a small model flips it on a window that gives it no more
+and no less to go on: with `--margins K` the model is asked through
+Ollama's own API on this machine -- its own penalties and draft model held
+off, since a penalty weighs on a value the window lays near its end after
+the log-probabilities are read, and a draft model's tokens carry none --
+each token of its reply with its K likeliest alternatives, and each probe
+carries its margin, in nats: with a stale statement the probe's expected
+one retired, at the token where the two part, the log-probability of going
+the expected way less that of going the stale one's; with none, at each
+token of the value, the least against every other token; a bound when one
+side is not among those read. `compare` refuses two files asked otherwise
+and says how each probe's margin moved, those read exactly that moved by a
+nat or more either way. Measured on the maintainer's machine with K of 20
+over the 91 kept probes, cold and unpenalized: under the change that lays
+the user's words of a newer statement, a 4B model's update probes gained
+2.8 to 9.1 nats and a 27B model's 3.4 to 9.2, one verdict of the 4B's and
+two of the 27B's turned right, and the last question, on another subject,
+lost 1.2 to 1.9 nats for the 4B and 1.0 for the 27B where no verdict
+turned; the change that left out the anchors that only ask turned four of
+the 4B's verdicts on margins that fell by 1.5, where run warm and
+penalized it had turned eleven.
 
 ## The native core
 

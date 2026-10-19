@@ -11,6 +11,27 @@ package costs.
 
 ### Added
 
+- The paired windows ask each window cold and read how far it holds its
+  answer. On Ollama, `scripts/drift_pairs.py compose` asks each window of a
+  model loaded for it alone, the bench's trial line asked first: an engine
+  that reuses the prefix a window shares with the one asked before it,
+  computed in other batches, answered a window otherwise after another than
+  alone. With `--margins K` the model is asked through Ollama's own API on
+  this machine, straight to it whatever proxy the environment names and
+  within a time limit, its own penalties and draft model held off, each
+  token of its reply with its K likeliest alternatives; each probe carries
+  its margin -- at the token where the statement it expects and the stale
+  one it retired part, or, with none, the weakest token of the value against
+  every other -- the token read and the way the reply went there, or why
+  there is none. `compare` refuses two files asked otherwise, and prints the
+  margins beside the verdicts: each probe's change, those that moved by a
+  nat or more. Measured on the maintainer's machine over the 91 kept probes,
+  cold and unpenalized: the change that lays the user's words of a newer
+  statement gained 2.8 to 9.1 nats on a 4B model's update probes and 3.4 to
+  9.2 on a 27B model's, and cost 1.0 to 1.9 on the last question, of another
+  subject, that no verdict showed; leaving out the anchors that only ask,
+  which turned eleven of the 4B's verdicts run warm under qwen3.5's presence
+  penalty, turned four.
 - The drift A/B measures a change of the onion's composition on the same
   states. With `--states DIR`, a new directory, its onion arm keeps at each
   probe turn its state before the window is planned -- the bench's own
