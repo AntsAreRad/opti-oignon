@@ -124,8 +124,10 @@ def test_mt2_chosen_by_rank_laid_by_time():
         cfg = oj.config(lib)
         facts = [f"Alice moved build {n} to Lisbon on 2026-03-{n:02d}." for n in range(1, 31)]
         _state, messages = _held_facts(lib, "c1", facts, cfg)
-        win = oj.window(loaded, "c1", "Where did Alice move the builds to Lisbon?", messages=messages, config=cfg,
-                        model_window=4096)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the cap binds as written.
+        question = "Where did Alice move the builds to Lisbon?"
+        win = oj.window(loaded, "c1", question, messages=messages, config=cfg, model_window=4096,
+                        budgets=oj.snug(loaded, question))
         assert win.refusal is None, win.refusal
         last = win.messages[-1][1]
         laid = [fact for fact in facts if fact in last]
@@ -261,8 +263,9 @@ def test_mt7_a_window_that_cuts_further_leaves_out_the_last_chosen():
         new = "Alice lives in Oslo now, in the flat on the long fjord street near the new harbour market."
         filler = [f"Alice met Bob on day {n}." for n in range(1, 13)]
         _state, messages = _held_facts(lib, "c1", [old] + filler + [new], cfg, after=12)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the cap binds as written.
         planned = oj.plan(lib, "c1", _QUESTION, wrap=loaded[oj.WRAPPER].wrap, messages=messages, config=cfg,
-                          model_window=8192)
+                          model_window=8192, budgets=oj.snug(loaded, _QUESTION))
         handed = [item[2] for item in planned._held.tail if item[0] == "memory"]
         assert planned.rung == 8192 and old in handed and new in handed, ("control: both handed at 8192", handed)
         win = lib.compose_window(planned, num_ctx=4096)
@@ -286,7 +289,9 @@ def test_mt8_chosen_by_rank_whatever_its_age():
         cfg = oj.config(lib)
         filler = [f"Alice met Bob on day {n}." for n in range(1, 31)]
         _state, messages = _held_facts(lib, "c1", [_NEW] + filler, cfg)
-        win = oj.window(loaded, "c1", _QUESTION, messages=messages, config=cfg, model_window=4096)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the cap binds as written.
+        win = oj.window(loaded, "c1", _QUESTION, messages=messages, config=cfg, model_window=4096,
+                        budgets=oj.snug(loaded, _QUESTION))
         assert win.refusal is None, win.refusal
         last = win.messages[-1][1]
         laid = [fact for fact in filler if fact in last]

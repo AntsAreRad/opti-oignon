@@ -74,9 +74,10 @@ journal:
   # calls the earlier turns of a tool turn's conversation made (tool), the
   # newest first; a turn's documents are held to theirs, never cut. Every
   # kind is named. They sum to 1 at most. The memory may also borrow the
-  # shares of the kinds the turn brings nothing of and the room the region
-  # of accepted peels leaves of the peels' cap -- at 4096 its own share does
-  # not hold its envelope -- room it gives up before any other part of the
+  # shares of the kinds the turn brings nothing of, the room the region of
+  # accepted peels leaves of the peels' cap and the room the system prompt,
+  # the Core and the turn leave of theirs -- at 4096 its own share does not
+  # hold its envelope -- room it gives up before any other part of the
   # window. A memory share of 0 keeps the memory out.
   tail_shares: {memory: 0.35, rag: 0.25, web: 0.1, tool: 0.1, document: 0.2}
   # How a plan catches the Flesh up when it finds it over its cap at the

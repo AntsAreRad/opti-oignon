@@ -3121,6 +3121,22 @@ package costs.
 
 ### Fixed
 
+- At 4096 the memory a question brings has room to be laid. The tail's cap
+  at that rung is 192 tokens and the memory's envelope alone costs 174 by
+  the chat's counter for a Qwen model: borrowing the shares of the kinds a
+  turn brings nothing of and the room the region of accepted peels leaves
+  of the peels' cap, the memory still laid few items, and none once the
+  region filled its cap, while the window took about a quarter of the room
+  its prompt may take. The system prompt, the Core and the turn are laid
+  whole and never cut, each within its cap at the rung: what they leave of
+  their caps the memory now borrows too, given up with the rest of its
+  borrowed room, before the Flesh, when the window passes its cap; no other
+  kind takes it. Measured on probe states recorded in drift A/B runs,
+  each window composed again under the change before it and under this
+  one: at 4096 a 4B model answers 27 of 28 memory probes right where it
+  answered 24, a 27B model 14 of 14 where it answered 13, none answered
+  wrong that was right; at 8192 and 16384 every window is the same.
+
 - A fact and the later one that updates it can now stand together near the
   question, in the order of time, wherever else either is shown. The tail
   brought the peels the region of accepted peels left out, never one it

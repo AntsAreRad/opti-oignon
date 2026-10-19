@@ -77,7 +77,9 @@ def test_qa1_the_fact_before_the_questions_that_echo_it():
         ranked = peels.select_anchors(state.ledger, state.cellar, _QUESTION, 10 ** 6, estimate=oj.count)
         hits = {item.text: item.score for item in ranked}
         assert hits[_ASKED] > hits[_FACT], ("control: the question's words hold more of the one asked", hits)
-        win = oj.window(loaded, "c1", _QUESTION, messages=messages, config=cfg, model_window=4096)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the cap binds as written.
+        win = oj.window(loaded, "c1", _QUESTION, messages=messages, config=cfg, model_window=4096,
+                        budgets=oj.snug(loaded, _QUESTION))
         assert win.refusal is None, win.refusal
         last = win.messages[-1][1]
         assert last.count(_ASKED) < 40, ("control: the earlier questions fill the cap", last.count(_ASKED))
@@ -157,8 +159,10 @@ def test_qa5_a_question_that_orders_is_an_order():
         order = "Never push to main on Atlas, ok?"
         facts = [f"Atlas runs build {n} on the cluster." for n in range(1, 41)]
         _state, messages = _held(lib, "c1", [order] + facts, cfg)
-        win = oj.window(loaded, "c1", "Can I push to main on Atlas?", messages=messages, config=cfg,
-                        model_window=4096)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the cap binds as written.
+        question = "Can I push to main on Atlas?"
+        win = oj.window(loaded, "c1", question, messages=messages, config=cfg, model_window=4096,
+                        budgets=oj.snug(loaded, question))
         assert win.refusal is None, win.refusal
         last = win.messages[-1][1]
         assert sum(fact in last for fact in facts) < len(facts), "control: the facts crowd the cap"

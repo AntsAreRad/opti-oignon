@@ -83,9 +83,10 @@ earlier calls, each in its envelope and cut to whole items within its share
 of the tail's cap (`journal.tail_shares`: memory 0.35, retrieval 0.25, web
 0.1, tool 0.1, documents 0.2, every kind named), what each left out counted
 -- the memory borrowing, past its own share, the shares of the kinds the
-turn brings nothing of and the room the region leaves of the peels' cap,
-since at 4096 its own share does not hold its envelope: room it gives up
-when the window passes its cap, before the Flesh gives, none of it
+turn brings nothing of, the room the region leaves of the peels' cap and
+the room the system prompt, the Core and the turn, laid whole, leave of
+theirs, since at 4096 its own share does not hold its envelope: room it
+gives up when the window passes its cap, before the Flesh gives, none of it
 under a tail's room, and that a burst is not aimed on; the plan keeps of
 the memory it chose, a recalled span included, what the composer's own
 loop lays at that cap, and the window counts what it kept back as cut;

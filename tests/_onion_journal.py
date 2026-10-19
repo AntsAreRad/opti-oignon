@@ -161,3 +161,14 @@ def roles(win):
 def budgets_at_home(loaded, home):
     """The shipped budgets, read again with ``home`` as the rung a caller that names none composes under."""
     return replace(loaded[COMPOSER].load_budgets(), home=home)
+
+
+def snug(loaded, question, *, budgets=None, system=SYSTEM, counter=count):
+    """``budgets`` -- the shipped ones when None -- with the caps of the parts a window lays whole at what a turn
+    asking ``question`` under ``system`` lays of them, at every rung: the system prompt and the turn's words as
+    counted, the Core, empty, at one token, its cap never none. They leave the memory one token to borrow
+    (``idle_room``), so a contract written on a cap that binds holds under the caps it was written for."""
+    budgets = budgets or loaded[COMPOSER].load_budgets()
+    used, words = sum(counter(text) for text in system), counter(question)
+    return replace(budgets, tables=tuple((rung, replace(table, system=used, core=1, turn=words))
+                                         for rung, table in budgets.tables))

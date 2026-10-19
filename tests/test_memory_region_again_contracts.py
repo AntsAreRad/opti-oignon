@@ -159,8 +159,9 @@ def test_ra3_what_the_question_does_not_reach_is_not_laid_again():
 # RA4 -- chosen by rank, wherever it is shown
 # ---------------------------------------------------------------------------
 def _crowded(loaded, cid, cfg, newest, others):
-    """Same-size peels accepted in turn, ``newest`` last, under a peels' cap that lays the newest alone; the window
-    at 8192 for a question every one of them answers in part: ``(region, tail, marks)``."""
+    """Same-size peels accepted in turn, ``newest`` last, under a peels' cap that lays the newest alone, the parts
+    laid whole filling their caps (``_onion_journal.snug``); the window at 8192 for a question every one of them
+    answers in part: ``(region, tail, marks)``."""
     lib, composer = loaded[oj.LIBRARIAN], loaded[oj.COMPOSER]
     assert {oj.count(text) for text in others} == {oj.count(newest)}, "control: all the same size"
     messages = []
@@ -175,10 +176,10 @@ def _crowded(loaded, cid, cfg, newest, others):
     shipped = composer.load_budgets()
     at = shipped.at(8192)
     room = oj.count(newest) + oj.count(newest) // 2
-    narrow = composer.Budgets(reserve=shipped.reserve, home=8192, tables=(
-        (8192, replace(at, peels=room, flesh=at.flesh + at.peels - room)),))
-    win = oj.window(loaded, cid, "Where does Alice live now in Oslo?", messages=messages, config=cfg,
-                    model_window=8192, budgets=narrow)
+    question = "Where does Alice live now in Oslo?"
+    narrow = oj.snug(loaded, question, budgets=composer.Budgets(reserve=shipped.reserve, home=8192, tables=(
+        (8192, replace(at, peels=room, flesh=at.flesh + at.peels - room)),)))
+    win = oj.window(loaded, cid, question, messages=messages, config=cfg, model_window=8192, budgets=narrow)
     assert win.refusal is None, win.refusal
     region, last = win.messages[1][1], win.messages[-1][1]
     assert marks[newest] in region and not any(marks[text] in region for text in others), (
@@ -294,8 +295,9 @@ def test_ra7_a_copy_left_out_is_not_cut():
         state.mirror(messages)
         oj.accept(loaded, state, 2, peel)
         mark = f"provenance=peel:{_peel_id(state, peel)[:12]}"
-        # The plan: a peels' cap the peel fills, a tail whose memory cap holds its words but not its envelope.
-        shipped = composer.load_budgets()
+        # The plan: a peels' cap the peel fills, a tail whose memory cap holds its words but not its envelope, the
+        # parts laid whole filling their caps (``_onion_journal.snug``).
+        shipped = oj.snug(loaded, question)
         at = shipped.at(8192)
         size = oj.count(peel)
         tight = composer.Budgets(reserve=shipped.reserve, home=8192, tables=(
@@ -308,7 +310,7 @@ def test_ra7_a_copy_left_out_is_not_cut():
         assert dict(win.cut)["memory"] == 0, ("the copy the plan kept back, not cut", win.cut)
         # A descent: planned at 8192 with the copy, sent at 4096, where the memory's room no longer holds it.
         planned = oj.plan(lib, "c1", question, wrap=loaded[oj.WRAPPER].wrap, messages=messages, config=cfg,
-                          model_window=8192)
+                          model_window=8192, budgets=shipped)
         assert planned.rung == 8192 and any(f"provenance={item[1]}".startswith(mark) for item in planned._held.tail), (
             "control: the copy handed at 8192")
         sent = lib.compose_window(planned, num_ctx=4096)

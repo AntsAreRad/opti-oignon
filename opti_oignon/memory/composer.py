@@ -765,31 +765,56 @@ TAIL_KINDS = ("memory", "rag", "web", "tool")
 _SOURCE = {"memory": "memory", "rag": "file", "web": "web", "tool": "tool"}
 
 
-def memory_cap(budget, shares, brought, region_tokens):
+def _core_part(pinned):
+    """The Core as its message lays it: its header, then its text defanged; nothing when it holds no text."""
+    root, core_text = pinned
+    return f"{_CORE_HEADER.format(root=str(root)[:16])}\n{_defang(core_text)}" if str(core_text) else ""
+
+
+def idle_room(budget, system, pinned, turn, count, wrap):
+    """What the parts a window lays whole leave of their caps at ``budget``: the system prompt, the Core under its
+    header and the current turn's words, each counted as ``compose_journal`` counts it -- the words before they meet
+    the message before them, which they meet only when the tail lays nothing, so with no room borrowed. None of
+    them is ever cut, and each holds within its cap at the rung a plan chooses: what one leaves no other part
+    claims, and the memory may borrow it (``memory_cap``)."""
+    system = (system,) if isinstance(system, str) else (system or ())
+    used = sum(_part("system", str(text), "system", count)[2] for text in system if str(text))
+    pinned_text = _core_part(pinned)
+    pieces, _label = turn
+    words = "\n\n".join(text for kind, text in _rendered(pieces, wrap) if kind != "file")
+    return (max(0, budget.system - used)
+            + max(0, budget.core - (_part("core", pinned_text, "core", count)[2] if pinned_text else 0))
+            + max(0, budget.turn - (_part("turn", words, "turn", count)[2] if words else 0)))
+
+
+def memory_cap(budget, shares, brought, region_tokens, idle=0):
     """``(own, whole)``: the memory's caps in the tail. ``own`` is its share of the tail's cap; ``whole`` adds the
-    shares of the kinds after it the turn brings nothing of (``brought``, the kinds it brings) and the room the
-    region leaves of the peels' cap (``region_tokens``, what the region lays). Both none when its own share or the
-    tail's cap is none: a configuration that gives the memory no room keeps it out.
+    shares of the kinds after it the turn brings nothing of (``brought``, the kinds it brings), the room the
+    region leaves of the peels' cap (``region_tokens``, what the region lays) and the room the parts a window lays
+    whole leave of theirs (``idle``, ``idle_room``). Both none when its own share or the tail's cap is none: a
+    configuration that gives the memory no room keeps it out.
 
     The shares hold the kinds a turn brings against each other, and the
     peels' cap holds the memory the tree accepted: a share no part of the
-    turn claims, and room the region does not take, may be the memory's,
-    which the question brings into the tail -- room it borrows, given up
-    before any other part of the window (``lend``). At the small rung the
-    memory's own share does not hold its envelope.
+    turn claims, room the region does not take, and room the system prompt,
+    the Core and the turn leave of their caps, may be the memory's, which
+    the question brings into the tail -- room it borrows, given up before
+    any other part of the window (``lend``). At the small rung the memory's
+    own share does not hold its envelope.
     """
     if not (shares.get("memory", 0) > 0 and budget.tail > 0):
         return 0, 0
     own = int(shares["memory"] * budget.tail)
     lent = sum(shares.get(kind, 0) for kind in TAIL_KINDS[1:] if kind not in brought)
-    return own, int((shares["memory"] + lent) * budget.tail) + max(0, budget.peels - region_tokens)
+    return own, int((shares["memory"] + lent) * budget.tail) + max(0, budget.peels - region_tokens) + max(0, idle)
 
 
-def memory_room(budget, shares, brought, region, count):
-    """``memory_cap`` for the kinds a turn brings (``brought``) and its region as the journal lays it: cut first to
-    the peels' cap, each peel counted bare."""
+def memory_room(budget, shares, brought, region, count, idle=0):
+    """``memory_cap`` for the kinds a turn brings (``brought``), its region as the journal lays it -- cut first to
+    the peels' cap, each peel counted bare -- and the room the parts laid whole leave (``idle``, ``idle_room``)."""
     held = tuple(region)[region_cut(region, budget, count):]
-    return memory_cap(budget, shares, brought, sum(count(_bare(text)) for _key, text, _provenance, _label in held))
+    return memory_cap(budget, shares, brought, sum(count(_bare(text)) for _key, text, _provenance, _label in held),
+                      idle)
 
 
 def fit_kind(kind, items, cap, wrap, measure, seed=(), citation="", trials=None):
@@ -1048,8 +1073,10 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     in time, a sixth part, laid in that order) -- memory, retrieval, web, a tool
     turn's earlier calls, each cut to whole items within its share of the
     tail's cap (``shares``), the memory's holding the shares of the other
-    kinds the turn brings nothing of and the room the region leaves of the
-    peels' cap (``memory_cap``) -- what it lays past its own share is
+    kinds the turn brings nothing of, the room the region leaves of the
+    peels' cap and the room the system prompt, the Core and the turn leave
+    of theirs (``memory_cap``, ``idle_room``), the tail's cap raised by the
+    last two -- what it lays past its own share is
     ``lent``, no more than ``lend`` when given -- what it left out counted,
     and counted in its envelope -- then the current turn (``turn``: pieces,
     label) laid as the Flesh lays a turn, its documents held to the
@@ -1132,9 +1159,12 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     for place, text in enumerate(system):
         laid.enter("system", [("system", f"system:{place}", text, "")])
     system_tokens = sum(counted("system", text) for text in system)
-    root, core_text = pinned
-    core_part = f"{_CORE_HEADER.format(root=str(root)[:16])}\n{_defang(core_text)}" if str(core_text) else ""
+    root = pinned[0]
+    core_part = _core_part(pinned)
     core_tokens = counted("core", core_part) if core_part else 0
+    # What the parts laid whole leave of their caps is the memory's to borrow, the tail's cap raised by it as by the
+    # room the region leaves (``idle_room``).
+    idle = idle_room(budget, system, pinned, turn, count, wrap) if shares.get("memory", 0) > 0 else 0
     region = tuple(region)
     cut["peels_full"] = region_cut(region, budget, count)
     held = region[cut["peels_full"]:]
@@ -1142,7 +1172,7 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     peel_tokens = tuple(counted("peels", _bare(text)) for _key, text, _provenance, _label in held)
     # What the region leaves of the peels' cap moves to the tail, where the memory the question brings takes it.
     spare = max(0, budget.peels - sum(peel_tokens)) if shares.get("memory", 0) > 0 else 0
-    laid_under = replace(laid_under, peels=budget.peels - spare, tail=laid_under.tail + spare)
+    laid_under = replace(laid_under, peels=budget.peels - spare, tail=laid_under.tail + spare + idle)
     digest_frame = _framed("receipts", "receipts", _bare(digest)) if str(digest) else ""
     digest_tokens = counted("receipts", _bare(digest)) if digest_frame else 0
     if digest_frame:
@@ -1169,7 +1199,8 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
         laid.enter(str(role), [("flesh", str(key), text, "")], [label])
     tail_text, tail_tokens, tail_labels = [], 0, []
     by_kind = {kind: [item for item in tail if item[0] == kind] for kind in TAIL_KINDS + ("citation",)}
-    own, whole = memory_cap(budget, shares, {kind for kind in TAIL_KINDS[1:] if by_kind[kind]}, sum(peel_tokens))
+    own, whole = memory_cap(budget, shares, {kind for kind in TAIL_KINDS[1:] if by_kind[kind]}, sum(peel_tokens),
+                            idle)
     # The memory borrows what ``lend`` allows of the room past its own share, all of it when None; under a tail's
     # room -- a window past its cap with none borrowed (``_laid``) -- none.
     room = own if tail_room is not None else whole if lend is None else min(whole, own + max(lend, 0))

@@ -2409,7 +2409,7 @@ def _read(state, asked):
     """What the composition needs of the conversation's state, read under its lock, or the refusal of the plan."""
     import copy
 
-    from .composer import _CORE_HEADER, _defang, _part, fit_kind, memory_room, region_cut
+    from .composer import _CORE_HEADER, _defang, _part, fit_kind, idle_room, memory_room, region_cut
     from .peels import (
         PeelTree,
         join_labels,
@@ -2468,9 +2468,11 @@ def _read(state, asked):
                         for r in asked.budgets.rungs if r <= rung)
         digest = dict(digests)[rung]
         # The memory's cap as the composer holds it (``memory_room``): its own share, the shares the turn's other
-        # kinds leave and the room the region leaves of the peels' cap. What it borrows past its own share the
-        # window gives up first (``_laid``).
-        _own, cap = memory_room(budget, shares, asked.brought, region, counted)
+        # kinds leave, the room the region leaves of the peels' cap and the room the system prompt, the Core and
+        # the turn leave of theirs (``idle_room``). What it borrows past its own share the window gives up first
+        # (``_laid``).
+        _own, cap = memory_room(budget, shares, asked.brought, region, counted,
+                                idle_room(budget, asked.system, pinned, asked.turn, counted, asked.wrap))
         anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
                                   estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate)
                    if cap > 0 else [])
@@ -2749,8 +2751,8 @@ def tail_room(model_window=None, *, budgets=None, journal=None):
     """What each kind of source a turn brings may take, in tokens, at the conversation's own rung -- the largest
     within ``home_rung`` and the model's window -- by kind (``memory``, ``rag``, ``web``, ``tool``, ``document``):
     the caps a window cuts them to, so a caller fetches no more than fits -- for the memory its own share, which it
-    may pass on room the turn and the region leave (``memory_cap``). Empty when no rung is within the model's window
-    or a configuration does not read. Never raises."""
+    may pass on room the turn's other kinds, the region and the parts laid whole leave (``memory_cap``). Empty when
+    no rung is within the model's window or a configuration does not read. Never raises."""
     from .composer import layer_cap, load_budgets, load_journal
 
     try:
@@ -2966,6 +2968,7 @@ def _laid(held, cap, budget, digest, rung, sent):
         TAIL_KINDS,
         BudgetError,
         compose_journal,
+        idle_room,
         layer_cap,
         memory_room,
         memory_wants,
@@ -3037,7 +3040,8 @@ def _laid(held, cap, budget, digest, rung, sent):
     # by halving once the window holds it with none, within what its items take (``memory_wants``: from there on it
     # lays all of them) -- the most where a count only grows as text is added.
     own, whole = memory_room(budget, held.shares, {item[0] for item in held.tail if item[0] in TAIL_KINDS[1:]},
-                             held.region, held.count)
+                             held.region, held.count,
+                             idle_room(budget, held.system, held.pinned, held.turn, held.count, held.wrap))
     wants = min(whole - own, memory_wants(sources, own, held.wrap, held.count, fold)) if whole > own else 0
     lending[0] = 0
     if wants > 0:

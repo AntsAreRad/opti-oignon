@@ -25,8 +25,9 @@ counted.
     additive too -- and the window counts what the plan kept back as cut;
     it chooses on the shares of the kinds the turn brings nothing of, and
     not on the share of one it brings.
-  * MR4 -- THE ROOM MOVES, IT IS NOT ADDED: the peels and the tail together
-    never pass their two caps; a region that fills the peels' cap leaves
+  * MR4 -- THE ROOM MOVES, IT IS NOT ADDED: the peels, the tail and the
+    parts a window lays whole together never pass their caps; a region that
+    fills the peels' cap, beside parts laid whole that fill theirs, leaves
     the memory its shares alone, which at 4096 do not hold its envelope.
   * MR5 -- THE COMPOSER LENDS AS THE CAP SAYS: with no room from the region,
     the memory takes the shares of the kinds the turn brings nothing of --
@@ -204,7 +205,8 @@ def test_mr3_the_plan_hands_the_composer_what_it_lays():
                 win.cut, held.trimmed)
             assert len(handed) < len(facts) and (window > 4096 or held.trimmed > 0), (
                 "control: the caps bind, the plan keeping back at 4096", window, len(handed), held.trimmed)
-        shipped = composer.load_budgets()
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the caps bind as written.
+        shipped = oj.snug(loaded, "Where did Alice move the builds to Lisbon?")
         at = shipped.at(8192)
         bare = composer.Budgets(reserve=shipped.reserve, home=8192, tables=(
             (8192, replace(at, peels=0, flesh=at.flesh + at.peels)),))
@@ -226,18 +228,22 @@ def test_mr3_the_plan_hands_the_composer_what_it_lays():
 # MR4 -- the room moves to the tail and is never added
 # ---------------------------------------------------------------------------
 def test_mr4_the_room_moves_to_the_tail_and_is_never_added():
-    """MR4: the peels and the tail together hold within their two caps; a full region leaves the memory its shares."""
+    """MR4: the peels, the tail and the parts laid whole hold within their caps; a full region and full parts leave
+    the memory its shares."""
     loaded, restore = oj.open_window()
     lib, composer = loaded[oj.LIBRARIAN], loaded[oj.COMPOSER]
     try:
         cfg = oj.config(lib)
         budget = composer.load_budgets().at(4096)
-        _state, messages = _held_facts(lib, "c1", [_FACT], cfg)
+        pool = [f"Alice moved build {n} to Lisbon on 2026-04-{n % 28 + 1:02d}." for n in range(1, 61)]
+        _state, messages = _held_facts(lib, "c1", [_FACT] + pool, cfg)
         win = oj.window(loaded, "c1", "Where did Alice move the build?", messages=messages, config=cfg,
                         model_window=4096)
         layers = dict(win.layers)
         assert layers["tail"] > budget.tail, ("control: the tail took room the region left", layers)
-        assert layers["peels"] + layers["tail"] <= budget.peels + budget.tail, ("moved, never added", layers)
+        whole = ("system", "core", "turn")
+        assert layers["peels"] + layers["tail"] + sum(layers[name] for name in whole) <= (
+            budget.peels + budget.tail + sum(getattr(budget, name) for name in whole)), ("moved, never added", layers)
         full = lib.state_for("c2", cfg)
         messages = [oj.typed(_FACT), oj.answer("Noted.")] + oj.conversation(12, start=3)
         full.mirror(messages)
@@ -247,8 +253,9 @@ def test_mr4_the_room_moves_to_the_tail_and_is_never_added():
         region = dict(oj.window(loaded, "c2", "Where did Alice move the build?", messages=messages, config=cfg,
                                 model_window=4096).layers)["peels"]
         shipped = composer.load_budgets()
-        exact = composer.Budgets(reserve=shipped.reserve, home=4096, tables=(
-            (4096, replace(budget, peels=region, flesh=budget.flesh + budget.peels - region)),))
+        exact = oj.snug(loaded, "Where did Alice move the build?", budgets=composer.Budgets(
+            reserve=shipped.reserve, home=4096,
+            tables=((4096, replace(budget, peels=region, flesh=budget.flesh + budget.peels - region)),)))
         crowded = oj.window(loaded, "c2", "Where did Alice move the build?", messages=messages, config=cfg,
                             model_window=4096, budgets=exact)
         assert crowded.refusal is None and dict(crowded.layers)["peels"] == region, (
@@ -269,7 +276,8 @@ def test_mr5_the_composer_lends_the_shares_the_cap_says():
     try:
         wrap = loaded[oj.WRAPPER].wrap
         held = oj.plan(lib, None, "Where did Alice move the builds?", wrap=wrap)._held
-        budget = replace(composer.load_budgets().at(8192), peels=0)
+        # The parts laid whole fill their caps (``_onion_journal.snug``): the shares bind as written.
+        budget = replace(oj.snug(loaded, "Where did Alice move the builds?").at(8192), peels=0)
         shares = held.shares
         items = tuple(("memory", f"m{n}", f"Alice moved build {n} to Lisbon on 2026-03-{n:02d}, said the user.",
                        ("peels", f"anchor:{n:012d}:t{n:04d}"), (("typed",), ())) for n in range(1, 15))
