@@ -82,9 +82,16 @@ retrieval, the web results and the sentence that cites them, a tool turn's
 earlier calls, each in its envelope and cut to whole items within its share
 of the tail's cap (`journal.tail_shares`: memory 0.35, retrieval 0.25, web
 0.1, tool 0.1, documents 0.2, every kind named), what each left out counted
--- then the turn, its documents held to the document share and refused,
-never cut, past it. Two user messages are
-never adjacent. Each message carries the label of what it holds, and the
+-- the memory borrowing, past its own share, the shares of the kinds the
+turn brings nothing of and the room the region leaves of the peels' cap,
+since at 4096 its own share does not hold its envelope: room it gives up
+first when the window passes its cap, before the Flesh gives, none of it
+under a tail's room, and that a burst is not aimed on; the plan keeps of
+the memory it chose, a recalled span included, what the composer's own
+loop lays at that cap, and the window counts what it kept back as cut --
+then the turn, its documents held to the document share and refused,
+never cut, past it. Two user messages are never adjacent. Each message
+carries the label of what it holds, and the
 request's label is their union. The memory shows nothing a withdrawal
 reached: a peel or a recalled span standing on a source the user withdrew
 is left out, and the window says what it left out.

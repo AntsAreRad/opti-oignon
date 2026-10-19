@@ -765,6 +765,64 @@ TAIL_KINDS = ("memory", "rag", "web", "tool")
 _SOURCE = {"memory": "memory", "rag": "file", "web": "web", "tool": "tool"}
 
 
+def memory_cap(budget, shares, brought, region_tokens):
+    """``(own, whole)``: the memory's caps in the tail. ``own`` is its share of the tail's cap; ``whole`` adds the
+    shares of the kinds after it the turn brings nothing of (``brought``, the kinds it brings) and the room the
+    region leaves of the peels' cap (``region_tokens``, what the region lays). Both none when its own share or the
+    tail's cap is none: a configuration that gives the memory no room keeps it out.
+
+    The shares hold the kinds a turn brings against each other, and the
+    peels' cap holds the memory the tree accepted: a share no part of the
+    turn claims, and room the region does not take, may be the memory's,
+    which the question brings into the tail -- room it borrows, given up
+    before any other part of the window (``lend``). At the small rung the
+    memory's own share does not hold its envelope.
+    """
+    if not (shares.get("memory", 0) > 0 and budget.tail > 0):
+        return 0, 0
+    own = int(shares["memory"] * budget.tail)
+    lent = sum(shares.get(kind, 0) for kind in TAIL_KINDS[1:] if kind not in brought)
+    return own, int((shares["memory"] + lent) * budget.tail) + max(0, budget.peels - region_tokens)
+
+
+def memory_room(budget, shares, brought, region, count):
+    """``memory_cap`` for the kinds a turn brings (``brought``) and its region as the journal lays it: cut first to
+    the peels' cap, each peel counted bare."""
+    held = tuple(region)[region_cut(region, budget, count):]
+    return memory_cap(budget, shares, brought, sum(count(_bare(text)) for _key, text, _provenance, _label in held))
+
+
+def fit_kind(kind, items, cap, wrap, measure, seed=(), citation="", trials=None):
+    """``(taken, kept, placed, dropped)``: what the tail lays of ``kind`` within ``cap`` tokens counted with
+    ``measure`` -- the loop a window cuts a kind by, so that a plan which selects with it hands the composer what it
+    lays. In their order, each item that would pass the cap is left out and counted (``dropped``) and the next one
+    tried; ``taken`` are the indices of the items laid, ``kept`` each laid as it is (text, label) after ``seed``,
+    those laid before them, and ``placed`` the kind's envelope as laid, ``citation`` closing it. ``trials``, a list,
+    receives the count of each try."""
+    kept, taken, dropped, placed = list(seed), [], 0, ""
+    if kept:
+        placed = _wrapped(wrap, "\n\n".join(item for item, _label in kept), _SOURCE[kind], frames=kind == "memory")
+    for index, (_kind, _key, text, frame, label) in enumerate(items):
+        item = _framed(frame[0], frame[1], _bare(text)) if frame else _bare(text)
+        if kept:
+            # Each item is bare alone; the rest of a header the item before it begins is neutralized here.
+            item = _joined(kept[-1][0], item)
+        trial = _wrapped(wrap, "\n\n".join([laid for laid, _label in kept] + [item]), _SOURCE[kind],
+                         frames=kind == "memory")
+        if citation:
+            trial += "\n\n" + citation
+        counted = measure(trial)
+        if trials is not None:
+            trials.append(counted)
+        if counted > cap:
+            dropped += 1
+            continue
+        kept.append((item, label))
+        taken.append(index)
+        placed = trial
+    return taken, kept, placed, dropped
+
+
 @dataclass(frozen=True)
 class Message:
     """One message of a journal: its role, its content, the labels of the parts it holds and their layers."""
@@ -787,7 +845,8 @@ class Journal:
     ``pieces`` place every part in ``canonical()``, ``(layer, key, start,
     end)`` in bytes, tiling it, the joint before a part counted with it;
     ``stable_end`` is where the current turn's part begins, the bytes before
-    it the prefix the next turn keeps.
+    it the prefix the next turn keeps. ``lent`` is what the memory took of
+    the room it borrows past its own share (``memory_cap``).
     """
 
     messages: tuple
@@ -797,6 +856,7 @@ class Journal:
     core_root: str
     stable_end: int
     pieces: tuple
+    lent: int = 0
 
     def canonical(self):
         """The journal as bytes: each message its role, a NUL, its content in UTF-8 and a record separator."""
@@ -935,8 +995,29 @@ def fold_cost(fold, wrap, count):
     return _part("tail", _fold_part(fold, wrap)[1], "tail", count)[2]
 
 
+def memory_wants(items, own, wrap, count, fold=None):
+    """What the memory among a tail's ``items`` takes past its own share ``own`` for all of it to be laid as
+    ``compose_journal`` lays it -- after a shadow's ``fold``, charged outside the share: the heaviest of the loop's
+    tries, since a count may fall as an item is added, so that from that ``lend`` on a window lays all of it, and
+    below it does not. 0 with no memory item."""
+    memory = [item for item in items if item[0] == "memory"]
+    if not memory:
+        return 0
+
+    def measure(text):
+        return _part("tail", text, "tail", count)[2]
+
+    seed, charge = (), 0
+    if fold is not None:
+        item, alone = _fold_part(fold, wrap)
+        seed, charge = ((item, fold[4]),), measure(alone)
+    trials = []
+    fit_kind("memory", memory, _MOST_TOKENS, wrap, measure, seed=seed, trials=trials)
+    return max(0, max(trials) - own - charge)
+
+
 def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget, count, overhead, wrap, shares,
-                    prompt_cap=None, tail_room=None, images=0, image_tokens=0, fold=None, tools=0):
+                    prompt_cap=None, tail_room=None, images=0, image_tokens=0, fold=None, tools=0, lend=None):
     """A turn's window as a journal under ``budget``. Pure: same inputs, same journal, inputs untouched.
 
     The system prompt, and a manifest when given (``system``), open it, one
@@ -949,8 +1030,11 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     bare. The last message holds the tail (``tail``: kind, key, text, frame,
     label, the memory framed as data) -- memory, retrieval, web, a tool
     turn's earlier calls, each cut to whole items within its share of the
-    tail's cap (``shares``), what it left out counted, and counted in its
-    envelope -- then the current turn (``turn``: pieces,
+    tail's cap (``shares``), the memory's holding the shares of the other
+    kinds the turn brings nothing of and the room the region leaves of the
+    peels' cap (``memory_cap``) -- what it lays past its own share is
+    ``lent``, no more than ``lend`` when given -- what it left out counted,
+    and counted in its envelope -- then the current turn (``turn``: pieces,
     label) laid as the Flesh lays a turn, its documents held to the
     document share. Every bare part is defanged, and a Core header forged in
     any part but the Core is neutralized, and one forged across the joint
@@ -980,8 +1064,9 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     and envelopes included, by the window less the reserve, and by
     ``prompt_cap`` when it is lower (the refusal's figures are the whole's
     count and the cap). ``tail_room``, when given, is what the tail may take
-    in all: each kind, in order, within its share and what the kinds before
-    it left of it. What may not be cut is refused by name
+    in all: each kind, in order, within its own share and what the kinds
+    before it left of it, the memory borrowing nothing. What may not be cut
+    is refused by name
     (``BudgetError``, with its motive and figures).
     """
     errors = budget.validate()
@@ -1038,6 +1123,9 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     held = region[cut["peels_full"]:]
     frames = [("peels", key, _framed("peels", provenance, _bare(text)), label) for key, text, provenance, label in held]
     peel_tokens = tuple(counted("peels", _bare(text)) for _key, text, _provenance, _label in held)
+    # What the region leaves of the peels' cap moves to the tail, where the memory the question brings takes it.
+    spare = max(0, budget.peels - sum(peel_tokens)) if shares.get("memory", 0) > 0 else 0
+    laid_under = replace(laid_under, peels=budget.peels - spare, tail=laid_under.tail + spare)
     digest_frame = _framed("receipts", "receipts", _bare(digest)) if str(digest) else ""
     digest_tokens = counted("receipts", _bare(digest)) if digest_frame else 0
     if digest_frame:
@@ -1064,29 +1152,25 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
         laid.enter(str(role), [("flesh", str(key), text, "")], [label])
     tail_text, tail_tokens, tail_labels = [], 0, []
     by_kind = {kind: [item for item in tail if item[0] == kind] for kind in TAIL_KINDS + ("citation",)}
+    own, whole = memory_cap(budget, shares, {kind for kind in TAIL_KINDS[1:] if by_kind[kind]}, sum(peel_tokens))
+    # The memory borrows what ``lend`` allows of the room past its own share, all of it when None; under a tail's
+    # room -- a window past its cap with none borrowed (``_laid``) -- none.
+    room = own if tail_room is not None else whole if lend is None else min(whole, own + max(lend, 0))
+    lent = 0
     for kind in TAIL_KINDS:
-        cap = int(shares.get(kind, 0) * budget.tail)
+        cap = room if kind == "memory" else int(shares.get(kind, 0) * budget.tail)
         if tail_room is not None:
             cap = min(cap, max(tail_room - tail_tokens, 0))
-        kept, dropped, placed = [], 0, ""
+        seed = ()
         if kind == "memory" and fold_item is not None:
             # The fold first, never cut, on the room its eviction freed: the share holds what follows it.
-            kept, placed = [(fold_item, fold[4])], fold_alone
+            seed = ((fold_item, fold[4]),)
             cap = cap + charge if tail_room is None else min(cap + charge, tail_room)
-        for _kind, key, text, frame, label in by_kind[kind]:
-            item = _framed(frame[0], frame[1], _bare(text)) if frame else _bare(text)
-            if kept:
-                # Each item is bare alone; the rest of a header the item before it begins is neutralized here.
-                item = _joined(kept[-1][0], item)
-            trial = _wrapped(wrap, "\n\n".join([item for item, _label in kept] + [item]), _SOURCE[kind],
-                             frames=kind == "memory")
-            if kind == "web" and by_kind["citation"]:
-                trial += "\n\n" + _bare(by_kind["citation"][0][2])
-            if counted("tail", trial) > cap:
-                dropped += 1
-                continue
-            kept.append((item, label))
-            placed = trial
+        citation = _bare(by_kind["citation"][0][2]) if kind == "web" and by_kind["citation"] else ""
+        _taken, kept, placed, dropped = fit_kind(kind, by_kind[kind], cap, wrap, lambda text: counted("tail", text),
+                                                seed=seed, citation=citation)
+        if kind == "memory" and placed:
+            lent = max(0, counted("tail", placed) - own - charge)
         cut[kind] = dropped
         if placed:
             tail_text.append((kind, placed))
@@ -1133,7 +1217,7 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
               ("receipts", digest_tokens), ("flesh", sum(part[2] for part in flesh_parts)), ("tail", tail_tokens),
               ("turn", parts.turn[2]), ("images", image_cost), ("tools", tools))
     return Journal(messages=messages, tokens=tokens, layers=layers, cut=tuple(sorted(cut.items())),
-                   core_root=str(root), stable_end=stable_end, pieces=laid_pieces)
+                   core_root=str(root), stable_end=stable_end, pieces=laid_pieces, lent=lent)
 
 
 # The runtime's own words a tool turn's transcript lays a result under, bare: the call it answers, by its place in

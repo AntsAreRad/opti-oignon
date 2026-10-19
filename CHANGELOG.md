@@ -3121,6 +3121,30 @@ package costs.
 
 ### Fixed
 
+- At the 4096 rung, the onion lays again the memory a question reaches,
+  where the region of accepted peels leaves it room. The tail held each kind
+  of source to its share of its cap, envelope included, and at 4096 the
+  memory's share -- 0.35 of a tail of 192 tokens -- did not hold its
+  envelope alone, 174 tokens by the chat's counter for a Qwen model: every
+  memory item was cut. On the drift A/B at 4096 the probes were answered
+  from no memory, and a 27B model invented every answer, none of seven
+  right. The memory may now borrow, past its own share, the shares of the
+  retrieval, the web and the tool kinds the turn brings nothing of, and the
+  room the region leaves of the peels' cap. It gives that room up first when
+  the window passes its cap -- it keeps the most of it that holds with the
+  Flesh as planned, and when none holds the Flesh gives what the window
+  passes its cap by with none borrowed -- it borrows nothing under a tail's
+  room, and a tool turn does not aim its next burst on it. A configuration
+  that gives the memory no share still keeps it out. The plan keeps of the
+  memory it chose, a recalled span included, what the composer's own loop
+  lays at the cap of the plan's rung, and the window counts what it kept
+  back as cut, as it counted what the composer cut: the composer lays all it
+  is handed unless the window descends a rung or passes its cap. Measured on
+  the drift A/B at 4096, the 27B model answers six of seven probes right,
+  one wrong, the memory laying 408 tokens a turn against 92; a 4B model
+  answers three of seven right at 4096 as before, two wrong against four,
+  and four of seven at 8192 against three.
+
 - [SECURITY] A span the onion's queue holds no longer keeps an order the
   user typed without what bounds it. A held span keeps, as anchors, the
   fewest typed units -- sentences and fenced blocks -- that answer its

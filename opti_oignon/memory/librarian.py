@@ -2004,7 +2004,9 @@ class Window:
     the answer (``num_predict``: the context less what the window is
     accounted, never under the journal's floor), so ``accounted +
     num_predict == num_ctx``; its count by layer, the charge of the turn's
-    images named apart (``images``), and what each kind of part left out.
+    images named apart (``images``), and what each kind of part left out --
+    the memory's what the plan chose, and the peels a shadow made, that the
+    window does not lay.
     Its epoch: its number, why it began (``motive``, None while
     the stable prefix held), where the first piece that changed since the
     conversation's last window begins (``first_diff``), the chain of the
@@ -2065,6 +2067,8 @@ class _Held:
     digest: str
     laid_turns: tuple
     tail: tuple
+    # The memory the plan chose and kept back: what the composer's loop would not lay of it at the plan's rung.
+    trimmed: int
     turn: tuple
     causes: tuple
     # What a shadow and a descent need: the Flesh's turns as stored, the budgets of every rung, the receipts digest
@@ -2325,7 +2329,7 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         withdrawn=frozenset(withdrawn or ()), recalled=tuple(recalled or ()), model_window=model_window,
         counted=counted, wrap=wrap, budgets=budgets, journal=journal, ladder=ladder, unheld=unheld,
         tooled=bool(schemas), tools=max((_part("tools", text, "tools", counted)[2] for text in schemas), default=0),
-        gate=gate,
+        gate=gate, brought=frozenset(source[0] for source in sources),
     )
     cost = _turn_cost(counted, wrap, journal.message_overhead)
     sticky = _sticky(budgets, model_window)
@@ -2352,7 +2356,7 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         shares=journal.shares(), images=images, image_tokens=journal.image_tokens,
         system=asked.system, pinned=read["pinned"], region=read["region"], digest=read["digest"],
         laid_turns=read["laid_turns"],
-        tail=tuple(read["memory"]) + tuple(sources), turn=asked.turn, causes=read["causes"],
+        tail=tuple(read["memory"]) + tuple(sources), trimmed=read["trimmed"], turn=asked.turn, causes=read["causes"],
         raw=read["raw"], budgets=budgets, digests=read["digests"], gate=gate, ladder=ladder, cost=cost,
         sticky=sticky, mark=journal.burst_mark, catch_up=(journal.catch_up_reach, journal.catch_up_steps),
         lineage=read["lineage"], withdrawn=asked.withdrawn, tooled=asked.tooled, tools=asked.tools,
@@ -2382,13 +2386,14 @@ class _Asked:
     tooled: bool = False
     tools: int = 0
     gate: object = None
+    brought: frozenset = frozenset()
 
 
 def _read(state, asked):
     """What the composition needs of the conversation's state, read under its lock, or the refusal of the plan."""
     import copy
 
-    from .composer import _CORE_HEADER, _defang, _part, region_cut
+    from .composer import _CORE_HEADER, _defang, _part, fit_kind, memory_room, region_cut
     from .peels import (
         PeelTree,
         join_labels,
@@ -2437,6 +2442,7 @@ def _read(state, asked):
     # A Flesh over its cap at the rung, or over what the turn's images leave of it, is laid over a shadow when the
     # window is composed: the turns as stored are kept for it.
     memory, digest, raw, digests = [], "", (), tuple((r, "") for r in asked.budgets.rungs if r <= rung)
+    trimmed = 0
     if state is not None and not asked.unheld:
         # The turns the shadow may lay, as stored.
         raw = tuple(copy.deepcopy(state.flesh.turns()))
@@ -2444,7 +2450,10 @@ def _read(state, asked):
         digests = tuple((r, state.ledger.render(state.cellar, cap=asked.budgets.at(r).receipts, estimate=counted)[0])
                         for r in asked.budgets.rungs if r <= rung)
         digest = dict(digests)[rung]
-        cap = int(shares.get("memory", 0) * budget.tail)
+        # The memory's cap as the composer holds it (``memory_room``): its own share, the shares the turn's other
+        # kinds leave and the room the region leaves of the peels' cap. What it borrows past its own share the
+        # window gives up first (``_laid``).
+        _own, cap = memory_room(budget, shares, asked.brought, region, counted)
         anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
                                   estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate)
                    if cap > 0 else [])
@@ -2476,8 +2485,14 @@ def _read(state, asked):
                 label = join_labels(turn_label(t, lineage) for t in visible)
                 memory.append(("memory", f"recalled:{key}", "\n".join(lines),
                                ("recalled", f"receipt:{str(key)[:12]}"), (tuple(label[0]), tuple(label[1]))))
+        if memory and asked.wrap is not None:
+            # What the composer's own loop lays of it at that cap, envelope and frames counted as it counts them: the
+            # plan hands it nothing it would cut there, and the window counts what it keeps back as cut. With no
+            # wrapper the composer refuses the memory by name.
+            kept = fit_kind("memory", memory, cap, asked.wrap, counted)[0]
+            trimmed, memory = len(memory) - len(kept), [memory[index] for index in kept]
     return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
-            "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory,
+            "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory, "trimmed": trimmed,
             "causes": tuple(sorted(causes.items())), "raw": raw, "digests": digests,
             "lineage": tuple(sorted((key, copy.deepcopy(value)) for key, value in lineage.items()))}
 
@@ -2705,8 +2720,9 @@ def _shadowed(held, costs, room):
 def tail_room(model_window=None, *, budgets=None, journal=None):
     """What each kind of source a turn brings may take, in tokens, at the conversation's own rung -- the largest
     within ``home_rung`` and the model's window -- by kind (``memory``, ``rag``, ``web``, ``tool``, ``document``):
-    the caps a window cuts them to, so a caller fetches no more than fits. Empty when no rung is within the model's
-    window or a configuration does not read. Never raises."""
+    the caps a window cuts them to, so a caller fetches no more than fits -- for the memory its own share, which it
+    may pass on room the turn and the region leave (``memory_cap``). Empty when no rung is within the model's window
+    or a configuration does not read. Never raises."""
     from .composer import layer_cap, load_budgets, load_journal
 
     try:
@@ -2857,8 +2873,9 @@ def _compose_window(plan, num_ctx):
         # A tool turn's record names the Flesh room its schemas and its transcript's room leave -- the Flesh's cap
         # less the turn's charges, held to what the cap leaves it beside every other part laid -- so the burst
         # evicts ahead of it, and the next tool turn need not lay a shadow.
+        # The room the memory borrowed is no part of what the cap leaves the Flesh: it gives way before it.
         left = min(layer_cap(budget, "flesh", held.images * held.image_tokens + held.tools),
-                   cap - (journal.tokens - dict(journal.layers)["flesh"]))
+                   cap - (journal.tokens - dict(journal.layers)["flesh"] - journal.lent))
         burst = (replace(held.sticky, flesh=max(min(held.sticky.flesh, left), 0)), held.mark, held.cost)
     record = _JournalRecord(model=held.model, rung=held.rung, pieces=pieces, stable_end=journal.stable_end,
                             chain=chain, epoch=epoch, causes=held.causes, burst=burst)
@@ -2884,7 +2901,9 @@ def _compose_window(plan, num_ctx):
         tooled = dict(tools=held.tools, tool_room=room, result_cap=at_rung(held.result_cap, rung, held.budgets.home),
                       limit=answer_limit(sent, held.margin, held.floor))
     return Window(messages=messages, rung=held.rung, num_ctx=sent, num_predict=sent - charged, accounted=charged,
-                  tokens=journal.tokens, layers=journal.layers, cut=journal.cut, epoch=epoch, motive=motive,
+                  tokens=journal.tokens, layers=journal.layers,
+                  cut=tuple((kind, n + held.trimmed * (kind == "memory")) for kind, n in journal.cut),
+                  epoch=epoch, motive=motive,
                   first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None,
                   overhead=held.overhead, margin=held.margin, **tooled)
 
@@ -2901,7 +2920,11 @@ def _laid(held, cap, budget, digest, rung, sent):
     two of them meet. The fold naming the turns it set aside is laid first
     among the memory and charged to the Flesh room their eviction freed,
     outside the memory share, so no turn leaves without its trace; the
-    peels the shadow made follow the memory the plan selected. A fold even
+    peels the shadow made follow the memory the plan selected. Before the
+    Flesh gives, the memory gives up the room it borrows past its own share
+    (``memory_cap``): the most of it the window holds with the Flesh as
+    planned, none at worst -- and with none the Flesh gives what the window
+    passes its cap by then, the tail's room taking nothing borrowed. A fold even
     the whole Flesh room cannot hold is refused by name: ``rung`` for a
     descent, with the next rung up, ``flesh`` otherwise. Then the tail, cut
     to the largest room that fits: the room the rest leaves it, lowered by
@@ -2909,17 +2932,27 @@ def _laid(held, cap, budget, digest, rung, sent):
     ``count`` when the system prompt, the Core and the turn alone, or with
     the region and the digest, which do not give, break the cap.
     """
-    from .composer import BudgetError, compose_journal, layer_cap
+    from .composer import (
+        TAIL_KINDS,
+        BudgetError,
+        compose_journal,
+        layer_cap,
+        memory_room,
+        memory_wants,
+    )
 
-    def attempt(*, turns, sources, fold=None, region=held.region, digest=digest, room=None):
+    lending = [None]
+
+    def attempt(*, turns, sources, fold=None, region=held.region, digest=digest, room=None, lend=None):
         """A journal, or the count by which its whole broke the cap -- a Flesh laid past its own cap read as a whole
-        past the prompt's by as much, so the Flesh gives again; any other refusal is raised."""
+        past the prompt's by as much, so the Flesh gives again; any other refusal is raised. The memory borrows
+        ``lend`` past its own share, what the window allows it so far when None."""
         try:
             return compose_journal(system=held.system, pinned=held.pinned, region=region, digest=digest, flesh=turns,
                                    tail=sources, turn=held.turn, budget=budget, count=held.count,
                                    overhead=held.overhead, wrap=held.wrap, shares=held.shares, prompt_cap=cap,
                                    tail_room=room, images=held.images, image_tokens=held.image_tokens,
-                                   fold=fold, tools=held.tools), None
+                                   fold=fold, tools=held.tools, lend=lending[0] if lend is None else lend), None
         except BudgetError as exc:
             if exc.motive == "flesh" and len(exc.figures) == 2 and turns and exc.figures[0] > exc.figures[1]:
                 # The Flesh as laid can pass the sum of its turns -- a header neutralized across a joint: it gives
@@ -2958,6 +2991,27 @@ def _laid(held, cap, budget, digest, rung, sent):
     journal, over = attempt(turns=turns, fold=fold, sources=sources)
     if journal is not None:
         return done(journal)
+    # The memory's borrowed room gives way first: the most of it the window holds with the Flesh as planned, found
+    # by halving once the window holds it with none, within what its items take (``memory_wants``: from there on it
+    # lays all of them) -- the most where a count only grows as text is added.
+    own, whole = memory_room(budget, held.shares, {item[0] for item in held.tail if item[0] in TAIL_KINDS[1:]},
+                             held.region, held.count)
+    wants = min(whole - own, memory_wants(sources, own, held.wrap, held.count, fold)) if whole > own else 0
+    lending[0] = 0
+    if wants > 0:
+        best, zero_over = attempt(turns=turns, fold=fold, sources=sources)
+        low, high = 1, wants - 1
+        while best is not None and low <= high:
+            middle = (low + high) // 2
+            fitted, _over = attempt(turns=turns, fold=fold, sources=sources, lend=middle)
+            if fitted is None:
+                high = middle - 1
+            else:
+                best, low = fitted, middle + 1
+        if best is not None:
+            return done(best)
+        # Even with none borrowed the window passes its cap: the Flesh gives what it passes it by then, no more.
+        over = zero_over
     least = attempt(turns=(), sources=(), region=(), digest="")[1]
     if least is not None:
         return None, Refusal("count", (least, cap))
