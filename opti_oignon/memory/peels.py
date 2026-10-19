@@ -2102,6 +2102,85 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     return chosen
 
 
+def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), lineage=None, withdrawn=(), gate=None):
+    """The words the user typed of a newer statement ``query`` reaches where an older item of ``chosen`` reaches it
+    alike: ``Selected`` items, the newest first, each saying where it stands in time.
+
+    ``chosen`` are the items the memory chose for ``query``, each
+    ``(provenance, text, at)``: what it shows and where it stands in time.
+    A summary keeps a fact's new value, not always that it is new -- "User
+    stated Alice lives in Oslo." beside "User stated Alice lives in
+    Berlin.", nothing saying which holds. A part of the query is a term of
+    it; a unit the user typed answers the parts it holds that an item older
+    than it holds too. For each such part, the newest unit that answers it
+    is laid, word for word: from the span of a peel among them (``peels``,
+    by provenance) -- "News: the move is done, Alice lives in Oslo." -- an
+    anchor of its span, at the span's place in time, so after a peel of
+    that span alone; or from the Flesh (``recent``, its turns, newer than
+    every receipt), which the window shows farther from the question than
+    the tail, laid again after every item that says its time, a copy of its
+    turn (``flesh:``). Never laid so: a unit that only asks, one that
+    reaches into an order of the user's -- shown whole where it stands, in
+    the Flesh or by its peel's references -- one within a segment its peel
+    references, a turn a peer sent, one a withdrawal reached. Each unit
+    once, defanged as an anchor is.
+    """
+    from .composer import defanged
+    from .probes import _is_question, generate_probes
+
+    withdrawn = frozenset(withdrawn or ())
+    terms = _terms(query)
+    if not terms:
+        return []
+    said = [(tuple(at), _terms(text) & terms) for _provenance, text, at in chosen]
+    places = {r.key: n for n, r in enumerate(ledger.all())}
+    table, found = None, {}
+
+    def answering(span, when, shown=()):
+        """``(place, unit, label, parts)`` for each unit of ``span`` that answers parts of the query an item older
+        than ``when`` answers, none within a segment of ``shown`` (a peel's references)."""
+        nonlocal table
+        older = set().union(*(theirs for at, theirs in said if at < when))
+        labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in span}
+        orders = None
+        for place, unit in enumerate(_typed_units(span)):
+            parts = _terms(unit.text) & older
+            if not parts or _is_question(unit.text):
+                continue
+            if any(str(ref[0]) == unit.turn_id and ref[1] <= unit.start and unit.stop <= ref[2] for ref in shown):
+                continue
+            if orders is None:
+                if table is None:
+                    table = gate if gate is not None and gate.directives is not None else load_gate()
+                orders = _ordering(span, generate_probes(span, table.lexicon), table)[0]
+            if _reached((unit.turn_id, unit.start, unit.stop), orders) or withheld(labels[unit.turn_id], withdrawn):
+                continue
+            yield place, unit, labels[unit.turn_id], parts
+
+    for provenance, _text, _at in chosen:
+        peel = peels.get(provenance)
+        for key in (peel.sources if peel is not None else ()):
+            if key in places and cellar.has(key):
+                for place, unit, label, parts in answering(cellar.get(key), (places[key], 0), peel.refs):
+                    found[f"anchor:{key[:12]}:{unit.turn_id}", unit.start] = ((places[key], 1 + place), parts, unit,
+                                                                              label)
+    if recent:
+        for place, unit, label, parts in answering(list(recent), (len(places), 0)):
+            found[f"flesh:{unit.turn_id}", unit.start] = ((len(places), place), parts, unit, label)
+    # For each part, the newest unit that answers it.
+    newest = {max((key for key, entry in found.items() if part in entry[1]), key=lambda key: found[key][0])
+              for part in set().union(*(entry[1] for entry in found.values()))}
+    laid = []
+    for key in sorted(newest, key=lambda key: found[key][0], reverse=True):
+        at, _parts, unit, label = found[key]
+        words, altered = defanged(unit.text)
+        if altered:
+            words = f"{_header(unit.turn_id, altered)} {words}"
+        laid.append(Selected(text=words, provenance=key[0], label=tuple(label), at=at,
+                             events=(("anchors_altered", altered),) if altered else ()))
+    return laid
+
+
 def in_time(items):
     """Selected items in the order of the time they show: by their receipt's place in the ledger, then their own
     place in its span, the oldest first, so that the newest stands nearest the question -- a fact and the later

@@ -1078,7 +1078,9 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
     of theirs (``memory_cap``, ``idle_room``), the tail's cap raised by the
     last two -- what it lays past its own share is
     ``lent``, no more than ``lend`` when given -- what it left out counted,
-    and counted in its envelope -- then the current turn (``turn``: pieces,
+    a copy of a peel the region lays or of a turn the Flesh lays (``flesh:``
+    and its key) aside, since the window shows it, and counted in its
+    envelope -- then the current turn (``turn``: pieces,
     label) laid as the Flesh lays a turn, its documents held to the
     document share. Every bare part is defanged, and a Core header forged in
     any part but the Core is neutralized, and one forged across the joint
@@ -1220,8 +1222,10 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
         if kind == "memory" and placed:
             lent = max(0, counted("tail", placed) - own - charge)
         if kind == "memory":
-            # A copy of a peel the region lays, left out of the tail, is not cut: the window shows it at its head.
+            # A copy of a peel the region lays or of a turn the Flesh lays, left out of the tail, is not cut: the
+            # window shows it already.
             shown = {provenance for _key, _text, provenance, _label in held}
+            shown |= {f"flesh:{key}" for key, _role, _pieces, _label in flesh}
             dropped = sum(1 for index, item in enumerate(by_kind[kind]) if index not in taken and item[1] not in shown)
         cut[kind] = dropped
         if placed:

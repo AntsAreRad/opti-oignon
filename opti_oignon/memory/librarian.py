@@ -2082,8 +2082,10 @@ class _Held:
     digest: str
     laid_turns: tuple
     tail: tuple
-    # The memory the plan chose and kept back: what the composer's loop would not lay of it at the plan's rung.
+    # The memory the plan chose and kept back: what the composer's loop would not lay of it at the plan's rung,
+    # counted, and the copies among it, by provenance -- cut where the window lays their original nowhere.
     trimmed: int
+    copies: tuple
     turn: tuple
     causes: tuple
     # What a shadow and a descent need: the Flesh's turns as stored, the budgets of every rung, the receipts digest
@@ -2372,7 +2374,8 @@ def _plan(conversation_id, *, model, count, system, turn, wrap, tail, model_wind
         shares=journal.shares(), images=images, image_tokens=journal.image_tokens,
         system=asked.system, pinned=read["pinned"], region=read["region"], digest=read["digest"],
         laid_turns=read["laid_turns"],
-        tail=tuple(read["memory"]) + tuple(sources), trimmed=read["trimmed"], turn=asked.turn, causes=read["causes"],
+        tail=tuple(read["memory"]) + tuple(sources), trimmed=read["trimmed"], copies=read["copies"], turn=asked.turn,
+        causes=read["causes"],
         raw=read["raw"], budgets=budgets, digests=read["digests"], gate=gate, ladder=ladder, cost=cost,
         sticky=sticky, mark=journal.burst_mark, catch_up=(journal.catch_up_reach, journal.catch_up_steps),
         lineage=read["lineage"], withdrawn=asked.withdrawn, tooled=asked.tooled, tools=asked.tools,
@@ -2409,13 +2412,14 @@ def _read(state, asked):
     """What the composition needs of the conversation's state, read under its lock, or the refusal of the plan."""
     import copy
 
-    from .composer import _CORE_HEADER, _defang, _part, fit_kind, idle_room, memory_room, region_cut
+    from .composer import _CORE_HEADER, _defang, _part, fit_kind, idle_room, memory_room
     from .peels import (
         PeelTree,
         join_labels,
         peel_time,
         render_peel,
         select_anchors,
+        select_newer_words,
         select_peels,
         turn_label,
         withheld,
@@ -2459,7 +2463,7 @@ def _read(state, asked):
     # A Flesh over its cap at the rung, or over what the turn's images leave of it, is laid over a shadow when the
     # window is composed: the turns as stored are kept for it.
     memory, digest, raw, digests = [], "", (), tuple((r, "") for r in asked.budgets.rungs if r <= rung)
-    trimmed = 0
+    trimmed, copies = 0, ()
     if state is not None and not asked.unheld:
         # The turns the shadow may lay, as stored.
         raw = tuple(copy.deepcopy(state.flesh.turns()))
@@ -2494,9 +2498,17 @@ def _read(state, asked):
             if not gone.intersection(peel.sources):
                 pool.add(peel)
         selected = select_peels(pool, asked.question, room, estimate=counted, render=render) if room > 0 else []
+        chosen = list(anchors) + list(selected)
+        # The words the user typed of a newer statement the question reaches where an older item reaches it alike:
+        # chosen after the rest, a recalled span included (``select_newer_words``).
+        newer = select_newer_words([(item.provenance, item.text, item.at) for item in chosen], asked.question,
+                                   ledger=state.ledger, cellar=state.cellar,
+                                   peels={f"peel:{peel.id[:12]}:L{peel.level}": peel for peel in pool.all()},
+                                   recent=state.flesh.turns(), lineage=lineage, withdrawn=asked.withdrawn,
+                                   gate=asked.gate)
         # Each item says where it stands in time: chosen in this order, it is laid in that one (``fit_kind``).
         memory = [("memory", item.provenance, item.text, ("peels", item.provenance),
-                   tuple(tuple(part) for part in item.label), item.at) for item in list(anchors) + list(selected)]
+                   tuple(tuple(part) for part in item.label), item.at) for item in chosen]
         # A recalled span, as the region and the pool would show it: none under a superseded receipt, and no
         # turn a withdrawal reached, said by number.
         live = {r.key for r in rows} - gone
@@ -2510,6 +2522,8 @@ def _read(state, asked):
                 label = join_labels(turn_label(t, lineage) for t in visible)
                 memory.append(("memory", f"recalled:{key}", "\n".join(lines),
                                ("recalled", f"receipt:{str(key)[:12]}"), (tuple(label[0]), tuple(label[1]))))
+        memory += [("memory", item.provenance, item.text, ("peels", item.provenance),
+                    tuple(tuple(part) for part in item.label), item.at) for item in newer]
         if memory and asked.wrap is not None:
             # What the composer's own loop lays of it at that cap -- chosen in this order, laid in the order of time,
             # a recalled span after the rest -- envelope and frames counted as it counts them: the plan hands it
@@ -2517,12 +2531,16 @@ def _read(state, asked):
             # chosen in, so a window that cuts it further leaves out the last chosen first. With no wrapper the
             # composer refuses the memory by name.
             kept = sorted(fit_kind("memory", memory, cap, asked.wrap, counted)[0])
-            # What it keeps back counts as cut, a copy of a peel the region lays aside: the window still shows it.
-            shown = {provenance for _key, _text, provenance, _label in region[region_cut(region, budget, counted):]}
-            trimmed = sum(1 for index, item in enumerate(memory) if index not in kept and item[1] not in shown)
+            # What it keeps back counts as cut, but a copy -- of a peel of the region or of a turn of the Flesh --
+            # which counts only where the window, as composed, lays its original nowhere (``_compose_window``).
+            originals = {provenance for _key, _text, provenance, _label in region}
+            originals |= {f"flesh:{key}" for key, _role, _pieces, _label in laid_turns}
+            copies = tuple(item[1] for index, item in enumerate(memory) if index not in kept and item[1] in originals)
+            trimmed = sum(1 for index, item in enumerate(memory) if index not in kept and item[1] not in originals)
             memory = [memory[index] for index in kept]
     return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
             "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory, "trimmed": trimmed,
+            "copies": copies,
             "causes": tuple(sorted(causes.items())), "raw": raw, "digests": digests,
             "lineage": tuple(sorted((key, copy.deepcopy(value)) for key, value in lineage.items()))}
 
@@ -2846,7 +2864,15 @@ def compose_window(plan, *, num_ctx=None):
 def _compose_window(plan, num_ctx):
     import hashlib
 
-    from .composer import _whole, accounted, answer_limit, at_rung, layer_cap, prompt_cap
+    from .composer import (
+        _whole,
+        accounted,
+        answer_limit,
+        at_rung,
+        layer_cap,
+        prompt_cap,
+        region_cut,
+    )
     from .peels import join_labels
 
     if plan.refusal is not None:
@@ -2876,6 +2902,12 @@ def _compose_window(plan, num_ctx):
     if rung != held.rung:
         # The epoch and the record read the rung the window was composed under.
         held = replace(held, rung=rung)
+    # A copy the plan kept back is cut where the window, as composed -- its region cut at its rung, its Flesh over
+    # a shadow -- lays its original nowhere.
+    shown = {provenance for _key, _text, provenance, _label in held.region[region_cut(held.region, budget,
+                                                                                      held.count):]}
+    shown |= {f"flesh:{key}" for layer, key, _start, _end in journal.pieces if layer == "flesh"}
+    unshown = sum(1 for provenance in held.copies if provenance not in shown)
     charged = accounted(journal.tokens, held.margin)
     data = journal.canonical()
     pieces = tuple((layer, key, end, hashlib.sha256(data[start:end]).hexdigest())
@@ -2932,7 +2964,7 @@ def _compose_window(plan, num_ctx):
                       limit=answer_limit(sent, held.margin, held.floor))
     return Window(messages=messages, rung=held.rung, num_ctx=sent, num_predict=sent - charged, accounted=charged,
                   tokens=journal.tokens, layers=journal.layers,
-                  cut=tuple((kind, n + held.trimmed * (kind == "memory")) for kind, n in journal.cut),
+                  cut=tuple((kind, n + (held.trimmed + unshown) * (kind == "memory")) for kind, n in journal.cut),
                   epoch=epoch, motive=motive,
                   first_diff=first_diff, chain=chain, cold=prev is None or first_diff == 0, refusal=None,
                   overhead=held.overhead, margin=held.margin, **tooled)
@@ -2952,8 +2984,8 @@ def _laid(held, cap, budget, digest, rung, sent):
     outside the memory share, so no turn leaves without its trace; the
     peels the shadow made follow the memory the plan selected. Before the
     Flesh gives, the tail gives up what it lays again of the peels the
-    region lays -- shown at the head of the window already -- and then the
-    memory the room it borrows past its own share
+    region lays and of the turns the Flesh lays -- shown in the window
+    already -- and then the memory the room it borrows past its own share
     (``memory_cap``): the most of it the window holds with the Flesh as
     planned, none at worst -- and with none the Flesh gives what the window
     passes its cap by then, the tail's room taking nothing borrowed. A fold even
@@ -3026,10 +3058,11 @@ def _laid(held, cap, budget, digest, rung, sent):
     journal, over = attempt(turns=turns, fold=fold, sources=sources)
     if journal is not None:
         return done(journal)
-    # What the tail lays again of the peels the region lays gives way first: the window shows it at its head, and
-    # lays it near the question only with room it does not need.
+    # What the tail lays again of the peels the region lays and of the turns the Flesh lays gives way first: the
+    # window shows it already, and lays it near the question only with room it does not need.
     shown = {provenance for _key, _text, provenance, _label in held.region[region_cut(held.region, budget,
                                                                                       held.count):]}
+    shown |= {f"flesh:{key}" for key, _role, _pieces, _label in turns}
     kept = tuple(item for item in held.tail if not (item[0] == "memory" and item[1] in shown))
     if len(kept) < len(held.tail):
         planned[0], sources = kept, kept + tuple(sources[len(held.tail):])

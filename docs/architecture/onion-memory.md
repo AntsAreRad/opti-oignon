@@ -97,8 +97,20 @@ the region lays is among it, chosen by rank with the rest, so a fact and
 its update the question reaches can stand together in the order of time
 where the cap holds both, the region keeping it as it was -- a copy laid
 only with room the window does not need: the first thing it gives up when
-it passes its cap, before the borrowed room and the Flesh, and never
-counted as cut, since the region shows it -- then
+it passes its cap, before the borrowed room and the Flesh, and not
+counted as cut where the region shows it; chosen after the rest, a
+recalled span included, the words the user typed of a newer statement the
+question reaches where an older item reaches it alike -- since a summary
+keeps a fact's new value, not always that it is new: for each term of the
+question an older item holds, the newest unit that holds it, word for
+word, from the span of a peel it lays, at that span's place in time, or
+from the Flesh, which stands farther from the question, laid again in the
+tail after every item that says its time -- a copy that, as a copy of a
+peel of the region, gives way first when the window passes its cap and
+is counted as cut only where the window lays its turn nowhere -- never a
+unit that only asks, one that reaches into an order of the user's, shown
+whole where it stands, one within a segment its peel references, a turn
+a peer sent or one a withdrawal reached -- then
 the turn, its documents held to the document share and refused, never
 cut, past it. Two user messages are
 never adjacent. Each message carries the label of what it holds, and

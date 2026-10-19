@@ -3132,6 +3132,29 @@ package costs.
 
 ### Fixed
 
+- The memory a question brings shows, in the user's own words, a statement
+  newer than an item it lays that answers the question alike. A summary
+  keeps a fact's new value, not always that it is new: "User stated Alice
+  lives in Oslo" stood beside "User stated Alice lives in Berlin" with
+  nothing to say which holds, and an update still in the Flesh stood farther
+  from the question than the older peel the tail laid nearest it. Chosen
+  after the rest of the memory, a recalled span included, for each term of
+  the question an older item holds, the newest unit the user typed that
+  holds it is laid in the tail: from the span of a peel it lays, at that
+  span's place in time; from the Flesh, laid again after every item that
+  says its time. Never a unit that only asks, one that reaches into an order
+  of the user's, shown whole where it stands, one within a segment its peel
+  references, a turn a peer sent or one a withdrawal reached; every message
+  before the turn's is the same. A copy -- of a peel of the region, now of a
+  turn of the Flesh too -- gives way first when the window passes its cap,
+  and one the plan kept back counts as cut where the window, as composed,
+  lays its original nowhere: a peel the region no longer holds at a descent,
+  a turn a shadow set aside. Measured on probe states recorded in drift A/B
+  runs, each window composed again under the change before it and under this
+  one: a 4B model answers 63 of 63 memory probes right where it answered 61,
+  a 27B model 28 of 28 where it answered 26, none answered wrong that was
+  right.
+
 - At 4096 the memory a question brings has room to be laid. The tail's cap
   at that rung is 192 tokens and the memory's envelope alone costs 174 by
   the chat's counter for a Qwen model: borrowing the shares of the kinds a
