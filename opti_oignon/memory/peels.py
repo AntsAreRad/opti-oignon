@@ -1979,7 +1979,11 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
 
     An anchor ranks as a peel does, by the share of the query's terms its
-    words hold, then the newest receipt first, then its place in its span;
+    words hold, then the newest receipt first, then its place in its span --
+    after every anchor that states, when it is a unit that only asks -- it
+    ends on a question mark and orders nothing (``_ordering``), a whole
+    segment never only asking: an earlier question holds the words a
+    question is asked by, not what answers it;
     it says where it stands in time (``at``: its receipt's place in the
     ledger, then its own in the span).
     It shows what a peel would of its unit, re-read from its place: a
@@ -2006,7 +2010,7 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     part of which a withdrawal reached, not shown.
     """
     from .composer import defanged
-    from .probes import _retraction, generate_probes, mask_code
+    from .probes import _is_question, _retraction, generate_probes, mask_code
 
     estimate = estimate or estimate_tokens
     withdrawn = frozenset(withdrawn or ())
@@ -2023,6 +2027,7 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
         labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in span}
         units = _typed_units(span)
         typed = {(u.turn_id, u.start, u.stop): u.text for u in units}
+        units_at = set(typed)
         wide = reading = None
         for place, (turn_id, start, stop) in enumerate(receipt.anchors):
             own = _terms(texts.get(turn_id, "")[start:stop])
@@ -2067,13 +2072,22 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
                                         defang=defanged)
                 label = join_labels(labels[at] for at, _begin, _end in parts)
             events = (("anchors_altered", altered),) if altered else ()
-            scored.append((-hit, age, place, words, provenance, tuple(label), events, (turn_id, start, stop),
+            # A unit that only asks holds the question's words, not what answers it: it ranks after any that states.
+            # A whole segment states what else it holds, and a question that orders is an order: neither only asks.
+            asks = False
+            if alone and (turn_id, start, stop) in units_at and _is_question(shown):
+                if reading is None:
+                    if table is None:
+                        table = gate if gate is not None and gate.directives is not None else load_gate()
+                    reading = _ordering(span, generate_probes(span, table.lexicon), table)
+                asks = not _reached((turn_id, start, stop), reading[0])
+            scored.append((asks, -hit, age, place, words, provenance, tuple(label), events, (turn_id, start, stop),
                            tuple(parts), (index.get(receipt.key, -1), place)))
     # An item holds the words of the anchors within it, so it ranks before them: its hit is no lower, its place
-    # earlier; an anchor within a part shown is shown there.
-    scored.sort(key=lambda entry: entry[:3])
+    # earlier, and it never only asks; an anchor within a part shown is shown there.
+    scored.sort(key=lambda entry: entry[:4])
     chosen, used, laid = [], 0, []
-    for neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts, when in scored:
+    for _asks, neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts, when in scored:
         if any(at == age and on == turn_id and begin <= start and stop <= end for at, on, begin, end in laid):
             continue
         tokens = estimate(words)

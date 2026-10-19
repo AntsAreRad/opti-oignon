@@ -377,9 +377,12 @@ final called.
   the memory block shows it as one item with every segment of that order
   and of each bare retraction typed after it, as a peel references them,
   or not at all; a fact typed beside an order keeps its own place, shown
-  alone only where the block does not show the order's segment. A
-  decision that reaches into an order is not
-  offered to the Core. A span held before this rule keeps its anchors as
+  alone only where the block does not show the order's segment; an
+  anchor that is a unit only asking, ending on a question mark and
+  ordering nothing, ranks after every anchor that states, since an
+  earlier question holds the words a question is asked by and not what
+  answers it. A decision that reaches into an order is not offered to
+  the Core. A span held before this rule keeps its anchors as
   they were made. No block a summary writes is
   honoured, the user's own words written into it included, and the model's
   own markers are taken out first. A decision is

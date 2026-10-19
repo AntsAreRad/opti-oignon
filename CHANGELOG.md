@@ -3121,6 +3121,22 @@ package costs.
 
 ### Fixed
 
+- A question the user typed no longer stands in the memory in place of the
+  fact that answers it. A held span keeps as anchors the units the user
+  typed that answer its probes, and a question answers an entity's probe by
+  naming it: ranked by the share of the question's terms their words hold,
+  the earlier questions a later one repeats ("Quick check: where does Bob
+  live?") outranked the fact that answers it ("Bob lives in Lyon."), filled
+  the memory's cap and left the fact out. An anchor that is a unit only
+  asking -- it ends on a question mark, read as the probes read one, and
+  orders nothing -- now ranks after every anchor that states, and is still
+  laid where room remains; a question that orders or forbids, and a whole
+  segment kept for an order, keep their rank. Measured on probe states
+  recorded in drift A/B runs, each window composed again under the change
+  before it and under this one: a 4B model answers 53 of 63 memory probes
+  right where it answered 50, a 27B model 25 of 28 where it answered 23,
+  none answered wrong that was right.
+
 - The onion lays the memory a question brings in the order of time, the
   newest nearest the question. It chose that memory by rank -- the share of
   the question's terms an item holds -- and laid it in that order, so a fact
