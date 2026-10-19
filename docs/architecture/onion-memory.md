@@ -664,6 +664,26 @@ each turn, the sentences that agree with them, and the sentences the
 templates cannot decide, which are left to a model judge and never counted
 as agreement.
 
+A change of the onion's composition is measured on the same states, never
+run against run: a run's later states follow its own answers, so two trees
+run end to end differ by their course as much as by their composition, and
+one run's verdict on a probe proves nothing. With `--states DIR`, a new
+directory, the onion arm keeps at each probe turn its state before the
+window is planned -- the bench's own conversation, in a store file in
+plaintext under DIR, never the data directory -- with the turn, the
+conversation as stored, the system prompt and home rung it is planned
+under, whether a burst held it, and the window it sent; `--home-rung R`
+plans the arm under `home_rung` R, in the process alone.
+`scripts/drift_pairs.py compose` loads each kept state again from a copy
+of its store and composes its probe's window under the tree it runs from,
+at the home rung it was kept under, then asks the answering model with the
+bench's sampling and reads the answer with that tree's reading, refusing a
+kept turn that is not its probe; `compare` reads two such files probe by
+probe -- the windows that differ, and, when both were asked, the probes
+each tree answers right and what the second gains and loses. Under the
+tree that kept them a state composes again to the window it sent, unless a
+burst held the conversation when the run planned it.
+
 ## The native core
 
 The integrity primitives -- the four hashes -- and the window assembly

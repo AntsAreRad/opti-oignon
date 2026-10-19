@@ -65,6 +65,18 @@ decided, undecided): what a rate and its undecided share were read from.
 The conversation is the bench's own, synthetic; the file is written
 whole, so a run that breaks leaves an earlier one as it was.
 
+With ``--home-rung R`` the onion arm is planned under ``onion.yaml`` with
+``home_rung`` set to R, in this process alone (``pinned_rung``): the
+journal's tool room and result cap, set at the home rung and held to
+another in proportion, are scaled so each rung keeps the value the shipped
+file gives it, the machine's ``local.yaml`` read beside the copy as beside
+the file, and no tracked file changes. With ``--states DIR``, a new
+directory, at each probe turn the onion arm's state before its window is
+planned -- the bench's own conversation, synthetic, in a store file in
+plaintext -- the turn, the conversation as stored and the window it sent
+go under DIR, for ``scripts/drift_pairs.py`` to compose that window again
+under another tree; the user's store is still never read or written.
+
 A sentence the deterministic templates cannot parse is counted undecided,
 never as agreement: the host's model judge is the remedy, and the report
 says how much was left to it. The templates read English, and so does the
@@ -93,12 +105,17 @@ half-run is not a measurement.
 """
 
 import argparse
+import contextlib
+import importlib
 import importlib.util
 import inspect
 import json
 import math
 import re
+import shutil
+import sqlite3
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -360,9 +377,100 @@ def _turns_stored(history):
     return [dict(m, origin="typed" if m["role"] == "user" else "assistant") for m in history]
 
 
+_HOME_RUNG = re.compile(r"^home_rung:[ \t]*([0-9]+)[ \t]*(?:#.*)?$", re.M)
+
+
+class RungRefused(ValueError):
+    """A rung the onion's configuration cannot be pinned to, by name."""
+
+
+def pinned_text(text, rung):
+    """``onion.yaml``'s ``text`` with ``home_rung`` set to ``rung``, and the journal's tool room and result cap --
+    set at the home rung and held to another in proportion -- scaled so each rung keeps the value the shipped file
+    gives it (unscaled, 4096 is refused: the tool room and the answer floor would leave nothing of it). Refused when
+    the file does not name ``home_rung`` once at its top level."""
+    found = _HOME_RUNG.findall(text)
+    if len(found) != 1:
+        raise RungRefused("onion.yaml does not name home_rung once at its top level")
+    home = int(found[0])
+    text = _HOME_RUNG.sub(f"home_rung: {rung}", text)
+    for key in ("tool_room", "tool_result_cap"):
+        line = re.compile(rf"^(  {key}:[ \t]*)([0-9]+)", re.M)
+        held = line.findall(text)
+        if len(held) == 1:
+            value = max(1, int(held[0][1]) * rung // home)
+            text = line.sub(lambda match, value=value: f"{match.group(1)}{value}", text)
+    return text
+
+
+@contextlib.contextmanager
+def pinned_rung(rung):
+    """The onion read with ``home_rung`` set to ``rung``, in this process, for the block: a copy of ``onion.yaml``
+    (``pinned_text``) that the package's own loaders read first, and the three readers that hold its path as a
+    module constant -- the composer, the librarian and the peels -- pointed at it, then back, whatever ends the
+    block. The machine's ``local.yaml``, read beside the file the librarian's configuration comes from, is read
+    beside the copy. Nothing tracked changes. None pins nothing; a copy the loaders refuse, or whose home is not
+    ``rung``, is refused by name, the constants untouched."""
+    if rung is None:
+        yield
+        return
+    from opti_oignon.memory import composer, librarian, peels
+
+    modules = (composer, librarian, peels)
+    shipped = [(module, module._CONFIG) for module in modules]
+    workdir = Path(tempfile.mkdtemp(prefix="oo-drift-rung-"))
+    try:
+        copy = workdir / "onion.yaml"
+        copy.write_text(pinned_text(Path(composer._CONFIG).read_text(encoding="utf-8"), rung), encoding="utf-8")
+        local = Path(librarian._CONFIG).with_name("local.yaml")
+        if local.is_file():
+            shutil.copyfile(local, workdir / "local.yaml")
+        try:
+            budgets = composer.load_budgets(copy)
+            composer.load_journal(copy)
+            librarian.load_config(copy)
+            peels.load_gate(copy)
+            peels.load_ladder(copy)
+        except Exception as exc:  # noqa: BLE001 - the pinned copy refused, by name
+            raise RungRefused(f"the pinned onion.yaml does not read ({type(exc).__name__}: {exc})") from None
+        if budgets.home != rung:
+            raise RungRefused(f"the pinned copy's home is {budgets.home}, not {rung}")
+        for module in modules:
+            module._CONFIG = copy
+        yield
+    finally:
+        for module, saved in shipped:
+            module._CONFIG = saved
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _kept(states, turn, conversation_id, state, meta):
+    """The onion arm's state before turn ``turn``'s window is planned, under ``states``: the store, in plaintext --
+    the bench's own conversation -- saved under the state's lock, as every save is; what the window is planned
+    from; the home rung it is planned under; and whether a burst held the conversation (``held``), when the window
+    may lay over a shadow a composition with no burst in flight does not."""
+    store = importlib.import_module("opti_oignon.memory.onion_store")
+    composer = importlib.import_module("opti_oignon.memory.composer")
+    directory = Path(states)
+    directory.mkdir(parents=True, exist_ok=True)
+    with state.lock:
+        held = state.slot.locked()
+        store.OnionStore(directory / f"t{turn:03d}.db", connect=sqlite3.connect, require_encryption=False).save(
+            conversation_id, state)
+    (directory / f"t{turn:03d}.json").write_text(json.dumps(dict(
+        meta, turn=turn, cid=conversation_id, home_rung=composer.load_budgets().home, held=held)), encoding="utf-8")
+
+
+def _sent(states, turn, reply, messages, window):
+    """The window turn ``turn`` sent, and its answer, beside its state."""
+    Path(states, f"t{turn:03d}.window.json").write_text(json.dumps(
+        {"reply": reply, "messages": messages, "layers": dict(window.layers), "cut": [list(c) for c in window.cut],
+         "rung": window.rung, "num_ctx": int(window.num_ctx)}), encoding="utf-8")
+
+
 def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast", resolve=None,
               system=SYSTEM_PROMPT, conversation_id="drift-ab", gate=None, budget=None, model="bench",
-              model_window=None, count=estimate_tokens):
+              model_window=None, count=estimate_tokens, states=None, record=()):
     """The chat with the onion: each turn sent as the window the onion's journal composed for it.
 
     As on the chat path: the librarian plans the turn's window -- the
@@ -392,7 +500,10 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
     ``block_tokens``, what the memory laid of them -- the Core, the
     receipts digest, the peels and the tail -- in ``memory_tokens``, the
     Flesh's in ``flesh_tokens``, and its ``settle`` waits for the bursts it
-    launched.
+    launched. With ``states``, a directory, each turn numbered in
+    ``record`` (from 1) leaves there its state before its window is planned,
+    the turn and the conversation as stored, and the window it sent with
+    its answer (``_kept``, ``_sent``).
     """
     if getattr(config, "persist_path", ""):
         raise ValueError("the drift A/B runs the librarian in process: a persistence path would write the user's store")
@@ -400,6 +511,8 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
         raise ValueError("the drift A/B keeps its counts in the process: a counters path would add them to the user's")
     if mode not in MODES:
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
+    if states is not None and not str(states):
+        raise ValueError("the drift A/B keeps states only under a directory it is named")
     history, launched, tokens, memory, flesh = [], [], [], [], []
     envelope, sized = _envelope(wrap), _takes(ask, "window")
 
@@ -446,6 +559,12 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
                 run.release()
 
     def answer(text):
+        turn = len(history) // 2 + 1
+        keep = states is not None and turn in record
+        if keep:
+            _kept(states, turn, conversation_id, librarian.state_for(conversation_id, config),
+                  {"question": text, "model": model, "model_window": model_window, "system": system,
+                   "history": _turns_stored(history)})
         plan = librarian.plan_window(
             conversation_id, model=model, count=count, system=system,
             turn={"role": "user", "content": text, "origin": "typed", "segments": []}, wrap=envelope,
@@ -462,6 +581,8 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
         flesh.append(layers.get("flesh", 0))
         messages = [{"role": role, "content": content} for role, content, _label in window.messages]
         reply = str(ask(messages, window=window) if sized else ask(messages))
+        if keep:
+            _sent(states, turn, reply, messages, window)
         history.extend([{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
         # The librarian reads each turn with the origin the executor gives
         # it: the user's words typed, the answer the assistant's.
@@ -761,9 +882,41 @@ def main(argv=None, *, resolve=None):
                         help="write every turn's question and both arms' answers, each sentence with its verdict, "
                              "as JSON lines to PATH once the run has measured (the bench's own conversation, "
                              "synthetic)")
+    parser.add_argument("--home-rung", type=int, default=None, metavar="R",
+                        help="plan the onion arm under onion.yaml with home_rung set to R, in this process (the tool "
+                             "room and result cap scaled to keep their value at each rung, local.yaml read as beside "
+                             "the file)")
+    parser.add_argument("--states", default=None, metavar="DIR",
+                        help="keep, at each probe turn, the onion arm's state before its window is planned and the "
+                             "window it sent, under DIR, a new directory (plaintext: the bench's own conversation, "
+                             "synthetic), for scripts/drift_pairs.py")
     args = parser.parse_args(argv)
+    if args.states is not None:
+        # A new directory, made here and by this run alone: one run's states never mix with another's.
+        target = Path(args.states)
+        try:
+            if not args.states:
+                raise FileExistsError(args.states)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.mkdir()
+        except OSError as exc:
+            print(f"refused: {args.states!r} is not a new directory this run can make ({type(exc).__name__}): one "
+                  "run's states never mix with another's", file=sys.stderr)
+            return 2
     if resolve is None:
+        # The package the run measures is this tree's, the rung's pin included.
         sys.path.insert(0, str(_REPO))
+    try:
+        with pinned_rung(args.home_rung):
+            return _measured(args, resolve)
+    except RungRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+
+
+def _measured(args, resolve):
+    """The run ``main`` was asked for, its arguments parsed, under the rung it pinned."""
+    if resolve is None:
         resolve = _registry_resolver()
     model = args.model or _default_model()
     backend = resolve(model)
@@ -806,7 +959,8 @@ def main(argv=None, *, resolve=None):
     # them with the model's counter, as the executor hands it.
     onion_answer = onion_arm(ask, librarian=librarian, config=config, summarize=None, resolve=resolve,
                              wrap=untrusted_context.wrap, mode=args.mode, model=model, model_window=window,
-                             count=_model_counter(model))
+                             count=_model_counter(model), states=args.states,
+                             record={number for number, turn in enumerate(TURNS, 1) if turn.probe})
     # What the gate weighed at each decision of the run, read where the queue asks it, and put back as it was.
     figures, unread, decide = [], [], peels.decide
     peels.decide = recording_gate(peels, probes, figures, unread)
@@ -830,6 +984,8 @@ def main(argv=None, *, resolve=None):
         "lexicon": peels.load_gate().lexicon.fingerprint,
         "taken_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "history_tokens": args.history_tokens,
+        "home_rung": args.home_rung,
+        "states": args.states,
         "turns": len(TURNS),
         "seconds": round(time.perf_counter() - started, 1),
         # What the onion did, so a rate reads with the engagement behind it.

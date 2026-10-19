@@ -11,6 +11,17 @@ package costs.
 
 ### Added
 
+- The drift A/B measures a change of the onion's composition on the same
+  states. With `--states DIR`, a new directory, its onion arm keeps at each
+  probe turn its state before the window is planned -- the bench's own
+  conversation, in plaintext, never the data directory -- with the turn,
+  the home rung it is planned under and the window it sent; `--home-rung R`
+  plans the arm under `home_rung` R, in the process alone.
+  `scripts/drift_pairs.py` composes each kept window again under the tree
+  it runs from, at the rung it was kept under, asks the model and reads the
+  answer as that tree's bench does, and compares two trees probe by probe:
+  what one gains and loses on the same states, where two runs end to end
+  differ by their course as much as by their composition.
 - The drift A/B scores each arm's probes on their own: how many it asked,
   answered with the fact expected, contradicted or left undecided, and the
   share recalled, with the difference of the two arms' recall. Measured on
