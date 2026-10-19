@@ -2185,7 +2185,8 @@ def plan_window(conversation_id, *, model, count, system, turn, wrap, tail=(), m
     slot held, nothing is evicted and the window lays the overflow over a
     shadow. The region, the receipts
     digest, the Flesh and the memory a question brings
-    -- the anchors of held spans, the peels laid in no region, the spans
+    -- the anchors of held spans, the peels it reaches, the region's among
+    them, the spans
     the user recalls (``recalled``) -- are read now, under the state's
     lock, for the composition. ``system`` is the system prompt and, when
     given, the manifest, one message each (a string is one); ``wrap`` the
@@ -2474,7 +2475,6 @@ def _read(state, asked):
                                   estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate)
                    if cap > 0 else [])
         room = cap - sum(counted(anchor.text) for anchor in anchors)
-        laid = {key for key, _text, _provenance, _label in region[region_cut(region, budget, counted):]}
 
         places = {r.key: n for n, r in enumerate(state.ledger.all())}
 
@@ -2482,11 +2482,14 @@ def _read(state, asked):
             shown = render_peel(peel, state.cellar, lineage=lineage, withdrawn=asked.withdrawn)
             return shown if shown is None else replace(shown, at=peel_time(peel, places))
 
-        # The peels the question may still bring into the tail, in a view for one composition: standing on no
-        # superseded span, and laid in no region; the state's tree is not touched.
+        # The peels the question may bring into the tail, in a view for one composition: standing on no superseded
+        # span, the region's among them, chosen by rank with the rest. One the region lays is shown already, but
+        # far from the question: laid again in its place in time, a fact and its update stand together in the
+        # tail whichever of them the region lays (``fit_kind``); the region keeps it, its bytes unchanged. The
+        # state's tree is not touched.
         pool = PeelTree()
         for peel in accepted:
-            if peel.id not in laid and not gone.intersection(peel.sources):
+            if not gone.intersection(peel.sources):
                 pool.add(peel)
         selected = select_peels(pool, asked.question, room, estimate=counted, render=render) if room > 0 else []
         # Each item says where it stands in time: chosen in this order, it is laid in that one (``fit_kind``).
@@ -2512,7 +2515,10 @@ def _read(state, asked):
             # chosen in, so a window that cuts it further leaves out the last chosen first. With no wrapper the
             # composer refuses the memory by name.
             kept = sorted(fit_kind("memory", memory, cap, asked.wrap, counted)[0])
-            trimmed, memory = len(memory) - len(kept), [memory[index] for index in kept]
+            # What it keeps back counts as cut, a copy of a peel the region lays aside: the window still shows it.
+            shown = {provenance for _key, _text, provenance, _label in region[region_cut(region, budget, counted):]}
+            trimmed = sum(1 for index, item in enumerate(memory) if index not in kept and item[1] not in shown)
+            memory = [memory[index] for index in kept]
     return {"rung": rung, "budget": budget, "prev": state.journal if state is not None else None, "pinned": pinned,
             "region": region, "digest": digest, "laid_turns": laid_turns, "memory": memory, "trimmed": trimmed,
             "causes": tuple(sorted(causes.items())), "raw": raw, "digests": digests,
@@ -2943,7 +2949,9 @@ def _laid(held, cap, budget, digest, rung, sent):
     among the memory and charged to the Flesh room their eviction freed,
     outside the memory share, so no turn leaves without its trace; the
     peels the shadow made follow the memory the plan selected. Before the
-    Flesh gives, the memory gives up the room it borrows past its own share
+    Flesh gives, the tail gives up what it lays again of the peels the
+    region lays -- shown at the head of the window already -- and then the
+    memory the room it borrows past its own share
     (``memory_cap``): the most of it the window holds with the Flesh as
     planned, none at worst -- and with none the Flesh gives what the window
     passes its cap by then, the tail's room taking nothing borrowed. A fold even
@@ -2961,6 +2969,7 @@ def _laid(held, cap, budget, digest, rung, sent):
         layer_cap,
         memory_room,
         memory_wants,
+        region_cut,
     )
 
     lending = [None]
@@ -2998,12 +3007,13 @@ def _laid(held, cap, budget, digest, rung, sent):
 
     costs = [held.cost(turn) for turn in held.raw]
     room = layer_cap(budget, "flesh", held.images * held.image_tokens + held.tools)
+    planned = [held.tail]
 
     def shade(target):
         """The Flesh laid within ``target`` over a shadow: ``(turns, fold, the tail's items, the fold's charge)``,
         the memory the plan selected before the peels the shadow made of the turns it set aside."""
         turns, fold, peels, charge = _shadowed(held, costs, target)
-        return turns, fold, held.tail + peels, charge
+        return turns, fold, planned[0] + peels, charge
 
     turns, fold, sources, charge = held.laid_turns, None, held.tail, 0
     if 0 <= room < sum(costs):
@@ -3013,7 +3023,17 @@ def _laid(held, cap, budget, digest, rung, sent):
     journal, over = attempt(turns=turns, fold=fold, sources=sources)
     if journal is not None:
         return done(journal)
-    # The memory's borrowed room gives way first: the most of it the window holds with the Flesh as planned, found
+    # What the tail lays again of the peels the region lays gives way first: the window shows it at its head, and
+    # lays it near the question only with room it does not need.
+    shown = {provenance for _key, _text, provenance, _label in held.region[region_cut(held.region, budget,
+                                                                                      held.count):]}
+    kept = tuple(item for item in held.tail if not (item[0] == "memory" and item[1] in shown))
+    if len(kept) < len(held.tail):
+        planned[0], sources = kept, kept + tuple(sources[len(held.tail):])
+        journal, over = attempt(turns=turns, fold=fold, sources=sources)
+        if journal is not None:
+            return done(journal)
+    # The memory's borrowed room gives way next: the most of it the window holds with the Flesh as planned, found
     # by halving once the window holds it with none, within what its items take (``memory_wants``: from there on it
     # lays all of them) -- the most where a count only grows as text is added.
     own, whole = memory_room(budget, held.shares, {item[0] for item in held.tail if item[0] in TAIL_KINDS[1:]},

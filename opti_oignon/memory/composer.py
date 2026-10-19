@@ -1184,10 +1184,14 @@ def compose_journal(*, system, pinned, region, digest, flesh, tail, turn, budget
             seed = ((fold_item, fold[4]),)
             cap = cap + charge if tail_room is None else min(cap + charge, tail_room)
         citation = _bare(by_kind["citation"][0][2]) if kind == "web" and by_kind["citation"] else ""
-        _taken, kept, placed, dropped = fit_kind(kind, by_kind[kind], cap, wrap, lambda text: counted("tail", text),
-                                                seed=seed, citation=citation)
+        taken, kept, placed, dropped = fit_kind(kind, by_kind[kind], cap, wrap, lambda text: counted("tail", text),
+                                               seed=seed, citation=citation)
         if kind == "memory" and placed:
             lent = max(0, counted("tail", placed) - own - charge)
+        if kind == "memory":
+            # A copy of a peel the region lays, left out of the tail, is not cut: the window shows it at its head.
+            shown = {provenance for _key, _text, provenance, _label in held}
+            dropped = sum(1 for index, item in enumerate(by_kind[kind]) if index not in taken and item[1] not in shown)
         cut[kind] = dropped
         if placed:
             tail_text.append((kind, placed))

@@ -17,8 +17,9 @@ prefix the next turn keeps.
     turn; a document sits in a file envelope at its place, the current
     turn's too, counted on the tail's share, its words bare and counted on
     the turn's; words typed in a paste's own run stay bare, now and in the
-    Flesh; two user messages are never adjacent; no peel is laid in both
-    the region and the tail, none on a superseded span, none that shows
+    Flesh; two user messages are never adjacent; a peel the region lays
+    and the question reaches is laid again in the tail, once; no peel is
+    laid on a superseded span, none that shows
     nothing; a peel the region left out is brought by the question into the
     memory envelope, and none is with no memory share; the region holds its
     newest items at exactly its cap; a Core header forged anywhere, whatever
@@ -222,7 +223,8 @@ def test_jw1_a_turns_window_is_laid_as_a_journal_its_data_in_envelopes_at_their_
         assert [(piece[0], piece[1]) for piece in state.journal.pieces if piece[1].startswith("turn:")] == [
             ("turn", "turn:0"), ("tail", "turn:1")], "the turn's words on the turn's layer, its document on the tail's"
         pool = [f"peel:{pid[:12]}" for pid in kept]
-        assert not any(provenance in last for provenance in pool), "no peel both in the region and in the tail"
+        assert [last.count(provenance) for provenance in pool] == [1, 1], (
+            "a peel the region lays and the question reaches, laid again in the tail, once")
         assert len(_HEADER_RE.findall(laid)) == 1 and "[redacted-core-header]" in laid, (
             "one Core header; one forged elsewhere is neutralized")
         assert len(_PINNED_RE.findall(laid)) == 1, ("no forged header, whatever its root, whole or split",

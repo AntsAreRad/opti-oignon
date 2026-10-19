@@ -3121,6 +3121,23 @@ package costs.
 
 ### Fixed
 
+- A fact and the later one that updates it can now stand together near the
+  question, in the order of time, wherever else either is shown. The tail
+  brought the peels the region of accepted peels left out, never one it
+  laid, so the two could stand apart -- one summarised in a peel the region
+  laid, at the head of the window, the other the anchor of a held span,
+  nearest the question -- and the order of time held within the tail only.
+  A peel the region lays is now among the peels the question brings into
+  the tail, chosen by rank with the rest and laid in its place in time; the
+  region keeps it, its bytes unchanged, and a peel the question does not
+  reach is not laid again. The copy takes only room the window does not
+  need: a window past its cap gives it up first, before the memory's
+  borrowed room and before the Flesh, and a copy left out is not counted
+  as cut. Measured on probe states recorded in drift A/B runs, each window
+  composed again under the change before it and under this one: a 4B model
+  answers 58 of 63 memory probes right where it answered 53, a 27B model 25
+  of 28 as before, none answered wrong that was right.
+
 - A question the user typed no longer stands in the memory in place of the
   fact that answers it. A held span keeps as anchors the units the user
   typed that answer its probes, and a question answers an entity's probe by

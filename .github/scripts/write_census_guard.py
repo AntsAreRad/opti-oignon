@@ -662,8 +662,7 @@ EXEMPT = {
                       "receipt and recallable, with no model, as the queue would; a window's shadow evicts only from "
                       "a state of its own, made for one composition and never saved"),
     ("opti_oignon/memory/librarian.py", "peels"): (
-        "copy", "it copies the peels already in the tree, less the superseded -- and, for a journal's tail, less "
-                "those its region lays -- into a view for one composition"),
+        "copy", "it copies the peels already in the tree, less the superseded, into a view for one composition"),
     ("opti_oignon/memory/librarian.py", "receipts"): (
         "transcript", "taking back the conversation's last turns supersedes the receipts that pointed at them"),
     ("opti_oignon/memory/onion_store.py", "cellar"): ("restore", _RESTORE),

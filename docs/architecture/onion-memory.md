@@ -85,13 +85,19 @@ of the tail's cap (`journal.tail_shares`: memory 0.35, retrieval 0.25, web
 -- the memory borrowing, past its own share, the shares of the kinds the
 turn brings nothing of and the room the region leaves of the peels' cap,
 since at 4096 its own share does not hold its envelope: room it gives up
-first when the window passes its cap, before the Flesh gives, none of it
+when the window passes its cap, before the Flesh gives, none of it
 under a tail's room, and that a burst is not aimed on; the plan keeps of
 the memory it chose, a recalled span included, what the composer's own
 loop lays at that cap, and the window counts what it kept back as cut;
 chosen by rank, so that a cap leaves out the last chosen first, the
 memory is laid in the order of time, the newest nearest the question, a
-recalled span after it, wherever that order holds within the cap -- then
+recalled span after it, wherever that order holds within the cap; a peel
+the region lays is among it, chosen by rank with the rest, so a fact and
+its update the question reaches can stand together in the order of time
+where the cap holds both, the region keeping it as it was -- a copy laid
+only with room the window does not need: the first thing it gives up when
+it passes its cap, before the borrowed room and the Flesh, and never
+counted as cut, since the region shows it -- then
 the turn, its documents held to the document share and refused, never
 cut, past it. Two user messages are
 never adjacent. Each message carries the label of what it holds, and
