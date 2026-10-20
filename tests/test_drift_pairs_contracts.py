@@ -36,6 +36,14 @@ was pinned to (``--home-rung``).
     the verdict, the tree that composed; ``turns`` keeps some; a kept turn
     that is not this tree's probe, a rung that is not the states', and a
     model no backend serves are refused and write nothing.
+  * DP6 -- WHAT THE LIBRARIAN READS, LAID ON THE SAME STATES: ``read`` asks
+    the model as the librarian asks it, each span the kept states hold
+    once, oldest first, with the subjects known before it, and writes each
+    span's statements by its key; ``compose --statements`` lays them in
+    each state before its window is planned and names the file it laid; a
+    model no backend serves, a reading the model fails, a file that holds
+    no statements by span or nothing of a span a state holds, and a tree
+    whose librarian reads no statement are refused, and write nothing.
 
 Local-only (the public distribution ships no tests). The scripts load as
 the drift A/B suite loads its own (tests/test_drift_ab_contracts.py); the
@@ -43,6 +51,8 @@ onion's modules come through the shared isolation window, and the model is
 a recording seam.
 """
 
+import dataclasses
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -64,6 +74,7 @@ BUDGET_S = {
     "test_dp3_the_rung_pinned_in_the_process": 5.0,
     "test_dp4_two_trees_compared_probe_by_probe": 2.0,
     "test_dp5_compose_end_to_end": 20.0,
+    "test_dp6_what_the_librarian_reads_laid_on_the_same_states": 30.0,
 }
 
 _ONION = ("probes", "drift", "core_store", "receipts", "composer", "peels", "librarian", "onion_store")
@@ -369,6 +380,102 @@ def test_dp5_compose_end_to_end(tmp_path):
         assert refused == {"rung": 2, "model": 2, "probe": 2}, refused
         assert not any(tmp_path.glob("rung.jsonl*")) and not any(tmp_path.glob("model.jsonl*")) and not any(
             tmp_path.glob("probe.jsonl*")), "a refusal writes nothing"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+class _Reader:
+    """A backend that reads, in each span, one statement of each typed turn that names Alice or Bob, and keeps what
+    it was handed."""
+
+    def __init__(self, prompt, fail=False):
+        self._prompt, self._fail, self.read = prompt, fail, []
+
+    def generate(self, model, messages, **kwargs):
+        assert messages[0]["content"] == self._prompt, "the librarian's reading prompt"
+        if self._fail:
+            raise RuntimeError("the model went away")
+        lines = [json.loads(line) for line in messages[1]["content"].split("\n")]
+        known = lines[-1]["known"] if "known" in lines[-1] else []
+        turns = [line for line in lines if "turn" in line]
+        self.read.append((tuple(t["turn"] for t in turns), tuple(known)))
+        found = [f"{t['turn']} | {name} | is named in | {name}'s" for t in turns if t["role"] == "user"
+                 for name in ("Alice", "Bob") if f"{name}'s" in t["text"]]
+        found += [f"{t['turn']} | {name} | lives in | {t['text'].split(' lives in ')[1].rstrip('.')}"
+                  for t in turns if t["role"] == "user" for name in ("Alice", "Bob")
+                  if t["text"].endswith(".") and f"{name} lives in " in t["text"]]
+        return SimpleNamespace(content="\n".join(found) or "NONE")
+
+
+# ---------------------------------------------------------------------------
+# DP6 -- what the librarian reads, laid on the same states
+# ---------------------------------------------------------------------------
+def test_dp6_what_the_librarian_reads_laid_on_the_same_states(tmp_path, monkeypatch):
+    """DP6: ``read`` reads each span once, oldest first, with the subjects known before it, and writes each span's
+    statements by its key; ``compose --statements`` lays them before each plan and names the file; refusals that
+    write nothing."""
+    ab, pairs = da._script(), _pairs()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        states = tmp_path / "states"
+        _kept_run(ab, lib, loaded, states)
+        lib.reset_librarian()
+        backend = _Reader(lib._STATEMENTS_PROMPT)
+        out = tmp_path / "read.json"
+        assert pairs.read(states, out, model="small:1b", resolve=lambda name: backend) == 0
+        rows = json.loads(out.read_text(encoding="utf-8"))
+        assert rows and len(backend.read) == len(rows), ("each span read once", len(backend.read), len(rows))
+        firsts = [int(turns[0][1:]) for turns, _known in backend.read]
+        assert firsts == sorted(firsts), "oldest first"
+        said = {r[3] for found in rows.values() for r in found}
+        assert {"Alice", "Bob"} <= said, ("control: both named", said)
+        first_bob = next(n for n, (turns, _k) in enumerate(backend.read)
+                         if any(r[3] == "Bob" for key in rows for r in rows[key] if r[0] in turns))
+        assert all("Bob" not in known for _turns, known in backend.read[:first_bob + 1]) and all(
+            "Bob" in known for _turns, known in backend.read[first_bob + 1:]), "the subjects known before each span"
+        laid = []
+        real = lib.plan_window
+
+        def planned(conversation_id, **kwargs):
+            state = lib.peek_state(conversation_id)
+            laid.append({key: [list(dataclasses.astuple(s)) for s in found]
+                         for key, found in state.statements.items()})
+            return real(conversation_id, **kwargs)
+
+        monkeypatch.setattr(lib, "plan_window", planned)
+        section = lib._statements_section()
+        assert not section.enabled, "control: off as shipped"
+        monkeypatch.setattr(lib, "_statements_section", lambda: dataclasses.replace(section, enabled=True))
+        composed = tmp_path / "composed.jsonl"
+        assert pairs.compose(states, composed, ask=False, statements=out) == 0
+        digest = hashlib.sha256(out.read_bytes()).hexdigest()[:16]
+        lines = [json.loads(line) for line in composed.read_text(encoding="utf-8").splitlines()]
+        assert [r["turn"] for r in lines] == list(_KEPT) and {r["statements"] for r in lines} == {digest}, (
+            "every probe composed, the file named")
+        assert len(laid) == len(_KEPT) and all(found and all(rows[k] == v for k, v in found.items())
+                                               for found in laid), "each state laid as read before its plan"
+        assert len(laid[-1]) > len(laid[0]), "a later state holds more spans read"
+        refused = {}
+        refused["model"] = pairs.read(states, tmp_path / "model.json", model="small:1b", resolve=lambda name: None)
+        refused["failed"] = pairs.read(states, tmp_path / "failed.json", model="small:1b",
+                                       resolve=lambda name: _Reader(lib._STATEMENTS_PROMPT, fail=True))
+        listed = tmp_path / "listed.json"
+        listed.write_text("[]", encoding="utf-8")
+        refused["listed"] = pairs.compose(states, tmp_path / "listed.jsonl", ask=False, statements=listed)
+        short = tmp_path / "short.json"
+        short.write_text(json.dumps({key: [["t1", 0]] for key in rows}), encoding="utf-8")
+        refused["short"] = pairs.compose(states, tmp_path / "short.jsonl", ask=False, statements=short)
+        partial = tmp_path / "partial.json"
+        partial.write_text(json.dumps(dict(list(rows.items())[:1])), encoding="utf-8")
+        refused["partial"] = pairs.compose(states, tmp_path / "partial.jsonl", ask=False, statements=partial)
+        monkeypatch.setattr(lib, "_statements_section", lambda: dataclasses.replace(section, enabled=False))
+        refused["off"] = pairs.compose(states, tmp_path / "off.jsonl", ask=False, statements=out)
+        assert refused == {"model": 2, "failed": 2, "listed": 2, "short": 2, "partial": 2, "off": 2}, refused
+        assert not any(tmp_path.glob("model.json*")) and not any(tmp_path.glob("failed.json*")) and not any(
+            tmp_path.glob("listed.jsonl*")) and not any(tmp_path.glob("short.jsonl*")) and not any(
+            tmp_path.glob("partial.jsonl*")) and not any(tmp_path.glob("off.jsonl*")), "a refusal writes nothing"
     finally:
         lib.reset_librarian()
         restore()

@@ -11,6 +11,34 @@ package costs.
 
 ### Added
 
+- The librarian can read who or what each statement the user typed
+  speaks of, and the newer words of a question can then leave out another
+  subject's -- off as shipped. Switched on in the `statements` section of
+  `onion.yaml`, once a burst has evicted what it could, one more call a
+  span hands its model the words the user typed in it -- never the
+  assistant's, a document's or a peer's -- and the subjects known before,
+  and asks for one line a fact, `turn | subject | relation | value`; a line
+  is kept only where the span's words bear it out -- the user typed the
+  turn, the value's words stand in one of its sentences, the subject is no
+  pronoun, "you" or group word and is written in the span or known, or is
+  the user in a turn that says "I", and the sentence it lands in is known
+  -- and every other line is refused and counted. A question that names a
+  known subject then no longer lays the newer words of a unit whose
+  statements are of nothing it refers to; nothing is laid in their place,
+  and a unit of the Flesh, of a span not read or that the librarian read
+  nothing in lays as before. On the maintainer's machine a 4B librarian
+  named the subject of each fact and update of the paired bench it read
+  rightly; ten of the 77 kept windows changed, each by one unit of another
+  subject left out, no verdict turned, and Bob's city at 16384 went from
+  6.3 nats ahead of Oslo to 8.5 ahead of Paris. It ships off because a
+  question that names another known subject and bends a word --
+  "releases" for "the release" -- loses the newer words it asks for.
+  `scripts/drift_pairs.py read` asks a model what the kept states' spans
+  state, as the librarian asks it, and `compose --statements` lays it
+  before each window is planned, refusing a tree that reads nothing and a
+  state the file does not cover; the drift A/B's onion arm reads as a
+  burst does when the section is on.
+
 - Each margin of the paired windows says what it is read against. A probe
   read with `scripts/drift_pairs.py compose --margins K` carries, beside its
   margin, the token the margin is taken against: the likeliest alternative

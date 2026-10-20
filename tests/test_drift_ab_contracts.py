@@ -54,6 +54,11 @@ the next turns are answered.
     its counts to the user's.
   * DA17 -- with the registry's summariser, each measured turn's curation
     in the fast mode is a run of its own, whose budget is the turn's.
+  * DA18 -- with the registry's calls, the onion arm reads what the spans
+    it has not read state once its steps are done, in both modes, each
+    span once, as a burst does; with the statements section off, nothing,
+    nor once a summary call failed: a model a step stopped asking is not
+    asked to read.
 
 Local-only (the public distribution ships no tests). The script is loaded
 from its path; the onion's modules come through the shared isolation
@@ -602,6 +607,68 @@ def test_da17_with_the_registry_s_summariser_each_fast_turn_is_a_run_of_its_own(
         ab.run_arm(ab.TURNS[:4], onion)
         assert backend.calls >= 4, "control: the registry's summariser was asked"
         assert len(runs) == 4, "one run per measured turn"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+class _Reading(_Backend):
+    """A backend that answers a summary "Noted." and a reading with one statement of its span's first turn."""
+
+    def __init__(self, lib, *, failing=False):
+        super().__init__(None)
+        self._prompt, self._failing, self.read = lib._STATEMENTS_PROMPT, failing, 0
+
+    def generate(self, model, messages, **kwargs):
+        self.calls += 1
+        if messages[0]["content"] != self._prompt:
+            if self._failing:
+                raise RuntimeError("the summary call failed")
+            return type("_Reply", (), {"content": "Noted."})()
+        self.read += 1
+        first = json.loads(messages[1]["content"].split("\n")[0])
+        return type("_Reply", (), {"content": f"{first['turn']} | Alice | reviewed | {first['text'].split()[0]}"})()
+
+
+@pytest.mark.parametrize("mode", ["fast", "launcher"])
+def test_da18_the_onion_arm_reads_what_its_spans_state_as_a_burst_does(mode, monkeypatch):
+    ab = _script()
+    loaded, restore = _window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        config, gate, budget = _rhythm(lib, loaded)
+        section = lib._statements_section()
+        assert section is not None and not section.enabled, "control: off as shipped"
+        for on in (True, False):
+            lib.reset_librarian()
+            monkeypatch.setattr(lib, "_statements_section", lambda on=on: replace(section, enabled=on))
+            backend = _Reading(lib)
+            onion = ab.onion_arm(lambda messages: "Noted.", librarian=lib, config=config, summarize=None,
+                                 resolve=lambda model: backend, wrap=lambda block: block, gate=gate, budget=budget,
+                                 mode=mode)
+            ab.run_arm(ab.TURNS[:6], onion)
+            state = lib.state_for("drift-ab", config)
+            standing = {r.key for r in state.ledger.all() if r.kind != "superseded"}
+            assert standing and backend.calls > backend.read, ("control: spans left, summaries asked", mode, on)
+            if on:
+                assert set(state.statements) == standing and backend.read == len(standing), (
+                    "each span read once", mode, backend.read, len(standing))
+                assert all(s.subject == "Alice" for found in state.statements.values() for s in found)
+            else:
+                assert backend.read == 0 and state.statements == {}, ("off: nothing read", mode)
+                assert "statements" not in lib.counters(), ("off: no reading counted", mode)
+        lib.reset_librarian()
+        monkeypatch.setattr(lib, "_statements_section", lambda: replace(section, enabled=True))
+        backend = _Reading(lib, failing=True)
+        onion = ab.onion_arm(lambda messages: "Noted.", librarian=lib, config=config, summarize=None,
+                             resolve=lambda model: backend, wrap=lambda block: block, gate=gate, budget=budget,
+                             mode=mode)
+        ab.run_arm(ab.TURNS[:6], onion)
+        state = lib.state_for("drift-ab", config)
+        assert any(r.kind != "superseded" for r in state.ledger.all()) and backend.calls, (
+            "control: spans left, the summary asked", mode)
+        assert backend.read == 0 and state.statements == {}, ("a model a step stopped asking is not asked to read",
+                                                              mode)
     finally:
         lib.reset_librarian()
         restore()

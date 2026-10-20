@@ -551,6 +551,57 @@ tells: an answer told bare would make the assistant's claim a fact. What
 the request changes on real conversations is a host measurement; on the
 drift A/B it is in the changelog.
 
+Switched on (`statements.enabled`, off as shipped), once a burst has
+evicted what it could, the librarian reads what the spans it has not
+read state, oldest first, at most `statements.per_burst` of them, under
+the same run: one more call a span, handed the words the
+user typed in it -- never the assistant's, a document's, a tool's or a
+peer's -- and the subjects the conversation named before, as data, asking
+for one line a fact, `turn | subject | relation | value`, each subject
+named as the turns name it, never by a pronoun. No line is trusted until
+the span's words bear it out: it is kept only when its turn is one the
+user typed in the span; its value's words stand one after another, case
+and accents aside, in one of that turn's typed sentences; its subject
+holds none of the section's pronouns -- "you" and the words of a group
+among them -- and is written so in a sentence the user typed in the span
+up to that turn, or is a subject already known, or is the user in a turn
+that holds a first-person word -- "Bob" is not written in "Bobby"; its
+relation holds one to eight words; and the sentence it is placed in is
+known: the first that holds its value and writes its subject, else the
+one sentence of the turn that holds its value. A value two sentences
+hold, the subject written in neither -- or the user's in two sentences
+that say "I" -- places nothing, so a line the model wrote of one
+sentence never lands in another's by its value alone. Every other line
+is refused and counted by its motive, never kept. A span the user typed
+nothing in states nothing, with no call; a span the window cannot hold
+is passed over for the next and asked again by a later reading; any other call refused or failed stops the burst's
+readings, and a model a step stopped asking is not asked to read. What
+is read is kept in the process and never persisted, so a restart reads
+the spans again; switched off, nothing is read.
+
+What the librarian read takes back newer words. When a question names a
+subject the statements know -- every word that names it among the
+question's terms; never the user, whom "remind me" or "we" addresses as
+often as it asks of -- a unit is no longer laid whose statements, those
+placed in it, are of nothing the question refers to: none is the user's
+when the question says "I" or names the user, none has a subject that
+shares a word with the question, none is said of the user's own
+relation ("my wife", who may be the subject asked under a name), and the
+unit's own words name no subject asked. Asked where Bob lives, "News: the move is done, Alice lives in
+Oslo." is not laid; asked "Bob asked when the release is", the Harvest
+release's update is. Nothing is laid in its place, so an older unit never
+stands in for a newer one; a unit of the Flesh, of a span not read, or
+one the librarian placed nothing in, is laid as before, and so is every
+unit for a question that names no known subject. A reading that
+misnames a subject can only take back a unit the newer words would lay,
+never add one; but a question that refers to a subject by a word no
+statement of it holds -- "the launch" for "the Harvest release", "the
+CEO" for "Dana", and as much "releases" for "release" or "deploy" for
+"the deployment" -- while it names another known subject loses that
+subject's newer words. That is why the section ships off: the rule
+measured below takes back only another subject's words on the bench, and
+a review of it found the questions that bend a word.
+
 The user's surface on the Core and the receipts is a memory route scoped
 to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
 Core entries and the open receipts, `POST .../pin` pins a statement as the
@@ -727,6 +778,30 @@ lost 1.2 to 1.9 nats for the 4B and 1.0 for the 27B where no verdict
 turned; the change that left out the anchors that only ask turned four of
 the 4B's verdicts on margins that fell by 1.5, where run warm and
 penalized it had turned eleven.
+
+What the librarian reads is measured the same way, in a tree that
+switches the section on: `drift_pairs.py read`
+asks a model, as the librarian asks it, what the kept states' spans
+state, once a span, and `compose --statements` lays what it read before
+each window is planned. On the maintainer's machine a 4B librarian
+(temperature 0, seed 1), handed the words the user typed, read the 401
+spans of the 77 kept windows' states and kept 99 statements; it read
+eight of the bench's nine facts and updates in all eleven sets, each with
+its subject right, and the budget review's date in none -- an omission,
+whose sentence lays as before. Ten windows changed, each by one unit of
+another subject left out -- Alice's move for Bob's question, Bob's city
+for Alice's, Carol's employer for Alice's -- every message before the
+turn's unchanged; no verdict turned; the 4B's margins moved by +0.8 nat
+in sum, Bob's city at 16384 from 6.3 nats ahead of Oslo to 8.5 ahead of
+Paris, and the 27B's by +0.4. On the twelve questions of ten
+conversations written to break a reading by surface -- a pronoun, "my
+brother", "my wife" with her name, a value two subjects share, "they",
+the first person, a product's team -- each typed fact a span of its own,
+the 4B reader left out the two units of another subject and laid the ten
+updates of the subject asked; it read nothing of "They live in Paris
+now." nor of "it ships on Thursday now", laid as before. A 0.8B reader
+left out no update of the subject asked, and two units of another
+subject stayed laid.
 
 ## The native core
 

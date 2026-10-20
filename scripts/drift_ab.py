@@ -519,17 +519,21 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
     envelope, sized = _envelope(wrap), _takes(ask, "window")
 
     def callers():
-        """The summariser and the second asking for one run: those handed in, or the registry's under a run of their own."""
+        """The summariser, the second asking and the reading of what spans state for one run: those handed in, none
+        read; or the registry's under a run of their own, the reading when the ``statements`` section is on."""
         if summarize is not None:
-            return summarize, reask, None
+            return summarize, reask, None, None
         run = librarian._Run(config)
+        said = librarian._statements_section()
+        reader = (librarian.registry_reader(config, resolve=resolve, run=run, said=said)
+                  if said is not None and said.enabled else None)
         return (librarian.registry_summarizer(config, resolve=resolve, run=run),
-                librarian.registry_reasker(config, resolve=resolve, run=run), run)
+                librarian.registry_reasker(config, resolve=resolve, run=run), run, reader)
 
     def burst(cid):
-        summariser, again, run = callers()
+        summariser, again, run, reader = callers()
         librarian._curation_burst(cid, config=config, summarize=summariser, reask=again, gate=gate, budget=budget,
-                                  run=run)
+                                  run=run, **({} if reader is None else {"read": reader}))
 
     def runner(cid):
         # The launcher's own way: a burst on a thread of its own, while the
@@ -539,7 +543,7 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
         thread.start()
 
     def curate_now(state):
-        summariser, again, run = callers()
+        summariser, again, run, reader = callers()
         # As a burst aims once a journal laid the conversation: at the journal's
         # mark of the Flesh's cap at its rung, read at the cost the journal lays a
         # turn at, so the plan finds no Flesh to catch up; a budget handed in wins.
@@ -556,6 +560,9 @@ def onion_arm(ask, *, librarian, config, summarize, wrap, reask=None, mode="fast
                 summariser, again = librarian.broken(outcome, summariser, again)
                 if not outcome.evicted:
                     break
+            # As a burst does: what the spans not read yet state, unless the model stopped being asked.
+            if reader is not None and summariser is not None:
+                librarian.read_spans(state, reader)
         finally:
             if run is not None:
                 run.release()

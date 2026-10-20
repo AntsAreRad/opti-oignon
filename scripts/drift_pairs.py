@@ -20,6 +20,12 @@ that kept them a state composes again to the window it sent, unless a
 burst held the conversation when the run planned it (``held``): no burst
 runs here.
 
+``read`` asks a model, as the librarian asks it, what the kept states'
+spans state (``read_recorded``), and writes each span's statements by its
+key; ``compose --statements`` lays them in each state before its window is
+planned, so a rule that reads what the librarian read is measured on the
+same states, the reading done once and warm, the windows asked cold.
+
 ``compare`` reads two files ``compose`` wrote over the same states, probe
 by probe: whether the windows differ, and, when both were asked, the
 probes each answers right and what the second gains and loses -- and, when
@@ -44,6 +50,8 @@ Run on the host, never in CI::
     python3 scripts/drift_pairs.py compose /tmp/states --out before.jsonl  # in one tree
     python3 scripts/drift_pairs.py compose /tmp/states --out after.jsonl   # in the other
     python3 scripts/drift_pairs.py compare before.jsonl after.jsonl
+    python3 scripts/drift_pairs.py read /tmp/states --out read.json --model qwen3.5:4b   # what the librarian reads
+    python3 scripts/drift_pairs.py compose /tmp/states --out read.jsonl --statements read.json
 
 ``--model`` names the answering model (the recording run's by default);
 ``--rung``, when given, must be the home rung the states were kept under,
@@ -57,6 +65,7 @@ writes nothing and exits 2.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import ipaddress
 import json
@@ -113,13 +122,37 @@ def recorded(directory):
             if meta.with_suffix(".db").is_file()]
 
 
-def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, system, gate=None):
+def _statements_module(librarian):
+    """The module ``librarian`` reads statements with: its package's own."""
+    return importlib.import_module(f"{librarian.__package__}.peels")
+
+
+def take_statements(librarian, state, rows):
+    """Lay in ``state`` what ``read`` wrote of the spans its Cellar holds: each span's statements by its key, rows
+    of ``[turn_id, start, stop, subject, relation, value]``; a span the Cellar does not hold is left aside."""
+    statement, laid = _statements_module(librarian).Statement, {}
+    for key, found in rows.items():
+        if not state.cellar.has(key):
+            continue
+        if not isinstance(found, list) or not all(isinstance(r, list) and len(r) == 6 for r in found):
+            raise ValueError(f"span {str(key)[:12]}: a statement is no row of six")
+        try:
+            laid[key] = tuple(statement(str(r[0]), int(r[1]), int(r[2]), str(r[3]), str(r[4]), str(r[5]))
+                              for r in found)
+        except TypeError as exc:
+            raise ValueError(f"span {str(key)[:12]}: {exc}") from None
+    state.statements = laid
+
+
+def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, system, gate=None, statements=None):
     """``(meta, window)``: the window the onion arm plans for the probe kept as ``turn`` under ``directory``,
     composed again under ``librarian``. The state is loaded from a copy of its store -- the record is never
     opened -- into the conversation's new state, the librarian in process with persistence and counters off;
     the turn is planned as the arm plans it: typed, counted with ``counter(model)`` for the model it was planned
     for, within the window the run planned it in, from the conversation as stored before it, under ``system``
-    and ``gate`` (the shipped one when None, as the run's)."""
+    and ``gate`` (the shipped one when None, as the run's). With ``statements``, what ``read`` wrote, the spans the
+    state holds are laid as read (``take_statements``) before the turn is planned, and a standing span the file
+    holds nothing of is refused by name: nothing is laid as read that was not."""
     directory = Path(directory)
     meta = json.loads((directory / f"t{turn:03d}.json").read_text(encoding="utf-8"))
     work = Path(tempfile.mkdtemp(prefix="oo-drift-pairs-"))
@@ -132,6 +165,12 @@ def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, 
         if onion_store.OnionStore(copy, connect=sqlite3.connect, require_encryption=False).load(
                 meta["cid"], state) is None:
             raise Refused(f"the store kept for turn {turn} does not know conversation {meta['cid']!r}")
+        if statements is not None:
+            take_statements(librarian, state, statements)
+            unread = [r.key for r in state.ledger.all()
+                      if r.kind != "superseded" and state.cellar.has(r.key) and r.key not in state.statements]
+            if unread:
+                raise Refused(f"turn {turn}: {len(unread)} span(s) of the state not in the statements laid")
         plan = librarian.plan_window(
             meta["cid"], model=meta["model"], count=counter(meta["model"]), system=system,
             turn={"role": "user", "content": meta["question"], "origin": "typed", "segments": []}, wrap=wrap,
@@ -141,6 +180,72 @@ def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, 
     finally:
         librarian.reset_librarian()
         shutil.rmtree(work, ignore_errors=True)
+
+
+def read_recorded(librarian, onion_store, directory, turn, read, rows):
+    """What ``read`` reads of the spans of the state kept as ``turn`` under ``directory`` that ``rows`` does not
+    hold yet: ``{key: rows}``, each span's statements as ``take_statements`` lays them. The state is loaded as
+    ``compose_recorded`` loads it, what ``rows`` holds of its spans laid first, so each span is read once, with
+    the subjects known before it, as a burst reads it (``read_spans``), with no limit."""
+    directory = Path(directory)
+    meta = json.loads((directory / f"t{turn:03d}.json").read_text(encoding="utf-8"))
+    work = Path(tempfile.mkdtemp(prefix="oo-drift-pairs-"))
+    try:
+        copy = work / "state.db"
+        shutil.copyfile(directory / f"t{turn:03d}.db", copy)
+        librarian.reset_librarian()
+        config = replace(librarian.load_config(), enabled=True, persist_path="", counters_path="")
+        state = librarian.state_for(meta["cid"], config)
+        if onion_store.OnionStore(copy, connect=sqlite3.connect, require_encryption=False).load(
+                meta["cid"], state) is None:
+            raise Refused(f"the store kept for turn {turn} does not know conversation {meta['cid']!r}")
+        take_statements(librarian, state, rows)
+        known = set(state.statements)
+        librarian.read_spans(state, read, limit=len(state.ledger.all()))
+        unread = [r.key for r in state.ledger.all()
+                  if r.kind != "superseded" and state.cellar.has(r.key) and r.key not in state.statements]
+        if unread:
+            raise Refused(f"turn {turn}: {len(unread)} span(s) not read, the model refused or failed")
+        return {key: [[s.turn_id, s.start, s.stop, s.subject, s.relation, s.value] for s in found]
+                for key, found in state.statements.items() if key not in known}
+    finally:
+        librarian.reset_librarian()
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def read(directory, out, *, model, turns=None, resolve=None):
+    """What the librarian reads, with ``model``, of every span the probe states kept under ``directory`` hold
+    (``turns`` alone when given), as a burst reads it (``read_recorded``), written whole to ``out`` as one JSON
+    object: each span's statements by its key. The model is asked as the librarian asks it -- its temperature,
+    seed and prompt -- with no resource governor, as ``compose`` asks. 0; 2 refused by name, nothing written."""
+    if resolve is None and str(_REPO) not in sys.path:
+        sys.path.insert(0, str(_REPO))
+    ab = _drift_ab()
+    from opti_oignon.memory import librarian, onion_store
+
+    partial = Path(f"{out}.partial")
+    try:
+        wanted = [turn for turn in recorded(directory) if turns is None or turn in turns]
+        if not wanted:
+            raise Refused(f"no probe state kept under {directory}")
+        backend = (resolve or ab._registry_resolver())(model)
+        if backend is None:
+            raise Refused(f"no backend resolves {model!r}: nothing read")
+        # No budget of time: every span is read, or the reading is refused.
+        config = replace(librarian.load_config(), model=model, enabled=True, persist_path="", counters_path="",
+                         run_budget_s=float("inf"))
+        reader = librarian.registry_reader(config, resolve=lambda _name: backend,
+                                           run=librarian._Run(config, governance=False))
+        rows = {}
+        for turn in wanted:
+            rows.update(read_recorded(librarian, onion_store, directory, turn, reader, rows))
+        partial.write_text(json.dumps(rows, sort_keys=True, ensure_ascii=True), encoding="utf-8")
+        partial.replace(out)
+    except (Refused, OSError, ValueError, KeyError) as exc:
+        partial.unlink(missing_ok=True)
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _kept_rung(directory, turns, rung):
@@ -348,7 +453,8 @@ def _cold(backend):
     return getattr(backend, "name", None) == "ollama"
 
 
-def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, resolve=None, margins=0, fetch=None):
+def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, resolve=None, margins=0, fetch=None,
+            statements=None):
     """Every probe kept under ``directory`` (``turns`` alone when given) composed again under this tree at the home
     rung it was kept under and, with ``ask``, asked and read; one JSON line per probe to ``out``, written whole.
     On Ollama each window is asked of a model loaded for it alone (``cold``), with the bench's sampling -- the
@@ -357,7 +463,10 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
     through ``logprobs_asker`` (``fetch`` its post), its own penalties and draft held off (``sampling`` "raw"), and
     each probe carries its ``margin`` (``margin``): the stale statement the probe's expected one retired as its
     rival, or every other token when none was, the token read and the way the reply went there, and the token it
-    is read against (``margin_against``). 0; 2 refused by name, nothing written."""
+    is read against (``margin_against``). With ``statements``, a file ``read`` wrote, each state's spans are laid
+    as read before its window is planned, and each probe names the file by its digest (``statements``); a tree
+    whose librarian reads no statement, and a state with a standing span the file holds nothing of, are refused.
+    0; 2 refused by name, nothing written."""
     if resolve is None and str(_REPO) not in sys.path:
         sys.path.insert(0, str(_REPO))
     ab = _drift_ab()
@@ -374,6 +483,15 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
         if not wanted:
             raise Refused(f"no probe state kept under {directory}")
         home = _kept_rung(directory, wanted, rung)
+        rows, digest = None, None
+        if statements is not None:
+            section = getattr(librarian, "_statements_section", lambda: None)()
+            if section is None or not section.enabled:
+                raise Refused("this tree's librarian reads no statement: the statements laid would change nothing")
+            raw = Path(statements).read_bytes()
+            rows, digest = json.loads(raw.decode("utf-8")), hashlib.sha256(raw).hexdigest()[:16]
+            if not isinstance(rows, dict):
+                raise Refused(f"{statements} holds no statements by span")
         asked, how = {}, {}
         with ab.pinned_rung(home), open(partial, "w", encoding="utf-8") as handle:
             for turn in wanted:
@@ -381,12 +499,15 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
                 probe = ab.TURNS[turn - 1] if 0 < turn <= len(ab.TURNS) else None
                 if probe is None or not probe.probe or probe.text != meta["question"]:
                     raise Refused(f"turn {turn} kept is not this tree's probe {turn}: its reading would be another's")
+                laid = {} if rows is None else {"statements": rows}
                 meta, window = compose_recorded(librarian, onion_store, directory, turn,
                                                 wrap=ab._envelope(untrusted_context.wrap), counter=ab._model_counter,
-                                                system=meta.get("system", ab.SYSTEM_PROMPT))
+                                                system=meta.get("system", ab.SYSTEM_PROMPT), **laid)
                 row = {"turn": turn, "question": meta["question"], "rung": home, "tree": tree,
                        "held": meta.get("held"),
                        "refusal": None if window.refusal is None else str(window.refusal.motive)}
+                if digest is not None:
+                    row["statements"] = digest
                 if window.refusal is None:
                     messages, window_rung, num_ctx = _windowed(window)
                     row.update(messages=messages, layers=dict(window.layers), cut=[list(c) for c in window.cut],
@@ -543,6 +664,13 @@ def main(argv=None):
     composing.add_argument("--margins", type=int, default=0,
                            help="read each probe's margin with this many alternatives a token (1 to 20; Ollama on "
                                 "this machine)")
+    composing.add_argument("--statements", default=None,
+                           help="lay each state's spans as the file `read` wrote reads them")
+    reading = sub.add_parser("read", help="read what the kept states' spans state, as the librarian reads it")
+    reading.add_argument("states", help="the directory a drift A/B run kept its states in (--states)")
+    reading.add_argument("--out", required=True, help="the JSON object written: each span's statements by its key")
+    reading.add_argument("--model", required=True, help="the librarian's model")
+    reading.add_argument("--turns", type=int, nargs="*", default=None, help="only these probe turns")
     comparing = sub.add_parser("compare", help="read two composed files over the same states")
     comparing.add_argument("before")
     comparing.add_argument("after")
@@ -556,8 +684,10 @@ def main(argv=None):
             print(f"refused: {exc}", file=sys.stderr)
             return 2
         return 0
+    if args.command == "read":
+        return read(args.states, args.out, model=args.model, turns=args.turns)
     return compose(args.states, args.out, rung=args.rung, model=args.model, ask=not args.no_ask, turns=args.turns,
-                   margins=args.margins)
+                   margins=args.margins, **({} if args.statements is None else {"statements": args.statements}))
 
 
 if __name__ == "__main__":

@@ -2102,7 +2102,8 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     return chosen
 
 
-def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), lineage=None, withdrawn=(), gate=None):
+def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), lineage=None, withdrawn=(), gate=None,
+                       statements=None, section=None, left_out=None):
     """The words the user typed of a newer statement ``query`` reaches where an older item of ``chosen`` reaches it
     alike: ``Selected`` items, the newest first, each saying where it stands in time.
 
@@ -2124,6 +2125,18 @@ def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), linea
     the Flesh or by its peel's references -- one within a segment its peel
     references, a turn a peer sent, one a withdrawal reached. Each unit
     once, defanged as an anchor is.
+
+    With ``statements`` -- what the librarian read of the spans it read, a
+    tuple of ``Statement`` by span key, the standing spans alone -- a unit
+    of such a span that would be laid is left out when it speaks only of
+    others (``speaks_of_others``): the question names a subject the
+    statements know (``asked_subjects``), and none of the unit's own
+    statements may be of what the question refers to. Nothing is laid in
+    its place, so an older unit never stands in for a newer one; a unit of
+    the Flesh, or of a span not read, is laid as before. ``section`` is the
+    ``statements`` section of ``onion.yaml`` (``load_statements`` when
+    None); ``left_out``, when a list, receives the place
+    ``(turn_id, start, stop)`` of each unit left out.
     """
     from .composer import defanged
     from .probes import _is_question, generate_probes
@@ -2163,22 +2176,285 @@ def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), linea
             if key in places and cellar.has(key):
                 for place, unit, label, parts in answering(cellar.get(key), (places[key], 0), peel.refs):
                     found[f"anchor:{key[:12]}:{unit.turn_id}", unit.start] = ((places[key], 1 + place), parts, unit,
-                                                                              label)
+                                                                              label, key)
     if recent:
         for place, unit, label, parts in answering(list(recent), (len(places), 0)):
-            found[f"flesh:{unit.turn_id}", unit.start] = ((len(places), place), parts, unit, label)
+            found[f"flesh:{unit.turn_id}", unit.start] = ((len(places), place), parts, unit, label, None)
     # For each part, the newest unit that answers it.
     newest = {max((key for key, entry in found.items() if part in entry[1]), key=lambda key: found[key][0])
               for part in set().union(*(entry[1] for entry in found.values()))}
+    asked = ()
+    if statements is not None and newest:
+        section = section or load_statements()
+        asked = asked_subjects(query, known_subjects(
+            [statement for r in ledger.all() for statement in statements.get(r.key, ())]), section)
     laid = []
     for key in sorted(newest, key=lambda key: found[key][0], reverse=True):
-        at, _parts, unit, label = found[key]
+        at, _parts, unit, label, span = found[key]
+        if asked and span in statements and speaks_of_others(unit, [
+                s for s in statements[span] if (s.turn_id, s.start, s.stop) == (unit.turn_id, unit.start, unit.stop)],
+                query, asked, section):
+            if left_out is not None:
+                left_out.append((unit.turn_id, unit.start, unit.stop))
+            continue
         words, altered = defanged(unit.text)
         if altered:
             words = f"{_header(unit.turn_id, altered)} {words}"
         laid.append(Selected(text=words, provenance=key[0], label=tuple(label), at=at,
                              events=(("anchors_altered", altered),) if altered else ()))
     return laid
+
+
+@dataclass(frozen=True)
+class Statement:
+    """One statement the user typed, as the librarian read it and the words of its span bore it out.
+
+    ``turn_id``, ``start`` and ``stop`` place the sentence the user typed that
+    holds its value; ``subject`` is who or what it speaks of as the turns
+    write it, or ``user`` for the user; ``relation`` what it says of it;
+    ``value`` the words that say it.
+    """
+
+    turn_id: str
+    start: int
+    stop: int
+    subject: str
+    relation: str
+    value: str
+
+
+@dataclass(frozen=True)
+class Statements:
+    """The ``statements`` section of ``onion.yaml`` (``load_statements``).
+
+    Whether a burst reads what its spans state, how many spans it reads at
+    most, how many known subjects a call is given, the tokens its answer
+    may take, and the words of both languages read as one: those no subject
+    may hold (``pronouns``) and those that say the user (``first_person``).
+    """
+
+    enabled: bool
+    per_burst: int
+    known: int
+    num_predict: int
+    pronouns: frozenset
+    first_person: frozenset
+
+
+_STATEMENT_COUNTS = ("per_burst", "known", "num_predict")
+_STATEMENT_WORDS = ("pronouns", "first_person")
+# What a value may end with that the turn need not hold where it stands.
+_STATEMENT_TAIL = ".,;:!?"
+# The most words a relation holds.
+_RELATION_WORDS = 8
+
+
+def load_statements(path=None):
+    """The ``statements`` section of ``onion.yaml``, refused by name when malformed.
+
+    ``enabled`` is a boolean and each count a whole number, one or more;
+    both languages are required, each with ``pronouns`` and
+    ``first_person`` alone, lists of lower-case ASCII words, and no word is
+    both a pronoun and a first-person word.
+    """
+    raw = _read_onion(path or _CONFIG) or {}
+    section = raw.get("statements")
+    if not isinstance(section, dict):
+        raise GateError("statements: the section is missing or not a mapping")
+    unknown = sorted(set(map(str, section)) - {"enabled", *_STATEMENT_COUNTS, *_REPORTER_LANGUAGES})
+    if unknown:
+        raise GateError(f"statements: unknown key {unknown[0]!r}")
+    if type(section.get("enabled")) is not bool:
+        raise GateError(f"statements: enabled {section.get('enabled')!r} is not a boolean")
+    for name in _STATEMENT_COUNTS:
+        if not _count(section.get(name), 1):
+            raise GateError(f"statements: {name} {section.get(name)!r} is not a whole number, one or more")
+    words = {name: set() for name in _STATEMENT_WORDS}
+    for language in _REPORTER_LANGUAGES:
+        entry = section.get(language)
+        if not isinstance(entry, dict) or sorted(map(str, entry)) != sorted(_STATEMENT_WORDS):
+            raise GateError(f"statements: {language} does not hold pronouns and first_person alone")
+        for name in _STATEMENT_WORDS:
+            members = entry[name]
+            if not isinstance(members, list) or not all(
+                    isinstance(word, str) and _REPORTER.fullmatch(word) for word in members):
+                raise GateError(f"statements: {language}.{name} is not a list of lower-case ASCII words")
+            words[name].update(members)
+    both = sorted(words["pronouns"] & words["first_person"])
+    if both:
+        raise GateError(f"statements: {both[0]!r} is both a pronoun and a first-person word")
+    return Statements(section["enabled"], section["per_burst"], section["known"], section["num_predict"],
+                      frozenset(words["pronouns"]), frozenset(words["first_person"]))
+
+
+def _flat(text):
+    """Text as a statement is matched in: NFKC, case folded, its blanks run together."""
+    import unicodedata
+
+    return " ".join(unicodedata.normalize("NFKC", str(text)).casefold().split())
+
+
+def _words_within(phrase, text):
+    """Whether the words of ``phrase`` stand in ``text`` one after another, as the probes read words: "Bob" in
+    "Bob's car", not in "Bobby"."""
+    from .probes import folded_words
+
+    want, have = folded_words(phrase), folded_words(text)
+    return bool(want) and any(have[at:at + len(want)] == want for at in range(len(have) - len(want) + 1))
+
+
+def _fields(line):
+    """The four fields of ``turn | subject | relation | value``, each without its blanks and quotes, one bar
+    before or after allowed; None for any other shape."""
+    parts = [part.strip().strip("\"'`").strip() for part in line.split("|")]
+    if len(parts) > 4 and parts[0] == "":
+        parts = parts[1:]
+    if len(parts) > 4 and parts[-1] == "":
+        parts = parts[:-1]
+    return parts if len(parts) == 4 else None
+
+
+def read_statements(answer, span, known=(), said=None):
+    """``(kept, refused)``: the statements of the librarian's ``answer`` the words of ``span`` bear out, in the
+    answer's order, each once, and the motive of each line refused, in order.
+
+    One line a statement, ``turn | subject | relation | value``; a blank
+    line or ``NONE`` says nothing, any other shape is refused (``form``). A
+    line is kept when each field holds:
+      * the turn is one of the span's the user typed (``_typed_units``),
+        never the words of the assistant, a document, a tool or a peer
+        (``turn``);
+      * the value, without its last punctuation, stands within one sentence
+        the user typed in that turn, its words one after another as the
+        probes read words -- case and accents aside (``value``);
+      * the subject holds no pronoun (``pronoun``); the user -- ``user``, or
+        first-person words alone -- only in a turn that holds a first-person
+        word; any other is written, word after word, in a sentence the user
+        typed in the span up to that turn, or is one of ``known``, and is not
+        the value (``subject``);
+      * the relation holds one to eight words (``relation``);
+      * the sentence it is placed in is known: the first that holds its
+        value and writes its subject -- the one with a first-person word for
+        the user's -- else the one sentence of that turn that holds its
+        value; a value two sentences hold, the subject written in neither or
+        the user's in both, places nothing (``place``), so a line the model
+        wrote of one sentence never lands in another's by its value alone.
+    The user's statement is written ``user``. ``said`` is the section of
+    ``onion.yaml`` (``load_statements`` when None).
+    """
+    from .probes import folded_words
+
+    said = said or load_statements()
+    units = _typed_units(span)
+    order = {str(t.get("turn_id", "")): n for n, t in enumerate(span)}
+    known = {tuple(folded_words(subject)) for subject in known}
+    kept, refused, seen = [], [], set()
+    for raw in str(answer or "").splitlines():
+        line = raw.strip()
+        if not line or line.upper() == "NONE":
+            continue
+        fields = _fields(line)
+        if fields is None:
+            refused.append("form")
+            continue
+        turn_id, subject, relation, value = fields
+        mine = [unit for unit in units if unit.turn_id == turn_id]
+        if not mine:
+            refused.append("turn")
+            continue
+        value = value.rstrip(_STATEMENT_TAIL).strip()
+        holding = [unit for unit in mine if _words_within(value, unit.text)]
+        if not holding:
+            refused.append("value")
+            continue
+        words = set(folded_words(subject))
+        if words & said.pronouns:
+            refused.append("pronoun")
+            continue
+        user = _flat(subject) == "user" or (bool(words) and words <= said.first_person)
+        if user:
+            if not any(set(folded_words(unit.text)) & said.first_person for unit in mine):
+                refused.append("subject")
+                continue
+            subject = "user"
+        else:
+            written = [unit.text for unit in units if order[unit.turn_id] <= order[turn_id]]
+            if not words or _flat(subject) == _flat(value) or (
+                    not any(_words_within(subject, text) for text in written)
+                    and tuple(folded_words(subject)) not in known):
+                refused.append("subject")
+                continue
+        if not 1 <= len(relation.split()) <= _RELATION_WORDS:
+            refused.append("relation")
+            continue
+        tied = [u for u in holding if (set(folded_words(u.text)) & said.first_person if user
+                                       else _words_within(subject, u.text))]
+        if user and len(tied) > 1:
+            tied = []
+        if not tied and len(holding) > 1:
+            refused.append("place")
+            continue
+        unit = (tied or holding)[0]
+        statement = Statement(turn_id, unit.start, unit.stop, subject, relation, value)
+        identity = (turn_id, unit.start, unit.stop, _flat(subject), _flat(relation), _flat(value))
+        if identity not in seen:
+            seen.add(identity)
+            kept.append(statement)
+    return kept, refused
+
+
+def known_subjects(statements):
+    """The subjects ``statements`` speak of, each once as first written, in order."""
+    found, seen = [], set()
+    for statement in statements:
+        if _flat(statement.subject) not in seen:
+            seen.add(_flat(statement.subject))
+            found.append(statement.subject)
+    return found
+
+
+def _subject_words(subject, said):
+    """The words that name a subject: its terms (``_terms``), the first-person words aside."""
+    return _terms(subject) - said.first_person
+
+
+def asked_subjects(question, known, said):
+    """The subjects of ``known`` that ``question`` names: every word that names one among its terms. Never the user:
+    a first-person word -- "remind me", "we" -- addresses the question as often as it asks of the user."""
+    terms = _terms(question)
+    return [subject for subject in known if subject != "user" and _subject_words(subject, said)
+            and _subject_words(subject, said) <= terms]
+
+
+def speaks_of_others(unit, statements, question, asked, said):
+    """Whether ``unit`` speaks only of subjects ``question`` does not refer to.
+
+    True when the question names a subject the memory knows (``asked``),
+    the librarian read at least one statement in the unit
+    (``statements``, those placed in it), and none of them may be of what
+    the question refers to: the user's, when the question holds a
+    first-person word or the word user; one whose subject shares a word with
+    the question -- "the Harvest release" for "when is the release?",
+    whatever subject the question also names; one said of the user's own
+    relation, a subject that holds a first-person word ("my wife"), who may
+    be the subject asked under a name. Nor may the unit's own words name
+    every word of an asked subject.
+    """
+    from .probes import folded_words
+
+    if not asked or not statements:
+        return False
+    terms = _terms(question)
+    for statement in statements:
+        if statement.subject == "user":
+            if set(folded_words(question)) & said.first_person or "user" in terms:
+                return False
+        elif set(folded_words(statement.subject)) & said.first_person:
+            return False
+        elif _subject_words(statement.subject, said) & terms:
+            return False
+    words = _terms(unit.text)
+    return not any(_subject_words(subject, said) <= words for subject in asked)
 
 
 def in_time(items):

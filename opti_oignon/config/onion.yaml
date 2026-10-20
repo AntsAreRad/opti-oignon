@@ -587,6 +587,38 @@ queue:
   proposals_per_day: 5      # typed decisions offered to the Core per conversation and UTC day, superseded ones included; the rest wait for a later day
   copy_shared_words: 2      # content words a summary's sentence shares with a document, tool or web page to be dropped as a copy
 
+# What the librarian reads of the spans the Cellar holds: one statement a
+# line -- the turn, who or what it speaks of, what it says of it, the words
+# that say it -- kept only where the span's words bear it out
+# (peels.read_statements). A burst reads, oldest first, the standing spans
+# it has not read, at most per_burst of them, each call handed the words
+# the user typed and the latest known subjects, at most `known`, with room
+# for num_predict tokens of answer. The newer words of a question that
+# names a known subject leave out a unit whose statements are of nothing
+# the question refers to. No subject holds a word of `pronouns` -- "you"
+# and the words of a group among them; the first-person words say the
+# user. Kept in the process: a restart reads the spans again.
+# Off as shipped: on the paired bench the reading named every subject it
+# read rightly and the rule took back only another subject's words, but a
+# question that bends a word -- "releases" for a statement of "the
+# release", "deploy" for "the deployment" -- can lose the newer words it
+# asks for once it names another known subject. A tree that measures it
+# switches it on here.
+statements:
+  enabled: false
+  per_burst: 16
+  known: 32
+  num_predict: 384
+  fr:
+    pronouns: [il, elle, ils, elles, lui, eux, leur, leurs, son, sa, ses, ce, cela, ceci, ca, celui, celle, ceux,
+               celles, "on", qui, quoi, tu, toi, vous, ton, ta, tes, votre, vos, tous, toutes, tout, chacun, chacune]
+    first_person: [je, j, me, m, moi, mon, ma, mes, nous, notre, nos]
+  en:
+    pronouns: [he, she, it, they, him, her, them, his, hers, its, their, theirs, this, that, these, those, who, whom,
+               which, someone, somebody, something, one, you, your, yours, yourself, yourselves, both, all, each,
+               everyone, everybody, anyone, anybody, nobody, none]
+    first_person: [i, me, my, mine, myself, we, us, our, ours, ourselves]
+
 # The switch. Off, the chat path keeps the window it has today -- the
 # working-memory block, the optimizer or the history window -- and the
 # librarian is never asked. On, the librarian mirrors each saved
