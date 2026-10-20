@@ -566,7 +566,8 @@ holds none of the section's pronouns -- "you" and the words of a group
 among them -- and is written so in a sentence the user typed in the span
 up to that turn, or is a subject already known, or is the user in a turn
 that holds a first-person word -- "Bob" is not written in "Bobby"; its
-relation holds one to eight words; and the sentence it is placed in is
+relation holds one to eight words, the model's own, never laid in a
+window; and the sentence it is placed in is
 known: the first that holds its value and writes its subject, else the
 one sentence of the turn that holds its value. A value two sentences
 hold, the subject written in neither -- or the user's in two sentences
@@ -576,8 +577,31 @@ is refused and counted by its motive, never kept. A span the user typed
 nothing in states nothing, with no call; a span the window cannot hold
 is passed over for the next and asked again by a later reading; any other call refused or failed stops the burst's
 readings, and a model a step stopped asking is not asked to read. What
-is read is kept in the process and never persisted, so a restart reads
-the spans again; switched off, nothing is read.
+is read is saved with the state, by the burst that read it, when the
+state persists (below): the standing spans' readings alone, a span that
+states nothing included, so a restart reads only the spans not read yet.
+A load checks each statement again in the Cellar as a line is checked
+when it is read, handed the subjects of the readings kept before it: a
+reading those checks no longer keep exactly as it was -- the section's
+words changed since, or the checks themselves -- is not laid, its count
+said in the log, and the next burst reads its span again, and the spans
+whose subjects it alone made known with it. Each reading is saved with
+the identity of the reading that made it -- the model, its sampling, the
+room its answer has and its prompt, as a digest: one another identity
+made stays laid until a burst reads its span again, after every span not
+read yet, oldest first, so a new model or prompt renews what was read one
+burst at a time; a span the user typed nothing in is never read again for
+it, and a reading named otherwise than by a digest is kept by its digest.
+Once a span is read again, the readings are checked again as a load
+checks them: one that knew a subject only from the reading replaced is
+left out, for its span to be read again, so what is laid is what a
+restart lays. A blank answer states nothing and takes nothing away: what
+the span had stays laid and saved, and the reading that gave it does not
+ask the span again before a restart. A line with a field that does not
+encode as UTF-8 -- half of a surrogate pair -- is refused (`encoding`),
+so no reading can stop a save. A close reads nothing: the next burst
+reads what it evicted, before or after a restart. Without a persistence
+path a restart reads the spans again; switched off, nothing is read.
 
 What the newer words do with what the librarian read is the section's
 `newer_words`. As shipped, `label`: each unit they lay again whose
@@ -664,7 +688,15 @@ connection that is not encrypted is refused unless the file allows it;
 the rest of the tree opens plaintext with a warning outside Bulbe mode,
 this store does not. Without a path the onion lives in the process and a
 restart starts it over. The root covers Core, Cellar, receipts and Peels;
-the drift ledger has its own table and its root is a later decision.
+the drift ledger has its own table and its root is a later decision. What
+the librarian read of each standing span has a table of its own, which
+the third schema brings, and enters the root once a state holds a
+reading, so a state without one keeps the root it had; a reading of a
+span the file does not hold standing, or of one span twice, is refused by
+name. A build of an older schema refuses the file by name; readings the
+saved root does not cover, where the rest of the state answers to it --
+a process of an older build saved the state since -- are left out, and
+said, never laid.
 
 Two verbs work on a whole conversation, and `oo chat` gives them to the
 user as `/close` and `/open`. Closing runs the gate synchronously over
@@ -811,7 +843,9 @@ What the librarian reads is measured the same way, in a tree that
 switches the section on: `drift_pairs.py read`
 asks a model, as the librarian asks it, what the kept states' spans
 state, once a span, and `compose --statements` lays what it read before
-each window is planned. On the maintainer's machine a 4B librarian
+each window is planned; a state kept with readings of its own carries
+them, and each line `compose` writes then says how many spans it carried
+read, their digest and whether the tree laid them. On the maintainer's machine a 4B librarian
 (temperature 0, seed 1), handed the words the user typed, read the 401
 spans of the 77 kept windows' states and kept 99 statements; it read
 eight of the bench's nine facts and updates in all eleven sets, each with

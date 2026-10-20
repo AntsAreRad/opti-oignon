@@ -34,7 +34,15 @@ in the Cellar when the file is loaded, and a peel whose bytes no longer
 answer to it is refused by name. The lineage of each mirrored turn lives in
 a table of its own, in the root once a state holds one: a row moved in the
 file is refused by name, and one read outside the grammar reads cut, never
-empty.
+empty. What the librarian read of each standing span -- the statements the
+user typed, as the span's words bore them out -- lives in a table of its
+own too, with the identity of the reading that made it, in the root once a
+state holds a reading: a load checks each statement again in the Cellar as
+a line is checked when it is read, and a reading those checks no longer
+keep exactly as it was is not laid, for its span to be read again; a
+reading of a span the file does not hold standing is refused by name, and
+readings the saved root does not cover -- a build that knew none saved the
+state since -- are left out, and said.
 """
 
 import hashlib
@@ -52,6 +60,7 @@ logger = logging.getLogger(__name__)
 TABLES = (
     "onion_core", "onion_cellar", "onion_receipts", "onion_peels", "onion_flesh", "onion_cursor",
     "onion_receipt_marks", "onion_peel_marks", "onion_proposals", "onion_refusals", "onion_lineage",
+    "onion_statements",
 )
 _PROPOSAL_STATUSES = ("open", "accepted", "declined", "deferred", "superseded")
 # The rungs a peel can be made on; a mark naming another is refused on load.
@@ -149,6 +158,14 @@ CREATE TABLE IF NOT EXISTS onion_refusals (
     mark TEXT NOT NULL,
     PRIMARY KEY (conversation, span_key)
 );
+CREATE TABLE IF NOT EXISTS onion_statements (
+    conversation TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    span_key TEXT NOT NULL,
+    reader TEXT NOT NULL,
+    statements TEXT NOT NULL,
+    PRIMARY KEY (conversation, seq)
+);
 """
 
 
@@ -204,6 +221,12 @@ class Snapshot:
     # in the file -- in the grammar or not -- is refused by name: a withdrawal
     # finds what it reached by these rows, and none of them may change unseen.
     lineage: tuple = ()
+    # (span_key, reader, ((turn_id, start, stop, subject, relation, value),
+    # ...)) for each standing span the librarian read, in the ledger's order,
+    # a span that states nothing with none, ``reader`` the identity of the
+    # reading that made it ("" for none). In the root when there is one: a
+    # label says to the model whom a unit speaks of by these rows.
+    statements: tuple = ()
 
 
 def onion_root(snapshot):
@@ -230,6 +253,8 @@ def onion_root(snapshot):
         rows["peel_marks"] = [_mark_row(mark) for mark in snapshot.peel_marks]
     if snapshot.lineage:
         rows["lineage"] = [[turn_id, list(entries)] for turn_id, entries in snapshot.lineage]
+    if snapshot.statements:
+        rows["statements"] = [[key, reader, [list(row) for row in found]] for key, reader, found in snapshot.statements]
     return hashlib.sha256(_canonical(rows).encode("utf-8")).hexdigest()
 
 
@@ -280,9 +305,18 @@ def snapshot_of(state):
         str(t.get("turn_id", "")) for t in flesh}
     lineage = tuple(sorted((str(turn_id), tuple(entries)) for turn_id, entries in getattr(state, "lineage", {}).items()
                            if str(turn_id) in present))
+    # What was read of a span superseded since is never laid again: only the standing spans' readings are kept.
+    read, readers = getattr(state, "statements", {}), getattr(state, "readers", {})
+    standing = dict.fromkeys(r.key for r in state.ledger.all() if r.kind != "superseded" and state.cellar.has(r.key))
+    statements = tuple(
+        (key, str(readers.get(key, "")),
+         tuple((s.turn_id, int(s.start), int(s.stop), s.subject, s.relation, s.value) for s in read[key]))
+        for key in standing if key in read
+    )
     return Snapshot(core=core, cellar=cellar, receipts=receipts, peels=peels,
                     flesh=flesh, seen=int(state.seen), receipt_marks=marks,
-                    peel_marks=peel_marks, proposals=proposals, refusals=refusals, lineage=lineage)
+                    peel_marks=peel_marks, proposals=proposals, refusals=refusals, lineage=lineage,
+                    statements=statements)
 
 
 def _is_encrypted(conn):
@@ -426,6 +460,11 @@ class OnionStore:
                 "INSERT INTO onion_refusals (conversation, span_key, mark) VALUES (?, ?, ?)",
                 [(cid, key, mark) for key, mark in snapshot.refusals],
             )
+            conn.executemany(
+                "INSERT INTO onion_statements (conversation, seq, span_key, reader, statements) VALUES (?, ?, ?, ?, ?)",
+                [(cid, i, key, reader, _canonical([list(row) for row in found]))
+                 for i, (key, reader, found) in enumerate(snapshot.statements)],
+            )
             conn.execute(
                 "INSERT INTO onion_cursor (conversation, seen, root, saved_at) VALUES (?, ?, ?, ?)",
                 (cid, snapshot.seen, root, _now()),
@@ -446,18 +485,34 @@ class OnionStore:
         Returns the state, or None when the file does not know the
         conversation. Every Core entry, Cellar span and Peel is re-hashed
         against its saved id, and the root recomputed against the saved
-        one; the first that does not answer is refused by name.
+        one; the first that does not answer is refused by name. Readings the
+        saved root does not cover, where the rest answers to it -- a build
+        that knew no reading saved the state over a file that held some --
+        are left out, and said: no reading is ever laid that the root does
+        not cover. Each reading is then checked again in the Cellar
+        (``_restore_readings``): one the checks no longer keep as it was is
+        left out, and said.
         """
+        from dataclasses import replace
+
         cid = str(conversation_id)
         snapshot, saved_root = self.load_snapshot(cid)
         if snapshot is None:
             return None
         root = onion_root(snapshot)
+        if root != saved_root and snapshot.statements and onion_root(replace(snapshot, statements=())) == saved_root:
+            logger.warning("onion state %s: %d span reading(s) its saved root does not cover, left out: a build that "
+                           "knew none saved it since", cid, len(snapshot.statements))
+            snapshot, root = replace(snapshot, statements=()), saved_root
         if root != saved_root:
             raise OnionIntegrityError(
                 f"onion state {cid}: the saved root {saved_root} does not answer to its rows ({root}); refused, not repaired"
             )
         _rebuild(state, snapshot)
+        stale = _restore_readings(state, snapshot)
+        if stale:
+            logger.warning("onion state %s: %d span reading(s) no longer borne out as kept, left for the spans to be "
+                           "read again", cid, len(stale))
         return state
 
     def conversations(self):
@@ -508,6 +563,9 @@ def _read_snapshot(conn, cid):
     refusals = conn.execute(
         "SELECT span_key, mark FROM onion_refusals WHERE conversation = ? ORDER BY span_key", (cid,)
     ).fetchall()
+    statements = conn.execute(
+        "SELECT span_key, reader, statements FROM onion_statements WHERE conversation = ? ORDER BY seq", (cid,)
+    ).fetchall()
     try:
         snapshot = Snapshot(
             core=tuple((r[0], r[1], r[2]) for r in core),
@@ -529,6 +587,7 @@ def _read_snapshot(conn, cid):
             proposals=tuple((r[0], r[1], r[2], int(r[3]), int(r[4]), r[5], r[6], r[7]) for r in proposals),
             refusals=tuple((r[0], r[1]) for r in refusals),
             lineage=tuple((r[0], _read_lineage(r[1])) for r in lineage),
+            statements=tuple(_reading(r[0], r[1], json.loads(r[2])) for r in statements),
         )
     except _CONTENT_ERRORS as exc:
         raise OnionIntegrityError(
@@ -556,6 +615,23 @@ def _read_lineage(text):
     if not isinstance(entries, list) or _context_defect("assistant", "assistant", [], entries) is not None:
         return (CUT,)
     return tuple(entries)
+
+
+def _reading(key, reader, found):
+    """A reading as saved: a span's key, the identity of the reading that made it -- a digest, or none -- and its
+    statements, each a turn, a place and three fields; anything else does not decode."""
+    if not isinstance(key, str) or not isinstance(found, list):
+        raise ValueError("a reading is no span's key with a list of statements")
+    if not isinstance(reader, str) or (reader and (len(reader) != 64 or not set(reader) <= set("0123456789abcdef"))):
+        raise ValueError("a reading names its reader by no digest")
+    rows = []
+    for row in found:
+        turn_id, start, stop, subject, relation, value = row
+        if not all(isinstance(part, str) for part in (turn_id, subject, relation, value)) or not all(
+                type(part) is int for part in (start, stop)):
+            raise ValueError("a statement is no turn, place and three fields")
+        rows.append((turn_id, start, stop, subject, relation, value))
+    return key, reader, tuple(rows)
 
 
 def _typed_receipts(conn):
@@ -621,6 +697,17 @@ def _references(conn):
             conn.execute(f"ALTER TABLE onion_peel_marks ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'")
 
 
+def _statements(conn):
+    """Schema 3, "statements": what the librarian read of each standing span has a table of its own.
+
+    The table comes with the schema, empty: no conversation of an older file
+    holds a reading, so every root it holds still answers to its rows and
+    nothing is written again. A build of an older schema then refuses the
+    file by name, rather than read a conversation whose root its rows no
+    longer answer to without the readings.
+    """
+
+
 # The schema a file was written with, in SQLite's ``user_version``: 0 for
 # every file written before versions existed. Each migration brings a file
 # to its version, in order and once, inside one transaction with the tables
@@ -629,6 +716,7 @@ def _references(conn):
 _MIGRATIONS = (
     (1, "typed-receipts", _typed_receipts),
     (2, "references", _references),
+    (3, "statements", _statements),
 )
 SCHEMA_VERSION = _MIGRATIONS[-1][0]
 _SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";") if statement.strip())
@@ -708,3 +796,33 @@ def _rebuild(state, snapshot):
                 raise OnionIntegrityError(f"proposal {p_id[:12]} points outside its span: refused, not repaired")
             state.proposals.append(Proposal(p_id, span_key, turn_id, int(start), int(stop), origin, made_on, status))
     return state
+
+
+def _restore_readings(state, snapshot):
+    """Lay in ``state`` what was read of its standing spans, each statement checked again in the Cellar
+    (``peels.readings_borne_out``); the keys of the spans whose reading is left out, to be read again.
+
+    A reading of a span the file does not hold standing, or a span read
+    twice, is refused by name. With the ``statements`` section unreadable no
+    reading can be checked, and none is laid.
+    """
+    if not snapshot.statements:
+        return []
+    from .peels import GateError, Statement, readings_borne_out
+
+    keys = [key for key, _reader, _found in snapshot.statements]
+    standing = {r.key for r in state.ledger.all() if r.kind != "superseded" and state.cellar.has(r.key)}
+    if len(set(keys)) != len(keys):
+        raise OnionIntegrityError("a span is read twice in the file: refused, not repaired")
+    if any(key not in standing for key in keys):
+        raise OnionIntegrityError("a reading names a span the file does not hold standing: refused, not repaired")
+    readings = {key: tuple(Statement(*row) for row in found) for key, _reader, found in snapshot.statements}
+    try:
+        kept, stale = readings_borne_out(readings, state.ledger, state.cellar)
+    except GateError as exc:
+        logger.warning("no reading is laid: the statements section does not read (%s)", exc)
+        kept, stale = {}, keys
+    if hasattr(state, "statements"):
+        state.statements = kept
+        state.readers = {key: reader for key, reader, _found in snapshot.statements if key in kept}
+    return stale

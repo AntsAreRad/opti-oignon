@@ -1049,6 +1049,13 @@ fail_under = 0
 # withdrawing the source by value through the grammar. They stay in the
 # tree word for word.
 #
+# What the librarian read of each span is now kept by the onion store, in a
+# table of its own that a third schema brings. pc19 of
+# tests/test_peel_record_contracts.py held a file of schema 0 or 1 to be
+# brought to schema 2: it gives way to pc19b in the same file, word for word
+# but for the schema, this build's, the table of readings among the file's,
+# and no reading in it. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1428,4 +1435,5 @@ addopts = """
     --deselect=tests/test_onion_journal_contracts.py::test_jw19_the_journal_section_is_refused_by_name_every_reason_at_once
     --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw43_each_request_carries_the_windows_label_and_its_results_and_the_answer_their_union
     --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw44_the_answer_reads_back_as_a_flesh_turn_with_its_label_and_a_withdrawal_reaches_it
+    --deselect=tests/test_peel_record_contracts.py::test_pc19_a_file_of_schema_one_is_brought_to_two_in_one_transaction_and_its_peels_read_as_saved
 """

@@ -129,7 +129,8 @@ def _statements_module(librarian):
 
 def take_statements(librarian, state, rows):
     """Lay in ``state`` what ``read`` wrote of the spans its Cellar holds: each span's statements by its key, rows
-    of ``[turn_id, start, stop, subject, relation, value]``; a span the Cellar does not hold is left aside."""
+    of ``[turn_id, start, stop, subject, relation, value]``; a span the Cellar does not hold is left aside. What the
+    state carried is laid aside whole, with the readers it named: nothing laid is read again for its reader."""
     statement, laid = _statements_module(librarian).Statement, {}
     for key, found in rows.items():
         if not state.cellar.has(key):
@@ -141,7 +142,7 @@ def take_statements(librarian, state, rows):
                               for r in found)
         except TypeError as exc:
             raise ValueError(f"span {str(key)[:12]}: {exc}") from None
-    state.statements = laid
+    state.statements, state.readers, state.unanswered = laid, {}, set()
 
 
 def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, system, gate=None, statements=None):
@@ -150,9 +151,11 @@ def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, 
     opened -- into the conversation's new state, the librarian in process with persistence and counters off;
     the turn is planned as the arm plans it: typed, counted with ``counter(model)`` for the model it was planned
     for, within the window the run planned it in, from the conversation as stored before it, under ``system``
-    and ``gate`` (the shipped one when None, as the run's). With ``statements``, what ``read`` wrote, the spans the
-    state holds are laid as read (``take_statements``) before the turn is planned, and a standing span the file
-    holds nothing of is refused by name: nothing is laid as read that was not."""
+    and ``gate`` (the shipped one when None, as the run's). What the store kept read of the state's spans comes
+    with it, checked again as a load checks it, and ``meta`` then says how many spans it covers and their digest
+    (``readings``). With ``statements``, what ``read`` wrote, the spans the state holds are laid as read in its
+    place (``take_statements``) before the turn is planned, and a standing span the file holds nothing of is
+    refused by name: nothing is laid as read that was not."""
     directory = Path(directory)
     meta = json.loads((directory / f"t{turn:03d}.json").read_text(encoding="utf-8"))
     work = Path(tempfile.mkdtemp(prefix="oo-drift-pairs-"))
@@ -165,6 +168,12 @@ def compose_recorded(librarian, onion_store, directory, turn, *, wrap, counter, 
         if onion_store.OnionStore(copy, connect=sqlite3.connect, require_encryption=False).load(
                 meta["cid"], state) is None:
             raise Refused(f"the store kept for turn {turn} does not know conversation {meta['cid']!r}")
+        carried = getattr(state, "statements", {})
+        if carried and statements is None:
+            rows = {key: [[s.turn_id, s.start, s.stop, s.subject, s.relation, s.value] for s in found]
+                    for key, found in carried.items()}
+            meta = dict(meta, readings={"spans": len(rows), "digest": hashlib.sha256(json.dumps(
+                rows, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]})
         if statements is not None:
             take_statements(librarian, state, statements)
             unread = [r.key for r in state.ledger.all()
@@ -508,6 +517,10 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
                        "refusal": None if window.refusal is None else str(window.refusal.motive)}
                 if digest is not None:
                     row["statements"] = digest
+                if "readings" in meta:
+                    # What the state carried read of its spans, laid only when this tree's reading is on.
+                    section = getattr(librarian, "_statements_section", lambda: None)()
+                    row["readings"] = dict(meta["readings"], laid=bool(section is not None and section.enabled))
                 if window.refusal is None:
                     messages, window_rung, num_ctx = _windowed(window)
                     row.update(messages=messages, layers=dict(window.layers), cut=[list(c) for c in window.cut],

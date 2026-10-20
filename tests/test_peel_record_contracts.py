@@ -52,6 +52,8 @@ lineages in its schema 2.
     the list of them is counted.
   * PC19 -- a file of schema 1 is brought to schema 2 in one transaction,
     every root unchanged, its peels read as they were saved.
+  * PC19b -- PC19, a file brought to this build's schema, the table of
+    what the librarian read with it, and no reading in it.
   * PC20 -- references, dropped sentences and lineages come back from the
     store as saved, and a reference moved in the file is refused.
   * PC21 -- a peel made before references shows as saved, memory, legacy too
@@ -841,6 +843,39 @@ def test_pc19_a_file_of_schema_one_is_brought_to_two_in_one_transaction_and_its_
             back = store.load("c1", lib.OnionState())
             (peel,) = back.tree.all()
             assert (peel.text, peel.stitched, peel.refs) == (old.text, old.stitched, ()), version
+    finally:
+        restore()
+
+
+def test_pc19b_a_file_of_schema_one_is_brought_to_this_builds_schema_in_one_transaction_and_its_peels_read_as_saved(
+        tmp_path):
+    lib, loaded, restore = _open(persisted=True)
+    try:
+        peels = loaded[_PEELS]
+        store_mod = loaded["opti_oignon.memory.onion_store"]
+        state, outcome = _accepted(lib, loaded)
+        old = replace(outcome.peel, refs=(), text=_SUMMARY + " [t0001] " + _ORDERING,
+                      stitched=(("t0001", 0, len(_ORDERING)),))
+        old = replace(old, id=peels.peel_id(old.text, old.sources))
+        state.tree = peels.PeelTree()
+        state.tree.add(old)
+        for version in (0, 1):
+            path = tmp_path / f"onion{version}.db"
+            root = _written_before(path, state, version)
+            store = _store(loaded, path)
+            conn = sqlite3.connect(str(path))
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == store_mod.SCHEMA_VERSION, version
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(onion_peel_marks)")}
+            assert {"refs", "dropped"} <= columns, version
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            assert {"onion_lineage", "onion_statements"} <= tables, version
+            assert conn.execute("SELECT root FROM onion_cursor").fetchone()[0] == root, ("the root is unchanged",
+                                                                                          version)
+            conn.close()
+            back = store.load("c1", lib.OnionState())
+            (peel,) = back.tree.all()
+            assert (peel.text, peel.stitched, peel.refs) == (old.text, old.stitched, ()), version
+            assert back.statements == {}, ("nothing read in a file written before readings", version)
     finally:
         restore()
 

@@ -56,6 +56,25 @@ is unreachable refuses and creates no file.
     nothing migrated, nothing marked, and the next opening migrates.
   * OS17-OS20 -- OS8, OS9, OS10 and OS12 over a state whose repaired peel
     references the user's words instead of copying them.
+  * OS21 -- what the librarian read of each standing span comes back from
+    the store as it was saved, a span that states nothing included, a
+    pronoun's subject known from an earlier span too; the readings are in
+    the root, and a state with none keeps the root it had; what was read of
+    a span the mirror superseded since is not saved.
+  * OS22 -- a reading moved in the file is refused by name; with the root
+    made to answer, so is a reading of a span the file does not hold
+    standing, a span read twice and a statement that does not decode; a
+    reading the checks no longer keep exactly as it was -- a value its
+    sentence does not hold, a value kept with its last punctuation, a
+    statement twice -- is left out with the readings that knew a subject
+    only from it, said, never refused.
+  * OS23 -- a file of schema 2 is brought up by the migration of the
+    readings, by name: the table added, every root unchanged, nothing read.
+  * OS24 -- readings the saved root does not cover, where the rest answers
+    to it -- a build that knew none saved the state over a file that held
+    some -- are left out, and said, and the next save holds none of them;
+    the reader of a reading is in the root, a digest or none: one moved is
+    refused by name, and so is one that is no digest.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the connection seam is blocked, so a
@@ -65,6 +84,8 @@ encrypted case.
 """
 
 import ast
+import json
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -73,6 +94,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _onion_journal as oj  # noqa: E402
 from _isolation import isolate, source  # noqa: E402
 
 _MODULES = ("probes", "core_store", "receipts", "composer", "peels", "librarian", "onion_store")
@@ -774,6 +796,222 @@ def test_os20_a_file_of_a_newer_schema_is_refused_by_name_and_left_as_it_was(tmp
         with pytest.raises(store_mod.OnionStoreError, match="newer than this build"):
             store_mod.OnionStore(path, connect=_plain, require_encryption=False)
         assert path.read_bytes() == before
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS21-OS23 -- what the librarian read of each span, on disk
+# ---------------------------------------------------------------------------
+_FACTS = ("Bob lives in Lyon.", "Alice lives in Berlin.", "She lives in Oslo now.")
+# What the librarian reads of each span, by the span's first turn: the third's subject is a pronoun's, known from the
+# second.
+_LINES = {"t0001": "t0001 | Bob | lives in | Lyon", "t0003": "t0003 | Alice | lives in | Berlin",
+          "t0005": "t0005 | Alice | lives in | Oslo now."}
+
+
+def _read_state(loaded, *, read=True):
+    """A state of four spans under accepted peels -- three the user typed a fact in, then a document's alone -- and
+    the root it has before any is read; each read by the librarian unless ``read`` is false."""
+    lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+    messages = []
+    for message in [oj.typed(words) for words in _FACTS] + [oj.with_document("", "Carol works at Initech.")]:
+        messages += [message, oj.answer("Noted.")]
+    messages += oj.conversation(4, start=len(messages) + 1)
+    state = lib.state_for("c1")
+    state.mirror(messages)
+    for n in range(4):
+        oj.accept(loaded, state, 2, f"The user stated fact {n + 1}.")
+    root = store_mod.onion_root(store_mod.snapshot_of(state))
+    if read:
+        reading = lambda turns, known=(): _LINES.get(str(turns[0]["turn_id"]), "NONE")  # noqa: E731
+        assert lib.read_spans(state, reading, limit=10) == 3, "control: three spans read, the document's not asked"
+    return state, messages, root
+
+
+def _rewritten(store_mod, path, statements):
+    """The readings of c1 in the file written as ``statements``, the root made to answer to them."""
+    from dataclasses import replace
+
+    conn = sqlite3.connect(str(path))
+    conn.execute("DELETE FROM onion_statements WHERE conversation = 'c1'")
+    conn.commit()
+    conn.close()
+    store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+    snapshot, _root = store.load_snapshot("c1")
+    root = store_mod.onion_root(replace(snapshot, statements=tuple(statements)))
+    conn = sqlite3.connect(str(path))
+    conn.executemany("INSERT INTO onion_statements (conversation, seq, span_key, reader, statements) "
+                     "VALUES ('c1', ?, ?, ?, ?)",
+                     [(i, key, reader, json.dumps([list(row) for row in found]))
+                      for i, (key, reader, found) in enumerate(statements)])
+    conn.execute("UPDATE onion_cursor SET root = ? WHERE conversation = 'c1'", (root,))
+    conn.commit()
+    conn.close()
+    return store
+
+
+def test_os21_what_the_librarian_read_of_the_standing_spans_comes_back_as_saved_and_is_in_the_root(tmp_path):
+    from dataclasses import replace
+
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state, messages, unread = _read_state(loaded)
+        keys = [r.key for r in state.ledger.all()]
+        assert [[(s.subject, s.value) for s in state.statements[key]] for key in keys] == [
+            [("Bob", "Lyon")], [("Alice", "Berlin")], [("Alice", "Oslo now")], []], "control: what was read"
+        snapshot = store_mod.snapshot_of(state)
+        assert [key for key, _reader, _found in snapshot.statements] == keys, "each span read, in the ledger's order"
+        root = store_mod.onion_root(snapshot)
+        assert root != unread, "the readings are in the root"
+        assert store_mod.onion_root(replace(snapshot, statements=())) == unread, "a state with none keeps its root"
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert store.save("c1", state) == root
+        back = store_mod.OnionStore(path, connect=_plain, require_encryption=False).load("c1", lib.OnionState())
+        assert back.statements == state.statements, "every reading, the pronoun's and a span that states nothing"
+        assert store_mod.onion_root(store_mod.snapshot_of(back)) == root
+        # A span the mirror superseded since: what was read of it is not saved.
+        edited = list(messages)
+        edited[4] = oj.typed("Alice is staying in Berlin.")
+        state.mirror(edited)
+        assert keys[2] in state.statements and lib._superseded(state, keys[2]), "control: superseded, still read"
+        store.save("c1", state)
+        conn = sqlite3.connect(str(path))
+        saved = [row[0] for row in conn.execute("SELECT span_key FROM onion_statements ORDER BY seq").fetchall()]
+        conn.close()
+        assert saved == keys[:2], "the standing spans' readings alone"
+        assert store.load("c1", lib.OnionState()).statements == {key: state.statements[key] for key in keys[:2]}
+    finally:
+        restore()
+
+
+def test_os22_a_reading_moved_is_refused_and_one_the_checks_no_longer_keep_is_left_out_and_said(tmp_path, caplog):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state, messages, _unread = _read_state(loaded)
+        keys = [r.key for r in state.ledger.all()]
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        read = list(store.load_snapshot("c1")[0].statements)
+        (bob,), (alice,), (oslo,) = read[0][2], read[1][2], read[2][2]
+        conn = sqlite3.connect(str(path))
+        moved = conn.execute("UPDATE onion_statements SET statements = replace(statements, 'Bob', 'Rob') "
+                             "WHERE seq = 0").rowcount
+        conn.commit()
+        conn.close()
+        assert moved == 1, "control: one reading moved in the file"
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not answer to its rows"):
+            store.load("c1", lib.OnionState())
+        # The root made to answer: a span read twice, a span the file does not hold, a row that does not decode.
+        _rewritten(store_mod, path, read + [read[0]])
+        with pytest.raises(store_mod.OnionIntegrityError, match="read twice"):
+            store.load("c1", lib.OnionState())
+        _rewritten(store_mod, path, read + [("f" * 64, "", ())])
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not hold standing"):
+            store.load("c1", lib.OnionState())
+        _rewritten(store_mod, path, [(keys[0], read[0][1], ((bob[0], str(bob[1]), *bob[2:]),))] + read[1:])
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not decode"):
+            store.load("c1", lib.OnionState())
+        # A reading the checks no longer keep exactly as it was: left out, with what knew a subject only from it.
+        caplog.set_level(logging.WARNING)
+        cases = (
+            ("a value its sentence does not hold", (*alice[:5], "Paris")),
+            ("a value kept with its last punctuation", (*alice[:5], "Berlin.")),
+        )
+        for why, moved_row in cases:
+            caplog.clear()
+            _rewritten(store_mod, path, [read[0], (keys[1], read[1][1], (moved_row,))] + read[2:])
+            back = store.load("c1", lib.OnionState())
+            assert back.statements == {keys[0]: state.statements[keys[0]], keys[3]: ()}, (
+                why, "the pronoun's reading knew Alice from it alone")
+            assert any("2 span reading(s) no longer borne out" in r.getMessage() for r in caplog.records), why
+        caplog.clear()
+        _rewritten(store_mod, path, [(keys[0], read[0][1], (bob, bob))] + read[1:])
+        back = store.load("c1", lib.OnionState())
+        assert back.statements == {key: state.statements[key] for key in keys[1:]}, "a statement twice"
+        assert any("1 span reading(s) no longer borne out" in r.getMessage() for r in caplog.records)
+        assert oslo[3] == "Alice", "control: the pronoun's subject"
+        # A reading of a span the file holds, superseded: not standing, refused.
+        edited = list(messages)
+        edited[4] = oj.typed("Alice is staying in Berlin.")
+        state.mirror(edited)
+        store.save("c1", state)
+        _rewritten(store_mod, path, read[:3])
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not hold standing"):
+            store.load("c1", lib.OnionState())
+    finally:
+        restore()
+
+
+def test_os23_a_file_of_schema_two_is_brought_up_by_the_readings_migration_every_root_unchanged(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state, _messages, unread = _read_state(loaded, read=False)
+        path = tmp_path / "onion.db"
+        assert store_mod.OnionStore(path, connect=_plain, require_encryption=False).save("c1", state) == unread
+        conn = sqlite3.connect(str(path))
+        conn.execute("DROP TABLE onion_statements")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+        conn.close()
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert (3, "statements") in [(target, name) for target, name, _step in store_mod._MIGRATIONS]
+        conn = sqlite3.connect(str(path))
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store_mod.SCHEMA_VERSION >= 3
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert "onion_statements" in tables
+        assert conn.execute("SELECT root FROM onion_cursor").fetchone()[0] == unread, "the root is unchanged"
+        conn.close()
+        back = store.load("c1", lib.OnionState())
+        assert back.statements == {} and store_mod.onion_root(store_mod.snapshot_of(back)) == unread
+    finally:
+        restore()
+
+
+def test_os24_readings_the_saved_root_does_not_cover_are_left_out_and_a_readers_identity_is_in_the_root(
+        tmp_path, caplog):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state, _messages, unread = _read_state(loaded)
+        keys = [r.key for r in state.ledger.all()]
+        state.readers = dict(state.readers, **{keys[0]: "a" * 64})
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        store.save("c1", state)
+        assert store.load("c1", lib.OnionState()).readers[keys[0]] == "a" * 64, "control: the reader saved"
+        # A build that knew no reading saved the state since: the root it wrote covers none of the rows left.
+        conn = sqlite3.connect(str(path))
+        conn.execute("UPDATE onion_cursor SET root = ? WHERE conversation = 'c1'", (unread,))
+        conn.commit()
+        conn.close()
+        caplog.set_level(logging.WARNING)
+        back = store.load("c1", lib.OnionState())
+        assert back.statements == {} and back.tree.all() == state.tree.all(), "left out, the rest as saved"
+        assert any("4 span reading(s) its saved root does not cover" in r.getMessage() for r in caplog.records)
+        store.save("c1", back)
+        conn = sqlite3.connect(str(path))
+        assert conn.execute("SELECT COUNT(*) FROM onion_statements").fetchone()[0] == 0, "the next save holds none"
+        conn.close()
+        # The reader is in the root: moved, refused; no digest, refused.
+        store.save("c1", state)
+        conn = sqlite3.connect(str(path))
+        moved = conn.execute("UPDATE onion_statements SET reader = ? WHERE seq = 0", ("b" * 64,)).rowcount
+        conn.commit()
+        conn.close()
+        assert moved == 1, "control: one reader moved in the file"
+        with pytest.raises(store_mod.OnionIntegrityError, match="does not answer to its rows"):
+            store.load("c1", lib.OnionState())
+        read = list(store_mod.snapshot_of(state).statements)
+        for reader in ("the 4B", "g" * 64, "A" * 64):
+            _rewritten(store_mod, path, [(keys[0], reader, read[0][2])] + read[1:])
+            with pytest.raises(store_mod.OnionIntegrityError, match="does not decode"):
+                store.load("c1", lib.OnionState())
     finally:
         restore()
 

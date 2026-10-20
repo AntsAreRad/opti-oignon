@@ -44,6 +44,12 @@ was pinned to (``--home-rung``).
     model no backend serves, a reading the model fails, a file that holds
     no statements by span or nothing of a span a state holds, and a tree
     whose librarian reads no statement are refused, and write nothing.
+  * DP7 -- A KEPT STATE SAYS WHAT IT CARRIED READ: a state kept with what
+    was read of its spans says, in each line ``compose`` writes, how many
+    spans it carried read, their digest and whether this tree laid them;
+    laid with ``--statements``, the file's take their place and the line
+    says the file alone; ``read`` lays what a state carried aside whole, so
+    no span is read again for the reader that read it.
 
 Local-only (the public distribution ships no tests). The scripts load as
 the drift A/B suite loads its own (tests/test_drift_ab_contracts.py); the
@@ -75,6 +81,7 @@ BUDGET_S = {
     "test_dp4_two_trees_compared_probe_by_probe": 2.0,
     "test_dp5_compose_end_to_end": 20.0,
     "test_dp6_what_the_librarian_reads_laid_on_the_same_states": 30.0,
+    "test_dp7_a_kept_state_says_what_it_carried_read": 45.0,
 }
 
 _ONION = ("probes", "drift", "core_store", "receipts", "composer", "peels", "librarian", "onion_store")
@@ -476,6 +483,62 @@ def test_dp6_what_the_librarian_reads_laid_on_the_same_states(tmp_path, monkeypa
         assert not any(tmp_path.glob("model.json*")) and not any(tmp_path.glob("failed.json*")) and not any(
             tmp_path.glob("listed.jsonl*")) and not any(tmp_path.glob("short.jsonl*")) and not any(
             tmp_path.glob("partial.jsonl*")) and not any(tmp_path.glob("off.jsonl*")), "a refusal writes nothing"
+    finally:
+        lib.reset_librarian()
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# DP7 -- a kept state says what it carried read
+# ---------------------------------------------------------------------------
+def test_dp7_a_kept_state_says_what_it_carried_read(tmp_path, monkeypatch):
+    """DP7: each line says the spans a kept state carried read, their digest and whether this tree laid them; the
+    file of ``--statements`` takes their place; ``read`` reads no span again for the reader that read it."""
+    ab, pairs = da._script(), _pairs()
+    loaded, restore = _window()
+    lib, store = loaded["opti_oignon.memory.librarian"], loaded[_STORE]
+    try:
+        states = tmp_path / "states"
+        _kept_run(ab, lib, loaded, states)
+        lib.reset_librarian()
+        out = tmp_path / "read.json"
+        assert pairs.read(states, out, model="small:1b", resolve=lambda name: _Reader(lib._STATEMENTS_PROMPT)) == 0
+        rows = json.loads(out.read_text(encoding="utf-8"))
+        # The same states, each kept with what was read of its spans, by a reader of its own.
+        carried = tmp_path / "carried"
+        shutil.copytree(states, carried)
+        for turn in _KEPT:
+            meta = json.loads((carried / f"t{turn:03d}.json").read_text(encoding="utf-8"))
+            kept = store.OnionStore(carried / f"t{turn:03d}.db", connect=sqlite3.connect, require_encryption=False)
+            lib.reset_librarian()
+            state = kept.load(meta["cid"], lib.OnionState())
+            pairs.take_statements(lib, state, rows)
+            state.readers = {key: "a" * 64 for key in state.statements}
+            kept.save(meta["cid"], state)
+        lib.reset_librarian()
+        backend = _Reader(lib._STATEMENTS_PROMPT)
+        again = tmp_path / "again.json"
+        assert pairs.read(carried, again, model="small:1b", resolve=lambda name: backend) == 0
+        assert json.loads(again.read_text(encoding="utf-8")) == rows and len(backend.read) == len(rows), (
+            "each span read once: what a state carried laid aside whole", len(backend.read), len(rows))
+        section = lib._statements_section()
+        composed = {}
+        for name, on in (("off", False), ("on", True)):
+            monkeypatch.setattr(lib, "_statements_section", lambda on=on: dataclasses.replace(section, enabled=on))
+            path = tmp_path / f"{name}.jsonl"
+            assert pairs.compose(carried, path, ask=False) == 0
+            composed[name] = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        spans = [r["readings"]["spans"] for r in composed["off"]]
+        assert spans == sorted(spans) and spans[0] > 0 and all(
+            len(r["readings"]["digest"]) == 16 for r in composed["off"]), ("each state says what it carried", spans)
+        assert {r["readings"]["laid"] for r in composed["off"]} == {False}, "laid only when this tree reads"
+        assert [r["readings"] for r in composed["on"]] == [dict(r["readings"], laid=True) for r in composed["off"]]
+        laid = tmp_path / "laid.jsonl"
+        assert pairs.compose(carried, laid, ask=False, statements=out) == 0
+        lines = [json.loads(line) for line in laid.read_text(encoding="utf-8").splitlines()]
+        assert [r["turn"] for r in lines] == list(_KEPT) and all(
+            "readings" not in r and r["statements"] == hashlib.sha256(out.read_bytes()).hexdigest()[:16]
+            for r in lines), "the file laid in their place, said alone"
     finally:
         lib.reset_librarian()
         restore()

@@ -76,6 +76,40 @@ relation | value``, kept only where the span's words bear it out.
     words and ``label_chars`` characters, never a subject that reads as the
     user's; and a subject the unit does not write, the user's included, is
     labelled only on a unit that refers by a pronoun.
+  * SD14 -- WHAT WAS READ IS SAVED, AND A RESTART READS NOTHING AGAIN: the
+    burst saves what it read with the state; loaded after a restart, the
+    state holds it -- a pronoun's subject, a value kept without the blanks
+    and punctuation it ended with -- reads nothing again, and composes the
+    same window, labels and all.
+  * SD15 -- A READING THE CHECKS NO LONGER KEEP IS READ AGAIN, NEVER LAID:
+    loaded under checks that no longer keep a reading as it was, it is left
+    out, and said; the window lays its words bare; the next burst reads its
+    span again, with the subjects known before it; with the section
+    unreadable, no reading is laid.
+  * SD16 -- A READING IS CHECKED AGAIN WITH EVERY SUBJECT KNOWN BEFORE IT:
+    a pronoun's reading knows a subject read spans before it, a span read
+    nothing in or more subjects than ``known`` between, and none read only
+    in a reading left out; the work grows with the readings, not with their
+    square.
+  * SD17 -- A READING ANOTHER READER MADE IS LAID UNTIL READ AGAIN: each
+    reading is saved with the identity of the reading that made it; under
+    another, it is laid until a burst reads its span again, after every
+    span not read, oldest first, and saved; a span the user typed nothing
+    in, and a reading that names no identity, are never read again for
+    one; a burst that only reads again saves what it read; a reading named
+    otherwise than by a digest is kept by its digest, and loads; the
+    registry's reading names the model, its sampling, its room and its
+    prompt.
+  * SD18 -- A BLANK ANSWER TAKES NOTHING AWAY: it states nothing, is not
+    asked again by the reading that gave it before a restart, is saved in
+    nothing, and is asked again after a restart; given for a span another
+    reader read, that reading stays laid and saved; a line with a field
+    that does not encode is refused (``encoding``), and the state still
+    saves.
+  * SD19 -- A RENEWAL LEAVES OUT WHAT KNEW A SUBJECT ONLY FROM WHAT IT
+    REPLACED: once a span is read again, a later reading that knew its
+    subject only from the reading replaced is left out, counted, and read
+    again by a later burst; the window laid is the one a restart lays.
   * SD8 -- WHAT THE QUESTION REFERS TO KEEPS ITS WORDS: a first-person word
     arms nothing, the user known or not, and a unit with a statement whose
     subject shares a word with the question is laid: "remind me when the
@@ -89,7 +123,9 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 import re
+import sqlite3
 import sys
 import unicodedata
 from dataclasses import replace
@@ -114,6 +150,12 @@ BUDGET_S = {
     "test_sd11_the_mode_as_written": 5.0,
     "test_sd12_a_label_shows_no_word_a_withdrawal_reached": 5.0,
     "test_sd13_a_label_names_and_nothing_else": 5.0,
+    "test_sd14_what_was_read_is_saved_and_a_restart_reads_nothing_again": 5.0,
+    "test_sd15_a_reading_the_checks_no_longer_keep_is_read_again_and_never_laid": 5.0,
+    "test_sd16_a_reading_is_checked_again_with_every_subject_known_before_it": 20.0,
+    "test_sd17_a_reading_another_reader_made_is_laid_until_its_span_is_read_again": 5.0,
+    "test_sd18_a_blank_answer_is_asked_again_after_a_restart_and_a_field_that_does_not_encode_is_refused": 5.0,
+    "test_sd19_a_renewal_leaves_out_what_knew_a_subject_only_from_the_reading_it_replaced": 5.0,
 }
 
 _BOB = "Bob lives in Lyon."
@@ -993,6 +1035,332 @@ def test_sd13_a_label_names_and_nothing_else(monkeypatch):
         chain = "-".join(["Ab"] * 30) + " lives in Oslo."
         assert labelled("c11", chain, f"t0003 | {'-'.join(['Ab'] * 30)} | lives in | Oslo") == chain, (
             "a name past sixty-four characters labels nothing")
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD14-SD15 -- what was read, across a restart
+# ---------------------------------------------------------------------------
+_SHE = "She lives in Oslo now."
+# What the librarian reads of the spans of Bob's, Alice's and her move's words: the move's subject a pronoun's, known
+# from the second span, its value written with blanks and punctuation after it.
+_READ_SHE = dict(_READ, t0005="t0005 | Alice | lives in | Oslo now. .")
+_SHE_PEELS = _PEELS[:2] + ("The user said she lives in Oslo now.",)
+
+
+def _persisted(loaded, tmp_path):
+    """A configuration that keeps the state in a store of the plain client under ``tmp_path``, and what installs
+    that store as the librarian builds one: again after a restart (``reset_librarian``)."""
+    lib, store_mod = loaded[oj.LIBRARIAN], loaded["opti_oignon.memory.onion_store"]
+    path = tmp_path / "onion.db"
+
+    def install():
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=lambda p: sqlite3.connect(str(p)),
+                                                               require_encryption=False)
+
+    install()
+    return oj.config(lib, persist_path=str(path), require_encryption=False), install
+
+
+def _burst(lib, cid, cfg, read):
+    return lib._curation_burst(cid, config=cfg, summarize=lambda turns, brief=None: "unused", read=read)
+
+
+def test_sd14_what_was_read_is_saved_and_a_restart_reads_nothing_again(tmp_path, monkeypatch):
+    """SD14: the burst saves what it read; after a restart the state holds it, reads nothing again and composes the
+    same window, labels and all."""
+    loaded, restore = oj.open_window(store=True)
+    lib = loaded[oj.LIBRARIAN]
+    try:
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg, install = _persisted(loaded, tmp_path)
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE, _SHE), _SHE_PEELS)
+        _burst(lib, "c1", cfg, _reading(_READ_SHE))
+        read = dict(state.statements)
+        assert [(s.subject, s.value) for key in read for s in read[key]] == [
+            ("Bob", "Lyon"), ("Alice", "Berlin"), ("Alice", "Oslo now")], "control: as read"
+        before = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0005", "(about Alice) " + _SHE) in _laid(before.messages[-1][1]), "control: the pronoun's label"
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert state.statements == read, "what was read comes back"
+        calls = []
+        _burst(lib, "c1", cfg, _reading(_READ_SHE, calls))
+        assert calls == [], "a restart reads nothing again"
+        after = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert oj.canonical(after) == oj.canonical(before), "the same window, labels and all"
+    finally:
+        restore()
+
+
+def test_sd15_a_reading_the_checks_no_longer_keep_is_read_again_and_never_laid(tmp_path, monkeypatch, caplog):
+    """SD15: under checks that no longer keep a reading, it is left out and said, its words laid bare; the next
+    burst reads its span again; with the section unreadable, no reading is laid."""
+    loaded, restore = oj.open_window(store=True)
+    lib, peels = loaded[oj.LIBRARIAN], loaded[oj.PEELS]
+    try:
+        section = _switched_on(lib, monkeypatch, newer_words="label")
+        cfg, install = _persisted(loaded, tmp_path)
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE, _SHE), _SHE_PEELS)
+        _burst(lib, "c1", cfg, _reading(_READ_SHE))
+        keys = [r.key for r in state.ledger.all()]
+        read = dict(state.statements)
+        # The checks change as the section can change them: "alice" becomes a word no subject may hold.
+        changed = replace(section, pronouns=section.pronouns | {"alice"})
+        monkeypatch.setattr(peels, "load_statements", lambda path=None: changed)
+        monkeypatch.setattr(lib, "_statements_section", lambda: changed)
+        lib.reset_librarian()
+        install()
+        caplog.set_level(logging.WARNING)
+        state = lib.state_for("c1", cfg)
+        assert state.statements == {keys[0]: read[keys[0]]}, "Alice's readings left out"
+        assert any("2 span reading(s) no longer borne out" in r.getMessage() for r in caplog.records)
+        win = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0005", _SHE) in _laid(win.messages[-1][1]), "laid bare, never as it was read"
+        calls = []
+        _burst(lib, "c1", cfg, _reading(_READ_SHE, calls))
+        assert calls == [(("t0003", "t0004"), ("Bob",)), (("t0005", "t0006"), ("Bob",))], calls
+        assert (state.statements[keys[1]], state.statements[keys[2]]) == ((), ()), "read again under these checks"
+
+        def unreadable(path=None):
+            raise peels.GateError("statements: the section is missing or not a mapping")
+
+        monkeypatch.setattr(peels, "load_statements", unreadable)
+        lib.reset_librarian()
+        install()
+        caplog.clear()
+        assert lib.state_for("c1", cfg).statements == {}, "nothing can be checked, so nothing is laid"
+        assert any("the statements section does not read" in r.getMessage() for r in caplog.records)
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD16-SD18 -- what a reading is checked again with, who made it, and what is never saved
+# ---------------------------------------------------------------------------
+_DOCUMENT = oj.with_document("", "Carol works at Initech.")
+
+
+def test_sd16_a_reading_is_checked_again_with_every_subject_known_before_it(monkeypatch):
+    """SD16: a pronoun's reading checked again knows a subject read spans before it, and none read only in a reading
+    left out; the work grows with the readings, not with their square."""
+    loaded, restore = oj.open_window()
+    lib, peels, probes = loaded[oj.LIBRARIAN], loaded[oj.PEELS], loaded["opti_oignon.memory.probes"]
+    try:
+        cfg = oj.config(lib)
+        state, _messages = _spans(loaded, "c1", cfg, (_ALICE, _DOCUMENT, _BOB, _SHE),
+                                  (_PEELS[1], "A document said Carol works at Initech.", _PEELS[0], _SHE_PEELS[2]))
+        lines = {"t0001": "t0001 | Alice | lives in | Berlin", "t0005": "t0005 | Bob | lives in | Lyon",
+                 "t0007": "t0007 | Alice | lives in | Oslo now"}
+        assert lib.read_spans(state, _reading(lines)) == 3, "control: the document's span asks nothing"
+        keys = [r.key for r in state.ledger.all()]
+        read = dict(state.statements)
+        assert [s.subject for s in read[keys[3]]] == ["Alice"] and read[keys[1]] == (), "control: the pronoun's"
+        section = peels.load_statements()
+        for said in (section, replace(section, known=1)):
+            assert peels.readings_borne_out(read, state.ledger, state.cellar, said) == (read, []), (
+                "every subject read before, a span read nothing in and another subject between", said.known)
+        left = {key: found for key, found in read.items() if key != keys[0]}
+        assert peels.readings_borne_out(left, state.ledger, state.cellar, section) == (
+            {keys[1]: (), keys[2]: read[keys[2]]}, [keys[3]]), "a subject known only from a reading left out"
+
+        def work(n):
+            """The words looked at to check again what was read of ``n`` spans, one subject each."""
+            state, _messages = _spans(loaded, f"w{n}", cfg, [f"Person {i} lives in Town {i}." for i in range(n)],
+                                      [f"The user said person {i} lives in town {i}." for i in range(n)])
+            answers = {f"t{2 * i + 1:04d}": f"t{2 * i + 1:04d} | Person {i} | lives in | Town {i}" for i in range(n)}
+            assert lib.read_spans(state, _reading(answers), limit=n) == n, "control: every span read"
+            looked, words, flat = [0], probes.folded_words, peels._flat
+
+            def counted(real):
+                def call(text):
+                    looked[0] += 1
+                    return real(text)
+
+                return call
+
+            monkeypatch.setattr(probes, "folded_words", counted(words))
+            monkeypatch.setattr(peels, "_flat", counted(flat))
+            try:
+                kept, stale = peels.readings_borne_out(dict(state.statements), state.ledger, state.cellar, section)
+            finally:
+                monkeypatch.setattr(probes, "folded_words", words)
+                monkeypatch.setattr(peels, "_flat", flat)
+            assert len(kept) == n and stale == [], "control: every reading kept"
+            return looked[0]
+
+        small, large = work(40), work(80)
+        assert large < 2.5 * small, ("the words looked at grow with the readings, not with their square", small, large)
+    finally:
+        restore()
+
+
+def test_sd17_a_reading_another_reader_made_is_laid_until_its_span_is_read_again(tmp_path, monkeypatch):
+    """SD17: a reading is saved with its reader's identity; another reader's is laid until a burst reads its span
+    again, after every span not read; never for a span typed nothing in, nor for a reading that names none."""
+    loaded, restore = oj.open_window(store=True)
+    lib = loaded[oj.LIBRARIAN]
+    try:
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg, install = _persisted(loaded, tmp_path)
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _DOCUMENT, _ALICE, _SHE),
+                                 (_PEELS[0], "A document said Carol works at Initech.", _PEELS[1], _SHE_PEELS[2]))
+        lines = {"t0001": "t0001 | Bob | lives in | Lyon", "t0005": "t0005 | Alice | lives in | Berlin",
+                 "t0007": "t0007 | Alice | lives in | Oslo now"}
+
+        def reader(identity, calls=None):
+            read = _reading(lines, calls)
+            read.identity = identity
+            return read
+
+        first, second = "a" * 64, "b" * 64
+        _burst(lib, "c1", cfg, reader(first))
+        keys = [r.key for r in state.ledger.all()]
+        named = {keys[0]: first, keys[1]: "", keys[2]: first, keys[3]: first}
+        assert state.readers == named, "control: each reading with its reader, none for the document's span"
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert state.readers == named, "saved with each reading"
+        win = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0007", "(about Alice) " + _SHE) in _laid(win.messages[-1][1]), "another reader's reading laid"
+        oj.accept(loaded, state, 2, "The user asked whether Alice reviewed a service.")
+        calls = []
+        _burst(lib, "c1", cfg, reader(second, calls))
+        assert [turns[0] for turns, _known in calls] == ["t0009", "t0001", "t0005", "t0007"], (
+            "the span not read first, then the others oldest first, the document's never", calls)
+        assert lib.counters()["statements"]["renewed"] == 3
+        assert set(state.readers.values()) == {second, ""}, "read again by this reader"
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert set(state.readers.values()) == {second, ""}, "saved as read again"
+        calls.clear()
+        _burst(lib, "c1", cfg, reader(second, calls))
+        _burst(lib, "c1", cfg, _reading(lines, calls))
+        assert calls == [], "the same reader, or one that names none, reads nothing again"
+        _burst(lib, "c1", cfg, reader(first, calls))
+        assert [turns[0] for turns, _known in calls] == ["t0001", "t0005", "t0007", "t0009"], calls
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert set(state.readers.values()) == {first, ""}, "a burst that only reads again saves what it read"
+        # A reading named otherwise than by a digest: kept by its digest, and the state loads.
+        import hashlib
+
+        for name in ("llama3:4b", "llama3:8b"):
+            _burst(lib, "c1", cfg, reader(name))
+            lib.reset_librarian()
+            install()
+            state = lib.state_for("c1", cfg)
+            assert set(state.readers.values()) == {hashlib.sha256(name.encode("utf-8")).hexdigest(), ""}, name
+        backend = _Backend()
+        said = loaded[oj.PEELS].load_statements()
+
+        def named(config=cfg, said_=None):
+            return lib.registry_reader(config, resolve=lambda _model: backend, said=said_).identity
+
+        registry = [named(), named(), named(replace(cfg, model="other:4b")), named(said_=replace(said, num_predict=999)),
+                    named(replace(cfg, temperature=0.7)), named(replace(cfg, seed=7))]
+        monkeypatch.setattr(lib, "_STATEMENTS_PROMPT", lib._STATEMENTS_PROMPT + " Be brief.")
+        registry.append(named())
+        assert all(len(name) == 64 for name in registry) and registry[0] == registry[1] and len(set(registry)) == 6, (
+            "the registry's reading names its model, its sampling, its room and its prompt", registry)
+    finally:
+        restore()
+
+
+def test_sd18_a_blank_answer_is_asked_again_after_a_restart_and_a_field_that_does_not_encode_is_refused(
+        tmp_path, monkeypatch):
+    """SD18: a blank answer takes nothing away, is not asked again by the reading that gave it before a restart, is
+    saved in nothing and asked again after one; a field that does not encode is refused, and the state saves."""
+    loaded, restore = oj.open_window(store=True)
+    lib, peels = loaded[oj.LIBRARIAN], loaded[oj.PEELS]
+    try:
+        _switched_on(lib, monkeypatch)
+        cfg, install = _persisted(loaded, tmp_path)
+        state, _messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE), _PEELS[:2])
+        answers, calls = {"t0001": "  \n", "t0003": "t0003 | Alice | lives in | Berlin"}, []
+        first = _reading(answers, calls)
+        first.identity = "a" * 64
+        _burst(lib, "c1", cfg, first)
+        keys = [r.key for r in state.ledger.all()]
+        assert keys[0] not in state.statements and lib.counters()["statements"]["blank"] == 1, "stating nothing"
+        calls.clear()
+        _burst(lib, "c1", cfg, first)
+        assert calls == [], "not asked again by the reading that answered blank"
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert keys[0] not in state.statements and keys[1] in state.statements, "nothing of it saved"
+        answers["t0001"] = "t0001 | Bob | lives in | Lyon"
+        _burst(lib, "c1", cfg, first)
+        assert [turns for turns, _known in calls] == [("t0001", "t0002")], "asked again after the restart, alone"
+        assert [s.subject for s in state.statements[keys[0]]] == ["Bob"]
+        # Another reader answers blank where the first read: the first's readings stay laid, and saved.
+        blank = _reading({"t0001": " ", "t0003": ""}, calls)
+        blank.identity = "b" * 64
+        calls.clear()
+        _burst(lib, "c1", cfg, blank)
+        assert [turns[0] for turns, _known in calls] == ["t0001", "t0003"], "control: asked to read them again"
+        assert ([s.subject for s in state.statements[keys[0]]], state.readers[keys[0]]) == (["Bob"], "a" * 64), (
+            "a blank answer takes nothing away")
+        _burst(lib, "c1", cfg, blank)
+        assert len(calls) == 2, "not asked again by it before a restart"
+        lib.reset_librarian()
+        install()
+        state = lib.state_for("c1", cfg)
+        assert ([s.subject for s in state.statements[keys[0]]], state.readers[keys[0]]) == (["Bob"], "a" * 64)
+        _burst(lib, "c1", cfg, blank)
+        assert len(calls) == 4, "asked again after a restart"
+        # A field that does not encode: half of a surrogate pair, in each field.
+        lone = chr(0xD800)
+        broken = (f"t0001 | Bob{lone} | lives in | Lyon", f"t0001 | Bob | lives{lone} in | Lyon",
+                  f"t0001 | Bob | lives in | Lyon{lone}", f"t0001{lone} | Bob | lives in | Lyon")
+        assert peels.read_statements("\n".join(broken), list(state.cellar.get(keys[0]))) == ([], ["encoding"] * 4)
+        state, _messages = _spans(loaded, "c2", cfg, (_BOB,), _PEELS[:1])
+        _burst(lib, "c2", cfg, _reading({"t0001": "\n".join(broken)}))
+        assert state.statements[state.ledger.all()[0].key] == () and lib.counters()["statements_refused"][
+            "encoding"] == 4, "refused, counted"
+        lib.reset_librarian()
+        install()
+        assert lib.state_for("c2", cfg).statements == {state.ledger.all()[0].key: ()}, "and the state saved"
+    finally:
+        restore()
+
+
+def test_sd19_a_renewal_leaves_out_what_knew_a_subject_only_from_the_reading_it_replaced(tmp_path, monkeypatch):
+    """SD19: once a span is read again, a later reading that knew its subject only from the reading replaced is
+    left out, counted, and read again by a later burst; the window laid is the one a restart lays."""
+    loaded, restore = oj.open_window(store=True)
+    lib = loaded[oj.LIBRARIAN]
+    try:
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg, install = _persisted(loaded, tmp_path)
+        state, messages = _spans(loaded, "c1", cfg, (_ALICE, _SHE), (_PEELS[1], _SHE_PEELS[2]))
+        first = _reading({"t0001": "t0001 | Alice | lives in | Berlin", "t0003": "t0003 | Alice | lives in | Oslo now"})
+        first.identity = "a" * 64
+        _burst(lib, "c1", cfg, first)
+        keys = [r.key for r in state.ledger.all()]
+        assert [s.subject for s in state.statements[keys[1]]] == ["Alice"], "control: the pronoun's, Alice known"
+        calls = []
+        second = _reading({"t0001": "NONE", "t0003": "t0003 | Alice | lives in | Oslo now"}, calls)
+        second.identity = "b" * 64
+        assert lib.read_spans(state, second, limit=1) == 1 and calls[0][0] == ("t0001", "t0002"), "control: one renewal"
+        assert state.statements[keys[0]] == () and keys[1] not in state.statements, "left out with what it knew"
+        assert lib.counters()["statements"]["stale"] == 1
+        live = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0003", _SHE) in _laid(live.messages[-1][1]), "laid bare"
+        lib._save_state("c1", state, cfg)
+        lib.reset_librarian()
+        install()
+        reloaded = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert oj.canonical(reloaded) == oj.canonical(live), "the window a restart lays"
+        calls.clear()
+        _burst(lib, "c1", cfg, second)
+        assert [turns for turns, _known in calls] == [("t0003", "t0004")], "read again by a later burst"
     finally:
         restore()
 

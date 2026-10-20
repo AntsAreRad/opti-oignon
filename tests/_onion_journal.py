@@ -31,9 +31,11 @@ SYSTEM = ("You are a careful assistant. Answer from what you are shown.",)
 MANIFEST = "Tools: none."
 
 
-def open_window(*, native=False):
-    """``(loaded, restore)``: the onion's modules and the wrapper, from source; the native core only if asked."""
-    targets = {f"opti_oignon.memory.{name}": source("memory", f"{name}.py") for name in MODULES}
+def open_window(*, native=False, store=False):
+    """``(loaded, restore)``: the onion's modules and the wrapper, from source; the native core and the onion store
+    only if asked."""
+    targets = {f"opti_oignon.memory.{name}": source("memory", f"{name}.py")
+               for name in MODULES + (("onion_store",) if store else ())}
     targets[WRAPPER] = source("agent", "untrusted_context.py")
     blocked = ("opti_oignon.inference_backend", "opti_oignon.db_utils")
     if native:

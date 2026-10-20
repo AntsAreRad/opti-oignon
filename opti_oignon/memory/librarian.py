@@ -14,8 +14,8 @@ client behind it, with the temperature, seed and keep-alive of
 ``onion.yaml``. One burst runs per conversation, and a state lock keeps the
 mirror, a step's commit, a save and the user's verbs from crossing. Once a
 burst has evicted what it could, it reads what the spans it has not read
-state, one call a span, and keeps by the span's key the statements the
-span's words bear out (``read_spans``), in the process only. It is
+state, one call a span, keeps by the span's key the statements the span's
+words bear out (``read_spans``), and saves them with the state. It is
 dispatched the way the auto-capture is: gated by the YAML, throttled by a
 watermark on the conversation's growth, run through an injectable runner
 that defaults to a daemon thread, and it never raises into a turn. And it
@@ -744,9 +744,20 @@ class OnionState:
         # what the next one is compared with: in memory, never persisted.
         self.journal = None
         # What the librarian read of each span of the Cellar, by its key: a
-        # tuple of ``peels.Statement`` (``read_spans``). In memory, never
-        # persisted: a restart reads the spans again.
+        # tuple of ``peels.Statement`` (``read_spans``). Saved with the state,
+        # the standing spans' alone, and checked again in the Cellar when the
+        # state is loaded (``onion_store``): a restart reads only the spans
+        # not read, and those whose reading the checks no longer keep.
         self.statements = {}
+        # The identity of the call that read each span, by its key
+        # (``registry_reader``): "" for a span the user typed nothing in, or one
+        # read by a reading that names none. Saved with the reading: one another
+        # identity made is laid until a burst reads its span again.
+        self.readers = {}
+        # The spans a reading answered blank in this process, each with that
+        # reading's identity: it does not ask them again before a restart, and
+        # nothing of the answer is saved.
+        self.unanswered = set()
         self.lock = threading.RLock()
         self.slot = threading.Lock()
 
@@ -1558,7 +1569,9 @@ def registry_reader(config, resolve=None, *, run=None, said=None):
     one last JSON line in the user's role, data like the turns, listing
     them. The answer has room for the section's ``num_predict`` tokens. Each
     call is governed by ``run``, or by a run of its own. ``said`` is the
-    ``statements`` section (``load_statements`` when None).
+    ``statements`` section (``load_statements`` when None). The reading
+    names itself (``identity``): the model, its sampling, its room and its
+    prompt, as a digest, the identity each span it reads is kept with.
     """
     from .peels import load_statements
 
@@ -1574,6 +1587,7 @@ def registry_reader(config, resolve=None, *, run=None, said=None):
             content += "\n" + json.dumps({"known": list(known)}, ensure_ascii=False)
         return run.ask(backend, _STATEMENTS_PROMPT, content, num_predict=said.num_predict)
 
+    read.identity = _call_identity(replace(config, num_predict=said.num_predict), _STATEMENTS_PROMPT)
     return read
 
 
@@ -1591,26 +1605,52 @@ def read_spans(state, read, *, said=None, limit=None):
     window cannot hold (``over_window``) is passed over for the next one,
     and asked again by a later reading; any other call refused by its run,
     or that fails, stops the readings. Each is counted by its motive.
-    Nothing is persisted: a restart reads them again.
+    What is kept is saved with the state by the burst that read it, with the
+    identity of the reading that made it (``_reader_identity``): a span
+    another identity read is read again after every span not read yet,
+    oldest first, its reading laid until then -- a new model or prompt
+    renews what was read, one burst at a time. A blank answer states nothing
+    and takes nothing away: what the span had stays laid, the reading does
+    not ask it again before a restart, and nothing of it is saved. Once a
+    span is renewed, the readings are checked again as a load checks them
+    (``peels.readings_borne_out``): one that knew a subject only from what
+    was replaced is left out, for its span to be read again, so what is laid
+    is what a restart would lay.
     """
-    from .peels import CallRefused, _typed_units, known_subjects, load_statements, read_statements
+    from .peels import (
+        CallRefused,
+        _typed_units,
+        known_subjects,
+        load_statements,
+        read_statements,
+        readings_borne_out,
+    )
 
     said = said or load_statements()
     limit = said.per_burst if limit is None else limit
-    done, passed = 0, set()
+    identity = _reader_identity(read)
+    done, passed, renewals = 0, set(), 0
     while done < limit:
         with state.lock:
             standing = [r.key for r in state.ledger.all() if r.kind != "superseded" and state.cellar.has(r.key)]
+            # What this reading answered blank in this process is not asked again before a restart.
+            passed |= {key for key, by in state.unanswered if by == identity}
             unread = [key for key in standing if key not in state.statements and key not in passed]
+            if identity:
+                # What another reading read stays laid until its span is read again, after every span not read.
+                unread += [key for key in standing if key in state.statements and key not in passed
+                           and state.readers.get(key, "") not in ("", identity)]
             if not unread:
                 break
             key = unread[0]
+            renewed = key in state.statements
             before = standing[:standing.index(key)]
             known = known_subjects([s for k in before for s in state.statements.get(k, ())])[-said.known:]
             span = list(state.cellar.get(key))
             if not _typed_units(span):
                 # A span the user typed nothing in states nothing of theirs: no call.
                 state.statements[key] = ()
+                state.readers[key] = ""
                 _counted("statements", "nothing_typed")
                 continue
         try:
@@ -1626,17 +1666,47 @@ def read_spans(state, read, *, said=None, limit=None):
             _counted("statements", "call_failed")
             break
         kept, refused = read_statements(answer, span, known, said)
+        answered = bool(str(answer or "").strip())
         with state.lock:
             if _superseded(state, key):
                 _counted("statements", "superseded")
                 continue
-            state.statements[key] = tuple(kept)
+            if answered:
+                state.statements[key] = tuple(kept)
+                state.readers[key] = identity
+            else:
+                state.unanswered.add((key, identity))
         done += 1
+        if not answered:
+            _counted("statements", "blank")
+        elif renewed:
+            renewals += 1
+            _counted("statements", "renewed")
         _counted("statements", "read")
         _counted("statements", "kept", len(kept))
         for motive in refused:
             _counted("statements_refused", motive)
+    if renewals:
+        with state.lock:
+            _kept, stale = readings_borne_out(state.statements, state.ledger, state.cellar, said)
+            for key in stale:
+                state.statements.pop(key, None)
+                state.readers.pop(key, None)
+        _counted("statements", "stale", len(stale))
     return done
+
+
+def _reader_identity(read):
+    """The identity a reading names itself by (``read.identity``), as a store keeps it: a SHA-256 digest -- a name
+    that is none is taken by its digest -- or "" for a reading that names none."""
+    import hashlib
+
+    name = getattr(read, "identity", "")
+    if not isinstance(name, str) or not name:
+        return ""
+    if len(name) == 64 and set(name) <= set("0123456789abcdef"):
+        return name
+    return hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def _call_identity(config, system):
@@ -1908,7 +1978,8 @@ def _curation_burst(conversation_id, *, config=None, summarize=None, gate=None, 
     could, the burst reads what the spans it has not read state
     (``read_spans``) -- with the registry's reading under the same run when
     the ``statements`` section is on, or ``read`` when handed in -- unless a
-    call of its own has failed, been refused or spent the run.
+    call of its own has failed, been refused or spent the run, and saves the
+    state when a span was read.
     """
     config = config or load_config()
     said = None
@@ -1948,7 +2019,13 @@ def _curation_burst(conversation_id, *, config=None, summarize=None, gate=None, 
             _save_state(conversation_id, state, config)
         # A model a step stopped asking is not asked to read either.
         if read is not None and summarize is not None:
-            read_spans(state, read, said=said)
+            with state.lock:
+                read_before = set(state.statements)
+            asked = read_spans(state, read, said=said)
+            with state.lock:
+                grown = set(state.statements) != read_before
+            if asked or grown:
+                _save_state(conversation_id, state, config)
         return steps
     finally:
         if run is not None:
@@ -3766,7 +3843,8 @@ def close_onion(conversation_id, *, config=None, summarize=None, gate=None, ladd
     model, and its calls are governed by one run, as a burst's are: within
     its budget of time on the model, whatever the number of spans. A close
     is a writer of evictions like a burst: it waits for the burst in
-    flight, if any, and none starts until it is done.
+    flight, if any, and none starts until it is done. It reads nothing of
+    the spans it evicts: the next burst does, before or after a restart.
     """
     from .peels import advance, load_gate, load_ladder
 

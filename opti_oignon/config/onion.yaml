@@ -597,7 +597,12 @@ queue:
 # names a known subject leave out a unit whose statements are of nothing
 # the question refers to. No subject holds a word of `pronouns` -- "you"
 # and the words of a group among them; the first-person words say the
-# user. Kept in the process: a restart reads the spans again.
+# user. What is read is saved with the state when it persists
+# (persistence.path), with the identity of the reading that made it, and
+# checked again when the state is loaded: a restart reads only the spans
+# not read, those whose reading the checks no longer keep, those another
+# model or prompt read, and those a blank answer left; without a path, a
+# restart reads them all again.
 # What the newer words do with what was read (newer_words): `label` lays
 # each unit read with whom it speaks of, "(about Alice)", each name in at
 # most label_words words and label_chars characters, and leaves out

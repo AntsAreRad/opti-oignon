@@ -11,6 +11,44 @@ package costs.
 
 ### Added
 
+- What the librarian read survives a restart. With a persistence path in
+  `onion.yaml`, the burst that reads a span saves what it read with the
+  state, in a table of the onion store of its own -- the standing spans'
+  readings alone, a span that states nothing included -- and in the
+  store's root once a state holds a reading, so a state without one keeps
+  the root it had. The table comes with a third schema, brought up by
+  name; a build of an older schema refuses the file by name. A load checks
+  each statement again in the Cellar as a line is checked when it is
+  read, handed the subjects of the readings kept before it: a reading
+  those checks no longer keep exactly as it was -- the section's words or
+  the checks themselves changed since -- is not laid, its count said in
+  the log, and the next burst reads its span again; a reading of a span
+  the file does not hold standing, of one span twice, or that does not
+  decode refuses the state by name; readings the saved root does not
+  cover, where the rest answers to it -- a process of an older build saved
+  the state since -- are left out, and said. Each reading is saved with the
+  identity of the reading that made it (model, sampling, room, prompt):
+  one another identity made stays laid until a burst reads its span again,
+  after every span not read, so a new model or prompt renews what was read
+  one burst at a time, and once a span is read again the readings are
+  checked again, so what is laid is what a restart lays. A blank answer
+  takes nothing away and is saved in nothing: the reading that gave it
+  asks the span again only after a restart. A line with a field that does
+  not encode is refused, so no reading can stop a save. A close still
+  reads nothing: the next burst
+  reads what it evicted. A value is kept without the blanks and
+  punctuation it ends with, however they alternate, so a line reads the
+  same when it is checked again. A load checks the readings in a time
+  linear in them. `scripts/drift_pairs.py compose` says, in each line, how
+  many spans a kept state carried read, their digest and whether the tree
+  laid them. The 77 kept windows of the paired bench,
+  composed again from states whose readings the store saved and loaded,
+  are byte for byte those composed with the readings laid as read; with
+  the loading of readings skipped, 34 differ, the windows the labels
+  change. On the maintainer's machine a 4B librarian had taken 15 to 25
+  seconds to read each of the bench's conversations, 31 to 38 spans,
+  which a restart now leaves unread.
+
 - The newer words say whom they speak of. With the `statements` section of
   `onion.yaml` on, each unit the newer words lay again whose statements the
   librarian read says whom it speaks of before its words -- "(about Alice)

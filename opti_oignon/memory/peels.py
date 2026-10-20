@@ -2381,14 +2381,17 @@ def read_statements(answer, span, known=(), said=None):
     answer's order, each once, and the motive of each line refused, in order.
 
     One line a statement, ``turn | subject | relation | value``; a blank
-    line or ``NONE`` says nothing, any other shape is refused (``form``). A
-    line is kept when each field holds:
+    line or ``NONE`` says nothing, any other shape is refused (``form``), and
+    so is a line with a field that does not encode as UTF-8 -- half of a
+    surrogate pair -- which no store could keep (``encoding``). A line is
+    kept when each field holds:
       * the turn is one of the span's the user typed (``_typed_units``),
         never the words of the assistant, a document, a tool or a peer
         (``turn``);
-      * the value, without its last punctuation, stands within one sentence
-        the user typed in that turn, its words one after another as the
-        probes read words -- case and accents aside (``value``);
+      * the value, without the punctuation and blanks it ends with
+        (``_bare``), stands within one sentence the user typed in that
+        turn, its words one after another as the probes read words -- case
+        and accents aside (``value``);
       * the subject holds no pronoun (``pronoun``); the user -- ``user``, or
         first-person words alone -- only in a turn that holds a first-person
         word; any other is written, word after word, in a sentence the user
@@ -2419,50 +2422,119 @@ def read_statements(answer, span, known=(), said=None):
         if fields is None:
             refused.append("form")
             continue
-        turn_id, subject, relation, value = fields
-        mine = [unit for unit in units if unit.turn_id == turn_id]
-        if not mine:
-            refused.append("turn")
+        statement, motive = _borne_out(*fields, units, order, known, said)
+        if statement is None:
+            refused.append(motive)
             continue
-        value = value.rstrip(_STATEMENT_TAIL).strip()
-        holding = [unit for unit in mine if _words_within(value, unit.text)]
-        if not holding:
-            refused.append("value")
-            continue
-        words = set(folded_words(subject))
-        if words & said.pronouns:
-            refused.append("pronoun")
-            continue
-        user = _flat(subject) == "user" or (bool(words) and words <= said.first_person)
-        if user:
-            if not any(set(folded_words(unit.text)) & said.first_person for unit in mine):
-                refused.append("subject")
-                continue
-            subject = "user"
-        else:
-            written = [unit.text for unit in units if order[unit.turn_id] <= order[turn_id]]
-            if not words or _flat(subject) == _flat(value) or (
-                    not any(_words_within(subject, text) for text in written)
-                    and tuple(folded_words(subject)) not in known):
-                refused.append("subject")
-                continue
-        if not 1 <= len(relation.split()) <= _RELATION_WORDS:
-            refused.append("relation")
-            continue
-        tied = [u for u in holding if (set(folded_words(u.text)) & said.first_person if user
-                                       else _words_within(subject, u.text))]
-        if user and len(tied) > 1:
-            tied = []
-        if not tied and len(holding) > 1:
-            refused.append("place")
-            continue
-        unit = (tied or holding)[0]
-        statement = Statement(turn_id, unit.start, unit.stop, subject, relation, value)
-        identity = (turn_id, unit.start, unit.stop, _flat(subject), _flat(relation), _flat(value))
-        if identity not in seen:
-            seen.add(identity)
+        if _identity(statement) not in seen:
+            seen.add(_identity(statement))
             kept.append(statement)
     return kept, refused
+
+
+def _bare(value):
+    """A value without the blanks and the punctuation it may end with, however they alternate: "Oslo. ." reads
+    "Oslo", so a value kept reads the same when its line is checked again."""
+    bare = str(value).strip()
+    while bare and bare[-1] in _STATEMENT_TAIL:
+        bare = bare[:-1].rstrip()
+    return bare
+
+
+def _encodes(text):
+    """Whether ``text`` encodes as UTF-8: half of a surrogate pair does not."""
+    try:
+        str(text).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _identity(statement):
+    """What makes two statements one: their place, and their three fields as a statement is matched."""
+    return (statement.turn_id, statement.start, statement.stop, _flat(statement.subject), _flat(statement.relation),
+            _flat(statement.value))
+
+
+def _borne_out(turn_id, subject, relation, value, units, order, known, said):
+    """``(statement, None)`` when the words the user typed in a span -- its typed ``units``, its turns in ``order``
+    -- bear out a line's four fields, as ``read_statements`` says; else ``(None, motive)``, the first check failed.
+    ``known`` holds the known subjects' words."""
+    from .probes import folded_words
+
+    if not all(_encodes(field) for field in (turn_id, subject, relation, value)):
+        return None, "encoding"
+    mine = [unit for unit in units if unit.turn_id == turn_id]
+    if not mine:
+        return None, "turn"
+    value = _bare(value)
+    holding = [unit for unit in mine if _words_within(value, unit.text)]
+    if not holding:
+        return None, "value"
+    words = set(folded_words(subject))
+    if words & said.pronouns:
+        return None, "pronoun"
+    user = _flat(subject) == "user" or (bool(words) and words <= said.first_person)
+    if user:
+        if not any(set(folded_words(unit.text)) & said.first_person for unit in mine):
+            return None, "subject"
+        subject = "user"
+    else:
+        written = [unit.text for unit in units if order[unit.turn_id] <= order[turn_id]]
+        if not words or _flat(subject) == _flat(value) or (
+                not any(_words_within(subject, text) for text in written)
+                and tuple(folded_words(subject)) not in known):
+            return None, "subject"
+    if not 1 <= len(relation.split()) <= _RELATION_WORDS:
+        return None, "relation"
+    tied = [u for u in holding if (set(folded_words(u.text)) & said.first_person if user
+                                   else _words_within(subject, u.text))]
+    if user and len(tied) > 1:
+        tied = []
+    if not tied and len(holding) > 1:
+        return None, "place"
+    unit = (tied or holding)[0]
+    return Statement(turn_id, unit.start, unit.stop, subject, relation, value), None
+
+
+def readings_borne_out(readings, ledger, cellar, said=None):
+    """``(kept, stale)``: of ``readings`` -- what was read of each span, its statements by the span's key, as a store
+    kept them -- those the words of their span still bear out as they were kept, and the keys of the others.
+
+    The standing spans are gone through in the ledger's order, each handed the
+    subjects of the readings kept before it -- all of them, where a reading
+    was handed the latest ``known``: a subject the memory knew stays known --
+    gathered once as the readings are kept, so a load takes a time linear in
+    the readings. A
+    reading is kept when each of its statements, its line checked again as
+    ``read_statements`` checks one, comes back exactly as it was kept -- its
+    turn, its place, its subject, relation and value -- and no two are one;
+    any other is stale, for its span to be read again: a reading the checks
+    of this build no longer keep is never laid. A reading of a span not
+    standing is the caller's to refuse. ``said`` is the section of
+    ``onion.yaml`` (``load_statements`` when None).
+    """
+    from .probes import folded_words
+
+    said = said or load_statements()
+    kept, stale, named, known = {}, [], set(), set()
+    for key in dict.fromkeys(r.key for r in ledger.all() if r.kind != "superseded" and cellar.has(r.key)):
+        if key not in readings:
+            continue
+        found = tuple(readings[key])
+        span = list(cellar.get(key))
+        units, order = _typed_units(span), {str(t.get("turn_id", "")): n for n, t in enumerate(span)}
+        again = [_borne_out(s.turn_id, s.subject, s.relation, s.value, units, order, known, said)[0] for s in found]
+        if again == list(found) and len({_identity(s) for s in found}) == len(found):
+            kept[key] = found
+            # Each subject once, as first written, as ``known_subjects`` names them.
+            for statement in found:
+                if _flat(statement.subject) not in named:
+                    named.add(_flat(statement.subject))
+                    known.add(tuple(folded_words(statement.subject)))
+        else:
+            stale.append(key)
+    return kept, stale
 
 
 def about(names):
