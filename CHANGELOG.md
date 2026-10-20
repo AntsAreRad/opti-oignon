@@ -3248,6 +3248,18 @@ package costs.
 
 ### Fixed
 
+- The onion carries any text. A surrogate -- half of a pair, the kind a
+  JSON escape decodes into a string, or a pair split in two -- has no form
+  in UTF-8, and a span, a peel, a Core entry and the store's root are
+  named by digests of UTF-8: in a turn's words it stopped the span's
+  eviction, at every burst, and in a summary the model wrote it stopped
+  the peel's. The mirror, the queue's reading of a summary and the user's
+  pins now keep each surrogate as the replacement character, one
+  character for one, so every place in the text -- a part's bounds, an
+  anchor, a reference -- stays where it was, and a conversation seen again
+  is seen as the same; a text that holds none is kept as it was, and so is
+  every digest and root of it. A pin that is no string is refused by name.
+
 - The memory a question brings shows, in the user's own words, a statement
   newer than an item it lays that answers the question alike. A summary
   keeps a fact's new value, not always that it is new: "User stated Alice

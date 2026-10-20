@@ -75,6 +75,21 @@ is unreachable refuses and creates no file.
     some -- are left out, and said, and the next save holds none of them;
     the reader of a reading is in the root, a digest or none: one moved is
     refused by name, and so is one that is no digest.
+  * OS25 -- THE ONION CARRIES ANY TEXT: a surrogate, which UTF-8 cannot
+    carry -- half of a pair, or a pair split in two -- in a message, in a
+    summary the model wrote or in a pin is kept as the replacement
+    character, one character for one, so every place in the text stays;
+    the conversation seen again is the same; the state evicts, saves and
+    loads; a label or a lineage that holds one is read outside the grammar,
+    never raised, and a role that holds one is kept as words are; a text
+    that holds none is kept as it was; a pin that is no string is
+    refused by name.
+  * OS26 -- EVERY WAY A SUMMARY BECOMES A PEEL KEEPS IT SO: a second
+    asking, a leaf, a gated eviction and a parent the model summarised with
+    a surrogate keep it as the replacement character; ``storable`` replaces
+    every surrogate, the halves a byte-escaping decoder leaves among them,
+    and nothing else: the characters on either side of the range, a NUL,
+    marks not composed, blanks at either end, a long text, all as they were.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the connection seam is blocked, so a
@@ -1012,6 +1027,102 @@ def test_os24_readings_the_saved_root_does_not_cover_are_left_out_and_a_readers_
             _rewritten(store_mod, path, [(keys[0], reader, read[0][2])] + read[1:])
             with pytest.raises(store_mod.OnionIntegrityError, match="does not decode"):
                 store.load("c1", lib.OnionState())
+    finally:
+        restore()
+
+
+def test_os25_the_onion_carries_any_text_a_surrogate_kept_as_the_replacement_character(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        peels, probes = loaded["opti_oignon.memory.peels"], loaded["opti_oignon.memory.probes"]
+        composer, core_store = loaded["opti_oignon.memory.composer"], loaded["opti_oignon.memory.core_store"]
+        lone, split, shown = chr(0xD800), chr(0xD83D) + chr(0xDE00), chr(0xFFFD)
+        typed = f"Bob lives in Lyon{lone}. Alice moved{split} to Oslo on 2026-03-04."
+        kept = typed.replace(lone, shown).replace(split, shown * 2)
+        messages = [oj.typed(typed), oj.answer(f"Noted{lone}: Alice moved to Oslo."), oj.typed("And Carol?"),
+                    oj.answer("Carol stays in Lille.")]
+        state = lib.state_for("c1")
+        assert state.mirror(messages) == 4
+        first = state.flesh.turns()[0]
+        assert first["text"] == kept and len(kept) == len(typed), "one character for one: every place stays"
+        assert first["segments"] == [[0, len(typed), "typed"]], "the parts where they were"
+        assert state.flesh.turns()[1]["text"] == f"Noted{shown}: Alice moved to Oslo."
+        assert state.mirror(messages) == 0, "the same conversation seen again as the same"
+        # A summary the model wrote with one, through the queue's ladder.
+        gate = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        tiny = composer.Budget(window=780, reserve=60, core=60, receipts=300, peels=160, flesh=1, turn=60)
+        outcome = lib.curate(state, lambda turns: _faithful(turns) + lone, gate=gate, budget=tiny)
+        assert outcome.evicted and outcome.peel is not None and outcome.peel.text.endswith(shown), outcome.rung
+        assert [t["text"] for t in state.cellar.get(outcome.receipt.key)][0] == kept, "the span as mirrored"
+        # A pin, and its successor, with one.
+        entry = lib.pin("c1", f"Answer in French{lone}.", actor=core_store.USER)
+        assert state.core.get(entry).text == f"Answer in French{shown}."
+        successor = lib.supersede("c1", entry, f"Answer in French or English{lone}.", actor=core_store.USER)
+        assert state.core.get(successor).text == f"Answer in French or English{shown}."
+        # The state saves and loads, its root with it.
+        path = tmp_path / "onion.db"
+        root = store_mod.OnionStore(path, connect=_plain, require_encryption=False).save("c1", state)
+        back = store_mod.OnionStore(path, connect=_plain, require_encryption=False).load("c1", lib.OnionState())
+        _same(state, back)
+        assert store_mod.onion_root(store_mod.snapshot_of(back)) == root
+        # A label or a lineage that holds one: read outside the grammar, never raised; a role that holds one is kept
+        # as the words are; the state saves.
+        other = lib.state_for("c2")
+        assert other.mirror([dict(oj.typed("Hi there."), context=["document" + lone], lineage=["document:" + lone]),
+                             {"role": "assistant" + lone, "content": "Hello."}]) == 2
+        first_other = other.flesh.turns()[0]
+        assert first_other["text"] == "Hi there." and other.flesh.turns()[1]["role"] == "assistant" + shown
+        assert first_other["context"] == ["legacy"] and other.lineage[first_other["turn_id"]] == (peels.CUT,), (
+            "read outside the grammar")
+        store_mod.OnionStore(path, connect=_plain, require_encryption=False).save("c2", other)
+        # A text that holds none is kept as it was; a pin that is no string is refused by name, the Core untouched.
+        plain = "Bob lives in Lyon. Caf" + chr(0xE9) + " " + chr(0x1F600) + "."
+        assert probes.storable(plain) == plain
+        held = [(e.id, e.text, e.superseded_by) for e in state.core.all()]
+        for verb in (lambda: lib.pin("c1", None, actor=core_store.USER),
+                     lambda: lib.pin("c1", 123, actor=core_store.USER),
+                     lambda: lib.supersede("c1", successor, None, actor=core_store.USER)):
+            with pytest.raises(TypeError, match="the user's words as a string"):
+                verb()
+        assert [(e.id, e.text, e.superseded_by) for e in state.core.all()] == held
+    finally:
+        restore()
+
+
+def test_os26_every_way_a_summary_becomes_a_peel_keeps_a_surrogate_as_the_replacement_character():
+    from dataclasses import replace
+
+    loaded, restore = _open()
+    try:
+        lib, peels, probes = (loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.peels"],
+                              loaded["opti_oignon.memory.probes"])
+        lone, shown = chr(0xD800), chr(0xFFFD)
+        state = lib.state_for("c1")
+        state.mirror(_TYPED * 2)
+        # A second asking: the first summary loses a decision, the second holds a surrogate.
+        decision = "We keep Docker on the build server."
+        outcome = peels.advance(flesh=state.flesh, cellar=state.cellar, ledger=state.ledger, tree=state.tree,
+                                lock=state.lock, gate=replace(peels.load_gate(), span_turns=2),
+                                ladder=peels.load_ladder(), summarize=lambda turns: _LOSSY,
+                                reask=lambda turns, missing: _LOSSY + " " + decision + lone, refusals={})
+        assert outcome.rung == "reasked" and outcome.peel.text.endswith(shown), outcome.rung
+        simple = peels.Gate(decision_threshold=0.9, episodic_threshold=0.7, span_turns=2)
+        leaf, _decision = peels.build_leaf(outcome.receipt.key, state.cellar, lambda turns: _faithful(turns) + " " + lone,
+                                           simple, state.tree)
+        assert leaf is not None and leaf.text.endswith(shown), "a leaf"
+        gated = peels.evict_gated(flesh=state.flesh, cellar=state.cellar, ledger=state.ledger, tree=state.tree,
+                                  gate=simple, summarize=lambda turns: _faithful(turns) + lone)
+        assert gated.evicted and gated.peel.text.endswith(shown), "a gated eviction"
+        children = [p.id for p in state.tree.all() if p.level == 0][-2:]
+        built = peels.build_parent(children, state.cellar, lambda turns: _faithful(turns) + lone, simple, state.tree)
+        parent = built[0] if isinstance(built, tuple) else built
+        assert parent is not None and parent.level == 1 and parent.text.endswith(shown), "a parent"
+        # Every surrogate, the halves a byte-escaping decoder leaves among them, and nothing else.
+        edges = chr(0xD7FF) + chr(0xD800) + chr(0xDBFF) + chr(0xDC00) + chr(0xDC80) + chr(0xDCFF) + chr(0xDFFF) + chr(0xE000)
+        assert probes.storable(edges) == chr(0xD7FF) + shown * 6 + chr(0xE000)
+        sample = "  e" + chr(0x301) + " " + chr(0) + chr(0x1F600) + " Caf" + chr(0xE9) + " " * 3 + "x" * 5000 + "  "
+        assert probes.storable(sample) == sample, "a text that holds none, as it was"
     finally:
         restore()
 

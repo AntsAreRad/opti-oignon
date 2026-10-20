@@ -797,7 +797,7 @@ class OnionState:
         turn's own (``declared``), so a window lays those words bare; no
         other turn carries them, and they are no part of what the turn is.
         """
-        from .probes import _stored_context, read_origin
+        from .probes import _stored_context, read_origin, storable
 
         valid = [
             m for m in (messages or [])
@@ -807,7 +807,9 @@ class OnionState:
             return 0
         incoming = []
         for m in valid:
-            role, text = str(m.get("role", "") or ""), str(m.get("content", ""))
+            # What UTF-8 cannot carry no hash or store of the onion takes: each surrogate as the replacement
+            # character, every place in the text where it was (``probes.storable``).
+            role, text = storable(m.get("role", "") or ""), storable(m.get("content", ""))
             origin, segments, defect = read_origin(
                 {"role": role, "text": text, "origin": m.get("origin", "legacy"), "segments": m.get("segments", [])}
             )
@@ -3537,12 +3539,18 @@ def pin(conversation_id, text, *, actor, config=None, budget=None):
     other models -- is checked here, as the conversation's last turn counted
     it or, before any, as the heaviest counter a turn may hand over would,
     before the store is touched: a Core over its cap would blank the whole
-    memory block at compose time.
+    memory block at compose time. A surrogate in ``text``, which UTF-8
+    cannot carry, is pinned as the replacement character
+    (``probes.storable``); a ``text`` that is no string is refused by name.
     """
     from .composer import load_budget
     from .core_store import CoreStore
+    from .probes import storable
 
     CoreStore._require_user(actor)
+    if not isinstance(text, str):
+        raise TypeError(f"a pin holds the user's words as a string, not {type(text).__name__}")
+    text = storable(text)
     config = config or load_config()
     budget = budget or load_budget()
     state = state_for(conversation_id, config)
@@ -3555,11 +3563,16 @@ def pin(conversation_id, text, *, actor, config=None, budget=None):
 
 
 def supersede(conversation_id, old_id, text, *, actor, config=None, budget=None):
-    """Pin ``text`` as the successor of ``old_id``; the old text stays, linked."""
+    """Pin ``text`` as the successor of ``old_id``; the old text stays, linked. A surrogate in ``text`` is pinned as
+    the replacement character, as ``pin`` pins it."""
     from .composer import load_budget
     from .core_store import CoreStore
+    from .probes import storable
 
     CoreStore._require_user(actor)
+    if not isinstance(text, str):
+        raise TypeError(f"a pin holds the user's words as a string, not {type(text).__name__}")
+    text = storable(text)
     config = config or load_config()
     budget = budget or load_budget()
     state = state_for(conversation_id, config)

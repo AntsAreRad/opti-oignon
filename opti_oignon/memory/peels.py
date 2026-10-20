@@ -1537,7 +1537,9 @@ def _unmarked(text, span):
         written = match.group(0).strip()
         return " " if marker and not any(written in unit for unit in typed) else match.group(0)
 
-    out, pattern = "".join(ch for ch in str(text) if ch not in _BIDI_CONTROLS), _bracketed()
+    from .probes import storable
+
+    out, pattern = "".join(ch for ch in storable(text) if ch not in _BIDI_CONTROLS), _bracketed()
     while True:
         again = pattern.sub(drop, out)
         if again == out:

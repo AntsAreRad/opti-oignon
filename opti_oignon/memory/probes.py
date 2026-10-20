@@ -110,6 +110,23 @@ from dataclasses import dataclass, field
 
 checkpoint_before_apply = True
 
+# Every surrogate code point: UTF-8 has no form for one, paired or not, so no hash and no store of the onion takes it.
+_SURROGATES = re.compile("[" + chr(0xD800) + "-" + chr(0xDFFF) + "]")
+
+
+def storable(text):
+    """``text`` as UTF-8, every hash and every store of the onion can carry it: each surrogate -- half of a pair,
+    the kind a JSON escape decodes into a ``str``, or what a decoder that escapes bytes it cannot read leaves -- as
+    the replacement character, one character for one, so every place in the text stays where it was; the text
+    itself when it holds none."""
+    text = str(text)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return _SURROGATES.sub(chr(0xFFFD), text)
+    return text
+
+
 # What the generator draws, as a number: raised whenever it draws otherwise,
 # so a figure names the generator that drew it and a native twin answers only
 # for the generator it reproduces. 1 read sentences; 2 reads blocks first;

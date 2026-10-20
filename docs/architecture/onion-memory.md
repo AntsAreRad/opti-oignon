@@ -483,6 +483,13 @@ conversation is mirrored again from there, under turn ids never given
 before, so a step that read a span before it was taken back evicts nothing.
 A synchronisation makes every received turn legacy, so it supersedes the
 whole Cellar and the conversation is summarised again, a burst at a time.
+What UTF-8 cannot carry no hash and no store of the onion takes: a
+surrogate -- half of a pair, the kind a JSON escape decodes into a string,
+or a pair split in two -- in a turn's role or words, in a summary the
+model wrote, or in a statement the user pins is kept as the replacement
+character, one character for one, so every place in the text -- a part's
+bounds, an anchor, a reference -- stays where it was, and a conversation
+seen again is seen as the same. A text that holds none is kept as it was.
 
 Each call to the model asks the resource governor for a ticket of its own,
 as `librarian`, a background caller, for the context `librarian.num_ctx`

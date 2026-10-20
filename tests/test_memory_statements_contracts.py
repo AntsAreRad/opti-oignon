@@ -1363,4 +1363,3 @@ def test_sd19_a_renewal_leaves_out_what_knew_a_subject_only_from_the_reading_it_
         assert [turns for turns, _known in calls] == [("t0003", "t0004")], "read again by a later burst"
     finally:
         restore()
-
